@@ -3395,6 +3395,22 @@
             return;
         }
 
+        // Fetch comment counts for all CFV tenancies in parallel
+        const commentCounts = {};
+        await Promise.all(cfvList.map(async entry => {
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${entry.tenancyId}/comments`, {
+                    headers: { 'Authorization': 'Bearer ' + PAT }
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    commentCounts[entry.tenancyId] = (data.comments || []).length;
+                } else {
+                    commentCounts[entry.tenancyId] = 0;
+                }
+            } catch (e) { commentCounts[entry.tenancyId] = 0; }
+        }));
+
         // Sort: CFV first (by days overdue desc), then CFV Actioned
         cfvList.sort((a, b) => {
             const statusOrder = { 'cfv': 0, 'potential': 0, 'cfv actioned': 1 };
@@ -3424,17 +3440,23 @@
                 contactHtml = '<span class="cfv-contact-missing">⚠️ No contact info</span>';
             }
 
+            // Comment count badge
+            const cc = commentCounts[entry.tenancyId] || 0;
+            const commentBtnLabel = cc > 0
+                ? `💬 ${cc} comment${cc !== 1 ? 's' : ''}`
+                : '💬 Comments';
+
             // Action buttons
             let actionsHtml = '';
             if (entry.status === 'cfv' || entry.status === 'potential') {
                 actionsHtml = `
                     <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
-                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">Comments</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else {
                 actionsHtml = `
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
-                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">Comments</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
 
