@@ -480,12 +480,126 @@
             .auth-screen, .loading-overlay, .refresh-info { display: none !important; }
         }
 
-        /* Responsive */
+        /* ====== RESPONSIVE — TABLET (≤768px) ====== */
         @media (max-width: 768px) {
-            .cards-grid { grid-template-columns: 1fr; }
+            body { padding: 10px; }
+            .container { padding: 0; }
+            .header { margin-bottom: 20px; padding-bottom: 12px; }
             .header h1 { font-size: 24px; }
-            .chart-container { height: 300px; }
+            .header p { font-size: 12px; }
+            .refresh-info { flex-wrap: wrap; justify-content: center; }
+            .section { margin-bottom: 24px; }
+            .section-title { font-size: 16px; margin-bottom: 12px; }
+
+            /* Tabs: wrap + smaller */
+            .tabs-nav { flex-wrap: wrap; gap: 4px; margin-bottom: 20px; }
+            .tab-btn { padding: 8px 12px; font-size: 12px; }
+
+            /* Cards: single column */
+            .cards-grid { grid-template-columns: 1fr; gap: 12px; }
+            .kpi-card { padding: 14px; }
             .kpi-card-value { font-size: 24px; }
+            .kpi-card-label { font-size: 11px; }
+
+            /* Chart */
+            .chart-container { height: 280px; }
+
+            /* Cash flow table: scrollable */
+            .cashflow-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .cashflow-table { font-size: 11px; min-width: 600px; }
+            .cashflow-table th { padding: 8px; font-size: 10px; }
+            .cashflow-table td { padding: 8px; }
+
+            /* Balance calculator */
+            .calc-panel { padding: 12px; }
+            .calc-header { flex-wrap: wrap; gap: 8px; }
+            .calc-header h3 { font-size: 14px; }
+            .calc-input { width: 100% !important; }
+            .calc-summary { grid-template-columns: 1fr 1fr; gap: 8px; }
+            .calc-summary-label { font-size: 10px; }
+            .calc-summary-value { font-size: 16px; }
+            .calc-actions { flex-wrap: wrap; }
+            .calc-btn { padding: 6px 10px; font-size: 11px; }
+            .calc-tx-item { flex-wrap: wrap; font-size: 12px; }
+
+            /* Invoice table */
+            .invoice-table { font-size: 12px; }
+            .invoice-table th { padding: 8px; font-size: 10px; }
+            .invoice-table td { padding: 8px; }
+            .inv-mark-paid-btn { min-height: 36px; min-width: 64px; padding: 6px 10px; font-size: 11px; }
+            .inv-approve-btn, .inv-reject-btn { min-height: 36px; padding: 6px 10px; font-size: 11px; }
+
+            /* AI commentary */
+            .ai-commentary { padding: 14px; font-size: 12px; }
+
+            /* Auth screen */
+            .auth-box { padding: 24px 16px; }
+
+            /* Iframe */
+            .tab-panel-iframe { min-height: 400px; height: calc(100vh - 140px); }
+
+            /* Detail items */
+            .detail-item { font-size: 12px; }
+            .detail-item-value { font-size: 12px; }
+        }
+
+        /* ====== RESPONSIVE — MOBILE (≤480px) ====== */
+        @media (max-width: 480px) {
+            body { padding: 6px; }
+            .header h1 { font-size: 20px; }
+            .header p { font-size: 11px; }
+            .header { margin-bottom: 16px; }
+
+            /* Tabs: full width */
+            .tabs-nav { flex-direction: column; border-bottom: none; gap: 2px; }
+            .tab-btn { text-align: left; padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #e2e8f0; margin-bottom: 0; }
+            .tab-btn.active { border-bottom-color: #2563eb; border-left: 3px solid #2563eb; background: #eff6ff; }
+
+            /* Cards: tighter */
+            .cards-grid { gap: 8px; }
+            .kpi-card-value { font-size: 20px; }
+            .kpi-card-value.range { font-size: 16px; }
+
+            /* Cash flow table: even smaller */
+            .cashflow-table { min-width: 520px; font-size: 10px; }
+            .cashflow-table th, .cashflow-table td { padding: 6px 4px; }
+
+            /* Balance calculator: single column summary */
+            .calc-summary { grid-template-columns: 1fr; }
+            .calc-toggle { font-size: 12px; padding: 6px 10px; }
+
+            /* Invoice table: hide ref column, compact */
+            .invoice-table th:nth-child(4),
+            .invoice-table td:nth-child(4) { display: none; }
+            .invoice-table { font-size: 11px; }
+            .inv-mark-paid-btn { min-height: 44px; min-width: 70px; font-size: 12px; }
+            .inv-approve-btn, .inv-reject-btn { min-height: 44px; font-size: 12px; }
+
+            /* Invoice summary header: stack */
+            #tab-invoices .section > div:first-child { flex-direction: column !important; align-items: flex-start !important; }
+
+            /* AI commentary */
+            .ai-commentary { padding: 10px; font-size: 11px; }
+            .ai-commentary h3 { font-size: 14px; }
+
+            /* Section titles */
+            .section-title { font-size: 15px; }
+
+            /* Chart */
+            .chart-container { height: 220px; }
+
+            /* Progress bars in cards */
+            .progress-bar { height: 6px; }
+
+            /* Auth screen */
+            .auth-box { margin: 10px; padding: 20px 14px; }
+            .auth-box h2 { font-size: 18px; }
+
+            /* Iframe */
+            .tab-panel-iframe { min-height: 350px; }
+
+            /* Refresh info */
+            .refresh-info { font-size: 10px; text-align: center; }
         }
 
         .dashboard { display: none; }
