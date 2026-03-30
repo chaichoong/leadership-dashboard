@@ -2770,7 +2770,29 @@
             refreshSpan.innerHTML = `Gmail label: <strong style="color:#64748b">3. to pay</strong> &nbsp;·&nbsp; ${liveLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong>${isLive ? '' : ' &nbsp;·&nbsp; Deploy Apps Script for live data'}`;
         }
 
-        // ── Cross-reference invoices with Airtable transactions ──
+        // ── Apply localStorage overrides into source data ──
+        // User-edited fields ALWAYS take priority over live/static data
+        sourceData.forEach(inv => {
+            const key = inv.id || inv.threadId;
+            const sAmt = localStorage.getItem('inv_amt_' + key);
+            const sPayee = localStorage.getItem('inv_payee_' + key);
+            const sDesc = localStorage.getItem('inv_desc_' + key);
+            const sRef = localStorage.getItem('inv_ref_' + key);
+            const sDue = localStorage.getItem('inv_due_' + key);
+            if (sAmt) inv.amount = parseFloat(sAmt);
+            if (sPayee) inv.payee = sPayee;
+            if (sDesc) inv.desc = sDesc;
+            if (sRef) inv.ref = sRef;
+            if (sDue) inv.dueDate = sDue;
+        });
+
+        // ── Filter out invoices marked as paid (localStorage or removed from Gmail label) ──
+        sourceData = sourceData.filter(inv => {
+            const key = inv.id || inv.threadId;
+            return !localStorage.getItem('inv_paid_' + key);
+        });
+
+        // ── Cross-reference remaining invoices with Airtable transactions ──
         const txMatches = matchInvoicesToTransactions(sourceData, allTransactions);
 
         // Sort by effective date (due date if known, else email date), oldest first
@@ -2778,14 +2800,12 @@
             new Date(a.dueDate || a.emailDate) - new Date(b.dueDate || b.emailDate)
         );
 
-        // Summary calculations
+        // Summary calculations (paid invoices already filtered out above)
         let knownTotal = 0, unknownCount = 0, overdueCount = 0, paidCount = 0;
         sorted.forEach(inv => {
-            const isPaid = !!txMatches[inv.id || inv.threadId];
-            if (isPaid) { paidCount++; return; }
-            const stored = localStorage.getItem('inv_amt_' + (inv.id || inv.threadId));
-            const effAmt = inv.amount !== null ? inv.amount : (stored ? parseFloat(stored) : null);
-            if (effAmt !== null) knownTotal += effAmt; else unknownCount++;
+            const isMatched = !!txMatches[inv.id || inv.threadId];
+            if (isMatched) { paidCount++; return; }
+            if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
             if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
         });
 
@@ -2834,19 +2854,12 @@
 
             const invKey = inv.id || inv.threadId;
 
-            // Check localStorage for manually entered values
-            const storedAmt = localStorage.getItem('inv_amt_' + invKey);
-            const storedPayee = localStorage.getItem('inv_payee_' + invKey);
-            const storedDesc = localStorage.getItem('inv_desc_' + invKey);
-            const storedRef = localStorage.getItem('inv_ref_' + invKey);
-            const storedDue = localStorage.getItem('inv_due_' + invKey);
-            const isLocalPaid = localStorage.getItem('inv_paid_' + invKey);
-
-            const displayAmt = inv.amount !== null ? inv.amount : (storedAmt ? parseFloat(storedAmt) : null);
-            const displayPayee = (storedPayee || inv.payee || '').trim();
-            const displayDesc = (storedDesc || inv.desc || '').trim();
-            const displayRef = (storedRef || inv.ref || '').trim();
-            const displayDue = storedDue || inv.dueDate || null;
+            // Values already merged from localStorage into source data above
+            const displayAmt = inv.amount;
+            const displayPayee = (inv.payee || '').trim();
+            const displayDesc = (inv.desc || '').trim();
+            const displayRef = (inv.ref || '').trim();
+            const displayDue = inv.dueDate || null;
 
             // Editable fields — click empty ones to enter data
             const amountHtml = displayAmt !== null
@@ -2867,9 +2880,6 @@
 
             const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
             const threadId = inv.threadId || inv.id;
-
-            // Override isApproved if locally marked paid
-            if (isLocalPaid && !isApproved) { isApproved = true; }
 
             // AI match suggestion row (shown below the invoice row when a match is found)
             let matchRow = '';
@@ -2915,11 +2925,10 @@
         if (!transactions || !transactions.length) return matches;
 
         invoices.forEach(inv => {
-            // Use localStorage amount if source amount is null
-            const storedAmt = localStorage.getItem('inv_amt_' + (inv.id || inv.threadId));
-            const invAmount = inv.amount !== null ? inv.amount : (storedAmt ? parseFloat(storedAmt) : null);
+            // localStorage values already merged into source data before this function is called
+            const invAmount = inv.amount;
             if (invAmount === null || invAmount === 0) return; // can't match without a known amount
-            const invKeywords = extractInvKeywords(inv.payee + ' ' + (inv.desc || ''));
+            const invKeywords = extractInvKeywords((inv.payee || '') + ' ' + (inv.desc || ''));
             const invDate = new Date(inv.dueDate || inv.emailDate);
 
             for (const tx of transactions) {
