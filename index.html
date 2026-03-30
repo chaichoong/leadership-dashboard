@@ -149,6 +149,35 @@
         .inv-badge.estimate { background: #f1f5f9; color: #64748b; }
         .invoice-table .inv-link { color: #94a3b8; font-size: 14px; text-decoration: none; }
         .invoice-table .inv-link:hover { color: #2563eb; }
+
+        /* CFV Tab */
+        .cfv-status-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+        .cfv-status-badge.cfv { background: #fee2e2; color: #dc2626; }
+        .cfv-status-badge.cfv-actioned { background: #fef3c7; color: #d97706; }
+        .cfv-status-badge.potential { background: #fce7f3; color: #be185d; }
+        .cfv-chase-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
+        .cfv-chase-badge.stage-1 { background: #dbeafe; color: #2563eb; }
+        .cfv-chase-badge.stage-2 { background: #fef3c7; color: #d97706; }
+        .cfv-chase-badge.stage-3 { background: #fee2e2; color: #dc2626; }
+        .cfv-action-btn { padding: 4px 10px; font-size: 10px; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 4px; cursor: pointer; background: white; white-space: nowrap; }
+        .cfv-action-btn:hover { background: #f8fafc; }
+        .cfv-action-btn.primary { background: #2563eb; color: white; border-color: #2563eb; }
+        .cfv-action-btn.primary:hover { background: #1d4ed8; }
+        .cfv-action-btn.success { background: #16a34a; color: white; border-color: #16a34a; }
+        .cfv-action-btn.success:hover { background: #15803d; }
+        .cfv-contact-info { font-size: 11px; color: #64748b; }
+        .cfv-contact-info a { color: #2563eb; text-decoration: none; }
+        .cfv-contact-info a:hover { text-decoration: underline; }
+        .cfv-contact-missing { color: #d97706; font-size: 11px; }
+        .cfv-comment-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+        .cfv-comment-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .cfv-comment-tenant { font-weight: 700; font-size: 13px; color: #1e293b; }
+        .cfv-comment-list { max-height: 200px; overflow-y: auto; }
+        .cfv-comment-item { font-size: 12px; color: #475569; padding: 4px 0; border-bottom: 1px solid #f1f5f9; }
+        .cfv-comment-item:last-child { border-bottom: none; }
+        .cfv-comment-date { color: #94a3b8; font-size: 10px; }
+        .cfv-comment-input { width: 100%; padding: 8px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; margin-top: 8px; resize: none; }
+        .cfv-comment-send { margin-top: 6px; }
         .inv-match-suggestion td { cursor: default !important; }
         .inv-approve-btn { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 4px; border: 1px solid #16a34a; background: #dcfce7; color: #16a34a; cursor: pointer; }
         .inv-approve-btn:hover { background: #16a34a; color: white; }
@@ -640,6 +669,7 @@
             <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard</button>
             <button class="tab-btn" onclick="switchTab('airtable')">Contractor Job List</button>
             <button class="tab-btn" onclick="switchTab('invoices')">Invoices</button>
+            <button class="tab-btn" onclick="switchTab('cfv')">CFVs</button>
         </div>
 
         <!-- Tab 1: Leadership Dashboard -->
@@ -782,6 +812,41 @@
             </div>
         </div>
 
+        <!-- Tab 4: CFVs -->
+        <div class="tab-panel" id="tab-cfv">
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids</h2>
+                    <span style="font-size:12px;color:#94a3b8">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
+                </div>
+                <div class="cards-grid" id="cfvSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="invoice-table-wrapper">
+                    <table class="invoice-table" id="cfvTable">
+                        <thead>
+                            <tr>
+                                <th>Tenant</th>
+                                <th>Property</th>
+                                <th style="text-align:right">Rent</th>
+                                <th>Due Day</th>
+                                <th>Days Overdue</th>
+                                <th>Status</th>
+                                <th>Chase</th>
+                                <th>Contact</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cfvTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="section" id="cfvCommentsSection" style="display:none">
+                <h2 class="section-title" style="font-size:15px">Comments &amp; Updates</h2>
+                <div id="cfvCommentsContainer"></div>
+            </div>
+        </div>
+
         <div class="footer">
             <p id="footerSync"></p>
         </div>
@@ -855,6 +920,18 @@
         tenantPayType:    'fldZbrk8Xw5Dcwxhi',  // Rent Payment Type (singleSelect)
         // Tenancy → Tenant link
         tenLinkedTenant:  'fld1i5bDoHL3B6rUf',  // "Customers" — actual link to Tenants table
+        // CFV detection fields
+        tenPaidThisMonth: 'fldSNk1LWWcu517CA',  // Paid This Month? (formula)
+        tenDaysOverdue:   'fldrb4NVHdLefslPo',  // Number of Days Overdue (formula)
+        tenDaysUntilDue:  'fldDKdNdOsmdVnmGq',  // Days Until Due (formula)
+        tenNextDueDate:   'fldSPslO6Wh5IUSK3',  // Next Rent Due Date (formula)
+        tenUnitRef:       'fldql2nyQlPfkPP4p',  // Unit Reference (lookup)
+        tenProperty:      'fldxfIa0W1nqCbLo2',  // Property (lookup)
+        tenStartDate:     'fld2rPXwwV8dXb1zF',  // Tenancy Start Date
+        // Tenant contact fields
+        tenantPhone:      'fldraHUkWfqo4olLF',  // Contact Number
+        tenantEmail:      'fldybEduFY3DWWTfT',  // Email Address
+        tenantNotes:      'fldfwxEf7I3XQDVtR',  // Notes
     };
 
     // Key record IDs
@@ -888,6 +965,8 @@
     let cashflowChartInstance = null;
     let refreshTimer = null;
     let allTransactions = []; // stored globally for invoice cross-referencing
+    let allTenancies = [];    // stored globally for CFV tab
+    let allTenants = [];      // stored globally for CFV tab (contact details)
 
     // ── Smart Refresh: delays refresh while user is actively interacting ──
     let lastUserActivity = 0;       // timestamp of last interaction
@@ -1163,6 +1242,8 @@
             fetchInvoicesFromGmail();
 
             allTransactions = transactions; // store for invoice cross-referencing
+            allTenancies = tenancies;     // store for CFV tab
+            allTenants = tenants;         // store for CFV tab (contact details)
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
 
             document.getElementById('dashboard').style.display = 'block';
@@ -2332,7 +2413,8 @@
         btns.forEach(b => {
             if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
                 (tabId === 'airtable' && b.textContent.includes('Contractor')) ||
-                (tabId === 'invoices' && b.textContent.includes('Invoices'))) {
+                (tabId === 'invoices' && b.textContent.includes('Invoices')) ||
+                (tabId === 'cfv' && b.textContent.includes('CFV'))) {
                 b.classList.add('active');
             }
         });
@@ -2346,6 +2428,10 @@
         // Render invoices tab on switch
         if (tabId === 'invoices') {
             renderInvoiceTab();
+        }
+        // Render CFV tab on switch
+        if (tabId === 'cfv') {
+            renderCFVTab();
         }
 
         // Refresh data on tab switch (but don't interrupt if already loading)
@@ -3098,6 +3184,330 @@
             btn.classList.remove('loading');
             setTimeout(() => { btn.textContent = 'Move to Paid'; btn.style.background = ''; }, 3000);
         }
+    }
+
+
+    // ══════════════════════════════════════════
+    // CFV TAB — Cash Flow Void Detection & Management
+    // ══════════════════════════════════════════
+
+    const CFV_TOLERANCE_DAYS = 2; // days after due date before flagging
+    const CFV_STATUS_IDS = {
+        inPayment:   'sel4I99slfpd7Vc1t',
+        cfv:         'sel2mWzsvOd8d8de0',
+        cfvActioned: 'selmhFXah5Bodgg9x',
+    };
+    const CFV_CHASE_STAGES = [
+        { day: 0, label: 'Stage 1', desc: 'Friendly reminder', cssClass: 'stage-1' },
+        { day: 3, label: 'Stage 2', desc: 'Follow-up chase', cssClass: 'stage-2' },
+        { day: 7, label: 'Stage 3', desc: 'Escalation', cssClass: 'stage-3' },
+    ];
+
+    // Build tenant lookup from allTenants array
+    function buildTenantLookup() {
+        const lookup = {};
+        allTenants.forEach(t => { lookup[t.id] = t; });
+        return lookup;
+    }
+
+    // Get tenant record linked to a tenancy
+    function getTenantForTenancy(tenancy, tenantLookup) {
+        const linked = getField(tenancy, F.tenLinkedTenant);
+        if (!linked) return null;
+        const tenantId = Array.isArray(linked) ? (typeof linked[0] === 'string' ? linked[0] : linked[0]?.id) : null;
+        return tenantId ? tenantLookup[tenantId] : null;
+    }
+
+    // Detect CFVs: active tenancies where rent is 2+ days overdue with no matching transaction
+    function detectCFVs() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tenantLookup = buildTenantLookup();
+        const cfvList = [];
+
+        allTenancies.forEach(tenancy => {
+            const statusName = getPaymentStatusName(getField(tenancy, F.tenPayStatus)).toLowerCase().trim();
+
+            // Include existing CFV and CFV Actioned tenancies
+            if (statusName === 'cfv' || statusName === 'cfv actioned') {
+                const tenant = getTenantForTenancy(tenancy, tenantLookup);
+                cfvList.push(buildCFVEntry(tenancy, tenant, statusName, today));
+                return;
+            }
+
+            // Check "In Payment" tenancies for potential new CFVs
+            if (statusName !== 'in payment') return;
+            if (!isTenantStatusActive(tenancy)) return;
+
+            const rent = Number(getField(tenancy, F.tenRent)) || 0;
+            if (rent <= 0) return;
+
+            const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
+            const daysOverdue = Number(getField(tenancy, F.tenDaysOverdue)) || 0;
+            const paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
+
+            // Flag as potential CFV if: 2+ days overdue AND not paid this month
+            if (daysOverdue >= CFV_TOLERANCE_DAYS && !paidThisMonth) {
+                const tenant = getTenantForTenancy(tenancy, tenantLookup);
+                const entry = buildCFVEntry(tenancy, tenant, 'potential', today);
+                entry.autoDetected = true;
+                cfvList.push(entry);
+            }
+        });
+
+        return cfvList;
+    }
+
+    function buildCFVEntry(tenancy, tenant, status, today) {
+        const surname = String(getField(tenancy, F.tenSurname) || 'Unknown');
+        const ref = String(getField(tenancy, F.tenRef) || '');
+        const rent = Number(getField(tenancy, F.tenRent)) || 0;
+        const dueDay = getNumVal(tenancy, F.tenDueDay, 0);
+        const daysOverdue = Number(getField(tenancy, F.tenDaysOverdue)) || 0;
+        const unitRef = getField(tenancy, F.tenUnitRef);
+        const property = getField(tenancy, F.tenProperty);
+        const propertyName = Array.isArray(property) ? property[0] : (property || '');
+        const unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+
+        // Tenant contact info
+        const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : '';
+        const tenantPhone = tenant ? String(getField(tenant, F.tenantPhone) || '') : '';
+        const tenantEmail = tenant ? String(getField(tenant, F.tenantEmail) || '') : '';
+
+        // Chase stage from localStorage
+        const cfvKey = 'cfv_' + tenancy.id;
+        const chaseStartStr = localStorage.getItem(cfvKey + '_chaseStart');
+        let chaseStart = chaseStartStr ? new Date(chaseStartStr) : null;
+        if (!chaseStart && (status === 'cfv' || status === 'potential')) {
+            chaseStart = today;
+            localStorage.setItem(cfvKey + '_chaseStart', today.toISOString());
+        }
+
+        let chaseStage = 0;
+        if (chaseStart) {
+            const daysSinceChase = Math.floor((today - chaseStart) / 86400000);
+            for (let i = CFV_CHASE_STAGES.length - 1; i >= 0; i--) {
+                if (daysSinceChase >= CFV_CHASE_STAGES[i].day) { chaseStage = i; break; }
+            }
+        }
+
+        return {
+            tenancyId: tenancy.id,
+            surname, ref, rent, dueDay, daysOverdue,
+            propertyName, unitName,
+            status,
+            tenantName, tenantPhone, tenantEmail,
+            tenantId: tenant ? tenant.id : null,
+            chaseStage, chaseStart,
+            autoDetected: false,
+        };
+    }
+
+    // Render the CFV tab
+    async function renderCFVTab() {
+        if (!allTenancies.length) return;
+
+        const cfvList = detectCFVs();
+        const today = new Date();
+
+        // Auto-update Airtable: flag potential CFVs as CFV status
+        for (const entry of cfvList) {
+            if (entry.autoDetected && entry.status === 'potential') {
+                await updateTenancyStatus(entry.tenancyId, CFV_STATUS_IDS.cfv);
+                entry.status = 'cfv';
+                entry.autoDetected = false;
+            }
+        }
+
+        // Summary
+        const cfvOnly = cfvList.filter(e => e.status === 'cfv' || e.status === 'potential');
+        const cfvActioned = cfvList.filter(e => e.status === 'cfv actioned');
+        const totalExposure = cfvList.reduce((s, e) => s + e.rent, 0);
+        const oldestOverdue = cfvOnly.length ? Math.max(...cfvOnly.map(e => e.daysOverdue)) : 0;
+
+        const summaryCards = document.getElementById('cfvSummaryCards');
+        if (summaryCards) {
+            summaryCards.innerHTML = `
+                <div class="card"><div class="card-label">Active CFVs</div><div class="card-value text-red">${cfvOnly.length}</div></div>
+                <div class="card"><div class="card-label">Total Exposure</div><div class="card-value text-red">${fmt(totalExposure)}</div></div>
+                <div class="card"><div class="card-label">Oldest Overdue</div><div class="card-value">${oldestOverdue} days</div></div>
+                <div class="card"><div class="card-label">CFV Actioned</div><div class="card-value" style="color:#d97706">${cfvActioned.length}</div></div>
+            `;
+        }
+
+        // Table
+        const tbody = document.getElementById('cfvTableBody');
+        if (!tbody) return;
+
+        if (cfvList.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
+            return;
+        }
+
+        // Sort: CFV first (by days overdue desc), then CFV Actioned
+        cfvList.sort((a, b) => {
+            const statusOrder = { 'cfv': 0, 'potential': 0, 'cfv actioned': 1 };
+            const sDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+            if (sDiff !== 0) return sDiff;
+            return b.daysOverdue - a.daysOverdue;
+        });
+
+        tbody.innerHTML = cfvList.map((entry, idx) => {
+            const statusBadge = entry.status === 'cfv actioned'
+                ? '<span class="cfv-status-badge cfv-actioned">CFV Actioned</span>'
+                : '<span class="cfv-status-badge cfv">CFV</span>';
+
+            const chase = CFV_CHASE_STAGES[entry.chaseStage];
+            const chaseBadge = entry.status !== 'cfv actioned'
+                ? `<span class="cfv-chase-badge ${chase.cssClass}">${chase.label}</span>`
+                : '<span style="color:#94a3b8;font-size:10px">—</span>';
+
+            // Contact info
+            let contactHtml = '';
+            if (entry.tenantPhone || entry.tenantEmail) {
+                contactHtml = '<div class="cfv-contact-info">';
+                if (entry.tenantPhone) contactHtml += `<a href="tel:${entry.tenantPhone}">${escHtml(entry.tenantPhone)}</a><br>`;
+                if (entry.tenantEmail) contactHtml += `<a href="mailto:${entry.tenantEmail}">${escHtml(entry.tenantEmail)}</a>`;
+                contactHtml += '</div>';
+            } else {
+                contactHtml = '<span class="cfv-contact-missing">⚠️ No contact info</span>';
+            }
+
+            // Action buttons
+            let actionsHtml = '';
+            if (entry.status === 'cfv' || entry.status === 'potential') {
+                actionsHtml = `
+                    <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvMarkActioned('${entry.tenancyId}',this)">Mark Actioned</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">Comments</button>
+                `;
+            } else {
+                actionsHtml = `
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvReturnToPayment('${entry.tenancyId}',this)">In Payment</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">Comments</button>
+                `;
+            }
+
+            return `<tr>
+                <td style="font-weight:600">${escHtml(entry.surname)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.ref)}</span></td>
+                <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.unitName)}</span></td>
+                <td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${fmt(entry.rent)}</td>
+                <td style="text-align:center">${entry.dueDay || '—'}</td>
+                <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? '#dc2626' : entry.daysOverdue > 3 ? '#d97706' : '#1e293b'}">${entry.daysOverdue}</td>
+                <td>${statusBadge}</td>
+                <td>${chaseBadge}</td>
+                <td>${contactHtml}</td>
+                <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ── CFV Actions ──
+
+    async function updateTenancyStatus(tenancyId, statusSelectId) {
+        if (!PAT) return;
+        try {
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${tenancyId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.tenPayStatus]: { id: statusSelectId } } })
+            });
+        } catch (e) { console.error('Failed to update tenancy status:', e); }
+    }
+
+    async function cfvMarkActioned(tenancyId, btn) {
+        btn.textContent = '...';
+        btn.disabled = true;
+        await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfvActioned);
+        // Add comment
+        await addTenancyComment(tenancyId, 'Status changed to CFV Actioned from Leadership Dashboard.');
+        btn.textContent = 'Done ✓';
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#16a34a';
+        setTimeout(() => renderCFVTab(), 1500);
+    }
+
+    async function cfvReturnToPayment(tenancyId, btn) {
+        btn.textContent = '...';
+        btn.disabled = true;
+        await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.inPayment);
+        // Clear chase tracking
+        localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
+        // Add comment
+        await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
+        btn.textContent = 'Done ✓';
+        setTimeout(() => renderCFVTab(), 1500);
+    }
+
+    // ── Comments ──
+
+    async function addTenancyComment(recordId, text) {
+        if (!PAT) return;
+        try {
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${recordId}/comments`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            });
+        } catch (e) { console.warn('Failed to add comment:', e); }
+    }
+
+    async function fetchTenancyComments(recordId) {
+        if (!PAT) return [];
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${recordId}/comments`, {
+                headers: { 'Authorization': 'Bearer ' + PAT }
+            });
+            if (!resp.ok) return [];
+            const data = await resp.json();
+            return (data.comments || []).slice(0, 10); // latest 10
+        } catch (e) { return []; }
+    }
+
+    async function cfvShowComments(tenancyId, surname, ref) {
+        const section = document.getElementById('cfvCommentsSection');
+        const container = document.getElementById('cfvCommentsContainer');
+        section.style.display = 'block';
+
+        container.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8">Loading comments...</div>';
+
+        const comments = await fetchTenancyComments(tenancyId);
+
+        let commentsHtml = '';
+        if (comments.length > 0) {
+            commentsHtml = comments.map(c => {
+                const d = new Date(c.createdTime);
+                const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                const author = c.author?.name || c.author?.email || 'System';
+                return `<div class="cfv-comment-item"><span class="cfv-comment-date">${dateStr} — ${escHtml(author)}</span><br>${escHtml(c.text)}</div>`;
+            }).join('');
+        } else {
+            commentsHtml = '<div style="color:#94a3b8;font-size:12px;padding:8px 0">No comments yet.</div>';
+        }
+
+        container.innerHTML = `
+            <div class="cfv-comment-box">
+                <div class="cfv-comment-header">
+                    <span class="cfv-comment-tenant">${escHtml(surname)} — ${escHtml(ref)}</span>
+                    <button class="cfv-action-btn" onclick="document.getElementById('cfvCommentsSection').style.display='none'">Close</button>
+                </div>
+                <div class="cfv-comment-list">${commentsHtml}</div>
+                <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..."></textarea>
+                <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
+            </div>
+        `;
+
+        // Scroll to comments
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function cfvAddComment(tenancyId, surname, ref) {
+        const input = document.getElementById('cfvNewComment');
+        const text = input.value.trim();
+        if (!text) return;
+        input.disabled = true;
+        await addTenancyComment(tenancyId, text);
+        // Reload comments
+        await cfvShowComments(tenancyId, surname, ref);
     }
 
     </script>
