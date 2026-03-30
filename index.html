@@ -3263,7 +3263,6 @@
         const ref = String(getField(tenancy, F.tenRef) || '');
         const rent = Number(getField(tenancy, F.tenRent)) || 0;
         const dueDay = getNumVal(tenancy, F.tenDueDay, 0);
-        const daysOverdue = Number(getField(tenancy, F.tenDaysOverdue)) || 0;
         const unitRef = getField(tenancy, F.tenUnitRef);
         const property = getField(tenancy, F.tenProperty);
         const propertyName = Array.isArray(property) ? property[0] : (property || '');
@@ -3274,8 +3273,28 @@
         const tenantPhone = tenant ? String(getField(tenant, F.tenantPhone) || '') : '';
         const tenantEmail = tenant ? String(getField(tenant, F.tenantEmail) || '') : '';
 
-        // Chase stage from localStorage
+        // ── Days overdue: calculated from the CFV start date ──
+        // When a CFV is first detected, we store the due date of that month as the start date.
+        // Days overdue = today minus that start date. This persists across months.
         const cfvKey = 'cfv_' + tenancy.id;
+        const storedStartDate = localStorage.getItem(cfvKey + '_startDate');
+        let cfvStartDate = storedStartDate ? new Date(storedStartDate) : null;
+
+        if (!cfvStartDate && (status === 'cfv' || status === 'potential')) {
+            // Calculate the due date for the current month (or last month if due day hasn't passed)
+            const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay || 1);
+            // If due day this month is in the future, the CFV is from last month's due date
+            if (dueThisMonth > today) {
+                cfvStartDate = new Date(today.getFullYear(), today.getMonth() - 1, dueDay || 1);
+            } else {
+                cfvStartDate = dueThisMonth;
+            }
+            localStorage.setItem(cfvKey + '_startDate', cfvStartDate.toISOString());
+        }
+
+        const daysOverdue = cfvStartDate ? Math.max(0, Math.floor((today - cfvStartDate) / 86400000)) : 0;
+
+        // Chase stage from localStorage
         const chaseStartStr = localStorage.getItem(cfvKey + '_chaseStart');
         let chaseStart = chaseStartStr ? new Date(chaseStartStr) : null;
         if (!chaseStart && (status === 'cfv' || status === 'potential')) {
@@ -3298,7 +3317,7 @@
             status,
             tenantName, tenantPhone, tenantEmail,
             tenantId: tenant ? tenant.id : null,
-            chaseStage, chaseStart,
+            chaseStage, chaseStart, cfvStartDate,
             autoDetected: false,
         };
     }
@@ -3377,12 +3396,12 @@
             let actionsHtml = '';
             if (entry.status === 'cfv' || entry.status === 'potential') {
                 actionsHtml = `
-                    <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvMarkActioned('${entry.tenancyId}',this)">Mark Actioned</button>
+                    <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">Comments</button>
                 `;
             } else {
                 actionsHtml = `
-                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvReturnToPayment('${entry.tenancyId}',this)">In Payment</button>
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">Comments</button>
                 `;
             }
@@ -3414,11 +3433,22 @@
         } catch (e) { console.error('Failed to update tenancy status:', e); }
     }
 
+    // Confirmation step before any status change
+    function cfvConfirmAction(action, tenancyId, surname, btn) {
+        const actionLabel = action === 'actioned' ? 'Mark as CFV Actioned' : 'Return to In Payment';
+        const msg = `Are you sure you want to ${actionLabel} for ${surname}?`;
+        if (!confirm(msg)) return;
+        if (action === 'actioned') {
+            cfvMarkActioned(tenancyId, btn);
+        } else {
+            cfvReturnToPayment(tenancyId, btn);
+        }
+    }
+
     async function cfvMarkActioned(tenancyId, btn) {
         btn.textContent = '...';
         btn.disabled = true;
         await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfvActioned);
-        // Add comment
         await addTenancyComment(tenancyId, 'Status changed to CFV Actioned from Leadership Dashboard.');
         btn.textContent = 'Done ✓';
         btn.style.background = '#dcfce7';
@@ -3430,9 +3460,9 @@
         btn.textContent = '...';
         btn.disabled = true;
         await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.inPayment);
-        // Clear chase tracking
+        // Clear chase tracking and CFV start date
         localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
-        // Add comment
+        localStorage.removeItem('cfv_' + tenancyId + '_startDate');
         await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
         btn.textContent = 'Done ✓';
         setTimeout(() => renderCFVTab(), 1500);
