@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inbound Comms Tracker - Standard Operating Procedure</title>
+<style>
+/* ====== RESET & BASE ====== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #1e293b;
+  background: #f1f5f9;
+}
+
+/* ====== COLOUR VARIABLES ====== */
+:root {
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
+  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
+  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
+  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
+  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
+  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
+  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+/* ====== HEADER ====== */
+.header {
+  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
+  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+}
+.header::after {
+  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
+.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
+.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
+
+/* ====== LAYOUT ====== */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.5rem; }
+.section-title {
+  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section-title .icon { font-size: 1.4rem; }
+
+/* ====== CARDS ====== */
+.card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
+}
+.card-header {
+  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
+  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
+}
+
+/* ====== QUICK REFERENCE ====== */
+.quick-ref {
+  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
+  border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
+  box-shadow: var(--shadow-lg);
+}
+.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.qr-item {
+  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
+  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
+}
+.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
+.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
+.qr-item .qr-value a:hover { text-decoration: underline; }
+
+/* ====== TABLE OF CONTENTS ====== */
+.toc {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; border: 1px solid var(--slate-200);
+}
+.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
+.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
+.toc a {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
+  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
+}
+.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
+.toc a .toc-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+}
+
+/* ====== FLOW DIAGRAMS ====== */
+.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
+.flow-step {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
+  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
+  color: var(--slate-700); min-width: 110px; position: relative;
+}
+.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
+.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
+.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
+.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
+.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
+.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
+.flow-arrow {
+  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
+}
+.flow-arrow-down {
+  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
+  font-size: 1.4rem; color: var(--slate-400);
+}
+
+/* Vertical flow */
+.flow-vertical { flex-direction: column; align-items: center; }
+.flow-vertical .flow-step { min-width: 200px; }
+
+/* ====== ARCHITECTURE DIAGRAM ====== */
+.arch-diagram {
+  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
+}
+.arch-box {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.25rem; text-align: center; min-height: 120px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
+.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
+.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
+.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
+
+/* ====== LABEL TABLE ====== */
+.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
+.label-table th {
+  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
+  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+.label-table tr:last-child td { border-bottom: none; }
+.label-table tr:nth-child(even) td { background: var(--slate-50); }
+.label-table tr:hover td { background: var(--blue-50); }
+.label-badge {
+  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
+}
+.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
+.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
+.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
+.label-badge.lb-4 { background: #dcfce7; color: #166534; }
+.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
+.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
+.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
+.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
+.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
+
+/* ====== WORKFLOW CARDS ====== */
+.wf-card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
+}
+.wf-header {
+  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
+  border-bottom: 1px solid var(--slate-200);
+}
+.wf-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
+  flex-shrink: 0; color: white;
+}
+.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
+.wf-header .wf-tag {
+  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
+}
+.wf-body { padding: 1.25rem 1.5rem; }
+.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
+.wf-body h4:first-child { margin-top: 0; }
+
+/* Colour coding for workflow numbers */
+.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
+.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
+.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
+.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
+.wf-num.wf-9 { background: #059669; }
+
+/* ====== STEP LISTS ====== */
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps li {
+  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
+}
+.steps li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: 0; top: 0.45rem;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.steps li + li { border-top: 1px solid var(--slate-100); }
+
+/* ====== METRIC DOTS ====== */
+.dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 0.35rem; vertical-align: middle;
+}
+.dot.green { background: var(--green-500); }
+.dot.amber { background: var(--amber-500); }
+.dot.red { background: var(--red-500); }
+.dot.blue { background: var(--blue-500); }
+
+/* ====== METRICS BAR ====== */
+.metrics-bar {
+  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
+}
+.metric-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+}
+.metric-chip.mc-green { background: var(--green-100); color: var(--green-700); }
+.metric-chip.mc-amber { background: var(--amber-100); color: var(--amber-600); }
+.metric-chip.mc-red { background: var(--red-100); color: var(--red-600); }
+.metric-chip.mc-blue { background: var(--blue-100); color: var(--blue-700); }
+
+/* ====== INFO BOXES ====== */
+.info-box {
+  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
+  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
+}
+.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
+.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
+.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
+.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
+.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
+
+/* ====== CODE / MONO ====== */
+code {
+  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
+  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
+}
+
+/* ====== TROUBLESHOOTING ====== */
+.ts-item { margin-bottom: 0.75rem; }
+.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
+.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
+
+/* ====== TWO-COL GRID ====== */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+/* ====== AIRTABLE FLOW ====== */
+.at-flow {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+  align-items: center; padding: 1rem 0;
+}
+.at-flow .flow-step { min-width: auto; }
+
+/* ====== PRINT ====== */
+@media print {
+  body { background: white; font-size: 10pt; }
+  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .section { break-inside: avoid; }
+  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 768px) {
+  .header h1 { font-size: 1.6rem; }
+  .qr-grid { grid-template-columns: 1fr; }
+  .toc-grid { grid-template-columns: 1fr; }
+  .arch-diagram { grid-template-columns: 1fr; }
+  .arch-connector { transform: rotate(90deg); }
+  .grid-2 { grid-template-columns: 1fr; }
+  .flow { flex-direction: column; }
+  .flow-arrow { transform: rotate(90deg); }
+  .at-flow { grid-template-columns: 1fr; }
+  .container { padding: 0 1rem 3rem; }
+}
+
+/* ====== MISC ====== */
+strong { color: var(--slate-800); }
+a { color: var(--blue-600); }
+p { margin-bottom: 0.5rem; }
+ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
+li { margin-bottom: 0.2rem; font-size: 0.9rem; }
+hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<!-- ============ HEADER ============ -->
+<div class="header">
+  <div class="header-inner">
+    <h1>&#x1F4E8; Inbound Comms Tracker</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
+    <div class="version">Version 2.2 &bull; Last Updated: 30 March 2026 &bull; Owner: Kevin Brittain</div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ============ QUICK REFERENCE ============ -->
+<div class="quick-ref">
+  <h2>&#x26A1; Quick Reference</h2>
+  <div class="qr-grid">
+    <div class="qr-item">
+      <div class="qr-label">Web App URL</div>
+      <div class="qr-value"><a href="https://chaichoong.github.io/inbound-comms-tracker" target="_blank">chaichoong.github.io/inbound-comms-tracker</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Account</div>
+      <div class="qr-value">kevin@runpreneur.org.uk<br>(kevinbrittain@gmail.com)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">GitHub Repository</div>
+      <div class="qr-value"><a href="https://github.com/chaichoong/inbound-comms-tracker" target="_blank">chaichoong/inbound-comms-tracker</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">AI Proxy / Cloud Store</div>
+      <div class="qr-value"><a href="https://claude-proxy.kevinbrittain.workers.dev" target="_blank">claude-proxy.kevinbrittain.workers.dev</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Airtable Base</div>
+      <div class="qr-value">Operations Director<br><code>appnqjDpqDniH3IRl</code></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Source File (Edit Here)</div>
+      <div class="qr-value">Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <strong>follow-up.html</strong></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Scheduled Tasks</div>
+      <div class="qr-value">8am, 12pm, 4pm UK time<br>(Claude Desktop &gt; Scheduled)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Auto-Refresh</div>
+      <div class="qr-value">Every 15 minutes (when idle)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TABLE OF CONTENTS ============ -->
+<div class="section">
+  <div class="toc">
+    <h2>&#x1F4D1; Table of Contents</h2>
+    <div class="toc-grid">
+      <a href="#architecture"><span class="toc-num">1</span> System Architecture</a>
+      <a href="#labels"><span class="toc-num">2</span> The 9 Gmail Labels</a>
+      <a href="#inbox"><span class="toc-num">3</span> Inbox Triage Workflow</a>
+      <a href="#wf-respond"><span class="toc-num">4</span> To Respond (Label 1)</a>
+      <a href="#wf-followup"><span class="toc-num">5</span> Follow-up (Label 2)</a>
+      <a href="#wf-pay"><span class="toc-num">6</span> To Pay (Label 3)</a>
+      <a href="#wf-archive"><span class="toc-num">7</span> Paid &amp; Responded (4 &amp; 5)</a>
+      <a href="#wf-newsletter"><span class="toc-num">8</span> Newsletter (Label 6)</a>
+      <a href="#wf-delete"><span class="toc-num">9</span> Delete/Unsubscribe (Label 7)</a>
+      <a href="#wf-task"><span class="toc-num">10</span> Task Automation (Labels 8 &amp; 9)</a>
+      <a href="#ai"><span class="toc-num">11</span> AI Features &amp; Rules</a>
+      <a href="#search-pagination"><span class="toc-num">12</span> Search, Pagination &amp; Undo</a>
+      <a href="#backup-sync"><span class="toc-num">13</span> Backup &amp; Cloud Sync</a>
+      <a href="#audit"><span class="toc-num">14</span> Audit Trail</a>
+      <a href="#settings"><span class="toc-num">15</span> Settings &amp; Data Storage</a>
+      <a href="#updating"><span class="toc-num">16</span> Updating the App</a>
+      <a href="#troubleshooting"><span class="toc-num">17</span> Troubleshooting</a>
+      <a href="#limitations"><span class="toc-num">18</span> Known Limitations</a>
+      <a href="#technical"><span class="toc-num">19</span> Technical Reference</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 1. ARCHITECTURE ============ -->
+<div class="section" id="architecture">
+  <h2 class="section-title"><span class="icon">&#x1F3D7;</span> 1. System Architecture</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F310; Component Overview</div>
+    <p>The Inbound Comms Tracker is a client-side web application that orchestrates email management across six connected services:</p>
+
+    <div class="arch-diagram">
+      <div class="arch-box highlight">
+        <div class="arch-icon">&#x1F4E7;</div>
+        <div class="arch-title">Gmail</div>
+        <div class="arch-desc">Email source via<br>Google OAuth2 &amp; Gmail API</div>
+      </div>
+      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
+      <div class="arch-box highlight" style="border-color: var(--indigo-500); background: var(--indigo-50);">
+        <div class="arch-icon">&#x1F4BB;</div>
+        <div class="arch-title">Web App</div>
+        <div class="arch-desc">GitHub Pages<br>Single HTML file (index.html)</div>
+      </div>
+      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
+      <div class="arch-box" style="border-color: var(--purple-500); background: var(--purple-50);">
+        <div class="arch-icon">&#x1F916;</div>
+        <div class="arch-title">Claude AI</div>
+        <div class="arch-desc">Via Cloudflare Worker proxy<br>Haiku &amp; Sonnet models</div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+      <div class="arch-box" style="border-color: var(--green-500); background: var(--green-50);">
+        <div class="arch-icon">&#x1F4CA;</div>
+        <div class="arch-title">Airtable</div>
+        <div class="arch-desc">Operations Director base<br>Task creation &amp; tracking</div>
+      </div>
+      <div class="arch-box" style="border-color: var(--amber-500); background: var(--amber-50);">
+        <div class="arch-icon">&#x23F0;</div>
+        <div class="arch-title">Claude Scheduled Tasks</div>
+        <div class="arch-desc">8am, 12pm, 4pm UK<br>Airtable task automation</div>
+      </div>
+      <div class="arch-box" style="border-color: var(--blue-500); background: var(--blue-50);">
+        <div class="arch-icon">&#x2601;&#xFE0F;</div>
+        <div class="arch-title">Cloudflare KV</div>
+        <div class="arch-desc">SHARED_DATA namespace<br>Cross-device cloud storage</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F517; Cloudflare Worker Endpoints</div>
+    <p>The <code>claude-proxy</code> worker now serves four endpoints:</p>
+    <div style="overflow-x: auto;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>POST</code></td><td><code>/</code></td><td>Claude API proxy &mdash; forwards AI requests to Claude (Haiku &amp; Sonnet)</td></tr>
+          <tr><td><code>POST</code></td><td><code>/gmail-labels</code></td><td>Gmail label modification &mdash; adds/removes labels on messages server-side</td></tr>
+          <tr><td><code>GET</code></td><td><code>/shared-data</code></td><td>Retrieve shared data from KV (knowledge base, corrections, KB build date)</td></tr>
+          <tr><td><code>POST</code></td><td><code>/shared-data</code></td><td>Save shared data to KV (key, data, timestamp)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; Data Sync Flow</div>
+    <p>Data flows between local storage and the cloud for multi-device support:</p>
+    <div class="flow" style="padding: 1rem 0;">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F4BB;</span>
+        localStorage
+        <span class="flow-sub">Browser storage</span>
+      </div>
+      <span class="flow-arrow">&#x21C4;</span>
+      <div class="flow-step" style="background: var(--blue-50); border-color: var(--blue-500);">
+        <span class="flow-icon">&#x2601;&#xFE0F;</span>
+        Cloudflare KV
+        <span class="flow-sub">SHARED_DATA namespace</span>
+      </div>
+      <span class="flow-arrow">&#x21C4;</span>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F4F1;</span>
+        Any Device
+        <span class="flow-sub">Same learned data</span>
+      </div>
+    </div>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2601;&#xFE0F;</span>
+      <div>On app load (after auth), the app fetches cloud data. If the cloud version is newer than local, it uses the cloud version. If local is newer, it syncs to the cloud. Sync failures are handled gracefully &mdash; the app falls back to localStorage silently.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; Email Lifecycle Flow</div>
+    <p>Every email follows this journey through the system:</p>
+    <div class="flow">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F4E5;</span>
+        New Email
+        <span class="flow-sub">Arrives in Gmail</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step" style="background: var(--indigo-50); border-color: var(--indigo-500);">
+        <span class="flow-icon">&#x1F4CB;</span>
+        Inbox Triage
+        <span class="flow-sub">AI suggests label</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step warning">
+        <span class="flow-icon">&#x1F3F7;&#xFE0F;</span>
+        Labelled
+        <span class="flow-sub">1-9 categories</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step purple">
+        <span class="flow-icon">&#x2699;&#xFE0F;</span>
+        Action Taken
+        <span class="flow-sub">Reply / Pay / Task</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x2705;</span>
+        Complete
+        <span class="flow-sub">Archived / Resolved</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 2. LABELS ============ -->
+<div class="section" id="labels">
+  <h2 class="section-title"><span class="icon">&#x1F3F7;&#xFE0F;</span> 2. The 9 Gmail Labels</h2>
+  <div class="card" style="overflow-x: auto;">
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Purpose</th>
+          <th>Sort</th>
+          <th>Key Actions</th>
+          <th>Metrics</th>
+          <th>Count in Menu</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="label-badge lb-1">1: to respond</span></td>
+          <td>Emails needing a reply</td>
+          <td>Oldest first</td>
+          <td>AI Draft Response, Move</td>
+          <td><span class="dot green"></span>&lt;7d &nbsp;<span class="dot amber"></span>7-13d &nbsp;<span class="dot red"></span>14d+</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-2">2: to follow-up</span></td>
+          <td>Sent replies awaiting response</td>
+          <td>Oldest first</td>
+          <td>Follow Up, Move, Auto-detect replies</td>
+          <td><span class="dot green"></span>&lt;7d &nbsp;<span class="dot amber"></span>7-13d &nbsp;<span class="dot red"></span>14d+</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-3">3. to pay</span></td>
+          <td>Invoices / payments pending</td>
+          <td>Oldest first</td>
+          <td>Delay Payment (AI draft + send, stays in label), Move</td>
+          <td>Invoice Date, Days Old, Last Activity</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-4">4: paid</span></td>
+          <td>Paid invoices (archive)</td>
+          <td>Newest first</td>
+          <td>Move only</td>
+          <td><span class="dot green"></span>&lt;30d &nbsp;<span class="dot amber"></span>30-89d &nbsp;<span class="dot red"></span>90d+</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-5">5: responded</span></td>
+          <td>Sent responses (archive)</td>
+          <td>Newest first</td>
+          <td>Move only</td>
+          <td><span class="dot green"></span>&lt;30d &nbsp;<span class="dot amber"></span>30-89d &nbsp;<span class="dot red"></span>90d+</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-6">6: newsletter</span></td>
+          <td>Newsletter subscriptions</td>
+          <td>Newest first</td>
+          <td>Filter (All/Unread/Read), Mark Read, Read All</td>
+          <td><span class="dot red"></span>Unread &nbsp;<span class="dot green"></span>Read &nbsp;<span class="dot blue"></span>Total</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-7">7: delete</span></td>
+          <td>Emails to delete / unsubscribe</td>
+          <td>Newest first</td>
+          <td>Unsubscribe (3 methods), Mark Done, Unsub All</td>
+          <td><span class="dot red"></span>Pending &nbsp;<span class="dot green"></span>Done &nbsp;<span class="dot blue"></span>30d</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-8">8: task created</span></td>
+          <td>Emails needing Airtable task</td>
+          <td>Oldest first</td>
+          <td>Auto-creates Airtable task via scheduled job</td>
+          <td><span class="dot green"></span>&lt;7d &nbsp;<span class="dot amber"></span>7-13d &nbsp;<span class="dot red"></span>14d+</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-9">9: task completed</span></td>
+          <td>Completed task emails (archive)</td>
+          <td>Oldest first</td>
+          <td>Standard actions</td>
+          <td><span class="dot green"></span>7d &nbsp;<span class="dot amber"></span>7-14d &nbsp;<span class="dot amber"></span>14-30d &nbsp;<span class="dot blue"></span>Total</td>
+          <td>No</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box info" style="margin-top: 1rem;">
+      <span class="ib-icon">&#x1F522;</span>
+      <div><strong>Dropdown counts:</strong> Labels 1, 2, 3, and 8 show email counts in the label dropdown menu. Label 9 and archive labels do not. The Inbox (Unlabelled) view also shows its email count in the dropdown.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 3. INBOX TRIAGE ============ -->
+<div class="section" id="inbox">
+  <h2 class="section-title"><span class="icon">&#x1F4E5;</span> 3. Inbox Triage Workflow</h2>
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num" style="background: var(--indigo-600);">&#x1F50D;</span>
+      <h3>Inbox (Unlabelled) View</h3>
+      <span class="wf-tag">Default View</span>
+    </div>
+    <div class="wf-body">
+      <p>Shows all inbox emails that do <strong>not</strong> yet have any numbered label (1-9). This is the starting point for all email management. The email count is displayed in the dropdown menu.</p>
+
+      <div class="flow" style="padding: 1rem 0;">
+        <div class="flow-step primary">
+          <span class="flow-icon">&#x1F4E5;</span>
+          Open App
+        </div>
+        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+        <div class="flow-step" style="background: var(--purple-50); border-color: var(--purple-500);">
+          <span class="flow-icon">&#x1F916;</span>
+          AI Suggests Labels
+          <span class="flow-sub">Auto-classifies each email</span>
+        </div>
+        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+        <div class="flow-step" style="background: var(--amber-50); border-color: var(--amber-500);">
+          <span class="flow-icon">&#x1F441;&#xFE0F;</span>
+          Review &amp; Adjust
+          <span class="flow-sub">Change if AI is wrong</span>
+        </div>
+        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+        <div class="flow-step success">
+          <span class="flow-icon">&#x2705;</span>
+          Apply / Apply All
+          <span class="flow-sub">Emails move to labels</span>
+        </div>
+      </div>
+
+      <h4>&#x1F3AF; AI Confidence Indicators</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-green"><span class="dot green"></span> High Confidence (90%+)</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> Medium Confidence (65-89%)</span>
+      </div>
+
+      <h4>&#x1F4C8; Accuracy Tracking</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-green"><span class="dot green"></span> 90%+ = Good</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> 65-89% = Needs Attention</span>
+        <span class="metric-chip mc-red"><span class="dot red"></span> &lt;65% = Poor</span>
+      </div>
+
+      <div class="info-box tip">
+        <span class="ib-icon">&#x1F4A1;</span>
+        <div>The AI <strong>learns from corrections</strong>. When you change a suggested label, the system stores this correction in localStorage (and syncs to Cloudflare KV) and improves future suggestions.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 4. TO RESPOND ============ -->
+<div class="section" id="wf-respond">
+  <h2 class="section-title"><span class="icon">&#x2709;&#xFE0F;</span> 4. Workflow: To Respond (Label 1)</h2>
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-1">1</span>
+      <h3>1: to respond</h3>
+      <span class="wf-tag">Oldest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x23F1;&#xFE0F; Response Time Metrics</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;7 days</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> Warning: 7-13 days</span>
+        <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
+      </div>
+
+      <h4>&#x1F4CB; Steps</h4>
+      <ol class="steps">
+        <li>Select <strong>"1: to respond"</strong> from the label dropdown</li>
+        <li>Emails appear sorted oldest first &mdash; prioritise red (critical) items</li>
+        <li>Click <strong>"Respond"</strong> on an email &mdash; the loading screen shows "Claude is drafting your response..."</li>
+        <li>Review the draft alongside the original email content</li>
+        <li>If amendments are needed, type feedback in the textarea and click <strong>"Revise"</strong></li>
+        <li>Optionally add attachments via the <strong>Add Attachment</strong> button (up to 20MB total)</li>
+        <li>Choose destination:
+          <ul>
+            <li><strong>Send &amp; Move to Responded</strong> &rarr; moves to label 5 (done)</li>
+            <li><strong>Send &amp; Move to Follow-up</strong> &rarr; moves to label 2 (awaiting reply)</li>
+          </ul>
+        </li>
+      </ol>
+
+      <div class="flow" style="padding: 1rem 0;">
+        <div class="flow-step primary">
+          <span class="flow-icon">&#x1F4E7;</span>
+          Email in Label 1
+        </div>
+        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+        <div class="flow-step purple">
+          <span class="flow-icon">&#x1F916;</span>
+          AI Drafts Reply
+        </div>
+        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+        <div class="flow-step warning">
+          <span class="flow-icon">&#x270F;&#xFE0F;</span>
+          Review / Amend
+        </div>
+        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+        <div class="flow-step success">
+          <span class="flow-icon">&#x1F4E4;</span>
+          Send &amp; Move
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 5. FOLLOW-UP ============ -->
+<div class="section" id="wf-followup">
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 5. Workflow: Follow-up (Label 2)</h2>
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-2">2</span>
+      <h3>2: to follow-up</h3>
+      <span class="wf-tag">Oldest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x23F1;&#xFE0F; Follow-up Time Metrics</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;7 days</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> Warning: 7-13 days</span>
+        <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
+      </div>
+
+      <h4>&#x1F4CB; Steps</h4>
+      <ol class="steps">
+        <li>Select <strong>"2: to follow-up"</strong> from the label dropdown</li>
+        <li>Review emails sorted oldest first &mdash; these are sent replies awaiting a response</li>
+        <li>Click <strong>"Follow Up"</strong> &mdash; the loading screen shows "Claude is drafting your follow-up..."</li>
+        <li>Review, amend if needed, optionally add attachments, then send</li>
+      </ol>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#x1F504;</span>
+        <div><strong>Auto-detection:</strong> The system automatically detects when someone replies to a followed-up email and moves it back to the inbox for re-triage. This check runs every time you navigate to the follow-up view or refresh.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 6. TO PAY ============ -->
+<div class="section" id="wf-pay">
+  <h2 class="section-title"><span class="icon">&#x1F4B0;</span> 6. Workflow: To Pay (Label 3)</h2>
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-3">3</span>
+      <h3>3. to pay</h3>
+      <span class="wf-tag">Oldest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x1F4CA; Custom Columns</h4>
+      <p>This view has unique columns not found in other labels:</p>
+      <ul>
+        <li><strong>Invoice Date</strong> &mdash; When the invoice was received</li>
+        <li><strong>Days Old</strong> &mdash; Age of the invoice</li>
+        <li><strong>Last Activity</strong> &mdash; Most recent action taken</li>
+        <li><strong>Last Update</strong> &mdash; Days since last delay email was sent</li>
+      </ul>
+
+      <h4>&#x1F4CB; Steps</h4>
+      <ol class="steps">
+        <li>Select <strong>"3. to pay"</strong> from the label dropdown</li>
+        <li>Review outstanding invoices sorted oldest first</li>
+        <li>Click <strong>"Delay Payment"</strong> to generate an AI-drafted financial difficulty email</li>
+        <li>The loading screen shows <strong>"Claude is drafting a delayed payment message..."</strong></li>
+        <li>The AI references your financial situation and avoids repeating the same wording to the same creditor</li>
+        <li>Review, amend if needed, and optionally add attachments via the <strong>Add Attachment</strong> button</li>
+        <li>Click <strong>"Send"</strong> &mdash; the email is sent but <strong>stays in the To Pay label</strong> (it is not moved)</li>
+        <li>When the invoice is eventually paid, use the Move dropdown to move to <strong>label 4 (paid)</strong></li>
+      </ol>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#x2139;&#xFE0F;</span>
+        <div><strong>No label move on send:</strong> Unlike other labels, sending a delay payment email does <strong>not</strong> move the email to another label. The email stays in To Pay because the invoice is still outstanding. The automation will detect when the invoice is reconciled.</div>
+      </div>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+        <div><strong>Delay History Tracking:</strong> The system tracks all delay emails per creditor in localStorage. The AI uses this history to avoid sending repetitive or identical delay notifications.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 7. ARCHIVE ============ -->
+<div class="section" id="wf-archive">
+  <h2 class="section-title"><span class="icon">&#x1F4C1;</span> 7. Workflow: Paid &amp; Responded (Labels 4 &amp; 5)</h2>
+  <div class="grid-2">
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-4">4</span>
+        <h3>4: paid</h3>
+        <span class="wf-tag">Newest First</span>
+      </div>
+      <div class="wf-body">
+        <p>Archive of paid invoices. No action buttons &mdash; only the Move dropdown to reclassify if needed.</p>
+        <div class="metrics-bar" style="margin-top: 0.5rem;">
+          <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;30d</span>
+          <span class="metric-chip mc-amber"><span class="dot amber"></span> Medium: 30-89d</span>
+          <span class="metric-chip mc-red"><span class="dot red"></span> Long Term: 90d+</span>
+        </div>
+      </div>
+    </div>
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-5">5</span>
+        <h3>5: responded</h3>
+        <span class="wf-tag">Newest First</span>
+      </div>
+      <div class="wf-body">
+        <p>Archive of sent responses. No action buttons &mdash; only the Move dropdown to reclassify if needed.</p>
+        <div class="metrics-bar" style="margin-top: 0.5rem;">
+          <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;30d</span>
+          <span class="metric-chip mc-amber"><span class="dot amber"></span> Medium: 30-89d</span>
+          <span class="metric-chip mc-red"><span class="dot red"></span> Long Term: 90d+</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 8. NEWSLETTER ============ -->
+<div class="section" id="wf-newsletter">
+  <h2 class="section-title"><span class="icon">&#x1F4F0;</span> 8. Workflow: Newsletter (Label 6)</h2>
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-6">6</span>
+      <h3>6: newsletter</h3>
+      <span class="wf-tag">Newest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x1F4CA; Metrics</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-red"><span class="dot red"></span> Unread</span>
+        <span class="metric-chip mc-green"><span class="dot green"></span> Read</span>
+        <span class="metric-chip mc-blue"><span class="dot blue"></span> Total</span>
+      </div>
+
+      <h4>&#x1F50D; Filter Buttons</h4>
+      <p>A filter bar appears above the email list with three options:</p>
+      <div class="metrics-bar" style="margin-top: 0.5rem;">
+        <span class="metric-chip mc-blue"><span class="dot blue"></span> All &mdash; show all newsletters (default)</span>
+        <span class="metric-chip mc-red"><span class="dot red"></span> Unread &mdash; show only unread newsletters</span>
+        <span class="metric-chip mc-green"><span class="dot green"></span> Read &mdash; show only read newsletters</span>
+      </div>
+      <p style="margin-top: 0.5rem;">The active filter is highlighted in purple. Filters work alongside search &mdash; if you search while "Unread" is selected, results are filtered to unread newsletters matching your search term. Switching labels resets the filter to "All".</p>
+
+      <h4 style="margin-top: 1rem;">&#x1F4CB; Actions</h4>
+      <ul>
+        <li><strong>Mark Read</strong> &mdash; Mark individual newsletters as read</li>
+        <li><strong>Read All</strong> &mdash; Bulk-mark all newsletters as read</li>
+      </ul>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#x1F4BE;</span>
+        <div>Read state persists across sessions via <strong>localStorage</strong> &mdash; your read/unread tracking is saved in the browser.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 9. DELETE / UNSUBSCRIBE ============ -->
+<div class="section" id="wf-delete">
+  <h2 class="section-title"><span class="icon">&#x1F5D1;&#xFE0F;</span> 9. Workflow: Delete &amp; Unsubscribe (Label 7)</h2>
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-7">7</span>
+      <h3>7: delete</h3>
+      <span class="wf-tag">Newest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x1F4CA; Metrics</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-red"><span class="dot red"></span> Pending</span>
+        <span class="metric-chip mc-green"><span class="dot green"></span> Unsubscribed</span>
+        <span class="metric-chip mc-blue"><span class="dot blue"></span> Unsubs 30 day</span>
+      </div>
+
+      <h4>&#x1F6AB; Four Unsubscribe Methods</h4>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 0.5rem;">
+        <div style="background: var(--green-50); border: 1px solid var(--green-200); border-radius: var(--radius-sm); padding: 1rem; text-align: center;">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x1F4E7;</div>
+          <div style="font-weight: 700; color: var(--green-700); margin-bottom: 0.25rem;">1. Auto-Email</div>
+          <div style="font-size: 0.82rem; color: var(--slate-600);">If email has a <code>mailto:</code> unsubscribe header, sends unsubscribe email automatically</div>
+        </div>
+        <div style="background: var(--blue-50); border: 1px solid var(--blue-200); border-radius: var(--radius-sm); padding: 1rem; text-align: center;">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x1F517;</div>
+          <div style="font-weight: 700; color: var(--blue-700); margin-bottom: 0.25rem;">2. Link</div>
+          <div style="font-size: 0.82rem; color: var(--slate-600);">If email has an <code>https:</code> unsubscribe header, opens the link in a new tab</div>
+        </div>
+        <div style="background: var(--purple-50); border: 1px solid #e9d5ff; border-radius: var(--radius-sm); padding: 1rem; text-align: center;">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x1F916;</div>
+          <div style="font-weight: 700; color: var(--purple-600); margin-bottom: 0.25rem;">3. AI Draft</div>
+          <div style="font-size: 0.82rem; color: var(--slate-600);">"Reply to Request Unsubscribe" button drafts a polite unsubscribe request via AI</div>
+        </div>
+        <div style="background: var(--indigo-50); border: 1px solid var(--indigo-100); border-radius: var(--radius-sm); padding: 1rem; text-align: center;">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x2705;</div>
+          <div style="font-weight: 700; color: var(--indigo-600); margin-bottom: 0.25rem;">4. Mark Done</div>
+          <div style="font-size: 0.82rem; color: var(--slate-600);">For emails you've already unsubscribed from or that have no link &mdash; manually mark as done to update the metrics</div>
+        </div>
+      </div>
+
+      <div class="info-box info" style="margin-top: 1rem;">
+        <span class="ib-icon">&#x2139;&#xFE0F;</span>
+        <div><strong>"Mark Done" override:</strong> Emails with no unsubscribe link show a <strong>"Mark Done"</strong> button instead of a disabled "No link" label. You can also click <strong>"Mark as Already Unsubscribed"</strong> in the expanded email view for any email. This logs the unsubscribe as "manual" and updates the Pending/Unsubscribed metrics immediately.</div>
+      </div>
+
+      <div class="info-box tip" style="margin-top: 0.5rem;">
+        <span class="ib-icon">&#x1F680;</span>
+        <div><strong>"Unsub All" button:</strong> Batch-processes all mailto-based unsubscribes in one click. Only works for emails with mailto: unsubscribe headers.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 10. TASK AUTOMATION ============ -->
+<div class="section" id="wf-task">
+  <h2 class="section-title"><span class="icon">&#x2705;</span> 10. Workflow: Task Automation (Labels 8 &amp; 9)</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; Airtable Task Automation Flow</div>
+    <p>This is the most complex workflow, involving automated scheduled tasks that bridge Gmail and Airtable.</p>
+
+    <div class="flow" style="padding: 1.5rem 0;">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F4E7;</span>
+        Email moved to<br>Label 8
+        <span class="flow-sub">Via web app</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step" style="background: var(--amber-50); border-color: var(--amber-500);">
+        <span class="flow-icon">&#x23F0;</span>
+        Scheduled Task<br>Runs
+        <span class="flow-sub">8am / 12pm / 4pm</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step purple">
+        <span class="flow-icon">&#x1F916;</span>
+        AI Creates<br>Airtable Task
+        <span class="flow-sub">Title, desc, fields</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step" style="background: var(--green-50); border-color: var(--green-500);">
+        <span class="flow-icon">&#x1F4CA;</span>
+        Task in<br>Airtable
+        <span class="flow-sub">Assigned to Mica</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x2705;</span>
+        Task Done<br>&rarr; Label 9
+        <span class="flow-sub">Auto-moved via worker</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-8">8</span>
+      <h3>8: task created</h3>
+      <span class="wf-tag">Oldest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x1F4CA; Metrics</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;7 days</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> Warning: 7-13 days</span>
+        <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
+      </div>
+
+      <h4>&#x1F916; Automated Task Creation Details</h4>
+      <p>The scheduled task <code>inbound-comms-create-airtable-tasks</code> reads emails in label 8 and creates Airtable records with:</p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1.5rem; margin-top: 0.5rem; font-size: 0.88rem;">
+        <div><strong>Title:</strong> "INBOUND: [AI-generated action item]"</div>
+        <div><strong>Assignee:</strong> Mica Albovias</div>
+        <div><strong>Description:</strong> AI-generated summary</div>
+        <div><strong>Status:</strong> Today</div>
+        <div><strong>Priority:</strong> Urgent</div>
+        <div><strong>Time Estimate:</strong> 15 min</div>
+        <div><strong>Due Date:</strong> Today</div>
+        <div><strong>Source Type:</strong> Gmail</div>
+        <div><strong>Checkbox:</strong> "Inbound Communication Task" ticked</div>
+        <div><strong>Email Data:</strong> Link, sender, date, content</div>
+      </div>
+
+      <div class="info-box info" style="margin-top: 0.75rem;">
+        <span class="ib-icon">&#x1F3F7;&#xFE0F;</span>
+        <div><strong>Gmail label search syntax:</strong> The scheduled task searches using <code>label:8:-task-created</code> (keep colon, replace spaces with hyphens).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-9">9</span>
+      <h3>9: task completed</h3>
+      <span class="wf-tag">Oldest First</span>
+    </div>
+    <div class="wf-body">
+      <h4>&#x1F4CA; Metrics</h4>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-green"><span class="dot green"></span> Last 7 days</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> 7-14 days</span>
+        <span class="metric-chip mc-amber"><span class="dot amber"></span> 14-30 days</span>
+        <span class="metric-chip mc-blue"><span class="dot blue"></span> Total</span>
+      </div>
+
+      <p style="margin-top: 0.75rem;">The second scheduled task (<code>inbound-comms-complete-tasks</code>) monitors Airtable for completed inbound communication tasks and <strong>automatically moves emails from label 8 to label 9</strong> via the <code>/gmail-labels</code> Cloudflare Worker endpoint.</p>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#x23F0;</span>
+        <div><strong>Both scheduled tasks</strong> run at <strong>8am, 12pm, and 4pm UK time</strong> via Claude Desktop's Scheduled section. They require tool permissions approved on first run.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 11. AI FEATURES ============ -->
+<div class="section" id="ai">
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 11. AI Features &amp; Rules</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">&#x1F3F7;&#xFE0F; Label Suggestions</div>
+      <p><strong>Model:</strong> Claude Haiku (fast, cheap)</p>
+      <p><strong>Where:</strong> Inbox view</p>
+      <p>Classifies incoming emails and suggests the appropriate label (1-9). Learns from corrections stored in localStorage and synced to Cloudflare KV.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">&#x2709;&#xFE0F; Response &amp; Follow-up Drafting</div>
+      <p><strong>Model:</strong> Claude Sonnet (quality)</p>
+      <p><strong>Where:</strong> Labels 1, 2, and all other labels with action buttons</p>
+      <p>Drafts replies and follow-ups based on email content and your knowledge base entries. The loading message adapts to the context:</p>
+      <ul style="margin-top: 0.5rem;">
+        <li><strong>Label 1:</strong> "Claude is drafting your response..."</li>
+        <li><strong>Label 2:</strong> "Claude is drafting your follow-up..."</li>
+        <li><strong>Label 3:</strong> "Claude is drafting a delayed payment message..."</li>
+        <li><strong>Label 7:</strong> "Claude is drafting your unsubscribe request..."</li>
+      </ul>
+      <p style="margin-top: 0.5rem;">All draft modals support <strong>file attachments</strong> (up to 20MB total). Click "Add Attachment" to attach files before sending.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">&#x1F4B0; Delay Payment Drafts</div>
+      <p><strong>Model:</strong> Claude Sonnet (quality)</p>
+      <p><strong>Where:</strong> Label 3</p>
+      <p>Drafts financial difficulty emails. Tracks delay history per creditor to avoid repetitive wording.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">&#x1F6AB; Unsubscribe Drafts</div>
+      <p><strong>Model:</strong> Claude Haiku (fast)</p>
+      <p><strong>Where:</strong> Label 7</p>
+      <p>Drafts polite unsubscribe request emails when auto-methods are not available.</p>
+    </div>
+  </div>
+
+  <div class="info-box danger" style="margin-top: 0.75rem;">
+    <span class="ib-icon">&#x1F6A8;</span>
+    <div><strong>CRITICAL RULE:</strong> All AI-generated emails must <strong>NOT</strong> contain em dashes (&mdash;) or en dashes (&ndash;). This rule is enforced in the AI prompts.</div>
+  </div>
+</div>
+
+<!-- ============ 12. SEARCH, PAGINATION & UNDO ============ -->
+<div class="section" id="search-pagination">
+  <h2 class="section-title"><span class="icon">&#x1F50D;</span> 12. Search, Pagination &amp; Undo</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F50E; Search &amp; Filter</div>
+    <p>A search box appears between the stats bar and the email list in all views. There are <strong>two search modes</strong>:</p>
+
+    <h4 style="margin-top: 1rem; margin-bottom: 0.5rem; color: var(--slate-700);">Local Search (&#x201C;This Label&#x201D;)</h4>
+    <ul>
+      <li><strong>Real-time filtering</strong> with 300ms debounce as you type</li>
+      <li><strong>Searches across:</strong> subject, sender name, sender email, snippet text, and full email body content (HTML is converted to plain text for searching)</li>
+      <li>Shows <strong>&#x201C;Showing X of Y emails&#x201D;</strong> when a filter is active</li>
+      <li>Only searches emails loaded in the <strong>current label view</strong></li>
+    </ul>
+
+    <h4 style="margin-top: 1rem; margin-bottom: 0.5rem; color: var(--indigo-600);">Global Search (&#x201C;All Emails&#x201D;)</h4>
+    <ul>
+      <li>Click the <strong>&#x201C;This Label&#x201D;</strong> button next to the search box to toggle to <strong>&#x201C;All Emails&#x201D;</strong> mode (button turns purple)</li>
+      <li>Type your search term and press <strong>Enter</strong> to search</li>
+      <li>Uses the <strong>Gmail API server-side search</strong> &#x2014; same engine as the Gmail search bar</li>
+      <li>Searches your <strong>entire Gmail account</strong> (all labels, inbox, sent, archived)</li>
+      <li>Each result shows a <strong>purple label tag</strong> indicating which of the 9 numbered labels it belongs to (or &#x201C;Unlabelled&#x201D;)</li>
+      <li>Results display in a simplified read-only view (subject, from, label, date, days old)</li>
+      <li>Click any row to expand and read the full thread</li>
+      <li>Click <strong>&#x201C;All Emails&#x201D;</strong> again or clear the search to return to the current label view</li>
+    </ul>
+
+    <div class="info-box">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Global search limits:</strong> Results are capped at <strong>100 matches</strong> for speed (the 100 most recent). Because it searches the entire Gmail account, results may include emails outside the 9 numbered labels &#x2014; these show as &#x201C;Unlabelled&#x201D;.</div>
+    </div>
+
+    <div class="info-box" style="margin-top: 0.5rem;">
+      <span class="ib-icon">&#x2705;</span>
+      <div><strong>Full body search supported:</strong> Local search covers subject, sender, snippet, and full email body content. HTML emails are automatically converted to plain text for searching.</div>
+    </div>
+
+    <p style="margin-top: 0.75rem;"><strong>Clear button (X)</strong> resets both search modes. Pagination applies to all search results.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C4; Pagination</div>
+    <p>All views display <strong>50 emails per page</strong> with navigation controls below the email list.</p>
+    <ul>
+      <li><strong>Previous / Next</strong> buttons for navigation</li>
+      <li><strong>"Page X of Y"</strong> indicator shows current position</li>
+      <li>Stats and metrics always reflect <strong>ALL emails</strong>, not just the current page</li>
+      <li>Page resets to 1 when switching labels, refreshing, or searching</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x21A9;&#xFE0F; Undo Last Action</div>
+    <p>After any label move, an undo notification appears at the bottom of the screen.</p>
+    <div class="flow" style="padding: 1rem 0;">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F3F7;&#xFE0F;</span>
+        Move Email
+        <span class="flow-sub">Label change applied</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step" style="background: var(--slate-700); color: white; border-color: var(--slate-800);">
+        <span class="flow-icon">&#x1F4AC;</span>
+        Toast Notification
+        <span class="flow-sub">Dark bar at bottom</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step warning">
+        <span class="flow-icon">&#x21A9;&#xFE0F;</span>
+        Click "Undo"
+        <span class="flow-sub">Within 10 seconds</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x2705;</span>
+        Label Reversed
+        <span class="flow-sub">Via Gmail API</span>
+      </div>
+    </div>
+    <ul>
+      <li>Shows <strong>"Moved [subject] to [label]"</strong> with an "Undo" button</li>
+      <li>Auto-dismisses after <strong>10 seconds</strong></li>
+      <li>Tracks only the most recent action (<strong>single undo level</strong>)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ 13. BACKUP & CLOUD SYNC ============ -->
+<div class="section" id="backup-sync">
+  <h2 class="section-title"><span class="icon">&#x1F4BE;</span> 13. Backup &amp; Cloud Sync</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4E6; Auto-Backup System</div>
+    <p>The app automatically backs up all localStorage data after key actions:</p>
+    <ul>
+      <li>Building knowledge base</li>
+      <li>Applying inbox labels in bulk</li>
+      <li>Sending emails</li>
+    </ul>
+    <p style="margin-top: 0.5rem;">On app load, if the last backup was <strong>24+ hours ago</strong>, it auto-exports a backup JSON file.</p>
+
+    <h4 style="margin-top: 1rem;">&#x1F4CB; What's Included in Backups</h4>
+    <ul>
+      <li>Knowledge base</li>
+      <li>AI corrections</li>
+      <li>Accuracy log</li>
+      <li>Delay payment log</li>
+      <li>Read newsletters</li>
+      <li>Unsubscribe log</li>
+      <li>Sender name</li>
+      <li>Applied today counts</li>
+      <li>Response amendments</li>
+    </ul>
+
+    <h4 style="margin-top: 1rem;">&#x2699;&#xFE0F; Manual Backup &amp; Restore</h4>
+    <p>Available in <strong>Settings &gt; Backup &amp; Restore</strong> section:</p>
+    <ul>
+      <li><strong>Export</strong> &mdash; Downloads a JSON file with all app data</li>
+      <li><strong>Import</strong> &mdash; Restores from a previously exported JSON file</li>
+    </ul>
+
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div>A <strong>"Backup: Xh ago"</strong> indicator in the header shows when the last backup was created. If this indicator is missing, the auto-backup code may not have loaded.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x2601;&#xFE0F; Shared Cloud Data Store (Cloudflare KV)</div>
+    <p>Knowledge base, AI corrections, and KB build date are synced to Cloudflare KV storage for multi-device support.</p>
+
+    <h4 style="margin-top: 1rem;">&#x1F504; How Cloud Sync Works</h4>
+    <ol class="steps">
+      <li>On app load (after authentication), the app fetches cloud data from <code>GET /shared-data</code></li>
+      <li>If cloud data is <strong>newer than local</strong>, the cloud version replaces local data</li>
+      <li>If local data is <strong>newer than cloud</strong>, local data syncs up to the cloud</li>
+      <li>After building knowledge base or logging AI corrections, data syncs to cloud automatically</li>
+    </ol>
+
+    <h4 style="margin-top: 1rem;">&#x1F4CA; Cloud Sync Status Indicators</h4>
+    <div class="metrics-bar">
+      <span class="metric-chip mc-green"><span class="dot green"></span> Synced &mdash; data is up to date</span>
+      <span class="metric-chip mc-amber"><span class="dot amber"></span> Syncing... &mdash; transfer in progress</span>
+      <span class="metric-chip mc-red"><span class="dot red"></span> Offline &mdash; cloud unreachable</span>
+    </div>
+
+    <div class="info-box info" style="margin-top: 0.75rem;">
+      <span class="ib-icon">&#x2601;&#xFE0F;</span>
+      <div><strong>Multi-device support:</strong> Any device opening the app gets the same learned data. Failures are handled gracefully &mdash; the app falls back to localStorage silently.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 14. AUDIT TRAIL ============ -->
+<div class="section" id="audit">
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 14. Audit Trail</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CB; Action Logging</div>
+    <p>All user and system actions are logged to localStorage (<code>'audit_log'</code>) with timestamps.</p>
+
+    <h4 style="margin-top: 1rem;">&#x1F4CA; Events Tracked</h4>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1.5rem; font-size: 0.88rem; margin-top: 0.5rem;">
+      <div>Label moves</div>
+      <div>Emails sent</div>
+      <div>AI drafts generated</div>
+      <div>Inbox label applications</div>
+      <div>Unsubscribes</div>
+      <div>KB builds</div>
+      <div>Backup exports/imports</div>
+      <div>Undo actions</div>
+      <div>Cloud syncs</div>
+      <div>&nbsp;</div>
+    </div>
+
+    <h4 style="margin-top: 1rem;">&#x1F441;&#xFE0F; Viewing the Audit Log</h4>
+    <ul>
+      <li>Open <strong>Settings &gt; Audit Log</strong> section</li>
+      <li>Shows <strong>last 50 entries</strong> with timestamp, action icon, and description</li>
+      <li><strong>Export as CSV</strong> button downloads the full log</li>
+      <li><strong>Clear Log</strong> button (with confirmation prompt) resets the log</li>
+    </ul>
+
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Storage limit:</strong> Maximum <strong>500 entries</strong> are stored. When this limit is reached, the oldest entries are trimmed automatically.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 15. SETTINGS & DATA ============ -->
+<div class="section" id="settings">
+  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 15. Settings &amp; Data Storage</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">&#x2699;&#xFE0F; Settings Panel</div>
+      <p>Access via the gear icon in the header bar.</p>
+      <ul>
+        <li><strong>Sender Name</strong> &mdash; Used in all AI-drafted emails</li>
+        <li><strong>Knowledge Base</strong> &mdash; Context entries that improve AI response quality. Add information about your business, communication style, etc.</li>
+        <li><strong>Backup &amp; Restore</strong> &mdash; Manual export/import of all app data as JSON</li>
+        <li><strong>Audit Log</strong> &mdash; View, export (CSV), and clear action history</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header">&#x1F4BE; Data Storage Locations</div>
+      <p><strong>sessionStorage</strong> (clears on tab close):</p>
+      <ul>
+        <li>Gmail authentication token</li>
+      </ul>
+      <p style="margin-top: 0.5rem;"><strong>localStorage</strong> (persists in browser):</p>
+      <ul>
+        <li>Knowledge base entries</li>
+        <li>AI correction history</li>
+        <li>Accuracy log</li>
+        <li>Delay payment log</li>
+        <li>Read newsletter tracking</li>
+        <li>Unsubscribe log</li>
+        <li>Response amendments</li>
+        <li>Applied today counts</li>
+        <li>Sender name</li>
+        <li>Audit log (max 500 entries)</li>
+        <li>Last backup timestamp</li>
+      </ul>
+      <p style="margin-top: 0.5rem;"><strong>Cloudflare KV</strong> (cloud, multi-device):</p>
+      <ul>
+        <li>Knowledge base entries</li>
+        <li>AI correction history</li>
+        <li>KB build date</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="info-box info">
+    <span class="ib-icon">&#x2601;&#xFE0F;</span>
+    <div><strong>Multi-device data:</strong> Knowledge base and AI corrections sync across devices via Cloudflare KV. Other data (delay log, newsletters, audit log, etc.) remains browser-specific in localStorage but is included in backup exports.</div>
+  </div>
+</div>
+
+<!-- ============ 16. UPDATING ============ -->
+<div class="section" id="updating">
+  <h2 class="section-title"><span class="icon">&#x1F680;</span> 16. Updating the App</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4DD; Deployment Process &mdash; Two Files</div>
+    <p>The deployment now involves <strong>two separate files</strong>:</p>
+
+    <h4 style="margin-top: 1rem;">&#x1F310; File 1: Web App (index.html &rarr; GitHub)</h4>
+    <div class="flow">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x270F;&#xFE0F;</span>
+        Edit Source
+        <span class="flow-sub">follow-up.html<br>in Google Drive</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step" style="background: var(--amber-50); border-color: var(--amber-500);">
+        <span class="flow-icon">&#x1F4CB;</span>
+        Copy as index.html
+        <span class="flow-sub">Rename for GitHub</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step purple">
+        <span class="flow-icon">&#x1F4E4;</span>
+        Upload to GitHub
+        <span class="flow-sub">Main branch</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F30D;</span>
+        Auto-Deploy
+        <span class="flow-sub">GitHub Pages</span>
+      </div>
+    </div>
+
+    <h4 style="margin-top: 1.5rem;">&#x2601;&#xFE0F; File 2: Cloudflare Worker (cloudflare-worker.js &rarr; Cloudflare)</h4>
+    <ol class="steps">
+      <li>Go to <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a></li>
+      <li>Navigate to <strong>Workers &amp; Pages &gt; claude-proxy</strong></li>
+      <li>Click <strong>"Edit code"</strong></li>
+      <li>Select all existing code (<strong>Cmd+A</strong>) and delete</li>
+      <li>Paste the new worker code</li>
+      <li>Click <strong>Deploy</strong></li>
+    </ol>
+
+    <h4 style="margin-top: 1rem;">&#x1F4C2; File Locations</h4>
+    <ul>
+      <li><strong>Source file (web app):</strong> Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <code>follow-up.html</code></li>
+      <li><strong>Source file (worker):</strong> Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <code>cloudflare-worker.js</code></li>
+      <li><strong>GitHub repo:</strong> <code>chaichoong/inbound-comms-tracker</code> &gt; <code>index.html</code></li>
+      <li><strong>Live URL:</strong> <a href="https://chaichoong.github.io/inbound-comms-tracker" target="_blank">chaichoong.github.io/inbound-comms-tracker</a></li>
+      <li><strong>Worker URL:</strong> <a href="https://claude-proxy.kevinbrittain.workers.dev" target="_blank">claude-proxy.kevinbrittain.workers.dev</a></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ 17. TROUBLESHOOTING ============ -->
+<div class="section" id="troubleshooting">
+  <h2 class="section-title"><span class="icon">&#x1F527;</span> 17. Troubleshooting</h2>
+  <div class="card">
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; "Too many concurrent requests"</div>
+      <div class="ts-solution">The app processes label changes sequentially with 300ms delays to avoid Gmail rate limits. Wait a few seconds and retry. This usually happens when applying many labels at once.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Emails not loading</div>
+      <div class="ts-solution">Check that you are signed in (click the Sign In button). The session expires periodically and needs re-authentication via Google OAuth.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; AI not working / drafts not generating</div>
+      <div class="ts-solution">Check that the Cloudflare Worker (<code>claude-proxy.kevinbrittain.workers.dev</code>) is running. Test by visiting the URL directly in a browser. If down, check the Cloudflare Workers dashboard.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Scheduled tasks not running</div>
+      <div class="ts-solution">Open Claude Desktop and check the Scheduled section. Both tasks need tool permissions approved on first run. Verify they show recent successful runs at 8am, 12pm, or 4pm UK time.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Airtable tasks not being created</div>
+      <div class="ts-solution">Verify the scheduled task <code>inbound-comms-create-airtable-tasks</code> is enabled and has run recently. Also check Airtable access token is still valid.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; AI suggestions seem inaccurate</div>
+      <div class="ts-solution">The AI learns from corrections. Keep correcting wrong suggestions &mdash; the accuracy should improve over time. Check the accuracy percentage in the inbox view header. If localStorage was cleared, the learning history was lost.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Cloud sync shows "Offline"</div>
+      <div class="ts-solution">The Cloudflare Worker KV binding may not be set up correctly. Check that the <code>SHARED_DATA</code> namespace exists and is bound to the worker in the Cloudflare dashboard under Settings &gt; Bindings.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Knowledge base not syncing across devices</div>
+      <div class="ts-solution">Ensure you have built the KB at least once after the cloud sync update. The sync only happens after KB builds or AI corrections. Open the app on each device and check the cloud sync indicator in the header.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Backup not happening</div>
+      <div class="ts-solution">Check the "Backup: Xh ago" indicator in the header. If it is missing, the auto-backup code may not have loaded. Try a manual export from Settings &gt; Backup &amp; Restore.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Search not finding emails</div>
+      <div class="ts-solution">In <strong>&#x201C;This Label&#x201D;</strong> mode, search only covers emails loaded in the current view. Switch to <strong>&#x201C;All Emails&#x201D;</strong> mode (click the scope button) and press Enter to search across your entire Gmail account. Global search is capped at 100 results.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x1F534; Pagination showing wrong count</div>
+      <div class="ts-solution">Stats always show totals for ALL emails, regardless of pagination. The page count and "Page X of Y" indicator reflect the current filtered or full set. This is by design.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 18. KNOWN LIMITATIONS ============ -->
+<div class="section" id="limitations">
+  <h2 class="section-title"><span class="icon">&#x26A0;&#xFE0F;</span> 18. Known Limitations</h2>
+  <div class="card">
+    <p>The following are known limitations of the current system. These are accepted trade-offs, not bugs.</p>
+    <div style="margin-top: 0.75rem;">
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; API keys hardcoded in public repo</div>
+        <div class="ts-solution">The Google Client ID, API Key, and Airtable tokens are embedded in the public GitHub repository HTML file. This is a known security trade-off for simplicity.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Basic AI learning system</div>
+        <div class="ts-solution">AI learning is based on a lookup table of corrections, not sophisticated machine learning. It stores past corrections and feeds them into future prompts.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Gmail API rate limiting workaround</div>
+        <div class="ts-solution">Rate limits are handled with 300ms delays between requests. This is a simple workaround, not proper exponential backoff with retry logic.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Single HTML file architecture (~150KB)</div>
+        <div class="ts-solution">The entire app is a single HTML file with embedded CSS and JavaScript. This works but becomes harder to maintain as it grows.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; No collaborative features</div>
+        <div class="ts-solution">The app is designed for single-user operation. While data syncs across devices via Cloudflare KV, there is no multi-user support or collaboration.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--green-600);">&#x2705; Global search available</div>
+        <div class="ts-solution">Local search (&#x201C;This Label&#x201D;) only covers emails loaded in the current view. Use <strong>Global search (&#x201C;All Emails&#x201D;)</strong> to search across your entire Gmail account. Global search is capped at 100 results and may return emails outside the 9 numbered labels.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Single-level undo only</div>
+        <div class="ts-solution">Only the most recent label move can be undone. There is no multi-step undo history.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Audit log limited to 500 entries</div>
+        <div class="ts-solution">The audit log stores a maximum of 500 entries in localStorage. Older entries are trimmed automatically. Export as CSV before clearing if you need a full history.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 19. TECHNICAL REFERENCE ============ -->
+<div class="section" id="technical">
+  <h2 class="section-title"><span class="icon">&#x1F4D6;</span> 19. Technical Reference</h2>
+  <div class="card">
+    <div class="card-header">&#x1F511; API Credentials &amp; Identifiers</div>
+    <div style="overflow-x: auto;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Component</th><th>Value</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Google Client ID</strong></td><td><code>194836632219-qs3huadlat6f3vq17e68el61gvspce99.apps.googleusercontent.com</code></td></tr>
+          <tr><td><strong>Google API Key</strong></td><td><code>AIzaSyARLbCY5crLqM7wHbU2etW5WZP-WrjKNdA</code></td></tr>
+          <tr><td><strong>Claude Proxy URL</strong></td><td><code>https://claude-proxy.kevinbrittain.workers.dev</code></td></tr>
+          <tr><td><strong>Cloudflare KV Namespace</strong></td><td><code>SHARED_DATA</code> (bound to claude-proxy worker)</td></tr>
+          <tr><td><strong>Airtable Base ID</strong></td><td><code>appnqjDpqDniH3IRl</code> (Operations Director)</td></tr>
+          <tr><td><strong>Airtable Table ID</strong></td><td><code>tblqB8b22hKBL4PF1</code> (Tasks)</td></tr>
+          <tr><td><strong>GitHub Repository</strong></td><td><code>chaichoong/inbound-comms-tracker</code></td></tr>
+          <tr><td><strong>Gmail Accounts</strong></td><td><code>kevin@runpreneur.org.uk</code> / <code>kevinbrittain@gmail.com</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x2601;&#xFE0F; Cloudflare Worker Endpoints</div>
+    <table class="label-table">
+      <thead>
+        <tr><th>Endpoint</th><th>Method</th><th>Payload / Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>POST /</code></td>
+          <td>POST</td>
+          <td>Claude API proxy &mdash; forwards requests with <code>CLAUDE_API_KEY</code> secret</td>
+        </tr>
+        <tr>
+          <td><code>POST /gmail-labels</code></td>
+          <td>POST</td>
+          <td><code>{ accessToken, messageIds, addLabelIds, removeLabelIds }</code> &mdash; modifies Gmail labels server-side</td>
+        </tr>
+        <tr>
+          <td><code>GET /shared-data</code></td>
+          <td>GET</td>
+          <td>Retrieves shared data (knowledge base, corrections, KB build date) from KV</td>
+        </tr>
+        <tr>
+          <td><code>POST /shared-data</code></td>
+          <td>POST</td>
+          <td><code>{ key, data, timestamp }</code> &mdash; saves shared data to KV</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x23F0; Scheduled Tasks Reference</div>
+    <table class="label-table">
+      <thead>
+        <tr><th>Task Name</th><th>Schedule</th><th>Function</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>inbound-comms-create-airtable-tasks</code></td>
+          <td>8am, 12pm, 4pm UK</td>
+          <td>Reads label 8 emails (search: <code>label:8:-task-created</code>), creates Airtable tasks with AI-generated titles and descriptions. Defaults: Status=Today, Priority=Urgent, Time=15min, Due=Today.</td>
+        </tr>
+        <tr>
+          <td><code>inbound-comms-complete-tasks</code></td>
+          <td>8am, 12pm, 4pm UK</td>
+          <td>Checks Airtable for completed inbound tasks, moves emails from label 8 to 9 via <code>/gmail-labels</code> worker endpoint.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; Auto-Refresh Behaviour</div>
+    <ul>
+      <li>Triggers every <strong>15 minutes</strong></li>
+      <li>Only fires when the app is <strong>idle</strong> (no draft modal open, no rows expanded, no dropdowns changed)</li>
+      <li>Manual refresh available via the <strong>Refresh button</strong></li>
+      <li>Every <strong>label switch</strong> triggers a fresh data load</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4BB; Header Indicators</div>
+    <p>The app header bar shows several status indicators:</p>
+    <ul>
+      <li><strong>Backup: Xh ago</strong> &mdash; Time since last auto-backup export</li>
+      <li><strong>Cloud sync status</strong> &mdash; Synced / Syncing... / Offline</li>
+      <li><strong>Sign in / Account</strong> &mdash; Gmail authentication status</li>
+      <li><strong>Settings gear</strong> &mdash; Opens the settings panel</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ FOOTER ============ -->
+<div style="text-align: center; padding: 2rem 0 1rem; color: var(--slate-400); font-size: 0.82rem; border-top: 1px solid var(--slate-200); margin-top: 2rem;">
+  Inbound Comms Tracker &mdash; Standard Operating Procedure &bull; Version 2.2 &bull; 30 March 2026<br>
+  Prepared for handover and ongoing management reference
+</div>
+
+</div><!-- /container -->
+</body>
+</html>
