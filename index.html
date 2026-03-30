@@ -2898,10 +2898,26 @@
         const summaryCards = document.getElementById('invoiceSummaryCards');
         if (summaryCards) {
             summaryCards.innerHTML = `
-                <div class="card"><div class="card-label">Unpaid Invoices</div><div class="card-value">${sorted.length}</div></div>
-                <div class="card"><div class="card-label">Known Amount Due</div><div class="card-value text-red">${fmt(knownTotal)}</div></div>
-                <div class="card"><div class="card-label">Amount Unknown</div><div class="card-value" style="color:#94a3b8">${unknownCount} invoice${unknownCount !== 1 ? 's' : ''}</div></div>
-                <div class="card"><div class="card-label">Overdue / Past Date</div><div class="card-value text-red">${overdueCount}</div></div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Unpaid Invoices</div>
+                    <div class="kpi-card-value">${sorted.length}</div>
+                    <div class="kpi-card-sub">From Gmail label "3. to pay"</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Known Amount Due</div>
+                    <div class="kpi-card-value text-red">${fmt(knownTotal)}</div>
+                    <div class="kpi-card-sub">${sorted.length - unknownCount} of ${sorted.length} invoices with amounts</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Amount Unknown</div>
+                    <div class="kpi-card-value" style="color:#94a3b8">${unknownCount}</div>
+                    <div class="kpi-card-sub">${unknownCount > 0 ? 'Click to enter amounts on table below' : 'All amounts populated'}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Overdue / Past Date</div>
+                    <div class="kpi-card-value text-red">${overdueCount}</div>
+                    <div class="kpi-card-sub">${overdueCount > 0 ? 'Due date has passed' : 'No overdue invoices'}</div>
+                </div>
             `;
         }
 
@@ -3347,10 +3363,26 @@
         const summaryCards = document.getElementById('cfvSummaryCards');
         if (summaryCards) {
             summaryCards.innerHTML = `
-                <div class="card"><div class="card-label">Active CFVs</div><div class="card-value text-red">${cfvOnly.length}</div></div>
-                <div class="card"><div class="card-label">Total Exposure</div><div class="card-value text-red">${fmt(totalExposure)}</div></div>
-                <div class="card"><div class="card-label">Oldest Overdue</div><div class="card-value">${oldestOverdue} days</div></div>
-                <div class="card"><div class="card-label">CFV Actioned</div><div class="card-value" style="color:#d97706">${cfvActioned.length}</div></div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Active CFVs</div>
+                    <div class="kpi-card-value text-red">${cfvOnly.length}</div>
+                    <div class="kpi-card-sub">${cfvOnly.length > 0 ? 'Requires follow-up action' : 'No active cash flow voids'}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Total Exposure</div>
+                    <div class="kpi-card-value text-red">${fmt(totalExposure)}</div>
+                    <div class="kpi-card-sub">Combined monthly rent at risk</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Oldest Overdue</div>
+                    <div class="kpi-card-value">${oldestOverdue} days</div>
+                    <div class="kpi-card-sub">${oldestOverdue > 14 ? 'Escalation may be required' : oldestOverdue > 0 ? 'Within initial chase window' : 'No overdue items'}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">CFV Actioned</div>
+                    <div class="kpi-card-value" style="color:#d97706">${cfvActioned.length}</div>
+                    <div class="kpi-card-sub">${cfvActioned.length > 0 ? 'Awaiting payment confirmation' : 'No actioned CFVs'}</div>
+                </div>
             `;
         }
 
