@@ -1,0 +1,2982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leadership Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #ffffff;
+            color: #1e293b;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        /* Auth Screen */
+        .auth-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 80vh;
+            flex-direction: column;
+        }
+        .auth-box {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 40px;
+            max-width: 440px;
+            width: 100%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        .auth-box h2 { font-size: 22px; margin-bottom: 8px; }
+        .auth-box p { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+        .auth-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 16px;
+            outline: none;
+            font-family: monospace;
+        }
+        .auth-input:focus { border-color: #2563eb; }
+        .auth-btn {
+            width: 100%;
+            padding: 12px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .auth-btn:hover { background: #1d4ed8; }
+        .auth-error { color: #dc2626; font-size: 12px; margin-top: 12px; display: none; }
+        .auth-note { font-size: 11px; color: #94a3b8; margin-top: 16px; }
+
+        /* Loading */
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.9);
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column;
+            z-index: 1000;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #2563eb;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .header h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+        .header p { font-size: 14px; color: #64748b; }
+        .refresh-info {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 8px;
+        }
+        .refresh-dot {
+            width: 8px; height: 8px;
+            background: #16a34a;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Tabs */
+        .tabs-nav {
+            display: flex;
+            gap: 0;
+            margin-bottom: 32px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .tab-btn {
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #64748b;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .tab-btn:hover { color: #1e293b; }
+        .tab-btn.active {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Invoices Tab */
+        .invoice-table-wrapper { overflow-x: auto; }
+        .invoice-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .invoice-table thead { background: #f8fafc; }
+        .invoice-table th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
+        .invoice-table tbody tr { cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+        .invoice-table tbody tr:hover { background: #f8fafc; }
+        .invoice-table td { padding: 10px 12px; vertical-align: middle; }
+        .invoice-table .inv-amount { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+        .invoice-table .inv-amount.unknown { color: #94a3b8; font-weight: 400; font-style: italic; }
+        .inv-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; margin-top: 3px; }
+        .inv-badge.overdue { background: #fee2e2; color: #dc2626; }
+        .inv-badge.due-soon { background: #fef3c7; color: #d97706; }
+        .inv-badge.upcoming { background: #dbeafe; color: #2563eb; }
+        .inv-badge.estimate { background: #f1f5f9; color: #64748b; }
+        .invoice-table .inv-link { color: #94a3b8; font-size: 14px; text-decoration: none; }
+        .invoice-table .inv-link:hover { color: #2563eb; }
+        .inv-match-suggestion td { cursor: default !important; }
+        .inv-approve-btn { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 4px; border: 1px solid #16a34a; background: #dcfce7; color: #16a34a; cursor: pointer; }
+        .inv-approve-btn:hover { background: #16a34a; color: white; }
+        .inv-reject-btn { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 4px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; }
+        .inv-reject-btn:hover { background: #fee2e2; color: #dc2626; border-color: #dc2626; }
+        .invoice-table tr.inv-paid { opacity: 0.55; }
+        .invoice-table tr.inv-paid td:first-child { border-left: 3px solid #16a34a; }
+        .inv-badge.paid { background: #dcfce7; color: #16a34a; }
+        .inv-mark-paid-btn {
+            font-size: 10px; padding: 3px 8px; border: 1px solid #e2e8f0; border-radius: 4px;
+            background: #fff; color: #64748b; cursor: pointer; white-space: nowrap;
+        }
+        .inv-mark-paid-btn:hover { background: #f0fdf4; border-color: #16a34a; color: #16a34a; }
+        .inv-mark-paid-btn.loading { opacity: 0.5; pointer-events: none; }
+        .inv-match-info { font-size: 10px; color: #94a3b8; margin-top: 2px; }
+
+        .tab-panel-iframe {
+            width: 100%;
+            height: calc(100vh - 180px);
+            min-height: 600px;
+            border: none;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        /* Sections */
+        .section { margin-bottom: 40px; }
+        .section-title {
+            font-size: 18px; font-weight: 600;
+            margin-bottom: 20px; padding-bottom: 10px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #0f172a;
+        }
+
+        /* KPI Cards */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .kpi-card {
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        .kpi-card.clickable { cursor: pointer; }
+        .kpi-card.clickable:hover {
+            background-color: #f8fafc;
+            border-color: #475569;
+            transform: translateY(-2px);
+        }
+        .kpi-card-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: 600;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .kpi-card-value { font-size: 28px; font-weight: 700; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .kpi-card-value.range { font-size: 20px; }
+        .chevron {
+            display: inline-block;
+            font-size: 14px;
+            color: #64748b;
+            transition: transform 0.3s ease;
+        }
+        .kpi-card.expanded .chevron { transform: rotate(90deg); }
+        .kpi-card-sub { font-size: 12px; color: #64748b; margin-bottom: 12px; }
+        .kpi-card-detail {
+            display: none;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #475569;
+        }
+        .kpi-card.expanded .kpi-card-detail { display: block; }
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .detail-item:last-child { border-bottom: none; }
+        .detail-item-name { flex: 1; word-break: break-word; }
+        .detail-item-value {
+            text-align: right;
+            margin-left: 12px;
+            white-space: nowrap;
+            font-weight: 600;
+        }
+        .detail-total {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 12px;
+            padding-top: 8px;
+            border-top: 1px solid #e2e8f0;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        /* Colors */
+        .text-green { color: #16a34a; }
+        .text-red { color: #dc2626; }
+        .text-amber { color: #d97706; }
+        .text-blue { color: #2563eb; }
+
+        /* Progress bars */
+        .progress-bar {
+            background-color: #f8fafc;
+            border-radius: 4px;
+            height: 8px;
+            margin: 8px 0;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .progress-bar-fill.green { background-color: #16a34a; }
+        .progress-bar-fill.red { background-color: #dc2626; }
+        .progress-bar-fill.amber { background-color: #d97706; }
+        .progress-bar-fill.blue { background-color: #2563eb; }
+
+        /* Cash flow */
+        .cashflow-container {
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-bottom: 30px;
+        }
+        .cashflow-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 12px;
+        }
+        .cashflow-table thead {
+            background-color: #f1f5f9;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .cashflow-table th {
+            padding: 12px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+        .cashflow-table th:first-child { text-align: left; }
+        .cashflow-table th:not(:first-child) { text-align: right; }
+        .cashflow-table tbody tr {
+            border-bottom: 1px solid #e2e8f0;
+            transition: background-color 0.2s ease;
+        }
+        .cashflow-table tbody tr.cashflow-row { cursor: pointer; }
+        .cashflow-table tbody tr.cashflow-row:hover { background-color: #f8fafc; }
+        .cashflow-table tbody tr.weekend { background-color: #f1f5f9; }
+        .cashflow-table td { padding: 12px; text-align: right; }
+        .cashflow-table td:first-child { text-align: left; }
+        .cashflow-table-row-detail td {
+            padding: 8px 12px;
+            background-color: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .cashflow-detail-list { font-size: 11px; color: #475569; }
+        .cashflow-detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            gap: 12px;
+        }
+        .cashflow-detail-item-name { flex: 1; word-break: break-word; }
+        .cashflow-detail-item-value { text-align: right; white-space: nowrap; font-weight: 600; }
+        .cashflow-detail-item.in { color: #16a34a; }
+        .cashflow-detail-item.out { color: #dc2626; }
+        .uc-check-btn {
+            display: inline-block;
+            padding: 2px 8px;
+            margin-left: 8px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #ffffff;
+            background: #7c3aed;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+        .uc-check-btn:hover { background: #6d28d9; }
+        .uc-check-btn:disabled { background: #a5b4fc; cursor: default; }
+        .uc-check-btn.done { background: #16a34a; }
+
+        /* AI Commentary */
+        .ai-commentary {
+            background-color: #f0f4ff;
+            border-left: 4px solid #2563eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 40px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: #1e293b;
+        }
+        .ai-commentary p { margin: 0 0 12px 0; }
+        .ai-commentary p:last-child { margin-bottom: 0; }
+
+        /* Balance Calculator */
+        .calc-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: #f0f4ff;
+            border: 1px solid #2563eb;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #2563eb;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .calc-toggle:hover { background: #e0e7ff; }
+        .calc-panel {
+            display: none;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .calc-panel.open { display: block; }
+        .calc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .calc-header h3 { font-size: 16px; font-weight: 600; color: #1e293b; margin: 0; }
+        .calc-input {
+            width: 160px;
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: monospace;
+            text-align: right;
+        }
+        .calc-input:focus { border-color: #2563eb; outline: none; }
+        .calc-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #f8fafc;
+            border-radius: 6px;
+        }
+        .calc-summary-item { text-align: center; }
+        .calc-summary-label { font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 600; }
+        .calc-summary-value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+        .calc-tx-list { max-height: 400px; overflow-y: auto; }
+        .calc-tx-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 13px;
+        }
+        .calc-tx-item:last-child { border-bottom: none; }
+        .calc-tx-cb { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+        .calc-tx-name { flex: 1; color: #475569; word-break: break-word; }
+        .calc-tx-date { color: #94a3b8; font-size: 12px; min-width: 70px; }
+        .calc-tx-amount { font-weight: 600; white-space: nowrap; min-width: 80px; text-align: right; }
+        .calc-actions { display: flex; gap: 8px; margin-top: 12px; }
+        .calc-btn {
+            padding: 6px 14px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            background: #ffffff;
+            color: #475569;
+        }
+        .calc-btn:hover { background: #f8fafc; }
+        .calc-btn.primary { background: #2563eb; color: #ffffff; border-color: #2563eb; }
+        .calc-btn.primary:hover { background: #1d4ed8; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 40px;
+        }
+
+        /* Print */
+        @media print {
+            body { background-color: white; color: #000; }
+            .kpi-card { background-color: #f8f8f8; color: #000; border: 1px solid #ddd; }
+            .kpi-card-detail { display: block !important; }
+            .kpi-card-label { color: #666; }
+            .kpi-card-sub { color: #999; }
+            .cashflow-container { background-color: #f8f8f8; color: #000; border: 1px solid #ddd; }
+            .text-green { color: #22863a; }
+            .text-red { color: #cb2431; }
+            .text-amber { color: #d4a520; }
+            .chevron { display: none; }
+            .detail-item { border-bottom: 1px solid #ddd; }
+            .cashflow-table { color: #000; }
+            .cashflow-table thead { background-color: #f0f0f0; }
+            .cashflow-table td, .cashflow-table th { border: 1px solid #ddd; }
+            .auth-screen, .loading-overlay, .refresh-info { display: none !important; }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .cards-grid { grid-template-columns: 1fr; }
+            .header h1 { font-size: 24px; }
+            .chart-container { height: 300px; }
+            .kpi-card-value { font-size: 24px; }
+        }
+
+        .dashboard { display: none; }
+    </style>
+</head>
+<body>
+    <!-- Auth Screen -->
+    <div class="auth-screen" id="authScreen">
+        <div class="auth-box">
+            <h2>Leadership Dashboard</h2>
+            <p>Enter your Airtable Personal Access Token to connect</p>
+            <input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off">
+            <button class="auth-btn" onclick="authenticate()">Connect</button>
+            <div class="auth-error" id="authError">Invalid token. Please check and try again.</div>
+            <div class="auth-note">Your token is stored in this browser tab only and cleared when you close it. No data is sent anywhere except Airtable's API.</div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+        <div class="spinner"></div>
+        <div id="loadingText" style="color:#64748b; font-size:14px;">Loading data from Airtable...</div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="container dashboard" id="dashboard">
+        <div class="header">
+            <h1>Leadership Dashboard</h1>
+            <p id="headerDate"></p>
+            <div class="refresh-info">
+                <div class="refresh-dot"></div>
+                <span>Live — smart refresh every 15 minutes (defers while active) | Last updated: <span id="lastUpdated"></span></span>
+            </div>
+        </div>
+
+        <!-- Tabs Navigation -->
+        <div class="tabs-nav">
+            <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard</button>
+            <button class="tab-btn" onclick="switchTab('airtable')">Contractor Job List</button>
+            <button class="tab-btn" onclick="switchTab('invoices')">Invoices</button>
+        </div>
+
+        <!-- Tab 1: Leadership Dashboard -->
+        <div class="tab-panel active" id="tab-overview">
+
+        <!-- Balance Calculator Tool -->
+        <div>
+            <button class="calc-toggle" onclick="toggleCalcPanel()">
+                <span style="font-size:16px">&#9874;</span> Balance Calculator
+            </button>
+            <div class="calc-panel" id="calcPanel">
+                <div class="calc-header">
+                    <h3>Balance Calculator</h3>
+                    <div>
+                        <label style="font-size:12px;color:#64748b;margin-right:8px">Opening Balance:</label>
+                        <input type="number" class="calc-input" id="calcOpeningBal" step="0.01" oninput="this.dataset.userEdited='1'; updateCalcTotals()">
+                    </div>
+                </div>
+                <div class="calc-summary" id="calcSummary">
+                    <div class="calc-summary-item">
+                        <div class="calc-summary-label">Selected Inflows</div>
+                        <div class="calc-summary-value text-green" id="calcTotalIn">£0.00</div>
+                    </div>
+                    <div class="calc-summary-item">
+                        <div class="calc-summary-label">Selected Outflows</div>
+                        <div class="calc-summary-value text-red" id="calcTotalOut">£0.00</div>
+                    </div>
+                    <div class="calc-summary-item">
+                        <div class="calc-summary-label">Net Impact</div>
+                        <div class="calc-summary-value" id="calcNetImpact">£0.00</div>
+                    </div>
+                    <div class="calc-summary-item">
+                        <div class="calc-summary-label">Closing Balance</div>
+                        <div class="calc-summary-value" id="calcClosingBal">£0.00</div>
+                    </div>
+                </div>
+                <div class="calc-actions" style="margin-bottom:12px">
+                    <button class="calc-btn primary" onclick="calcSelectAll()">Select All</button>
+                    <button class="calc-btn" onclick="calcDeselectAll()">Deselect All</button>
+                    <button class="calc-btn" onclick="calcSelectInflows()">Inflows Only</button>
+                    <button class="calc-btn" onclick="calcSelectOutflows()">Outflows Only</button>
+                </div>
+                <div class="calc-tx-list" id="calcTxList">
+                    <div style="color:#94a3b8;font-size:13px;padding:20px;text-align:center">Loading transactions...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 1: Financial Overview -->
+        <div class="section">
+            <h2 class="section-title">Financial Overview</h2>
+            <div class="cards-grid" id="financialCards"></div>
+        </div>
+
+        <!-- Section 2: Portfolio Overview -->
+        <div class="section">
+            <h2 class="section-title">Portfolio Overview</h2>
+            <div class="cards-grid" id="portfolioCards"></div>
+        </div>
+
+        <!-- Section 3: Tenancy Metrics -->
+        <div class="section">
+            <h2 class="section-title">Tenancy Metrics</h2>
+            <div class="cards-grid" id="tenancyCards"></div>
+        </div>
+
+        <!-- Section 4: 31-Day Operational Metrics -->
+        <div class="section">
+            <h2 class="section-title">31-Day Operational Metrics</h2>
+            <div class="cards-grid" id="operationalCards"></div>
+        </div>
+
+        <!-- Section 5: 31-Day Cash Flow Forecast -->
+        <div class="section">
+            <h2 class="section-title">31-Day Cash Flow Forecast</h2>
+            <div class="cards-grid" id="cashflowKPIs"></div>
+            <div class="cashflow-container">
+                <div class="chart-container">
+                    <canvas id="cashflowChart"></canvas>
+                </div>
+                <table class="cashflow-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Opening</th>
+                            <th>In</th>
+                            <th>Out</th>
+                            <th>Net</th>
+                            <th>Closing</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cashflowBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Section 6: AI Analysis -->
+        <div class="section">
+            <h2 class="section-title">AI Analysis &amp; Commentary</h2>
+            <div class="ai-commentary" id="aiCommentary"></div>
+        </div>
+
+        </div><!-- end tab-overview -->
+
+        <!-- Tab 2: Airtable View -->
+        <div class="tab-panel" id="tab-airtable">
+            <iframe class="tab-panel-iframe" id="airtableFrame"
+                src=""
+                data-src="https://airtable.com/embed/appnqjDpqDniH3IRl/shrFbO4lsRlSC6swt"
+                loading="lazy"
+                allowfullscreen>
+            </iframe>
+        </div>
+
+        <!-- Tab 3: Invoices -->
+        <div class="tab-panel" id="tab-invoices">
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Invoices to Pay</h2>
+                    <span style="font-size:12px;color:#94a3b8">Gmail label: <strong style="color:#64748b">3. to pay</strong> &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">28 Mar 2026</strong> &nbsp;·&nbsp; Ask Claude to refresh</span>
+                </div>
+                <div class="cards-grid" id="invoiceSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="invoice-table-wrapper">
+                    <table class="invoice-table">
+                        <thead>
+                            <tr>
+                                <th>Due / Date</th>
+                                <th>Payee</th>
+                                <th>Description</th>
+                                <th>Ref</th>
+                                <th style="text-align:right">Amount</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="invoiceTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p id="footerSync"></p>
+        </div>
+    </div>
+
+    <script>
+    // ── Config ──
+    const BASE_ID = 'appnqjDpqDniH3IRl';
+    const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
+
+    // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
+    // and paste the URL here. Leave empty to use static fallback data.
+    const GMAIL_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyAW4UHzHQG_rwdcsAo_IjAUsWrjumC9rcWq7d92ppKJyhLf1XfcnCM_iRE2l53sDFt/exec';
+
+    // Table IDs
+    const TABLES = {
+        accounts:    'tbl1nr0EcX2T62KME',
+        costs:       'tblx5kvhzNEI5TFlS',
+        tenancies:   'tblN51a88qTDB6iMH',
+        transactions:'tbln0gzhCAorFc3zB',
+        rentalUnits: 'tblM3mZCR5kiEdWMj',
+        tenants:     'tblX4elTuu01gwBYh',
+        tasks:       'tblqB8b22hKBL4PF1',
+    };
+
+    // Field IDs
+    const F = {
+        // Accounts
+        accGBP:           'fldhDG5jDA8Tu2JyI',
+        accLastUpdate:    'fld8HOlbBrXbHesoA',
+        // Costs
+        costName:         'fldS6FYfpkhu6tJG0',
+        costExpected:     'fld9JibXkMpTeMcxw',
+        costDueDay:       'fld7IsfiGvKpxEwSs',
+        costFrequency:    'fldvozTHvs5VH3lNi',
+        costPayStatus:    'fldXZNI96v8HgjuSh',
+        costAccountAlias: 'fldX2QMLkSYzDEpIF',
+        costInactive:     'fldQJPGLFMbwVelsW',
+        costDueDateNext:  'fldQZBF4JzBsmWU87',
+        costSubCategory:  'fldRO90pSCj6ahVMC',   // Chart of Accounts - Sub Categories (linked)
+        // Transactions sub-category (already have txSubCategory = fldMRjSVzZVYeHb0A)
+        // Tenancies
+        tenRef:           'fldyNVvFn4x8GY14q',
+        tenRent:          'fldDMyfZLFMeONPq8',
+        tenDueDay:        'fldhy2U0CQmM2oS4P',
+        tenPayStatus:     'fldxU3dPUnbK0SCDq',
+        tenSurname:       'fldOXazTqBWieEOK2',
+        tenUnit:          'fld7cjLLEHKAx49OK',
+        tenPayFreq:       'fld5O24mC8vOezjXK',
+        // Transactions
+        txDate:           'fldoyQ6Rr9cHp3bgQ',
+        txAmount:         'fldN01r1hp7UQjgtm',   // raw **GBP — kept for reference only
+        txReportAmount:   'fldot7iisZeL3WrdR',   // Report Amount formula — use this for all displays
+        txReconciled:     'fldxKX1IbIFcAOnn5',
+        txSubCategory:    'fldMRjSVzZVYeHb0A',
+        txAccountAlias:   'fldBrjlbeaKFm3WzQ',
+        txVendor:         'fld0Xr8sboQ0ekJQJ',
+        txDescription:    'fldsbuAJCTsXHug4C',
+        txTeamMember:     'fldMwliSwEhLuumvd',
+        // Tenancy — tenant active/former status (rollup from Tenants table)
+        tenStatus:        'fldgWAyha1Uij1SZP',
+        // Rental Units
+        unitStatus:       'fldBvqysXBm9rIm0E',
+        unitProperty:     'fldUJNRGgzgyAwwjt',
+        unitPropName:     'fld7NBHkhjqfbcxk7',  // Property Name (Short) lookup
+        unitName:         'fldr8sliyu8h2jw9t',   // Rental Unit (primary field — formula)
+        unitNumber:       'fld3nPlpdXSExxDuq',   // Unit Number (number field)
+        // Tenants
+        tenantStatus:     'fldAXzP9SGIHiAhrv',
+        tenantName:       'fldxBKW7QnujSDWqA',
+        tenantPayType:    'fldZbrk8Xw5Dcwxhi',  // Rent Payment Type (singleSelect)
+        // Tenancy → Tenant link
+        tenLinkedTenant:  'fld1i5bDoHL3B6rUf',  // "Customers" — actual link to Tenants table
+    };
+
+    // Key record IDs
+    const SANTANDER_CC_LIMIT = 5500;
+
+    const REC = {
+        santander:         'rec3LiEiifomEHlvy',
+        tntZempler:        'recsR9QhRKYwgV8oP',
+        lloydsCreditCard:  'recPdnCnL0QvUQOiX',
+        americanExpress:   'recjJMy49enwgqWpo',
+        santanderCC:       'recwmjHfRZhODkFPV',
+        subRentalInc: 'recI8yCstyDP1Nd4b',
+        subMaint:     'recWomXYQ3XTgMdrr',
+        subOpexLabour:'rec7EdEwWXk2cQ0PG',
+        subCOGSLabour:'rec8ArDC6YbfOJydg',
+    };
+
+    // Payment status choice IDs
+    const PS = {
+        tenInPayment:    'sel4I99slfpd7Vc1t',
+        tenCFVActioned:  'selmhFXah5Bodgg9x',
+        tenCFV:          'sel2mWzsvOd8d8de0',
+        costInPayment:   'selGrWUm5NkfcY607',
+        costActive:      'selwuotKAoizHJl6z',
+        costOverdue:     'selGB3gE7Bg7jKoIS',
+        costDueToday:    'selZazCz6gUJJ8Pl8',
+        costUpcoming:    'selypOeFtsBePQG1E',
+    };
+
+    let PAT = '';
+    let cashflowChartInstance = null;
+    let refreshTimer = null;
+    let allTransactions = []; // stored globally for invoice cross-referencing
+
+    // ── Smart Refresh: delays refresh while user is actively interacting ──
+    let lastUserActivity = 0;       // timestamp of last interaction
+    const IDLE_THRESHOLD = 15 * 60 * 1000; // 15 min idle before auto-refresh fires
+    let refreshPending = false;     // true when a refresh was deferred due to activity
+
+    function markUserActive() {
+        lastUserActivity = Date.now();
+        // If a refresh was pending and got deferred, schedule a check
+        // once the user goes idle for 15 minutes
+        if (refreshPending) {
+            scheduleIdleRefresh();
+        }
+    }
+
+    let idleCheckTimer = null;
+    function scheduleIdleRefresh() {
+        if (idleCheckTimer) clearTimeout(idleCheckTimer);
+        idleCheckTimer = setTimeout(() => {
+            const idleTime = Date.now() - lastUserActivity;
+            if (idleTime >= IDLE_THRESHOLD) {
+                refreshPending = false;
+                loadDashboard();
+            } else {
+                // Not idle long enough, check again after remaining time
+                scheduleIdleRefresh();
+            }
+        }, IDLE_THRESHOLD - (Date.now() - lastUserActivity) + 500);
+    }
+
+    function smartRefresh() {
+        const idleTime = Date.now() - lastUserActivity;
+        if (idleTime >= IDLE_THRESHOLD || lastUserActivity === 0) {
+            // User has been idle — refresh immediately
+            refreshPending = false;
+            loadDashboard();
+        } else {
+            // User is active — defer refresh
+            refreshPending = true;
+            scheduleIdleRefresh();
+        }
+    }
+
+    // Track user activity on interactive elements
+    document.addEventListener('click', markUserActive);
+    document.addEventListener('keydown', markUserActive);
+    document.addEventListener('input', markUserActive);
+
+    // ── Auth ──
+    function authenticate() {
+        const input = document.getElementById('patInput').value.trim();
+        if (!input) return;
+        PAT = input;
+        sessionStorage.setItem('_dlr_pat', input);
+        document.getElementById('authScreen').style.display = 'none';
+        loadDashboard();
+    }
+
+    // Check session on load
+    (function init() {
+        const saved = sessionStorage.getItem('_dlr_pat');
+        if (saved) {
+            PAT = saved;
+            document.getElementById('authScreen').style.display = 'none';
+            loadDashboard();
+        }
+        document.getElementById('patInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') authenticate();
+        });
+    })();
+
+    // ── Airtable API ──
+    async function airtableFetch(tableId, params = {}) {
+        const records = [];
+        let offset = null;
+        do {
+            const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`);
+            url.searchParams.set('returnFieldsByFieldId', 'true');
+            Object.entries(params).forEach(([k, v]) => {
+                if (Array.isArray(v)) v.forEach(val => url.searchParams.append(k, val));
+                else url.searchParams.append(k, v);
+            });
+            if (offset) url.searchParams.set('offset', offset);
+
+            const resp = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${PAT}` }
+            });
+            if (resp.status === 401 || resp.status === 403) {
+                sessionStorage.removeItem('_dlr_pat');
+                document.getElementById('authScreen').style.display = 'flex';
+                document.getElementById('authError').style.display = 'block';
+                document.getElementById('loadingOverlay').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'none';
+                throw new Error('Auth failed');
+            }
+            if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+            const data = await resp.json();
+            records.push(...data.records);
+            offset = data.offset || null;
+        } while (offset);
+        return records;
+    }
+
+    // ── Helpers ──
+    const fmt = n => '£' + Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtSigned = n => (n >= 0 ? '+' : '-') + fmt(n);
+    // Accounting brackets: negative = (£X), positive = £X
+    const fmtAccounting = n => n < 0 ? `(${fmt(n)})` : fmt(n);
+
+    // Extract a numeric value from a field that may be a plain number, string, or singleSelect object
+    function getNumVal(rec, fieldId, fallback) {
+        const val = getField(rec, fieldId);
+        if (val == null) return fallback;
+        if (typeof val === 'number') return val;
+        if (typeof val === 'object' && val.name != null) return Number(val.name) || fallback;
+        return Number(val) || fallback;
+    }
+    const pct = (a, b) => b === 0 ? '0.0' : ((a / b) * 100).toFixed(1);
+
+    // Traffic light: Green = below target, Amber = target to target+10%, Red = above
+    function trafficLight(actual, target) {
+        if (actual < target) return 'green';
+        if (actual <= target * 1.10) return 'amber';
+        return 'red';
+    }
+    function trafficLightClass(actual, target) {
+        const tl = trafficLight(actual, target);
+        return tl === 'green' ? 'text-green' : tl === 'amber' ? 'text-amber' : 'text-red';
+    }
+    function trafficLightLabel(actual, target) {
+        const tl = trafficLight(actual, target);
+        return tl === 'green' ? 'Below target' : tl === 'amber' ? 'On target' : 'Above target';
+    }
+
+    function getField(rec, fieldId) {
+        return rec.fields?.[fieldId];
+    }
+
+    // Account Alias comes back as a flat array of name strings e.g. ["Santander"]
+    // or as a linked-record object with linkedRecordIds. Handle both.
+    function isOurAccount(aliasField) {
+        if (!aliasField) return false;
+        // Flat string array from lookup (most common with returnFieldsByFieldId)
+        if (Array.isArray(aliasField)) {
+            return aliasField.some(v => typeof v === 'string' && (v === 'Santander' || v === 'TNT Mgt Zempler'));
+        }
+        // Linked record object format
+        if (aliasField.linkedRecordIds) {
+            return aliasField.linkedRecordIds.includes(REC.santander) || aliasField.linkedRecordIds.includes(REC.tntZempler);
+        }
+        if (typeof aliasField === 'string') {
+            return aliasField === 'Santander' || aliasField === 'TNT Mgt Zempler';
+        }
+        return false;
+    }
+
+    // Extract display values from multipleLookupValues fields
+    // With returnFieldsByFieldId=true, these come back as {linkedRecordIds: [...], valuesByLinkedRecordId: {recId: ["value"]}}
+    function lookupValues(field) {
+        if (!field) return [];
+        if (Array.isArray(field)) return field.map(String); // flat array format
+        if (field.valuesByLinkedRecordId) {
+            const vals = [];
+            Object.values(field.valuesByLinkedRecordId).forEach(v => {
+                if (Array.isArray(v)) vals.push(...v.map(String));
+                else vals.push(String(v));
+            });
+            return vals;
+        }
+        if (typeof field === 'string') return [field];
+        return [String(field)];
+    }
+
+    // Payment status comes back as a plain string name e.g. "In Payment"
+    function getPaymentStatusName(field) {
+        if (!field) return '';
+        if (typeof field === 'string') return field;
+        if (field.name) return field.name;
+        return String(field);
+    }
+
+    function isTenancyActive(statusField) {
+        const name = getPaymentStatusName(statusField).trim().toLowerCase();
+        return ['in payment', 'cfv actioned', 'cfv'].includes(name);
+    }
+
+    function isTenancyIncome(statusField) {
+        const name = getPaymentStatusName(statusField).trim().toLowerCase();
+        return ['in payment', 'cfv actioned'].includes(name);
+    }
+
+    // Check the tenant's actual status (rollup from Tenants table) — excludes "Former" tenants
+    // Field returns an array like ["Active"] or ["Former"]
+    function isTenantStatusActive(rec) {
+        const status = getField(rec, F.tenStatus);
+        if (!status) return false;
+        if (Array.isArray(status)) {
+            return status.some(s => typeof s === 'string' && s.trim().toLowerCase() === 'active');
+        }
+        if (typeof status === 'string') return status.trim().toLowerCase() === 'active';
+        return false;
+    }
+
+    function isCostActive(rec) {
+        const status = getPaymentStatusName(getField(rec, F.costPayStatus));
+        const validStatuses = ['In Payment', 'Active', 'Overdue', 'Due Today', 'Upcoming'];
+        const inactive = getField(rec, F.costInactive);
+        return validStatuses.includes(status) && !inactive;
+    }
+
+    function dayName(d) {
+        return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    }
+
+    function isWeekend(d) {
+        return d.getDay() === 0 || d.getDay() === 6;
+    }
+
+    // Use local date parts to avoid DST duplicate-date bugs (e.g. UK clocks-forward)
+    function dateKey(d) {
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    // Sub-category name lookup (for transactions where vendor is blank)
+    const SUB_CAT_NAMES = {};
+    // Populated after REC is defined below in txLabel()
+
+    function txLabel(r) {
+        const vendor = getField(r, F.txVendor);
+        if (vendor && String(vendor).trim()) return String(vendor).trim();
+        const desc = getField(r, F.txDescription);
+        if (desc && String(desc).trim()) {
+            const d = String(desc).trim();
+            return d.length > 70 ? d.substring(0, 70) + '…' : d;
+        }
+        const sc = getField(r, F.txSubCategory);
+        if (sc && Array.isArray(sc)) {
+            for (const id of sc) {
+                if (id === REC.subRentalInc) return 'Rental Income';
+                if (id === REC.subMaint) return 'Property Reactive Maintenance';
+                if (id === REC.subOpexLabour) return 'Opex Labour';
+                if (id === REC.subCOGSLabour) return 'COGS Labour';
+            }
+        }
+        return 'Uncategorised';
+    }
+
+    function txTeamMemberName(r) {
+        const tm = getField(r, F.txTeamMember);
+        if (!tm) return null;
+        if (Array.isArray(tm)) {
+            const first = tm[0];
+            if (first && typeof first === 'object' && first.name) return first.name;
+        }
+        return null;
+    }
+
+    // ── Dashboard Load ──
+    async function loadDashboard() {
+        document.getElementById('loadingOverlay').style.display = 'flex';
+        try {
+            // Fetch Airtable data and Gmail invoices in parallel
+            const [accounts, costs, tenancies, transactions, rentalUnits, tenants] = await Promise.all([
+                airtableFetch(TABLES.accounts),
+                airtableFetch(TABLES.costs),
+                airtableFetch(TABLES.tenancies),
+                airtableFetch(TABLES.transactions),
+                airtableFetch(TABLES.rentalUnits),
+                airtableFetch(TABLES.tenants),
+            ]);
+
+            // Fire Gmail fetch in parallel (non-blocking — doesn't delay dashboard render)
+            fetchInvoicesFromGmail();
+
+            allTransactions = transactions; // store for invoice cross-referencing
+            renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
+
+            document.getElementById('dashboard').style.display = 'block';
+            document.getElementById('loadingOverlay').style.display = 'none';
+
+            // Schedule smart refresh — defers if user is actively interacting
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
+        } catch (e) {
+            if (e.message === 'Auth failed') return;
+            document.getElementById('loadingText').textContent = 'Error: ' + e.message;
+            console.error(e);
+        }
+    }
+
+    function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        // Header
+        document.getElementById('headerDate').textContent =
+            now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) +
+            ' | Combined Accounts: Santander + TNT Mgt Zempler';
+        document.getElementById('lastUpdated').textContent =
+            now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+        // ── SECTION 1: Financial Overview ──
+        const santanderRec = accounts.find(r => r.id === REC.santander);
+        const zemplerRec = accounts.find(r => r.id === REC.tntZempler);
+        const santBal = Number(getField(santanderRec, F.accGBP)) || 0;
+        const zempBal = Number(getField(zemplerRec, F.accGBP)) || 0;
+        const openingBalance = santBal + zempBal;
+
+        // Unreconciled transactions
+        const unreconciledTx = transactions.filter(r => {
+            const reconciled = getField(r, F.txReconciled);
+            const alias = getField(r, F.txAccountAlias);
+            return !reconciled && isOurAccount(alias);
+        });
+
+        // Monthly Income — split into In Payment only (low) and In Payment + CFV Actioned (high)
+        const inPaymentTenanciesS1 = tenancies.filter(r => getPaymentStatusName(getField(r, F.tenPayStatus)).trim().toLowerCase() === 'in payment' && isTenantStatusActive(r));
+        const cfvActionedTenanciesS1 = tenancies.filter(r => getPaymentStatusName(getField(r, F.tenPayStatus)).trim().toLowerCase() === 'cfv actioned' && isTenantStatusActive(r));
+        const incTenancies = [...inPaymentTenanciesS1, ...cfvActionedTenanciesS1];
+        const inPaymentIncome = inPaymentTenanciesS1.reduce((s, r) => s + (Number(getField(r, F.tenRent)) || 0), 0);
+        const cfvActionedIncome = cfvActionedTenanciesS1.reduce((s, r) => s + (Number(getField(r, F.tenRent)) || 0), 0);
+        const monthlyIncome = inPaymentIncome + cfvActionedIncome; // full = In Payment + CFV Actioned
+        const inPaymentCount = inPaymentTenanciesS1.length;
+        const cfvActionedCount = cfvActionedTenanciesS1.length;
+
+        // Monthly Costs — include ALL active/in-payment costs regardless of which account they're paid from
+        const activeCosts = costs.filter(r => isCostActive(r));
+        const monthlyCosts = activeCosts.reduce((s, r) => s + (Number(getField(r, F.costExpected)) || 0), 0);
+
+        // Profit & margin ranges: low = In Payment only minus costs, high = full income minus costs
+        const grossProfitLow = inPaymentIncome - monthlyCosts;
+        const grossProfitHigh = monthlyIncome - monthlyCosts;
+        const grossMarginLow = inPaymentIncome > 0 ? (grossProfitLow / inPaymentIncome * 100).toFixed(1) : '0.0';
+        const grossMarginHigh = monthlyIncome > 0 ? (grossProfitHigh / monthlyIncome * 100).toFixed(1) : '0.0';
+        // Keep single values for backward compat in other sections
+        const grossProfit = grossProfitHigh;
+        const grossMargin = grossMarginHigh;
+
+        // Sort income tenancies by due day asc, costs by due day asc
+        const incSorted = [...incTenancies].sort((a, b) => (getNumVal(a, F.tenDueDay, 99)) - (getNumVal(b, F.tenDueDay, 99)));
+        const costSorted = [...activeCosts].sort((a, b) => (getNumVal(a, F.costDueDay, 99)) - (getNumVal(b, F.costDueDay, 99)));
+
+        document.getElementById('financialCards').innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-card-label">Opening Balance</div>
+                <div class="kpi-card-value">${fmt(openingBalance)}</div>
+                <div class="kpi-card-sub">Santander ${fmt(santBal)} | TNT Zempler ${fmt(zempBal)}</div>
+            </div>
+            ${expandableCard('Unreconciled Transactions', unreconciledTx.length, `Santander + TNT Mgt Zempler`,
+                unreconciledTx.length === 0
+                    ? '<div class="detail-item"><span><em>No unreconciled transactions</em></span></div>'
+                    : unreconciledTx.map(r => `<div class="detail-item"><span class="detail-item-name">${escHtml(getField(r, F.txDate) || '')} — ${escHtml(txLabel(r))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.txReportAmount)) || 0)}</span></div>`).join('')
+            )}
+            ${expandableCard('Monthly Income', `<span class="text-amber">${fmt(inPaymentIncome)}</span> <span style="color:#94a3b8;font-size:14px">–</span> <span class="text-green">${fmt(monthlyIncome)}</span>`,
+                `${inPaymentCount} In Payment (confirmed) + ${cfvActionedCount} CFV Actioned (expected)`,
+                `<div style="margin-bottom:8px;font-weight:600;color:#1e293b">In Payment (${inPaymentCount})</div>` +
+                [...inPaymentTenanciesS1].sort((a,b) => (Number(getField(a, F.tenDueDay))||99) - (Number(getField(b, F.tenDueDay))||99)).map(r => {
+                    const dueDay = getNumVal(r, F.tenDueDay, null);
+                    const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
+                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                }).join('') +
+                `<div class="detail-total"><span>In Payment Subtotal</span><span>${fmt(inPaymentIncome)}</span></div>` +
+                (cfvActionedCount > 0 ? `<div style="margin:12px 0 8px;font-weight:600;color:#d97706">CFV Actioned (${cfvActionedCount})</div>` +
+                [...cfvActionedTenanciesS1].sort((a,b) => (Number(getField(a, F.tenDueDay))||99) - (Number(getField(b, F.tenDueDay))||99)).map(r => {
+                    const dueDay = getNumVal(r, F.tenDueDay, null);
+                    const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
+                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                }).join('') +
+                `<div class="detail-total"><span>Full Total (incl. CFV Actioned)</span><span>${fmt(monthlyIncome)}</span></div>` : ''),
+                'range'
+            )}
+            ${expandableCard('Monthly Costs', fmt(monthlyCosts), `${activeCosts.length} active costs`,
+                costSorted.map(r => {
+                    const dueDay = getNumVal(r, F.costDueDay, null);
+                    const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
+                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.costName) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.costExpected)) || 0)}</span></div>`;
+                }).join('') +
+                `<div class="detail-total"><span>Total</span><span>${fmt(monthlyCosts)}</span></div>`,
+                'text-red'
+            )}
+            <div class="kpi-card">
+                <div class="kpi-card-label">Monthly Gross Profit</div>
+                <div class="kpi-card-value range"><span class="text-amber">${fmt(grossProfitLow)}</span> <span style="color:#94a3b8;font-size:14px">–</span> <span class="text-green">${fmt(grossProfitHigh)}</span></div>
+                <div class="kpi-card-sub">In Payment only → incl. CFV Actioned</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Gross Margin</div>
+                <div class="kpi-card-value range"><span class="text-amber">${grossMarginLow}%</span> <span style="color:#94a3b8;font-size:14px">–</span> <span class="text-green">${grossMarginHigh}%</span></div>
+                <div class="kpi-card-sub">In Payment only → incl. CFV Actioned</div>
+            </div>
+        `;
+
+        // ── SECTION 2: Portfolio Overview ──
+        const totalUnits = rentalUnits.length;
+        const voidUnits = rentalUnits.filter(r => {
+            const status = getField(r, F.unitStatus);
+            return status && (typeof status === 'string' ? status : (status.name || '')).toLowerCase().includes('void');
+        });
+        const occupiedCount = totalUnits - voidUnits.length;
+        const occupancyRate = totalUnits > 0 ? (occupiedCount / totalUnits * 100).toFixed(1) : '0.0';
+
+        // Group by property
+        const unitsByProperty = {};
+        rentalUnits.forEach(r => {
+            const propVals = lookupValues(getField(r, F.unitPropName));
+            const propName = propVals.length > 0 ? propVals.join(', ') : 'Unknown';
+            if (!unitsByProperty[propName]) unitsByProperty[propName] = { total: 0, occupied: 0, voids: [] };
+            unitsByProperty[propName].total++;
+            const status = getField(r, F.unitStatus);
+            const isVoid = typeof status === 'string' && status.toLowerCase() === 'void';
+            if (isVoid) {
+                unitsByProperty[propName].voids.push(r);
+            } else {
+                unitsByProperty[propName].occupied++;
+            }
+        });
+
+        document.getElementById('portfolioCards').innerHTML = `
+            ${expandableCard('Total Rental Units', totalUnits, '',
+                Object.entries(unitsByProperty).sort((a,b) => b[1].total - a[1].total)
+                    .map(([p, d]) => `<div class="detail-item"><span class="detail-item-name">${escHtml(p)}</span><span class="detail-item-value">${d.total} units</span></div>`).join('')
+            )}
+            ${expandableCard('Occupied Units', occupiedCount, '',
+                Object.entries(unitsByProperty).filter(([,d]) => d.occupied > 0).sort((a,b) => b[1].occupied - a[1].occupied)
+                    .map(([p, d]) => `<div class="detail-item"><span class="detail-item-name">${escHtml(p)}</span><span class="detail-item-value">${d.occupied} units</span></div>`).join(''),
+                'text-green'
+            )}
+            ${expandableCard('Void Units', voidUnits.length, '',
+                voidUnits.map(r => {
+                    // Primary field (formula) = display name e.g. "Unit 3 – 42 Elmdon Place"
+                    let unitDisplay = getField(r, F.unitName);
+                    if (Array.isArray(unitDisplay)) unitDisplay = unitDisplay.join(', ');
+                    // Unit Number field
+                    const unitNum = getField(r, F.unitNumber);
+                    // Property Name (Short) — multipleLookupValues
+                    const propVals = lookupValues(getField(r, F.unitPropName));
+                    const propStr = propVals.join(', ');
+                    // Build label: prefer primary field, fallback to "Unit X — Property"
+                    let label;
+                    if (unitDisplay && String(unitDisplay).trim()) {
+                        label = String(unitDisplay).trim();
+                    } else if (unitNum && propStr) {
+                        label = `Unit ${unitNum} — ${propStr}`;
+                    } else if (propStr) {
+                        label = propStr;
+                    } else if (unitNum) {
+                        label = `Unit ${unitNum}`;
+                    } else {
+                        label = 'Unnamed Unit';
+                    }
+                    return `<div class="detail-item"><span class="detail-item-name">${escHtml(label)}</span></div>`;
+                }).join(''),
+                voidUnits.length > 0 ? 'text-amber' : 'text-green'
+            )}
+            <div class="kpi-card">
+                <div class="kpi-card-label">Occupancy Rate</div>
+                <div class="kpi-card-value ${Number(occupancyRate) >= 90 ? 'text-green' : Number(occupancyRate) >= 80 ? 'text-amber' : 'text-red'}">${occupancyRate}%</div>
+                <div class="progress-bar"><div class="progress-bar-fill ${Number(occupancyRate) >= 90 ? 'green' : Number(occupancyRate) >= 80 ? 'amber' : 'red'}" style="width:${occupancyRate}%"></div></div>
+            </div>
+        `;
+
+        // ── SECTION 3: Tenancy Metrics ── (all filters require active tenant status)
+        const activeTenancies = tenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus)) && isTenantStatusActive(r));
+        const inPaymentTenancies = tenancies.filter(r => getPaymentStatusName(getField(r, F.tenPayStatus)) === 'In Payment' && isTenantStatusActive(r));
+        const cfvTenancies = tenancies.filter(r => getPaymentStatusName(getField(r, F.tenPayStatus)) === 'CFV' && isTenantStatusActive(r));
+        const cfvActionedTenancies = tenancies.filter(r => getPaymentStatusName(getField(r, F.tenPayStatus)) === 'CFV Actioned' && isTenantStatusActive(r));
+        const paidRate = activeTenancies.length > 0 ? (inPaymentTenancies.length / activeTenancies.length * 100).toFixed(1) : '0.0';
+
+        const tenancyDetailList = (list) => [...list]
+            .sort((a, b) => (getNumVal(a, F.tenDueDay, 99)) - (getNumVal(b, F.tenDueDay, 99)))
+            .map(r => {
+                const dueDay = getNumVal(r, F.tenDueDay, null);
+                const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
+                return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+            })
+            .join('');
+
+        const allTenancyDetails = [...activeTenancies]
+            .sort((a, b) => (getNumVal(a, F.tenDueDay, 99)) - (getNumVal(b, F.tenDueDay, 99)))
+            .map(r => {
+                const dueDay = getNumVal(r, F.tenDueDay, null);
+                const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
+                return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))} (${getPaymentStatusName(getField(r, F.tenPayStatus))})</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+            })
+            .join('');
+
+        document.getElementById('tenancyCards').innerHTML = `
+            ${expandableCard('Total Tenancies', activeTenancies.length, '', allTenancyDetails)}
+            ${expandableCard('In Payment', inPaymentTenancies.length, '', tenancyDetailList(inPaymentTenancies), 'text-green')}
+            ${expandableCard('CFV', cfvTenancies.length, '', tenancyDetailList(cfvTenancies), 'text-amber')}
+            ${expandableCard('CFV Actioned', cfvActionedTenancies.length, '', tenancyDetailList(cfvActionedTenancies), 'text-amber')}
+            <div class="kpi-card">
+                <div class="kpi-card-label">Paid Tenancy Rate</div>
+                <div class="kpi-card-value ${Number(paidRate) >= 80 ? 'text-green' : 'text-amber'}">${paidRate}%</div>
+            </div>
+        `;
+
+        // ── SECTION 4: 31-Day Operational Metrics ──
+        const thirtyDaysAgo = new Date(today);
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const recentTx = transactions.filter(r => {
+            const d = getField(r, F.txDate);
+            if (!d) return false;
+            const txDate = new Date(d);
+            return txDate >= thirtyDaysAgo && txDate <= today;
+        });
+
+        function txBySubCat(recIds) {
+            return recentTx.filter(r => {
+                const sc = getField(r, F.txSubCategory);
+                if (!sc) return false;
+                if (Array.isArray(sc)) return sc.some(id => recIds.includes(id));
+                return recIds.includes(sc);
+            });
+        }
+
+        const rentalIncTx = txBySubCat([REC.subRentalInc]);
+        const rentalInc30 = rentalIncTx.reduce((s, r) => s + (Number(getField(r, F.txReportAmount)) || 0), 0);
+
+        const maintTx = txBySubCat([REC.subMaint]);
+        const maintSpend = Math.abs(maintTx.reduce((s, r) => s + (Number(getField(r, F.txReportAmount)) || 0), 0));
+        const maintPct = rentalInc30 > 0 ? (maintSpend / rentalInc30 * 100).toFixed(1) : '0.0';
+
+        const wagesTx = txBySubCat([REC.subOpexLabour, REC.subCOGSLabour]);
+        const wagesSpend = Math.abs(wagesTx.reduce((s, r) => s + (Number(getField(r, F.txReportAmount)) || 0), 0));
+        const wagesPct = rentalInc30 > 0 ? (wagesSpend / rentalInc30 * 100).toFixed(1) : '0.0';
+
+        const cfvExposureTenancies = [...cfvTenancies, ...cfvActionedTenancies];
+        const cfvExposure = cfvExposureTenancies.reduce((s, r) => s + (Number(getField(r, F.tenRent)) || 0), 0);
+        const cfvExposurePct = monthlyIncome > 0 ? (cfvExposure / monthlyIncome * 100).toFixed(1) : '0.0';
+
+        const txDetailList = (list, showTeamMember = false) => [...list]
+            .sort((a, b) => new Date(getField(b, F.txDate)) - new Date(getField(a, F.txDate)))
+            .map(r => {
+                const label = showTeamMember
+                    ? (() => {
+                        const tm = txTeamMemberName(r);
+                        const base = txLabel(r);
+                        return tm ? `${tm} — ${base}` : base;
+                      })()
+                    : txLabel(r);
+                return `<div class="detail-item"><span class="detail-item-name">${escHtml(getField(r, F.txDate) || '')} — ${escHtml(label)}</span><span class="detail-item-value">${fmt(Math.abs(Number(getField(r, F.txReportAmount)) || 0))}</span></div>`;
+            })
+            .join('');
+
+        // Targets — fixed £ amounts for variable costs
+        const MAINT_TARGET_GBP = 3000;  // £3,000/month maintenance budget
+        const WAGES_TARGET_GBP = 3000;  // £3,000/month wages budget
+        const CFV_TARGET_GBP = 1500;    // £1,500/month CFV allowance
+        const CLEAR_PROFIT_TARGET = 10000; // £10,000/month clear profit after all variable costs
+
+        // Variable cost reserve (sum of budgets)
+        const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £7,500
+        // Required gross profit = clear profit target + variable cost budgets
+        const requiredGrossProfit = CLEAR_PROFIT_TARGET + variableCostReserve; // £17,500
+
+        // Traffic light uses £ targets now (actual vs budget)
+        const maintNum = maintSpend;
+        const wagesNum = wagesSpend;
+        const cfvNum = cfvExposure;
+
+        function targetProgressBarGBP(actual, target) {
+            const tl = trafficLight(actual, target);
+            const maxVal = target * 2;
+            const w = Math.min(actual / maxVal * 100, 100);
+            const targetPos = Math.min(target / maxVal * 100, 100);
+            return `<div class="progress-bar" style="position:relative">
+                <div class="progress-bar-fill ${tl}" style="width:${w}%"></div>
+                <div style="position:absolute;left:${targetPos}%;top:-2px;bottom:-2px;width:2px;background:#1e293b;border-radius:1px" title="Budget: ${fmt(target)}"></div>
+            </div>`;
+        }
+
+        // Gross profit progress towards target
+        const gpProgressPct = requiredGrossProfit > 0 ? Math.min(grossProfitHigh / requiredGrossProfit * 100, 150).toFixed(1) : '0.0';
+        const gpOnTrack = grossProfitHigh >= requiredGrossProfit;
+
+        document.getElementById('operationalCards').innerHTML = `
+            ${expandableCard('Rental Income (30d)', fmt(rentalInc30), 'Actual from transactions',
+                txDetailList(rentalIncTx) + `<div class="detail-total"><span>Total</span><span>${fmt(rentalInc30)}</span></div>`,
+                'text-green'
+            )}
+            ${expandableCard('Maintenance Spend (30d)', fmt(maintSpend),
+                `${maintPct}% of rent | Budget: ${fmt(MAINT_TARGET_GBP)} | ${maintSpend <= MAINT_TARGET_GBP ? '<span class="text-green">Under budget</span>' : maintSpend <= MAINT_TARGET_GBP * 1.1 ? '<span class="text-amber">On budget</span>' : '<span class="text-red">Over budget</span>'}`,
+                txDetailList(maintTx) + `<div class="detail-total"><span>Total</span><span>${fmt(maintSpend)}</span></div>`,
+                trafficLightClass(maintNum, MAINT_TARGET_GBP),
+                targetProgressBarGBP(maintNum, MAINT_TARGET_GBP)
+            )}
+            ${expandableCard('Wages Spend (30d)', fmt(wagesSpend),
+                `${wagesPct}% of rent | Budget: ${fmt(WAGES_TARGET_GBP)} | ${wagesSpend <= WAGES_TARGET_GBP ? '<span class="text-green">Under budget</span>' : wagesSpend <= WAGES_TARGET_GBP * 1.1 ? '<span class="text-amber">On budget</span>' : '<span class="text-red">Over budget</span>'}`,
+                txDetailList(wagesTx, true) + `<div class="detail-total"><span>Total</span><span>${fmt(wagesSpend)}</span></div>`,
+                trafficLightClass(wagesNum, WAGES_TARGET_GBP),
+                targetProgressBarGBP(wagesNum, WAGES_TARGET_GBP)
+            )}
+            ${expandableCard('CFV Exposure', fmt(cfvExposure),
+                `${cfvExposurePct}% of income | Budget: ${fmt(CFV_TARGET_GBP)} | ${cfvExposure <= CFV_TARGET_GBP ? '<span class="text-green">Under budget</span>' : cfvExposure <= CFV_TARGET_GBP * 1.1 ? '<span class="text-amber">On budget</span>' : '<span class="text-red">Over budget</span>'}`,
+                [...cfvExposureTenancies].sort((a,b) => (Number(getField(a, F.tenDueDay))||99) - (Number(getField(b, F.tenDueDay))||99))
+                    .map(r => {
+                        const dueDay = getNumVal(r, F.tenDueDay, null);
+                        const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
+                        return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                    })
+                    .join('') + `<div class="detail-total"><span>Total</span><span>${fmt(cfvExposure)}</span></div>`,
+                trafficLightClass(cfvNum, CFV_TARGET_GBP),
+                targetProgressBarGBP(cfvNum, CFV_TARGET_GBP)
+            )}
+            <div class="kpi-card clickable" onclick="toggleCard(this)">
+                <div class="kpi-card-label">Target Gross Profit <span class="chevron">▸</span></div>
+                <div class="kpi-card-value range"><span class="${gpOnTrack ? 'text-green' : 'text-amber'}">${fmt(grossProfitHigh)}</span> <span style="color:#94a3b8;font-size:14px">/</span> <span style="color:#1e293b">${fmt(requiredGrossProfit)}</span></div>
+                <div class="kpi-card-sub">${gpProgressPct}% of target | ${gpOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredGrossProfit - grossProfitHigh)}</span>`}</div>
+                <div class="progress-bar" style="position:relative;margin:8px 0">
+                    <div class="progress-bar-fill ${gpOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(gpProgressPct), 100)}%"></div>
+                </div>
+                <div class="kpi-card-detail">
+                    <div style="font-size:12px;color:#64748b">
+                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Maintenance budget</span><span>${fmt(MAINT_TARGET_GBP)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Wages budget</span><span>${fmt(WAGES_TARGET_GBP)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>CFV allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px;font-weight:600;color:#1e293b"><span>Required gross profit</span><span>${fmt(requiredGrossProfit)}</span></div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // ── SECTION 5: 31-Day Cash Flow Forecast ──
+        // Build UC tenant map: tenant record ID → true if Universal Credit
+        const ucTenantIds = new Set();
+        tenants.forEach(t => {
+            const payType = getField(t, F.tenantPayType);
+            const typeName = typeof payType === 'string' ? payType : (payType && payType.name ? payType.name : '');
+            if (typeName.toLowerCase().includes('universal credit')) {
+                ucTenantIds.add(t.id);
+            }
+        });
+        // Build tenancy → isUC map via linked tenant
+        // Linked field returns [{id: "recXXX", name: "..."}, ...] objects
+        const tenancyIsUC = {};
+        tenancies.forEach(r => {
+            const linked = getField(r, F.tenLinkedTenant);
+            if (Array.isArray(linked)) {
+                tenancyIsUC[r.id] = linked.some(item => {
+                    const tenantId = typeof item === 'string' ? item : (item && item.id ? item.id : null);
+                    return tenantId && ucTenantIds.has(tenantId);
+                });
+            }
+        });
+
+        const cashFlowRows = buildCashFlow(today, openingBalance, incTenancies, activeCosts, tenancies, transactions, monthlyIncome, tenancyIsUC);
+
+        // ── SECTION 6: AI Analysis ──
+        // Credit card balances
+        const lloydsCCRec = accounts.find(r => r.id === REC.lloydsCreditCard);
+        const amexRec = accounts.find(r => r.id === REC.americanExpress);
+        const santanderCCRec = accounts.find(r => r.id === REC.santanderCC);
+        const lloydsCCBal = Number(getField(lloydsCCRec, F.accGBP)) || 0;
+        const amexBal = Number(getField(amexRec, F.accGBP)) || 0;
+        const santanderCCBal = Number(getField(santanderCCRec, F.accGBP)) || 0;
+        // Lloyds: shows negative balance = owed amount
+        // AmEx: shows positive balance = owed amount
+        // Santander CC: shows available credit; owed = limit − available
+        const lloydsCCOwed = Math.abs(lloydsCCBal);
+        const amexOwed = Math.max(0, amexBal);
+        const santanderCCOwed = Math.max(0, SANTANDER_CC_LIMIT - santanderCCBal);
+        const totalCCDebt = lloydsCCOwed + amexOwed + santanderCCOwed;
+
+        const voidCostPerMonth = monthlyIncome > 0 && occupiedCount > 0
+            ? (monthlyIncome / occupiedCount).toFixed(0)
+            : 0;
+
+        const cfvUnactioned = cfvTenancies.reduce((s, r) => s + (Number(getField(r, F.tenRent)) || 0), 0);
+
+        // ── CREDIT CARD STRATEGIC REPAYMENT PLAN ──
+        // Payment deadlines: AmEx 28th, Santander CC 14th, Lloyds CC 23rd
+        // Minimum payments estimated at ~2% of balance or £25 whichever is greater
+        const ccRepaymentPlan = (() => {
+            const cards = [
+                { name: 'American Express', owed: amexOwed, dueDay: 28, recId: REC.americanExpress },
+                { name: 'Santander Credit Card', owed: santanderCCOwed, dueDay: 14, recId: REC.santanderCC },
+                { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 23, recId: REC.lloydsCreditCard },
+            ].filter(c => c.owed > 0.01);
+
+            // Estimate minimum payment for each card (2% of balance or £25, whichever is greater)
+            cards.forEach(c => { c.minPayment = Math.max(25, c.owed * 0.02); });
+
+            // Find minimum payment deadlines within the 31-day window
+            const windowEnd = new Date(today);
+            windowEnd.setDate(windowEnd.getDate() + 30);
+            const deadlines = [];
+            cards.forEach(c => {
+                // Check this month and next month for the due day
+                for (let m = 0; m <= 1; m++) {
+                    const dueDate = new Date(today.getFullYear(), today.getMonth() + m, c.dueDay);
+                    if (dueDate >= today && dueDate <= windowEnd) {
+                        deadlines.push({ card: c.name, date: dueDate, minPayment: c.minPayment, dueDay: c.dueDay });
+                    }
+                }
+            });
+            deadlines.sort((a, b) => a.date - b.date);
+
+            // Walk the 31-day window to find Fridays
+            const fridays = [];
+            let d = new Date(today);
+            while (d <= windowEnd) {
+                if (d.getDay() === 5) fridays.push(new Date(d));
+                d.setDate(d.getDate() + 1);
+            }
+
+            const MIN_BUFFER = 750;
+
+            // Use actual cash flow forecast rows for accurate balance estimates
+            const cfRows = cashFlowRows || [];
+            function getClosingBal(dayIdx) {
+                if (dayIdx >= 0 && dayIdx < cfRows.length) return cfRows[dayIdx].closing;
+                return cfRows.length > 0 ? cfRows[cfRows.length - 1].closing : openingBalance;
+            }
+
+            const plans = [];
+            let remainingDebt = cards.map(c => ({ ...c }));
+            let cumulativePaid = 0;
+            const minPaidFor = {};
+
+            fridays.forEach((fri, idx) => {
+                const daysFromNow = Math.round((fri - today) / 86400000);
+                // Use actual closing balance from cash flow forecast, minus already-committed CC payments
+                const estBalance = getClosingBal(daysFromNow) - cumulativePaid;
+
+                // Look ahead 7 days using actual forecast data to find lowest point
+                let worstAhead = estBalance;
+                for (let ahead = 1; ahead <= 7; ahead++) {
+                    const futBal = getClosingBal(daysFromNow + ahead) - cumulativePaid;
+                    if (futBal < worstAhead) worstAhead = futBal;
+                }
+
+                // The limiting factor is whichever is tighter:
+                // - Today's balance minus buffer
+                // - Lowest upcoming balance minus buffer (protects against a dip next week)
+                const fromToday = Math.max(0, estBalance - MIN_BUFFER);
+                const fromLookAhead = Math.max(0, worstAhead - MIN_BUFFER);
+                const available = Math.min(fromToday, fromLookAhead);
+
+                // Build a plain-English reason for the payment amount
+                let reason;
+                const balanceAfterPay = estBalance - available;
+                if (available < 10) {
+                    reason = `Balance of ${fmt(estBalance)} is too close to the ${fmt(MIN_BUFFER)} safety buffer to make a payment.`;
+                } else if (fromLookAhead < fromToday) {
+                    const lowestDay = (() => {
+                        let minBal = estBalance, minD = 0;
+                        for (let a = 1; a <= 7; a++) {
+                            const b = getClosingBal(daysFromNow + a) - cumulativePaid;
+                            if (b < minBal) { minBal = b; minD = a; }
+                        }
+                        const d2 = new Date(fri); d2.setDate(d2.getDate() + minD);
+                        return d2.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'});
+                    })();
+                    reason = `Payment limited because the balance dips to ${fmt(worstAhead)} on ${lowestDay} next week. Keeping ${fmt(MIN_BUFFER)} buffer means ${fmt(available)} is safe to spend.`;
+                } else {
+                    reason = `Balance of ${fmt(estBalance)} minus ${fmt(MIN_BUFFER)} buffer = ${fmt(available)} available for payment.`;
+                }
+
+                // Check which minimum payments are due before the NEXT Friday (or end of window)
+                const nextFri = fridays[idx + 1] || windowEnd;
+                const upcomingMins = deadlines.filter(dl =>
+                    dl.date >= fri && dl.date < nextFri && !minPaidFor[dl.card + '-' + dl.date.getMonth()]
+                );
+
+                // Priority 1: Cover minimum payments due before next Friday
+                let budget = available;
+                const payments = [];
+                upcomingMins.forEach(dl => {
+                    if (budget <= 0) return;
+                    const card = remainingDebt.find(c => c.name === dl.card);
+                    if (!card || card.owed <= 0) return;
+                    const minPay = Math.min(dl.minPayment, card.owed, budget);
+                    payments.push({ name: dl.card, pay: minPay, isMinimum: true, dueDate: dl.date });
+                    card.owed -= minPay;
+                    budget -= minPay;
+                    cumulativePaid += minPay;
+                    minPaidFor[dl.card + '-' + dl.date.getMonth()] = true;
+                });
+
+                // Priority 2: Allocate remaining surplus to highest-balance card
+                const sortedDebt = [...remainingDebt].sort((a, b) => b.owed - a.owed);
+                for (const card of sortedDebt) {
+                    if (card.owed <= 0 || budget <= 0) continue;
+                    const pay = Math.min(card.owed, budget);
+                    const existing = payments.find(p => p.name === card.name);
+                    if (existing) {
+                        existing.pay += pay;
+                        existing.isMinimum = false;
+                    } else {
+                        payments.push({ name: card.name, pay, isMinimum: false });
+                    }
+                    card.owed -= pay;
+                    budget -= pay;
+                    cumulativePaid += pay;
+                }
+
+                const totalPay = payments.reduce((s, p) => s + p.pay, 0);
+                plans.push({
+                    date: fri, estBalance, available, totalPay,
+                    noFunds: totalPay < 1,
+                    payments, buffer: MIN_BUFFER,
+                    upcomingDeadlines: upcomingMins,
+                    reason, worstAhead, balanceAfterPay: estBalance - totalPay
+                });
+            });
+            return { cards, plans, remaining: remainingDebt, minBuffer: MIN_BUFFER, deadlines };
+        })();
+
+        const ccTableRows = ccRepaymentPlan.plans.map(p => {
+            const dayStr = p.date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+
+            if (p.noFunds) {
+                return `<div style="padding:12px 0;border-bottom:1px solid #e2e8f0;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                        <strong style="color:#1e293b;font-size:14px">${dayStr}</strong>
+                        <span style="color:#94a3b8;font-size:13px;font-weight:600">No payment this week</span>
+                    </div>
+                    <div style="font-size:12px;color:#64748b;line-height:1.5">${p.reason}</div>
+                </div>`;
+            }
+
+            const paymentLines = p.payments.map(pay => {
+                const dueBadge = pay.dueDate
+                    ? `<span style="background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">due ${pay.dueDate.toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span>`
+                    : '';
+                const minBadge = pay.isMinimum
+                    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">min. payment</span>`
+                    : '';
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;color:#475569;">
+                    <span>${escHtml(pay.name)}${dueBadge}${minBadge}</span>
+                    <strong>${fmt(pay.pay)}</strong>
+                </div>`;
+            }).join('');
+
+            return `<div style="padding:12px 0;border-bottom:1px solid #e2e8f0;">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                    <strong style="color:#1e293b;font-size:14px">${dayStr}</strong>
+                    <span style="color:#16a34a;font-weight:700;font-size:15px">Pay ${fmt(p.totalPay)}</span>
+                </div>
+                ${paymentLines}
+                <div style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;line-height:1.6">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                        <span>Account balance on this date</span><strong style="color:#1e293b">${fmt(p.estBalance)}</strong>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                        <span>Credit card payment</span><strong style="color:#dc2626">-${fmt(p.totalPay)}</strong>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;padding-top:4px;border-top:1px solid #e2e8f0;margin-top:2px">
+                        <span>Balance after payment</span><strong style="color:${p.balanceAfterPay >= p.buffer ? '#16a34a' : '#d97706'}">${fmt(p.balanceAfterPay)}</strong>
+                    </div>
+                    <div style="display:flex;justify-content:space-between">
+                        <span>Safety buffer</span><span>${fmt(p.buffer)}</span>
+                    </div>
+                    <div style="margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0;color:#475569;font-size:11px">${p.reason}</div>
+                </div>
+            </div>`;
+        }).join('');
+
+        // ── AI COMMENTARY — titled sections ──
+        const maintStatus = maintSpend < MAINT_TARGET_GBP ? 'green' : maintSpend <= MAINT_TARGET_GBP * 1.1 ? 'amber' : 'red';
+        const wagesStatus = wagesSpend < WAGES_TARGET_GBP ? 'green' : wagesSpend <= WAGES_TARGET_GBP * 1.1 ? 'amber' : 'red';
+
+        document.getElementById('aiCommentary').innerHTML = `
+            <h3 style="color:#1e293b;font-size:15px;margin:0 0 8px">Financial Health</h3>
+            <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the gross margin ranges from ${grossMarginLow}% to ${grossMarginHigh}%. ${Number(grossMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
+
+            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Profit Targets</h3>
+            <p>Target gross profit: ${fmt(requiredGrossProfit)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case gross profit is ${fmt(grossProfitHigh)} — ${gpOnTrack ? `a surplus of ${fmt(grossProfitHigh - requiredGrossProfit)} above target. You are on track.` : `a shortfall of ${fmt(requiredGrossProfit - grossProfitHigh)} (${gpProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
+
+            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
+            <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
+
+            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Occupancy &amp; Voids</h3>
+            <p>Occupancy is ${occupancyRate}% with ${voidUnits.length} void${voidUnits.length !== 1 ? 's' : ''}. Each void costs roughly £${voidCostPerMonth}/month in lost income. ${voidUnits.length > 0 ? `Filling ${Math.min(3, voidUnits.length)} void${Math.min(3, voidUnits.length) !== 1 ? 's' : ''} would add ${fmt(Math.min(3, voidUnits.length) * Number(voidCostPerMonth))}/month — the highest-ROI lever available.` : 'Full occupancy — excellent.'}</p>
+
+            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">CFV Risk</h3>
+            <p>CFV exposure is ${fmt(cfvExposure)} against a ${fmt(CFV_TARGET_GBP)} monthly allowance (${cfvExposure <= CFV_TARGET_GBP ? 'within budget' : 'over budget by ' + fmt(cfvExposure - CFV_TARGET_GBP)}). ${cfvTenancies.length > 0 ? `${cfvTenancies.length} remain unactioned (${fmt(cfvUnactioned)}) — actioning these improves income certainty.` : 'All CFVs actioned — good.'}</p>
+
+            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Quick Wins</h3>
+            <p>${voidUnits.length > 0 ? '(1) Fill voids — biggest revenue impact per action. ' : ''}${cfvTenancies.length > 0 ? `(${voidUnits.length > 0 ? '2' : '1'}) Action ${cfvTenancies.length} unactioned CFV${cfvTenancies.length !== 1 ? 's' : ''} to secure ${fmt(cfvUnactioned)}/month. ` : ''}${maintStatus !== 'green' ? `(${(voidUnits.length > 0 ? 1 : 0) + (cfvTenancies.length > 0 ? 1 : 0) + 1}) Reduce maintenance from ${fmt(maintSpend)} to below ${fmt(MAINT_TARGET_GBP)} budget. ` : ''}Monitor cash flow pinch points around mortgage payment clusters (typically days 1-6).</p>
+
+            <hr style="border:none;border-top:1px solid #cbd5e1;margin:20px 0;">
+            <h3 style="color:#1e293b;font-size:16px;margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
+            <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong> across ${ccRepaymentPlan.cards.length} card${ccRepaymentPlan.cards.length !== 1 ? 's' : ''}.</p>
+            <p style="margin:0 0 12px;font-size:13px;color:#475569">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
+            <div style="margin-bottom:16px">
+                ${ccRepaymentPlan.cards.map(c =>
+                    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:14px;">
+                        <span style="color:#475569">${escHtml(c.name)} <span style="color:#94a3b8;font-size:12px">(due ${c.dueDay}${c.dueDay===1?'st':c.dueDay===2?'nd':c.dueDay===3?'rd':'th'} | min. ${fmt(c.minPayment)})</span></span>
+                        <span style="font-weight:600;color:${c.owed > 5000 ? '#dc2626' : '#d97706'}">${fmt(c.owed)}</span>
+                    </div>`
+                ).join('')}
+            </div>
+            <div>${ccTableRows}</div>
+            ${ccRepaymentPlan.remaining.some(c => c.owed > 0.01)
+                ? `<p style="margin:12px 0 0;font-size:13px;color:#64748b">After 31 days, remaining: ${ccRepaymentPlan.remaining.filter(c=>c.owed>0.01).map(c=>`${c.name} ${fmt(c.owed)}`).join(', ')}.</p>`
+                : `<p style="margin:12px 0 0;font-size:13px;color:#16a34a">All credit card debt could be cleared within this 31-day window based on current projections.</p>`
+            }
+        `;
+
+        // Balance Calculator — populate with forecast inflows/outflows
+        populateCalcFromForecast(cashFlowRows);
+        const calcBalInput = document.getElementById('calcOpeningBal');
+        if (calcBalInput && !calcBalInput.dataset.userEdited) {
+            calcBalInput.value = openingBalance.toFixed(2);
+        }
+
+        // Footer
+        const lastSync = getField(santanderRec, F.accLastUpdate) || getField(zemplerRec, F.accLastUpdate) || 'Unknown';
+        document.getElementById('footerSync').textContent = `Last bank sync: ${lastSync}`;
+    }
+
+    // ── Cash Flow Forecast ──
+    function buildCashFlow(today, openingBalance, incomeTenancies, activeCostsList, allTenancies, transactions, monthlyIncome, tenancyIsUC) {
+        const days = [];
+        const dayMap = {};
+        const todayKey = dateKey(today);
+
+        // ── Reconciliation ──
+        // Window: reconciled transactions from today-3 to today matched against
+        // projected items from today to today+3. Payments may arrive early or late.
+        //
+        // MATCHING STRATEGY (multi-factor, keyword-first):
+        // 1. PRIMARY: keyword matching — extract keywords from tx vendor/description
+        //    and compare against the projected item's label (tenant name, unit ref, cost name).
+        //    If 2+ keywords match, it's a strong match regardless of amount difference.
+        // 2. SECONDARY: amount matching within £0.05 tolerance (exact match for costs)
+        // 3. COMBINED: 1 keyword match + amount within 30% = match (handles letting agent deductions)
+        //
+        // Each reconciled tx is consumed on match — can only cancel one projected item.
+
+        // Look back 5 days for reconciled transactions — catches payments that
+        // arrived a few days early without pulling in last month's payments
+        const reconDateKeys = [];
+        for (let i = 0; i <= 5; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            reconDateKeys.push(dateKey(d));
+        }
+        // Clear projected items up to 5 days ahead — matches early payments
+        // against their upcoming due date without reaching too far forward
+        const reconForecastKeys = [];
+        for (let i = 0; i <= 5; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() + i);
+            reconForecastKeys.push(dateKey(d));
+        }
+
+        const recentReconciled = (transactions || []).filter(r =>
+            getField(r, F.txReconciled) && reconDateKeys.includes(getField(r, F.txDate))
+        );
+
+        // Extract searchable text from a transaction
+        function txSearchText(r) {
+            const vendor = String(getField(r, F.txVendor) || '').toLowerCase();
+            const desc = String(getField(r, F.txDescription) || '').toLowerCase();
+            return `${vendor} ${desc}`;
+        }
+
+        // Extract keywords from a label (e.g. "Smith – Unit 6, Duckworth Building")
+        // Returns words of 3+ chars, lowercased, excluding common stop words
+        const STOP_WORDS = new Set(['the','and','for','unit','from','with','payment','rent','rental','income','cost','ltd','limited']);
+        function extractKeywords(label) {
+            return label.toLowerCase()
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .split(/\s+/)
+                .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+        }
+
+        // Count how many keywords from a label appear in the transaction text
+        function keywordMatchCount(txText, labelKeywords) {
+            return labelKeywords.filter(kw => txText.includes(kw)).length;
+        }
+
+        // Sub-categories to EXCLUDE from outflow matching (internal movements, not cost payments)
+        const EXCLUDED_OUTFLOW_SUBCATS = new Set([
+            'recY5XDZspRDNjZOO',  // Transfer
+            REC.subRentalInc,      // Rental Income (shouldn't be in outflows anyway)
+        ]);
+
+        // Build reconciled pools with full transaction data for keyword matching
+        const reconciledInflows = [];  // income transactions
+        const reconciledOutflows = []; // expense transactions
+
+        recentReconciled.forEach(r => {
+            const sc = getField(r, F.txSubCategory);
+            const scIds = Array.isArray(sc) ? sc.map(s => typeof s === 'object' ? s.id : s) : [];
+            const isIncome = scIds.includes(REC.subRentalInc);
+            const isExcludedOutflow = scIds.some(id => EXCLUDED_OUTFLOW_SUBCATS.has(id));
+            const reportAmt = Math.abs(Number(getField(r, F.txReportAmount)) || 0);
+            const rawAmt = Math.abs(Number(getField(r, F.txAmount)) || 0);
+            if (reportAmt <= 0 && rawAmt <= 0) return;
+            const searchText = txSearchText(r);
+
+            if (isIncome) {
+                // Handle split transactions (e.g. Serco bulk payment)
+                const count = rawAmt > reportAmt + 0.01 ? Math.round(rawAmt / reportAmt) : 1;
+                for (let i = 0; i < count; i++) {
+                    reconciledInflows.push({ amount: reportAmt, searchText, used: false });
+                }
+            } else if (!isExcludedOutflow) {
+                // Only include in outflow pool if NOT a Transfer or other excluded category
+                const amt = reportAmt > 0 ? reportAmt : rawAmt;
+                // Store sub-category IDs for cross-referencing against projected costs
+                const txSubCatIds = getField(r, F.txSubCategory);
+                const subCatSet = new Set(Array.isArray(txSubCatIds) ? txSubCatIds : []);
+                reconciledOutflows.push({ amount: amt, searchText, subCats: subCatSet, used: false });
+            }
+            // Excluded outflows (Transfers etc.) are silently dropped — they're internal movements
+        });
+
+        // Multi-factor match: does any unused reconciled inflow match this projected item?
+        function isInflowAlreadyCleared(amount, label) {
+            const keywords = extractKeywords(label);
+            let bestIdx = -1;
+            let bestScore = 0;
+
+            for (let i = 0; i < reconciledInflows.length; i++) {
+                if (reconciledInflows[i].used) continue;
+                const tx = reconciledInflows[i];
+                const kwCount = keywordMatchCount(tx.searchText, keywords);
+                const amtClose = Math.abs(tx.amount - amount) < 0.05;
+                const amtWithin30 = amount > 0 && Math.abs(tx.amount - amount) / amount < 0.30;
+
+                // Strong match: 2+ keyword matches (e.g. surname + building name)
+                if (kwCount >= 2) {
+                    bestIdx = i;
+                    break;
+                }
+                // Good match: 1 keyword + amount within 30%
+                if (kwCount >= 1 && amtWithin30 && kwCount + 1 > bestScore) {
+                    bestIdx = i;
+                    bestScore = kwCount + 1;
+                }
+                // Exact amount match (original behaviour)
+                if (amtClose && bestIdx === -1) {
+                    bestIdx = i;
+                    bestScore = 0.5;
+                }
+            }
+            if (bestIdx >= 0) { reconciledInflows[bestIdx].used = true; return true; }
+            return false;
+        }
+
+        // Outflows: keyword + amount + sub-category matching
+        // Three checks must align: (1) keyword match, (2) amount proximity, (3) sub-category match.
+        // If both the cost and transaction have sub-category data, they MUST overlap.
+        // This prevents false matches (e.g. Tesla software subscription ≠ Tesla vehicle charge).
+        function isOutflowAlreadyCleared(amount, label, costSubCatIds) {
+            const keywords = extractKeywords(label);
+            const costSubCats = new Set(Array.isArray(costSubCatIds) ? costSubCatIds : []);
+            let bestIdx = -1;
+
+            for (let i = 0; i < reconciledOutflows.length; i++) {
+                if (reconciledOutflows[i].used) continue;
+                const tx = reconciledOutflows[i];
+                const kwCount = keywordMatchCount(tx.searchText, keywords);
+                // Tolerance: within 33% OR £1, whichever is greater
+                const tolerance = Math.max(amount * 0.33, 1.00);
+                const amtClose = Math.abs(tx.amount - amount) <= tolerance;
+
+                // Sub-category check: if BOTH have sub-cats, they must overlap
+                let subCatOk = true;
+                if (costSubCats.size > 0 && tx.subCats.size > 0) {
+                    subCatOk = [...costSubCats].some(id => tx.subCats.has(id));
+                }
+
+                // Must have: keyword match + amount close + sub-category compatible
+                if (kwCount >= 1 && amtClose && subCatOk) {
+                    bestIdx = i;
+                    break;
+                }
+            }
+            if (bestIdx >= 0) { reconciledOutflows[bestIdx].used = true; return true; }
+            return false;
+        }
+
+        function isInReconWindow(dk) {
+            return reconForecastKeys.includes(dk);
+        }
+
+        // Build 31 days using LOCAL date parts to avoid DST duplicates
+        for (let i = 0; i < 31; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() + i);
+            const key = dateKey(d);
+            if (!dayMap[key]) {
+                dayMap[key] = { date: new Date(d), inflows: [], outflows: [] };
+                days.push(key);
+            }
+        }
+
+        // Project income from tenancies — only active-status tenancies (belt-and-suspenders guard)
+        incomeTenancies.forEach(r => {
+            // Guard: skip if tenancy/tenant status is not explicitly active
+            if (!isTenancyIncome(getField(r, F.tenPayStatus)) || !isTenantStatusActive(r)) return;
+            const rent = Number(getField(r, F.tenRent)) || 0;
+            if (rent <= 0) return;
+            const dueDay = getNumVal(r, F.tenDueDay, 1);
+            const freq = getField(r, F.tenPayFreq) || 'Monthly';
+            const surname = String(getField(r, F.tenSurname) || 'Unknown');
+            const ref = String(getField(r, F.tenRef) || '');
+            const label = `${surname} – ${ref}`;
+            // Extract linked tenant and rental unit IDs for UC task creation
+            const linkedTenant = getField(r, F.tenLinkedTenant);
+            const tenantId = Array.isArray(linkedTenant) ? (typeof linkedTenant[0] === 'string' ? linkedTenant[0] : linkedTenant[0]?.id) : null;
+            const linkedUnit = getField(r, F.tenUnit);
+            const unitId = Array.isArray(linkedUnit) ? (typeof linkedUnit[0] === 'string' ? linkedUnit[0] : linkedUnit[0]?.id) : null;
+
+            projectDates(today, dueDay, freq, getField(r, F.tenDueDay), null).forEach(dk => {
+                if (dayMap[dk]) {
+                    if (isInReconWindow(dk) && isInflowAlreadyCleared(rent, label)) return;
+                    const isUC = tenancyIsUC[r.id] || false;
+                    dayMap[dk].inflows.push({ name: label, amount: rent, isUC, tenancyId: r.id, tenantId, unitId, dueDate: dk });
+                }
+            });
+        });
+
+        // CFV Actioned tenancies — also include
+        const cfvActTenancies = allTenancies.filter(r => getPaymentStatusName(getField(r, F.tenPayStatus)) === 'CFV Actioned');
+        cfvActTenancies.forEach(r => {
+            // Already included in incomeTenancies if filter is correct
+        });
+
+        // Project costs
+        activeCostsList.forEach(r => {
+            const amount = Number(getField(r, F.costExpected)) || 0;
+            if (amount <= 0) return;
+            const dueDay = getNumVal(r, F.costDueDay, 1);
+            const freq = getField(r, F.costFrequency) || 'Monthly';
+            const name = String(getField(r, F.costName) || 'Unknown cost');
+            const dueDateNext = getField(r, F.costDueDateNext);
+            const costSubCatIds = getField(r, F.costSubCategory); // linked sub-category record IDs
+
+            projectDates(today, dueDay, freq, null, dueDateNext).forEach(dk => {
+                if (dayMap[dk]) {
+                    // Check today..today+3: keyword + amount + sub-category match against reconciled outflows
+                    if (isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds)) return;
+                    dayMap[dk].outflows.push({ name, amount });
+                }
+            });
+        });
+
+        // Calculate running balance + worst-case line (deducting variable cost reserves daily)
+        let balance = openingBalance;
+        const chartLabels = [];
+        const chartData = [];
+        const chartDataWorstCase = [];
+        let totalIn = 0, totalOut = 0;
+        let lowestBal = openingBalance;
+        let lowestDay = '';
+        const rows = [];
+
+        // Daily variable cost reserve: £3k maint + £3k wages + £1.5k CFV = £7,500 / 30
+        const dailyVarCostReserve = 7500 / 30;
+
+        days.forEach((key, idx) => {
+            const day = dayMap[key];
+            const dayIn = day.inflows.reduce((s, i) => s + i.amount, 0);
+            const dayOut = day.outflows.reduce((s, i) => s + i.amount, 0);
+            const net = dayIn - dayOut;
+            const opening = balance;
+            const closing = balance + net;
+            balance = closing;
+            totalIn += dayIn;
+            totalOut += dayOut;
+
+            if (closing < lowestBal) {
+                lowestBal = closing;
+                lowestDay = dayName(day.date);
+            }
+
+            chartLabels.push(dayName(day.date));
+            chartData.push(closing);
+            // Worst case: deduct cumulative variable cost reserve
+            chartDataWorstCase.push(closing - dailyVarCostReserve * (idx + 1));
+            rows.push({ date: day.date, key, opening, dayIn, dayOut, net, closing, inflows: day.inflows, outflows: day.outflows });
+        });
+
+        const finalBalance = balance;
+        const netChange = finalBalance - openingBalance;
+
+        // Cash flow KPI cards
+        document.getElementById('cashflowKPIs').innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-card-label">Opening Balance</div>
+                <div class="kpi-card-value">${fmt(openingBalance)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Total In</div>
+                <div class="kpi-card-value text-green">${fmt(totalIn)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Total Out</div>
+                <div class="kpi-card-value text-red">${fmt(totalOut)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Net Change</div>
+                <div class="kpi-card-value ${netChange >= 0 ? 'text-green' : 'text-red'}">${netChange >= 0 ? '+' : '-'}${fmt(netChange)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Final Balance</div>
+                <div class="kpi-card-value ${finalBalance >= 0 ? 'text-green' : 'text-red'}">${fmt(finalBalance)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Lowest Balance</div>
+                <div class="kpi-card-value ${lowestBal >= 0 ? 'text-amber' : 'text-red'}">${fmtAccounting(lowestBal)}</div>
+                <div class="kpi-card-sub">${lowestDay}</div>
+            </div>
+        `;
+
+        // Table
+        const tbody = document.getElementById('cashflowBody');
+        tbody.innerHTML = rows.map((r, i) => {
+            const wknd = isWeekend(r.date) ? ' weekend' : '';
+            const closingClass = r.closing < 500 ? 'text-amber' : r.closing < 0 ? 'text-red' : 'text-green';
+
+            const daysFromToday = Math.round((r.date - today) / 86400000);
+            const inflowsHtml = r.inflows.length > 0
+                ? r.inflows.map((f, fi) => {
+                    const ucChecked = isUCCheckRequested(f.tenancyId);
+                    const ucBtn = (f.isUC && daysFromToday >= 0 && daysFromToday <= 7)
+                        ? (ucChecked
+                            ? ` <button class="uc-check-btn done" disabled title="UC Check already requested">UC Check Requested</button>`
+                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escHtml(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Karlo to call UC and confirm this payment">UC Check</button>`)
+                        : '';
+                    return `<div class="cashflow-detail-item in"><span class="cashflow-detail-item-name">${escHtml(f.name)}${ucBtn}</span><span class="cashflow-detail-item-value">+${fmt(f.amount)}</span></div>`;
+                }).join('')
+                : '<div class="cashflow-detail-item"><em>None</em></div>';
+            const outflowsHtml = r.outflows.length > 0
+                ? r.outflows.map(f => `<div class="cashflow-detail-item out"><span class="cashflow-detail-item-name">${escHtml(f.name)}</span><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`).join('')
+                : '<div class="cashflow-detail-item"><em>None</em></div>';
+
+            return `
+                <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}')">
+                    <td><strong>${dayName(r.date)}</strong></td>
+                    <td>${fmtAccounting(r.opening)}</td>
+                    <td class="text-green">+${fmt(r.dayIn)}</td>
+                    <td class="text-red">-${fmt(r.dayOut)}</td>
+                    <td class="${r.net >= 0 ? 'text-green' : 'text-red'}">${r.net >= 0 ? '+' : '-'}${fmt(r.net)}</td>
+                    <td class="${closingClass}"><strong>${fmtAccounting(r.closing)}</strong></td>
+                </tr>
+                <tr class="cashflow-table-row-detail" id="cfrow-${i}">
+                    <td colspan="6"><div class="cashflow-detail-list">
+                        <div style="margin-bottom:8px;"><strong>Inflows:</strong></div>
+                        ${inflowsHtml}
+                        <div style="margin-top:8px;margin-bottom:8px;"><strong>Outflows:</strong></div>
+                        ${outflowsHtml}
+                    </div></td>
+                </tr>
+            `;
+        }).join('');
+
+        // Chart
+        if (cashflowChartInstance) cashflowChartInstance.destroy();
+        const ctx = document.getElementById('cashflowChart');
+        cashflowChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    label: 'Closing Balance (Fixed Costs Only)',
+                    data: chartData,
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#2563eb',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 6,
+                }, {
+                    label: 'After Variable Costs (Worst Case)',
+                    data: chartDataWorstCase,
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(220, 38, 38, 0.05)',
+                    borderWidth: 2,
+                    borderDash: [6, 3],
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 2,
+                    pointBackgroundColor: '#dc2626',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 1,
+                    pointHoverRadius: 5,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        labels: {
+                            color: '#1e293b',
+                            font: { size: 12, family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+                            padding: 15,
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        titleColor: '#1e293b',
+                        bodyColor: '#475569',
+                        borderColor: '#e2e8f0',
+                        borderWidth: 1,
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: { label: ctx => ctx.dataset.label + ': £' + ctx.parsed.y.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) }
+                    }
+                },
+                scales: {
+                    y: {
+                        grid: { color: '#e2e8f0', drawBorder: false },
+                        ticks: {
+                            color: '#1e293b',
+                            font: { size: 11 },
+                            callback: v => '£' + v.toLocaleString()
+                        }
+                    },
+                    x: {
+                        grid: { display: false, drawBorder: false },
+                        ticks: { color: '#1e293b', font: { size: 10 } }
+                    }
+                }
+            }
+        });
+        return rows;
+    }
+
+    // ── Due Date Projection ──
+    function projectDates(today, dueDay, frequency, _unused, dueDateNext) {
+        const dates = [];
+        const windowEnd = new Date(today);
+        windowEnd.setDate(windowEnd.getDate() + 30);
+        const todayDay = today.getDate();
+
+        const freq = (frequency || 'Monthly').toLowerCase();
+
+        if (freq === 'weekly' || freq === 'fortnightly' || freq === '4-weekly') {
+            // Use dueDateNext as anchor
+            let anchor = dueDateNext ? new Date(dueDateNext) : null;
+            if (!anchor || isNaN(anchor.getTime())) {
+                // Fallback: use due day this month
+                anchor = new Date(today.getFullYear(), today.getMonth(), dueDay);
+            }
+            const interval = freq === 'weekly' ? 7 : freq === 'fortnightly' ? 14 : 28;
+
+            // Find first occurrence at or after today
+            while (anchor < today) anchor.setDate(anchor.getDate() + interval);
+            // Also check backwards in case anchor is far future
+            let check = new Date(anchor);
+            while (check > today) {
+                const prev = new Date(check);
+                prev.setDate(prev.getDate() - interval);
+                if (prev < today) break;
+                check = prev;
+            }
+            // Project forward from check
+            let d = new Date(check);
+            while (d <= windowEnd) {
+                if (d >= today) dates.push(dateKey(d));
+                d.setDate(d.getDate() + interval);
+            }
+        } else if (freq === 'daily') {
+            let d = new Date(today);
+            while (d <= windowEnd) {
+                dates.push(dateKey(d));
+                d.setDate(d.getDate() + 1);
+            }
+        } else if (freq === 'quarterly') {
+            for (let m = 0; m < 3; m++) {
+                const checkDate = new Date(today.getFullYear(), today.getMonth() + m, 1);
+                const lastDay = new Date(checkDate.getFullYear(), checkDate.getMonth() + 1, 0).getDate();
+                const actualDay = Math.min(dueDay, lastDay);
+                const d = new Date(checkDate.getFullYear(), checkDate.getMonth(), actualDay);
+                if (d >= today && d <= windowEnd && [0, 3, 6, 9].includes(d.getMonth())) {
+                    dates.push(dateKey(d));
+                }
+            }
+            if (dates.length === 0) {
+                const thisMonth = new Date(today.getFullYear(), today.getMonth(), Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()));
+                const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate()));
+                [thisMonth, nextMonth].forEach(d => {
+                    if (d >= today && d <= windowEnd) dates.push(dateKey(d));
+                });
+            }
+        } else if (freq === 'annually' || freq === 'annual') {
+            for (let m = 0; m < 2; m++) {
+                const checkDate = new Date(today.getFullYear(), today.getMonth() + m, 1);
+                const lastDay = new Date(checkDate.getFullYear(), checkDate.getMonth() + 1, 0).getDate();
+                const actualDay = Math.min(dueDay, lastDay);
+                const d = new Date(checkDate.getFullYear(), checkDate.getMonth(), actualDay);
+                if (d >= today && d <= windowEnd) dates.push(dateKey(d));
+            }
+        } else {
+            // Monthly (default)
+            // Due Day >= today's day → this month; else next month
+            const thisMonthLast = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+            const nextMonthLast = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
+
+            if (dueDay >= todayDay) {
+                const actualDay = Math.min(dueDay, thisMonthLast);
+                const d = new Date(today.getFullYear(), today.getMonth(), actualDay);
+                if (d >= today && d <= windowEnd) dates.push(dateKey(d));
+            } else {
+                const actualDay = Math.min(dueDay, nextMonthLast);
+                const d = new Date(today.getFullYear(), today.getMonth() + 1, actualDay);
+                if (d >= today && d <= windowEnd) dates.push(dateKey(d));
+            }
+        }
+
+        return dates;
+    }
+
+    // ── UI Helpers ──
+    function expandableCard(label, value, sub, detailHtml, valueClass = '', extraHtml = '') {
+        return `
+            <div class="kpi-card clickable" onclick="toggleCard(this)">
+                <div class="kpi-card-label">${escHtml(label)} <span class="chevron">▸</span></div>
+                <div class="kpi-card-value ${valueClass}">${typeof value === 'number' ? value : value}</div>
+                ${sub ? `<div class="kpi-card-sub">${sub}</div>` : ''}
+                ${extraHtml}
+                <div class="kpi-card-detail">${detailHtml}</div>
+            </div>
+        `;
+    }
+
+    function toggleCard(el) { el.classList.toggle('expanded'); }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + tabId).classList.add('active');
+        // Highlight the clicked button
+        const btns = document.querySelectorAll('.tab-btn');
+        btns.forEach(b => {
+            if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
+                (tabId === 'airtable' && b.textContent.includes('Contractor')) ||
+                (tabId === 'invoices' && b.textContent.includes('Invoices'))) {
+                b.classList.add('active');
+            }
+        });
+        // Lazy-load the Airtable iframe on first switch
+        if (tabId === 'airtable') {
+            const frame = document.getElementById('airtableFrame');
+            if (!frame.src || frame.src === window.location.href) {
+                frame.src = frame.dataset.src;
+            }
+        }
+        // Render invoices tab on switch
+        if (tabId === 'invoices') {
+            renderInvoiceTab();
+        }
+
+        // Refresh data on tab switch (but don't interrupt if already loading)
+        if (PAT && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
+            loadDashboard();
+        }
+    }
+
+    function toggleCashflowRow(rowId) {
+        const row = document.getElementById(rowId);
+        if (row) {
+            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+        }
+    }
+
+    function escHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    // ── Balance Calculator ──
+    // Uses projected inflows/outflows from the cash flow forecast
+    // State persists in sessionStorage, keyed by today's date — auto-resets on a new day
+    let calcItems = [];
+    const CALC_STATE_KEY = '_calc_state';
+
+    function getCalcStateDate() {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    }
+
+    // Unique key for each calc item — survives index shifts between refreshes
+    function calcItemKey(item) {
+        return `${item.date}|${item.label}|${item.amount}|${item.isInflow ? 'in' : 'out'}`;
+    }
+
+    function saveCalcState() {
+        const checked = [];
+        calcItems.forEach((item, i) => {
+            const cb = document.getElementById(`calc-cb-${i}`);
+            if (cb && cb.checked) checked.push(calcItemKey(item));
+        });
+        const balInput = document.getElementById('calcOpeningBal');
+        const panel = document.getElementById('calcPanel');
+        const state = {
+            date: getCalcStateDate(),
+            checked,
+            openingBal: balInput ? balInput.value : '',
+            panelOpen: panel ? panel.classList.contains('open') : false,
+            userEditedBal: balInput ? !!balInput.dataset.userEdited : false,
+        };
+        sessionStorage.setItem(CALC_STATE_KEY, JSON.stringify(state));
+    }
+
+    function loadCalcState() {
+        try {
+            const raw = sessionStorage.getItem(CALC_STATE_KEY);
+            if (!raw) return null;
+            const state = JSON.parse(raw);
+            // Auto-reset on new day
+            if (state.date !== getCalcStateDate()) {
+                sessionStorage.removeItem(CALC_STATE_KEY);
+                return null;
+            }
+            return state;
+        } catch { return null; }
+    }
+
+    function toggleCalcPanel() {
+        const panel = document.getElementById('calcPanel');
+        panel.classList.toggle('open');
+        saveCalcState();
+    }
+
+    function populateCalcFromForecast(rows) {
+        calcItems = [];
+        rows.forEach(r => {
+            const dateStr = dayName(r.date);
+            const dk = r.key;
+            r.inflows.forEach(f => {
+                calcItems.push({ date: dk, dateStr, label: f.name, amount: f.amount, isInflow: true });
+            });
+            r.outflows.forEach(f => {
+                calcItems.push({ date: dk, dateStr, label: f.name, amount: f.amount, isInflow: false });
+            });
+        });
+
+        // Load saved state BEFORE rendering so checked attributes are baked into HTML
+        // Saved keys are item identity strings — match against current items by key
+        const state = loadCalcState();
+        const savedKeys = new Set(state && state.checked ? state.checked : []);
+        const checkedIndices = new Set();
+        if (savedKeys.size > 0) {
+            calcItems.forEach((item, i) => {
+                if (savedKeys.has(calcItemKey(item))) checkedIndices.add(i);
+            });
+        }
+        renderCalcList(checkedIndices);
+
+        // Restore panel and balance
+        if (state) {
+            const panel = document.getElementById('calcPanel');
+            if (panel && state.panelOpen) panel.classList.add('open');
+            const balInput = document.getElementById('calcOpeningBal');
+            if (balInput && state.userEditedBal && state.openingBal) {
+                balInput.value = state.openingBal;
+                balInput.dataset.userEdited = '1';
+            }
+        }
+        updateCalcTotals(true);
+    }
+
+    function renderCalcList(checkedSet) {
+        const list = document.getElementById('calcTxList');
+        if (!calcItems.length) {
+            list.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:20px;text-align:center">No forecast items found</div>';
+            return;
+        }
+        list.innerHTML = calcItems.map((item, i) => {
+            const amtClass = item.isInflow ? 'text-green' : 'text-red';
+            const prefix = item.isInflow ? '+' : '-';
+            const isChecked = checkedSet && checkedSet.has(i) ? ' checked' : '';
+            const typeTag = item.isInflow
+                ? '<span style="font-size:10px;background:#dcfce7;color:#16a34a;padding:1px 5px;border-radius:3px;margin-left:6px">Inflow</span>'
+                : '<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px;margin-left:6px">Outflow</span>';
+            return `<div class="calc-tx-item">
+                <input type="checkbox" class="calc-tx-cb" id="calc-cb-${i}" data-idx="${i}"${isChecked} onchange="updateCalcTotals()">
+                <span class="calc-tx-date">${escHtml(item.dateStr)}</span>
+                <span class="calc-tx-name">${escHtml(item.label)}${typeTag}</span>
+                <span class="calc-tx-amount ${amtClass}">${prefix}${fmt(item.amount)}</span>
+            </div>`;
+        }).join('');
+    }
+
+    function updateCalcTotals(skipSave) {
+        const opening = parseFloat(document.getElementById('calcOpeningBal').value) || 0;
+        let totalIn = 0, totalOut = 0;
+
+        calcItems.forEach((item, i) => {
+            const cb = document.getElementById(`calc-cb-${i}`);
+            if (cb && cb.checked) {
+                if (item.isInflow) totalIn += item.amount;
+                else totalOut += item.amount;
+            }
+        });
+
+        const net = totalIn - totalOut;
+        const closing = opening + net;
+
+        document.getElementById('calcTotalIn').textContent = '+' + fmt(totalIn);
+        document.getElementById('calcTotalOut').textContent = '-' + fmt(totalOut);
+
+        const netEl = document.getElementById('calcNetImpact');
+        netEl.textContent = (net >= 0 ? '+' : '-') + fmt(net);
+        netEl.className = 'calc-summary-value ' + (net >= 0 ? 'text-green' : 'text-red');
+
+        const closingEl = document.getElementById('calcClosingBal');
+        closingEl.textContent = fmtAccounting(closing);
+        closingEl.className = 'calc-summary-value ' + (closing >= 0 ? 'text-green' : 'text-red');
+
+        if (!skipSave) saveCalcState();
+    }
+
+    function calcSelectAll() {
+        calcItems.forEach((_, i) => {
+            const cb = document.getElementById(`calc-cb-${i}`);
+            if (cb) cb.checked = true;
+        });
+        updateCalcTotals();
+    }
+
+    function calcDeselectAll() {
+        calcItems.forEach((_, i) => {
+            const cb = document.getElementById(`calc-cb-${i}`);
+            if (cb) cb.checked = false;
+        });
+        updateCalcTotals();
+    }
+
+    function calcSelectInflows() {
+        calcItems.forEach((item, i) => {
+            const cb = document.getElementById(`calc-cb-${i}`);
+            if (cb) cb.checked = item.isInflow;
+        });
+        updateCalcTotals();
+    }
+
+    function calcSelectOutflows() {
+        calcItems.forEach((item, i) => {
+            const cb = document.getElementById(`calc-cb-${i}`);
+            if (cb) cb.checked = !item.isInflow;
+        });
+        updateCalcTotals();
+    }
+
+    // ── UC Check Task Creator ──
+    // Creates a task in Airtable assigned to Karlo to call Universal Credit
+    // Track which UC checks have been requested (persists across auto-refresh)
+    function isUCCheckRequested(tenancyId) {
+        try {
+            const stored = JSON.parse(sessionStorage.getItem('_uc_checks') || '{}');
+            return !!stored[tenancyId];
+        } catch { return false; }
+    }
+    function markUCCheckRequested(tenancyId) {
+        try {
+            const stored = JSON.parse(sessionStorage.getItem('_uc_checks') || '{}');
+            stored[tenancyId] = new Date().toISOString();
+            sessionStorage.setItem('_uc_checks', JSON.stringify(stored));
+        } catch {}
+    }
+
+    const UC_TASK_CONFIG = {
+        assigneeEmail: 'karlomiguel.teves@gmail.com',
+        teamMemberId: 'recepbO2GUxeDO03i',     // Karlo Teves
+        projectId: 'recpg9gSr5Wh1X1Kv',        // £4,000 profit project
+        priorityName: 'Project',
+        statusName: 'Today',
+    };
+
+    async function createUCTask(tenantLabel, amount, dueDate, tenancyId, tenantId, unitId, btnId) {
+        const btn = document.getElementById(btnId);
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+
+        const taskName = `Call UC to confirm payment of £${amount.toFixed(2)} for ${tenantLabel}, due ${dueDate}`;
+        const description = `UC Payment Verification\n\nTenant: ${tenantLabel}\nExpected Rent: £${amount.toFixed(2)}\nRent Due Date: ${dueDate}\n\nPlease call the Universal Credit call centre to confirm:\n1. The payment is in place\n2. It is being processed\n3. It will be paid to us as the landlord\n\nCreated automatically from Leadership Dashboard on ${new Date().toLocaleDateString('en-GB')}`;
+
+        const todayStr = dateKey(new Date());
+
+        try {
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`;
+
+            // Step 1: Create with Task Name + Assignee (confirmed working)
+            const fields = {
+                'fldgFjGBw6bTKJFCD': taskName,
+                'fldELMncVJYPDRJNc': { email: UC_TASK_CONFIG.assigneeEmail },
+            };
+
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields, typecast: true }),
+            });
+
+            if (!resp.ok) {
+                const errData = await resp.json();
+                console.error('Create error:', JSON.stringify(errData));
+                throw new Error(errData.error?.message || resp.statusText);
+            }
+
+            const created = await resp.json();
+            const recordId = created.id;
+            console.log('Step 1 done — created:', recordId);
+
+            // Step 2: Immediately PATCH with Time Estimate + Projects + linked records
+            btn.textContent = 'Linking...';
+            const patchFields = {};
+            patchFields['fld10VzzbiNNgRmIi'] = '15 min';          // Time Estimate
+            patchFields['fldBg0rQy0FrOAkRN'] = [UC_TASK_CONFIG.projectId];  // Projects
+            patchFields['fldmne4RYJU22ICub'] = [tenancyId];                  // Tenancies
+            if (tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [tenantId];    // Tenants
+            if (unitId) patchFields['fldEW648YtTZ6j01n'] = [unitId];        // Rental Units
+
+            // Look up property from rental unit
+            if (unitId) {
+                try {
+                    const uResp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.rentalUnits}/${unitId}?returnFieldsByFieldId=true`, {
+                        headers: { 'Authorization': `Bearer ${PAT}` },
+                    });
+                    if (uResp.ok) {
+                        const uData = await uResp.json();
+                        const pf = uData.fields?.['fldUJNRGgzgyAwwjt'];
+                        if (Array.isArray(pf)) {
+                            const pid = typeof pf[0] === 'string' ? pf[0] : pf[0]?.id;
+                            if (pid) patchFields['fldZKFvEpJ6NZeFKz'] = [pid]; // Properties
+                        }
+                    }
+                } catch (e) { console.warn('Property lookup:', e); }
+            }
+
+            console.log('Step 2 — patching:', JSON.stringify(patchFields, null, 2));
+            const pResp = await fetch(`${url}/${recordId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: patchFields, typecast: true }),
+            });
+            if (!pResp.ok) {
+                const pErr = await pResp.json();
+                console.error('Step 2 error:', JSON.stringify(pErr));
+                // Task still created, just missing some links
+            } else {
+                console.log('Step 2 done');
+            }
+
+            markUCCheckRequested(tenancyId);
+            btn.textContent = 'UC Check Requested';
+            btn.classList.add('done');
+            btn.disabled = true;
+        } catch (e) {
+            console.error('UC task creation failed:', e);
+            btn.textContent = 'Failed';
+            btn.title = String(e.message || e);
+            btn.style.background = '#dc2626';
+            setTimeout(() => {
+                btn.textContent = 'UC Check';
+                btn.style.background = '';
+                btn.title = 'Create task for Karlo to call UC and confirm this payment';
+                btn.disabled = false;
+            }, 5000);
+        }
+    }
+
+    // ── Invoices Tab ──
+    // Live data fetched from Gmail via Apps Script, with static fallback
+    let liveInvoiceData = null;
+    let invoiceRefreshedAt = null;
+
+    async function fetchInvoicesFromGmail() {
+        if (!GMAIL_SCRIPT_URL) return null;
+        try {
+            const resp = await fetch(GMAIL_SCRIPT_URL);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (data.error) { console.warn('Gmail script error:', data.error); return null; }
+            liveInvoiceData = data.invoices || [];
+            invoiceRefreshedAt = data.refreshedAt ? new Date(data.refreshedAt) : new Date();
+            // Re-render if the invoices tab is currently visible
+            invoiceTabRendered = false;
+            if (document.getElementById('tab-invoices').classList.contains('active')) {
+                renderInvoiceTab();
+            }
+            return liveInvoiceData;
+        } catch (e) {
+            console.warn('Gmail invoice fetch failed, using static data:', e.message);
+            return null;
+        }
+    }
+
+    // Static fallback data parsed from Gmail label "3. to pay" — 28 Mar 2026
+    const INVOICE_DATA = [
+        { id:"19686c14a359e598", payee:"Onyx Bureau",                          desc:"Invoice ONYX888-0219 — Client Acquisition",                              amount:3000.00, emailDate:"2025-04-30", dueDate:"2025-05-30", ref:"ONYX888-0219",  hasAttachment:true  },
+        { id:"19ba391ecd10ceca", payee:"Roy Lavin",                             desc:"Utility payment — 5 Woodcock Close",                                      amount:40.00,   emailDate:"2026-01-09", dueDate:null,         ref:null,            hasAttachment:false },
+        { id:"19bc2460f570dd56", payee:"Roy Lavin",                             desc:"Reimbursement — Viola Street (eBay purchase)",                            amount:30.45,   emailDate:"2026-01-15", dueDate:null,         ref:null,            hasAttachment:true  },
+        { id:"19bd56d51a35ceab", payee:"Roy Lavin",                             desc:"Sky Digital direct debit — Duckworth",                                    amount:37.00,   emailDate:"2026-01-19", dueDate:"2026-01-23", ref:null,            hasAttachment:true  },
+        { id:"19c239174234659c", payee:"Brett Wilson LLP",                      desc:"Invoice 15840 — Legal services Oct 2025–Feb 2026",                        amount:225.00,  emailDate:"2026-02-03", dueDate:null,         ref:"15840",         hasAttachment:true  },
+        { id:"19c5c7bfa7abb164", payee:"Roy Lavin",                             desc:"Expense report — various properties",                                     amount:264.02,  emailDate:"2026-02-14", dueDate:null,         ref:null,            hasAttachment:false },
+        { id:"19c8ae685371c2f1", payee:"Athertons Exterior Cleaning",           desc:"Invoice 002KBRI26 — Exterior cleaning",                                   amount:45.00,   emailDate:"2026-02-23", dueDate:"2026-03-02", ref:"002KBRI26",     hasAttachment:true  },
+        { id:"19c98b27bef8f115", payee:"Fylde Borough Council",                 desc:"Invoice 73335872 — Bin lease / commercial waste",                         amount:null,    emailDate:"2026-02-26", dueDate:null,         ref:"73335872",      hasAttachment:true  },
+        { id:"19cae67550f3d1f0", payee:"Oldham Council",                        desc:"Invoice 41052677 — Housing Benefits overpayment",                         amount:15.99,   emailDate:"2026-03-02", dueDate:null,         ref:"41052677",      hasAttachment:true  },
+        { id:"19cb48607a939a9c", payee:"Fylde Borough Council",                 desc:"Sect 59 demand — Duckworth Buildings default works",                      amount:471.56,  emailDate:"2026-03-03", dueDate:null,         ref:null,            hasAttachment:true  },
+        { id:"19cd751821b37d5b", payee:"Fylde Borough Council",                 desc:"Invoice 73330343 — Bin lease, Duckworth Building Apartments",             amount:121.90,  emailDate:"2026-03-10", dueDate:null,         ref:"73330343",      hasAttachment:true  },
+        { id:"19cd352c15e227b2", payee:"PPE & Sons Heating & Plumbing Ltd",     desc:"Invoice INV-0549 — Bath waste kit & trap replacement",                    amount:168.00,  emailDate:"2026-03-09", dueDate:"2026-03-16", ref:"INV-0549",      hasAttachment:true  },
+        { id:"19d1792ccacb56d6", payee:"RoC Immo Ltd (Rob Jackson)",            desc:"4AP Invoice — Taps, flexi hoses & labour",                               amount:83.27,   emailDate:"2026-03-12", dueDate:null,         ref:null,            hasAttachment:false },
+        { id:"19cfb53a93da54c2", payee:"DD Fire Alarms Ltd",                    desc:"Estimate 1724 — Fire alarm & emergency lighting service, Duckworth",      amount:258.00,  emailDate:"2026-03-17", dueDate:"2026-03-18", ref:"1724",          hasAttachment:true,  isEstimate:true },
+        { id:"19cd8e5796497d32", payee:"DD Fire Alarms Ltd",                    desc:"Invoice 40893 — Fire panel remedial, faulty device flat 8",               amount:121.80,  emailDate:"2026-03-10", dueDate:"2026-03-27", ref:"40893",         hasAttachment:true  },
+        { id:"19d08f7bd65e059f", payee:"Gary Marsh (Roofline)",                 desc:"Invoice — Snagging jobs, northern properties",                            amount:null,    emailDate:"2026-03-20", dueDate:null,         ref:null,            hasAttachment:true  },
+        { id:"19d0cd31f41bd345", payee:"Naturally Neat Ltd",                    desc:"Cleaning Invoice (via Roy Lavin)",                                        amount:null,    emailDate:"2026-03-20", dueDate:null,         ref:null,            hasAttachment:true  },
+        { id:"19d15b933583230b", payee:"Gary Marsh (Roofline)",                 desc:"Invoice — Waste removal: 1406 Oldham Rd & 5 Woodcock",                   amount:null,    emailDate:"2026-03-22", dueDate:null,         ref:null,            hasAttachment:true  },
+        { id:"19d203633f2f048e", payee:"Shelley & Co (Simon Rice)",             desc:"Appointment Invoice — Legal",                                             amount:null,    emailDate:"2026-03-24", dueDate:null,         ref:null,            hasAttachment:true  },
+        { id:"19d246060572f194", payee:"DD Fire Alarms Ltd",                    desc:"Invoice 41496 — Battery replacement, 1-3 Duckworth Building",            amount:72.00,   emailDate:"2026-03-25", dueDate:"2026-03-25", ref:"41496",         hasAttachment:true  },
+        { id:"19d29949ad7e4f91", payee:"Property Redress Scheme",               desc:"Invoice PRS049387 — Membership renewal 2026–2027",                        amount:null,    emailDate:"2026-03-26", dueDate:null,         ref:"PRS049387",     hasAttachment:false },
+        { id:"19d2f29f2ff2a3b6", payee:"Gary Marsh (Roofline)",                 desc:"Invoice — Room refurb & kitchen, 55 Elmdon Place",                       amount:null,    emailDate:"2026-03-27", dueDate:null,         ref:null,            hasAttachment:true  },
+    ];
+
+    function fmtInvDate(dateStr) {
+        if (!dateStr) return '—';
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    let invoiceTabRendered = false;
+    function renderInvoiceTab() {
+        // Always re-render so AI matching runs fresh against latest transaction data
+        invoiceTabRendered = true;
+
+        const today = new Date();
+        today.setHours(0,0,0,0);
+
+        // MERGE: live data + static data — live wins for populated fields, static fills gaps
+        let sourceData;
+        let isLive = false;
+        if (liveInvoiceData && liveInvoiceData.length > 0) {
+            isLive = true;
+            // Build lookup of static data by thread/message ID for gap-filling
+            const staticById = {};
+            INVOICE_DATA.forEach(s => { staticById[s.id] = s; });
+            // Merge: for each live invoice, fill in blanks from static
+            sourceData = liveInvoiceData.map(live => {
+                const staticMatch = staticById[live.id] || staticById[live.threadId] || null;
+                if (!staticMatch) return live;
+                return {
+                    ...live,
+                    amount:  live.amount !== null && live.amount !== undefined ? live.amount : staticMatch.amount,
+                    dueDate: live.dueDate || staticMatch.dueDate,
+                    ref:     (live.ref && /\d/.test(live.ref)) ? live.ref : staticMatch.ref,
+                    payee:   live.payee && live.payee.length > 2 ? live.payee : staticMatch.payee,
+                    desc:    live.desc && live.desc.length > 5 ? live.desc : staticMatch.desc,
+                    isEstimate: live.isEstimate || staticMatch.isEstimate,
+                };
+            });
+            // Also add any static invoices not present in live data (shouldn't happen, but safety net)
+            const liveIds = new Set(sourceData.map(l => l.id).concat(sourceData.map(l => l.threadId)));
+            INVOICE_DATA.forEach(s => {
+                if (!liveIds.has(s.id)) sourceData.push(s);
+            });
+        } else {
+            sourceData = INVOICE_DATA;
+        }
+
+        // Update the "Last refreshed" text
+        const refreshSpan = document.querySelector('#tab-invoices .section span[style*="font-size:12px"]');
+        if (refreshSpan) {
+            const refreshTime = invoiceRefreshedAt
+                ? invoiceRefreshedAt.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+                : '28 Mar 2026 (static)';
+            const liveLabel = isLive
+                ? '<span style="color:#16a34a;font-weight:600">Live</span>'
+                : '<span style="color:#d97706;font-weight:600">Static</span>';
+            refreshSpan.innerHTML = `Gmail label: <strong style="color:#64748b">3. to pay</strong> &nbsp;·&nbsp; ${liveLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong>${isLive ? '' : ' &nbsp;·&nbsp; Deploy Apps Script for live data'}`;
+        }
+
+        // ── Cross-reference invoices with Airtable transactions ──
+        const txMatches = matchInvoicesToTransactions(sourceData, allTransactions);
+
+        // Sort by effective date (due date if known, else email date), oldest first
+        const sorted = [...sourceData].sort((a, b) =>
+            new Date(a.dueDate || a.emailDate) - new Date(b.dueDate || b.emailDate)
+        );
+
+        // Summary calculations
+        let knownTotal = 0, unknownCount = 0, overdueCount = 0, paidCount = 0;
+        sorted.forEach(inv => {
+            const isPaid = !!txMatches[inv.id || inv.threadId];
+            if (isPaid) { paidCount++; return; }
+            const stored = localStorage.getItem('inv_amt_' + (inv.id || inv.threadId));
+            const effAmt = inv.amount !== null ? inv.amount : (stored ? parseFloat(stored) : null);
+            if (effAmt !== null) knownTotal += effAmt; else unknownCount++;
+            if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
+        });
+
+        // Summary cards
+        const summaryCards = document.getElementById('invoiceSummaryCards');
+        if (summaryCards) {
+            summaryCards.innerHTML = `
+                <div class="card"><div class="card-label">Unpaid Invoices</div><div class="card-value">${sorted.length - paidCount}</div></div>
+                <div class="card"><div class="card-label">Known Amount Due</div><div class="card-value text-red">${fmt(knownTotal)}</div></div>
+                <div class="card"><div class="card-label">Amount in PDF Only</div><div class="card-value" style="color:#94a3b8">${unknownCount} invoice${unknownCount !== 1 ? 's' : ''}</div></div>
+                <div class="card"><div class="card-label">Overdue / Past Date</div><div class="card-value text-red">${overdueCount}</div></div>
+                ${paidCount > 0 ? `<div class="card"><div class="card-label">Matched as Paid</div><div class="card-value" style="color:#16a34a">${paidCount}</div></div>` : ''}
+            `;
+        }
+
+        // Table rows
+        const tbody = document.getElementById('invoiceTableBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = sorted.map((inv, idx) => {
+            const effDate = new Date(inv.dueDate || inv.emailDate);
+            const isOverdue = effDate < today;
+            const daysDiff = Math.round((effDate - today) / 86400000);
+            const displayDate = fmtInvDate(inv.dueDate || inv.emailDate);
+            const dateCell = inv.dueDate
+                ? `<strong>${displayDate}</strong>`
+                : `<span style="color:#94a3b8">${displayDate}</span>`;
+
+            // Check if matched to a transaction (suggestion — not auto-paid)
+            const matchKey = inv.id || inv.threadId;
+            const match = txMatches[matchKey];
+            let isApproved = approvedMatches[matchKey];
+
+            let badge = '';
+            if (isApproved) {
+                badge = `<span class="inv-badge paid">Paid ✓</span>`;
+            } else if (inv.isEstimate) {
+                badge = '<span class="inv-badge estimate">Estimate</span>';
+            } else if (isOverdue) {
+                badge = '<span class="inv-badge overdue">Overdue</span>';
+            } else if (daysDiff <= 7) {
+                badge = '<span class="inv-badge due-soon">Due soon</span>';
+            } else {
+                badge = '<span class="inv-badge upcoming">Upcoming</span>';
+            }
+
+            const invKey = inv.id || inv.threadId;
+
+            // Check localStorage for manually entered values
+            const storedAmt = localStorage.getItem('inv_amt_' + invKey);
+            const storedPayee = localStorage.getItem('inv_payee_' + invKey);
+            const storedDesc = localStorage.getItem('inv_desc_' + invKey);
+            const storedRef = localStorage.getItem('inv_ref_' + invKey);
+            const storedDue = localStorage.getItem('inv_due_' + invKey);
+            const isLocalPaid = localStorage.getItem('inv_paid_' + invKey);
+
+            const displayAmt = inv.amount !== null ? inv.amount : (storedAmt ? parseFloat(storedAmt) : null);
+            const displayPayee = (storedPayee || inv.payee || '').trim();
+            const displayDesc = (storedDesc || inv.desc || '').trim();
+            const displayRef = (storedRef || inv.ref || '').trim();
+            const displayDue = storedDue || inv.dueDate || null;
+
+            // Editable fields — click empty ones to enter data
+            const amountHtml = displayAmt !== null
+                ? `<span class="inv-amount">${fmt(displayAmt)}</span>`
+                : `<span class="inv-amount unknown" onclick="event.stopPropagation(); editInvField(this,'${invKey}','amt','number')" title="Click to enter amount" style="cursor:pointer">Enter £ ✏️</span>`;
+
+            const payeeHtml = displayPayee
+                ? escHtml(displayPayee)
+                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${invKey}','payee','text')" title="Click to enter payee">Enter payee ✏️</span>`;
+
+            const descHtml = displayDesc
+                ? escHtml(displayDesc)
+                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${invKey}','desc','text')" title="Click to enter description">Enter description ✏️</span>`;
+
+            const refHtml = displayRef
+                ? `<span style="font-family:monospace;font-size:11px;color:#64748b">${escHtml(displayRef)}</span>`
+                : `<span style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${invKey}','ref','text')" title="Click to enter ref">Add ref ✏️</span>`;
+
+            const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
+            const threadId = inv.threadId || inv.id;
+
+            // Override isApproved if locally marked paid
+            if (isLocalPaid && !isApproved) { isApproved = true; }
+
+            // AI match suggestion row (shown below the invoice row when a match is found)
+            let matchRow = '';
+            if (match && !isApproved) {
+                matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
+                    <td colspan="6" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                            <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
+                            <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
+                            <div style="margin-left:auto;display:flex;gap:6px">
+                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${threadId}','${matchKey}','${match.txRecordId}','${gmailUrl}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
+                                <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch(${idx})" title="Dismiss this suggestion">✗ Reject</button>
+                            </div>
+                        </div>
+                    </td>
+                </tr>`;
+            }
+
+            // Action column: manual mark-as-paid button (always available)
+            let actionHtml = '';
+            if (isApproved) {
+                actionHtml = `<span style="color:#16a34a;font-size:11px;font-weight:600">Paid ✓</span>`;
+            } else {
+                actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${threadId}','${matchKey}','','${gmailUrl}',this)" title="Manually mark as paid and move to 4: paid label">Mark Paid</button>`;
+            }
+
+            return `<tr class="${isApproved ? 'inv-paid' : ''}" onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
+                <td style="white-space:nowrap;min-width:100px">${dateCell}<br>${badge}</td>
+                <td style="font-weight:600;max-width:160px">${payeeHtml}</td>
+                <td style="color:#475569;max-width:300px;font-size:12px">${descHtml}</td>
+                <td style="white-space:nowrap">${refHtml}</td>
+                <td style="text-align:right;white-space:nowrap">${amountHtml}</td>
+                <td style="width:110px;text-align:center" onclick="event.stopPropagation()">${actionHtml}</td>
+            </tr>${matchRow}`;
+        }).join('');
+    }
+
+    // ── Match invoices to Airtable transactions ──
+    // Strict matching: exact amount + payee keywords + tx date must be on or after invoice date
+    // Returns { [invoiceId]: { txRecordId, txDate, txLabel, txAmount } }
+    function matchInvoicesToTransactions(invoices, transactions) {
+        const matches = {};
+        if (!transactions || !transactions.length) return matches;
+
+        invoices.forEach(inv => {
+            // Use localStorage amount if source amount is null
+            const storedAmt = localStorage.getItem('inv_amt_' + (inv.id || inv.threadId));
+            const invAmount = inv.amount !== null ? inv.amount : (storedAmt ? parseFloat(storedAmt) : null);
+            if (invAmount === null || invAmount === 0) return; // can't match without a known amount
+            const invKeywords = extractInvKeywords(inv.payee + ' ' + (inv.desc || ''));
+            const invDate = new Date(inv.dueDate || inv.emailDate);
+
+            for (const tx of transactions) {
+                const txAmt = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
+                if (txAmt === 0) continue;
+
+                // 1. EXACT amount match (within £0.02 for rounding)
+                if (Math.abs(txAmt - invAmount) > 0.02) continue;
+
+                // 2. Transaction date must be on or after the invoice date
+                const txDateStr = getField(tx, F.txDate);
+                if (!txDateStr) continue;
+                const txDate = new Date(txDateStr);
+                if (txDate < invDate) continue;
+
+                // 3. Payee keyword match: at least 2 keywords must match,
+                //    OR 1 distinctive keyword (5+ chars) must match
+                const txVendor = String(getField(tx, F.txVendor) || '').toLowerCase();
+                const txDesc = String(getField(tx, F.txDescription) || '').toLowerCase();
+                const txText = txVendor + ' ' + txDesc;
+
+                let kwMatches = 0;
+                let longKwMatch = false;
+                invKeywords.forEach(kw => {
+                    if (txText.includes(kw)) {
+                        kwMatches++;
+                        if (kw.length >= 5) longKwMatch = true;
+                    }
+                });
+
+                if (kwMatches >= 2 || (kwMatches >= 1 && longKwMatch)) {
+                    const matchKey = inv.id || inv.threadId;
+                    matches[matchKey] = {
+                        txRecordId: tx.id,
+                        txDate: txDateStr,
+                        txLabel: txLabel(tx),
+                        txAmount: txAmt,
+                    };
+                    break;
+                }
+            }
+        });
+        return matches;
+    }
+
+    function extractInvKeywords(text) {
+        const stop = new Set(['invoice','inv','ltd','limited','the','and','for','from','via',
+            'payment','estimate','fwd','re','hi','dear','please','find','attached','kind',
+            'regards','sir','madame','thank','thanks','your','our','this','that','has','was']);
+        return text.toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length >= 3 && !stop.has(w));
+    }
+
+    // ── Click-to-edit any invoice field ──
+    function editInvField(el, invoiceId, fieldType, inputType) {
+        const input = document.createElement('input');
+        input.type = inputType === 'number' ? 'number' : 'text';
+        if (inputType === 'number') { input.step = '0.01'; input.placeholder = '0.00'; }
+        else { input.placeholder = fieldType === 'payee' ? 'Payee name' : fieldType === 'desc' ? 'Description' : fieldType === 'ref' ? 'Invoice ref' : 'DD/MM/YYYY'; }
+        const w = inputType === 'number' ? '80px' : (fieldType === 'ref' ? '90px' : '150px');
+        input.style.cssText = `width:${w};padding:3px 6px;font-size:12px;border:1px solid #2563eb;border-radius:4px;${inputType === 'number' ? 'text-align:right;' : ''}`;
+
+        function save() {
+            const val = input.value.trim();
+            if (!val) { renderInvoiceTab(); return; }
+            if (inputType === 'number') {
+                const num = parseFloat(val);
+                if (isNaN(num) || num <= 0) { renderInvoiceTab(); return; }
+                localStorage.setItem('inv_amt_' + invoiceId, num.toString());
+            } else {
+                localStorage.setItem('inv_' + fieldType + '_' + invoiceId, val);
+            }
+            renderInvoiceTab();
+        }
+
+        input.onkeydown = function(e) {
+            if (e.key === 'Enter') save();
+            if (e.key === 'Escape') renderInvoiceTab();
+        };
+        input.onblur = save;
+        el.replaceWith(input);
+        input.focus();
+    }
+
+    // ── AI match approval state ──
+    const approvedMatches = {};
+
+    async function approveMatch(threadId, invoiceKey, txRecordId, gmailUrl, btn, rowIdx) {
+        // Mark as approved in state
+        approvedMatches[invoiceKey] = true;
+
+        // Hide the suggestion row
+        const suggRow = document.getElementById('inv-match-' + rowIdx);
+        if (suggRow) suggRow.style.display = 'none';
+
+        // Call markInvoicePaid to do the actual Gmail label move + Airtable link
+        const parentRow = suggRow ? suggRow.previousElementSibling : null;
+        const markBtn = parentRow ? parentRow.querySelector('.inv-mark-paid-btn') : btn;
+        await markInvoicePaid(threadId, invoiceKey, txRecordId, gmailUrl, markBtn || btn);
+    }
+
+    function rejectMatch(rowIdx) {
+        // Simply hide the suggestion row
+        const suggRow = document.getElementById('inv-match-' + rowIdx);
+        if (suggRow) {
+            suggRow.style.display = 'none';
+        }
+    }
+
+    // ── Mark invoice as paid: move Gmail label + attach link to Airtable tx ──
+    async function markInvoicePaid(threadId, invoiceKey, txRecordId, gmailUrl, btn) {
+        btn.classList.add('loading');
+        btn.textContent = 'Processing...';
+
+        try {
+            // 1. Move Gmail label from "3. to pay" to "4: paid"
+            if (GMAIL_SCRIPT_URL) {
+                const url = GMAIL_SCRIPT_URL + '?action=markPaid&threadId=' + encodeURIComponent(threadId);
+                try {
+                    const resp = await fetch(url, { redirect: 'follow', mode: 'cors' });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (!data.success) console.warn('Gmail mark-paid warning:', data.error);
+                    } else {
+                        console.warn('Gmail mark-paid HTTP error:', resp.status);
+                    }
+                } catch (fetchErr) {
+                    // If CORS fails from file://, mark locally and notify user
+                    console.warn('Gmail mark-paid fetch failed (CORS?):', fetchErr.message);
+                    localStorage.setItem('inv_paid_' + invoiceKey, '1');
+                }
+            } else {
+                // No Apps Script URL — mark locally
+                localStorage.setItem('inv_paid_' + invoiceKey, '1');
+            }
+
+            // 2. Attach Gmail link to the Airtable transaction's "Invoice Data" field
+            if (txRecordId && PAT) {
+                const patchUrl = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txRecordId}`;
+                await fetch(patchUrl, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': 'Bearer ' + PAT,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ fields: { 'fldT5qfiyt5DTLrp8': gmailUrl } })
+                });
+            }
+
+            btn.textContent = 'Done';
+            btn.style.background = '#dcfce7';
+            btn.style.color = '#16a34a';
+            btn.style.borderColor = '#16a34a';
+
+            // Refresh invoice data after a short delay
+            setTimeout(() => {
+                invoiceTabRendered = false;
+                fetchInvoicesFromGmail();
+            }, 2000);
+
+        } catch (e) {
+            console.error('Mark as paid failed:', e);
+            btn.textContent = 'Failed';
+            btn.style.background = '#fee2e2';
+            btn.classList.remove('loading');
+            setTimeout(() => { btn.textContent = 'Move to Paid'; btn.style.background = ''; }, 3000);
+        }
+    }
+
+    </script>
+</body>
+</html>

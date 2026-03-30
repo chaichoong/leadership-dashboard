@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leadership Dashboard - Standard Operating Procedure</title>
+<style>
+/* ====== RESET & BASE ====== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #1e293b;
+  background: #f1f5f9;
+}
+
+/* ====== COLOUR VARIABLES ====== */
+:root {
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
+  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
+  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
+  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
+  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
+  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
+  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+/* ====== HEADER ====== */
+.header {
+  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
+  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+}
+.header::after {
+  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
+.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
+.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
+
+/* ====== LAYOUT ====== */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.5rem; }
+.section-title {
+  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section-title .icon { font-size: 1.4rem; }
+
+/* ====== CARDS ====== */
+.card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
+}
+.card-header {
+  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
+  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
+}
+
+/* ====== QUICK REFERENCE ====== */
+.quick-ref {
+  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
+  border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
+  box-shadow: var(--shadow-lg);
+}
+.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.qr-item {
+  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
+  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
+}
+.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
+.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
+.qr-item .qr-value a:hover { text-decoration: underline; }
+
+/* ====== TABLE OF CONTENTS ====== */
+.toc {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; border: 1px solid var(--slate-200);
+}
+.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
+.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
+.toc a {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
+  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
+}
+.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
+.toc a .toc-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+}
+
+/* ====== FLOW DIAGRAMS ====== */
+.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
+.flow-step {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
+  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
+  color: var(--slate-700); min-width: 110px; position: relative;
+}
+.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
+.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
+.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
+.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
+.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
+.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
+.flow-arrow {
+  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
+}
+.flow-arrow-down {
+  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
+  font-size: 1.4rem; color: var(--slate-400);
+}
+
+/* Vertical flow */
+.flow-vertical { flex-direction: column; align-items: center; }
+.flow-vertical .flow-step { min-width: 200px; }
+
+/* ====== ARCHITECTURE DIAGRAM ====== */
+.arch-diagram {
+  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
+}
+.arch-box {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.25rem; text-align: center; min-height: 120px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
+.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
+.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
+.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
+
+/* ====== LABEL TABLE ====== */
+.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
+.label-table th {
+  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
+  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+.label-table tr:last-child td { border-bottom: none; }
+.label-table tr:nth-child(even) td { background: var(--slate-50); }
+.label-table tr:hover td { background: var(--blue-50); }
+.label-badge {
+  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
+}
+.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
+.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
+.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
+.label-badge.lb-4 { background: #dcfce7; color: #166534; }
+.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
+.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
+.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
+.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
+.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
+
+/* ====== WORKFLOW CARDS ====== */
+.wf-card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
+}
+.wf-header {
+  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
+  border-bottom: 1px solid var(--slate-200);
+}
+.wf-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
+  flex-shrink: 0; color: white;
+}
+.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
+.wf-header .wf-tag {
+  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
+}
+.wf-body { padding: 1.25rem 1.5rem; }
+.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
+.wf-body h4:first-child { margin-top: 0; }
+
+/* Colour coding for workflow numbers */
+.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
+.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
+.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
+.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
+.wf-num.wf-9 { background: #059669; }
+
+/* ====== STEP LISTS ====== */
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps li {
+  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
+}
+.steps li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: 0; top: 0.45rem;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.steps li + li { border-top: 1px solid var(--slate-100); }
+
+/* ====== METRIC DOTS ====== */
+.dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 0.35rem; vertical-align: middle;
+}
+.dot.green { background: var(--green-500); }
+.dot.amber { background: var(--amber-500); }
+.dot.red { background: var(--red-500); }
+.dot.blue { background: var(--blue-500); }
+
+/* ====== METRICS BAR ====== */
+.metrics-bar {
+  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
+}
+.metric-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+}
+.metric-chip.mc-green { background: var(--green-100); color: var(--green-700); }
+.metric-chip.mc-amber { background: var(--amber-100); color: var(--amber-600); }
+.metric-chip.mc-red { background: var(--red-100); color: var(--red-600); }
+.metric-chip.mc-blue { background: var(--blue-100); color: var(--blue-700); }
+
+/* ====== INFO BOXES ====== */
+.info-box {
+  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
+  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
+}
+.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
+.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
+.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
+.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
+.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
+
+/* ====== CODE / MONO ====== */
+code {
+  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
+  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
+}
+
+/* ====== TROUBLESHOOTING ====== */
+.ts-item { margin-bottom: 0.75rem; }
+.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
+.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
+
+/* ====== TWO-COL GRID ====== */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+/* ====== AIRTABLE FLOW ====== */
+.at-flow {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+  align-items: center; padding: 1rem 0;
+}
+.at-flow .flow-step { min-width: auto; }
+
+/* ====== PRINT ====== */
+@media print {
+  body { background: white; font-size: 10pt; }
+  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .section { break-inside: avoid; }
+  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 768px) {
+  .header h1 { font-size: 1.6rem; }
+  .qr-grid { grid-template-columns: 1fr; }
+  .toc-grid { grid-template-columns: 1fr; }
+  .arch-diagram { grid-template-columns: 1fr; }
+  .arch-connector { transform: rotate(90deg); }
+  .grid-2 { grid-template-columns: 1fr; }
+  .flow { flex-direction: column; }
+  .flow-arrow { transform: rotate(90deg); }
+  .at-flow { grid-template-columns: 1fr; }
+  .container { padding: 0 1rem 3rem; }
+}
+
+/* ====== MISC ====== */
+strong { color: var(--slate-800); }
+a { color: var(--blue-600); }
+p { margin-bottom: 0.5rem; }
+ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
+li { margin-bottom: 0.2rem; font-size: 0.9rem; }
+hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<!-- ============ HEADER ============ -->
+<div class="header">
+  <div class="header-inner">
+    <h1>&#x1F4CA; Leadership Dashboard</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
+    <div class="version">Version 1.0 &bull; 29 March 2026 &bull; Owner: Kevin Brittain</div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ============ QUICK REFERENCE ============ -->
+<div class="quick-ref">
+  <h2>&#x26A1; Quick Reference</h2>
+  <div class="qr-grid">
+    <div class="qr-item">
+      <div class="qr-label">Dashboard File</div>
+      <div class="qr-value">Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <strong>dashboard.html</strong></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Account</div>
+      <div class="qr-value">kevin@runpreneur.org.uk<br>(kevinbrittain@gmail.com)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Airtable Base</div>
+      <div class="qr-value">Operations Director<br><code>appnqjDpqDniH3IRl</code></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Apps Script</div>
+      <div class="qr-value">Deployed as web app under Kevin&rsquo;s Google account</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Label</div>
+      <div class="qr-value"><span class="label-badge lb-3">3. to pay</span></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Smart Refresh</div>
+      <div class="qr-value">Every 15 minutes<br>(defers while active)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Technology</div>
+      <div class="qr-value">Static HTML + JavaScript<br>(no server required)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Authentication</div>
+      <div class="qr-value">Airtable Personal Access Token<br>(session only)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TABLE OF CONTENTS ============ -->
+<div class="section">
+  <div class="toc">
+    <h2>&#x1F4D1; Table of Contents</h2>
+    <div class="toc-grid">
+      <a href="#architecture"><span class="toc-num">1</span> System Architecture</a>
+      <a href="#access"><span class="toc-num">2</span> Access &amp; Authentication</a>
+      <a href="#tabs"><span class="toc-num">3</span> Dashboard Tabs Overview</a>
+      <a href="#financial"><span class="toc-num">4</span> Financial Overview</a>
+      <a href="#portfolio"><span class="toc-num">5</span> Portfolio &amp; Tenancy Metrics</a>
+      <a href="#cashflow"><span class="toc-num">6</span> 31-Day Cash Flow Forecast</a>
+      <a href="#reconciliation"><span class="toc-num">7</span> Reconciliation Matching Logic</a>
+      <a href="#balance-calc"><span class="toc-num">8</span> Balance Calculator</a>
+      <a href="#ai-commentary"><span class="toc-num">9</span> AI Commentary &amp; Credit Card Plan</a>
+      <a href="#invoices"><span class="toc-num">10</span> Invoices Tab</a>
+      <a href="#invoice-matching"><span class="toc-num">11</span> Invoice AI Matching &amp; Mark as Paid</a>
+      <a href="#smart-refresh"><span class="toc-num">12</span> Smart Refresh System</a>
+      <a href="#apps-script"><span class="toc-num">13</span> Google Apps Script Setup</a>
+      <a href="#troubleshooting"><span class="toc-num">14</span> Troubleshooting</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 1. SYSTEM ARCHITECTURE ============ -->
+<div class="section" id="architecture">
+  <h2 class="section-title"><span class="icon">&#x1F3D7;</span> 1. System Architecture</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F310; Component Overview</div>
+    <p>The Leadership Dashboard is a client-side HTML/JavaScript application that combines financial data from Airtable with invoice data from Gmail. It runs entirely in the browser with no back-end server, connecting directly to external APIs via personal access tokens and a Google Apps Script web app.</p>
+
+    <div class="arch-diagram">
+      <div class="arch-box highlight">
+        <div class="arch-icon">&#x1F4CA;</div>
+        <div class="arch-title">Airtable</div>
+        <div class="arch-desc">6 tables via<br>REST API + PAT</div>
+      </div>
+      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
+      <div class="arch-box highlight" style="border-color: var(--indigo-500); background: var(--indigo-50);">
+        <div class="arch-icon">&#x1F4BB;</div>
+        <div class="arch-title">Dashboard</div>
+        <div class="arch-desc">Static HTML/JS<br>Client-side processing</div>
+      </div>
+      <div class="arch-connector">&#x2B05;&#xFE0F;</div>
+      <div class="arch-box highlight" style="border-color: var(--green-500); background: var(--green-50);">
+        <div class="arch-icon">&#x1F4E7;</div>
+        <div class="arch-title">Gmail</div>
+        <div class="arch-desc">Apps Script web app<br>Invoice extraction</div>
+      </div>
+    </div>
+
+    <p>The dashboard reads from six Airtable tables: <strong>Transactions</strong>, <strong>Tenancies</strong>, <strong>Tenants</strong>, <strong>Rental Units</strong>, <strong>Fixed Costs</strong>, and <strong>Tasks</strong>. It also fetches invoice data from a deployed Google Apps Script that reads emails labelled <span class="label-badge lb-3">3. to pay</span>.</p>
+  </div>
+</div>
+
+<!-- ============ 2. ACCESS & AUTHENTICATION ============ -->
+<div class="section" id="access">
+  <h2 class="section-title"><span class="icon">&#x1F511;</span> 2. Access &amp; Authentication</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F6AA; Opening the Dashboard</div>
+    <ol class="steps">
+      <li>Open the <strong>dashboard.html</strong> file from Google Drive (double-click or open in browser).</li>
+      <li>On first load, the login screen appears requesting your <strong>Airtable Personal Access Token</strong> (PAT).</li>
+      <li>Enter your PAT and click <strong>Connect</strong>. The dashboard loads all data from Airtable and Gmail.</li>
+      <li>The token is stored in <code>sessionStorage</code> and persists until you close the browser tab.</li>
+      <li>If the session expires or you close the tab, re-enter the PAT on next visit.</li>
+    </ol>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F512;</span>
+      <div><strong>Session-only storage:</strong> Your PAT is stored in <code>sessionStorage</code> only. It is automatically cleared when the browser tab is closed. No credentials are persisted to disk or sent to any third-party service.</div>
+    </div>
+
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Security note:</strong> No credentials are sent anywhere except directly to the Airtable API (<code>api.airtable.com</code>) and the Google Apps Script web app URL. There is no intermediary server.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 3. DASHBOARD TABS OVERVIEW ============ -->
+<div class="section" id="tabs">
+  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 3. Dashboard Tabs Overview</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F5C2; Available Tabs</div>
+    <p>The dashboard is organised into three main tabs, each providing a different operational view:</p>
+
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Tab</th>
+          <th>Purpose</th>
+          <th>Key Data Sources</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="label-badge lb-1">Leadership Dashboard</span></td>
+          <td>Financial overview, portfolio metrics, 31-day cash flow forecast, AI commentary, and balance calculator</td>
+          <td>Transactions, Tenancies, Tenants, Rental Units, Fixed Costs</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-2">Contractor Job List</span></td>
+          <td>Active maintenance jobs, contractor assignments, and job status tracking</td>
+          <td>Tasks (filtered to Maintenance Tickets)</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-3">Invoices</span></td>
+          <td>Pending invoices from Gmail, AI-matched payments, mark-as-paid workflow</td>
+          <td>Gmail Apps Script + Airtable Transactions</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F504;</span>
+      <div><strong>Tab switching:</strong> Switching between tabs triggers a data refresh to ensure you always see the latest information from Airtable and Gmail.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 4. FINANCIAL OVERVIEW ============ -->
+<div class="section" id="financial">
+  <h2 class="section-title"><span class="icon">&#x1F4B7;</span> 4. Financial Overview</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F3E6; Combined Account Balances</div>
+    <p>The financial overview section displays the combined position across the two main business accounts: <strong>Santander</strong> (TNT Property Services Ltd) and <strong>TNT Mgt Zempler</strong> (TNT Property Management Ltd). The opening balance is calculated from the most recent reconciled transactions in Airtable.</p>
+
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Description</th>
+          <th>Value / Target</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Opening Balance</strong></td>
+          <td>Combined balance from Santander + TNT Mgt Zempler at the start of the forecast period</td>
+          <td>Calculated from Airtable</td>
+        </tr>
+        <tr>
+          <td><strong>Monthly Income</strong></td>
+          <td>Projected rental income from active tenancies for the current month</td>
+          <td>Calculated from Tenancies</td>
+        </tr>
+        <tr>
+          <td><strong>Clear Profit Target</strong></td>
+          <td>The minimum net profit the business aims to retain each month after all costs</td>
+          <td><strong>&pound;10,000</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Required Gross Profit</strong></td>
+          <td>Total revenue needed to cover fixed costs and achieve the clear profit target</td>
+          <td><strong>&pound;17,500</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 5. PORTFOLIO & TENANCY METRICS ============ -->
+<div class="section" id="portfolio">
+  <h2 class="section-title"><span class="icon">&#x1F3E0;</span> 5. Portfolio &amp; Tenancy Metrics</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">&#x1F3D8; Portfolio Metrics</div>
+      <p>Portfolio metrics are drawn from the <strong>Rental Units</strong> table and show property occupancy at a glance:</p>
+      <ul>
+        <li><strong>Total Units:</strong> Count of all rental units in the portfolio</li>
+        <li><strong>Occupied:</strong> Units with an active tenancy assigned</li>
+        <li><strong>Void:</strong> Units currently without a tenant</li>
+        <li><strong>Occupancy Rate:</strong> Percentage of occupied vs total units</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">&#x1F465; Tenancy Status Breakdown</div>
+      <p>Tenancy metrics show the payment health of active tenants from the <strong>Tenancies</strong> and <strong>Tenants</strong> tables:</p>
+      <ul>
+        <li><strong>In Payment:</strong> Tenants currently paying rent on schedule</li>
+        <li><strong>CFV (Consideration for Vulnerability):</strong> Tenants flagged for review</li>
+        <li><strong>CFV Actioned:</strong> CFV cases where action has been taken</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F6A6; Traffic Light System</div>
+    <p>Key metrics are displayed using a traffic light system to provide at-a-glance health indicators. Each metric is shown as a coloured chip:</p>
+
+    <div class="metrics-bar" style="margin-top: 0.75rem;">
+      <span class="metric-chip mc-green"><span class="dot green"></span> Green &mdash; On target</span>
+      <span class="metric-chip mc-amber"><span class="dot amber"></span> Amber &mdash; Needs attention</span>
+      <span class="metric-chip mc-red"><span class="dot red"></span> Red &mdash; Action required</span>
+    </div>
+
+    <p style="margin-top: 0.75rem;">Thresholds are applied to occupancy rate, CFV count, void count, and cash flow closing balance. Green indicates healthy operation, amber signals early warning, and red requires immediate review.</p>
+  </div>
+</div>
+
+<!-- ============ 6. 31-DAY CASH FLOW FORECAST ============ -->
+<div class="section" id="cashflow">
+  <h2 class="section-title"><span class="icon">&#x1F4C5;</span> 6. 31-Day Cash Flow Forecast</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C8; Forecast Logic</div>
+    <p>The cash flow forecast projects daily inflows and outflows for the next 31 days, starting from today&rsquo;s combined opening balance. It draws on tenancy rent schedules, fixed cost due dates, and reconciliation data to avoid double-counting.</p>
+
+    <div class="flow">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F3E0;</span>
+        Active Tenancies
+        <span class="flow-sub">Rent schedules</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step warning">
+        <span class="flow-icon">&#x1F4C5;</span>
+        Project Due Dates
+        <span class="flow-sub">+Fixed costs</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step purple">
+        <span class="flow-icon">&#x1F50D;</span>
+        Match vs Reconciled
+        <span class="flow-sub">Avoid double-count</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F4CA;</span>
+        Daily Forecast
+        <span class="flow-sub">31-day view</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-1">A</span>
+      <h3>Income Projection</h3>
+      <span class="wf-tag">Inflows</span>
+    </div>
+    <div class="wf-body">
+      <h4>How rental income is projected</h4>
+      <ol class="steps">
+        <li>All <strong>active tenancies</strong> are retrieved from the Tenancies table with their rent amount and payment day.</li>
+        <li>Each tenant&rsquo;s <strong>status is checked</strong> &mdash; only tenants marked as &ldquo;In Payment&rdquo; contribute to the income forecast.</li>
+        <li>Tenants receiving <strong>Universal Credit (UC)</strong> are marked separately; their payment may arrive on different dates to direct-pay tenants.</li>
+        <li>For each day in the 31-day window, the system calculates whether a rent payment falls on that day based on the tenant&rsquo;s payment frequency and due date.</li>
+        <li>The projected amount is checked against <strong>reconciled transactions</strong> to avoid counting payments that have already arrived.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-3">B</span>
+      <h3>Cost Projection</h3>
+      <span class="wf-tag">Outflows</span>
+    </div>
+    <div class="wf-body">
+      <h4>How fixed costs are projected</h4>
+      <ol class="steps">
+        <li>All <strong>active fixed costs</strong> are loaded from the Fixed Costs table, including due day and payment frequency (weekly, monthly, quarterly, annually).</li>
+        <li>For each cost, the <strong>next due date</strong> is calculated based on its frequency and last known payment date.</li>
+        <li>Costs are placed on the appropriate day within the 31-day forecast window.</li>
+        <li>Like income, projected costs are cross-referenced against <strong>reconciled transactions</strong> to prevent double-counting.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CA; Forecast Table Columns</div>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Date</strong></td><td>Calendar date for the forecast row</td></tr>
+        <tr><td><strong>Opening</strong></td><td>Balance at the start of the day (previous day&rsquo;s closing)</td></tr>
+        <tr><td><strong>In</strong></td><td>Total projected inflows for the day (rent payments)</td></tr>
+        <tr><td><strong>Out</strong></td><td>Total projected outflows for the day (fixed costs)</td></tr>
+        <tr><td><strong>Net</strong></td><td>In minus Out for the day</td></tr>
+        <tr><td><strong>Closing</strong></td><td>Opening + Net &mdash; carries forward as next day&rsquo;s opening</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 7. RECONCILIATION MATCHING LOGIC ============ -->
+<div class="section" id="reconciliation">
+  <h2 class="section-title"><span class="icon">&#x1F50D;</span> 7. Reconciliation Matching Logic</h2>
+
+  <div class="info-box danger">
+    <span class="ib-icon">&#x1F6A8;</span>
+    <div><strong>Critical system:</strong> The reconciliation matching logic is essential for preventing double-counting of transactions that have already been paid. If a projected income or cost has already been settled in the bank, the matching engine ensures it is excluded from the forecast to maintain accuracy.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C6; Date Matching Window</div>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Lookback</strong></td>
+          <td>5 days before expected date</td>
+          <td>Catches early payments (e.g., rent paid a few days ahead)</td>
+        </tr>
+        <tr>
+          <td><strong>Look-ahead</strong></td>
+          <td>5 days after expected date</td>
+          <td>Catches late payments (e.g., delayed bank transfers)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid-2">
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-4">&#x2191;</span>
+        <h3>Inflow Matching (3-Tier)</h3>
+        <span class="wf-tag">Income</span>
+      </div>
+      <div class="wf-body">
+        <h4>Tier 1: Strong Match</h4>
+        <p>Two or more keywords from the tenant name or reference appear in the bank transaction description. This is the highest-confidence match.</p>
+
+        <h4>Tier 2: Good Match</h4>
+        <p>One keyword from the tenant name plus the amount matches within <strong>30%</strong> of the expected rent. Provides reasonable confidence with a partial name match.</p>
+
+        <h4>Tier 3: Fallback Match</h4>
+        <p>The transaction amount matches the expected rent <strong>exactly</strong> (to the penny). Used only when no keyword matches are found, as an amount-only match is the weakest signal.</p>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-3">&#x2193;</span>
+        <h3>Outflow Matching</h3>
+        <span class="wf-tag">Costs</span>
+      </div>
+      <div class="wf-body">
+        <h4>Matching Criteria</h4>
+        <p>Outflow matching requires all three conditions to be met:</p>
+        <ul>
+          <li><strong>Keyword match:</strong> At least one keyword from the cost name appears in the transaction description</li>
+          <li><strong>Amount match:</strong> The transaction amount is within <strong>33%</strong> of the expected cost, or within <strong>&pound;1</strong> (whichever is more generous)</li>
+          <li><strong>Sub-category compatibility:</strong> The transaction&rsquo;s Airtable sub-category is compatible with the fixed cost&rsquo;s category</li>
+        </ul>
+
+        <div class="info-box tip">
+          <span class="ib-icon">&#x1F4A1;</span>
+          <div><strong>Why sub-category matters:</strong> The sub-category check prevents false matches where two different costs share a similar name or amount. For example, two utility bills of similar value would not be confused if their sub-categories differ.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 8. BALANCE CALCULATOR ============ -->
+<div class="section" id="balance-calc">
+  <h2 class="section-title"><span class="icon">&#x1F527;</span> 8. Balance Calculator</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F9EE; Interactive What-If Tool</div>
+    <p>The Balance Calculator is an interactive what-if tool that allows you to model different cash flow scenarios by selectively including or excluding individual inflows and outflows from the 31-day forecast. It is accessed by clicking the <strong>wrench icon</strong> on the dashboard toolbar.</p>
+
+    <h4 style="margin-top: 1rem;">How It Works</h4>
+    <ol class="steps">
+      <li>Click the <strong>wrench icon</strong> to open the Balance Calculator panel.</li>
+      <li>Each projected inflow and outflow is listed with a <strong>checkbox</strong>. Ticked items are included in the forecast; unticked items are excluded.</li>
+      <li>Select or deselect individual items to see how the closing balance changes in real time.</li>
+      <li>Use the <strong>filter buttons</strong> to quickly adjust selections: <strong>Select All</strong>, <strong>Deselect All</strong>, <strong>Inflows Only</strong>, or <strong>Outflows Only</strong>.</li>
+      <li>The selected state is saved to <code>sessionStorage</code> so it persists during your browser session.</li>
+      <li>Selections <strong>auto-reset daily</strong> to ensure each day starts with a clean forecast.</li>
+    </ol>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4BE;</span>
+      <div><strong>State persistence:</strong> Your Balance Calculator selections are stored in <code>sessionStorage</code> and will persist while your browser tab is open. They automatically reset at midnight to provide a fresh forecast each day.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 9. AI COMMENTARY & CREDIT CARD PLAN ============ -->
+<div class="section" id="ai-commentary">
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 9. AI Commentary &amp; Credit Card Plan</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4AC; AI Commentary Topics</div>
+    <p>The AI commentary section provides an automated narrative analysis of the dashboard data. It covers the following topics to give a holistic view of the business position:</p>
+    <ul>
+      <li><strong>Financial Health:</strong> Overall cash position, income vs expenditure trends, and balance trajectory</li>
+      <li><strong>Occupancy Analysis:</strong> Void rates, tenant turnover, and impact on projected income</li>
+      <li><strong>Maintenance &amp; Wages:</strong> Comparison of actual spend against budget allocations</li>
+      <li><strong>CFV Risk Assessment:</strong> Impact of tenants under consideration for vulnerability on rental income</li>
+      <li><strong>Quick Wins:</strong> Actionable suggestions to improve cash position in the short term</li>
+    </ul>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">&#x1F4B0; Monthly Budget Allocations</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Monthly Budget</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Maintenance</strong></td><td>&pound;3,000</td></tr>
+          <tr><td><strong>Wages</strong></td><td>&pound;3,000</td></tr>
+          <tr><td><strong>CFV Allowance</strong></td><td>&pound;1,500</td></tr>
+          <tr><td><strong>Clear Profit Target</strong></td><td>&pound;10,000</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">&#x1F4B3; Credit Card Overview</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Card</th>
+            <th>Balance Logic</th>
+            <th>Payment Day</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Lloyds</strong></td>
+            <td>Negative = owed to bank</td>
+            <td>23rd</td>
+          </tr>
+          <tr>
+            <td><strong>AmEx</strong></td>
+            <td>Positive = owed to bank</td>
+            <td>28th</td>
+          </tr>
+          <tr>
+            <td><strong>Santander</strong></td>
+            <td>&pound;5,500 minus available = owed</td>
+            <td>14th</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C5; Credit Card Payment Logic</div>
+    <p>The dashboard calculates recommended credit card payments based on several business rules:</p>
+    <ul>
+      <li><strong>Friday-based payments:</strong> Payments are scheduled to coincide with Fridays to align with business cash flow cycles</li>
+      <li><strong>7-day lookahead:</strong> The system looks 7 days ahead to identify upcoming payment due dates</li>
+      <li><strong>&pound;750 buffer:</strong> A buffer of &pound;750 is maintained in the business account before credit card payments are recommended</li>
+      <li><strong>Minimum payment:</strong> Either 2% of the outstanding balance or &pound;25, whichever is greater</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ 10. INVOICES TAB ============ -->
+<div class="section" id="invoices">
+  <h2 class="section-title"><span class="icon">&#x1F9FE;</span> 10. Invoices Tab</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4E5; Data Flow</div>
+    <p>The Invoices tab combines data from two sources with a merge strategy to ensure reliability:</p>
+
+    <div class="flow">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F4E7;</span>
+        Gmail Apps Script
+        <span class="flow-sub">Live data (primary)</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step warning">
+        <span class="flow-icon">&#x1F504;</span>
+        Merge Strategy
+        <span class="flow-sub">Live + static fallback</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F4CB;</span>
+        Invoice List
+        <span class="flow-sub">Combined view</span>
+      </div>
+    </div>
+
+    <p>If the Gmail Apps Script is unreachable (e.g., network issues), the dashboard falls back to <strong>static data</strong> stored in localStorage. A <span class="label-badge lb-2">Static</span> badge appears next to invoices loaded from the fallback source.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x270F;&#xFE0F; Editable Fields</div>
+    <p>Each invoice row supports click-to-edit for the following fields. Manually entered values are saved to <code>localStorage</code> and persist across browser sessions.</p>
+
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Type</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Due Date</strong></td><td>Date picker</td><td>Click to set or change the invoice due date</td></tr>
+        <tr><td><strong>Payee</strong></td><td>Text input</td><td>Supplier or contractor name</td></tr>
+        <tr><td><strong>Description</strong></td><td>Text input</td><td>Brief description of the invoice contents</td></tr>
+        <tr><td><strong>Reference</strong></td><td>Text input</td><td>Invoice number or reference code</td></tr>
+        <tr><td><strong>Amount</strong></td><td>Number input</td><td>Invoice total in GBP</td></tr>
+      </tbody>
+    </table>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4BE;</span>
+      <div><strong>Local persistence:</strong> Manually entered values (via click-to-edit) are saved to <code>localStorage</code> and will persist across browser sessions and refreshes. This allows you to augment invoice data that was not automatically extracted from the email.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 11. INVOICE AI MATCHING & MARK AS PAID ============ -->
+<div class="section" id="invoice-matching">
+  <h2 class="section-title"><span class="icon">&#x2705;</span> 11. Invoice AI Matching &amp; Mark as Paid</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F50D; AI Matching Criteria</div>
+    <p>The dashboard automatically attempts to match pending invoices against reconciled bank transactions using the following criteria:</p>
+
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Criterion</th>
+          <th>Rule</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Amount Match</strong></td>
+          <td>Transaction amount must be within <strong>&pound;0.02</strong> of the invoice amount (allowing for minor rounding differences)</td>
+        </tr>
+        <tr>
+          <td><strong>Date Check</strong></td>
+          <td>Transaction date must be <strong>on or after</strong> the invoice date (payments cannot precede the invoice)</td>
+        </tr>
+        <tr>
+          <td><strong>Payee Keywords</strong></td>
+          <td>Either <strong>2+ keywords</strong> from the payee name match the transaction description, or <strong>1 distinctive keyword</strong> (5+ characters) matches</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid-2">
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-4">&#x2713;</span>
+        <h3>Approve / Reject Flow</h3>
+        <span class="wf-tag">AI Match</span>
+      </div>
+      <div class="wf-body">
+        <p>When the AI finds a matching transaction, the invoice row displays the proposed match with <strong>Approve</strong> and <strong>Reject</strong> buttons:</p>
+        <ul>
+          <li><strong>Approve:</strong> Confirms the match and triggers the Mark Paid workflow (moves the email to the &ldquo;4: paid&rdquo; label and links to the Airtable transaction)</li>
+          <li><strong>Reject:</strong> Dismisses the proposed match. The invoice remains in the pending list and can be manually matched later.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-5">&#x1F4B8;</span>
+        <h3>Mark as Paid</h3>
+        <span class="wf-tag">Workflow</span>
+      </div>
+      <div class="wf-body">
+        <p>When an invoice is marked as paid (either via AI match approval or manually):</p>
+        <ol class="steps">
+          <li>The Gmail email is moved from <span class="label-badge lb-3">3. to pay</span> to <span class="label-badge lb-4">4: paid</span> via the Apps Script.</li>
+          <li>The invoice is linked to the matching <strong>Airtable transaction</strong> record for audit trail.</li>
+          <li>The invoice is removed from the pending invoices list in the dashboard.</li>
+        </ol>
+        <p style="margin-top: 0.75rem;">Every invoice row also includes a <strong>Manual Mark Paid</strong> button for cases where the AI cannot find a match (e.g., partial payments, split transactions, or payments from a different account).</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 12. SMART REFRESH SYSTEM ============ -->
+<div class="section" id="smart-refresh">
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 12. Smart Refresh System</h2>
+
+  <div class="card">
+    <div class="card-header">&#x23F0; Refresh Configuration</div>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Refresh Interval</strong></td>
+          <td>15 minutes</td>
+          <td>Data is automatically refreshed from Airtable and Gmail every 15 minutes</td>
+        </tr>
+        <tr>
+          <td><strong>Idle Threshold</strong></td>
+          <td>15 minutes</td>
+          <td>User must be idle for 15 minutes before an auto-refresh fires</td>
+        </tr>
+        <tr>
+          <td><strong>Activity Tracking</strong></td>
+          <td>Clicks, keystrokes, input</td>
+          <td>Mouse clicks, keyboard presses, and form input all count as user activity</td>
+        </tr>
+        <tr>
+          <td><strong>Tab Switch</strong></td>
+          <td>Immediate refresh</td>
+          <td>Switching between dashboard tabs triggers an immediate data refresh</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F6E1;&#xFE0F;</span>
+      <div><strong>Defers while active:</strong> The smart refresh system monitors user activity (clicks, keystrokes, and input). If you are actively working in the dashboard, the automatic refresh is deferred until you become idle. This prevents data reload from interrupting form edits, Balance Calculator adjustments, or invoice reviews.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 13. GOOGLE APPS SCRIPT SETUP ============ -->
+<div class="section" id="apps-script">
+  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 13. Google Apps Script Setup</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F680; Deployment Steps</div>
+    <ol class="steps">
+      <li>Open <strong>Google Apps Script</strong> at <code>script.google.com</code> and create a new project (or open the existing one).</li>
+      <li>Paste the Apps Script code that handles reading emails from the <span class="label-badge lb-3">3. to pay</span> label, extracting invoice fields, and processing <code>markPaid</code> actions.</li>
+      <li>Click <strong>Deploy &gt; New deployment</strong> and select <strong>Web app</strong> as the deployment type.</li>
+      <li>Set <strong>Execute as: Me</strong> (Kevin&rsquo;s Google account) and <strong>Who has access: Anyone</strong> (so the dashboard can call it without OAuth).</li>
+      <li>Copy the <strong>Web app URL</strong> and paste it into the dashboard&rsquo;s <code>GMAIL_SCRIPT_URL</code> configuration constant.</li>
+      <li>Test by loading the Invoices tab &mdash; invoices should appear with a <span class="label-badge lb-4">Live</span> badge.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4E7; What the Script Does</div>
+    <ul>
+      <li><strong>Reads emails:</strong> Fetches all threads with the <span class="label-badge lb-3">3. to pay</span> Gmail label</li>
+      <li><strong>Extracts fields:</strong> Parses the email subject, sender, body, and attachments to extract payee, amount, due date, and reference</li>
+      <li><strong>OCR for PDFs:</strong> If a PDF attachment is present, the script can use Google Drive&rsquo;s built-in OCR to extract text from the PDF for field extraction</li>
+      <li><strong>markPaid action:</strong> When called with a <code>markPaid</code> action, the script moves the email thread from <span class="label-badge lb-3">3. to pay</span> to <span class="label-badge lb-4">4: paid</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ 14. TROUBLESHOOTING ============ -->
+<div class="section" id="troubleshooting">
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 14. Troubleshooting</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F527; Common Issues &amp; Solutions</div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Dashboard shows login screen / &ldquo;Session expired&rdquo;</div>
+      <div class="ts-solution">Your Airtable PAT has expired or the browser tab was closed. Re-enter your PAT on the login screen. The token is stored in <code>sessionStorage</code> and does not persist after the tab is closed.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Invoices show &ldquo;Static&rdquo; badge instead of &ldquo;Live&rdquo;</div>
+      <div class="ts-solution">The Gmail Apps Script is unreachable. Check the <code>GMAIL_SCRIPT_URL</code> constant in the dashboard code matches the deployed web app URL. Verify the Apps Script deployment is active by visiting the URL directly in a browser &mdash; it should return JSON.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Invoice amounts show &ldquo;See PDF&rdquo; instead of a value</div>
+      <div class="ts-solution">The Apps Script could not extract the amount from the email body or attachment. Click the amount field to manually enter the value, or enable Google Drive API OCR in the Apps Script to extract text from PDF attachments.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">A reconciled payment still appears in the forecast</div>
+      <div class="ts-solution">The reconciliation matching engine uses a &plusmn;5 day window. If the payment fell outside this window (e.g., more than 5 days early or late), it will not be matched. Check the transaction date in Airtable and adjust if needed.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Refresh interrupts my work / reloads while editing</div>
+      <div class="ts-solution">The smart refresh system should defer while you are active. If it is not detecting your activity, ensure you have interacted with the dashboard (click, keystroke, or input) within the last 15 minutes. The idle threshold must be exceeded before an auto-refresh fires.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Mark Paid not working / CORS error</div>
+      <div class="ts-solution">If the dashboard is opened via the <code>file://</code> protocol (double-clicking the HTML file), CORS restrictions may block the request to the Google Apps Script. The dashboard falls back to saving the paid status in <code>localStorage</code> instead. For full functionality, serve the file via a local HTTP server or host it on a web server.</div>
+    </div>
+  </div>
+</div>
+
+</div><!-- end .container -->
+</body>
+</html>
