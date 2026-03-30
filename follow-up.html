@@ -1013,13 +1013,20 @@
                 });
             await Promise.all(countPromises);
 
-            // Refresh inbox unlabelled count
+            // Refresh inbox unlabelled count (count unique threads, not messages)
             let inboxCount = null;
             try {
                 const numberedLabelIds = new Set(allLabels.map(l => l.id));
-                const inboxResp = await gapi.client.gmail.users.messages.list({ userId: 'me', labelIds: ['INBOX'], maxResults: 500 });
-                const inboxMsgs = inboxResp.result.messages || [];
-                let unlabelledCount = 0;
+                let inboxMsgs = [];
+                let inboxPageToken = null;
+                do {
+                    const params = { userId: 'me', labelIds: ['INBOX'], maxResults: 500 };
+                    if (inboxPageToken) params.pageToken = inboxPageToken;
+                    const inboxResp = await gapi.client.gmail.users.messages.list(params);
+                    inboxMsgs = inboxMsgs.concat(inboxResp.result.messages || []);
+                    inboxPageToken = inboxResp.result.nextPageToken;
+                } while (inboxPageToken);
+                const unlabelledThreadIds = new Set();
                 const batchSize = 50;
                 for (let i = 0; i < inboxMsgs.length; i += batchSize) {
                     const batch = inboxMsgs.slice(i, Math.min(i + batchSize, inboxMsgs.length));
@@ -1030,11 +1037,11 @@
                     );
                     for (const d of details) {
                         if (d && d.labelIds && !d.labelIds.some(lid => numberedLabelIds.has(lid))) {
-                            unlabelledCount++;
+                            unlabelledThreadIds.add(d.threadId);
                         }
                     }
                 }
-                inboxCount = unlabelledCount;
+                inboxCount = unlabelledThreadIds.size;
             } catch (e) { inboxCount = null; }
 
             // Update dropdown text without changing selection
