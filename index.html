@@ -2886,11 +2886,10 @@
             new Date(a.dueDate || a.emailDate) - new Date(b.dueDate || b.emailDate)
         );
 
-        // Summary calculations (paid invoices already filtered out above)
-        let knownTotal = 0, unknownCount = 0, overdueCount = 0, paidCount = 0;
+        // Summary calculations — all paid invoices are already filtered out above
+        // so everything remaining is genuinely unpaid
+        let knownTotal = 0, unknownCount = 0, overdueCount = 0;
         sorted.forEach(inv => {
-            const isMatched = !!txMatches[inv.id || inv.threadId];
-            if (isMatched) { paidCount++; return; }
             if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
             if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
         });
@@ -2899,11 +2898,10 @@
         const summaryCards = document.getElementById('invoiceSummaryCards');
         if (summaryCards) {
             summaryCards.innerHTML = `
-                <div class="card"><div class="card-label">Unpaid Invoices</div><div class="card-value">${sorted.length - paidCount}</div></div>
+                <div class="card"><div class="card-label">Unpaid Invoices</div><div class="card-value">${sorted.length}</div></div>
                 <div class="card"><div class="card-label">Known Amount Due</div><div class="card-value text-red">${fmt(knownTotal)}</div></div>
-                <div class="card"><div class="card-label">Amount in PDF Only</div><div class="card-value" style="color:#94a3b8">${unknownCount} invoice${unknownCount !== 1 ? 's' : ''}</div></div>
+                <div class="card"><div class="card-label">Amount Unknown</div><div class="card-value" style="color:#94a3b8">${unknownCount} invoice${unknownCount !== 1 ? 's' : ''}</div></div>
                 <div class="card"><div class="card-label">Overdue / Past Date</div><div class="card-value text-red">${overdueCount}</div></div>
-                ${paidCount > 0 ? `<div class="card"><div class="card-label">Matched as Paid</div><div class="card-value" style="color:#16a34a">${paidCount}</div></div>` : ''}
             `;
         }
 
@@ -2923,7 +2921,8 @@
             // Check if matched to a transaction (suggestion — not auto-paid)
             const matchKey = inv.id || inv.threadId;
             const match = txMatches[matchKey];
-            let isApproved = approvedMatches[matchKey];
+            const isApproved = isInvoiceApproved(matchKey);
+            const isRejected = isMatchRejected(matchKey);
 
             let badge = '';
             if (isApproved) {
@@ -2968,8 +2967,9 @@
             const threadId = inv.threadId || inv.id;
 
             // AI match suggestion row (shown below the invoice row when a match is found)
+            // Only show if: match exists, not already approved, and not rejected
             let matchRow = '';
-            if (match && !isApproved) {
+            if (match && !isApproved && !isRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
                     <td colspan="6" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -2977,7 +2977,7 @@
                             <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
                             <div style="margin-left:auto;display:flex;gap:6px">
                                 <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${threadId}','${matchKey}','${match.txRecordId}','${gmailUrl}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
-                                <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch(${idx})" title="Dismiss this suggestion">✗ Reject</button>
+                                <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch('${matchKey}',${idx})" title="Dismiss this suggestion">✗ Reject</button>
                             </div>
                         </div>
                     </td>
@@ -3101,35 +3101,42 @@
         input.focus();
     }
 
-    // ── AI match approval state ──
-    const approvedMatches = {};
+    // ── AI match approval state — persisted in localStorage ──
+    function isInvoiceApproved(key) {
+        return !!localStorage.getItem('inv_paid_' + key);
+    }
+    function isMatchRejected(key) {
+        return !!localStorage.getItem('inv_reject_' + key);
+    }
 
     async function approveMatch(threadId, invoiceKey, txRecordId, gmailUrl, btn, rowIdx) {
-        // Mark as approved in state
-        approvedMatches[invoiceKey] = true;
+        // Immediately mark as paid in localStorage — this persists across refreshes
+        localStorage.setItem('inv_paid_' + invoiceKey, '1');
 
         // Hide the suggestion row
         const suggRow = document.getElementById('inv-match-' + rowIdx);
         if (suggRow) suggRow.style.display = 'none';
 
-        // Call markInvoicePaid to do the actual Gmail label move + Airtable link
+        // Do the Gmail label move + Airtable link
         const parentRow = suggRow ? suggRow.previousElementSibling : null;
         const markBtn = parentRow ? parentRow.querySelector('.inv-mark-paid-btn') : btn;
         await markInvoicePaid(threadId, invoiceKey, txRecordId, gmailUrl, markBtn || btn);
     }
 
-    function rejectMatch(rowIdx) {
-        // Simply hide the suggestion row
+    function rejectMatch(invoiceKey, rowIdx) {
+        // Persist rejection so the suggestion doesn't reappear on refresh
+        localStorage.setItem('inv_reject_' + invoiceKey, '1');
         const suggRow = document.getElementById('inv-match-' + rowIdx);
-        if (suggRow) {
-            suggRow.style.display = 'none';
-        }
+        if (suggRow) suggRow.style.display = 'none';
     }
 
     // ── Mark invoice as paid: move Gmail label + attach link to Airtable tx ──
     async function markInvoicePaid(threadId, invoiceKey, txRecordId, gmailUrl, btn) {
         btn.classList.add('loading');
         btn.textContent = 'Processing...';
+
+        // ALWAYS mark as paid in localStorage first — this ensures persistence
+        localStorage.setItem('inv_paid_' + invoiceKey, '1');
 
         try {
             // 1. Move Gmail label from "3. to pay" to "4: paid"
@@ -3144,13 +3151,8 @@
                         console.warn('Gmail mark-paid HTTP error:', resp.status);
                     }
                 } catch (fetchErr) {
-                    // If CORS fails from file://, mark locally and notify user
                     console.warn('Gmail mark-paid fetch failed (CORS?):', fetchErr.message);
-                    localStorage.setItem('inv_paid_' + invoiceKey, '1');
                 }
-            } else {
-                // No Apps Script URL — mark locally
-                localStorage.setItem('inv_paid_' + invoiceKey, '1');
             }
 
             // 2. Attach Gmail link to the Airtable transaction's "Invoice Data" field
