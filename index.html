@@ -3411,12 +3411,12 @@
             } catch (e) { commentCounts[entry.tenancyId] = 0; }
         }));
 
-        // Sort: CFV first (by days overdue desc), then CFV Actioned
+        // Sort: CFV first, then CFV Actioned — within each group, sort by due day earliest to latest
         cfvList.sort((a, b) => {
             const statusOrder = { 'cfv': 0, 'potential': 0, 'cfv actioned': 1 };
             const sDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
             if (sDiff !== 0) return sDiff;
-            return b.daysOverdue - a.daysOverdue;
+            return (a.dueDay || 99) - (b.dueDay || 99);
         });
 
         tbody.innerHTML = cfvList.map((entry, idx) => {
