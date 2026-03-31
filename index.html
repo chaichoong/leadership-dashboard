@@ -3246,18 +3246,18 @@
 
             // Include existing CFV and CFV Actioned tenancies
             if (statusName === 'cfv' || statusName === 'cfv actioned') {
-                // Auto-return: if CFV Actioned and paid this month, move back to In Payment
+                const tenant = getTenantForTenancy(tenancy, tenantLookup);
+                const entry = buildCFVEntry(tenancy, tenant, statusName, today);
+                // Flag CFV Actioned tenancies that have been paid this month
+                // (user must approve the return — not automatic, as payments may be from transfers)
                 const paidCheck = getField(tenancy, F.tenPaidThisMonth);
                 if (statusName === 'cfv actioned' && paidCheck) {
-                    // Payment received — auto-return to In Payment
-                    updateTenancyStatus(tenancy.id, CFV_STATUS_IDS.inPayment);
-                    addTenancyComment(tenancy.id, 'Auto-returned to In Payment — payment received this month.');
-                    localStorage.removeItem('cfv_' + tenancy.id + '_chaseStart');
-                    localStorage.removeItem('cfv_' + tenancy.id + '_startDate');
-                    return; // skip — no longer a CFV
+                    const dismissKey = 'cfv_' + tenancy.id + '_returnDismissed';
+                    if (!localStorage.getItem(dismissKey)) {
+                        entry.paymentDetected = true;
+                    }
                 }
-                const tenant = getTenantForTenancy(tenancy, tenantLookup);
-                cfvList.push(buildCFVEntry(tenancy, tenant, statusName, today));
+                cfvList.push(entry);
                 return;
             }
 
@@ -3470,6 +3470,23 @@
                 `;
             }
 
+            // Payment detected banner (for CFV Actioned with paid this month)
+            let paymentBanner = '';
+            if (entry.paymentDetected) {
+                paymentBanner = `<tr>
+                    <td colspan="9" style="padding:6px 12px;background:#f0fdf4;border-left:3px solid #16a34a">
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                            <span style="font-size:11px;font-weight:700;color:#16a34a">Payment detected this month</span>
+                            <span style="font-size:12px;color:#1e293b">Return ${escHtml(entry.surname)} to In Payment?</span>
+                            <div style="margin-left:auto;display:flex;gap:6px">
+                                <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">✓ Approve</button>
+                                <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReturn('${entry.tenancyId}',this)">✗ Dismiss</button>
+                            </div>
+                        </div>
+                    </td>
+                </tr>`;
+            }
+
             return `<tr>
                 <td style="font-weight:600">${escHtml(entry.surname)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.ref)}</span></td>
                 <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.unitName)}</span></td>
@@ -3480,7 +3497,7 @@
                 <td>${chaseBadge}</td>
                 <td>${contactHtml}</td>
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
-            </tr>`;
+            </tr>${paymentBanner}`;
         }).join('');
     }
 
@@ -3507,6 +3524,12 @@
         } else {
             cfvReturnToPayment(tenancyId, btn);
         }
+    }
+
+    function cfvDismissReturn(tenancyId, btn) {
+        localStorage.setItem('cfv_' + tenancyId + '_returnDismissed', '1');
+        const row = btn.closest('tr');
+        if (row) row.style.display = 'none';
     }
 
     async function cfvMarkActioned(tenancyId, btn) {
