@@ -110,7 +110,7 @@
             grid-template-columns: 40px 1fr 160px 80px 120px 40px;
         }
         .email-row-summary.newsletter-row {
-            grid-template-columns: 40px 1fr 160px 80px 120px 40px;
+            grid-template-columns: 40px 1fr 160px 80px 120px 120px 40px;
         }
         .email-row.newsletter-read .email-row-summary { opacity: 0.5; }
         .read-btn {
@@ -2758,6 +2758,12 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             ${isRead
                                 ? '<button class="read-btn already-read" disabled>Read</button>'
                                 : `<button class="read-btn" onclick="event.stopPropagation(); collapseRow(${i}); markNewsletterReadAndRefresh('${email.threadId}');">Read</button>`}
+                        </div>
+                        <div class="label-change-col" onclick="event.stopPropagation();">
+                            <select class="label-change-select" id="labelChg-${i}" onchange="changeLabel(${i}, this.value)">
+                                <option value="">Move to...</option>
+                                ${labelOptions}
+                            </select>
                         </div>
                         <div class="expand-icon">&#9662;</div>
                     </div>
