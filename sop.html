@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>&#x1F4CA; Leadership Dashboard</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
-    <div class="version">Version 1.0 &bull; 29 March 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.1 &bull; 31 March 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -386,9 +386,12 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <a href="#ai-commentary"><span class="toc-num">9</span> AI Commentary &amp; Credit Card Plan</a>
       <a href="#invoices"><span class="toc-num">10</span> Invoices Tab</a>
       <a href="#invoice-matching"><span class="toc-num">11</span> Invoice AI Matching &amp; Mark as Paid</a>
-      <a href="#smart-refresh"><span class="toc-num">12</span> Smart Refresh System</a>
-      <a href="#apps-script"><span class="toc-num">13</span> Google Apps Script Setup</a>
-      <a href="#troubleshooting"><span class="toc-num">14</span> Troubleshooting</a>
+      <a href="#cfv"><span class="toc-num">12</span> CFV Tab &mdash; Cash Flow Voids</a>
+      <a href="#cfv-lifecycle"><span class="toc-num">13</span> CFV Lifecycle &amp; Chase Sequence</a>
+      <a href="#smart-refresh"><span class="toc-num">14</span> Smart Refresh System</a>
+      <a href="#mobile"><span class="toc-num">15</span> Mobile Responsive Design</a>
+      <a href="#apps-script"><span class="toc-num">16</span> Google Apps Script Setup</a>
+      <a href="#troubleshooting"><span class="toc-num">17</span> Troubleshooting</a>
     </div>
   </div>
 </div>
@@ -457,7 +460,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
   <div class="card">
     <div class="card-header">&#x1F5C2; Available Tabs</div>
-    <p>The dashboard is organised into three main tabs, each providing a different operational view:</p>
+    <p>The dashboard is organised into four main tabs, each providing a different operational view:</p>
 
     <table class="label-table">
       <thead>
@@ -482,6 +485,11 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
           <td><span class="label-badge lb-3">Invoices</span></td>
           <td>Pending invoices from Gmail, AI-matched payments, mark-as-paid workflow</td>
           <td>Gmail Apps Script + Airtable Transactions</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-7">CFVs</span></td>
+          <td>Auto-detected cash flow voids, 3-stage chase tracking, comments, status management</td>
+          <td>Tenancies, Tenants, Airtable Comments API</td>
         </tr>
       </tbody>
     </table>
@@ -974,8 +982,161 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 </div>
 
 <!-- ============ 12. SMART REFRESH SYSTEM ============ -->
+<!-- ============ 12. CFV TAB ============ -->
+<div class="section" id="cfv">
+  <h2 class="section-title"><span class="icon">&#x1F6A8;</span> 12. CFV Tab &mdash; Cash Flow Voids</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F50D; Overview</div>
+    <p>The CFV tab automatically detects tenancies where rent is overdue and manages the follow-up process. It reads from the Airtable Tenancies and Tenants tables, updates payment statuses directly, and tracks chase progress.</p>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x26A1;</span>
+      <div><strong>Auto-detection:</strong> On each refresh, the dashboard checks all &ldquo;In Payment&rdquo; tenancies. If rent is 2+ days past the due day and no payment has been received this month, the tenancy is automatically flagged as a CFV in Airtable.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CA; KPI Summary Cards</div>
+    <table class="label-table">
+      <thead><tr><th>Card</th><th>What It Shows</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Active CFVs</strong></td><td>Count of tenancies with CFV status (not yet actioned)</td></tr>
+        <tr><td><strong>Total Exposure</strong></td><td>Combined monthly rent at risk across all CFV + CFV Actioned tenancies</td></tr>
+        <tr><td><strong>Oldest Overdue</strong></td><td>Days since the longest-standing active CFV was first detected</td></tr>
+        <tr><td><strong>CFV Actioned</strong></td><td>Count of tenancies where follow-up is in progress, awaiting payment confirmation</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CB; CFV Table Columns</div>
+    <table class="label-table">
+      <thead><tr><th>Column</th><th>Source</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Tenant</strong></td><td>Tenancy surname + reference</td><td>Name and tenancy ref from Airtable</td></tr>
+        <tr><td><strong>Property</strong></td><td>Rental Unit lookup</td><td>Property name and unit reference</td></tr>
+        <tr><td><strong>Rent</strong></td><td>Expected Monthly Rent field</td><td>Amount at risk</td></tr>
+        <tr><td><strong>Due Day</strong></td><td>Due Day of Month field</td><td>Day of month when rent is due. Table sorted earliest to latest.</td></tr>
+        <tr><td><strong>Days Overdue</strong></td><td>localStorage (persistent)</td><td>Calculated from stored CFV start date. Persists across months &mdash; keeps counting until returned to In Payment.</td></tr>
+        <tr><td><strong>Status</strong></td><td>Payment Status (Unified)</td><td>CFV (red badge) or CFV Actioned (amber badge)</td></tr>
+        <tr><td><strong>Chase</strong></td><td>localStorage</td><td>Stage 1 / Stage 2 / Stage 3 badge based on days since chase started</td></tr>
+        <tr><td><strong>Contact</strong></td><td>Tenants table</td><td>Phone and email from linked tenant record. Shows &#x26A0;&#xFE0F; if missing.</td></tr>
+        <tr><td><strong>Comments</strong></td><td>Airtable Comments API</td><td>Shows count (e.g. &ldquo;&#x1F4AC; 3 comments&rdquo;). Click to expand comment panel.</td></tr>
+        <tr><td><strong>Actions</strong></td><td>&mdash;</td><td>Mark Actioned / In Payment buttons (with confirmation dialog)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C6; Days Overdue Calculation</div>
+    <p>When a CFV is first detected, the dashboard calculates the <strong>actual due date</strong> for that month and stores it in <code>localStorage</code>. This is the CFV start date.</p>
+    <ol class="steps">
+      <li>If the due day has passed this month (e.g. due day 15, today is 20), start date = 15th of this month</li>
+      <li>If the due day hasn&rsquo;t passed yet this month (e.g. due day 25, today is 3), start date = 25th of last month (the CFV is from the previous cycle)</li>
+      <li>Days overdue = today minus the stored start date</li>
+      <li>The stored date persists across months &mdash; so a CFV from 15th February will show 44 days overdue on 31st March</li>
+      <li>When returned to &ldquo;In Payment&rdquo;, the start date is cleared from localStorage</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4AC; Comments System</div>
+    <p>Each CFV row shows a comment count fetched live from the Airtable Comments API. Clicking the button opens an expandable panel at the bottom showing:</p>
+    <ul>
+      <li>All comments on the <strong>Tenancy record</strong> (latest 10), with date, author, and text</li>
+      <li>A text input to add new comments directly from the dashboard</li>
+      <li>New comments are written to the Tenancy record in Airtable via the Comments API</li>
+    </ul>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Token scopes:</strong> Your Airtable PAT must include <code>data.recordComments:read</code> and <code>data.recordComments:write</code> scopes for comments to work. If counts show 0, update your token at airtable.com/create/tokens.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F3AF; Airtable Status IDs</div>
+    <table class="label-table">
+      <thead><tr><th>Status</th><th>Select Option ID</th><th>Colour</th></tr></thead>
+      <tbody>
+        <tr><td>In Payment</td><td><code>sel4I99slfpd7Vc1t</code></td><td>Cyan</td></tr>
+        <tr><td>CFV</td><td><code>sel2mWzsvOd8d8de0</code></td><td>Red</td></tr>
+        <tr><td>CFV Actioned</td><td><code>selmhFXah5Bodgg9x</code></td><td>Yellow</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 13. CFV LIFECYCLE ============ -->
+<div class="section" id="cfv-lifecycle">
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 13. CFV Lifecycle &amp; Chase Sequence</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F503; CFV Lifecycle Flow</div>
+    <div class="flow">
+      <div class="flow-step primary"><span class="flow-icon">&#x1F4B0;</span>In Payment<span class="flow-sub">Rent being received</span></div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-step warning"><span class="flow-icon">&#x26A0;&#xFE0F;</span>2 Days Overdue<span class="flow-sub">Auto-detected</span></div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-step" style="background:#dc2626;color:white;border-color:#dc2626"><span class="flow-icon">&#x1F6A8;</span>CFV<span class="flow-sub">Airtable updated</span></div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-step" style="background:#d97706;color:white;border-color:#d97706"><span class="flow-icon">&#x1F4CB;</span>CFV Actioned<span class="flow-sub">Follow-up in progress</span></div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="flow-step success"><span class="flow-icon">&#x2705;</span>In Payment<span class="flow-sub">Payment confirmed</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4E3; 3-Stage Chase Sequence</div>
+    <p>Chase stages are tracked from the date the CFV was first detected, stored in <code>localStorage</code>:</p>
+    <table class="label-table">
+      <thead><tr><th>Stage</th><th>Trigger</th><th>Action</th><th>Badge</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="label-badge lb-1">Stage 1</span></td>
+          <td>Day 0 (CFV detected)</td>
+          <td>Friendly reminder &mdash; initial contact with tenant or letting agent</td>
+          <td>Blue</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-2">Stage 2</span></td>
+          <td>Day 3</td>
+          <td>Follow-up chase &mdash; second contact, escalate urgency</td>
+          <td>Amber</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-3">Stage 3</span></td>
+          <td>Day 7</td>
+          <td>Escalation &mdash; formal notice, flag for personal attention</td>
+          <td>Red</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x2705; Payment Detected Banner</div>
+    <p>When a CFV Actioned tenancy has <code>Paid This Month = true</code> in Airtable, the dashboard shows a green banner beneath the row:</p>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4B3;</span>
+      <div><strong>Payment detected this month &mdash; Return [Tenant] to In Payment?</strong><br>
+      Two options: <strong>Approve</strong> (returns to In Payment, adds comment, clears chase data) or <strong>Dismiss</strong> (hides banner, tenant stays as CFV Actioned). Dismissed banners don&rsquo;t reappear until localStorage is cleared.</div>
+    </div>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Edge case:</strong> Payments from property transfers or historical adjustments may trigger this banner incorrectly. Always dismiss if the payment is not genuine rent for the current period (e.g. Huggins scenario &mdash; tenant moved between properties).</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F512; Action Confirmation</div>
+    <p>Both &ldquo;Mark Actioned&rdquo; and &ldquo;In Payment&rdquo; buttons require a confirmation dialog before executing. This prevents accidental status changes. The confirmation shows: <em>&ldquo;Are you sure you want to [action] for [tenant name]?&rdquo;</em></p>
+  </div>
+</div>
+
+<!-- ============ 14. SMART REFRESH ============ -->
 <div class="section" id="smart-refresh">
-  <h2 class="section-title"><span class="icon">&#x1F504;</span> 12. Smart Refresh System</h2>
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 14. Smart Refresh System</h2>
 
   <div class="card">
     <div class="card-header">&#x23F0; Refresh Configuration</div>
@@ -1019,8 +1180,43 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 </div>
 
 <!-- ============ 13. GOOGLE APPS SCRIPT SETUP ============ -->
+<!-- ============ 15. MOBILE ============ -->
+<div class="section" id="mobile">
+  <h2 class="section-title"><span class="icon">&#x1F4F1;</span> 15. Mobile Responsive Design</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4F1; Breakpoints</div>
+    <p>The dashboard is fully responsive with two CSS breakpoints:</p>
+    <table class="label-table">
+      <thead><tr><th>Breakpoint</th><th>Target</th><th>Key Changes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>&le;768px</code></td>
+          <td>Tablet / iPad</td>
+          <td>Cards stack single-column, tabs wrap, cash flow table scrolls horizontally, calculator goes full-width, touch targets enlarged to 36px</td>
+        </tr>
+        <tr>
+          <td><code>&le;480px</code></td>
+          <td>Phone / iPhone</td>
+          <td>Tabs stack vertically, Invoice Ref column hidden, chart height reduced, calculator summary single-column, touch targets 44px minimum, body padding tightened</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4F2; Mobile Access</div>
+    <p>Access the dashboard on any mobile device at <a href="https://chaichoong.github.io/leadership-dashboard" target="_blank">chaichoong.github.io/leadership-dashboard</a>. Enter your Airtable PAT to authenticate. All tabs and features work on mobile including the balance calculator, invoice click-to-edit, and CFV actions.</p>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div><strong>Tip:</strong> On iPhone, tap Share &rarr; Add to Home Screen to create an app-like shortcut. The dashboard loads full-screen without the Safari address bar.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 16. APPS SCRIPT ============ -->
 <div class="section" id="apps-script">
-  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 13. Google Apps Script Setup</h2>
+  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 16. Google Apps Script Setup</h2>
 
   <div class="card">
     <div class="card-header">&#x1F680; Deployment Steps</div>
@@ -1047,29 +1243,14 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
 <!-- ============ 14. TROUBLESHOOTING ============ -->
 <div class="section" id="troubleshooting">
-  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 14. Troubleshooting</h2>
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 17. Troubleshooting</h2>
 
   <div class="card">
-    <div class="card-header">&#x1F527; Common Issues &amp; Solutions</div>
+    <div class="card-header">&#x1F527; General Issues</div>
 
     <div class="ts-item">
       <div class="ts-problem">Dashboard shows login screen / &ldquo;Session expired&rdquo;</div>
       <div class="ts-solution">Your Airtable PAT has expired or the browser tab was closed. Re-enter your PAT on the login screen. The token is stored in <code>sessionStorage</code> and does not persist after the tab is closed.</div>
-    </div>
-
-    <div class="ts-item">
-      <div class="ts-problem">Invoices show &ldquo;Static&rdquo; badge instead of &ldquo;Live&rdquo;</div>
-      <div class="ts-solution">The Gmail Apps Script is unreachable. Check the <code>GMAIL_SCRIPT_URL</code> constant in the dashboard code matches the deployed web app URL. Verify the Apps Script deployment is active by visiting the URL directly in a browser &mdash; it should return JSON.</div>
-    </div>
-
-    <div class="ts-item">
-      <div class="ts-problem">Invoice amounts show &ldquo;See PDF&rdquo; instead of a value</div>
-      <div class="ts-solution">The Apps Script could not extract the amount from the email body or attachment. Click the amount field to manually enter the value, or enable Google Drive API OCR in the Apps Script to extract text from PDF attachments.</div>
-    </div>
-
-    <div class="ts-item">
-      <div class="ts-problem">A reconciled payment still appears in the forecast</div>
-      <div class="ts-solution">The reconciliation matching engine uses a &plusmn;5 day window. If the payment fell outside this window (e.g., more than 5 days early or late), it will not be matched. Check the transaction date in Airtable and adjust if needed.</div>
     </div>
 
     <div class="ts-item">
@@ -1078,8 +1259,61 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
 
     <div class="ts-item">
+      <div class="ts-problem">A reconciled payment still appears in the forecast</div>
+      <div class="ts-solution">The reconciliation matching engine uses a &plusmn;5 day window. If the payment fell outside this window (e.g., more than 5 days early or late), it will not be matched. Check the transaction date in Airtable and adjust if needed.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F9FE; Invoice Issues</div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Invoices show &ldquo;Static&rdquo; badge instead of &ldquo;Live&rdquo;</div>
+      <div class="ts-solution">The Gmail Apps Script is unreachable. Check the <code>GMAIL_SCRIPT_URL</code> constant in the dashboard code matches the deployed web app URL. Verify the Apps Script deployment is active by visiting the URL directly in a browser &mdash; it should return JSON.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Invoice amounts show &ldquo;Enter &pound;&rdquo; instead of a value</div>
+      <div class="ts-solution">The Apps Script could not extract the amount from the email body or attachment. Click the field to manually enter the value. Manually entered values are saved to <code>localStorage</code> and persist across refreshes.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Approved AI match reappears after refresh</div>
+      <div class="ts-solution">This was fixed in v1.1. Approvals are now stored in <code>localStorage</code> (key: <code>inv_paid_[id]</code>) and persist across refreshes. If an old approval is missing, re-approve it &mdash; it will stick permanently.</div>
+    </div>
+
+    <div class="ts-item">
       <div class="ts-problem">Mark Paid not working / CORS error</div>
-      <div class="ts-solution">If the dashboard is opened via the <code>file://</code> protocol (double-clicking the HTML file), CORS restrictions may block the request to the Google Apps Script. The dashboard falls back to saving the paid status in <code>localStorage</code> instead. For full functionality, serve the file via a local HTTP server or host it on a web server.</div>
+      <div class="ts-solution">If the dashboard is opened via the <code>file://</code> protocol, CORS restrictions may block the Gmail Apps Script request. The dashboard falls back to <code>localStorage</code> marking. Use the GitHub Pages version at <a href="https://chaichoong.github.io/leadership-dashboard">chaichoong.github.io/leadership-dashboard</a> for full functionality.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Known Amount Due doesn&rsquo;t match the number of invoices shown</div>
+      <div class="ts-solution">The metric only counts invoices visible on the page. Paid invoices (approved or manually marked) are filtered out before the total is calculated. If the number seems wrong, check whether invoices have been marked paid in <code>localStorage</code>.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F6A8; CFV Issues</div>
+
+    <div class="ts-item">
+      <div class="ts-problem">CFV comment counts all show 0</div>
+      <div class="ts-solution">Your Airtable PAT is missing the <code>data.recordComments:read</code> scope. Go to <a href="https://airtable.com/create/tokens">airtable.com/create/tokens</a>, edit your token, and add the <code>data.recordComments:read</code> and <code>data.recordComments:write</code> scopes.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Days overdue shows 0 for a CFV tenancy</div>
+      <div class="ts-solution">The CFV start date is stored in <code>localStorage</code> when the CFV is first detected. If the tenancy was set to CFV or CFV Actioned directly in Airtable (not via the dashboard), the start date is calculated on first view. Clear <code>localStorage</code> key <code>cfv_[recordId]_startDate</code> to force recalculation.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Payment detected banner shows for a tenant who shouldn&rsquo;t be returned to In Payment</div>
+      <div class="ts-solution">This happens when <code>Paid This Month</code> is true but the payment is from a property transfer or historical adjustment, not genuine rent. Click <strong>Dismiss</strong> to hide the banner. The dismissal persists in <code>localStorage</code> and won&rsquo;t reappear.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Accidentally changed a CFV status</div>
+      <div class="ts-solution">All status changes require a confirmation dialog (&ldquo;Are you sure?&rdquo;). If a status was changed in error, use the opposite action button to revert it (e.g., if accidentally moved to In Payment, the tenancy will be re-detected as a CFV on the next refresh if rent is still overdue).</div>
     </div>
   </div>
 </div>
