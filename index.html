@@ -3246,6 +3246,16 @@
 
             // Include existing CFV and CFV Actioned tenancies
             if (statusName === 'cfv' || statusName === 'cfv actioned') {
+                // Auto-return: if CFV Actioned and paid this month, move back to In Payment
+                const paidCheck = getField(tenancy, F.tenPaidThisMonth);
+                if (statusName === 'cfv actioned' && paidCheck) {
+                    // Payment received — auto-return to In Payment
+                    updateTenancyStatus(tenancy.id, CFV_STATUS_IDS.inPayment);
+                    addTenancyComment(tenancy.id, 'Auto-returned to In Payment — payment received this month.');
+                    localStorage.removeItem('cfv_' + tenancy.id + '_chaseStart');
+                    localStorage.removeItem('cfv_' + tenancy.id + '_startDate');
+                    return; // skip — no longer a CFV
+                }
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
                 cfvList.push(buildCFVEntry(tenancy, tenant, statusName, today));
                 return;
@@ -3296,7 +3306,7 @@
         const storedStartDate = localStorage.getItem(cfvKey + '_startDate');
         let cfvStartDate = storedStartDate ? new Date(storedStartDate) : null;
 
-        if (!cfvStartDate && (status === 'cfv' || status === 'potential')) {
+        if (!cfvStartDate && (status === 'cfv' || status === 'potential' || status === 'cfv actioned')) {
             // Calculate the due date for the current month (or last month if due day hasn't passed)
             const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay || 1);
             // If due day this month is in the future, the CFV is from last month's due date
