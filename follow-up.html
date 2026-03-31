@@ -1304,6 +1304,8 @@
 
         // Show search bar after loading
         document.getElementById('searchBar').style.display = 'block';
+        // Hide search scope button on inbox view (no label context)
+        document.getElementById('searchScopeBtn').style.display = isInboxView ? 'none' : '';
 
         // Show/hide newsletter filter bar and reset filter
         if (isNewsletterView()) {
@@ -2673,7 +2675,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             <div><strong>Last activity:</strong> ${formatDate(email.lastDate)}</div>
                             <div><strong>Messages:</strong> ${email.messageCount}</div>
                         </div>
-                        ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                        ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
             }
@@ -2708,7 +2710,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             <div><strong>Last update sent:</strong> ${lastDelay ? new Date(lastDelay).toLocaleDateString() : '-'}</div>
                             <div><strong>Messages:</strong> ${email.messageCount}</div>
                         </div>
-                        ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                        ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
             } else if (isArchiveView()) {
@@ -2737,7 +2739,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             <div><strong>Last activity:</strong> ${formatDate(email.lastDate)}</div>
                             <div><strong>Messages:</strong> ${email.messageCount}</div>
                         </div>
-                        ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                        ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
             } else if (isNewsletterView()) {
@@ -2765,7 +2767,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             <div><strong>Date:</strong> ${formatDate(email.lastDate)}</div>
                             <div><strong>Messages:</strong> ${email.messageCount}</div>
                         </div>
-                        ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                        ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
             } else if (isDeleteView()) {
@@ -2810,7 +2812,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             ${email.unsubscribeUrl ? `<button class="followup-btn" onclick="window.open('${escapeHtml(email.unsubscribeUrl)}', '_blank')" style="padding:8px 16px; font-size:13px;">Open Unsubscribe Link</button>` : ''}
                             ${!alreadyUnsub ? `<button class="unsub-btn mark-done-btn" id="unsub-body-${i}" onclick="markAsUnsubscribed(${i})" style="padding:8px 16px; font-size:13px;">Mark as Already Unsubscribed</button>` : ''}
                         </div>
-                        ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                        ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
             } else {
@@ -2840,7 +2842,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             <div><strong>Last activity:</strong> ${formatDate(email.lastDate)}</div>
                             <div><strong>Messages:</strong> ${email.messageCount}</div>
                         </div>
-                        ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                        ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
             }
@@ -2928,7 +2930,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                         <div><strong>Messages:</strong> ${email.messageCount}</div>
                         ${suggestion ? `<div><strong>AI Reason:</strong> ${escapeHtml(suggestion.reason)}</div>` : ''}
                     </div>
-                    ${email.messages.length > 1 ? renderThread(email.messages) : renderSingleMessage(email.messages[0])}
+                    ${renderEmailBodyPlaceholder(email)}
                 </div>
             </div>`;
         }).join('');
@@ -2939,6 +2941,24 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
     // ============================================================
     // SHARED RENDER HELPERS
     // ============================================================
+    // Render email body content — deferred until row is expanded to prevent
+    // malformed HTML in email bodies from breaking the outer DOM structure
+    function renderEmailBodyPlaceholder(email) {
+        return `<div class="email-body-content" data-loaded="false"></div>`;
+    }
+
+    function populateEmailBody(row, email) {
+        const bodyContent = row.querySelector('.email-body-content');
+        if (!bodyContent || bodyContent.dataset.loaded === 'true') return;
+        bodyContent.dataset.loaded = 'true';
+
+        if (email.messages.length > 1) {
+            bodyContent.innerHTML = renderThread(email.messages);
+        } else {
+            bodyContent.innerHTML = renderSingleMessage(email.messages[0]);
+        }
+    }
+
     function renderSingleMessage(msg) {
         const contentId = 'msg-content-' + msg.id;
         const content = msg.isHtml
@@ -2971,19 +2991,27 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
 
     async function toggleRow(index) {
         const row = document.getElementById('row-' + index);
+        if (!row) return;
         const wasExpanded = row.classList.contains('expanded');
         row.classList.toggle('expanded');
 
-        // On first expand, resolve inline images
-        if (!wasExpanded && !row.dataset.imagesResolved) {
-            row.dataset.imagesResolved = 'true';
+        // On first expand, populate the email body content (deferred to prevent malformed HTML breaking DOM)
+        if (!wasExpanded) {
             const email = allEmails[index];
-            for (const msg of email.messages) {
-                if (msg.isHtml && msg.inlineImages && Object.keys(msg.inlineImages).length > 0) {
-                    const el = document.getElementById('msg-content-' + msg.id);
-                    if (el) {
-                        const resolved = await resolveInlineImages(msg.id, el.innerHTML, msg.inlineImages);
-                        el.innerHTML = resolved;
+            if (email) {
+                populateEmailBody(row, email);
+
+                // Resolve inline images after body is populated
+                if (!row.dataset.imagesResolved) {
+                    row.dataset.imagesResolved = 'true';
+                    for (const msg of email.messages) {
+                        if (msg.isHtml && msg.inlineImages && Object.keys(msg.inlineImages).length > 0) {
+                            const el = document.getElementById('msg-content-' + msg.id);
+                            if (el) {
+                                const resolved = await resolveInlineImages(msg.id, el.innerHTML, msg.inlineImages);
+                                el.innerHTML = resolved;
+                            }
+                        }
                     }
                 }
             }
