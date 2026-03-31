@@ -629,7 +629,7 @@
 
         <!-- Label view stats -->
         <div class="stats-bar" id="statsBar">
-            <div class="stat-card"><div class="label">Total</div><div class="value blue" id="statTotal">-</div></div>
+            <div class="stat-card"><div class="label" id="statTotalLabel">Total</div><div class="value blue" id="statTotal">-</div></div>
             <div class="stat-card"><div class="label" id="statCriticalLabel">Critical (30+ days)</div><div class="value red" id="statCritical">-</div></div>
             <div class="stat-card"><div class="label" id="statWarningLabel">Warning (14-29 days)</div><div class="value amber" id="statWarning">-</div></div>
             <div class="stat-card"><div class="label" id="statRecentLabel">Recent (&lt;14 days)</div><div class="value green" id="statRecent">-</div></div>
@@ -1886,6 +1886,7 @@
         applyNewsletterFilterAndSearch();
         currentPage = 1;
         renderEmailsWithPagination();
+        updateStats(allEmails);
     }
 
     function applyNewsletterFilterAndSearch() {
@@ -2990,18 +2991,22 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
     }
 
     function updateStats(emails) {
-        // Always use the actual display list for stats — if filtered, show filtered count
-        const displayList = filteredEmails !== null ? filteredEmails : emails;
-        document.getElementById('statTotal').textContent = displayList.length;
+        // emails = allEmails (the full dataset for this label)
+        // Stats always reflect the FULL dataset so numbers stay consistent
+        // regardless of search/filter state
+        const total = emails.length;
 
         if (isDeleteView()) {
             const unsubLog = getUnsubscribeLog();
-            const unsubCount = displayList.filter(e => isUnsubscribed(e.threadId)).length;
+            const unsubCount = emails.filter(e => isUnsubscribed(e.threadId)).length;
+            const pendingCount = total - unsubCount;
             const last30 = unsubLog.filter(e => new Date(e.date) >= new Date(Date.now() - 30*24*60*60*1000)).length;
+            document.getElementById('statTotalLabel').textContent = 'Total';
+            document.getElementById('statTotal').textContent = total;
             document.getElementById('statCriticalLabel').textContent = 'Pending';
             document.getElementById('statWarningLabel').textContent = 'Unsubscribed';
             document.getElementById('statRecentLabel').textContent = 'Unsubs (30 day)';
-            document.getElementById('statCritical').textContent = displayList.length - unsubCount;
+            document.getElementById('statCritical').textContent = pendingCount;
             document.getElementById('statWarning').textContent = unsubCount;
             document.getElementById('statRecent').textContent = last30;
             document.getElementById('statCritical').className = 'value red';
@@ -3011,14 +3016,18 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
         }
 
         if (isNewsletterView()) {
-            const readCount = displayList.filter(e => isNewsletterRead(e.threadId)).length;
-            const unreadCount = displayList.length - readCount;
+            const readCount = emails.filter(e => isNewsletterRead(e.threadId)).length;
+            const unreadCount = total - readCount;
+            document.getElementById('statTotalLabel').textContent = 'Total';
+            document.getElementById('statTotal').textContent = total;
             document.getElementById('statCriticalLabel').textContent = 'Unread';
             document.getElementById('statWarningLabel').textContent = 'Read';
-            document.getElementById('statRecentLabel').textContent = 'Total';
+            document.getElementById('statRecentLabel').textContent = 'Showing';
             document.getElementById('statCritical').textContent = unreadCount;
             document.getElementById('statWarning').textContent = readCount;
-            document.getElementById('statRecent').textContent = displayList.length;
+            // Show how many are currently displayed (respects filter)
+            const showing = filteredEmails !== null ? filteredEmails.length : total;
+            document.getElementById('statRecent').textContent = showing;
             // Recolour for newsletter context
             document.getElementById('statCritical').className = 'value red';
             document.getElementById('statWarning').className = 'value green';
@@ -3026,7 +3035,9 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
             return;
         }
 
-        // Reset colours for non-newsletter views
+        // Reset labels and colours for standard label views
+        document.getElementById('statTotalLabel').textContent = 'Total';
+        document.getElementById('statTotal').textContent = total;
         document.getElementById('statCritical').className = 'value red';
         document.getElementById('statWarning').className = 'value amber';
         document.getElementById('statRecent').className = 'value green';
@@ -3035,11 +3046,11 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
             document.getElementById('statCriticalLabel').textContent = '14-30 days';
             document.getElementById('statWarningLabel').textContent = '7-14 days';
             document.getElementById('statRecentLabel').innerHTML = 'Last 7 days';
-            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 14 && e.daysOld <= 30).length;
+            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 14 && e.daysOld <= 30).length;
             document.getElementById('statCritical').className = 'value amber';
-            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
+            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
             document.getElementById('statWarning').className = 'value amber';
-            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 7).length;
+            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 7).length;
             return;
         }
 
@@ -3047,23 +3058,23 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
             document.getElementById('statCriticalLabel').textContent = 'Long Term (90+ days)';
             document.getElementById('statWarningLabel').textContent = 'Medium Term (30-89 days)';
             document.getElementById('statRecentLabel').innerHTML = 'Recent (&lt;30 days)';
-            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 90).length;
-            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 30 && e.daysOld < 90).length;
-            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 30).length;
+            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 90).length;
+            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 30 && e.daysOld < 90).length;
+            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 30).length;
         } else if (useTighterThresholds()) {
             document.getElementById('statCriticalLabel').textContent = 'Critical (14+ days)';
             document.getElementById('statWarningLabel').textContent = 'Warning (7-13 days)';
             document.getElementById('statRecentLabel').innerHTML = 'Recent (&lt;7 days)';
-            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 14).length;
-            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
-            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 7).length;
+            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 14).length;
+            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
+            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 7).length;
         } else {
             document.getElementById('statCriticalLabel').textContent = 'Critical (30+ days)';
             document.getElementById('statWarningLabel').textContent = 'Warning (14-29 days)';
             document.getElementById('statRecentLabel').innerHTML = 'Recent (&lt;14 days)';
-            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 30).length;
-            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 14 && e.daysOld < 30).length;
-            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 14).length;
+            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 30).length;
+            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 14 && e.daysOld < 30).length;
+            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 14).length;
         }
     }
 
