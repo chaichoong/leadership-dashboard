@@ -1365,6 +1365,9 @@
     async function loadLabelEmails() {
         // Switch to label view UI
         switchToLabelView();
+        filteredEmails = null;
+        searchQuery = '';
+        globalSearchResults = null;
 
         try {
             // Refresh labels in case they changed
@@ -1469,6 +1472,9 @@
         // Switch to inbox view UI
         switchToInboxView();
         inboxSuggestions = {};
+        filteredEmails = null;
+        searchQuery = '';
+        globalSearchResults = null;
 
         try {
             if (allLabelsRaw.length === 0) {
@@ -2984,17 +2990,18 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
     }
 
     function updateStats(emails) {
-        document.getElementById('statTotal').textContent = emails.length;
+        // Always use the actual display list for stats — if filtered, show filtered count
+        const displayList = filteredEmails !== null ? filteredEmails : emails;
+        document.getElementById('statTotal').textContent = displayList.length;
 
         if (isDeleteView()) {
             const unsubLog = getUnsubscribeLog();
-            const unsubCount = emails.filter(e => isUnsubscribed(e.threadId)).length;
-            const hasLink = emails.filter(e => e.unsubscribeUrl || e.unsubscribeMailto).length;
+            const unsubCount = displayList.filter(e => isUnsubscribed(e.threadId)).length;
             const last30 = unsubLog.filter(e => new Date(e.date) >= new Date(Date.now() - 30*24*60*60*1000)).length;
             document.getElementById('statCriticalLabel').textContent = 'Pending';
             document.getElementById('statWarningLabel').textContent = 'Unsubscribed';
             document.getElementById('statRecentLabel').textContent = 'Unsubs (30 day)';
-            document.getElementById('statCritical').textContent = emails.length - unsubCount;
+            document.getElementById('statCritical').textContent = displayList.length - unsubCount;
             document.getElementById('statWarning').textContent = unsubCount;
             document.getElementById('statRecent').textContent = last30;
             document.getElementById('statCritical').className = 'value red';
@@ -3004,14 +3011,14 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
         }
 
         if (isNewsletterView()) {
-            const readCount = emails.filter(e => isNewsletterRead(e.threadId)).length;
-            const unreadCount = emails.length - readCount;
+            const readCount = displayList.filter(e => isNewsletterRead(e.threadId)).length;
+            const unreadCount = displayList.length - readCount;
             document.getElementById('statCriticalLabel').textContent = 'Unread';
             document.getElementById('statWarningLabel').textContent = 'Read';
             document.getElementById('statRecentLabel').textContent = 'Total';
             document.getElementById('statCritical').textContent = unreadCount;
             document.getElementById('statWarning').textContent = readCount;
-            document.getElementById('statRecent').textContent = emails.length;
+            document.getElementById('statRecent').textContent = displayList.length;
             // Recolour for newsletter context
             document.getElementById('statCritical').className = 'value red';
             document.getElementById('statWarning').className = 'value green';
@@ -3028,11 +3035,11 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
             document.getElementById('statCriticalLabel').textContent = '14-30 days';
             document.getElementById('statWarningLabel').textContent = '7-14 days';
             document.getElementById('statRecentLabel').innerHTML = 'Last 7 days';
-            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 14 && e.daysOld <= 30).length;
+            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 14 && e.daysOld <= 30).length;
             document.getElementById('statCritical').className = 'value amber';
-            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
+            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
             document.getElementById('statWarning').className = 'value amber';
-            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 7).length;
+            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 7).length;
             return;
         }
 
@@ -3040,28 +3047,30 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
             document.getElementById('statCriticalLabel').textContent = 'Long Term (90+ days)';
             document.getElementById('statWarningLabel').textContent = 'Medium Term (30-89 days)';
             document.getElementById('statRecentLabel').innerHTML = 'Recent (&lt;30 days)';
-            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 90).length;
-            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 30 && e.daysOld < 90).length;
-            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 30).length;
+            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 90).length;
+            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 30 && e.daysOld < 90).length;
+            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 30).length;
         } else if (useTighterThresholds()) {
             document.getElementById('statCriticalLabel').textContent = 'Critical (14+ days)';
             document.getElementById('statWarningLabel').textContent = 'Warning (7-13 days)';
             document.getElementById('statRecentLabel').innerHTML = 'Recent (&lt;7 days)';
-            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 14).length;
-            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
-            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 7).length;
+            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 14).length;
+            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 7 && e.daysOld < 14).length;
+            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 7).length;
         } else {
             document.getElementById('statCriticalLabel').textContent = 'Critical (30+ days)';
             document.getElementById('statWarningLabel').textContent = 'Warning (14-29 days)';
             document.getElementById('statRecentLabel').innerHTML = 'Recent (&lt;14 days)';
-            document.getElementById('statCritical').textContent = emails.filter(e => e.daysOld >= 30).length;
-            document.getElementById('statWarning').textContent = emails.filter(e => e.daysOld >= 14 && e.daysOld < 30).length;
-            document.getElementById('statRecent').textContent = emails.filter(e => e.daysOld < 14).length;
+            document.getElementById('statCritical').textContent = displayList.filter(e => e.daysOld >= 30).length;
+            document.getElementById('statWarning').textContent = displayList.filter(e => e.daysOld >= 14 && e.daysOld < 30).length;
+            document.getElementById('statRecent').textContent = displayList.filter(e => e.daysOld < 14).length;
         }
     }
 
     function updateInboxStats(total, suggested) {
-        document.getElementById('inboxStatTotal').textContent = total;
+        // Always use allEmails.length as the single source of truth for total
+        const actualTotal = allEmails.length;
+        document.getElementById('inboxStatTotal').textContent = actualTotal;
         document.getElementById('inboxStatSuggested').textContent = suggested;
         document.getElementById('inboxStatApplied').textContent = appliedTodayCount;
 
