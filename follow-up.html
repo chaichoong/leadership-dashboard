@@ -2757,7 +2757,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                         <div class="action-col" onclick="event.stopPropagation();">
                             ${isRead
                                 ? '<button class="read-btn already-read" disabled>Read</button>'
-                                : `<button class="read-btn" onclick="event.stopPropagation(); markNewsletterReadAndRefresh('${email.threadId}');">Read</button>`}
+                                : `<button class="read-btn" onclick="event.stopPropagation(); collapseRow(${i}); markNewsletterReadAndRefresh('${email.threadId}');">Read</button>`}
                         </div>
                         <div class="expand-icon">&#9662;</div>
                     </div>
