@@ -2919,7 +2919,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                         <span class="suggestion-badge ${badgeClass}" id="suggBadge-${i}" title="${escapeHtml(badgeTitle)}">${escapeHtml(badgeText)}</span>
                     </div>
                     <div onclick="event.stopPropagation();">
-                        <select class="label-change-select" id="inboxApply-${i}" style="width:100%; max-width:110px;">
+                        <select class="label-change-select" id="inboxApply-${i}" style="width:100%; max-width:110px;" onchange="collapseRow(${i})">
                             <option value="">Select...</option>
                             ${labelOptions}
                         </select>
