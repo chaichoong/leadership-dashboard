@@ -295,16 +295,18 @@
 
         /* Progress bars */
         .progress-bar {
-            background-color: #f8fafc;
+            background-color: #e2e8f0;
             border-radius: 4px;
             height: 8px;
-            margin: 8px 0;
-            overflow: hidden;
+            margin: 8px 0 4px;
+            overflow: visible;
+            position: relative;
         }
         .progress-bar-fill {
             height: 100%;
             border-radius: 4px;
             transition: width 0.3s ease;
+            max-width: 100%;
         }
         .progress-bar-fill.green { background-color: #16a34a; }
         .progress-bar-fill.red { background-color: #dc2626; }
@@ -1536,9 +1538,9 @@
             const maxVal = target * 2;
             const w = Math.min(actual / maxVal * 100, 100);
             const targetPos = Math.min(target / maxVal * 100, 100);
-            return `<div class="progress-bar" style="position:relative">
+            return `<div class="progress-bar">
                 <div class="progress-bar-fill ${tl}" style="width:${w}%"></div>
-                <div style="position:absolute;left:${targetPos}%;top:-2px;bottom:-2px;width:2px;background:#1e293b;border-radius:1px" title="Budget: ${fmt(target)}"></div>
+                <div style="position:absolute;left:${targetPos}%;top:0;bottom:0;width:2px;background:#1e293b;border-radius:1px" title="Budget: ${fmt(target)}"></div>
             </div>`;
         }
 
