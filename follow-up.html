@@ -2894,10 +2894,6 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
         // Update pagination bar
         updatePaginationBar(totalPages, displayEmails.length);
 
-        const labelOptions = allLabels
-            .map(l => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)}</option>`)
-            .join('');
-
         container.innerHTML = pageEmails.map((email, pageIdx) => {
             const i = allEmails.indexOf(email);
             const displayNum = startIdx + pageIdx + 1;
@@ -2905,6 +2901,12 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
             const badgeText = suggestion ? suggestion.label : 'Pending...';
             const badgeClass = suggestion ? suggestion.confidence : 'pending';
             const badgeTitle = suggestion ? (suggestion.reason || '') : 'Waiting for AI suggestion';
+            const suggestedLabel = suggestion ? suggestion.label : '';
+
+            // Build label options with AI suggestion pre-selected
+            const rowLabelOptions = allLabels
+                .map(l => `<option value="${escapeHtml(l.name)}"${l.name === suggestedLabel ? ' selected' : ''}>${escapeHtml(l.name)}</option>`)
+                .join('');
 
             return `
             <div class="email-row" id="row-${i}">
@@ -2921,7 +2923,7 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                     <div onclick="event.stopPropagation();">
                         <select class="label-change-select" id="inboxApply-${i}" style="width:100%; max-width:110px;" onchange="collapseRow(${i})">
                             <option value="">Select...</option>
-                            ${labelOptions}
+                            ${rowLabelOptions}
                         </select>
                     </div>
                     <div onclick="event.stopPropagation(); " style="text-align:center;">
