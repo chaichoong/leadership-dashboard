@@ -3262,10 +3262,36 @@
 
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
                 const entry = buildCFVEntry(tenancy, tenant, statusName, today);
-                // Flag CFV or CFV Actioned tenancies that have been paid this month
-                // (user must approve the return — not automatic, as payments may be from transfers)
-                const paidCheck = getField(tenancy, F.tenPaidThisMonth);
-                if (paidCheck) {
+
+                // Check if paid — first use Airtable formula, then fall back to
+                // scanning recent reconciled transactions for a matching payment
+                let paidDetected = !!getField(tenancy, F.tenPaidThisMonth);
+
+                if (!paidDetected && allTransactions.length > 0) {
+                    // Secondary check: look for a reconciled transaction this month
+                    // matching the tenant name/ref and approximate rent amount
+                    const surname = String(getField(tenancy, F.tenSurname) || '').toLowerCase();
+                    const ref = String(getField(tenancy, F.tenRef) || '').toLowerCase();
+                    const rent = Number(getField(tenancy, F.tenRent)) || 0;
+                    const thisMonth = today.getMonth();
+                    const thisYear = today.getFullYear();
+
+                    const keywords = [surname, ...ref.split(/[\s–\-]+/)].filter(w => w.length >= 3);
+
+                    paidDetected = allTransactions.some(tx => {
+                        if (!getField(tx, F.txReconciled)) return false;
+                        const txDateStr = getField(tx, F.txDate);
+                        if (!txDateStr) return false;
+                        const txDate = new Date(txDateStr);
+                        if (txDate.getMonth() !== thisMonth || txDate.getFullYear() !== thisYear) return false;
+                        const txAmt = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
+                        if (rent > 0 && Math.abs(txAmt - rent) > rent * 0.33) return false;
+                        const txText = (String(getField(tx, F.txVendor) || '') + ' ' + String(getField(tx, F.txDescription) || '')).toLowerCase();
+                        return keywords.some(kw => txText.includes(kw));
+                    });
+                }
+
+                if (paidDetected) {
                     const dismissKey = 'cfv_' + tenancy.id + '_returnDismissed';
                     if (!localStorage.getItem(dismissKey)) {
                         entry.paymentDetected = true;
