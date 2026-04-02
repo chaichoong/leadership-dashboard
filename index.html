@@ -1246,6 +1246,14 @@
             allTransactions = transactions; // store for invoice cross-referencing
             allTenancies = tenancies;     // store for CFV tab
             allTenants = tenants;         // store for CFV tab (contact details)
+
+            // Clear stale "returned" flags — if Airtable now shows In Payment, the flag is no longer needed
+            tenancies.forEach(t => {
+                const status = getPaymentStatusName(getField(t, F.tenPayStatus)).toLowerCase().trim();
+                if (status === 'in payment') {
+                    localStorage.removeItem('cfv_' + t.id + '_returned');
+                }
+            });
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
 
             document.getElementById('dashboard').style.display = 'block';
@@ -3249,12 +3257,15 @@
 
             // Include existing CFV and CFV Actioned tenancies
             if (statusName === 'cfv' || statusName === 'cfv actioned') {
+                // Skip if locally marked as returned to In Payment (prevents re-showing before Airtable syncs)
+                if (localStorage.getItem('cfv_' + tenancy.id + '_returned')) return;
+
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
                 const entry = buildCFVEntry(tenancy, tenant, statusName, today);
-                // Flag CFV Actioned tenancies that have been paid this month
+                // Flag CFV or CFV Actioned tenancies that have been paid this month
                 // (user must approve the return — not automatic, as payments may be from transfers)
                 const paidCheck = getField(tenancy, F.tenPaidThisMonth);
-                if (statusName === 'cfv actioned' && paidCheck) {
+                if (paidCheck) {
                     const dismissKey = 'cfv_' + tenancy.id + '_returnDismissed';
                     if (!localStorage.getItem(dismissKey)) {
                         entry.paymentDetected = true;
@@ -3553,9 +3564,17 @@
         // Clear chase tracking and CFV start date
         localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
         localStorage.removeItem('cfv_' + tenancyId + '_startDate');
+        localStorage.removeItem('cfv_' + tenancyId + '_returnDismissed');
+        // Mark locally so re-render doesn't re-show this tenancy before full data refresh
+        localStorage.setItem('cfv_' + tenancyId + '_returned', '1');
         await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
         btn.textContent = 'Done ✓';
-        setTimeout(() => renderCFVTab(), 1500);
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#16a34a';
+        // Re-render immediately (local flag prevents re-showing)
+        setTimeout(() => renderCFVTab(), 1000);
+        // Full data refresh after 3 seconds to sync from Airtable
+        setTimeout(() => loadDashboard(), 3000);
     }
 
     // ── Comments ──
