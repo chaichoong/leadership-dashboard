@@ -1579,7 +1579,7 @@
             )}
             <div class="kpi-card clickable" onclick="toggleCard(this)">
                 <div class="kpi-card-label">Target Gross Profit <span class="chevron">▸</span></div>
-                <div class="kpi-card-value range"><span class="${gpOnTrack ? 'text-green' : 'text-amber'}">${fmt(grossProfitHigh)}</span> <span style="color:#94a3b8;font-size:14px">/</span> <span style="color:#1e293b">${fmt(requiredGrossProfit)}</span></div>
+                <div class="kpi-card-value"><span class="${gpOnTrack ? 'text-green' : 'text-amber'}">${fmt(grossProfitHigh)}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">/</span><span style="color:#1e293b">${fmt(requiredGrossProfit)}</span></div>
                 <div class="kpi-card-sub">${gpProgressPct}% of target | ${gpOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredGrossProfit - grossProfitHigh)}</span>`}</div>
                 <div class="progress-bar" style="position:relative;margin:8px 0">
                     <div class="progress-bar-fill ${gpOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(gpProgressPct), 100)}%"></div>
