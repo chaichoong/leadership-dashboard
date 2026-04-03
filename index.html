@@ -3582,7 +3582,7 @@
         btn.style.color = '#16a34a';
         // Update local data immediately so main dashboard reflects the change
         const rec = allTenancies.find(t => t.id === tenancyId);
-        if (rec) rec.cellValuesByFieldId[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned' };
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned' };
         setTimeout(() => renderCFVTab(), 1500);
         // Full refresh to sync everything
         setTimeout(() => loadDashboard(), 3000);
@@ -3598,7 +3598,7 @@
         localStorage.removeItem('cfv_' + tenancyId + '_returnDismissed');
         // Update local data immediately so main dashboard reflects the change
         const rec = allTenancies.find(t => t.id === tenancyId);
-        if (rec) rec.cellValuesByFieldId[F.tenPayStatus] = { id: CFV_STATUS_IDS.inPayment, name: 'In Payment' };
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.inPayment, name: 'In Payment' };
         // Mark locally so re-render doesn't re-show this tenancy before full data refresh
         localStorage.setItem('cfv_' + tenancyId + '_returned', '1');
         await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
