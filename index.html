@@ -3544,14 +3544,25 @@
     // ── CFV Actions ──
 
     async function updateTenancyStatus(tenancyId, statusSelectId) {
-        if (!PAT) return;
+        if (!PAT) { alert('No Airtable token — cannot update status'); return false; }
         try {
-            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${tenancyId}`, {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${tenancyId}`, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: { [F.tenPayStatus]: { id: statusSelectId } } })
+                body: JSON.stringify({ fields: { [F.tenPayStatus]: statusSelectId === CFV_STATUS_IDS.inPayment ? 'In Payment' : statusSelectId === CFV_STATUS_IDS.cfvActioned ? 'CFV Actioned' : statusSelectId === CFV_STATUS_IDS.cfv ? 'CFV' : { id: statusSelectId } } })
             });
-        } catch (e) { console.error('Failed to update tenancy status:', e); }
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                console.error('Airtable PATCH failed:', resp.status, JSON.stringify(err));
+                alert(`Failed to update Airtable (${resp.status}): ${err.error?.message || 'Unknown error'}. Check your PAT has data.records:write scope.`);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            console.error('Failed to update tenancy status:', e);
+            alert('Network error updating Airtable: ' + e.message);
+            return false;
+        }
     }
 
     // Confirmation step before any status change
@@ -3575,39 +3586,43 @@
     async function cfvMarkActioned(tenancyId, btn) {
         btn.textContent = '...';
         btn.disabled = true;
-        await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfvActioned);
+        const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfvActioned);
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
         await addTenancyComment(tenancyId, 'Status changed to CFV Actioned from Leadership Dashboard.');
         btn.textContent = 'Done ✓';
         btn.style.background = '#dcfce7';
         btn.style.color = '#16a34a';
-        // Update local data immediately so main dashboard reflects the change
         const rec = allTenancies.find(t => t.id === tenancyId);
-        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned' };
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned', color: 'yellowLight2' };
         setTimeout(() => renderCFVTab(), 1500);
-        // Full refresh to sync everything
         setTimeout(() => loadDashboard(), 3000);
     }
 
     async function cfvReturnToPayment(tenancyId, btn) {
         btn.textContent = '...';
         btn.disabled = true;
-        await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.inPayment);
+        const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.inPayment);
+        if (!ok) {
+            btn.textContent = 'Failed';
+            btn.disabled = false;
+            // Remove any local flag since Airtable wasn't updated
+            localStorage.removeItem('cfv_' + tenancyId + '_returned');
+            return;
+        }
         // Clear chase tracking and CFV start date
         localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
         localStorage.removeItem('cfv_' + tenancyId + '_startDate');
         localStorage.removeItem('cfv_' + tenancyId + '_returnDismissed');
         // Update local data immediately so main dashboard reflects the change
         const rec = allTenancies.find(t => t.id === tenancyId);
-        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.inPayment, name: 'In Payment' };
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.inPayment, name: 'In Payment', color: 'cyanLight2' };
         // Mark locally so re-render doesn't re-show this tenancy before full data refresh
         localStorage.setItem('cfv_' + tenancyId + '_returned', '1');
         await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
         btn.textContent = 'Done ✓';
         btn.style.background = '#dcfce7';
         btn.style.color = '#16a34a';
-        // Re-render immediately (local flag prevents re-showing)
         setTimeout(() => renderCFVTab(), 1000);
-        // Full data refresh after 3 seconds to sync from Airtable
         setTimeout(() => loadDashboard(), 3000);
     }
 
