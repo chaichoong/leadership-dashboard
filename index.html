@@ -800,6 +800,7 @@
                     <table class="invoice-table">
                         <thead>
                             <tr>
+                                <th style="width:32px;text-align:center">#</th>
                                 <th>Due / Date</th>
                                 <th>Payee</th>
                                 <th>Description</th>
@@ -2996,7 +2997,7 @@
             let matchRow = '';
             if (match && !isApproved && !isRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
-                    <td colspan="6" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
+                    <td colspan="7" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                             <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
@@ -3018,6 +3019,7 @@
             }
 
             return `<tr class="${isApproved ? 'inv-paid' : ''}" onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
+                <td style="text-align:center;color:#94a3b8;font-size:11px;font-weight:600">${idx + 1}</td>
                 <td style="white-space:nowrap;min-width:100px">${dateCell}<br>${badge}</td>
                 <td style="font-weight:600;max-width:160px">${payeeHtml}</td>
                 <td style="color:#475569;max-width:300px;font-size:12px">${descHtml}</td>
