@@ -105,30 +105,41 @@
         }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-        /* Tabs */
-        .tabs-nav {
-            display: flex;
-            gap: 0;
-            margin-bottom: 32px;
-            border-bottom: 2px solid #e2e8f0;
+        /* Sidebar Navigation */
+        .app-layout { display: flex; min-height: 100vh; }
+        .sidebar {
+            width: 220px; min-width: 220px; background: #1e293b; color: white;
+            display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
+            transition: transform 0.3s ease;
         }
-        .tab-btn {
-            padding: 12px 24px;
-            font-size: 14px;
-            font-weight: 600;
-            color: #64748b;
-            background: none;
-            border: none;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -2px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+        .sidebar-header { padding: 20px 16px 16px; border-bottom: 1px solid #334155; }
+        .sidebar-header h1 { font-size: 15px; font-weight: 700; color: white; margin: 0; }
+        .sidebar-header p { font-size: 10px; color: #94a3b8; margin: 4px 0 0; }
+        .sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+        .sidebar-item {
+            display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+            color: #94a3b8; font-size: 13px; font-weight: 500; cursor: pointer;
+            border-left: 3px solid transparent; transition: all 0.15s ease;
+            text-decoration: none;
         }
-        .tab-btn:hover { color: #1e293b; }
-        .tab-btn.active {
-            color: #2563eb;
-            border-bottom-color: #2563eb;
+        .sidebar-item:hover { color: white; background: #334155; }
+        .sidebar-item.active { color: white; background: #334155; border-left-color: #2563eb; }
+        .sidebar-item .sidebar-icon { font-size: 16px; width: 20px; text-align: center; }
+        .sidebar-item .sidebar-label { flex: 1; }
+        .main-content { margin-left: 220px; flex: 1; min-width: 0; }
+        .sidebar-toggle {
+            display: none; position: fixed; top: 10px; left: 10px; z-index: 200;
+            background: #1e293b; color: white; border: none; border-radius: 6px;
+            padding: 8px 12px; font-size: 18px; cursor: pointer;
         }
+        .sidebar-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 99;
+        }
+
+        /* Hide old horizontal tabs — replaced by sidebar */
+        .tabs-nav { display: none; }
+        .tab-btn { display: none; }
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
 
@@ -196,7 +207,7 @@
 
         .tab-panel-iframe {
             width: 100%;
-            height: calc(100vh - 180px);
+            height: calc(100vh - 80px);
             min-height: 600px;
             border: none;
             border-radius: 8px;
@@ -513,6 +524,11 @@
 
         /* ====== RESPONSIVE — TABLET (≤768px) ====== */
         @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .sidebar-toggle { display: block; }
+            .sidebar-overlay.open { display: block; }
+            .main-content { margin-left: 0; }
             body { padding: 10px; }
             .container { padding: 0; }
             .header { margin-bottom: 20px; padding-bottom: 12px; }
@@ -655,7 +671,29 @@
         <div id="loadingText" style="color:#64748b; font-size:14px;">Loading data from Airtable...</div>
     </div>
 
+    <!-- Sidebar Toggle (mobile) -->
+    <button class="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h1>Operations Hub</h1>
+            <p>Kevin Brittain</p>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
+            <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List</span></div>
+            <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span></div>
+            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span></div>
+            <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
+            <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
+        </nav>
+    </div>
+
     <!-- Dashboard -->
+    <div class="app-layout">
+    <div class="main-content">
     <div class="container dashboard" id="dashboard">
         <div class="header">
             <h1>Leadership Dashboard</h1>
@@ -666,7 +704,7 @@
             </div>
         </div>
 
-        <!-- Tabs Navigation -->
+        <!-- Tabs Navigation (hidden — replaced by sidebar) -->
         <div class="tabs-nav">
             <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard</button>
             <button class="tab-btn" onclick="switchTab('airtable')">Contractor Job List</button>
@@ -850,10 +888,34 @@
             </div>
         </div>
 
+        <!-- Tab 5: Inbound Comms -->
+        <div class="tab-panel" id="tab-comms">
+            <iframe class="tab-panel-iframe" id="commsFrame"
+                src=""
+                data-src="follow-up.html"
+                loading="lazy"
+                allowfullscreen
+                style="border:none">
+            </iframe>
+        </div>
+
+        <!-- Tab 6: Property Compliance -->
+        <div class="tab-panel" id="tab-compliance">
+            <iframe class="tab-panel-iframe" id="complianceFrame"
+                src=""
+                data-src="compliance.html"
+                loading="lazy"
+                allowfullscreen
+                style="border:none">
+            </iframe>
+        </div>
+
         <div class="footer">
             <p id="footerSync"></p>
         </div>
     </div>
+    </div><!-- end main-content -->
+    </div><!-- end app-layout -->
 
     <script>
     // ── Config ──
@@ -2479,11 +2541,17 @@
 
     function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
         document.getElementById('tab-' + tabId).classList.add('active');
-        // Highlight the clicked button
-        const btns = document.querySelectorAll('.tab-btn');
-        btns.forEach(b => {
+        // Update URL hash for deep-linking
+        if (history.replaceState) history.replaceState(null, '', '#' + tabId);
+        // Highlight the sidebar item
+        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance' };
+        document.querySelectorAll('.sidebar-item').forEach(b => {
+            if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
+        });
+        // Also highlight old tab buttons (if visible)
+        document.querySelectorAll('.tab-btn').forEach(b => {
             if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
                 (tabId === 'airtable' && b.textContent.includes('Contractor')) ||
                 (tabId === 'invoices' && b.textContent.includes('Invoices')) ||
@@ -2491,12 +2559,18 @@
                 b.classList.add('active');
             }
         });
-        // Lazy-load the Airtable iframe on first switch
+        // Lazy-load iframes on first switch
         if (tabId === 'airtable') {
             const frame = document.getElementById('airtableFrame');
-            if (!frame.src || frame.src === window.location.href) {
-                frame.src = frame.dataset.src;
-            }
+            if (!frame.src || frame.src === window.location.href) frame.src = frame.dataset.src;
+        }
+        if (tabId === 'comms') {
+            const frame = document.getElementById('commsFrame');
+            if (!frame.src || frame.src === window.location.href) frame.src = frame.dataset.src;
+        }
+        if (tabId === 'compliance') {
+            const frame = document.getElementById('complianceFrame');
+            if (!frame.src || frame.src === window.location.href) frame.src = frame.dataset.src;
         }
         // Render invoices tab on switch
         if (tabId === 'invoices') {
@@ -2512,6 +2586,30 @@
             loadDashboard();
         }
     }
+
+    // Sidebar toggle (mobile)
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+        document.getElementById('sidebarOverlay').classList.toggle('open');
+    }
+
+    // Auto-switch to tab from URL hash (e.g. #invoices, #cfv)
+    // Also close sidebar on mobile after tab switch
+    const _origSwitchTab = switchTab;
+    switchTab = function(tabId) {
+        _origSwitchTab(tabId);
+        // Close sidebar on mobile
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('sidebarOverlay').classList.remove('open');
+    };
+
+    // On load: check URL hash for deep-linking
+    window.addEventListener('load', () => {
+        const hash = window.location.hash.replace('#', '');
+        if (hash && document.getElementById('tab-' + hash)) {
+            switchTab(hash);
+        }
+    });
 
     function toggleCashflowRow(rowId) {
         const row = document.getElementById(rowId);

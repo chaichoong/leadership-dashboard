@@ -759,6 +759,12 @@
                 <input type="text" id="senderName" placeholder="Kevin" />
             </div>
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
+                <label>Airtable Integration</label>
+                <input type="text" id="airtablePat" placeholder="Airtable Personal Access Token" style="font-family:monospace; font-size:12px;" />
+                <p class="settings-info">Required for auto-creating tasks when emails are moved to "8: Task created". Get a token from airtable.com/create/tokens with data.records:write and data.records:read scopes.</p>
+                <p class="settings-info" id="airtableStatus" style="margin-top:4px;"></p>
+            </div>
+            <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
                 <label>Knowledge Base</label>
                 <p class="kb-status" id="kbStatus">Not yet built</p>
                 <button class="kb-btn" id="kbBuildBtn" onclick="buildKnowledgeBase()">Build KB</button>
@@ -1093,6 +1099,8 @@
     // ============================================================
     function openSettings() {
         document.getElementById('senderName').value = localStorage.getItem('sender_name') || '';
+        document.getElementById('airtablePat').value = localStorage.getItem('airtable_pat') || '';
+        updateAirtableStatus();
         updateKbStatusDisplay();
         renderAuditLog();
         document.getElementById('settingsModal').classList.add('active');
@@ -1107,7 +1115,7 @@
         'knowledge_base', 'kb_last_built', 'ai_corrections', 'ai_accuracy_log',
         'delay_payment_log', 'read_newsletters', 'unsubscribe_log',
         'sender_name', 'applied_today_count', 'applied_today_date',
-        'response_amendments'
+        'response_amendments', 'airtable_pat'
     ];
 
     function exportBackup() {
@@ -1170,7 +1178,22 @@
         const name = document.getElementById('senderName').value.trim();
         if (name) localStorage.setItem('sender_name', name);
         else localStorage.removeItem('sender_name');
+
+        const pat = document.getElementById('airtablePat').value.trim();
+        if (pat) localStorage.setItem('airtable_pat', pat);
+        else localStorage.removeItem('airtable_pat');
+
         closeSettings();
+    }
+
+    function updateAirtableStatus() {
+        const el = document.getElementById('airtableStatus');
+        const pat = localStorage.getItem('airtable_pat');
+        if (pat) {
+            el.innerHTML = '<span style="color:#22c55e;">Connected</span> - Tasks will auto-create when emails move to label 8.';
+        } else {
+            el.innerHTML = '<span style="color:#f59e0b;">Not configured</span> - Add your token to enable Airtable integration.';
+        }
     }
 
     function updateKbStatusDisplay() {
@@ -1457,6 +1480,11 @@
             renderEmails(allEmails);
             updateStats(allEmails);
             document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
+
+            // Auto-check Airtable for completed tasks when viewing label 8
+            if (isTaskCreatedView()) {
+                checkCompletedAirtableTasks();
+            }
 
         } catch (err) {
             console.error(err);
@@ -2027,6 +2055,232 @@
     }
 
     // ============================================================
+    // AIRTABLE INTEGRATION
+    // ============================================================
+    const AIRTABLE_BASE_ID = 'appnqjDpqDniH3IRl';
+    const AIRTABLE_TABLE_ID = 'tblqB8b22hKBL4PF1';
+    const AIRTABLE_FIELDS = {
+        taskName: 'fldgFjGBw6bTKJFCD',
+        status: 'fldx4qCw17UfrKpaN',
+        assignee: 'fldELMncVJYPDRJNc',
+        priority: 'fldS21RwmwOqt71LI',
+        timeEstimate: 'fld10VzzbiNNgRmIi',
+        description: 'fldRGhBQViKZKtkQ6',
+        isInbound: 'fldueazD67F7fUGee',
+        sourceType: 'fldiXSzcMol6Tdwij',
+        messageContent: 'fldiSNijdCy5GXuzL',
+        sender: 'fldzf4xlbrQuktx0i',
+        dateReceived: 'fldR4peEZRXo7tjoI',
+        noteUrl: 'fldXf1p0vtHqOZcKl',
+        dueDate: 'fld7XP8w8kbxfETV4'
+    };
+    const AIRTABLE_ASSIGNEE_ID = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
+    const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
+
+    function getAirtablePat() {
+        return localStorage.getItem('airtable_pat') || '';
+    }
+
+    async function generateAirtableTaskContent(email) {
+        // Use Claude to generate a concise task title and description from the email
+        const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 3000);
+        const prompt = `You are generating an Airtable task from an inbound email. Generate a JSON object with two fields:
+- "title": A concise task title starting with "INBOUND: " followed by a brief action item. Under 100 chars. Do NOT use em dashes or en dashes.
+- "description": A professional, actionable description of what needs to be done based on the email. Include key details and any deadlines mentioned. Do NOT use em dashes or en dashes. Keep under 500 chars.
+
+Email subject: ${email.subject}
+From: ${email.from}
+Body: ${bodyText}
+
+Respond with ONLY the JSON object, no markdown.`;
+
+        try {
+            const response = await fetch(CLAUDE_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'claude-haiku-4-5-20251001',
+                    max_tokens: 300,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+            const data = await response.json();
+            const text = data.content?.[0]?.text || '';
+            const parsed = JSON.parse(text);
+            return {
+                title: (parsed.title || 'INBOUND: Review email from ' + email.from).substring(0, 100),
+                description: (parsed.description || 'Review and action email: ' + email.subject).substring(0, 500)
+            };
+        } catch (err) {
+            console.error('AI task generation failed, using fallback:', err);
+            return {
+                title: ('INBOUND: ' + email.subject).substring(0, 100),
+                description: 'Review and action inbound email from ' + email.from + '. Subject: ' + email.subject
+            };
+        }
+    }
+
+    async function createAirtableTask(email) {
+        const pat = getAirtablePat();
+        if (!pat) {
+            showError('Airtable token not configured. Go to Settings to add your Personal Access Token.');
+            return false;
+        }
+
+        // Check if task already exists for this thread
+        const gmailUrl = 'https://mail.google.com/mail/u/0/#inbox/' + email.threadId;
+        try {
+            const checkResp = await fetch(
+                `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}?filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${AIRTABLE_FIELDS.noteUrl}})`)}&maxRecords=1`,
+                { headers: { 'Authorization': 'Bearer ' + pat } }
+            );
+            if (checkResp.ok) {
+                const checkData = await checkResp.json();
+                if (checkData.records && checkData.records.length > 0) {
+                    showSuccess('Airtable task already exists for this email.');
+                    return true; // Already exists, not an error
+                }
+            }
+        } catch (err) {
+            console.warn('Could not check for existing Airtable task:', err);
+        }
+
+        // Generate task content via AI
+        const content = await generateAirtableTaskContent(email);
+        const today = new Date().toISOString().slice(0, 10);
+        const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 5000);
+
+        const record = {
+            fields: {
+                [AIRTABLE_FIELDS.taskName]: content.title,
+                [AIRTABLE_FIELDS.status]: { name: 'Today' },
+                [AIRTABLE_FIELDS.assignee]: [{ id: AIRTABLE_ASSIGNEE_ID }],
+                [AIRTABLE_FIELDS.priority]: { name: 'Urgent' },
+                [AIRTABLE_FIELDS.timeEstimate]: { name: '15 min' },
+                [AIRTABLE_FIELDS.description]: content.description,
+                [AIRTABLE_FIELDS.isInbound]: true,
+                [AIRTABLE_FIELDS.sourceType]: { name: 'Gmail' },
+                [AIRTABLE_FIELDS.messageContent]: bodyText,
+                [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
+                [AIRTABLE_FIELDS.dateReceived]: today,
+                [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
+                [AIRTABLE_FIELDS.dueDate]: today
+            }
+        };
+
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + pat,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ records: [record] })
+            });
+
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                throw new Error(errData.error?.message || 'HTTP ' + resp.status);
+            }
+
+            addAuditEntry('airtable_create', `Created Airtable task: "${content.title}" for "${truncate(email.subject, 40)}"`);
+            return true;
+        } catch (err) {
+            console.error('Airtable task creation failed:', err);
+            showError('Failed to create Airtable task: ' + err.message);
+            return false;
+        }
+    }
+
+    async function checkCompletedAirtableTasks() {
+        const pat = getAirtablePat();
+        if (!pat) return; // Silently skip if not configured
+
+        // Only run when viewing label 8
+        if (!isTaskCreatedView()) return;
+
+        try {
+            // Query Airtable for completed inbound tasks with Gmail links
+            const formula = encodeURIComponent(
+                'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.status + '} = "Completed", {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
+            );
+            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl].map(f => 'fields%5B%5D=' + f).join('&');
+            const resp = await fetch(
+                `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}?${fields}&filterByFormula=${formula}&maxRecords=50`,
+                { headers: { 'Authorization': 'Bearer ' + pat } }
+            );
+
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (!data.records || data.records.length === 0) return;
+
+            // Extract thread IDs from Airtable records
+            const completedThreadIds = new Map();
+            for (const rec of data.records) {
+                const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
+                const match = url.match(/#inbox\/([a-f0-9]+)$/i);
+                if (match) {
+                    completedThreadIds.set(match[1], rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task');
+                }
+            }
+
+            if (completedThreadIds.size === 0) return;
+
+            // Find label 9 (task completed)
+            const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
+            const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
+            if (!label9 || !label8) return;
+
+            // Check which of our currently loaded emails have completed tasks
+            const toMove = [];
+            for (const email of allEmails) {
+                if (completedThreadIds.has(email.threadId)) {
+                    toMove.push({ email, taskName: completedThreadIds.get(email.threadId) });
+                }
+            }
+
+            if (toMove.length === 0) return;
+
+            // Move completed emails from label 8 to label 9
+            let movedCount = 0;
+            for (const { email, taskName } of toMove) {
+                try {
+                    for (let m = 0; m < email.msgIds.length; m++) {
+                        if (m > 0) await new Promise(r => setTimeout(r, 300));
+                        await gapi.client.gmail.users.messages.modify({
+                            userId: 'me',
+                            id: email.msgIds[m],
+                            resource: {
+                                addLabelIds: [label9.id],
+                                removeLabelIds: [label8.id]
+                            }
+                        });
+                    }
+                    movedCount++;
+                    addAuditEntry('airtable_complete', `Auto-moved "${truncate(email.subject, 40)}" to Task Completed (Airtable task: "${truncate(taskName, 30)}")`);
+                } catch (err) {
+                    console.error('Failed to move completed email:', err);
+                }
+            }
+
+            if (movedCount > 0) {
+                // Remove moved emails from current list
+                const movedIds = new Set(toMove.map(t => t.email.threadId));
+                allEmails = allEmails.filter(e => !movedIds.has(e.threadId));
+                if (filteredEmails) {
+                    filteredEmails = getFilteredEmails();
+                }
+                renderEmailsWithPagination();
+                updateStats(allEmails);
+                scheduleLabelCountRefresh();
+                showSuccess(`${movedCount} completed task${movedCount > 1 ? 's' : ''} auto-moved to "Task Completed".`);
+            }
+        } catch (err) {
+            console.error('Airtable completion check failed:', err);
+        }
+    }
+
+    // ============================================================
     // CHANGE LABEL
     // ============================================================
     let labelChangeInProgress = false;
@@ -2070,6 +2324,13 @@
             showUndoToast(`Moved "${truncate(email.subject, 40)}" to ${newLabelName}`);
 
             addAuditEntry('label_move', `Moved "${truncate(email.subject, 50)}" from ${currentLabel} to ${newLabelName}`);
+
+            // Auto-create Airtable task if moved to label 8 (Task Created)
+            if (/^8[.:]\s/.test(newLabelName)) {
+                createAirtableTask(email).then(ok => {
+                    if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
+                });
+            }
 
             // Remove from current list and re-render
             allEmails.splice(emailIndex, 1);
@@ -2132,6 +2393,13 @@
 
             showSuccess('Applied "' + labelName + '" and removed from inbox.');
             addAuditEntry('inbox_label', `Applied "${labelName}" to "${truncate(email.subject, 50)}"${suggestion ? ' (AI: ' + suggestion.label + ')' : ''}`);
+
+            // Auto-create Airtable task if applied to label 8 (Task Created)
+            if (/^8[.:]\s/.test(labelName)) {
+                createAirtableTask(email).then(ok => {
+                    if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
+                });
+            }
 
             // Update applied today count
             appliedTodayCount++;
@@ -2215,6 +2483,11 @@
 
                 successCount++;
                 appliedTodayCount++;
+
+                // Auto-create Airtable task if applied to label 8 (Task Created)
+                if (/^8[.:]\s/.test(labelName)) {
+                    createAirtableTask(email).catch(err => console.error('Bulk Airtable task creation failed:', err));
+                }
 
                 // Remove suggestion and email
                 delete inboxSuggestions[index];
