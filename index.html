@@ -3539,10 +3539,8 @@
 
     function runReconciliationMatching() {
         const results = [];
-        const unrec = allTransactions.filter(r => {
-            if (getField(r, F.txReconciled)) return false;
-            return isOurAccount(getField(r, F.txAccountAlias));
-        });
+        // Include ALL accounts for reconciliation (not just Santander + TNT)
+        const unrec = allTransactions.filter(r => !getField(r, F.txReconciled));
 
         // 1. Build historical patterns from ALL reconciled transactions
         const historicalPatterns = buildHistoricalPatterns();
