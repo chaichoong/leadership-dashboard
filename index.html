@@ -3279,42 +3279,44 @@
     }
 
     // Build dropdown options for reconciliation columns
-    // Dropdowns preserve Airtable record order (createdTime) — no re-sorting
-    function buildSubCatOptions(selectedId) {
-        return allSubCategories.map(r => {
-            const name = getField(r, 'fldO4BTJhFv5EsN6i') || '';
-            const sel = r.id === selectedId ? ' selected' : '';
-            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
-        }).join('');
+    // ── Searchable dropdown helpers ──
+    // Uses <input list="datalist"> for type-to-search. All sorted A-Z.
+    // Each returns { datalist, inputValue } — datalist is <datalist> HTML, inputValue is pre-selected display text
+    let _dlCounter = 0;
+    function reconDropdown(id, items, selectedId, style) {
+        // items = [{ id, name }] — sorted A-Z
+        const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
+        const dlId = 'dl_' + id;
+        const selected = sorted.find(i => i.id === selectedId);
+        const val = selected ? selected.name : '';
+        const datalist = `<datalist id="${dlId}">${sorted.map(i => `<option value="${escHtml(i.name)}" data-id="${i.id}">`).join('')}</datalist>`;
+        return `${datalist}<input id="${id}" list="${dlId}" value="${escHtml(val)}" style="${style}" autocomplete="off" placeholder="Type to search...">`;
     }
-    function buildCatOptions(selectedId) {
-        return allCategories.map(r => {
-            const name = getField(r, 'fldii4oUzSfmplihO') || '';
-            const sel = r.id === selectedId ? ' selected' : '';
-            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
-        }).join('');
+
+    function buildSubCatDropdown(id, selectedId) {
+        const items = allSubCategories.map(r => ({ id: r.id, name: getField(r, 'fldO4BTJhFv5EsN6i') || '' }));
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:170px');
     }
-    function buildTenantOptions(selectedId) {
-        return allTenants.filter(t => {
+    function buildCatDropdown(id, selectedId) {
+        const items = allCategories.map(r => ({ id: r.id, name: getField(r, 'fldii4oUzSfmplihO') || '' }));
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:140px');
+    }
+    function buildTenantDropdown(id, selectedId) {
+        const items = allTenants.filter(t => {
             const status = getField(t, F.tenantStatus);
             return status && typeof status === 'object' ? status.name === 'Active' : String(status || '').toLowerCase() === 'active';
-        }).map(t => {
-            const name = getField(t, F.tenantName) || '';
-            const sel = t.id === selectedId ? ' selected' : '';
-            return `<option value="${t.id}"${sel}>${escHtml(name)}</option>`;
-        }).join('');
+        }).map(t => ({ id: t.id, name: getField(t, F.tenantName) || '' }));
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:110px');
     }
-    function buildTenancyOptions(selectedId) {
-        return allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => {
-            const ref = getField(r, F.tenRef) || '';
-            const sel = r.id === selectedId ? ' selected' : '';
-            return `<option value="${r.id}"${sel}>${escHtml(ref)}</option>`;
-        }).join('');
+    function buildTenancyDropdown(id, selectedId) {
+        const items = allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => ({
+            id: r.id, name: getField(r, F.tenRef) || ''
+        }));
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:140px');
     }
-    // Cache rental units and properties from tenancies (deduplicated)
-    function buildRentalUnitOptions(selectedId) {
+    function buildRentalUnitDropdown(id, selectedId) {
         const seen = new Set();
-        let opts = '';
+        const items = [];
         allTenancies.forEach(r => {
             const unitField = getField(r, F.tenUnit);
             const unitId = Array.isArray(unitField) ? unitField[0] : unitField;
@@ -3322,37 +3324,44 @@
             const unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
             if (!unitId || seen.has(unitId)) return;
             seen.add(unitId);
-            const sel = unitId === selectedId ? ' selected' : '';
-            opts += `<option value="${unitId}"${sel}>${escHtml(unitName)}</option>`;
+            items.push({ id: unitId, name: unitName });
         });
-        return opts;
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:120px');
     }
-    function buildPropertyOptions(selectedName) {
+    function buildPropertyDropdown(id, selectedName) {
         const seen = new Set();
-        let opts = '';
+        const items = [];
         allTenancies.forEach(r => {
             const prop = getField(r, F.tenProperty);
             const propName = Array.isArray(prop) ? prop[0] : (prop || '');
             if (!propName || seen.has(propName)) return;
             seen.add(propName);
-            const sel = propName === selectedName ? ' selected' : '';
-            opts += `<option value="${escHtml(propName)}"${sel}>${escHtml(propName)}</option>`;
+            items.push({ id: propName, name: propName });
         });
-        return opts;
+        return reconDropdown(id, items, selectedName, 'font-size:10px;padding:2px 4px;width:120px');
     }
-    function buildCostOptions(selectedId) {
-        return allCosts.filter(r => isCostActive(r)).map(r => {
-            const name = getField(r, F.costName) || '';
-            const sel = r.id === selectedId ? ' selected' : '';
-            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
-        }).join('');
+    function buildCostDropdown(id, selectedId) {
+        const items = allCosts.filter(r => isCostActive(r)).map(r => ({
+            id: r.id, name: getField(r, F.costName) || ''
+        }));
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:130px');
     }
-    function buildBusinessOptions(selectedId) {
-        return allBusinesses.map(r => {
-            const name = getField(r, 'fldbbRqVxLxUdHwIR') || '';
-            const sel = r.id === selectedId ? ' selected' : '';
-            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
-        }).join('');
+    function buildBusinessDropdown(id, selectedId) {
+        const items = allBusinesses.map(r => ({
+            id: r.id, name: getField(r, 'fldbbRqVxLxUdHwIR') || ''
+        }));
+        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:120px');
+    }
+
+    // Resolve a datalist input value back to its record ID
+    function resolveDropdownId(inputId) {
+        const input = document.getElementById(inputId);
+        if (!input || !input.value) return '';
+        const dlId = input.getAttribute('list');
+        const dl = document.getElementById(dlId);
+        if (!dl) return input.value; // fallback: return raw value (for property which uses name as id)
+        const opt = [...dl.options].find(o => o.value === input.value);
+        return opt ? opt.getAttribute('data-id') : '';
     }
 
     function triggerReconciliation(btn) {
@@ -3608,8 +3617,8 @@
         const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
         const cell = 'padding:5px 6px;vertical-align:top;font-size:11px';
         const dim = 'color:#94a3b8;font-size:10px';
-        const catSelect = `<select id="recon-cat-${i}" style="font-size:10px;padding:2px;max-width:150px" onchange="reconCatChanged(${i})">${'<option value="">—</option>'}${buildCatOptions(r.categoryId)}</select>`;
-        const subCatSelect = `<select id="recon-subcat-${i}" style="font-size:10px;padding:2px;max-width:180px" onchange="reconSubCatChanged(${i})">${'<option value="">—</option>'}${buildSubCatOptions(r.subCatId)}</select>`;
+        const catSelect = buildCatDropdown('recon-cat-' + i, r.categoryId);
+        const subCatSelect = buildSubCatDropdown('recon-subcat-' + i, r.subCatId);
 
         const actionHtml = r.status === 'approved'
             ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
@@ -3624,12 +3633,12 @@
             <td style="${cell};text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
             <td style="${cell}">${catSelect}</td>
             <td style="${cell}">${subCatSelect}</td>
-            <td style="${cell}"><select id="recon-business-${i}" style="font-size:10px;padding:2px;max-width:130px"><option value="">—</option>${buildBusinessOptions(r.businessId || '')}</select></td>
-            <td style="${cell}"><select id="recon-tenant-${i}" style="font-size:10px;padding:2px;max-width:110px"><option value="">—</option>${buildTenantOptions(r.tenantId || '')}</select></td>
-            <td style="${cell}"><select id="recon-tenancy-${i}" style="font-size:10px;padding:2px;max-width:130px" onchange="reconTenancyChanged(${i})"><option value="">—</option>${buildTenancyOptions(r.tenancyId || '')}</select></td>
-            <td style="${cell}"><select id="recon-unit-${i}" style="font-size:10px;padding:2px;max-width:120px"><option value="">—</option>${buildRentalUnitOptions(r.unitId || '')}</select></td>
-            <td style="${cell}"><select id="recon-property-${i}" style="font-size:10px;padding:2px;max-width:120px"><option value="">—</option>${buildPropertyOptions(r.propertyName || '')}</select></td>
-            <td style="${cell}"><select id="recon-cost-${i}" style="font-size:10px;padding:2px;max-width:130px"><option value="">—</option>${buildCostOptions(r.costId || '')}</select></td>
+            <td style="${cell}">${buildBusinessDropdown('recon-business-' + i, r.businessId || '')}</td>
+            <td style="${cell}">${buildTenantDropdown('recon-tenant-' + i, r.tenantId || '')}</td>
+            <td style="${cell}" onchange="reconTenancyChanged(${i})">${buildTenancyDropdown('recon-tenancy-' + i, r.tenancyId || '')}</td>
+            <td style="${cell}">${buildRentalUnitDropdown('recon-unit-' + i, r.unitId || '')}</td>
+            <td style="${cell}">${buildPropertyDropdown('recon-property-' + i, r.propertyName || '')}</td>
+            <td style="${cell}">${buildCostDropdown('recon-cost-' + i, r.costId || '')}</td>
             <td style="${cell};text-align:center;min-width:60px">${actionHtml}</td>
         </tr>`;
     }
@@ -3645,34 +3654,34 @@
             window._reconResults[idx].subCatName = getSubCatName(sel.value);
         }
     }
-    // When tenancy dropdown changes, auto-fill tenant, unit, property
+    // When tenancy input changes, auto-fill tenant, unit, property
+    // Attach this via onchange on the tenancy input
     function reconTenancyChanged(idx) {
-        const sel = document.getElementById('recon-tenancy-' + idx);
-        if (!sel || !sel.value) return;
-        const tenancy = allTenancies.find(t => t.id === sel.value);
+        const input = document.getElementById('recon-tenancy-' + idx);
+        if (!input || !input.value) return;
+        const tenancyId = resolveDropdownId('recon-tenancy-' + idx);
+        const tenancy = allTenancies.find(t => t.id === tenancyId);
         if (!tenancy) return;
-        const tenantLookup = buildTenantLookup();
-        const tenant = getTenantForTenancy(tenancy, tenantLookup);
+        const tLookup = buildTenantLookup();
+        const tenant = getTenantForTenancy(tenancy, tLookup);
 
-        // Set tenant dropdown
-        const tenantSel = document.getElementById('recon-tenant-' + idx);
-        if (tenantSel && tenant) tenantSel.value = tenant.id;
+        // Set tenant input
+        const tenantInput = document.getElementById('recon-tenant-' + idx);
+        if (tenantInput && tenant) tenantInput.value = getField(tenant, F.tenantName) || '';
 
-        // Set unit dropdown
-        const unitField = getField(tenancy, F.tenUnit);
-        const unitId = Array.isArray(unitField) ? unitField[0] : unitField;
-        const unitSel = document.getElementById('recon-unit-' + idx);
-        if (unitSel && unitId) unitSel.value = unitId;
+        // Set unit input
+        const unitRef = getField(tenancy, F.tenUnitRef);
+        const unitInput = document.getElementById('recon-unit-' + idx);
+        if (unitInput) unitInput.value = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
 
-        // Set property dropdown
+        // Set property input
         const propField = getField(tenancy, F.tenProperty);
-        const propName = Array.isArray(propField) ? propField[0] : (propField || '');
-        const propSel = document.getElementById('recon-property-' + idx);
-        if (propSel && propName) propSel.value = propName;
+        const propInput = document.getElementById('recon-property-' + idx);
+        if (propInput) propInput.value = Array.isArray(propField) ? propField[0] : (propField || '');
 
-        // Also set sub-category to Rental Income if not already set
-        const subCatSel = document.getElementById('recon-subcat-' + idx);
-        if (subCatSel && !subCatSel.value) subCatSel.value = REC.subRentalInc;
+        // Set sub-category to Rental Income if empty
+        const subCatInput = document.getElementById('recon-subcat-' + idx);
+        if (subCatInput && !subCatInput.value) subCatInput.value = getSubCatName(REC.subRentalInc);
     }
 
     function toggleAmendRow(idx) {
@@ -3752,20 +3761,12 @@
             const fields = { [F.txReconciled]: true };
 
             // Read ALL values from dropdowns (user may have changed them)
-            const catSel = document.getElementById('recon-cat-' + idx);
-            const subCatSel = document.getElementById('recon-subcat-' + idx);
-            const businessSel = document.getElementById('recon-business-' + idx);
-            const tenantSel = document.getElementById('recon-tenant-' + idx);
-            const tenancySel = document.getElementById('recon-tenancy-' + idx);
-            const unitSel = document.getElementById('recon-unit-' + idx);
-            const costSel = document.getElementById('recon-cost-' + idx);
-
-            const catId = catSel ? catSel.value : '';
-            const subCatId = subCatSel ? subCatSel.value : '';
-            const businessId = businessSel ? businessSel.value : '';
-            const tenancyId = tenancySel ? tenancySel.value : '';
-            const unitId = unitSel ? unitSel.value : '';
-            const costId = costSel ? costSel.value : '';
+            const catId = resolveDropdownId('recon-cat-' + idx);
+            const subCatId = resolveDropdownId('recon-subcat-' + idx);
+            const businessId = resolveDropdownId('recon-business-' + idx);
+            const tenancyId = resolveDropdownId('recon-tenancy-' + idx);
+            const unitId = resolveDropdownId('recon-unit-' + idx);
+            const costId = resolveDropdownId('recon-cost-' + idx);
 
             if (catId) fields[F.txCategory] = [catId];
             if (subCatId) fields[F.txSubCategory] = [subCatId];
@@ -3788,16 +3789,16 @@
 
             r.status = 'approved';
 
-            // Get display names for knowledge base from dropdown selected text
-            const subCatName = subCatSel && subCatSel.selectedIndex > 0 ? subCatSel.options[subCatSel.selectedIndex].text : '';
-            const catName = catSel && catSel.selectedIndex > 0 ? catSel.options[catSel.selectedIndex].text : '';
-            const costLabel = costSel && costSel.selectedIndex > 0 ? costSel.options[costSel.selectedIndex].text : '';
-            const businessName = businessSel && businessSel.selectedIndex > 0 ? businessSel.options[businessSel.selectedIndex].text : '';
-            const tenancyLabel = tenancySel && tenancySel.selectedIndex > 0 ? tenancySel.options[tenancySel.selectedIndex].text : '';
-            const tenantName = tenantSel && tenantSel.selectedIndex > 0 ? tenantSel.options[tenantSel.selectedIndex].text : '';
-            const unitName = unitSel && unitSel.selectedIndex > 0 ? unitSel.options[unitSel.selectedIndex].text : '';
-            const propSel = document.getElementById('recon-property-' + idx);
-            const propertyName = propSel && propSel.selectedIndex > 0 ? propSel.options[propSel.selectedIndex].text : '';
+            // Get display names for knowledge base from input values
+            const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+            const subCatName = getInputVal('recon-subcat-' + idx);
+            const catName = getInputVal('recon-cat-' + idx);
+            const costLabel = getInputVal('recon-cost-' + idx);
+            const businessName = getInputVal('recon-business-' + idx);
+            const tenancyLabel = getInputVal('recon-tenancy-' + idx);
+            const tenantName = getInputVal('recon-tenant-' + idx);
+            const unitName = getInputVal('recon-unit-' + idx);
+            const propertyName = getInputVal('recon-property-' + idx);
 
             // Save to knowledge base
             const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
