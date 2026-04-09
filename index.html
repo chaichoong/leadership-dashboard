@@ -1350,7 +1350,7 @@
                     : unreconciledTx.map(r => `<div class="detail-item"><span class="detail-item-name">${escHtml(getField(r, F.txDate) || '')} — ${escHtml(txLabel(r))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.txReportAmount)) || 0)}</span></div>`).join(''))
                 + `<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                     <button onclick="event.stopPropagation(); triggerReconciliation(this)" style="padding:8px 16px;font-size:12px;font-weight:600;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer">Run Reconciliation</button>
-                    <span style="font-size:11px;color:#94a3b8" id="reconStatus">Auto-runs 9am, 1pm, 5pm weekdays</span>
+                    <span style="font-size:11px;color:#94a3b8" id="reconStatus"></span>
                 </div>`
             )}
             ${expandableCard('Monthly Income', `<span class="text-amber">£${Math.floor(inPaymentIncome).toLocaleString('en-GB')}</span> <span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span> <span class="text-green">£${Math.floor(monthlyIncome).toLocaleString('en-GB')}</span>`,
@@ -3273,7 +3273,7 @@
         return rec ? (getField(rec, 'fldii4oUzSfmplihO') || '') : '';
     }
 
-    // Build sub-category options for dropdowns
+    // Build dropdown options for reconciliation columns
     function buildSubCatOptions(selectedId) {
         return allSubCategories.map(r => {
             const name = getField(r, 'fldO4BTJhFv5EsN6i') || '';
@@ -3284,6 +3284,59 @@
     function buildCatOptions(selectedId) {
         return allCategories.map(r => {
             const name = getField(r, 'fldii4oUzSfmplihO') || '';
+            const sel = r.id === selectedId ? ' selected' : '';
+            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
+        }).join('');
+    }
+    function buildTenantOptions(selectedId) {
+        return allTenants.filter(t => {
+            const status = getField(t, F.tenantStatus);
+            return status && typeof status === 'object' ? status.name === 'Active' : String(status || '').toLowerCase() === 'active';
+        }).map(t => {
+            const name = getField(t, F.tenantName) || '';
+            const sel = t.id === selectedId ? ' selected' : '';
+            return `<option value="${t.id}"${sel}>${escHtml(name)}</option>`;
+        }).join('');
+    }
+    function buildTenancyOptions(selectedId) {
+        return allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => {
+            const ref = getField(r, F.tenRef) || '';
+            const sel = r.id === selectedId ? ' selected' : '';
+            return `<option value="${r.id}"${sel}>${escHtml(ref)}</option>`;
+        }).join('');
+    }
+    // Cache rental units and properties from tenancies (deduplicated)
+    function buildRentalUnitOptions(selectedId) {
+        const seen = new Set();
+        let opts = '';
+        allTenancies.forEach(r => {
+            const unitField = getField(r, F.tenUnit);
+            const unitId = Array.isArray(unitField) ? unitField[0] : unitField;
+            const unitRef = getField(r, F.tenUnitRef);
+            const unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+            if (!unitId || seen.has(unitId)) return;
+            seen.add(unitId);
+            const sel = unitId === selectedId ? ' selected' : '';
+            opts += `<option value="${unitId}"${sel}>${escHtml(unitName)}</option>`;
+        });
+        return opts;
+    }
+    function buildPropertyOptions(selectedName) {
+        const seen = new Set();
+        let opts = '';
+        allTenancies.forEach(r => {
+            const prop = getField(r, F.tenProperty);
+            const propName = Array.isArray(prop) ? prop[0] : (prop || '');
+            if (!propName || seen.has(propName)) return;
+            seen.add(propName);
+            const sel = propName === selectedName ? ' selected' : '';
+            opts += `<option value="${escHtml(propName)}"${sel}>${escHtml(propName)}</option>`;
+        });
+        return opts;
+    }
+    function buildCostOptions(selectedId) {
+        return allCosts.filter(r => isCostActive(r)).map(r => {
+            const name = getField(r, F.costName) || '';
             const sel = r.id === selectedId ? ' selected' : '';
             return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
         }).join('');
@@ -3533,11 +3586,11 @@
             <td style="${cell};text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
             <td style="${cell}">${catSelect}</td>
             <td style="${cell}">${subCatSelect}</td>
-            <td style="${cell}">${r.tenantName ? escHtml(r.tenantName) : `<span style="${dim}">—</span>`}</td>
-            <td style="${cell};font-size:10px">${r.tenancyLabel ? escHtml(r.tenancyLabel) : `<span style="${dim}">—</span>`}</td>
-            <td style="${cell};font-size:10px">${r.unitName ? escHtml(r.unitName) : `<span style="${dim}">—</span>`}</td>
-            <td style="${cell};font-size:10px">${r.propertyName ? escHtml(r.propertyName) : `<span style="${dim}">—</span>`}</td>
-            <td style="${cell};font-size:10px">${r.costLabel ? escHtml(r.costLabel) : `<span style="${dim}">—</span>`}</td>
+            <td style="${cell}"><select id="recon-tenant-${i}" style="font-size:10px;padding:2px;max-width:110px"><option value="">—</option>${buildTenantOptions(r.tenantId || '')}</select></td>
+            <td style="${cell}"><select id="recon-tenancy-${i}" style="font-size:10px;padding:2px;max-width:130px" onchange="reconTenancyChanged(${i})"><option value="">—</option>${buildTenancyOptions(r.tenancyId || '')}</select></td>
+            <td style="${cell}"><select id="recon-unit-${i}" style="font-size:10px;padding:2px;max-width:120px"><option value="">—</option>${buildRentalUnitOptions(r.unitId || '')}</select></td>
+            <td style="${cell}"><select id="recon-property-${i}" style="font-size:10px;padding:2px;max-width:120px"><option value="">—</option>${buildPropertyOptions(r.propertyName || '')}</select></td>
+            <td style="${cell}"><select id="recon-cost-${i}" style="font-size:10px;padding:2px;max-width:130px"><option value="">—</option>${buildCostOptions(r.costId || '')}</select></td>
             <td style="${cell};text-align:center;min-width:70px">${actionHtml}</td>
         </tr>
         <tr id="recon-amend-${i}" style="display:none;border-bottom:1px solid #e2e8f0">
@@ -3562,6 +3615,35 @@
             window._reconResults[idx].subCatId = sel.value;
             window._reconResults[idx].subCatName = getSubCatName(sel.value);
         }
+    }
+    // When tenancy dropdown changes, auto-fill tenant, unit, property
+    function reconTenancyChanged(idx) {
+        const sel = document.getElementById('recon-tenancy-' + idx);
+        if (!sel || !sel.value) return;
+        const tenancy = allTenancies.find(t => t.id === sel.value);
+        if (!tenancy) return;
+        const tenantLookup = buildTenantLookup();
+        const tenant = getTenantForTenancy(tenancy, tenantLookup);
+
+        // Set tenant dropdown
+        const tenantSel = document.getElementById('recon-tenant-' + idx);
+        if (tenantSel && tenant) tenantSel.value = tenant.id;
+
+        // Set unit dropdown
+        const unitField = getField(tenancy, F.tenUnit);
+        const unitId = Array.isArray(unitField) ? unitField[0] : unitField;
+        const unitSel = document.getElementById('recon-unit-' + idx);
+        if (unitSel && unitId) unitSel.value = unitId;
+
+        // Set property dropdown
+        const propField = getField(tenancy, F.tenProperty);
+        const propName = Array.isArray(propField) ? propField[0] : (propField || '');
+        const propSel = document.getElementById('recon-property-' + idx);
+        if (propSel && propName) propSel.value = propName;
+
+        // Also set sub-category to Rental Income if not already set
+        const subCatSel = document.getElementById('recon-subcat-' + idx);
+        if (subCatSel && !subCatSel.value) subCatSel.value = REC.subRentalInc;
     }
 
     function toggleAmendRow(idx) {
@@ -3639,17 +3721,26 @@
 
         try {
             const fields = { [F.txReconciled]: true };
-            // Get values from dropdowns (user may have changed them)
+
+            // Read ALL values from dropdowns (user may have changed them)
             const catSel = document.getElementById('recon-cat-' + idx);
             const subCatSel = document.getElementById('recon-subcat-' + idx);
-            const catId = catSel ? catSel.value : r.categoryId;
-            const subCatId = subCatSel ? subCatSel.value : r.subCatId;
+            const tenantSel = document.getElementById('recon-tenant-' + idx);
+            const tenancySel = document.getElementById('recon-tenancy-' + idx);
+            const unitSel = document.getElementById('recon-unit-' + idx);
+            const costSel = document.getElementById('recon-cost-' + idx);
+
+            const catId = catSel ? catSel.value : '';
+            const subCatId = subCatSel ? subCatSel.value : '';
+            const tenancyId = tenancySel ? tenancySel.value : '';
+            const unitId = unitSel ? unitSel.value : '';
+            const costId = costSel ? costSel.value : '';
 
             if (catId) fields[F.txCategory] = [catId];
             if (subCatId) fields[F.txSubCategory] = [subCatId];
-            if (r.tenancyId) fields[F.txTenancy] = [r.tenancyId];
-            if (r.unitId) fields[F.txUnit] = [r.unitId];
-            if (r.costId) fields[F.txCost] = [r.costId];
+            if (tenancyId) fields[F.txTenancy] = [tenancyId];
+            if (unitId) fields[F.txUnit] = [unitId];
+            if (costId) fields[F.txCost] = [costId];
 
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${r.txId}`, {
                 method: 'PATCH',
@@ -3664,15 +3755,24 @@
             }
 
             r.status = 'approved';
+
+            // Get display names for knowledge base from dropdown selected text
+            const subCatName = subCatSel && subCatSel.selectedIndex > 0 ? subCatSel.options[subCatSel.selectedIndex].text : '';
+            const catName = catSel && catSel.selectedIndex > 0 ? catSel.options[catSel.selectedIndex].text : '';
+            const costLabel = costSel && costSel.selectedIndex > 0 ? costSel.options[costSel.selectedIndex].text : '';
+            const tenancyLabel = tenancySel && tenancySel.selectedIndex > 0 ? tenancySel.options[tenancySel.selectedIndex].text : '';
+            const tenantName = tenantSel && tenantSel.selectedIndex > 0 ? tenantSel.options[tenantSel.selectedIndex].text : '';
+            const unitName = unitSel && unitSel.selectedIndex > 0 ? unitSel.options[unitSel.selectedIndex].text : '';
+            const propSel = document.getElementById('recon-property-' + idx);
+            const propertyName = propSel && propSel.selectedIndex > 0 ? propSel.options[propSel.selectedIndex].text : '';
+
             // Save to knowledge base
             const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
             if (vendorKey.length >= 3) {
                 saveReconRule(vendorKey, {
-                    subCatId: subCatId, subCatName: r.subCatName || getSubCatName(subCatId),
-                    categoryId: catId, categoryName: r.categoryName || getCatName(catId),
-                    costLabel: r.costLabel, costId: r.costId,
-                    tenantName: r.tenantName, tenancyLabel: r.tenancyLabel, tenancyId: r.tenancyId,
-                    unitName: r.unitName, propertyName: r.propertyName,
+                    subCatId, subCatName, categoryId: catId, categoryName: catName,
+                    costLabel, costId, tenantName, tenancyLabel, tenancyId,
+                    unitName, unitId, propertyName,
                 });
             }
 
