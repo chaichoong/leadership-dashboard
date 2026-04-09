@@ -1553,14 +1553,14 @@
 
         // Targets — fixed £ amounts for variable costs
         const MAINT_TARGET_GBP = 3000;  // £3,000/month maintenance budget
-        const WAGES_TARGET_GBP = 3000;  // £3,000/month wages budget
+        const WAGES_TARGET_GBP = 1500;  // £1,500/month wages budget
         const CFV_TARGET_GBP = 1500;    // £1,500/month CFV allowance
         const CLEAR_PROFIT_TARGET = 10000; // £10,000/month clear profit after all variable costs
 
         // Variable cost reserve (sum of budgets)
-        const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £7,500
+        const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £6,000
         // Required gross profit = clear profit target + variable cost budgets
-        const requiredGrossProfit = CLEAR_PROFIT_TARGET + variableCostReserve; // £17,500
+        const requiredGrossProfit = CLEAR_PROFIT_TARGET + variableCostReserve; // £16,000
 
         // Traffic light uses £ targets now (actual vs budget)
         const maintNum = maintSpend;
@@ -2162,8 +2162,8 @@
         let lowestDay = '';
         const rows = [];
 
-        // Daily variable cost reserve: £3k maint + £3k wages + £1.5k CFV = £7,500 / 30
-        const dailyVarCostReserve = 7500 / 30;
+        // Daily variable cost reserve: £3k maint + £1.5k wages + £1.5k CFV = £6,000 / 31
+        const dailyVarCostReserve = (MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP) / 31;
 
         days.forEach((key, idx) => {
             const day = dayMap[key];
@@ -2235,11 +2235,17 @@
                             ? ` <button class="uc-check-btn done" disabled title="UC Check already requested">UC Check Requested</button>`
                             : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escHtml(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Karlo to call UC and confirm this payment">UC Check</button>`)
                         : '';
-                    return `<div class="cashflow-detail-item in"><span class="cashflow-detail-item-name">${escHtml(f.name)}${ucBtn}</span><span class="cashflow-detail-item-value">+${fmt(f.amount)}</span></div>`;
+                    const cbId = `cf-in-${i}-${fi}`;
+                    const checked = !isCFExcluded(cbId) ? 'checked' : '';
+                    return `<div class="cashflow-detail-item in"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" id="${cbId}" ${checked} onchange="toggleCFExclusion('${cbId}')"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${ucBtn}</span></label><span class="cashflow-detail-item-value">+${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
             const outflowsHtml = r.outflows.length > 0
-                ? r.outflows.map(f => `<div class="cashflow-detail-item out"><span class="cashflow-detail-item-name">${escHtml(f.name)}</span><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`).join('')
+                ? r.outflows.map((f, fi) => {
+                    const cbId = `cf-out-${i}-${fi}`;
+                    const checked = !isCFExcluded(cbId) ? 'checked' : '';
+                    return `<div class="cashflow-detail-item out"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" id="${cbId}" ${checked} onchange="toggleCFExclusion('${cbId}')"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}</span></label><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`;
+                }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
 
             return `
@@ -2261,6 +2267,11 @@
                 </tr>
             `;
         }).join('');
+
+        // Build what-if data: recalculate closing balances excluding unchecked items
+        window._cfRows = rows;
+        window._cfOpeningBalance = openingBalance;
+        const whatIfData = buildWhatIfLine(rows, openingBalance);
 
         // Chart
         if (cashflowChartInstance) cashflowChartInstance.destroy();
@@ -2296,6 +2307,21 @@
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 1,
                     pointHoverRadius: 5,
+                }, {
+                    label: 'What-If (Excludes Unchecked)',
+                    data: whatIfData,
+                    borderColor: '#d97706',
+                    backgroundColor: 'rgba(217, 119, 6, 0.05)',
+                    borderWidth: 2,
+                    borderDash: [4, 4],
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 2,
+                    pointBackgroundColor: '#d97706',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 1,
+                    pointHoverRadius: 5,
+                    hidden: !hasAnyExclusions(), // hidden by default until user unchecks something
                 }]
             },
             options: {
@@ -2323,6 +2349,7 @@
                 },
                 scales: {
                     y: {
+                        min: Math.min(0, ...chartData, ...chartDataWorstCase) < 0 ? Math.min(...chartData, ...chartDataWorstCase) - 500 : -500,
                         suggestedMin: -500,
                         grid: { color: '#e2e8f0', drawBorder: false },
                         ticks: {
@@ -2345,7 +2372,7 @@
     function projectDates(today, dueDay, frequency, _unused, dueDateNext) {
         const dates = [];
         const windowEnd = new Date(today);
-        windowEnd.setDate(windowEnd.getDate() + 30);
+        windowEnd.setDate(windowEnd.getDate() + 31);
         const todayDay = today.getDate();
 
         const freq = (frequency || 'Monthly').toLowerCase();
@@ -2408,18 +2435,24 @@
             }
         } else {
             // Monthly (default)
-            // Due Day >= today's day → this month; else next month
+            // Always include this month's due date (even if past, for reconciliation window)
+            // Plus next month if within the 31-day forecast window
             const thisMonthLast = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
             const nextMonthLast = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
 
-            if (dueDay >= todayDay) {
-                const actualDay = Math.min(dueDay, thisMonthLast);
-                const d = new Date(today.getFullYear(), today.getMonth(), actualDay);
-                if (d >= today && d <= windowEnd) dates.push(dateKey(d));
-            } else {
-                const actualDay = Math.min(dueDay, nextMonthLast);
-                const d = new Date(today.getFullYear(), today.getMonth() + 1, actualDay);
-                if (d >= today && d <= windowEnd) dates.push(dateKey(d));
+            // This month: include if due date is within 5 days ago (recon window) or in future
+            const actualDayThis = Math.min(dueDay, thisMonthLast);
+            const dThis = new Date(today.getFullYear(), today.getMonth(), actualDayThis);
+            const daysAgo = Math.floor((today - dThis) / 86400000);
+            if (dThis <= windowEnd && daysAgo <= 5) {
+                dates.push(dateKey(dThis));
+            }
+
+            // Next month: include if within the forecast window
+            const actualDayNext = Math.min(dueDay, nextMonthLast);
+            const dNext = new Date(today.getFullYear(), today.getMonth() + 1, actualDayNext);
+            if (dNext >= today && dNext <= windowEnd) {
+                dates.push(dateKey(dNext));
             }
         }
 
@@ -2670,15 +2703,19 @@
     // Track which UC checks have been requested (persists across auto-refresh)
     function isUCCheckRequested(tenancyId) {
         try {
-            const stored = JSON.parse(sessionStorage.getItem('_uc_checks') || '{}');
-            return !!stored[tenancyId];
+            const stored = JSON.parse(localStorage.getItem('_uc_checks') || '{}');
+            // Auto-expire after 30 days
+            const ts = stored[tenancyId];
+            if (!ts) return false;
+            if (Date.now() - new Date(ts).getTime() > 30 * 86400000) { delete stored[tenancyId]; localStorage.setItem('_uc_checks', JSON.stringify(stored)); return false; }
+            return true;
         } catch { return false; }
     }
     function markUCCheckRequested(tenancyId) {
         try {
-            const stored = JSON.parse(sessionStorage.getItem('_uc_checks') || '{}');
+            const stored = JSON.parse(localStorage.getItem('_uc_checks') || '{}');
             stored[tenancyId] = new Date().toISOString();
-            sessionStorage.setItem('_uc_checks', JSON.stringify(stored));
+            localStorage.setItem('_uc_checks', JSON.stringify(stored));
         } catch {}
     }
 
@@ -3240,6 +3277,52 @@
         }
     }
 
+
+    // ══════════════════════════════════════════
+    // WHAT-IF CASH FLOW EXCLUSIONS
+    // ══════════════════════════════════════════
+
+    function getCFExclusions() {
+        try { return JSON.parse(localStorage.getItem('_cf_exclusions') || '{}'); } catch { return {}; }
+    }
+    function isCFExcluded(cbId) { return !!getCFExclusions()[cbId]; }
+    function hasAnyExclusions() { return Object.keys(getCFExclusions()).length > 0; }
+
+    function toggleCFExclusion(cbId) {
+        const excl = getCFExclusions();
+        const cb = document.getElementById(cbId);
+        if (cb && !cb.checked) {
+            excl[cbId] = true;
+        } else {
+            delete excl[cbId];
+        }
+        localStorage.setItem('_cf_exclusions', JSON.stringify(excl));
+        // Recalculate what-if line and update chart
+        updateWhatIfChart();
+    }
+
+    function buildWhatIfLine(rows, openingBalance) {
+        const excl = getCFExclusions();
+        let balance = openingBalance;
+        return rows.map((r, i) => {
+            let dayIn = 0, dayOut = 0;
+            r.inflows.forEach((f, fi) => { if (!excl[`cf-in-${i}-${fi}`]) dayIn += f.amount; });
+            r.outflows.forEach((f, fi) => { if (!excl[`cf-out-${i}-${fi}`]) dayOut += f.amount; });
+            balance += dayIn - dayOut;
+            return balance;
+        });
+    }
+
+    function updateWhatIfChart() {
+        if (!cashflowChartInstance || !window._cfRows || !window._cfOpeningBalance) return;
+        const whatIfData = buildWhatIfLine(window._cfRows, window._cfOpeningBalance);
+        // Dataset index 2 is the what-if line
+        if (cashflowChartInstance.data.datasets[2]) {
+            cashflowChartInstance.data.datasets[2].data = whatIfData;
+            cashflowChartInstance.data.datasets[2].hidden = !hasAnyExclusions();
+            cashflowChartInstance.update();
+        }
+    }
 
     // ══════════════════════════════════════════
     // RECONCILIATION ENGINE v2
