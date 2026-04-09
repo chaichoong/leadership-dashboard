@@ -274,7 +274,7 @@
             border: 1px solid #e2e8f0;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
             border-radius: 8px;
-            padding: 20px;
+            padding: 16px;
             transition: all 0.3s ease;
         }
         .kpi-card.clickable { cursor: pointer; }
@@ -294,7 +294,7 @@
             align-items: center;
             justify-content: space-between;
         }
-        .kpi-card-value { font-size: 28px; font-weight: 700; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 36px; display: flex; align-items: center; }
+        .kpi-card-value { font-size: 24px; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 32px; display: flex; align-items: center; }
         .kpi-card-value.range { font-size: 20px; }
         .chevron {
             display: inline-block;
@@ -804,6 +804,9 @@
                 </div>
             </div>
         </div>
+
+        <!-- Utility Bar: Unreconciled Transactions -->
+        <div id="reconBar" style="margin-bottom:16px"></div>
 
         <!-- Section 1: Financial Overview -->
         <div class="section">
@@ -1530,12 +1533,8 @@
         const incSorted = [...incTenancies].sort((a, b) => (getNumVal(a, F.tenDueDay, 99)) - (getNumVal(b, F.tenDueDay, 99)));
         const costSorted = [...activeCosts].sort((a, b) => (getNumVal(a, F.costDueDay, 99)) - (getNumVal(b, F.costDueDay, 99)));
 
-        document.getElementById('financialCards').innerHTML = `
-            <div class="kpi-card">
-                <div class="kpi-card-label">Opening Balance</div>
-                <div class="kpi-card-value">${fmt(openingBalance)}</div>
-                <div class="kpi-card-sub">Santander ${fmt(santBal)} | TNT Zempler ${fmt(zempBal)}</div>
-            </div>
+        // Unreconciled transactions bar (above Financial Overview, alongside Balance Calculator)
+        document.getElementById('reconBar').innerHTML = `
             ${expandableCard('Unreconciled Transactions', unreconciledTx.length, `Santander + TNT Mgt Zempler`,
                 (unreconciledTx.length === 0
                     ? '<div class="detail-item"><span><em>No unreconciled transactions</em></span></div>'
@@ -1545,6 +1544,14 @@
                     <span style="font-size:11px;color:#94a3b8" id="reconStatus"></span>
                 </div>`
             )}
+        `;
+
+        document.getElementById('financialCards').innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-card-label">Opening Balance</div>
+                <div class="kpi-card-value">${fmt(openingBalance)}</div>
+                <div class="kpi-card-sub">Santander ${fmt(santBal)} | TNT Zempler ${fmt(zempBal)}</div>
+            </div>
             ${expandableCard('Monthly Income', `<span class="text-amber">£${Math.floor(inPaymentIncome).toLocaleString('en-GB')}</span> <span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span> <span class="text-green">£${Math.floor(monthlyIncome).toLocaleString('en-GB')}</span>`,
                 `${inPaymentCount} In Payment (confirmed) + ${cfvActionedCount} CFV Actioned (expected)`,
                 `<div style="margin-bottom:8px;font-weight:600;color:#1e293b">In Payment (${inPaymentCount})</div>` +
