@@ -3860,79 +3860,82 @@
 
     async function approveRecon(idx) {
         const r = window._reconResults[idx];
+        if (r.status === 'approved') return; // already done
         const btn = document.getElementById('recon-btn-' + idx);
         if (btn) { btn.textContent = '...'; btn.disabled = true; }
 
-        try {
-            const fields = { [F.txReconciled]: true };
+        const fields = { [F.txReconciled]: true };
 
-            // Read ALL values from dropdowns (user may have changed them)
-            const catId = resolveDropdownId('recon-cat-' + idx);
-            const subCatId = resolveDropdownId('recon-subcat-' + idx);
-            const businessId = resolveDropdownId('recon-business-' + idx);
-            const tenancyId = resolveDropdownId('recon-tenancy-' + idx);
-            const unitId = resolveDropdownId('recon-unit-' + idx);
-            const costId = resolveDropdownId('recon-cost-' + idx);
+        const catId = resolveDropdownId('recon-cat-' + idx);
+        const subCatId = resolveDropdownId('recon-subcat-' + idx);
+        const businessId = resolveDropdownId('recon-business-' + idx);
+        const tenancyId = resolveDropdownId('recon-tenancy-' + idx);
+        const unitId = resolveDropdownId('recon-unit-' + idx);
+        const costId = resolveDropdownId('recon-cost-' + idx);
 
-            if (catId) fields[F.txCategory] = [catId];
-            if (subCatId) fields[F.txSubCategory] = [subCatId];
-            if (businessId) fields[F.txBusiness] = [businessId];
-            if (tenancyId) fields[F.txTenancy] = [tenancyId];
-            if (unitId) fields[F.txUnit] = [unitId];
-            if (costId) fields[F.txCost] = [costId];
+        if (catId) fields[F.txCategory] = [catId];
+        if (subCatId) fields[F.txSubCategory] = [subCatId];
+        if (businessId) fields[F.txBusiness] = [businessId];
+        if (tenancyId) fields[F.txTenancy] = [tenancyId];
+        if (unitId) fields[F.txUnit] = [unitId];
+        if (costId) fields[F.txCost] = [costId];
 
-            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${r.txId}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields })
-            });
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({}));
-                alert(`Failed: ${err.error?.message || resp.status}`);
-                if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }
-                return;
-            }
-
-            r.status = 'approved';
-
-            // Get display names for knowledge base from input values
-            const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
-            const subCatName = getInputVal('recon-subcat-' + idx);
-            const catName = getInputVal('recon-cat-' + idx);
-            const costLabel = getInputVal('recon-cost-' + idx);
-            const businessName = getInputVal('recon-business-' + idx);
-            const tenancyLabel = getInputVal('recon-tenancy-' + idx);
-            const tenantName = getInputVal('recon-tenant-' + idx);
-            const unitName = getInputVal('recon-unit-' + idx);
-            const propertyName = getInputVal('recon-property-' + idx);
-
-            // Save to knowledge base
-            const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
-            if (vendorKey.length >= 3) {
-                saveReconRule(vendorKey, {
-                    subCatId, subCatName, categoryId: catId, categoryName: catName,
-                    businessId, businessName,
-                    costLabel, costId, tenantName, tenancyLabel, tenancyId,
-                    unitName, unitId, propertyName,
-                });
-            }
-
-            if (btn) { btn.textContent = '✓'; btn.style.background = '#dcfce7'; btn.style.color = '#16a34a'; }
-            const row = document.getElementById('recon-row-' + idx);
-            if (row) row.style.opacity = '0.5';
-        } catch (e) {
-            alert('Error: ' + e.message);
-            if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${r.txId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            const msg = `Row ${idx + 1} failed: ${err.error?.message || resp.status}`;
+            console.error(msg);
+            if (btn) { btn.textContent = 'Failed'; btn.disabled = false; }
+            throw new Error(msg);
         }
+
+        r.status = 'approved';
+
+        const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+        const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+        if (vendorKey.length >= 3) {
+            saveReconRule(vendorKey, {
+                subCatId, subCatName: getInputVal('recon-subcat-' + idx),
+                categoryId: catId, categoryName: getInputVal('recon-cat-' + idx),
+                businessId, businessName: getInputVal('recon-business-' + idx),
+                costLabel: getInputVal('recon-cost-' + idx), costId,
+                tenantName: getInputVal('recon-tenant-' + idx),
+                tenancyLabel: getInputVal('recon-tenancy-' + idx), tenancyId,
+                unitName: getInputVal('recon-unit-' + idx), unitId,
+                propertyName: getInputVal('recon-property-' + idx),
+            });
+        }
+
+        if (btn) { btn.textContent = '✓'; btn.style.background = '#dcfce7'; btn.style.color = '#16a34a'; }
+        const row = document.getElementById('recon-row-' + idx);
+        if (row) row.style.opacity = '0.5';
     }
 
     async function approveAllRecon() {
-        if (!confirm('Approve all matched suggestions? This will mark them as reconciled in Airtable.')) return;
         const results = window._reconResults || [];
+        const toApprove = results.filter(r => r.status === 'suggestion');
+        if (toApprove.length === 0) { alert('No suggestions to approve.'); return; }
+        if (!confirm(`Approve all ${toApprove.length} matched suggestions? This will mark them as reconciled in Airtable.`)) return;
+
+        let successCount = 0;
+        let failCount = 0;
         for (let i = 0; i < results.length; i++) {
-            if (results[i].status === 'suggestion') await approveRecon(i);
+            if (results[i].status !== 'suggestion') continue;
+            try {
+                await approveRecon(i);
+                successCount++;
+            } catch (e) {
+                console.error('Approve failed for row ' + i, e);
+                failCount++;
+            }
+            // Rate limit: 200ms pause between requests to avoid Airtable 429 errors
+            if (i < results.length - 1) await new Promise(r => setTimeout(r, 200));
         }
-        document.getElementById('reconStatus').textContent = 'Reconciliation complete — refreshing...';
+        document.getElementById('reconStatus').textContent = `Done: ${successCount} approved${failCount > 0 ? ', ' + failCount + ' failed' : ''} — refreshing...`;
         setTimeout(() => loadDashboard(), 2000);
     }
 
