@@ -2680,15 +2680,15 @@
         // Lazy-load iframes on first switch
         if (tabId === 'airtable') {
             const frame = document.getElementById('airtableFrame');
-            if (!frame.src || frame.src === window.location.href) frame.src = frame.dataset.src;
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('airtable.com')) frame.src = frame.dataset.src;
         }
         if (tabId === 'comms') {
             const frame = document.getElementById('commsFrame');
-            if (!frame.src || frame.src === window.location.href) frame.src = frame.dataset.src;
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('follow-up')) frame.src = frame.dataset.src;
         }
         if (tabId === 'compliance') {
             const frame = document.getElementById('complianceFrame');
-            if (!frame.src || frame.src === window.location.href) frame.src = frame.dataset.src;
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('compliance')) frame.src = frame.dataset.src;
         }
         // Render invoices tab on switch
         if (tabId === 'invoices') {
