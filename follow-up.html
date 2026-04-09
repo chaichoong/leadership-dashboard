@@ -94,6 +94,9 @@
         .email-list-header.newsletter-header {
             grid-template-columns: 40px 1fr 160px 80px 120px 40px;
         }
+        .email-list-header.compliance-header {
+            grid-template-columns: 40px 1fr 160px 100px 120px 40px;
+        }
         .email-row { border-bottom: 1px solid #f1f5f9; transition: background 0.1s; }
         .email-row:last-child { border-bottom: none; }
         .email-row-summary {
@@ -126,6 +129,9 @@
             grid-template-columns: 40px 1fr 160px 100px 120px 40px;
         }
         .email-row-summary.delete-row {
+            grid-template-columns: 40px 1fr 160px 100px 120px 40px;
+        }
+        .email-row-summary.compliance-row {
             grid-template-columns: 40px 1fr 160px 100px 120px 40px;
         }
         .unsub-btn {
@@ -312,6 +318,7 @@
             .email-row-summary.archive-row,
             .email-row-summary.newsletter-row,
             .email-row-summary.delete-row,
+            .email-row-summary.compliance-row,
             .email-row-summary.global-row {
                 grid-template-columns: 28px 1fr auto !important;
                 gap: 4px; padding: 10px 12px;
@@ -460,6 +467,17 @@
         .unsub-btn.mark-done-btn:hover { background: #ede9fe; border-color: #a5b4fc; }
 
         /* Newsletter Filter Bar */
+        .compliance-banner {
+            background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 10px;
+            padding: 12px 16px; margin-bottom: 12px; font-size: 13px;
+        }
+        .compliance-badge {
+            display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 6px;
+            border-radius: 4px; text-transform: uppercase; vertical-align: middle; margin-left: 6px;
+        }
+        .compliance-badge.processed { background: #dcfce7; color: #16a34a; }
+        .compliance-badge.pending { background: #fef3c7; color: #d97706; }
+        .compliance-badge.failed { background: #fee2e2; color: #dc2626; }
         .filter-bar {
             display: flex; gap: 8px; margin-bottom: 12px;
         }
@@ -652,6 +670,21 @@
                 <button class="search-scope-btn local" id="searchScopeBtn" onclick="toggleSearchScope()">This Label</button>
             </div>
             <div class="search-info" id="searchInfo" style="display:none;"></div>
+        </div>
+
+        <div class="compliance-banner" id="complianceBanner" style="display:none;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <strong style="color:#4338ca;">Property Compliance</strong>
+                    <span style="color:#64748b; font-size:12px; margin-left:8px;">
+                        <span id="complianceProcessed">0</span> processed · <span id="compliancePending">0</span> pending
+                    </span>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button class="filter-btn" id="processAllComplianceBtn" onclick="processAllPendingCompliance()" style="background:#4338ca; color:white; border-color:#4338ca;">Process All Pending</button>
+                    <a href="compliance.html" target="_blank" style="font-size:12px; color:#4338ca; text-decoration:none; font-weight:500;">Open Dashboard →</a>
+                </div>
+            </div>
         </div>
 
         <div class="filter-bar" id="newsletterFilterBar" style="display:none;">
@@ -938,13 +971,13 @@
             const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
             allLabelsRaw = labelsResp.result.labels || [];
             allLabels = allLabelsRaw
-                .filter(l => l.type === 'user' && /^[1-9][.:]\s/.test(l.name))
+                .filter(l => l.type === 'user' && (/^[1-9]\d?[.:]\s/.test(l.name)))
                 .sort((a, b) => a.name.localeCompare(b.name));
 
-            // Fetch counts for selected labels (1, 2, 3, 8, 9)
+            // Fetch counts for selected labels (1, 2, 3, 8, 9, Property Compliance)
             const labelCounts = {};
             const countPromises = allLabels
-                .filter(l => LABELS_WITH_COUNTS.includes(l.name.charAt(0)))
+                .filter(l => LABELS_WITH_COUNTS.includes(l.name.charAt(0)) || l.name.startsWith('10'))
                 .map(async (l) => {
                     try {
                         const detail = await gapi.client.gmail.users.labels.get({ userId: 'me', id: l.id });
@@ -1008,7 +1041,7 @@
         try {
             const labelCounts = {};
             const countPromises = allLabels
-                .filter(l => LABELS_WITH_COUNTS.includes(l.name.charAt(0)))
+                .filter(l => LABELS_WITH_COUNTS.includes(l.name.charAt(0)) || l.name.startsWith('10'))
                 .map(async (l) => {
                     try {
                         const detail = await gapi.client.gmail.users.labels.get({ userId: 'me', id: l.id });
@@ -1221,7 +1254,7 @@
                 const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
                 allLabelsRaw = labelsResp.result.labels || [];
                 allLabels = allLabelsRaw
-                    .filter(l => l.type === 'user' && /^[1-9][.:]\s/.test(l.name))
+                    .filter(l => l.type === 'user' && (/^[1-9]\d?[.:]\s/.test(l.name)))
                     .sort((a, b) => a.name.localeCompare(b.name));
             }
 
@@ -1341,8 +1374,29 @@
             document.getElementById('newsletterFilterBar').style.display = 'none';
         }
 
+        // Show/hide compliance banner
+        if (isComplianceView()) {
+            document.getElementById('complianceBanner').style.display = 'block';
+            updateComplianceBannerCounts();
+        } else {
+            document.getElementById('complianceBanner').style.display = 'none';
+        }
+
         btn.disabled = false;
         btn.textContent = 'Refresh';
+    }
+
+    function updateComplianceBannerCounts() {
+        const processed = getProcessedCompliance();
+        let procCount = 0, pendCount = 0;
+        for (const e of allEmails) {
+            if (processed[e.threadId]?.status === 'success') procCount++;
+            else pendCount++;
+        }
+        document.getElementById('complianceProcessed').textContent = procCount;
+        document.getElementById('compliancePending').textContent = pendCount;
+        const btn = document.getElementById('processAllComplianceBtn');
+        if (btn) btn.style.display = pendCount > 0 ? '' : 'none';
     }
 
     // ============================================================
@@ -1511,7 +1565,7 @@
                 const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
                 allLabelsRaw = labelsResp.result.labels || [];
                 allLabels = allLabelsRaw
-                    .filter(l => l.type === 'user' && /^[1-9][.:]\s/.test(l.name))
+                    .filter(l => l.type === 'user' && (/^[1-9]\d?[.:]\s/.test(l.name)))
                     .sort((a, b) => a.name.localeCompare(b.name));
             }
 
@@ -1704,6 +1758,10 @@
 
     function isTaskCreatedView() {
         return currentLabel.toLowerCase().includes('task created') || currentLabel.startsWith('8');
+    }
+
+    function isComplianceView() {
+        return currentLabel.toLowerCase().includes('compliance') || currentLabel.startsWith('10');
     }
 
     function isTaskCompletedView() {
@@ -2023,6 +2081,16 @@
                 <div>Move Label</div>
                 <div></div>
             `;
+        } else if (isComplianceView()) {
+            header.className = 'email-list-header compliance-header';
+            header.innerHTML = `
+                <div>#</div>
+                <div>Subject / From</div>
+                <div>Date</div>
+                <div>Status</div>
+                <div>Move Label</div>
+                <div></div>
+            `;
         } else {
             header.className = 'email-list-header';
             header.innerHTML = `
@@ -2281,6 +2349,233 @@ Respond with ONLY the JSON object, no markdown.`;
     }
 
     // ============================================================
+    // PROPERTY COMPLIANCE PROCESSING
+    // ============================================================
+    const COMPLIANCE_CERTS_TABLE = 'tbl35rf9qtmq0P87r';
+    const COMPLIANCE_PROPS_TABLE = 'tbl6f0OkAmTC2jbuG';
+    const CERT_FIELDS = {
+        type:        'fld00ZuxT8uKagM0b',
+        property:    'fldXdDStBL7xrytgT',
+        unit:        'fldAa2aZINAPgmR79',
+        status:      'fldcSmrEQxoqpEQYF',
+        renewalDate: 'fldhZw8IrmgLt1hLY',
+        notes:       'fldzNfi71BXP1E3pj',
+    };
+    const PROP_FIELDS = {
+        property:  'fldy2t735TV5e1DIL',
+        shortName: 'fldqMbR329TNY974G',
+    };
+
+    let compliancePropsCache = null;
+
+    function getProcessedCompliance() {
+        try { return JSON.parse(localStorage.getItem('compliance_processed') || '{}'); }
+        catch { return {}; }
+    }
+    function markComplianceProcessed(threadId, result) {
+        const processed = getProcessedCompliance();
+        processed[threadId] = { ...result, processedAt: new Date().toISOString() };
+        localStorage.setItem('compliance_processed', JSON.stringify(processed));
+    }
+
+    async function fetchComplianceProperties() {
+        if (compliancePropsCache) return compliancePropsCache;
+        const pat = getAirtablePat();
+        if (!pat) return [];
+
+        let records = [], offset = null;
+        do {
+            let url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COMPLIANCE_PROPS_TABLE}?returnFieldsByFieldId=true`;
+            url += `&fields%5B%5D=${PROP_FIELDS.property}&fields%5B%5D=${PROP_FIELDS.shortName}`;
+            if (offset) url += '&offset=' + offset;
+            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + pat } });
+            if (!resp.ok) break;
+            const data = await resp.json();
+            records = records.concat(data.records || []);
+            offset = data.offset;
+        } while (offset);
+
+        compliancePropsCache = records.map(r => ({
+            id: r.id,
+            name: r.fields[PROP_FIELDS.property] || '',
+            shortName: r.fields[PROP_FIELDS.shortName] || r.fields[PROP_FIELDS.property] || '',
+        }));
+        return compliancePropsCache;
+    }
+
+    async function processComplianceEmail(email) {
+        const pat = getAirtablePat();
+        if (!pat) { showError('Airtable token required. Go to Settings.'); return false; }
+
+        const gmailUrl = 'https://mail.google.com/mail/u/0/#inbox/' + email.threadId;
+
+        // Already processed?
+        const processed = getProcessedCompliance();
+        if (processed[email.threadId]?.status === 'success') {
+            return true;
+        }
+
+        // Check Airtable for existing cert with this Gmail URL
+        try {
+            const checkResp = await fetch(
+                `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${CERT_FIELDS.notes}})`)}&maxRecords=1`,
+                { headers: { 'Authorization': 'Bearer ' + pat } }
+            );
+            if (checkResp.ok) {
+                const checkData = await checkResp.json();
+                if (checkData.records?.length > 0) {
+                    markComplianceProcessed(email.threadId, { status: 'success', certId: checkData.records[0].id });
+                    return true;
+                }
+            }
+        } catch (err) { console.warn('Compliance duplicate check failed:', err); }
+
+        // Fetch properties
+        const properties = await fetchComplianceProperties();
+        const propertyNames = properties.map(p => p.name).join('\n');
+
+        // Get email text
+        const bodyText = email.messages.map(m => {
+            if (typeof getPlainText === 'function') return getPlainText(m);
+            return m.body || m.snippet || '';
+        }).join('\n').substring(0, 4000);
+
+        // AI extraction
+        const prompt = `You are extracting property compliance certificate information from an email.
+
+AVAILABLE PROPERTIES (match one exactly):
+${propertyNames}
+
+EMAIL:
+Subject: ${email.subject}
+From: ${email.fromFull || email.from}
+Date: ${email.lastDate ? email.lastDate.toISOString().slice(0, 10) : 'unknown'}
+Body: ${bodyText}
+
+Extract as JSON:
+- "cert_type": one of "GSC", "EICR", "Landlord Insurance", "Fire Alarm" (or null if unclear)
+- "property_name": exact property name from the list above (or null if no match)
+- "renewal_date": certificate expiry/renewal date as YYYY-MM-DD (or null)
+- "status": "Active" if current, "Expired" if expired
+- "summary": one-line description under 100 chars
+
+If multiple certificates in one email, return an array of objects. Otherwise return a single object.
+Respond with ONLY valid JSON, no markdown.`;
+
+        try {
+            let response;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                response = await fetch(CLAUDE_PROXY, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'claude-haiku-4-5-20251001',
+                        max_tokens: 500,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                if (response.status !== 529) break;
+                await new Promise(r => setTimeout(r, (attempt + 1) * 2500));
+            }
+
+            if (!response.ok) throw new Error('Claude API error: ' + response.status);
+
+            const data = await response.json();
+            const text = data.content?.[0]?.text || '';
+            let extracted;
+            try {
+                const jsonMatch = text.match(/[\[{][\s\S]*[\]}]/);
+                extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+            } catch { extracted = null; }
+
+            if (!extracted) {
+                markComplianceProcessed(email.threadId, { status: 'failed', error: 'Could not parse AI response' });
+                showError('Could not extract compliance details from: "' + truncate(email.subject, 40) + '"');
+                return false;
+            }
+
+            const certs = Array.isArray(extracted) ? extracted : [extracted];
+            let created = 0;
+
+            for (const cert of certs) {
+                if (!cert.cert_type || !cert.property_name) continue;
+
+                const matchedProp = properties.find(p =>
+                    p.name.toLowerCase() === cert.property_name.toLowerCase() ||
+                    p.shortName.toLowerCase() === cert.property_name.toLowerCase()
+                );
+                if (!matchedProp) {
+                    console.warn('No property match for:', cert.property_name);
+                    continue;
+                }
+
+                const record = {
+                    fields: {
+                        [CERT_FIELDS.type]: { name: cert.cert_type },
+                        [CERT_FIELDS.property]: [matchedProp.id],
+                        [CERT_FIELDS.status]: { name: cert.status || 'Active' },
+                        [CERT_FIELDS.notes]: `Gmail: ${gmailUrl}\n${cert.summary || ''}`,
+                    }
+                };
+                if (cert.renewal_date) record.fields[CERT_FIELDS.renewalDate] = cert.renewal_date;
+
+                const resp = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COMPLIANCE_CERTS_TABLE}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records: [record] })
+                });
+
+                if (resp.ok) {
+                    created++;
+                    addAuditEntry('compliance_cert', `Created ${cert.cert_type} cert for ${matchedProp.shortName} from "${truncate(email.subject, 40)}"`);
+                } else {
+                    const errData = await resp.json().catch(() => ({}));
+                    console.error('Cert creation failed:', errData);
+                }
+            }
+
+            markComplianceProcessed(email.threadId, { status: created > 0 ? 'success' : 'no_match', certsCreated: created });
+
+            if (created > 0) {
+                showSuccess(`Created ${created} compliance cert(s) from "${truncate(email.subject, 40)}"`);
+            } else {
+                showError('No matching property/cert found in: "' + truncate(email.subject, 40) + '"');
+            }
+            return created > 0;
+
+        } catch (err) {
+            console.error('Compliance processing failed:', err);
+            markComplianceProcessed(email.threadId, { status: 'error', error: err.message });
+            showError('Compliance processing failed: ' + err.message);
+            return false;
+        }
+    }
+
+    async function processAllPendingCompliance() {
+        const pat = getAirtablePat();
+        if (!pat) { showError('Airtable token required. Go to Settings.'); return; }
+
+        const processed = getProcessedCompliance();
+        const pending = allEmails.filter(e => !processed[e.threadId] || processed[e.threadId].status === 'failed');
+        if (pending.length === 0) { showSuccess('All compliance emails already processed.'); return; }
+
+        const btn = document.getElementById('processAllComplianceBtn');
+        if (btn) { btn.disabled = true; btn.textContent = `Processing 0/${pending.length}...`; }
+
+        let success = 0, fail = 0;
+        for (let i = 0; i < pending.length; i++) {
+            if (btn) btn.textContent = `Processing ${i + 1}/${pending.length}...`;
+            const ok = await processComplianceEmail(pending[i]);
+            if (ok) success++; else fail++;
+            await new Promise(r => setTimeout(r, 500)); // rate limit
+        }
+
+        if (btn) { btn.disabled = false; btn.textContent = 'Process All Pending'; }
+        showSuccess(`Compliance processing complete: ${success} succeeded, ${fail} failed.`);
+        if (isComplianceView()) renderEmailsWithPagination(); // refresh status badges
+    }
+
+    // ============================================================
     // CHANGE LABEL
     // ============================================================
     let labelChangeInProgress = false;
@@ -2330,6 +2625,11 @@ Respond with ONLY the JSON object, no markdown.`;
                 createAirtableTask(email).then(ok => {
                     if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
                 });
+            }
+
+            // Auto-process compliance cert if moved to Property Compliance
+            if (newLabelName.startsWith('10')) {
+                processComplianceEmail(email).catch(err => console.error('Compliance processing failed:', err));
             }
 
             // Remove from current list and re-render
@@ -2399,6 +2699,11 @@ Respond with ONLY the JSON object, no markdown.`;
                 createAirtableTask(email).then(ok => {
                     if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
                 });
+            }
+
+            // Auto-process compliance cert if applied to Property Compliance
+            if (labelName.startsWith('10')) {
+                processComplianceEmail(email).catch(err => console.error('Compliance processing failed:', err));
             }
 
             // Update applied today count
@@ -2487,6 +2792,11 @@ Respond with ONLY the JSON object, no markdown.`;
                 // Auto-create Airtable task if applied to label 8 (Task Created)
                 if (/^8[.:]\s/.test(labelName)) {
                     createAirtableTask(email).catch(err => console.error('Bulk Airtable task creation failed:', err));
+                }
+
+                // Auto-process compliance cert if applied to Property Compliance
+                if (labelName.startsWith('10')) {
+                    processComplianceEmail(email).catch(err => console.error('Bulk compliance processing failed:', err));
                 }
 
                 // Remove suggestion and email
@@ -3091,6 +3401,47 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                             ${email.unsubscribeUrl ? `<button class="followup-btn" onclick="window.open('${escapeHtml(email.unsubscribeUrl)}', '_blank')" style="padding:8px 16px; font-size:13px;">Open Unsubscribe Link</button>` : ''}
                             ${!alreadyUnsub ? `<button class="unsub-btn mark-done-btn" id="unsub-body-${i}" onclick="markAsUnsubscribed(${i})" style="padding:8px 16px; font-size:13px;">Mark as Already Unsubscribed</button>` : ''}
                         </div>
+                        ${renderEmailBodyPlaceholder(email)}
+                    </div>
+                </div>`;
+            } else if (isComplianceView()) {
+                const proc = getProcessedCompliance()[email.threadId];
+                let statusBadge;
+                if (proc?.status === 'success') {
+                    statusBadge = `<span class="compliance-badge processed">Processed</span>`;
+                } else if (proc?.status === 'failed' || proc?.status === 'error') {
+                    statusBadge = `<span class="compliance-badge failed">Failed</span>`;
+                } else if (proc?.status === 'no_match') {
+                    statusBadge = `<span class="compliance-badge failed">No Match</span>`;
+                } else {
+                    statusBadge = `<span class="compliance-badge pending">Pending</span>`;
+                }
+                return `
+                <div class="email-row" id="row-${i}">
+                    <div class="email-row-summary compliance-row" onclick="toggleRow(${i}); return false;">
+                        <div class="row-number">${displayNum}</div>
+                        <div class="email-subject-col">
+                            <div class="email-subject">${hasRealAttachments(email) ? '<span class="paperclip" title="Has attachments">&#128206;</span> ' : ''}${escapeHtml(email.subject)}</div>
+                            <div class="email-from">${escapeHtml(email.from)}${email.messageCount > 1 ? ' &middot; ' + email.messageCount + ' messages' : ''}</div>
+                        </div>
+                        <div class="email-date">${formatDate(email.lastDate)}</div>
+                        <div style="text-align:center;">${statusBadge}</div>
+                        <div class="label-change-col" onclick="event.stopPropagation();">
+                            <select class="label-change-select" id="labelChg-${i}" onchange="changeLabel(${i}, this.value)">
+                                <option value="">Move to...</option>
+                                ${labelOptions}
+                            </select>
+                        </div>
+                        <div class="expand-icon">&#9662;</div>
+                    </div>
+                    <div class="email-body">
+                        <div class="email-meta">
+                            <div><strong>From:</strong> ${escapeHtml(email.fromFull)}</div>
+                            <div><strong>Date:</strong> ${formatDate(email.lastDate)}</div>
+                            <div><strong>Messages:</strong> ${email.messageCount}</div>
+                            <div><strong>Compliance Status:</strong> ${proc ? proc.status + (proc.certsCreated ? ' (' + proc.certsCreated + ' cert' + (proc.certsCreated > 1 ? 's' : '') + ')' : '') : 'Not processed'}</div>
+                        </div>
+                        ${!proc || proc.status !== 'success' ? `<div style="padding:10px 0;"><button class="followup-btn" onclick="event.stopPropagation(); processComplianceEmail(allEmails[${i}]).then(() => { updateComplianceBannerCounts(); renderEmailsWithPagination(); });">Process Now</button></div>` : ''}
                         ${renderEmailBodyPlaceholder(email)}
                     </div>
                 </div>`;
