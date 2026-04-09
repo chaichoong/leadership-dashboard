@@ -137,6 +137,41 @@
             background: rgba(0,0,0,0.5); z-index: 99;
         }
 
+        /* Share button */
+        .share-btn {
+            position: fixed; top: 12px; right: 16px; z-index: 50;
+            display: flex; align-items: center; gap: 6px;
+            padding: 6px 14px; font-size: 12px; font-weight: 600;
+            background: #2563eb; color: white; border: none; border-radius: 6px;
+            cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        .share-btn:hover { background: #1d4ed8; }
+        .share-toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #1e293b; color: white; padding: 10px 20px; border-radius: 8px;
+            font-size: 13px; font-weight: 500; z-index: 9999; display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        /* Site map */
+        .sitemap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 20px 0; }
+        .sitemap-card {
+            background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+            padding: 20px; transition: all 0.2s ease;
+        }
+        .sitemap-card:hover { border-color: #2563eb; box-shadow: 0 4px 12px rgba(37,99,235,0.1); }
+        .sitemap-card h3 { font-size: 15px; font-weight: 700; color: #1e293b; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+        .sitemap-card p { font-size: 12px; color: #64748b; margin: 0 0 12px; }
+        .sitemap-card .sitemap-links { display: flex; flex-direction: column; gap: 6px; }
+        .sitemap-card a { font-size: 12px; color: #2563eb; text-decoration: none; word-break: break-all; }
+        .sitemap-card a:hover { text-decoration: underline; }
+        .sitemap-card .sitemap-copy {
+            display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+            font-size: 10px; font-weight: 600; background: #f1f5f9; color: #64748b;
+            border: 1px solid #e2e8f0; border-radius: 4px; cursor: pointer; margin-left: 6px;
+        }
+        .sitemap-card .sitemap-copy:hover { background: #e2e8f0; }
+
         /* Hide old horizontal tabs — replaced by sidebar */
         .tabs-nav { display: none; }
         .tab-btn { display: none; }
@@ -689,7 +724,14 @@
             <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
             <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
         </nav>
+        <div style="border-top:1px solid #334155;padding:8px 0">
+            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span></div>
+        </div>
     </div>
+
+    <!-- Share button + toast -->
+    <button class="share-btn" onclick="shareCurrentPage()">&#x1F517; Share</button>
+    <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
 
     <!-- Dashboard -->
     <div class="app-layout">
@@ -908,6 +950,78 @@
                 allowfullscreen
                 style="border:none">
             </iframe>
+        </div>
+
+        <!-- Tab 7: Site Map -->
+        <div class="tab-panel" id="tab-sitemap">
+            <div class="section">
+                <h2 class="section-title">Site Map & Links</h2>
+                <p style="color:#64748b;font-size:13px;margin-bottom:16px">Share any page by copying its standalone link. Each page works independently — recipients don't need access to the full platform.</p>
+                <div class="sitemap-grid">
+                    <div class="sitemap-card">
+                        <h3>&#x1F4CA; Leadership Dashboard</h3>
+                        <p>Financial overview, cash flow forecast, balance calculator, AI commentary</p>
+                        <div class="sitemap-links">
+                            <div><a href="#overview" onclick="switchTab('overview')">Open in platform</a></div>
+                            <div><a href="index.html#overview" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#overview')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x1F527; Contractor Job List</h3>
+                        <p>Active maintenance jobs, contractor assignments, job status tracking</p>
+                        <div class="sitemap-links">
+                            <div><a href="#airtable" onclick="switchTab('airtable')">Open in platform</a></div>
+                            <div><a href="index.html#airtable" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#airtable')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x1F9FE; Invoices</h3>
+                        <p>Pending invoices from Gmail, AI-matched payments, mark-as-paid workflow</p>
+                        <div class="sitemap-links">
+                            <div><a href="#invoices" onclick="switchTab('invoices')">Open in platform</a></div>
+                            <div><a href="index.html#invoices" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#invoices')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x1F6A8; CFVs</h3>
+                        <p>Cash flow voids, 3-stage chase tracking, comments, status management</p>
+                        <div class="sitemap-links">
+                            <div><a href="#cfv" onclick="switchTab('cfv')">Open in platform</a></div>
+                            <div><a href="index.html#cfv" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#cfv')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x1F4E8; Inbound Comms</h3>
+                        <p>Email triage, AI label suggestions, follow-up drafting, inbox management</p>
+                        <div class="sitemap-links">
+                            <div><a href="#comms" onclick="switchTab('comms')">Open in platform</a></div>
+                            <div><a href="follow-up.html" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('follow-up.html')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x2705; Property Compliance</h3>
+                        <p>Property compliance tracking, document status, expiry monitoring</p>
+                        <div class="sitemap-links">
+                            <div><a href="#compliance" onclick="switchTab('compliance')">Open in platform</a></div>
+                            <div><a href="compliance.html" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('compliance.html')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x1F4D6; SOP — Leadership Dashboard</h3>
+                        <p>Standard Operating Procedure — complete system guide</p>
+                        <div class="sitemap-links">
+                            <div><a href="sop.html" target="_blank">Open SOP</a> <button class="sitemap-copy" onclick="copyLink('sop.html')">Copy</button></div>
+                        </div>
+                    </div>
+                    <div class="sitemap-card">
+                        <h3>&#x1F4D6; SOP — Inbound Comms</h3>
+                        <p>Standard Operating Procedure — inbound comms tracker guide</p>
+                        <div class="sitemap-links">
+                            <div><a href="inbound-comms-sop.html" target="_blank">Open SOP</a> <button class="sitemap-copy" onclick="copyLink('inbound-comms-sop.html')">Copy</button></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="footer">
@@ -2546,7 +2660,7 @@
         // Update URL hash for deep-linking
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
-        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance' };
+        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -2585,6 +2699,27 @@
         if (PAT && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
             loadDashboard();
         }
+    }
+
+    // Share current page — copies the deep link to clipboard
+    function shareCurrentPage() {
+        const hash = window.location.hash || '#overview';
+        const url = window.location.origin + window.location.pathname + hash;
+        navigator.clipboard.writeText(url).then(() => {
+            const toast = document.getElementById('shareToast');
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 2500);
+        }).catch(() => { prompt('Copy this link:', url); });
+    }
+
+    function copyLink(path) {
+        const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+        const url = base + path;
+        navigator.clipboard.writeText(url).then(() => {
+            const toast = document.getElementById('shareToast');
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 2500);
+        }).catch(() => { prompt('Copy this link:', url); });
     }
 
     // Sidebar toggle (mobile)
