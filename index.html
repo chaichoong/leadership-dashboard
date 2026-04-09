@@ -875,6 +875,7 @@
         tasks:         'tblqB8b22hKBL4PF1',
         categories:    'tbleWb8ioptnEwPR8',
         subCategories: 'tblOTdRcPf8AgRz25',
+        businesses:    'tblpqkvWJJo8Uu25q',
     };
 
     // Field IDs
@@ -943,6 +944,7 @@
         txUnit:           'fldJGIhSbgXNIEW4a',  // Unit (linked)
         txProperty:       'fldvp44VfF8uTTthp',  // Property (linked)
         txCost:           'fldGkpkVqSeiGvUGL',  // Costs (linked)
+        txBusiness:       'fldX1aFlJyzpXGhbF',  // Business (For Reports) (linked)
     };
 
     // Key record IDs
@@ -981,6 +983,7 @@
     let allCosts = [];        // stored globally for reconciliation
     let allCategories = [];   // Chart of Accounts categories
     let allSubCategories = []; // Chart of Accounts sub-categories
+    let allBusinesses = [];   // Business entities
 
     // ── Smart Refresh: delays refresh while user is actively interacting ──
     let lastUserActivity = 0;       // timestamp of last interaction
@@ -1243,7 +1246,7 @@
         document.getElementById('loadingOverlay').style.display = 'flex';
         try {
             // Fetch Airtable data and Gmail invoices in parallel
-            const [accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories] = await Promise.all([
+            const [accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories, businesses] = await Promise.all([
                 airtableFetch(TABLES.accounts),
                 airtableFetch(TABLES.costs),
                 airtableFetch(TABLES.tenancies),
@@ -1252,6 +1255,7 @@
                 airtableFetch(TABLES.tenants),
                 airtableFetch(TABLES.categories),
                 airtableFetch(TABLES.subCategories),
+                airtableFetch(TABLES.businesses),
             ]);
 
             // Fire Gmail fetch in parallel (non-blocking — doesn't delay dashboard render)
@@ -1263,6 +1267,7 @@
             allCosts = costs;
             allCategories = categories;
             allSubCategories = subCategories;
+            allBusinesses = businesses;
 
             // Clear stale "returned" flags — if Airtable now shows In Payment, the flag is no longer needed
             tenancies.forEach(t => {
@@ -3341,6 +3346,13 @@
             return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
         }).join('');
     }
+    function buildBusinessOptions(selectedId) {
+        return allBusinesses.map(r => {
+            const name = getField(r, 'fldbbRqVxLxUdHwIR') || '';
+            const sel = r.id === selectedId ? ' selected' : '';
+            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
+        }).join('');
+    }
 
     function triggerReconciliation(btn) {
         btn.textContent = 'Analysing...';
@@ -3423,7 +3435,8 @@
                 txAmount: amt || rawAmt,
                 categoryId: '', categoryName: '',
                 subCatId: '', subCatName: '',
-                tenantName: '', tenancyLabel: '', tenancyId: '',
+                businessId: '', businessName: '',
+                tenantName: '', tenantId: '', tenancyLabel: '', tenancyId: '',
                 unitName: '', unitId: '', propertyName: '',
                 costLabel: '', costId: '',
                 matchType: '', score: 0, status: 'unmatched',
@@ -3436,6 +3449,8 @@
                 result.subCatName = rule.subCatName || getSubCatName(rule.subCatId);
                 result.categoryId = rule.categoryId || '';
                 result.categoryName = rule.categoryName || getCatName(rule.categoryId);
+                result.businessId = rule.businessId || '';
+                result.businessName = rule.businessName || '';
                 result.costLabel = rule.costLabel || '';
                 result.costId = rule.costId || '';
                 result.tenantName = rule.tenantName || '';
@@ -3547,6 +3562,7 @@
                             <th style="${thStyle};text-align:right">Amount</th>
                             <th style="${thStyle}">Category</th>
                             <th style="${thStyle}">Sub-Category</th>
+                            <th style="${thStyle}">Business</th>
                             <th style="${thStyle}">Tenant</th>
                             <th style="${thStyle}">Tenancy</th>
                             <th style="${thStyle}">Rental Unit</th>
@@ -3569,13 +3585,12 @@
         const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
         const cell = 'padding:5px 6px;vertical-align:top;font-size:11px';
         const dim = 'color:#94a3b8;font-size:10px';
-        const catSelect = `<select id="recon-cat-${i}" style="font-size:10px;padding:2px;max-width:100px" onchange="reconCatChanged(${i})">${'<option value="">—</option>'}${buildCatOptions(r.categoryId)}</select>`;
-        const subCatSelect = `<select id="recon-subcat-${i}" style="font-size:10px;padding:2px;max-width:120px" onchange="reconSubCatChanged(${i})">${'<option value="">—</option>'}${buildSubCatOptions(r.subCatId)}</select>`;
+        const catSelect = `<select id="recon-cat-${i}" style="font-size:10px;padding:2px;max-width:150px" onchange="reconCatChanged(${i})">${'<option value="">—</option>'}${buildCatOptions(r.categoryId)}</select>`;
+        const subCatSelect = `<select id="recon-subcat-${i}" style="font-size:10px;padding:2px;max-width:180px" onchange="reconSubCatChanged(${i})">${'<option value="">—</option>'}${buildSubCatOptions(r.subCatId)}</select>`;
 
         const actionHtml = r.status === 'approved'
             ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
-            : `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
-               <button class="cfv-action-btn" onclick="toggleAmendRow(${i})" style="font-size:10px;margin-top:3px">Amend</button>`;
+            : `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>`;
 
         const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
 
@@ -3586,22 +3601,13 @@
             <td style="${cell};text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
             <td style="${cell}">${catSelect}</td>
             <td style="${cell}">${subCatSelect}</td>
+            <td style="${cell}"><select id="recon-business-${i}" style="font-size:10px;padding:2px;max-width:130px"><option value="">—</option>${buildBusinessOptions(r.businessId || '')}</select></td>
             <td style="${cell}"><select id="recon-tenant-${i}" style="font-size:10px;padding:2px;max-width:110px"><option value="">—</option>${buildTenantOptions(r.tenantId || '')}</select></td>
             <td style="${cell}"><select id="recon-tenancy-${i}" style="font-size:10px;padding:2px;max-width:130px" onchange="reconTenancyChanged(${i})"><option value="">—</option>${buildTenancyOptions(r.tenancyId || '')}</select></td>
             <td style="${cell}"><select id="recon-unit-${i}" style="font-size:10px;padding:2px;max-width:120px"><option value="">—</option>${buildRentalUnitOptions(r.unitId || '')}</select></td>
             <td style="${cell}"><select id="recon-property-${i}" style="font-size:10px;padding:2px;max-width:120px"><option value="">—</option>${buildPropertyOptions(r.propertyName || '')}</select></td>
             <td style="${cell}"><select id="recon-cost-${i}" style="font-size:10px;padding:2px;max-width:130px"><option value="">—</option>${buildCostOptions(r.costId || '')}</select></td>
-            <td style="${cell};text-align:center;min-width:70px">${actionHtml}</td>
-        </tr>
-        <tr id="recon-amend-${i}" style="display:none;border-bottom:1px solid #e2e8f0">
-            <td colspan="12" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
-                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    <span style="font-size:10px;font-weight:700;color:#2563eb">Amend:</span>
-                    <input id="recon-amend-input-${i}" type="text" placeholder="e.g. Category is Utilities, or This is rent from Collins" style="flex:1;min-width:200px;padding:5px 8px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px">
-                    <button class="cfv-action-btn primary" onclick="applyAmendment(${i})" style="font-size:10px">Apply</button>
-                    <button class="cfv-action-btn" onclick="document.getElementById('recon-amend-${i}').style.display='none'" style="font-size:10px">Cancel</button>
-                </div>
-            </td>
+            <td style="${cell};text-align:center;min-width:60px">${actionHtml}</td>
         </tr>`;
     }
 
@@ -3725,6 +3731,7 @@
             // Read ALL values from dropdowns (user may have changed them)
             const catSel = document.getElementById('recon-cat-' + idx);
             const subCatSel = document.getElementById('recon-subcat-' + idx);
+            const businessSel = document.getElementById('recon-business-' + idx);
             const tenantSel = document.getElementById('recon-tenant-' + idx);
             const tenancySel = document.getElementById('recon-tenancy-' + idx);
             const unitSel = document.getElementById('recon-unit-' + idx);
@@ -3732,12 +3739,14 @@
 
             const catId = catSel ? catSel.value : '';
             const subCatId = subCatSel ? subCatSel.value : '';
+            const businessId = businessSel ? businessSel.value : '';
             const tenancyId = tenancySel ? tenancySel.value : '';
             const unitId = unitSel ? unitSel.value : '';
             const costId = costSel ? costSel.value : '';
 
             if (catId) fields[F.txCategory] = [catId];
             if (subCatId) fields[F.txSubCategory] = [subCatId];
+            if (businessId) fields[F.txBusiness] = [businessId];
             if (tenancyId) fields[F.txTenancy] = [tenancyId];
             if (unitId) fields[F.txUnit] = [unitId];
             if (costId) fields[F.txCost] = [costId];
@@ -3760,6 +3769,7 @@
             const subCatName = subCatSel && subCatSel.selectedIndex > 0 ? subCatSel.options[subCatSel.selectedIndex].text : '';
             const catName = catSel && catSel.selectedIndex > 0 ? catSel.options[catSel.selectedIndex].text : '';
             const costLabel = costSel && costSel.selectedIndex > 0 ? costSel.options[costSel.selectedIndex].text : '';
+            const businessName = businessSel && businessSel.selectedIndex > 0 ? businessSel.options[businessSel.selectedIndex].text : '';
             const tenancyLabel = tenancySel && tenancySel.selectedIndex > 0 ? tenancySel.options[tenancySel.selectedIndex].text : '';
             const tenantName = tenantSel && tenantSel.selectedIndex > 0 ? tenantSel.options[tenantSel.selectedIndex].text : '';
             const unitName = unitSel && unitSel.selectedIndex > 0 ? unitSel.options[unitSel.selectedIndex].text : '';
@@ -3771,6 +3781,7 @@
             if (vendorKey.length >= 3) {
                 saveReconRule(vendorKey, {
                     subCatId, subCatName, categoryId: catId, categoryName: catName,
+                    businessId, businessName,
                     costLabel, costId, tenantName, tenancyLabel, tenancyId,
                     unitName, unitId, propertyName,
                 });
