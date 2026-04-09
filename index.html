@@ -2494,11 +2494,12 @@
                     borderDash: [6, 3],
                     fill: false,
                     tension: 0.4,
-                    pointRadius: 3,
+                    pointRadius: 4,
                     pointBackgroundColor: '#dc2626',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
-                    pointHoverRadius: 6,
+                    pointHoverRadius: 7,
+                    pointStyle: 'circle',
                 }, {
                     label: 'What-If (Excludes Unchecked)',
                     data: whatIfData,
@@ -2508,11 +2509,12 @@
                     borderDash: [4, 4],
                     fill: false,
                     tension: 0.4,
-                    pointRadius: 3,
+                    pointRadius: 4,
                     pointBackgroundColor: '#1e293b',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
-                    pointHoverRadius: 6,
+                    pointHoverRadius: 7,
+                    pointStyle: 'circle',
                     hidden: !hasAnyExclusions(), // hidden by default until user unchecks something
                 }]
             },
@@ -2631,17 +2633,26 @@
             const thisMonthLast = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
             const nextMonthLast = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
 
-            // This month: include if due date is within 5 days ago (recon window) or in future
-            const actualDayThis = Math.min(dueDay, thisMonthLast);
-            const dThis = new Date(today.getFullYear(), today.getMonth(), actualDayThis);
+            // This month: if due day exceeds days in month, roll to 1st of next month
+            let dThis;
+            if (dueDay > thisMonthLast) {
+                // e.g. due day 31 in April (30 days) → rolls to May 1st
+                dThis = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+            } else {
+                dThis = new Date(today.getFullYear(), today.getMonth(), dueDay);
+            }
             const daysAgo = Math.floor((today - dThis) / 86400000);
             if (dThis <= windowEnd && daysAgo <= 5) {
                 dates.push(dateKey(dThis));
             }
 
-            // Next month: include if within the forecast window
-            const actualDayNext = Math.min(dueDay, nextMonthLast);
-            const dNext = new Date(today.getFullYear(), today.getMonth() + 1, actualDayNext);
+            // Next month: same rollover logic
+            let dNext;
+            if (dueDay > nextMonthLast) {
+                dNext = new Date(today.getFullYear(), today.getMonth() + 2, 1);
+            } else {
+                dNext = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+            }
             if (dNext >= today && dNext <= windowEnd) {
                 dates.push(dateKey(dNext));
             }
