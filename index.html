@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leadership Dashboard</title>
+    <title>Operations Director</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -108,13 +108,17 @@
         /* Sidebar Navigation */
         .app-layout { display: flex; min-height: 100vh; }
         .sidebar {
-            width: 220px; min-width: 220px; background: #1e293b; color: white;
+            width: 220px; min-width: 220px;
+            background: linear-gradient(180deg, #0f2a3d 0%, #133a50 100%);
+            color: white;
             display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100;
             transition: transform 0.3s ease;
+            border-right: 3px solid;
+            border-image: linear-gradient(180deg, #0891b2, #1e40af) 1;
         }
-        .sidebar-header { padding: 20px 16px 16px; border-bottom: 1px solid #334155; }
-        .sidebar-header h1 { font-size: 15px; font-weight: 700; color: white; margin: 0; }
-        .sidebar-header p { font-size: 10px; color: #94a3b8; margin: 4px 0 0; }
+        .sidebar-header { padding: 20px 16px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .sidebar-header h1 { font-size: 15px; font-weight: 700; color: white; margin: 0; letter-spacing: -0.3px; }
+        .sidebar-header p { font-size: 10px; color: #67e8f9; margin: 4px 0 0; }
         .sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
         .sidebar-item {
             display: flex; align-items: center; gap: 10px; padding: 10px 16px;
@@ -122,14 +126,14 @@
             border-left: 3px solid transparent; transition: all 0.15s ease;
             text-decoration: none;
         }
-        .sidebar-item:hover { color: white; background: #334155; }
-        .sidebar-item.active { color: white; background: #334155; border-left-color: #2563eb; }
+        .sidebar-item:hover { color: white; background: rgba(8,145,178,0.15); }
+        .sidebar-item.active { color: #67e8f9; background: rgba(8,145,178,0.2); border-left-color: #0891b2; }
         .sidebar-item .sidebar-icon { font-size: 16px; width: 20px; text-align: center; }
         .sidebar-item .sidebar-label { flex: 1; }
         .main-content { margin-left: 220px; flex: 1; min-width: 0; }
         .sidebar-toggle {
             display: none; position: fixed; top: 10px; left: 10px; z-index: 200;
-            background: #1e293b; color: white; border: none; border-radius: 6px;
+            background: #0f2a3d; color: white; border: none; border-radius: 6px;
             padding: 8px 12px; font-size: 18px; cursor: pointer;
         }
         .sidebar-overlay {
@@ -142,10 +146,10 @@
             position: fixed; top: 12px; right: 16px; z-index: 50;
             display: flex; align-items: center; gap: 6px;
             padding: 6px 14px; font-size: 12px; font-weight: 600;
-            background: #2563eb; color: white; border: none; border-radius: 6px;
+            background: #0891b2; color: white; border: none; border-radius: 6px;
             cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         }
-        .share-btn:hover { background: #1d4ed8; }
+        .share-btn:hover { background: #0e7490; }
         .share-toast {
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
             background: #1e293b; color: white; padding: 10px 20px; border-radius: 8px;
@@ -691,7 +695,7 @@
     <!-- Auth Screen -->
     <div class="auth-screen" id="authScreen">
         <div class="auth-box">
-            <h2>Leadership Dashboard</h2>
+            <h2>Operations Director</h2>
             <p>Enter your Airtable Personal Access Token to connect</p>
             <input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off">
             <button class="auth-btn" onclick="authenticate()">Connect</button>
@@ -713,8 +717,8 @@
     <!-- Sidebar Navigation -->
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <h1>Operations Hub</h1>
-            <p>Kevin Brittain</p>
+            <h1>&#x2699;&#xFE0F; Operations Director</h1>
+            <p>Kevin Brittain &bull; Founder</p>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
@@ -724,7 +728,7 @@
             <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
             <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
         </nav>
-        <div style="border-top:1px solid #334155;padding:8px 0">
+        <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span></div>
         </div>
     </div>
