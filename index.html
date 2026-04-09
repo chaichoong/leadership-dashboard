@@ -866,13 +866,15 @@
 
     // Table IDs
     const TABLES = {
-        accounts:    'tbl1nr0EcX2T62KME',
-        costs:       'tblx5kvhzNEI5TFlS',
-        tenancies:   'tblN51a88qTDB6iMH',
-        transactions:'tbln0gzhCAorFc3zB',
-        rentalUnits: 'tblM3mZCR5kiEdWMj',
-        tenants:     'tblX4elTuu01gwBYh',
-        tasks:       'tblqB8b22hKBL4PF1',
+        accounts:      'tbl1nr0EcX2T62KME',
+        costs:         'tblx5kvhzNEI5TFlS',
+        tenancies:     'tblN51a88qTDB6iMH',
+        transactions:  'tbln0gzhCAorFc3zB',
+        rentalUnits:   'tblM3mZCR5kiEdWMj',
+        tenants:       'tblX4elTuu01gwBYh',
+        tasks:         'tblqB8b22hKBL4PF1',
+        categories:    'tbleWb8ioptnEwPR8',
+        subCategories: 'tblOTdRcPf8AgRz25',
     };
 
     // Field IDs
@@ -935,6 +937,12 @@
         tenantPhone:      'fldraHUkWfqo4olLF',  // Contact Number
         tenantEmail:      'fldybEduFY3DWWTfT',  // Email Address
         tenantNotes:      'fldfwxEf7I3XQDVtR',  // Notes
+        // Transaction reconciliation linked fields
+        txCategory:       'fldFPmNixqHPQy4D6',  // Chart of Accounts - Category (linked)
+        txTenancy:        'fldPmAMmxwqs4SdPa',  // Tenancy (linked)
+        txUnit:           'fldJGIhSbgXNIEW4a',  // Unit (linked)
+        txProperty:       'fldvp44VfF8uTTthp',  // Property (linked)
+        txCost:           'fldGkpkVqSeiGvUGL',  // Costs (linked)
     };
 
     // Key record IDs
@@ -971,6 +979,8 @@
     let allTenancies = [];    // stored globally for CFV tab
     let allTenants = [];      // stored globally for CFV tab (contact details)
     let allCosts = [];        // stored globally for reconciliation
+    let allCategories = [];   // Chart of Accounts categories
+    let allSubCategories = []; // Chart of Accounts sub-categories
 
     // ── Smart Refresh: delays refresh while user is actively interacting ──
     let lastUserActivity = 0;       // timestamp of last interaction
@@ -1233,22 +1243,26 @@
         document.getElementById('loadingOverlay').style.display = 'flex';
         try {
             // Fetch Airtable data and Gmail invoices in parallel
-            const [accounts, costs, tenancies, transactions, rentalUnits, tenants] = await Promise.all([
+            const [accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories] = await Promise.all([
                 airtableFetch(TABLES.accounts),
                 airtableFetch(TABLES.costs),
                 airtableFetch(TABLES.tenancies),
                 airtableFetch(TABLES.transactions),
                 airtableFetch(TABLES.rentalUnits),
                 airtableFetch(TABLES.tenants),
+                airtableFetch(TABLES.categories),
+                airtableFetch(TABLES.subCategories),
             ]);
 
             // Fire Gmail fetch in parallel (non-blocking — doesn't delay dashboard render)
             fetchInvoicesFromGmail();
 
-            allTransactions = transactions; // store for invoice cross-referencing
-            allTenancies = tenancies;     // store for CFV tab
-            allTenants = tenants;         // store for CFV tab (contact details)
-            allCosts = costs;             // store for reconciliation
+            allTransactions = transactions;
+            allTenancies = tenancies;
+            allTenants = tenants;
+            allCosts = costs;
+            allCategories = categories;
+            allSubCategories = subCategories;
 
             // Clear stale "returned" flags — if Airtable now shows In Payment, the flag is no longer needed
             tenancies.forEach(t => {
@@ -3223,16 +3237,63 @@
 
 
     // ══════════════════════════════════════════
-    // RECONCILIATION ENGINE
+    // RECONCILIATION ENGINE v2
     // ══════════════════════════════════════════
+
+    // Knowledge base — learns from corrections
+    function getReconRules() {
+        try { return JSON.parse(localStorage.getItem('recon_rules') || '[]'); } catch { return []; }
+    }
+    function saveReconRule(vendorKey, data) {
+        const rules = getReconRules();
+        const existing = rules.find(r => r.vendorKey === vendorKey);
+        if (existing) {
+            Object.assign(existing, data);
+            existing.confidence = Math.min((existing.confidence || 0) + 1, 10);
+        } else {
+            rules.push({ vendorKey, ...data, confidence: 1 });
+        }
+        localStorage.setItem('recon_rules', JSON.stringify(rules));
+    }
+    function findReconRule(vendorText) {
+        const rules = getReconRules();
+        const vLower = vendorText.toLowerCase();
+        return rules.find(r => vLower.includes(r.vendorKey)) || null;
+    }
+
+    // Helper: get sub-category name by record ID
+    function getSubCatName(recId) {
+        if (!recId) return '';
+        const rec = allSubCategories.find(r => r.id === recId);
+        return rec ? (getField(rec, 'fldO4BTJhFv5EsN6i') || '') : '';
+    }
+    function getCatName(recId) {
+        if (!recId) return '';
+        const rec = allCategories.find(r => r.id === recId);
+        return rec ? (getField(rec, 'fldii4oUzSfmplihO') || '') : '';
+    }
+
+    // Build sub-category options for dropdowns
+    function buildSubCatOptions(selectedId) {
+        return allSubCategories.map(r => {
+            const name = getField(r, 'fldO4BTJhFv5EsN6i') || '';
+            const sel = r.id === selectedId ? ' selected' : '';
+            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
+        }).join('');
+    }
+    function buildCatOptions(selectedId) {
+        return allCategories.map(r => {
+            const name = getField(r, 'fldii4oUzSfmplihO') || '';
+            const sel = r.id === selectedId ? ' selected' : '';
+            return `<option value="${r.id}"${sel}>${escHtml(name)}</option>`;
+        }).join('');
+    }
 
     function triggerReconciliation(btn) {
         btn.textContent = 'Analysing...';
         btn.disabled = true;
         btn.style.background = '#64748b';
         document.getElementById('reconStatus').textContent = 'Matching unreconciled transactions...';
-
-        // Short delay for UI update
         setTimeout(() => {
             try {
                 const results = runReconciliationMatching();
@@ -3240,7 +3301,7 @@
                 btn.textContent = 'Run Reconciliation';
                 btn.style.background = '#2563eb';
                 btn.disabled = false;
-                document.getElementById('reconStatus').textContent = `Found ${results.length} suggestions`;
+                document.getElementById('reconStatus').textContent = `Found ${results.length} transactions`;
             } catch (e) {
                 console.error('Reconciliation error:', e);
                 btn.textContent = 'Failed';
@@ -3254,34 +3315,42 @@
     function runReconciliationMatching() {
         const results = [];
         const unrec = allTransactions.filter(r => {
-            const reconciled = getField(r, F.txReconciled);
-            const alias = getField(r, F.txAccountAlias);
-            if (reconciled) return false;
-            return isOurAccount(alias);
+            if (getField(r, F.txReconciled)) return false;
+            return isOurAccount(getField(r, F.txAccountAlias));
         });
+        const tenantLookup = buildTenantLookup();
 
-        // Build keyword pools from tenancies and costs
-        const tenancyPool = allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => ({
-            surname: String(getField(r, F.tenSurname) || '').toLowerCase(),
-            ref: String(getField(r, F.tenRef) || '').toLowerCase(),
-            rent: Number(getField(r, F.tenRent)) || 0,
-            id: r.id,
-            label: `${getField(r, F.tenSurname) || ''} – ${getField(r, F.tenRef) || ''}`,
-            subCatId: REC.subRentalInc,
-            subCatName: 'Rental Income',
-            type: 'income',
-        }));
+        // Build pools
+        const tenancyPool = allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => {
+            const tenant = getTenantForTenancy(r, tenantLookup);
+            const unitRef = getField(r, F.tenUnitRef);
+            const property = getField(r, F.tenProperty);
+            const unitId = getField(r, F.tenUnit);
+            return {
+                surname: String(getField(r, F.tenSurname) || '').toLowerCase(),
+                ref: String(getField(r, F.tenRef) || ''),
+                rent: Number(getField(r, F.tenRent)) || 0,
+                tenancyId: r.id,
+                tenancyLabel: String(getField(r, F.tenRef) || ''),
+                tenantName: tenant ? String(getField(tenant, F.tenantName) || '') : '',
+                tenantId: tenant ? tenant.id : null,
+                unitName: Array.isArray(unitRef) ? unitRef[0] : (unitRef || ''),
+                unitId: Array.isArray(unitId) ? unitId[0] : unitId,
+                propertyName: Array.isArray(property) ? property[0] : (property || ''),
+                subCatId: REC.subRentalInc,
+                type: 'income',
+            };
+        });
 
         const costPool = allCosts.filter(r => isCostActive(r)).map(r => {
             const subCats = getField(r, F.costSubCategory);
-            const subCatId = Array.isArray(subCats) ? subCats[0] : subCats;
+            const subCatId = Array.isArray(subCats) ? (typeof subCats[0] === 'object' ? subCats[0].id : subCats[0]) : subCats;
             return {
                 name: String(getField(r, F.costName) || '').toLowerCase(),
                 expected: Number(getField(r, F.costExpected)) || 0,
-                id: r.id,
-                label: String(getField(r, F.costName) || ''),
+                costId: r.id,
+                costLabel: String(getField(r, F.costName) || ''),
                 subCatId: subCatId || null,
-                subCatName: String(getField(r, F.costName) || ''),
                 type: 'cost',
             };
         });
@@ -3289,156 +3358,300 @@
         unrec.forEach(tx => {
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
             const rawAmt = Number(getField(tx, F.txAmount)) || 0;
-            const vendor = String(getField(tx, F.txVendor) || '').toLowerCase();
-            const desc = String(getField(tx, F.txDescription) || '').toLowerCase();
-            const txText = vendor + ' ' + desc;
+            const vendor = String(getField(tx, F.txVendor) || '');
+            const desc = String(getField(tx, F.txDescription) || '');
+            const txText = (vendor + ' ' + desc).toLowerCase();
             const txDate = getField(tx, F.txDate) || '';
             const txId = tx.id;
 
+            // Result template
+            const result = {
+                txId, txDate, txVendor: vendor, txDesc: desc,
+                txAmount: amt || rawAmt,
+                categoryId: '', categoryName: '',
+                subCatId: '', subCatName: '',
+                tenantName: '', tenancyLabel: '', tenancyId: '',
+                unitName: '', unitId: '', propertyName: '',
+                costLabel: '', costId: '',
+                matchType: '', score: 0, status: 'unmatched',
+            };
+
+            // 1. Check knowledge base first
+            const rule = findReconRule(vendor.toLowerCase());
+            if (rule && rule.subCatId) {
+                result.subCatId = rule.subCatId;
+                result.subCatName = rule.subCatName || getSubCatName(rule.subCatId);
+                result.categoryId = rule.categoryId || '';
+                result.categoryName = rule.categoryName || getCatName(rule.categoryId);
+                result.costLabel = rule.costLabel || '';
+                result.costId = rule.costId || '';
+                result.tenantName = rule.tenantName || '';
+                result.tenancyLabel = rule.tenancyLabel || '';
+                result.tenancyId = rule.tenancyId || '';
+                result.unitName = rule.unitName || '';
+                result.propertyName = rule.propertyName || '';
+                result.matchType = 'Knowledge Base';
+                result.score = rule.confidence || 1;
+                result.status = 'suggestion';
+                results.push(result);
+                return;
+            }
+
             let bestMatch = null;
             let bestScore = 0;
-            let matchType = '';
 
-            // 1. Try matching against tenancies (income — positive amounts)
+            // 2. Try tenancy matching
             if (amt > 0 || rawAmt > 0) {
                 tenancyPool.forEach(ten => {
                     let score = 0;
-                    const keywords = [ten.surname, ...ten.ref.split(/[\s–\-]+/)].filter(w => w.length >= 3);
+                    const keywords = [ten.surname, ...ten.ref.toLowerCase().split(/[\s–\-]+/)].filter(w => w.length >= 3);
                     keywords.forEach(kw => { if (txText.includes(kw)) score += kw.length >= 5 ? 3 : 1; });
-
-                    // Amount check (within 33% for split transactions)
                     const checkAmt = Math.abs(amt) || Math.abs(rawAmt);
                     if (ten.rent > 0 && checkAmt > 0) {
                         const diff = Math.abs(checkAmt - ten.rent) / ten.rent;
                         if (diff < 0.05) score += 5;
                         else if (diff < 0.33) score += 2;
                     }
-
-                    if (score > bestScore && score >= 3) {
-                        bestScore = score;
-                        bestMatch = ten;
-                        matchType = 'Tenant Match';
-                    }
+                    if (score > bestScore && score >= 3) { bestScore = score; bestMatch = { ...ten, matchType: 'Tenant Match' }; }
                 });
             }
 
-            // 2. Try matching against costs (expenses — negative or positive)
+            // 3. Try cost matching
             costPool.forEach(cost => {
                 let score = 0;
                 const keywords = cost.name.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
                 keywords.forEach(kw => { if (txText.includes(kw)) score += kw.length >= 5 ? 3 : 1; });
-
-                // Amount check
                 const checkAmt = Math.abs(amt) || Math.abs(rawAmt);
                 if (cost.expected > 0 && checkAmt > 0) {
                     const diff = Math.abs(checkAmt - cost.expected) / cost.expected;
                     if (diff < 0.05) score += 5;
                     else if (diff < 0.33) score += 2;
                 }
+                if (score > bestScore && score >= 3) { bestScore = score; bestMatch = { ...cost, matchType: 'Cost Match' }; }
+            });
 
-                if (score > bestScore && score >= 3) {
-                    bestScore = score;
-                    bestMatch = cost;
-                    matchType = 'Cost Match';
+            if (bestMatch) {
+                result.matchType = bestMatch.matchType;
+                result.score = bestScore;
+                result.status = 'suggestion';
+                if (bestMatch.type === 'income') {
+                    result.subCatId = bestMatch.subCatId;
+                    result.subCatName = getSubCatName(bestMatch.subCatId);
+                    result.tenantName = bestMatch.tenantName;
+                    result.tenancyLabel = bestMatch.tenancyLabel;
+                    result.tenancyId = bestMatch.tenancyId;
+                    result.unitName = bestMatch.unitName;
+                    result.unitId = bestMatch.unitId;
+                    result.propertyName = bestMatch.propertyName;
+                } else {
+                    result.subCatId = bestMatch.subCatId;
+                    result.subCatName = getSubCatName(bestMatch.subCatId);
+                    result.costLabel = bestMatch.costLabel;
+                    result.costId = bestMatch.costId;
                 }
-            });
-
-            results.push({
-                txId,
-                txDate,
-                txVendor: getField(tx, F.txVendor) || '',
-                txDesc: getField(tx, F.txDescription) || '',
-                txAmount: amt || rawAmt,
-                match: bestMatch,
-                matchType,
-                score: bestScore,
-                status: bestMatch ? 'suggestion' : 'unmatched',
-            });
+            }
+            results.push(result);
         });
 
-        // Sort: matched first (by score desc), then unmatched
         results.sort((a, b) => {
-            if (a.match && !b.match) return -1;
-            if (!a.match && b.match) return 1;
+            if (a.status === 'suggestion' && b.status !== 'suggestion') return -1;
+            if (a.status !== 'suggestion' && b.status === 'suggestion') return 1;
             return b.score - a.score;
         });
-
         return results;
     }
 
     function showReconciliationPanel(results) {
-        // Remove existing panel if present
         const existing = document.getElementById('reconPanel');
         if (existing) existing.remove();
-
-        const matched = results.filter(r => r.match);
-        const unmatched = results.filter(r => !r.match);
+        const matched = results.filter(r => r.status === 'suggestion').length;
+        const unmatched = results.length - matched;
+        const thStyle = 'padding:6px;text-align:left;font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;white-space:nowrap';
 
         const panel = document.createElement('div');
         panel.id = 'reconPanel';
-        panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+        panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px';
 
         panel.innerHTML = `
-            <div style="background:white;border-radius:12px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,0.25)">
-                <div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
-                    <div>
-                        <h2 style="font-size:18px;font-weight:700;color:#1e293b;margin:0">Transaction Reconciliation</h2>
-                        <p style="font-size:12px;color:#64748b;margin:4px 0 0">${results.length} unreconciled · ${matched.length} suggestions · ${unmatched.length} unmatched</p>
-                    </div>
-                    <div style="display:flex;gap:8px">
-                        <button onclick="approveAllRecon()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Matches</button>
-                        <button onclick="document.getElementById('reconPanel').remove()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
-                    </div>
+        <div style="background:white;border-radius:12px;max-width:98vw;width:100%;max-height:95vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,0.25)">
+            <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <div>
+                    <h2 style="font-size:16px;font-weight:700;color:#1e293b;margin:0">Transaction Reconciliation</h2>
+                    <p style="font-size:11px;color:#64748b;margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
                 </div>
-                <div style="overflow-y:auto;padding:16px 24px">
-                    <table style="width:100%;border-collapse:collapse;font-size:12px">
-                        <thead>
-                            <tr style="border-bottom:2px solid #e2e8f0">
-                                <th style="padding:8px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Date</th>
-                                <th style="padding:8px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Vendor / Description</th>
-                                <th style="padding:8px;text-align:right;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Amount</th>
-                                <th style="padding:8px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Suggested Match</th>
-                                <th style="padding:8px;text-align:center;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="reconTableBody">
-                            ${results.map((r, i) => {
-                                const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
-                                const matchHtml = r.match
-                                    ? `<div style="font-weight:600;color:#1e293b">${escHtml(r.match.label)}</div>
-                                       <div style="font-size:10px;color:#64748b">${escHtml(r.matchType)} · ${escHtml(r.match.subCatName)} · Score: ${r.score}</div>`
-                                    : '<span style="color:#94a3b8;font-style:italic">No match found</span>';
-                                const actionHtml = r.match
-                                    ? `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i},'${r.txId}','${r.match.subCatId || ''}',this)" style="min-width:70px">Approve</button>
-                                       <button class="cfv-action-btn" onclick="skipRecon(${i},this)" style="margin-left:4px">Skip</button>`
-                                    : `<button class="cfv-action-btn" onclick="skipRecon(${i},this)">Skip</button>`;
-                                return `<tr id="recon-row-${i}" style="border-bottom:1px solid #f1f5f9">
-                                    <td style="padding:8px;white-space:nowrap">${escHtml(r.txDate)}</td>
-                                    <td style="padding:8px;max-width:250px"><strong>${escHtml(r.txVendor)}</strong><br><span style="color:#64748b">${escHtml(r.txDesc).substring(0, 80)}</span></td>
-                                    <td style="padding:8px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
-                                    <td style="padding:8px">${matchHtml}</td>
-                                    <td style="padding:8px;text-align:center;white-space:nowrap">${actionHtml}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
+                <div style="display:flex;gap:6px">
+                    <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Matches</button>
+                    <button onclick="document.getElementById('reconPanel').remove()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
                 </div>
             </div>
-        `;
-
+            <div style="overflow:auto;padding:8px 12px">
+                <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:1200px">
+                    <thead>
+                        <tr style="border-bottom:2px solid #e2e8f0">
+                            <th style="${thStyle}">#</th>
+                            <th style="${thStyle}">Date</th>
+                            <th style="${thStyle}">Vendor / Description</th>
+                            <th style="${thStyle};text-align:right">Amount</th>
+                            <th style="${thStyle}">Category</th>
+                            <th style="${thStyle}">Sub-Category</th>
+                            <th style="${thStyle}">Tenant</th>
+                            <th style="${thStyle}">Tenancy</th>
+                            <th style="${thStyle}">Rental Unit</th>
+                            <th style="${thStyle}">Property</th>
+                            <th style="${thStyle}">Cost</th>
+                            <th style="${thStyle};text-align:center">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reconTableBody">
+                        ${results.map((r, i) => reconRowHtml(r, i)).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
         document.body.appendChild(panel);
-        // Store results globally for approve actions
         window._reconResults = results;
     }
 
-    async function approveRecon(idx, txId, subCatId, btn) {
-        btn.textContent = '...';
-        btn.disabled = true;
+    function reconRowHtml(r, i) {
+        const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
+        const cell = 'padding:5px 6px;vertical-align:top;font-size:11px';
+        const dim = 'color:#94a3b8;font-size:10px';
+        const catSelect = `<select id="recon-cat-${i}" style="font-size:10px;padding:2px;max-width:100px" onchange="reconCatChanged(${i})">${'<option value="">—</option>'}${buildCatOptions(r.categoryId)}</select>`;
+        const subCatSelect = `<select id="recon-subcat-${i}" style="font-size:10px;padding:2px;max-width:120px" onchange="reconSubCatChanged(${i})">${'<option value="">—</option>'}${buildSubCatOptions(r.subCatId)}</select>`;
+
+        const actionHtml = r.status === 'approved'
+            ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
+            : `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
+               <button class="cfv-action-btn" onclick="toggleAmendRow(${i})" style="font-size:10px;margin-top:3px">Amend</button>`;
+
+        const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
+
+        return `<tr id="recon-row-${i}" style="border-bottom:1px solid #f1f5f9;${r.status === 'approved' ? 'opacity:0.5;' : ''}">
+            <td style="${cell};color:#94a3b8;font-weight:600">${i + 1}</td>
+            <td style="${cell};white-space:nowrap">${escHtml(r.txDate)}</td>
+            <td style="${cell};max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span style="${dim}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
+            <td style="${cell};text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
+            <td style="${cell}">${catSelect}</td>
+            <td style="${cell}">${subCatSelect}</td>
+            <td style="${cell}">${r.tenantName ? escHtml(r.tenantName) : `<span style="${dim}">—</span>`}</td>
+            <td style="${cell};font-size:10px">${r.tenancyLabel ? escHtml(r.tenancyLabel) : `<span style="${dim}">—</span>`}</td>
+            <td style="${cell};font-size:10px">${r.unitName ? escHtml(r.unitName) : `<span style="${dim}">—</span>`}</td>
+            <td style="${cell};font-size:10px">${r.propertyName ? escHtml(r.propertyName) : `<span style="${dim}">—</span>`}</td>
+            <td style="${cell};font-size:10px">${r.costLabel ? escHtml(r.costLabel) : `<span style="${dim}">—</span>`}</td>
+            <td style="${cell};text-align:center;min-width:70px">${actionHtml}</td>
+        </tr>
+        <tr id="recon-amend-${i}" style="display:none;border-bottom:1px solid #e2e8f0">
+            <td colspan="12" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <span style="font-size:10px;font-weight:700;color:#2563eb">Amend:</span>
+                    <input id="recon-amend-input-${i}" type="text" placeholder="e.g. Category is Utilities, or This is rent from Collins" style="flex:1;min-width:200px;padding:5px 8px;font-size:11px;border:1px solid #cbd5e1;border-radius:4px">
+                    <button class="cfv-action-btn primary" onclick="applyAmendment(${i})" style="font-size:10px">Apply</button>
+                    <button class="cfv-action-btn" onclick="document.getElementById('recon-amend-${i}').style.display='none'" style="font-size:10px">Cancel</button>
+                </div>
+            </td>
+        </tr>`;
+    }
+
+    function reconCatChanged(idx) {
+        const sel = document.getElementById('recon-cat-' + idx);
+        if (sel) window._reconResults[idx].categoryId = sel.value;
+    }
+    function reconSubCatChanged(idx) {
+        const sel = document.getElementById('recon-subcat-' + idx);
+        if (sel) {
+            window._reconResults[idx].subCatId = sel.value;
+            window._reconResults[idx].subCatName = getSubCatName(sel.value);
+        }
+    }
+
+    function toggleAmendRow(idx) {
+        const row = document.getElementById('recon-amend-' + idx);
+        if (row) {
+            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+            const input = document.getElementById('recon-amend-input-' + idx);
+            if (input) input.focus();
+        }
+    }
+
+    function applyAmendment(idx) {
+        const input = document.getElementById('recon-amend-input-' + idx);
+        const text = (input ? input.value : '').toLowerCase().trim();
+        if (!text) return;
+        const r = window._reconResults[idx];
+
+        // Match against sub-category names
+        allSubCategories.forEach(sc => {
+            const name = (getField(sc, 'fldO4BTJhFv5EsN6i') || '').toLowerCase();
+            if (name && text.includes(name)) { r.subCatId = sc.id; r.subCatName = getField(sc, 'fldO4BTJhFv5EsN6i'); }
+        });
+        // Match against category names
+        allCategories.forEach(cat => {
+            const name = (getField(cat, 'fldii4oUzSfmplihO') || '').toLowerCase();
+            if (name && text.includes(name)) { r.categoryId = cat.id; r.categoryName = getField(cat, 'fldii4oUzSfmplihO'); }
+        });
+        // Match against tenant names
+        allTenants.forEach(t => {
+            const name = (getField(t, F.tenantName) || '').toLowerCase();
+            if (name && name.length >= 3 && text.includes(name)) { r.tenantName = getField(t, F.tenantName); r.tenantId = t.id; }
+        });
+        // Match against tenancy references
+        allTenancies.forEach(ten => {
+            const surname = (getField(ten, F.tenSurname) || '').toLowerCase();
+            if (surname && surname.length >= 3 && text.includes(surname)) {
+                r.tenancyLabel = getField(ten, F.tenRef) || '';
+                r.tenancyId = ten.id;
+                r.tenantName = r.tenantName || getField(ten, F.tenSurname);
+                const unitRef = getField(ten, F.tenUnitRef);
+                const property = getField(ten, F.tenProperty);
+                const unitId = getField(ten, F.tenUnit);
+                r.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+                r.unitId = Array.isArray(unitId) ? unitId[0] : unitId;
+                r.propertyName = Array.isArray(property) ? property[0] : (property || '');
+            }
+        });
+        // Match against cost names
+        allCosts.forEach(c => {
+            const name = (getField(c, F.costName) || '').toLowerCase();
+            if (name && name.length >= 3 && text.includes(name)) { r.costLabel = getField(c, F.costName); r.costId = c.id; }
+        });
+
+        r.status = 'suggestion';
+        r.matchType = 'Amended';
+
+        // Re-render just this row
+        const row = document.getElementById('recon-row-' + idx);
+        const amendRow = document.getElementById('recon-amend-' + idx);
+        if (row && amendRow) {
+            const temp = document.createElement('tbody');
+            temp.innerHTML = reconRowHtml(r, idx);
+            row.replaceWith(temp.children[0]);
+            amendRow.replaceWith(temp.children[0] || document.createElement('tr'));
+        }
+        // Simpler: just re-render the whole table
+        const tbody = document.getElementById('reconTableBody');
+        if (tbody) tbody.innerHTML = window._reconResults.map((r, i) => reconRowHtml(r, i)).join('');
+    }
+
+    async function approveRecon(idx) {
+        const r = window._reconResults[idx];
+        const btn = document.getElementById('recon-btn-' + idx);
+        if (btn) { btn.textContent = '...'; btn.disabled = true; }
+
         try {
             const fields = { [F.txReconciled]: true };
-            if (subCatId) fields[F.txSubCategory] = [subCatId];
+            // Get values from dropdowns (user may have changed them)
+            const catSel = document.getElementById('recon-cat-' + idx);
+            const subCatSel = document.getElementById('recon-subcat-' + idx);
+            const catId = catSel ? catSel.value : r.categoryId;
+            const subCatId = subCatSel ? subCatSel.value : r.subCatId;
 
-            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+            if (catId) fields[F.txCategory] = [catId];
+            if (subCatId) fields[F.txSubCategory] = [subCatId];
+            if (r.tenancyId) fields[F.txTenancy] = [r.tenancyId];
+            if (r.unitId) fields[F.txUnit] = [r.unitId];
+            if (r.costId) fields[F.txCost] = [r.costId];
+
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${r.txId}`, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields })
@@ -3446,44 +3659,39 @@
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
                 alert(`Failed: ${err.error?.message || resp.status}`);
-                btn.textContent = 'Retry';
-                btn.disabled = false;
+                if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }
                 return;
             }
-            btn.textContent = '✓ Done';
-            btn.style.background = '#dcfce7';
-            btn.style.color = '#16a34a';
-            btn.style.border = '1px solid #16a34a';
+
+            r.status = 'approved';
+            // Save to knowledge base
+            const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+            if (vendorKey.length >= 3) {
+                saveReconRule(vendorKey, {
+                    subCatId: subCatId, subCatName: r.subCatName || getSubCatName(subCatId),
+                    categoryId: catId, categoryName: r.categoryName || getCatName(catId),
+                    costLabel: r.costLabel, costId: r.costId,
+                    tenantName: r.tenantName, tenancyLabel: r.tenancyLabel, tenancyId: r.tenancyId,
+                    unitName: r.unitName, propertyName: r.propertyName,
+                });
+            }
+
+            if (btn) { btn.textContent = '✓'; btn.style.background = '#dcfce7'; btn.style.color = '#16a34a'; }
             const row = document.getElementById('recon-row-' + idx);
             if (row) row.style.opacity = '0.5';
-            window._reconResults[idx].status = 'approved';
         } catch (e) {
             alert('Error: ' + e.message);
-            btn.textContent = 'Retry';
-            btn.disabled = false;
+            if (btn) { btn.textContent = 'Retry'; btn.disabled = false; }
         }
-    }
-
-    function skipRecon(idx, btn) {
-        btn.textContent = 'Skipped';
-        btn.disabled = true;
-        const row = document.getElementById('recon-row-' + idx);
-        if (row) row.style.opacity = '0.4';
-        window._reconResults[idx].status = 'skipped';
     }
 
     async function approveAllRecon() {
         if (!confirm('Approve all matched suggestions? This will mark them as reconciled in Airtable.')) return;
         const results = window._reconResults || [];
         for (let i = 0; i < results.length; i++) {
-            const r = results[i];
-            if (r.match && r.status === 'suggestion') {
-                const btn = document.getElementById('recon-btn-' + i);
-                if (btn) await approveRecon(i, r.txId, r.match.subCatId || '', btn);
-            }
+            if (results[i].status === 'suggestion') await approveRecon(i);
         }
-        document.getElementById('reconStatus').textContent = 'Reconciliation complete — refresh to update counts';
-        // Refresh after 2 seconds
+        document.getElementById('reconStatus').textContent = 'Reconciliation complete — refreshing...';
         setTimeout(() => loadDashboard(), 2000);
     }
 
