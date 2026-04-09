@@ -972,7 +972,7 @@
             allLabelsRaw = labelsResp.result.labels || [];
             allLabels = allLabelsRaw
                 .filter(l => l.type === 'user' && (/^[1-9]\d?[.:]\s/.test(l.name)))
-                .sort((a, b) => a.name.localeCompare(b.name));
+                .sort((a, b) => (parseInt(a.name) || 999) - (parseInt(b.name) || 999));
 
             // Fetch counts for selected labels (1, 2, 3, 8, 9, Property Compliance)
             const labelCounts = {};
@@ -1255,7 +1255,7 @@
                 allLabelsRaw = labelsResp.result.labels || [];
                 allLabels = allLabelsRaw
                     .filter(l => l.type === 'user' && (/^[1-9]\d?[.:]\s/.test(l.name)))
-                    .sort((a, b) => a.name.localeCompare(b.name));
+                    .sort((a, b) => (parseInt(a.name) || 999) - (parseInt(b.name) || 999));
             }
 
             const kb = {};
@@ -1566,7 +1566,7 @@
                 allLabelsRaw = labelsResp.result.labels || [];
                 allLabels = allLabelsRaw
                     .filter(l => l.type === 'user' && (/^[1-9]\d?[.:]\s/.test(l.name)))
-                    .sort((a, b) => a.name.localeCompare(b.name));
+                    .sort((a, b) => (parseInt(a.name) || 999) - (parseInt(b.name) || 999));
             }
 
             // Get numbered label IDs for filtering
