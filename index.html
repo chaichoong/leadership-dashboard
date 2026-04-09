@@ -970,6 +970,7 @@
     let allTransactions = []; // stored globally for invoice cross-referencing
     let allTenancies = [];    // stored globally for CFV tab
     let allTenants = [];      // stored globally for CFV tab (contact details)
+    let allCosts = [];        // stored globally for reconciliation
 
     // ── Smart Refresh: delays refresh while user is actively interacting ──
     let lastUserActivity = 0;       // timestamp of last interaction
@@ -1247,6 +1248,7 @@
             allTransactions = transactions; // store for invoice cross-referencing
             allTenancies = tenancies;     // store for CFV tab
             allTenants = tenants;         // store for CFV tab (contact details)
+            allCosts = costs;             // store for reconciliation
 
             // Clear stale "returned" flags — if Airtable now shows In Payment, the flag is no longer needed
             tenancies.forEach(t => {
@@ -3221,21 +3223,268 @@
 
 
     // ══════════════════════════════════════════
-    // Reconciliation Trigger
+    // RECONCILIATION ENGINE
     // ══════════════════════════════════════════
+
     function triggerReconciliation(btn) {
-        btn.textContent = 'Copied!';
-        btn.style.background = '#16a34a';
-        // Copy the command to clipboard
-        navigator.clipboard.writeText('/transaction-reconciler').then(() => {
-            document.getElementById('reconStatus').textContent = 'Command copied — paste in Claude Code and press Enter';
-        }).catch(() => {
-            document.getElementById('reconStatus').textContent = 'Open Claude Code and run: /transaction-reconciler';
-        });
+        btn.textContent = 'Analysing...';
+        btn.disabled = true;
+        btn.style.background = '#64748b';
+        document.getElementById('reconStatus').textContent = 'Matching unreconciled transactions...';
+
+        // Short delay for UI update
         setTimeout(() => {
-            btn.textContent = 'Run Reconciliation';
-            btn.style.background = '#2563eb';
-        }, 3000);
+            try {
+                const results = runReconciliationMatching();
+                showReconciliationPanel(results);
+                btn.textContent = 'Run Reconciliation';
+                btn.style.background = '#2563eb';
+                btn.disabled = false;
+                document.getElementById('reconStatus').textContent = `Found ${results.length} suggestions`;
+            } catch (e) {
+                console.error('Reconciliation error:', e);
+                btn.textContent = 'Failed';
+                btn.style.background = '#dc2626';
+                document.getElementById('reconStatus').textContent = 'Error: ' + e.message;
+                setTimeout(() => { btn.textContent = 'Run Reconciliation'; btn.style.background = '#2563eb'; btn.disabled = false; }, 3000);
+            }
+        }, 100);
+    }
+
+    function runReconciliationMatching() {
+        const results = [];
+        const unrec = allTransactions.filter(r => {
+            const reconciled = getField(r, F.txReconciled);
+            const alias = getField(r, F.txAccountAlias);
+            if (reconciled) return false;
+            return isOurAccount(alias);
+        });
+
+        // Build keyword pools from tenancies and costs
+        const tenancyPool = allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => ({
+            surname: String(getField(r, F.tenSurname) || '').toLowerCase(),
+            ref: String(getField(r, F.tenRef) || '').toLowerCase(),
+            rent: Number(getField(r, F.tenRent)) || 0,
+            id: r.id,
+            label: `${getField(r, F.tenSurname) || ''} – ${getField(r, F.tenRef) || ''}`,
+            subCatId: REC.subRentalInc,
+            subCatName: 'Rental Income',
+            type: 'income',
+        }));
+
+        const costPool = allCosts.filter(r => isCostActive(r)).map(r => {
+            const subCats = getField(r, F.costSubCategory);
+            const subCatId = Array.isArray(subCats) ? subCats[0] : subCats;
+            return {
+                name: String(getField(r, F.costName) || '').toLowerCase(),
+                expected: Number(getField(r, F.costExpected)) || 0,
+                id: r.id,
+                label: String(getField(r, F.costName) || ''),
+                subCatId: subCatId || null,
+                subCatName: String(getField(r, F.costName) || ''),
+                type: 'cost',
+            };
+        });
+
+        unrec.forEach(tx => {
+            const amt = Number(getField(tx, F.txReportAmount)) || 0;
+            const rawAmt = Number(getField(tx, F.txAmount)) || 0;
+            const vendor = String(getField(tx, F.txVendor) || '').toLowerCase();
+            const desc = String(getField(tx, F.txDescription) || '').toLowerCase();
+            const txText = vendor + ' ' + desc;
+            const txDate = getField(tx, F.txDate) || '';
+            const txId = tx.id;
+
+            let bestMatch = null;
+            let bestScore = 0;
+            let matchType = '';
+
+            // 1. Try matching against tenancies (income — positive amounts)
+            if (amt > 0 || rawAmt > 0) {
+                tenancyPool.forEach(ten => {
+                    let score = 0;
+                    const keywords = [ten.surname, ...ten.ref.split(/[\s–\-]+/)].filter(w => w.length >= 3);
+                    keywords.forEach(kw => { if (txText.includes(kw)) score += kw.length >= 5 ? 3 : 1; });
+
+                    // Amount check (within 33% for split transactions)
+                    const checkAmt = Math.abs(amt) || Math.abs(rawAmt);
+                    if (ten.rent > 0 && checkAmt > 0) {
+                        const diff = Math.abs(checkAmt - ten.rent) / ten.rent;
+                        if (diff < 0.05) score += 5;
+                        else if (diff < 0.33) score += 2;
+                    }
+
+                    if (score > bestScore && score >= 3) {
+                        bestScore = score;
+                        bestMatch = ten;
+                        matchType = 'Tenant Match';
+                    }
+                });
+            }
+
+            // 2. Try matching against costs (expenses — negative or positive)
+            costPool.forEach(cost => {
+                let score = 0;
+                const keywords = cost.name.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
+                keywords.forEach(kw => { if (txText.includes(kw)) score += kw.length >= 5 ? 3 : 1; });
+
+                // Amount check
+                const checkAmt = Math.abs(amt) || Math.abs(rawAmt);
+                if (cost.expected > 0 && checkAmt > 0) {
+                    const diff = Math.abs(checkAmt - cost.expected) / cost.expected;
+                    if (diff < 0.05) score += 5;
+                    else if (diff < 0.33) score += 2;
+                }
+
+                if (score > bestScore && score >= 3) {
+                    bestScore = score;
+                    bestMatch = cost;
+                    matchType = 'Cost Match';
+                }
+            });
+
+            results.push({
+                txId,
+                txDate,
+                txVendor: getField(tx, F.txVendor) || '',
+                txDesc: getField(tx, F.txDescription) || '',
+                txAmount: amt || rawAmt,
+                match: bestMatch,
+                matchType,
+                score: bestScore,
+                status: bestMatch ? 'suggestion' : 'unmatched',
+            });
+        });
+
+        // Sort: matched first (by score desc), then unmatched
+        results.sort((a, b) => {
+            if (a.match && !b.match) return -1;
+            if (!a.match && b.match) return 1;
+            return b.score - a.score;
+        });
+
+        return results;
+    }
+
+    function showReconciliationPanel(results) {
+        // Remove existing panel if present
+        const existing = document.getElementById('reconPanel');
+        if (existing) existing.remove();
+
+        const matched = results.filter(r => r.match);
+        const unmatched = results.filter(r => !r.match);
+
+        const panel = document.createElement('div');
+        panel.id = 'reconPanel';
+        panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+
+        panel.innerHTML = `
+            <div style="background:white;border-radius:12px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,0.25)">
+                <div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
+                    <div>
+                        <h2 style="font-size:18px;font-weight:700;color:#1e293b;margin:0">Transaction Reconciliation</h2>
+                        <p style="font-size:12px;color:#64748b;margin:4px 0 0">${results.length} unreconciled · ${matched.length} suggestions · ${unmatched.length} unmatched</p>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button onclick="approveAllRecon()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Matches</button>
+                        <button onclick="document.getElementById('reconPanel').remove()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
+                    </div>
+                </div>
+                <div style="overflow-y:auto;padding:16px 24px">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px">
+                        <thead>
+                            <tr style="border-bottom:2px solid #e2e8f0">
+                                <th style="padding:8px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Date</th>
+                                <th style="padding:8px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Vendor / Description</th>
+                                <th style="padding:8px;text-align:right;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Amount</th>
+                                <th style="padding:8px;text-align:left;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Suggested Match</th>
+                                <th style="padding:8px;text-align:center;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reconTableBody">
+                            ${results.map((r, i) => {
+                                const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
+                                const matchHtml = r.match
+                                    ? `<div style="font-weight:600;color:#1e293b">${escHtml(r.match.label)}</div>
+                                       <div style="font-size:10px;color:#64748b">${escHtml(r.matchType)} · ${escHtml(r.match.subCatName)} · Score: ${r.score}</div>`
+                                    : '<span style="color:#94a3b8;font-style:italic">No match found</span>';
+                                const actionHtml = r.match
+                                    ? `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i},'${r.txId}','${r.match.subCatId || ''}',this)" style="min-width:70px">Approve</button>
+                                       <button class="cfv-action-btn" onclick="skipRecon(${i},this)" style="margin-left:4px">Skip</button>`
+                                    : `<button class="cfv-action-btn" onclick="skipRecon(${i},this)">Skip</button>`;
+                                return `<tr id="recon-row-${i}" style="border-bottom:1px solid #f1f5f9">
+                                    <td style="padding:8px;white-space:nowrap">${escHtml(r.txDate)}</td>
+                                    <td style="padding:8px;max-width:250px"><strong>${escHtml(r.txVendor)}</strong><br><span style="color:#64748b">${escHtml(r.txDesc).substring(0, 80)}</span></td>
+                                    <td style="padding:8px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
+                                    <td style="padding:8px">${matchHtml}</td>
+                                    <td style="padding:8px;text-align:center;white-space:nowrap">${actionHtml}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(panel);
+        // Store results globally for approve actions
+        window._reconResults = results;
+    }
+
+    async function approveRecon(idx, txId, subCatId, btn) {
+        btn.textContent = '...';
+        btn.disabled = true;
+        try {
+            const fields = { [F.txReconciled]: true };
+            if (subCatId) fields[F.txSubCategory] = [subCatId];
+
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields })
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                alert(`Failed: ${err.error?.message || resp.status}`);
+                btn.textContent = 'Retry';
+                btn.disabled = false;
+                return;
+            }
+            btn.textContent = '✓ Done';
+            btn.style.background = '#dcfce7';
+            btn.style.color = '#16a34a';
+            btn.style.border = '1px solid #16a34a';
+            const row = document.getElementById('recon-row-' + idx);
+            if (row) row.style.opacity = '0.5';
+            window._reconResults[idx].status = 'approved';
+        } catch (e) {
+            alert('Error: ' + e.message);
+            btn.textContent = 'Retry';
+            btn.disabled = false;
+        }
+    }
+
+    function skipRecon(idx, btn) {
+        btn.textContent = 'Skipped';
+        btn.disabled = true;
+        const row = document.getElementById('recon-row-' + idx);
+        if (row) row.style.opacity = '0.4';
+        window._reconResults[idx].status = 'skipped';
+    }
+
+    async function approveAllRecon() {
+        if (!confirm('Approve all matched suggestions? This will mark them as reconciled in Airtable.')) return;
+        const results = window._reconResults || [];
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.match && r.status === 'suggestion') {
+                const btn = document.getElementById('recon-btn-' + i);
+                if (btn) await approveRecon(i, r.txId, r.match.subCatId || '', btn);
+            }
+        }
+        document.getElementById('reconStatus').textContent = 'Reconciliation complete — refresh to update counts';
+        // Refresh after 2 seconds
+        setTimeout(() => loadDashboard(), 2000);
     }
 
     // ══════════════════════════════════════════
