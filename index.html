@@ -3279,6 +3279,7 @@
     }
 
     // Build dropdown options for reconciliation columns
+    // Dropdowns preserve Airtable record order (createdTime) — no re-sorting
     function buildSubCatOptions(selectedId) {
         return allSubCategories.map(r => {
             const name = getField(r, 'fldO4BTJhFv5EsN6i') || '';
@@ -3377,59 +3378,74 @@
         }, 100);
     }
 
+    // Build a lookup of historical patterns from ALL reconciled transactions
+    function buildHistoricalPatterns() {
+        const patterns = {}; // vendorKey → { catId, subCatId, businessId, costId, tenancyId, ... count }
+        allTransactions.forEach(tx => {
+            if (!getField(tx, F.txReconciled)) return;
+            const vendor = String(getField(tx, F.txVendor) || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+            if (vendor.length < 3) return;
+            // Use first 3 words as key (matches knowledge base format)
+            const vendorKey = vendor.split(/\s+/).slice(0, 3).join(' ');
+            if (!vendorKey) return;
+
+            // Extract all linked fields from this historical transaction
+            const subCatField = getField(tx, F.txSubCategory);
+            const subCatId = Array.isArray(subCatField) ? (typeof subCatField[0] === 'object' ? subCatField[0].id : subCatField[0]) : (typeof subCatField === 'object' ? subCatField?.id : subCatField);
+            const catField = getField(tx, F.txCategory);
+            const catId = Array.isArray(catField) ? (typeof catField[0] === 'object' ? catField[0].id : catField[0]) : (typeof catField === 'object' ? catField?.id : catField);
+            const bizField = getField(tx, F.txBusiness);
+            const bizId = Array.isArray(bizField) ? (typeof bizField[0] === 'object' ? bizField[0].id : bizField[0]) : (typeof bizField === 'object' ? bizField?.id : bizField);
+            const costField = getField(tx, F.txCost);
+            const costId = Array.isArray(costField) ? (typeof costField[0] === 'object' ? costField[0].id : costField[0]) : (typeof costField === 'object' ? costField?.id : costField);
+            const tenancyField = getField(tx, F.txTenancy);
+            const tenancyId = Array.isArray(tenancyField) ? (typeof tenancyField[0] === 'object' ? tenancyField[0].id : tenancyField[0]) : (typeof tenancyField === 'object' ? tenancyField?.id : tenancyField);
+            const unitField = getField(tx, F.txUnit);
+            const unitId = Array.isArray(unitField) ? (typeof unitField[0] === 'object' ? unitField[0].id : unitField[0]) : (typeof unitField === 'object' ? unitField?.id : unitField);
+
+            if (!subCatId && !catId && !costId && !tenancyId) return; // nothing useful
+
+            if (!patterns[vendorKey]) {
+                patterns[vendorKey] = { count: 0, subCatId, catId, bizId, costId, tenancyId, unitId };
+            }
+            patterns[vendorKey].count++;
+            // Most recent wins (later transactions overwrite earlier ones)
+            if (subCatId) patterns[vendorKey].subCatId = subCatId;
+            if (catId) patterns[vendorKey].catId = catId;
+            if (bizId) patterns[vendorKey].bizId = bizId;
+            if (costId) patterns[vendorKey].costId = costId;
+            if (tenancyId) patterns[vendorKey].tenancyId = tenancyId;
+            if (unitId) patterns[vendorKey].unitId = unitId;
+        });
+        return patterns;
+    }
+
     function runReconciliationMatching() {
         const results = [];
         const unrec = allTransactions.filter(r => {
             if (getField(r, F.txReconciled)) return false;
             return isOurAccount(getField(r, F.txAccountAlias));
         });
+
+        // 1. Build historical patterns from ALL reconciled transactions
+        const historicalPatterns = buildHistoricalPatterns();
+
+        // 2. Build tenancy lookup for enrichment
         const tenantLookup = buildTenantLookup();
-
-        // Build pools
-        const tenancyPool = allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => {
-            const tenant = getTenantForTenancy(r, tenantLookup);
-            const unitRef = getField(r, F.tenUnitRef);
-            const property = getField(r, F.tenProperty);
-            const unitId = getField(r, F.tenUnit);
-            return {
-                surname: String(getField(r, F.tenSurname) || '').toLowerCase(),
-                ref: String(getField(r, F.tenRef) || ''),
-                rent: Number(getField(r, F.tenRent)) || 0,
-                tenancyId: r.id,
-                tenancyLabel: String(getField(r, F.tenRef) || ''),
-                tenantName: tenant ? String(getField(tenant, F.tenantName) || '') : '',
-                tenantId: tenant ? tenant.id : null,
-                unitName: Array.isArray(unitRef) ? unitRef[0] : (unitRef || ''),
-                unitId: Array.isArray(unitId) ? unitId[0] : unitId,
-                propertyName: Array.isArray(property) ? property[0] : (property || ''),
-                subCatId: REC.subRentalInc,
-                type: 'income',
-            };
-        });
-
-        const costPool = allCosts.filter(r => isCostActive(r)).map(r => {
-            const subCats = getField(r, F.costSubCategory);
-            const subCatId = Array.isArray(subCats) ? (typeof subCats[0] === 'object' ? subCats[0].id : subCats[0]) : subCats;
-            return {
-                name: String(getField(r, F.costName) || '').toLowerCase(),
-                expected: Number(getField(r, F.costExpected)) || 0,
-                costId: r.id,
-                costLabel: String(getField(r, F.costName) || ''),
-                subCatId: subCatId || null,
-                type: 'cost',
-            };
-        });
+        const tenancyLookup = {};
+        allTenancies.forEach(r => { tenancyLookup[r.id] = r; });
+        const costLookup = {};
+        allCosts.forEach(r => { costLookup[r.id] = r; });
 
         unrec.forEach(tx => {
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
             const rawAmt = Number(getField(tx, F.txAmount)) || 0;
             const vendor = String(getField(tx, F.txVendor) || '');
             const desc = String(getField(tx, F.txDescription) || '');
-            const txText = (vendor + ' ' + desc).toLowerCase();
             const txDate = getField(tx, F.txDate) || '';
             const txId = tx.id;
+            const vendorKey = vendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
 
-            // Result template
             const result = {
                 txId, txDate, txVendor: vendor, txDesc: desc,
                 txAmount: amt || rawAmt,
@@ -3442,82 +3458,35 @@
                 matchType: '', score: 0, status: 'unmatched',
             };
 
-            // 1. Check knowledge base first
-            const rule = findReconRule(vendor.toLowerCase());
-            if (rule && rule.subCatId) {
-                result.subCatId = rule.subCatId;
-                result.subCatName = rule.subCatName || getSubCatName(rule.subCatId);
-                result.categoryId = rule.categoryId || '';
-                result.categoryName = rule.categoryName || getCatName(rule.categoryId);
-                result.businessId = rule.businessId || '';
-                result.businessName = rule.businessName || '';
-                result.costLabel = rule.costLabel || '';
-                result.costId = rule.costId || '';
-                result.tenantName = rule.tenantName || '';
-                result.tenancyLabel = rule.tenancyLabel || '';
-                result.tenancyId = rule.tenancyId || '';
-                result.unitName = rule.unitName || '';
-                result.propertyName = rule.propertyName || '';
-                result.matchType = 'Knowledge Base';
-                result.score = rule.confidence || 1;
-                result.status = 'suggestion';
+            // Priority 1: Knowledge base (user corrections — highest priority)
+            const rule = findReconRule(vendorKey);
+            if (rule && (rule.subCatId || rule.costId || rule.tenancyId)) {
+                applyRuleToResult(result, rule, 'Knowledge Base', rule.confidence || 5);
                 results.push(result);
                 return;
             }
 
-            let bestMatch = null;
-            let bestScore = 0;
+            // Priority 2: Historical transaction patterns from Airtable
+            const histMatch = historicalPatterns[vendorKey];
+            if (histMatch && histMatch.count >= 1) {
+                applyHistoricalToResult(result, histMatch, tenancyLookup, tenantLookup, costLookup, histMatch.count);
+                results.push(result);
+                return;
+            }
 
-            // 2. Try tenancy matching
-            if (amt > 0 || rawAmt > 0) {
-                tenancyPool.forEach(ten => {
-                    let score = 0;
-                    const keywords = [ten.surname, ...ten.ref.toLowerCase().split(/[\s–\-]+/)].filter(w => w.length >= 3);
-                    keywords.forEach(kw => { if (txText.includes(kw)) score += kw.length >= 5 ? 3 : 1; });
-                    const checkAmt = Math.abs(amt) || Math.abs(rawAmt);
-                    if (ten.rent > 0 && checkAmt > 0) {
-                        const diff = Math.abs(checkAmt - ten.rent) / ten.rent;
-                        if (diff < 0.05) score += 5;
-                        else if (diff < 0.33) score += 2;
+            // Priority 3: Partial vendor key match (first 2 words)
+            if (vendorKey.split(' ').length >= 2) {
+                const shortKey = vendorKey.split(' ').slice(0, 2).join(' ');
+                for (const [k, v] of Object.entries(historicalPatterns)) {
+                    if (k.startsWith(shortKey) && v.count >= 1) {
+                        applyHistoricalToResult(result, v, tenancyLookup, tenantLookup, costLookup, v.count);
+                        result.matchType = 'Historical (partial)';
+                        results.push(result);
+                        return;
                     }
-                    if (score > bestScore && score >= 3) { bestScore = score; bestMatch = { ...ten, matchType: 'Tenant Match' }; }
-                });
-            }
-
-            // 3. Try cost matching
-            costPool.forEach(cost => {
-                let score = 0;
-                const keywords = cost.name.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
-                keywords.forEach(kw => { if (txText.includes(kw)) score += kw.length >= 5 ? 3 : 1; });
-                const checkAmt = Math.abs(amt) || Math.abs(rawAmt);
-                if (cost.expected > 0 && checkAmt > 0) {
-                    const diff = Math.abs(checkAmt - cost.expected) / cost.expected;
-                    if (diff < 0.05) score += 5;
-                    else if (diff < 0.33) score += 2;
-                }
-                if (score > bestScore && score >= 3) { bestScore = score; bestMatch = { ...cost, matchType: 'Cost Match' }; }
-            });
-
-            if (bestMatch) {
-                result.matchType = bestMatch.matchType;
-                result.score = bestScore;
-                result.status = 'suggestion';
-                if (bestMatch.type === 'income') {
-                    result.subCatId = bestMatch.subCatId;
-                    result.subCatName = getSubCatName(bestMatch.subCatId);
-                    result.tenantName = bestMatch.tenantName;
-                    result.tenancyLabel = bestMatch.tenancyLabel;
-                    result.tenancyId = bestMatch.tenancyId;
-                    result.unitName = bestMatch.unitName;
-                    result.unitId = bestMatch.unitId;
-                    result.propertyName = bestMatch.propertyName;
-                } else {
-                    result.subCatId = bestMatch.subCatId;
-                    result.subCatName = getSubCatName(bestMatch.subCatId);
-                    result.costLabel = bestMatch.costLabel;
-                    result.costId = bestMatch.costId;
                 }
             }
+
             results.push(result);
         });
 
@@ -3527,6 +3496,60 @@
             return b.score - a.score;
         });
         return results;
+    }
+
+    function applyRuleToResult(result, rule, matchType, score) {
+        result.subCatId = rule.subCatId || '';
+        result.subCatName = rule.subCatName || getSubCatName(rule.subCatId);
+        result.categoryId = rule.categoryId || '';
+        result.categoryName = rule.categoryName || getCatName(rule.categoryId);
+        result.businessId = rule.businessId || '';
+        result.businessName = rule.businessName || '';
+        result.costLabel = rule.costLabel || '';
+        result.costId = rule.costId || '';
+        result.tenantName = rule.tenantName || '';
+        result.tenancyLabel = rule.tenancyLabel || '';
+        result.tenancyId = rule.tenancyId || '';
+        result.unitName = rule.unitName || '';
+        result.unitId = rule.unitId || '';
+        result.propertyName = rule.propertyName || '';
+        result.matchType = matchType;
+        result.score = score;
+        result.status = 'suggestion';
+    }
+
+    function applyHistoricalToResult(result, hist, tenancyLookup, tenantLookup, costLookup, count) {
+        result.subCatId = hist.subCatId || '';
+        result.subCatName = getSubCatName(hist.subCatId);
+        result.categoryId = hist.catId || '';
+        result.categoryName = getCatName(hist.catId);
+        result.businessId = hist.bizId || '';
+        result.unitId = hist.unitId || '';
+
+        // Enrich from tenancy record if available
+        if (hist.tenancyId && tenancyLookup[hist.tenancyId]) {
+            const ten = tenancyLookup[hist.tenancyId];
+            result.tenancyId = hist.tenancyId;
+            result.tenancyLabel = String(getField(ten, F.tenRef) || '');
+            const tenant = getTenantForTenancy(ten, tenantLookup);
+            result.tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : '';
+            result.tenantId = tenant ? tenant.id : '';
+            const unitRef = getField(ten, F.tenUnitRef);
+            result.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+            const prop = getField(ten, F.tenProperty);
+            result.propertyName = Array.isArray(prop) ? prop[0] : (prop || '');
+        }
+
+        // Enrich from cost record if available
+        if (hist.costId && costLookup[hist.costId]) {
+            const cost = costLookup[hist.costId];
+            result.costId = hist.costId;
+            result.costLabel = String(getField(cost, F.costName) || '');
+        }
+
+        result.matchType = `Historical (${count}x)`;
+        result.score = Math.min(count + 2, 10);
+        result.status = 'suggestion';
     }
 
     function showReconciliationPanel(results) {
