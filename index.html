@@ -3579,6 +3579,7 @@
 
     function buildWhatIfLine(rows, openingBalance) {
         const excl = getCFExclusions();
+        const dailyReserve = (MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP) / 31;
         let balance = openingBalance;
         return rows.map((r, i) => {
             let dayIn = 0, dayOut = 0;
@@ -3591,7 +3592,8 @@
                 if (!excl[key]) dayOut += f.amount;
             });
             balance += dayIn - dayOut;
-            return balance;
+            // Include variable cost deduction (same as worst-case line)
+            return balance - dailyReserve * (i + 1);
         });
     }
 
