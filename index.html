@@ -3753,43 +3753,64 @@
     }
 
     // Build a lookup of historical patterns from ALL reconciled transactions
+    // Helper to extract a linked record ID from Airtable field data
+    function extractLinkedId(field) {
+        if (!field) return null;
+        if (Array.isArray(field)) {
+            const first = field[0];
+            if (!first) return null;
+            return typeof first === 'object' ? first.id : first;
+        }
+        return typeof field === 'object' ? field.id : field;
+    }
+
     function buildHistoricalPatterns() {
-        const patterns = {}; // vendorKey → { catId, subCatId, businessId, costId, tenancyId, ... count }
+        const patterns = {}; // key → { catId, subCatId, bizId, costId, tenancyId, unitId, count }
+
+        function addPattern(key, data) {
+            if (!key || key.length < 2) return;
+            if (!patterns[key]) {
+                patterns[key] = { count: 0, ...data };
+            }
+            patterns[key].count++;
+            // Most recent wins
+            if (data.subCatId) patterns[key].subCatId = data.subCatId;
+            if (data.catId) patterns[key].catId = data.catId;
+            if (data.bizId) patterns[key].bizId = data.bizId;
+            if (data.costId) patterns[key].costId = data.costId;
+            if (data.tenancyId) patterns[key].tenancyId = data.tenancyId;
+            if (data.unitId) patterns[key].unitId = data.unitId;
+        }
+
         allTransactions.forEach(tx => {
             if (!getField(tx, F.txReconciled)) return;
+
+            const data = {
+                subCatId: extractLinkedId(getField(tx, F.txSubCategory)),
+                catId: extractLinkedId(getField(tx, F.txCategory)),
+                bizId: extractLinkedId(getField(tx, F.txBusiness)),
+                costId: extractLinkedId(getField(tx, F.txCost)),
+                tenancyId: extractLinkedId(getField(tx, F.txTenancy)),
+                unitId: extractLinkedId(getField(tx, F.txUnit)),
+            };
+
+            if (!data.subCatId && !data.catId && !data.costId && !data.tenancyId) return;
+
             const vendor = String(getField(tx, F.txVendor) || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-            if (vendor.length < 3) return;
-            // Use first 3 words as key (matches knowledge base format)
-            const vendorKey = vendor.split(/\s+/).slice(0, 3).join(' ');
-            if (!vendorKey) return;
+            const desc = String(getField(tx, F.txDescription) || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+            const words = vendor.split(/\s+/).filter(w => w.length >= 2);
 
-            // Extract all linked fields from this historical transaction
-            const subCatField = getField(tx, F.txSubCategory);
-            const subCatId = Array.isArray(subCatField) ? (typeof subCatField[0] === 'object' ? subCatField[0].id : subCatField[0]) : (typeof subCatField === 'object' ? subCatField?.id : subCatField);
-            const catField = getField(tx, F.txCategory);
-            const catId = Array.isArray(catField) ? (typeof catField[0] === 'object' ? catField[0].id : catField[0]) : (typeof catField === 'object' ? catField?.id : catField);
-            const bizField = getField(tx, F.txBusiness);
-            const bizId = Array.isArray(bizField) ? (typeof bizField[0] === 'object' ? bizField[0].id : bizField[0]) : (typeof bizField === 'object' ? bizField?.id : bizField);
-            const costField = getField(tx, F.txCost);
-            const costId = Array.isArray(costField) ? (typeof costField[0] === 'object' ? costField[0].id : costField[0]) : (typeof costField === 'object' ? costField?.id : costField);
-            const tenancyField = getField(tx, F.txTenancy);
-            const tenancyId = Array.isArray(tenancyField) ? (typeof tenancyField[0] === 'object' ? tenancyField[0].id : tenancyField[0]) : (typeof tenancyField === 'object' ? tenancyField?.id : tenancyField);
-            const unitField = getField(tx, F.txUnit);
-            const unitId = Array.isArray(unitField) ? (typeof unitField[0] === 'object' ? unitField[0].id : unitField[0]) : (typeof unitField === 'object' ? unitField?.id : unitField);
+            // Index under multiple key lengths for flexible matching
+            if (words.length >= 1) addPattern(words[0], data);                          // 1 word: "screwfix"
+            if (words.length >= 2) addPattern(words.slice(0, 2).join(' '), data);       // 2 words: "screwfix dir"
+            if (words.length >= 3) addPattern(words.slice(0, 3).join(' '), data);       // 3 words: "screwfix dir ltd"
 
-            if (!subCatId && !catId && !costId && !tenancyId) return; // nothing useful
-
-            if (!patterns[vendorKey]) {
-                patterns[vendorKey] = { count: 0, subCatId, catId, bizId, costId, tenancyId, unitId };
+            // Also index by description first 3 words (for transactions with no vendor)
+            if (!vendor && desc) {
+                const dWords = desc.split(/\s+/).filter(w => w.length >= 2);
+                if (dWords.length >= 2) addPattern(dWords.slice(0, 2).join(' '), data);
+                if (dWords.length >= 3) addPattern(dWords.slice(0, 3).join(' '), data);
             }
-            patterns[vendorKey].count++;
-            // Most recent wins (later transactions overwrite earlier ones)
-            if (subCatId) patterns[vendorKey].subCatId = subCatId;
-            if (catId) patterns[vendorKey].catId = catId;
-            if (bizId) patterns[vendorKey].bizId = bizId;
-            if (costId) patterns[vendorKey].costId = costId;
-            if (tenancyId) patterns[vendorKey].tenancyId = tenancyId;
-            if (unitId) patterns[vendorKey].unitId = unitId;
         });
         return patterns;
     }
@@ -3830,31 +3851,37 @@
                 matchType: '', score: 0, status: 'unmatched',
             };
 
+            // Build candidate keys: 3 words, 2 words, 1 word — from vendor and description
+            const vWords = vendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(w => w.length >= 2);
+            const dWords = desc.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(w => w.length >= 2);
+            const candidateKeys = [];
+            // Vendor keys (most specific first)
+            if (vWords.length >= 3) candidateKeys.push(vWords.slice(0, 3).join(' '));
+            if (vWords.length >= 2) candidateKeys.push(vWords.slice(0, 2).join(' '));
+            if (vWords.length >= 1) candidateKeys.push(vWords[0]);
+            // Description keys (fallback)
+            if (dWords.length >= 3) candidateKeys.push(dWords.slice(0, 3).join(' '));
+            if (dWords.length >= 2) candidateKeys.push(dWords.slice(0, 2).join(' '));
+
             // Priority 1: Knowledge base (user corrections — highest priority)
-            const rule = findReconRule(vendorKey);
-            if (rule && (rule.subCatId || rule.costId || rule.tenancyId)) {
-                applyRuleToResult(result, rule, 'Knowledge Base', rule.confidence || 5);
-                results.push(result);
-                return;
+            let matched = false;
+            for (const key of candidateKeys) {
+                const rule = findReconRule(key);
+                if (rule && (rule.subCatId || rule.costId || rule.tenancyId)) {
+                    applyRuleToResult(result, rule, 'Knowledge Base', rule.confidence || 5);
+                    matched = true;
+                    break;
+                }
             }
 
-            // Priority 2: Historical transaction patterns from Airtable
-            const histMatch = historicalPatterns[vendorKey];
-            if (histMatch && histMatch.count >= 1) {
-                applyHistoricalToResult(result, histMatch, tenancyLookup, tenantLookup, costLookup, histMatch.count);
-                results.push(result);
-                return;
-            }
-
-            // Priority 3: Partial vendor key match (first 2 words)
-            if (vendorKey.split(' ').length >= 2) {
-                const shortKey = vendorKey.split(' ').slice(0, 2).join(' ');
-                for (const [k, v] of Object.entries(historicalPatterns)) {
-                    if (k.startsWith(shortKey) && v.count >= 1) {
-                        applyHistoricalToResult(result, v, tenancyLookup, tenantLookup, costLookup, v.count);
-                        result.matchType = 'Historical (partial)';
-                        results.push(result);
-                        return;
+            // Priority 2: Historical transaction patterns (try each key)
+            if (!matched) {
+                for (const key of candidateKeys) {
+                    const histMatch = historicalPatterns[key];
+                    if (histMatch && histMatch.count >= 1) {
+                        applyHistoricalToResult(result, histMatch, tenancyLookup, tenantLookup, costLookup, histMatch.count);
+                        matched = true;
+                        break;
                     }
                 }
             }
@@ -4182,15 +4209,25 @@
         let failCount = 0;
         for (let i = 0; i < results.length; i++) {
             if (results[i].status !== 'suggestion') continue;
-            try {
-                await approveRecon(i);
-                successCount++;
-            } catch (e) {
-                console.error('Approve failed for row ' + i, e);
-                failCount++;
+            // Try up to 2 attempts per transaction (retry on rate limit)
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    await approveRecon(i);
+                    successCount++;
+                    break;
+                } catch (e) {
+                    if (attempt === 0 && e.message && e.message.includes('429')) {
+                        // Rate limited — wait 2 seconds and retry
+                        await new Promise(r => setTimeout(r, 2000));
+                    } else {
+                        console.error('Approve failed for row ' + i, e);
+                        failCount++;
+                        break;
+                    }
+                }
             }
-            // Rate limit: 200ms pause between requests to avoid Airtable 429 errors
-            if (i < results.length - 1) await new Promise(r => setTimeout(r, 200));
+            // 350ms pause between requests to stay well within Airtable's 5/sec limit
+            await new Promise(r => setTimeout(r, 350));
         }
         document.getElementById('reconStatus').textContent = `Done: ${successCount} approved${failCount > 0 ? ', ' + failCount + ' failed' : ''} — refreshing...`;
         setTimeout(() => loadDashboard(), 2000);
