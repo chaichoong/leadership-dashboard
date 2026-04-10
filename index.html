@@ -276,7 +276,10 @@
             border-radius: 8px;
             padding: 16px;
             transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
         }
+        .kpi-card .progress-bar { margin-top: auto; }
         .kpi-card.clickable { cursor: pointer; }
         .kpi-card.clickable:hover {
             background-color: #f8fafc;
@@ -1692,7 +1695,8 @@
             ${expandableCard('CFV Actioned', cfvActionedTenancies.length, '', tenancyDetailList(cfvActionedTenancies), 'text-amber')}
             <div class="kpi-card">
                 <div class="kpi-card-label">Paid Tenancy Rate</div>
-                <div class="kpi-card-value ${Number(paidRate) >= 80 ? 'text-green' : 'text-amber'}">${paidRate}%</div>
+                <div class="kpi-card-value ${Number(paidRate) >= 80 ? 'text-green' : Number(paidRate) >= 60 ? 'text-amber' : 'text-red'}">${paidRate}%</div>
+                <div class="progress-bar"><div class="progress-bar-fill ${Number(paidRate) >= 80 ? 'green' : Number(paidRate) >= 60 ? 'amber' : 'red'}" style="width:${paidRate}%"></div></div>
             </div>
         `;
 
