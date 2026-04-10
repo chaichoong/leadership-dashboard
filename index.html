@@ -1811,7 +1811,7 @@
                 <div class="kpi-card-label">Target Gross Profit <span class="chevron">▸</span></div>
                 <div class="kpi-card-value"><span class="${gpOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(grossProfitHigh).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">/</span><span style="color:#1e293b">£${Math.floor(requiredGrossProfit).toLocaleString('en-GB')}</span></div>
                 <div class="kpi-card-sub">${gpProgressPct}% of target | ${gpOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredGrossProfit - grossProfitHigh)}</span>`}</div>
-                <div class="progress-bar" style="position:relative;margin:8px 0">
+                <div class="progress-bar" style="position:relative">
                     <div class="progress-bar-fill ${gpOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(gpProgressPct), 100)}%"></div>
                 </div>
                 <div class="kpi-card-detail">
