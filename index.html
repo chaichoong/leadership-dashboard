@@ -4508,28 +4508,46 @@
         const cfvList = detectCFVs();
         const today = new Date();
 
-        // Auto-update Airtable: flag potential CFVs as CFV status
-        for (const entry of cfvList) {
-            if (entry.autoDetected && entry.status === 'potential') {
-                await updateTenancyStatus(entry.tenancyId, CFV_STATUS_IDS.cfv);
-                entry.status = 'cfv';
-                entry.autoDetected = false;
+        // DO NOT auto-update Airtable — show potential CFVs for user approval
+        // User must confirm before status changes in Airtable
+
+        // Filter out dismissed potential CFVs (user clicked "Not a CFV")
+        // Dismissals auto-expire after the due day passes next month (re-checks monthly)
+        const filteredList = cfvList.filter(entry => {
+            if (entry.status === 'potential') {
+                const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
+                if (!dismissedAt) return true;
+                // Auto-expire: if dismissed more than 25 days ago, re-check
+                const dismissDate = new Date(dismissedAt);
+                if (Date.now() - dismissDate.getTime() > 25 * 86400000) {
+                    localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
+                    return true;
+                }
+                return false;
             }
-        }
+            return true;
+        });
 
         // Summary
-        const cfvOnly = cfvList.filter(e => e.status === 'cfv' || e.status === 'potential');
-        const cfvActioned = cfvList.filter(e => e.status === 'cfv actioned');
-        const totalExposure = cfvList.reduce((s, e) => s + e.rent, 0);
+        const potentialCfvs = filteredList.filter(e => e.status === 'potential');
+        const cfvOnly = filteredList.filter(e => e.status === 'cfv' || e.status === 'potential');
+        const confirmedCfvs = filteredList.filter(e => e.status === 'cfv');
+        const cfvActioned = filteredList.filter(e => e.status === 'cfv actioned');
+        const totalExposure = filteredList.reduce((s, e) => s + e.rent, 0);
         const oldestOverdue = cfvOnly.length ? Math.max(...cfvOnly.map(e => e.daysOverdue)) : 0;
 
         const summaryCards = document.getElementById('cfvSummaryCards');
         if (summaryCards) {
             summaryCards.innerHTML = `
+                ${potentialCfvs.length > 0 ? `<div class="kpi-card" style="border-color:#d97706;border-width:2px">
+                    <div class="kpi-card-label" style="color:#d97706">⚠ Potential CFVs</div>
+                    <div class="kpi-card-value" style="color:#d97706">${potentialCfvs.length}</div>
+                    <div class="kpi-card-sub">Awaiting your review — confirm or dismiss below</div>
+                </div>` : ''}
                 <div class="kpi-card">
-                    <div class="kpi-card-label">Active CFVs</div>
-                    <div class="kpi-card-value text-red">${cfvOnly.length}</div>
-                    <div class="kpi-card-sub">${cfvOnly.length > 0 ? 'Requires follow-up action' : 'No active cash flow voids'}</div>
+                    <div class="kpi-card-label">Confirmed CFVs</div>
+                    <div class="kpi-card-value text-red">${confirmedCfvs.length}</div>
+                    <div class="kpi-card-sub">${confirmedCfvs.length > 0 ? 'Requires follow-up action' : 'No confirmed cash flow voids'}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Total Exposure</div>
@@ -4553,14 +4571,14 @@
         const tbody = document.getElementById('cfvTableBody');
         if (!tbody) return;
 
-        if (cfvList.length === 0) {
+        if (filteredList.length === 0) {
             tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
             return;
         }
 
         // Fetch comment counts for all CFV tenancies in parallel
         const commentCounts = {};
-        await Promise.all(cfvList.map(async entry => {
+        await Promise.all(filteredList.map(async entry => {
             try {
                 const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${entry.tenancyId}/comments`, {
                     headers: { 'Authorization': 'Bearer ' + PAT }
@@ -4574,17 +4592,19 @@
             } catch (e) { commentCounts[entry.tenancyId] = 0; }
         }));
 
-        // Sort: CFV first, then CFV Actioned — within each group, sort by due day earliest to latest
-        cfvList.sort((a, b) => {
-            const statusOrder = { 'cfv': 0, 'potential': 0, 'cfv actioned': 1 };
+        // Sort: Potential first, then CFV, then CFV Actioned — by due day
+        filteredList.sort((a, b) => {
+            const statusOrder = { 'potential': 0, 'cfv': 1, 'cfv actioned': 2 };
             const sDiff = (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
             if (sDiff !== 0) return sDiff;
             return (a.dueDay || 99) - (b.dueDay || 99);
         });
 
-        tbody.innerHTML = cfvList.map((entry, idx) => {
+        tbody.innerHTML = filteredList.map((entry, idx) => {
             const statusBadge = entry.status === 'cfv actioned'
                 ? '<span class="cfv-status-badge cfv-actioned">CFV Actioned</span>'
+                : entry.status === 'potential'
+                ? '<span class="cfv-status-badge potential">Potential CFV</span>'
                 : '<span class="cfv-status-badge cfv">CFV</span>';
 
             const chase = CFV_CHASE_STAGES[entry.chaseStage];
@@ -4609,14 +4629,22 @@
                 ? `💬 ${cc} comment${cc !== 1 ? 's' : ''}`
                 : '💬 Comments';
 
-            // Action buttons
+            // Action buttons — different for each status
             let actionsHtml = '';
-            if (entry.status === 'cfv' || entry.status === 'potential') {
+            if (entry.status === 'potential') {
+                // Awaiting user review — confirm as CFV or dismiss
+                actionsHtml = `
+                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvDismissAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Not a CFV</button>
+                `;
+            } else if (entry.status === 'cfv') {
+                // Confirmed CFV — can mark actioned
                 actionsHtml = `
                     <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else {
+                // CFV Actioned — can return to In Payment
                 actionsHtml = `
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
@@ -4694,6 +4722,40 @@
         localStorage.setItem('cfv_' + tenancyId + '_returnDismissed', '1');
         const row = btn.closest('tr');
         if (row) row.style.display = 'none';
+    }
+
+    // Confirm a potential CFV — update Airtable status to CFV
+    async function cfvConfirmAsCFV(tenancyId, surname, btn) {
+        if (!confirm(`Confirm ${surname} as a Cash Flow Void? This will update the payment status to CFV in Airtable.`)) return;
+        btn.textContent = '...';
+        btn.disabled = true;
+        const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
+        await addTenancyComment(tenancyId, 'Confirmed as CFV from Leadership Dashboard.');
+        const rec = allTenancies.find(t => t.id === tenancyId);
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
+        btn.textContent = 'Confirmed ✓';
+        btn.style.background = '#fee2e2';
+        btn.style.color = '#dc2626';
+        setTimeout(() => renderCFVTab(), 1500);
+        setTimeout(() => loadDashboard(), 3000);
+    }
+
+    // Dismiss a potential CFV — not a real CFV, return to In Payment
+    async function cfvDismissAsCFV(tenancyId, surname, btn) {
+        if (!confirm(`Dismiss ${surname} as not a CFV? This will keep the tenancy as In Payment.`)) return;
+        btn.textContent = '...';
+        btn.disabled = true;
+        // Store dismissal so it doesn't reappear until next month
+        localStorage.setItem('cfv_dismissed_' + tenancyId, new Date().toISOString());
+        // Clear any chase data that was started
+        localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
+        localStorage.removeItem('cfv_' + tenancyId + '_startDate');
+        await addTenancyComment(tenancyId, `Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.`);
+        btn.textContent = 'Dismissed ✓';
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#16a34a';
+        setTimeout(() => renderCFVTab(), 1500);
     }
 
     async function cfvMarkActioned(tenancyId, btn) {
