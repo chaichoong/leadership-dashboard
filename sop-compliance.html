@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Property Compliance — Standard Operating Procedure</title>
+<style>
+/* ====== RESET & BASE ====== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #1e293b;
+  background: #f1f5f9;
+}
+
+/* ====== COLOUR VARIABLES ====== */
+:root {
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
+  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
+  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
+  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
+  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
+  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
+  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+/* ====== HEADER ====== */
+.header {
+  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
+  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+}
+.header::after {
+  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
+.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
+.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
+
+/* ====== LAYOUT ====== */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.5rem; }
+.section-title {
+  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section-title .icon { font-size: 1.4rem; }
+
+/* ====== CARDS ====== */
+.card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
+}
+.card-header {
+  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
+  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
+}
+
+/* ====== QUICK REFERENCE ====== */
+.quick-ref {
+  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
+  border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
+  box-shadow: var(--shadow-lg);
+}
+.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.qr-item {
+  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
+  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
+}
+.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
+.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
+.qr-item .qr-value a:hover { text-decoration: underline; }
+
+/* ====== TABLE OF CONTENTS ====== */
+.toc {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; border: 1px solid var(--slate-200);
+}
+.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
+.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
+.toc a {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
+  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
+}
+.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
+.toc a .toc-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+}
+
+/* ====== FLOW DIAGRAMS ====== */
+.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
+.flow-step {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
+  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
+  color: var(--slate-700); min-width: 110px; position: relative;
+}
+.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
+.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
+.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
+.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
+.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
+.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
+.flow-arrow {
+  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
+}
+.flow-arrow-down {
+  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
+  font-size: 1.4rem; color: var(--slate-400);
+}
+
+/* Vertical flow */
+.flow-vertical { flex-direction: column; align-items: center; }
+.flow-vertical .flow-step { min-width: 200px; }
+
+/* ====== ARCHITECTURE DIAGRAM ====== */
+.arch-diagram {
+  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
+}
+.arch-box {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.25rem; text-align: center; min-height: 120px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
+.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
+.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
+.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
+
+/* ====== LABEL TABLE ====== */
+.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
+.label-table th {
+  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
+  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+.label-table tr:last-child td { border-bottom: none; }
+.label-table tr:nth-child(even) td { background: var(--slate-50); }
+.label-table tr:hover td { background: var(--blue-50); }
+.label-badge {
+  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
+}
+.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
+.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
+.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
+.label-badge.lb-4 { background: #dcfce7; color: #166534; }
+.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
+.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
+.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
+.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
+.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
+
+/* ====== WORKFLOW CARDS ====== */
+.wf-card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
+}
+.wf-header {
+  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
+  border-bottom: 1px solid var(--slate-200);
+}
+.wf-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
+  flex-shrink: 0; color: white;
+}
+.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
+.wf-header .wf-tag {
+  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
+}
+.wf-body { padding: 1.25rem 1.5rem; }
+.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
+.wf-body h4:first-child { margin-top: 0; }
+
+/* Colour coding for workflow numbers */
+.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
+.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
+.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
+.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
+.wf-num.wf-9 { background: #059669; }
+
+/* ====== STEP LISTS ====== */
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps li {
+  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
+}
+.steps li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: 0; top: 0.45rem;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.steps li + li { border-top: 1px solid var(--slate-100); }
+
+/* ====== METRIC DOTS ====== */
+.dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 0.35rem; vertical-align: middle;
+}
+.dot.green { background: var(--green-500); }
+.dot.amber { background: var(--amber-500); }
+.dot.red { background: var(--red-500); }
+.dot.blue { background: var(--blue-500); }
+
+/* ====== METRICS BAR ====== */
+.metrics-bar {
+  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
+}
+.metric-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+}
+.metric-chip.mc-green { background: var(--green-100); color: var(--green-700); }
+.metric-chip.mc-amber { background: var(--amber-100); color: var(--amber-600); }
+.metric-chip.mc-red { background: var(--red-100); color: var(--red-600); }
+.metric-chip.mc-blue { background: var(--blue-100); color: var(--blue-700); }
+
+/* ====== INFO BOXES ====== */
+.info-box {
+  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
+  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
+}
+.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
+.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
+.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
+.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
+.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
+
+/* ====== CODE / MONO ====== */
+code {
+  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
+  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
+}
+
+/* ====== TROUBLESHOOTING ====== */
+.ts-item { margin-bottom: 0.75rem; }
+.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
+.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
+
+/* ====== TWO-COL GRID ====== */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+/* ====== AIRTABLE FLOW ====== */
+.at-flow {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+  align-items: center; padding: 1rem 0;
+}
+.at-flow .flow-step { min-width: auto; }
+
+/* ====== PRINT ====== */
+@media print {
+  body { background: white; font-size: 10pt; }
+  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .section { break-inside: avoid; }
+  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 768px) {
+  .header h1 { font-size: 1.6rem; }
+  .qr-grid { grid-template-columns: 1fr; }
+  .toc-grid { grid-template-columns: 1fr; }
+  .arch-diagram { grid-template-columns: 1fr; }
+  .arch-connector { transform: rotate(90deg); }
+  .grid-2 { grid-template-columns: 1fr; }
+  .flow { flex-direction: column; }
+  .flow-arrow { transform: rotate(90deg); }
+  .at-flow { grid-template-columns: 1fr; }
+  .container { padding: 0 1rem 3rem; }
+}
+
+/* ====== MISC ====== */
+strong { color: var(--slate-800); }
+a { color: var(--blue-600); }
+p { margin-bottom: 0.5rem; }
+ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
+li { margin-bottom: 0.2rem; font-size: 0.9rem; }
+hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<!-- ====== HEADER ====== -->
+<div class="header">
+  <div class="header-inner">
+    <h1>Property Compliance &mdash; Standard Operating Procedure</h1>
+    <div class="subtitle">Tracking gas, electrical, EPC and licensing compliance across all properties</div>
+    <div class="version">Version 1.0 &middot; 11 April 2026 &middot; Owner: Kevin Brittain</div>
+  </div>
+</div>
+
+<!-- ====== CONTAINER ====== -->
+<div class="container">
+
+  <!-- Quick Reference -->
+  <div class="quick-ref">
+    <h2><span class="icon">&#9889;</span> Quick Reference</h2>
+    <div class="qr-grid">
+      <div class="qr-item">
+        <div class="qr-label">Data Source</div>
+        <div class="qr-value">Airtable &mdash; Properties &amp; Compliance Tables</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Dashboard</div>
+        <div class="qr-value">Leadership Dashboard &mdash; Compliance tab</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Alert Threshold</div>
+        <div class="qr-value">30 days before expiry = amber; overdue = red</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table of Contents -->
+  <div class="section">
+    <div class="toc">
+      <h2>Table of Contents</h2>
+      <div class="toc-grid">
+        <a href="#overview"><span class="toc-num">1</span> Overview</a>
+        <a href="#access"><span class="toc-num">2</span> How to Access</a>
+        <a href="#features"><span class="toc-num">3</span> Features</a>
+        <a href="#datasource"><span class="toc-num">4</span> Data Source</a>
+        <a href="#troubleshooting"><span class="toc-num">5</span> Troubleshooting</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. Overview -->
+  <div class="section" id="overview">
+    <h2 class="section-title"><span class="icon">&#128203;</span> 1. Overview</h2>
+    <div class="card">
+      <p>The Property Compliance module tracks all mandatory safety and regulatory certifications across the portfolio. It provides a single view of compliance status per property, highlighting items that are approaching expiry or already overdue.</p>
+      <p>Compliance items tracked include:</p>
+      <div class="grid-2">
+        <div class="card" style="border-left: 4px solid var(--blue-500);">
+          <div class="card-header"><span class="dot blue"></span> Gas Safety Certificate (CP12)</div>
+          <p>Annual requirement for all properties with gas appliances. Must be renewed before the expiry date.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--amber-500);">
+          <div class="card-header"><span class="dot amber"></span> Electrical Installation (EICR)</div>
+          <p>Required every 5 years. Must be satisfactory or have remedial works completed within 28 days of the report.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--green-500);">
+          <div class="card-header"><span class="dot green"></span> Energy Performance Certificate (EPC)</div>
+          <p>Valid for 10 years. Must be rated E or above for rental properties (minimum requirement).</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--red-500);">
+          <div class="card-header"><span class="dot red"></span> HMO / Selective Licence</div>
+          <p>Required for Houses in Multiple Occupation or properties in selective licensing areas. Typically valid for 5 years.</p>
+        </div>
+      </div>
+      <div class="info-box danger">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>Operating without a valid gas safety certificate is a criminal offence. The dashboard flags any property where the CP12 has expired in red with highest priority.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. How to Access -->
+  <div class="section" id="access">
+    <h2 class="section-title"><span class="icon">&#128279;</span> 2. How to Access</h2>
+    <div class="card">
+      <ol class="steps">
+        <li>Open the Leadership Dashboard in your browser.</li>
+        <li>Click the <strong>Compliance</strong> tab in the navigation bar.</li>
+        <li>The compliance matrix loads, showing all properties with their certification statuses colour-coded.</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- 3. Features -->
+  <div class="section" id="features">
+    <h2 class="section-title"><span class="icon">&#128296;</span> 3. Features</h2>
+    <div class="card">
+      <div class="card-header">Dashboard Features</div>
+      <ul>
+        <li><strong>Compliance Matrix</strong> &mdash; A grid showing each property as a row and each compliance type as a column. Cells are colour-coded: green (valid), amber (expiring within 30 days), red (expired).</li>
+        <li><strong>Summary KPIs</strong> &mdash; Header cards showing total compliant properties, items expiring soon, and overdue items.</li>
+        <li><strong>Expiry Timeline</strong> &mdash; Upcoming expiry dates sorted chronologically so renewals can be planned in advance.</li>
+        <li><strong>Certificate Links</strong> &mdash; Click a cell to view the uploaded certificate document (PDF stored in Airtable attachments).</li>
+        <li><strong>Filtering</strong> &mdash; Filter by property, compliance type, or status (Valid / Expiring / Expired).</li>
+      </ul>
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>Use the Expiry Timeline to batch-schedule renewals. Booking multiple gas checks in the same week is more cost-effective than individual visits.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Data Source -->
+  <div class="section" id="datasource">
+    <h2 class="section-title"><span class="icon">&#128451;</span> 4. Data Source</h2>
+    <div class="card">
+      <div class="card-header">Airtable Configuration</div>
+      <ul>
+        <li><strong>Base:</strong> Operations Director</li>
+        <li><strong>Tables:</strong> Properties (for property details) and Compliance (for certificate records)</li>
+        <li><strong>Relationship:</strong> Each compliance record is linked to a property via the Property field</li>
+        <li><strong>Key fields:</strong> Compliance Type, Issue Date, Expiry Date, Status, Certificate (attachment), Engineer/Provider</li>
+      </ul>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>When a new certificate is uploaded, update the Issue Date and Expiry Date fields. The dashboard calculates status (Valid/Expiring/Expired) automatically from the Expiry Date.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Troubleshooting -->
+  <div class="section" id="troubleshooting">
+    <h2 class="section-title"><span class="icon">&#128295;</span> 5. Troubleshooting</h2>
+    <div class="card">
+      <div class="ts-item">
+        <div class="ts-problem">Property showing as non-compliant despite valid certificate</div>
+        <div class="ts-solution">Check the Expiry Date field in the Airtable Compliance record. Ensure the date is correct and in the future. Also verify the compliance type matches the expected category.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Certificate PDF not loading when clicked</div>
+        <div class="ts-solution">Airtable attachment URLs expire periodically. Re-upload the PDF to the Compliance record attachment field. Refresh the dashboard after uploading.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Property missing from the compliance matrix</div>
+        <div class="ts-solution">The property must exist in the Properties table and have at least one linked Compliance record. Add the property to Airtable if it is new, or create the initial compliance records.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Amber warning not appearing for expiring items</div>
+        <div class="ts-solution">The 30-day threshold is calculated from today's date. Check that the Expiry Date is within 30 days. If the dashboard date seems off, verify browser time zone settings and clear cache.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -971,78 +971,23 @@
         <div class="tab-panel" id="tab-sitemap">
             <div class="section">
                 <h2 class="section-title">Site Map & Links</h2>
-                <p style="color:#64748b;font-size:13px;margin-bottom:16px">Share any page by copying its standalone link. Each page works independently — recipients don't need access to the full platform.</p>
-                <div class="sitemap-grid">
-                    <div class="sitemap-card">
-                        <h3>&#x1F4CA; Leadership Dashboard</h3>
-                        <p>Financial overview, cash flow forecast, balance calculator, AI commentary</p>
-                        <div class="sitemap-links">
-                            <div><a href="#overview" onclick="switchTab('overview')">Open in platform</a></div>
-                            <div><a href="index.html#overview" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#overview')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F527; Contractor Job List</h3>
-                        <p>Active maintenance jobs, contractor assignments, job status tracking</p>
-                        <div class="sitemap-links">
-                            <div><a href="#airtable" onclick="switchTab('airtable')">Open in platform</a></div>
-                            <div><a href="index.html#airtable" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#airtable')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F9FE; Invoices</h3>
-                        <p>Pending invoices from Gmail, AI-matched payments, mark-as-paid workflow</p>
-                        <div class="sitemap-links">
-                            <div><a href="#invoices" onclick="switchTab('invoices')">Open in platform</a></div>
-                            <div><a href="index.html#invoices" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#invoices')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F6A8; CFVs</h3>
-                        <p>Cash flow voids, 3-stage chase tracking, comments, status management</p>
-                        <div class="sitemap-links">
-                            <div><a href="#cfv" onclick="switchTab('cfv')">Open in platform</a></div>
-                            <div><a href="index.html#cfv" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#cfv')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F4E8; Inbound Comms</h3>
-                        <p>Email triage, AI label suggestions, follow-up drafting, inbox management</p>
-                        <div class="sitemap-links">
-                            <div><a href="#comms" onclick="switchTab('comms')">Open in platform</a></div>
-                            <div><a href="follow-up.html" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('follow-up.html')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x2705; Property Compliance</h3>
-                        <p>Property compliance tracking, document status, expiry monitoring</p>
-                        <div class="sitemap-links">
-                            <div><a href="#compliance" onclick="switchTab('compliance')">Open in platform</a></div>
-                            <div><a href="compliance.html" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('compliance.html')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F4D6; SOP — Leadership Dashboard</h3>
-                        <p>Standard Operating Procedure — complete system guide</p>
-                        <div class="sitemap-links">
-                            <div><a href="sop.html" target="_blank">Open SOP</a> <button class="sitemap-copy" onclick="copyLink('sop.html')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F4D6; SOP — Inbound Comms</h3>
-                        <p>Standard Operating Procedure — inbound comms tracker guide</p>
-                        <div class="sitemap-links">
-                            <div><a href="inbound-comms-sop.html" target="_blank">Open SOP</a> <button class="sitemap-copy" onclick="copyLink('inbound-comms-sop.html')">Copy</button></div>
-                        </div>
-                    </div>
-                    <div class="sitemap-card">
-                        <h3>&#x1F50C; Fintable Sync Monitor</h3>
-                        <p>Admin — monitors bank account sync status, alerts when reconnection needed</p>
-                        <div class="sitemap-links">
-                            <div><a href="#fintable" onclick="switchTab('fintable')">Open in platform</a></div>
-                            <div><a href="index.html#fintable" target="_blank">Standalone link</a> <button class="sitemap-copy" onclick="copyLink('index.html#fintable')">Copy</button></div>
-                        </div>
-                    </div>
+                <div id="sitemapIntegrity" style="margin-bottom:16px"></div>
+                <div style="overflow-x:auto">
+                    <table class="invoice-table" style="min-width:900px">
+                        <thead>
+                            <tr>
+                                <th style="width:30px">#</th>
+                                <th>Page</th>
+                                <th>Page v.</th>
+                                <th>Platform Link</th>
+                                <th>Standalone Link</th>
+                                <th>SOP</th>
+                                <th>SOP v.</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sitemapTableBody"></tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -1098,6 +1043,17 @@
     // ── Config ──
     const BASE_ID = 'appnqjDpqDniH3IRl';
     const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
+
+    // ── Page & SOP Version Registry ──
+    const PAGE_REGISTRY = [
+        { id: 'overview',    name: 'Leadership Dashboard',  icon: '📊', pageVer: '2.0', sopFile: 'sop.html',                   sopVer: '2.0', standalone: 'index.html#overview' },
+        { id: 'airtable',   name: 'Contractor Job List',   icon: '🔧', pageVer: '1.0', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.0', standalone: 'index.html#airtable' },
+        { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '1.0', sopFile: 'sop-invoices.html',           sopVer: '1.0', standalone: 'index.html#invoices' },
+        { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.0', sopFile: 'sop-cfvs.html',               sopVer: '1.0', standalone: 'index.html#cfv' },
+        { id: 'comms',      name: 'Inbound Comms',         icon: '📨', pageVer: '2.1', sopFile: 'inbound-comms-sop.html',      sopVer: '2.1', standalone: 'follow-up.html' },
+        { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
+        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.0', sopFile: 'sop-sitemap.html',            sopVer: '1.0', standalone: 'index.html#sitemap' },
+    ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
     // and paste the URL here. Leave empty to use static fallback data.
@@ -2790,6 +2746,10 @@
         if (tabId === 'cfv') {
             renderCFVTab();
         }
+        // Render Site Map on switch
+        if (tabId === 'sitemap') {
+            renderSiteMap();
+        }
         // Load Fintable Sync Monitor on switch
         if (tabId === 'fintable') {
             loadFintableSyncMonitor();
@@ -2798,6 +2758,53 @@
         // Refresh data on tab switch (but don't interrupt if already loading)
         if (PAT && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
             loadDashboard();
+        }
+    }
+
+    // ── Site Map Renderer ──
+    function renderSiteMap() {
+        const tbody = document.getElementById('sitemapTableBody');
+        const integrity = document.getElementById('sitemapIntegrity');
+        if (!tbody) return;
+
+        let matched = 0;
+        tbody.innerHTML = PAGE_REGISTRY.map((p, i) => {
+            const versionMatch = p.pageVer === p.sopVer;
+            if (versionMatch) matched++;
+            const statusHtml = versionMatch
+                ? '<span style="color:#16a34a;font-weight:600">✓ In sync</span>'
+                : '<span style="color:#d97706;font-weight:600">⚠ Update needed</span>';
+            return `<tr>
+                <td style="text-align:center;color:#94a3b8;font-weight:600">${i + 1}</td>
+                <td style="font-weight:600">${p.icon} ${escHtml(p.name)}</td>
+                <td style="text-align:center;font-family:monospace;font-size:11px">${p.pageVer}</td>
+                <td><a href="#${p.id}" onclick="switchTab('${p.id}')" style="font-size:12px">Open</a></td>
+                <td style="font-size:11px"><a href="${p.standalone}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.standalone}')">Copy</button></td>
+                <td><a href="${p.sopFile}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.sopFile}')">Copy</button></td>
+                <td style="text-align:center;font-family:monospace;font-size:11px">${p.sopVer}</td>
+                <td style="text-align:center">${statusHtml}</td>
+            </tr>`;
+        }).join('');
+
+        if (integrity) {
+            const total = PAGE_REGISTRY.length;
+            const allGood = matched === total;
+            integrity.innerHTML = `
+                <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+                    <div class="kpi-card" style="flex:1;min-width:200px;padding:12px 16px">
+                        <div class="kpi-card-label">Pages</div>
+                        <div style="font-size:20px;font-weight:700">${total}</div>
+                    </div>
+                    <div class="kpi-card" style="flex:1;min-width:200px;padding:12px 16px">
+                        <div class="kpi-card-label">SOPs</div>
+                        <div style="font-size:20px;font-weight:700">${total}</div>
+                    </div>
+                    <div class="kpi-card" style="flex:1;min-width:200px;padding:12px 16px">
+                        <div class="kpi-card-label">Version Sync</div>
+                        <div style="font-size:20px;font-weight:700;color:${allGood ? '#16a34a' : '#d97706'}">${matched}/${total} ${allGood ? '✓' : '⚠'}</div>
+                    </div>
+                </div>
+            `;
         }
     }
 

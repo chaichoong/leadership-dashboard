@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoices — Standard Operating Procedure</title>
+<style>
+/* ====== RESET & BASE ====== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #1e293b;
+  background: #f1f5f9;
+}
+
+/* ====== COLOUR VARIABLES ====== */
+:root {
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
+  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
+  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
+  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
+  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
+  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
+  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+/* ====== HEADER ====== */
+.header {
+  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
+  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+}
+.header::after {
+  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
+.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
+.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
+
+/* ====== LAYOUT ====== */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.5rem; }
+.section-title {
+  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section-title .icon { font-size: 1.4rem; }
+
+/* ====== CARDS ====== */
+.card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
+}
+.card-header {
+  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
+  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
+}
+
+/* ====== QUICK REFERENCE ====== */
+.quick-ref {
+  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
+  border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
+  box-shadow: var(--shadow-lg);
+}
+.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.qr-item {
+  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
+  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
+}
+.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
+.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
+.qr-item .qr-value a:hover { text-decoration: underline; }
+
+/* ====== TABLE OF CONTENTS ====== */
+.toc {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 1.5rem; border: 1px solid var(--slate-200);
+}
+.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
+.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
+.toc a {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
+  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
+}
+.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
+.toc a .toc-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+}
+
+/* ====== FLOW DIAGRAMS ====== */
+.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
+.flow-step {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
+  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
+  color: var(--slate-700); min-width: 110px; position: relative;
+}
+.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
+.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
+.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
+.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
+.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
+.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
+.flow-arrow {
+  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
+}
+.flow-arrow-down {
+  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
+  font-size: 1.4rem; color: var(--slate-400);
+}
+
+/* Vertical flow */
+.flow-vertical { flex-direction: column; align-items: center; }
+.flow-vertical .flow-step { min-width: 200px; }
+
+/* ====== ARCHITECTURE DIAGRAM ====== */
+.arch-diagram {
+  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
+}
+.arch-box {
+  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
+  padding: 1.25rem; text-align: center; min-height: 120px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
+.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
+.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
+.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
+
+/* ====== LABEL TABLE ====== */
+.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
+.label-table th {
+  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
+  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
+.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+.label-table tr:last-child td { border-bottom: none; }
+.label-table tr:nth-child(even) td { background: var(--slate-50); }
+.label-table tr:hover td { background: var(--blue-50); }
+.label-badge {
+  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
+  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
+}
+.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
+.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
+.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
+.label-badge.lb-4 { background: #dcfce7; color: #166534; }
+.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
+.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
+.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
+.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
+.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
+
+/* ====== WORKFLOW CARDS ====== */
+.wf-card {
+  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
+  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
+}
+.wf-header {
+  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
+  border-bottom: 1px solid var(--slate-200);
+}
+.wf-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
+  flex-shrink: 0; color: white;
+}
+.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
+.wf-header .wf-tag {
+  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
+  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
+}
+.wf-body { padding: 1.25rem 1.5rem; }
+.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
+.wf-body h4:first-child { margin-top: 0; }
+
+/* Colour coding for workflow numbers */
+.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
+.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
+.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
+.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
+.wf-num.wf-9 { background: #059669; }
+
+/* ====== STEP LISTS ====== */
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps li {
+  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
+}
+.steps li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: 0; top: 0.45rem;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--blue-100); color: var(--blue-700);
+  font-size: 0.75rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.steps li + li { border-top: 1px solid var(--slate-100); }
+
+/* ====== METRIC DOTS ====== */
+.dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  margin-right: 0.35rem; vertical-align: middle;
+}
+.dot.green { background: var(--green-500); }
+.dot.amber { background: var(--amber-500); }
+.dot.red { background: var(--red-500); }
+.dot.blue { background: var(--blue-500); }
+
+/* ====== METRICS BAR ====== */
+.metrics-bar {
+  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
+}
+.metric-chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+}
+.metric-chip.mc-green { background: var(--green-100); color: var(--green-700); }
+.metric-chip.mc-amber { background: var(--amber-100); color: var(--amber-600); }
+.metric-chip.mc-red { background: var(--red-100); color: var(--red-600); }
+.metric-chip.mc-blue { background: var(--blue-100); color: var(--blue-700); }
+
+/* ====== INFO BOXES ====== */
+.info-box {
+  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
+  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
+}
+.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
+.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
+.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
+.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
+.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
+
+/* ====== CODE / MONO ====== */
+code {
+  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
+  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
+}
+
+/* ====== TROUBLESHOOTING ====== */
+.ts-item { margin-bottom: 0.75rem; }
+.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
+.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
+
+/* ====== TWO-COL GRID ====== */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+/* ====== AIRTABLE FLOW ====== */
+.at-flow {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+  align-items: center; padding: 1rem 0;
+}
+.at-flow .flow-step { min-width: auto; }
+
+/* ====== PRINT ====== */
+@media print {
+  body { background: white; font-size: 10pt; }
+  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+  .section { break-inside: avoid; }
+  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 768px) {
+  .header h1 { font-size: 1.6rem; }
+  .qr-grid { grid-template-columns: 1fr; }
+  .toc-grid { grid-template-columns: 1fr; }
+  .arch-diagram { grid-template-columns: 1fr; }
+  .arch-connector { transform: rotate(90deg); }
+  .grid-2 { grid-template-columns: 1fr; }
+  .flow { flex-direction: column; }
+  .flow-arrow { transform: rotate(90deg); }
+  .at-flow { grid-template-columns: 1fr; }
+  .container { padding: 0 1rem 3rem; }
+}
+
+/* ====== MISC ====== */
+strong { color: var(--slate-800); }
+a { color: var(--blue-600); }
+p { margin-bottom: 0.5rem; }
+ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
+li { margin-bottom: 0.2rem; font-size: 0.9rem; }
+hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<!-- ====== HEADER ====== -->
+<div class="header">
+  <div class="header-inner">
+    <h1>Invoices &mdash; Standard Operating Procedure</h1>
+    <div class="subtitle">Invoice ingestion, AI matching, approval workflow and payment tracking</div>
+    <div class="version">Version 1.0 &middot; 11 April 2026 &middot; Owner: Kevin Brittain</div>
+  </div>
+</div>
+
+<!-- ====== CONTAINER ====== -->
+<div class="container">
+
+  <!-- Quick Reference -->
+  <div class="quick-ref">
+    <h2><span class="icon">&#9889;</span> Quick Reference</h2>
+    <div class="qr-grid">
+      <div class="qr-item">
+        <div class="qr-label">Data Source</div>
+        <div class="qr-value">Airtable &mdash; Invoices Table</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Trigger</div>
+        <div class="qr-value">Gmail invoice emails via Apps Script</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">AI Engine</div>
+        <div class="qr-value">Claude / OpenAI for supplier matching</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Dashboard</div>
+        <div class="qr-value">Leadership Dashboard &mdash; Invoices tab</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table of Contents -->
+  <div class="section">
+    <div class="toc">
+      <h2>Table of Contents</h2>
+      <div class="toc-grid">
+        <a href="#overview"><span class="toc-num">1</span> Overview &amp; Data Flow</a>
+        <a href="#columns"><span class="toc-num">2</span> Invoice Table Columns</a>
+        <a href="#kpi"><span class="toc-num">3</span> KPI Summary Cards</a>
+        <a href="#ai"><span class="toc-num">4</span> AI Matching Logic</a>
+        <a href="#approve"><span class="toc-num">5</span> Approve / Reject Flow</a>
+        <a href="#paid"><span class="toc-num">6</span> Mark as Paid</a>
+        <a href="#kb"><span class="toc-num">7</span> Knowledge Base</a>
+        <a href="#gas"><span class="toc-num">8</span> Google Apps Script Setup</a>
+        <a href="#troubleshooting"><span class="toc-num">9</span> Troubleshooting</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. Overview & Data Flow -->
+  <div class="section" id="overview">
+    <h2 class="section-title"><span class="icon">&#128202;</span> 1. Overview &amp; Data Flow</h2>
+    <div class="card">
+      <p>The Invoices module automates the full invoice lifecycle: ingestion from email, AI-powered supplier matching, manual approval, and payment tracking. All invoice data lives in Airtable and is rendered in real time on the Leadership Dashboard.</p>
+    </div>
+    <div class="card">
+      <div class="card-header">End-to-End Data Flow</div>
+      <div class="flow">
+        <div class="flow-step primary"><span class="flow-icon">&#128231;</span>Gmail Inbox<span class="flow-sub">Invoice emails</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step warning"><span class="flow-icon">&#9881;</span>Apps Script<span class="flow-sub">Parse &amp; extract</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step purple"><span class="flow-icon">&#129302;</span>AI Matching<span class="flow-sub">Supplier + cost code</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step"><span class="flow-icon">&#128451;</span>Airtable<span class="flow-sub">Invoice record</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step success"><span class="flow-icon">&#9989;</span>Dashboard<span class="flow-sub">Review &amp; pay</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Invoice Table Columns -->
+  <div class="section" id="columns">
+    <h2 class="section-title"><span class="icon">&#128203;</span> 2. Invoice Table Columns</h2>
+    <div class="card">
+      <table class="label-table">
+        <thead>
+          <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Invoice ID</strong></td><td>Auto-number</td><td>Unique identifier for each invoice record</td></tr>
+          <tr><td><strong>Supplier</strong></td><td>Linked record</td><td>Matched supplier from Contacts table</td></tr>
+          <tr><td><strong>Amount</strong></td><td>Currency</td><td>Invoice total (GBP)</td></tr>
+          <tr><td><strong>Date Received</strong></td><td>Date</td><td>Date the invoice email was processed</td></tr>
+          <tr><td><strong>Due Date</strong></td><td>Date</td><td>Payment deadline extracted from invoice</td></tr>
+          <tr><td><strong>Status</strong></td><td>Single select</td><td>Pending / Approved / Rejected / Paid</td></tr>
+          <tr><td><strong>AI Confidence</strong></td><td>Percent</td><td>Match confidence score from AI engine</td></tr>
+          <tr><td><strong>Cost Code</strong></td><td>Single select</td><td>Expense category assigned by AI or manually</td></tr>
+          <tr><td><strong>Attachment</strong></td><td>Attachment</td><td>Original invoice PDF from email</td></tr>
+          <tr><td><strong>Notes</strong></td><td>Long text</td><td>Reviewer comments or queries</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 3. KPI Summary Cards -->
+  <div class="section" id="kpi">
+    <h2 class="section-title"><span class="icon">&#128200;</span> 3. KPI Summary Cards</h2>
+    <div class="card">
+      <p>The dashboard header displays four real-time KPI cards summarising the current invoice state:</p>
+      <div class="grid-2">
+        <div class="card" style="border-left: 4px solid var(--blue-500);">
+          <div class="card-header"><span class="dot blue"></span> Total Outstanding</div>
+          <p>Sum of all invoices in <strong>Pending</strong> or <strong>Approved</strong> status. Indicates cash commitment not yet settled.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--amber-500);">
+          <div class="card-header"><span class="dot amber"></span> Awaiting Approval</div>
+          <p>Count of invoices still in <strong>Pending</strong> status requiring manual review before payment.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--red-500);">
+          <div class="card-header"><span class="dot red"></span> Overdue</div>
+          <p>Invoices where <strong>Due Date &lt; Today</strong> and status is not Paid. Triggers escalation.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--green-500);">
+          <div class="card-header"><span class="dot green"></span> Paid This Month</div>
+          <p>Total value of invoices marked as <strong>Paid</strong> within the current calendar month.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. AI Matching Logic -->
+  <div class="section" id="ai">
+    <h2 class="section-title"><span class="icon">&#129302;</span> 4. AI Matching Logic</h2>
+    <div class="card">
+      <p>When an invoice email arrives, the AI engine performs two matching tasks:</p>
+      <ol class="steps">
+        <li><strong>Supplier Matching</strong> &mdash; The sender email and invoice text are compared against the Contacts table. A confidence score (0&ndash;100%) is assigned.</li>
+        <li><strong>Cost Code Assignment</strong> &mdash; Based on historic invoices from the same supplier and the line-item descriptions, a cost code is suggested.</li>
+        <li><strong>Threshold Check</strong> &mdash; If confidence &ge; 85%, the match is auto-applied. Below 85%, the invoice is flagged for manual review.</li>
+      </ol>
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>The AI model improves over time. Each manual correction feeds back into the training data for future matching accuracy.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Approve / Reject Flow -->
+  <div class="section" id="approve">
+    <h2 class="section-title"><span class="icon">&#9989;</span> 5. Approve / Reject Flow</h2>
+    <div class="card">
+      <div class="card-header">Review Workflow</div>
+      <ol class="steps">
+        <li>Open the Invoices tab on the Leadership Dashboard.</li>
+        <li>Invoices in <strong>Pending</strong> status appear at the top of the table.</li>
+        <li>Click an invoice row to expand the detail panel showing the PDF attachment, supplier match, and suggested cost code.</li>
+        <li>Review the details. If correct, click <strong>Approve</strong>. If incorrect, click <strong>Reject</strong> and add a note explaining the reason.</li>
+        <li>Approved invoices move to the payment queue. Rejected invoices are returned for correction or deletion.</li>
+      </ol>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>Invoices over &pound;500 require a second approval step. The system will prompt for confirmation before finalising.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Mark as Paid -->
+  <div class="section" id="paid">
+    <h2 class="section-title"><span class="icon">&#128181;</span> 6. Mark as Paid</h2>
+    <div class="card">
+      <ol class="steps">
+        <li>Once payment has been made via the bank, return to the Invoices tab.</li>
+        <li>Locate the approved invoice and click <strong>Mark as Paid</strong>.</li>
+        <li>Enter the payment date and reference number if applicable.</li>
+        <li>The status changes to <strong>Paid</strong> and the record moves to the archive view.</li>
+      </ol>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>Paid invoices are not deleted. They remain in Airtable for audit and reporting purposes and contribute to monthly spend analysis.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Knowledge Base -->
+  <div class="section" id="kb">
+    <h2 class="section-title"><span class="icon">&#128218;</span> 7. Knowledge Base</h2>
+    <div class="card">
+      <div class="card-header">Key Concepts</div>
+      <ul>
+        <li><strong>Invoice vs. Statement</strong> &mdash; Only invoices (requests for payment) should enter the system. Statements are informational and should not be processed.</li>
+        <li><strong>Duplicate Detection</strong> &mdash; The system checks invoice number + supplier + amount to prevent duplicate entries. Flagged duplicates appear with an amber warning badge.</li>
+        <li><strong>Recurring Invoices</strong> &mdash; Regular monthly invoices from known suppliers can be auto-approved if the amount matches the expected value within a 5% tolerance.</li>
+        <li><strong>Credit Notes</strong> &mdash; Credit notes appear as negative amounts and automatically offset against outstanding invoices from the same supplier.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 8. Google Apps Script Setup -->
+  <div class="section" id="gas">
+    <h2 class="section-title"><span class="icon">&#9881;</span> 8. Google Apps Script Setup</h2>
+    <div class="card">
+      <div class="card-header">How the Ingestion Script Works</div>
+      <ol class="steps">
+        <li>A time-driven trigger runs every 15 minutes, scanning the Gmail inbox for emails matching the invoice label.</li>
+        <li>The script extracts sender, subject, date, and any PDF attachments.</li>
+        <li>Extracted data is sent to the AI matching endpoint for supplier and cost code identification.</li>
+        <li>A new record is created in the Airtable Invoices table via the Airtable API with the matched data and attachment.</li>
+        <li>The processed email is moved to the "Invoices/Processed" Gmail label to prevent reprocessing.</li>
+      </ol>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>If the Apps Script quota is exceeded (e.g. too many API calls), ingestion pauses until the next quota reset. Check the Apps Script dashboard for execution logs.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Troubleshooting -->
+  <div class="section" id="troubleshooting">
+    <h2 class="section-title"><span class="icon">&#128295;</span> 9. Troubleshooting</h2>
+    <div class="card">
+      <div class="ts-item">
+        <div class="ts-problem">Invoice email not appearing in the system</div>
+        <div class="ts-solution">Check that the email has the correct Gmail label applied. Verify the Apps Script trigger is active in the Apps Script dashboard. Review execution logs for errors.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Wrong supplier match</div>
+        <div class="ts-solution">Manually correct the supplier in Airtable. The correction will be fed back to improve future AI matching. Check if the supplier exists in the Contacts table.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Duplicate invoice detected</div>
+        <div class="ts-solution">Review both records. If genuinely duplicate, reject the newer entry. If the supplier has issued two invoices with the same number, add a distinguishing note and approve both.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">KPI cards showing stale data</div>
+        <div class="ts-solution">Refresh the dashboard page. If data remains stale, check the Airtable API connection and verify the data fetch function in the dashboard source code.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">PDF attachment not loading</div>
+        <div class="ts-solution">Ensure the attachment URL from Airtable has not expired. Re-upload the PDF manually if needed. Check browser CORS settings if viewing cross-origin.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
