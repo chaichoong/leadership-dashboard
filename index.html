@@ -2398,34 +2398,35 @@
         });
 
         // Cash flow KPI cards — based on After Variable Costs (orange line)
+        const cfLabelStyle = 'min-height:36px;display:flex;align-items:flex-start';
         document.getElementById('cashflowKPIs').innerHTML = `
             <div class="kpi-card">
-                <div class="kpi-card-label">Opening Balance</div>
+                <div class="kpi-card-label" style="${cfLabelStyle}">Opening Balance</div>
                 <div class="kpi-card-value">${fmt(openingBalance)}</div>
                 <div class="kpi-card-sub">Santander + TNT Zempler</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Total In</div>
+                <div class="kpi-card-label" style="${cfLabelStyle}">Total In</div>
                 <div class="kpi-card-value text-green">${fmt(totalIn)}</div>
                 <div class="kpi-card-sub">Projected inflows over 31 days</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Total Out (incl. Reserves)</div>
+                <div class="kpi-card-label" style="${cfLabelStyle}">Total Out (incl. Reserves)</div>
                 <div class="kpi-card-value text-red">${fmt(totalOut + totalVarCostReserve)}</div>
                 <div class="kpi-card-sub">Fixed ${fmt(totalOut)} + Variable ${fmt(totalVarCostReserve)}</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Net Change (after Reserves)</div>
+                <div class="kpi-card-label" style="${cfLabelStyle}">Net Change (after Reserves)</div>
                 <div class="kpi-card-value ${netChangeAfterVar >= 0 ? 'text-green' : 'text-red'}">${netChangeAfterVar >= 0 ? '+' : '-'}${fmt(netChangeAfterVar)}</div>
                 <div class="kpi-card-sub">Income minus all costs and reserves</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Final Balance (after Reserves)</div>
+                <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance (after Reserves)</div>
                 <div class="kpi-card-value" style="color:#d97706">${fmt(finalBalanceAfterVar)}</div>
                 <div class="kpi-card-sub">Day 31 on the orange line</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Lowest Balance (after Reserves)</div>
+                <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance (after Reserves)</div>
                 <div class="kpi-card-value ${lowestBalAfterVar >= 0 ? '' : 'text-red'}" style="${lowestBalAfterVar >= 0 ? 'color:#d97706' : ''}">${fmtAccounting(lowestBalAfterVar)}</div>
                 <div class="kpi-card-sub">${lowestDayAfterVar}</div>
             </div>
