@@ -1,0 +1,1809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Business Plan Builder — Operations Director</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3347;
+  --text:#e4e7ef;--text2:#8b90a5;--accent:#6366f1;--accent2:#818cf8;
+  --green:#22c55e;--green-bg:rgba(34,197,94,.12);--red:#ef4444;
+  --amber:#f59e0b;--blue:#3b82f6;--purple:#a855f7;--pink:#ec4899;--radius:12px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;height:100vh;overflow:hidden}
+
+/* ── Setup Screen ── */
+.setup{display:flex;align-items:center;justify-content:center;height:100vh;padding:1.5rem}
+.setup-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem;max-width:520px;width:100%}
+.setup-card h1{font-size:1.6rem;margin-bottom:.25rem}
+.setup-card .brand{color:var(--accent);font-size:.85rem;font-weight:600;margin-bottom:1.5rem}
+.setup-card p{color:var(--text2);font-size:.92rem;margin-bottom:1.5rem}
+.setup-card label{display:block;font-weight:600;font-size:.88rem;margin-bottom:.35rem}
+.setup-card .hint{font-size:.78rem;color:var(--text2);margin-bottom:1rem}
+.setup-card select,.setup-card input[type="text"],.setup-card input[type="password"]{
+  width:100%;padding:10px 14px;background:var(--bg);color:var(--text);
+  border:1px solid var(--border);border-radius:8px;font-size:.92rem;font-family:inherit;margin-bottom:.5rem}
+.setup-card select:focus,.setup-card input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.setup-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.setup-btn{width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:.5rem}
+.setup-btn:hover{background:var(--accent2)}
+.setup-btn:disabled{opacity:.5;cursor:not-allowed}
+.setup-error{color:var(--red);font-size:.85rem;margin-top:.5rem;display:none}
+
+/* ── App Layout ── */
+.app{display:flex;height:100vh}
+.sidebar{width:280px;min-width:280px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.sidebar-logo{padding:1.25rem 1.5rem;border-bottom:1px solid var(--border)}
+.sidebar-logo h2{font-size:1.05rem;color:var(--accent)}
+.sidebar-logo span{color:var(--text2);font-size:.78rem;display:block;margin-top:2px}
+.section-list{flex:1;padding:.75rem 0}
+.section-item{display:flex;align-items:center;gap:10px;padding:9px 1.5rem;font-size:.85rem;color:var(--text2);cursor:default;transition:background .15s}
+.section-item.active{color:var(--accent);font-weight:600}
+.section-item.done{color:var(--green);cursor:pointer}
+.section-item.done:hover{background:rgba(34,197,94,.08)}
+.section-item.reviewing{color:var(--accent);font-weight:600;background:rgba(99,102,241,.08)}
+.section-dot{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;flex-shrink:0;border:2px solid var(--border);color:var(--text2)}
+.section-item.active .section-dot{border-color:var(--accent);color:var(--accent)}
+.section-item.done .section-dot{border-color:var(--green);background:var(--green);color:#fff}
+.section-item.reviewing .section-dot{border-color:var(--accent);background:var(--accent);color:#fff}
+.sidebar-footer{padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.sidebar-footer button{padding:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);border-radius:8px;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .15s}
+.sidebar-footer button:hover{color:var(--text);border-color:var(--text2)}
+.sidebar-footer .btn-plan{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sidebar-footer .btn-plan:hover{background:var(--accent2)}
+.sidebar-footer .btn-plan:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── Chat Area ── */
+.chat-area{flex:1;display:flex;flex-direction:column;height:100vh}
+.chat-header{background:var(--surface);border-bottom:1px solid var(--border);padding:.75rem 2rem;display:flex;justify-content:space-between;align-items:center}
+.chat-header h1{font-size:1.1rem}
+.chat-header .phase{font-size:.8rem;color:var(--text2)}
+.chat-messages{flex:1;overflow-y:auto;padding:1.5rem 2rem;display:flex;flex-direction:column;gap:1rem}
+.msg{max-width:75%;animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg-ai{align-self:flex-start}
+.msg-user{align-self:flex-end}
+.msg-bubble{padding:12px 16px;border-radius:16px;font-size:.92rem;line-height:1.65}
+.msg-ai .msg-bubble{background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg-user .msg-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg-label{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;padding:0 4px}
+.msg-ai .msg-label{color:var(--accent)}
+.msg-user .msg-label{color:var(--text2);text-align:right}
+.msg-bubble p{margin-bottom:.5rem}
+.msg-bubble p:last-child{margin-bottom:0}
+.msg-bubble strong{color:inherit;font-weight:700}
+.msg-bubble ul,.msg-bubble ol{margin:.5rem 0 .5rem 1.25rem}
+.msg-bubble li{margin-bottom:.25rem}
+
+/* Section captured indicator */
+.section-captured{background:var(--green-bg);border:1px solid rgba(34,197,94,.25);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--green);font-weight:600;align-self:flex-start;animation:fadeIn .4s ease}
+.section-captured svg{flex-shrink:0}
+
+/* Typing indicator */
+.typing{align-self:flex-start;padding:0 4px}
+.typing .msg-bubble{display:flex;gap:4px;padding:14px 20px}
+.typing-dot{width:8px;height:8px;border-radius:50%;background:var(--text2);animation:typingBounce 1.4s infinite}
+.typing-dot:nth-child(2){animation-delay:.2s}
+.typing-dot:nth-child(3){animation-delay:.4s}
+@keyframes typingBounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+
+/* Input area */
+.chat-input{padding:1rem 2rem 1.5rem;background:var(--bg);border-top:1px solid var(--border)}
+.input-row{display:flex;gap:10px;align-items:flex-end;max-width:800px;margin:0 auto}
+.input-row textarea{flex:1;padding:12px 16px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;font-size:.92rem;font-family:inherit;resize:none;min-height:48px;max-height:150px;line-height:1.5;overflow-y:auto}
+.input-row textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.input-row textarea:disabled{opacity:.5}
+.send-btn{width:48px;height:48px;border-radius:12px;background:var(--accent);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s}
+.send-btn:hover{background:var(--accent2)}
+.send-btn:disabled{opacity:.4;cursor:not-allowed}
+.send-btn svg{width:20px;height:20px}
+
+/* ── Section Review Panel (in chat area) ── */
+.review-panel{display:none;flex:1;overflow-y:auto;padding:1.5rem 2rem;flex-direction:column;gap:1rem}
+.review-panel.active{display:flex}
+.review-panel .rp-header{display:flex;align-items:center;gap:12px;margin-bottom:.5rem}
+.review-panel .rp-icon{font-size:1.6rem;width:42px;height:42px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.review-panel .rp-title{font-size:1.15rem;font-weight:700}
+.review-panel .rp-subtitle{font-size:.82rem;color:var(--text2)}
+.review-panel .rp-back{padding:8px 16px;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text2);margin-left:auto;transition:all .15s}
+.review-panel .rp-back:hover{color:var(--text);border-color:var(--text2)}
+.review-panel .rp-section-label{font-size:.75rem;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-top:.75rem;margin-bottom:.35rem}
+.review-panel .rp-data-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:.5rem}
+.review-panel .rp-data-label{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:3px}
+.review-panel .rp-data-value{font-size:.9rem;color:var(--text);line-height:1.6}
+.review-panel .rp-disc-msg{padding:10px 14px;border-bottom:1px solid rgba(46,51,71,.4)}
+.review-panel .rp-disc-msg:last-child{border-bottom:none}
+.review-panel .rp-disc-role{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+.review-panel .rp-disc-role.ai{color:var(--accent)}
+.review-panel .rp-disc-role.user{color:var(--green)}
+.review-panel .rp-disc-text{font-size:.85rem;color:var(--text);line-height:1.6}
+.review-panel .rp-disc-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;max-height:300px;overflow-y:auto;margin-bottom:.75rem}
+.review-panel .rp-disc-empty{padding:16px;text-align:center;color:var(--text2);font-size:.85rem;font-style:italic}
+.review-panel .rp-edit-wrap{background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:14px}
+.review-panel .rp-edit-title{font-size:.82rem;font-weight:600;color:var(--accent);margin-bottom:4px}
+.review-panel .rp-edit-hint{font-size:.8rem;color:var(--text2);margin-bottom:10px}
+.review-panel .rp-edit-row{display:flex;gap:8px}
+.review-panel .rp-edit-row textarea{flex:1;padding:10px 14px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:.88rem;font-family:inherit;resize:none;min-height:44px;max-height:120px;line-height:1.5}
+.review-panel .rp-edit-row textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.review-panel .rp-edit-row textarea:disabled{opacity:.5}
+.review-panel .rp-edit-btn{padding:0 16px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600;font-size:.85rem;white-space:nowrap}
+.review-panel .rp-edit-btn:hover{background:var(--accent2)}
+.review-panel .rp-edit-btn:disabled{opacity:.4;cursor:not-allowed}
+.review-panel .rp-edit-status{font-size:.8rem;color:var(--text2);margin-top:8px;display:none}
+.review-panel .rp-edit-status.error{color:var(--red)}
+.review-panel .rp-edit-status.success{color:var(--green)}
+
+/* ── Plan Overlay ── */
+.plan-overlay{position:fixed;inset:0;z-index:1000;background:var(--bg);overflow-y:auto;display:none}
+.plan-overlay.active{display:block}
+.plan-bar{position:sticky;top:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--border);padding:.75rem 2rem;display:flex;justify-content:space-between;align-items:center}
+.plan-bar button{padding:8px 18px;border-radius:8px;font-size:.88rem;font-weight:600;cursor:pointer;border:none}
+.plan-bar .btn-back{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.plan-bar .btn-back:hover{color:var(--text)}
+.plan-bar .btn-pdf{background:var(--accent);color:#fff}
+.plan-bar .btn-pdf:hover{background:var(--accent2)}
+.plan-wrap{max-width:960px;margin:0 auto;padding:3rem 2rem 2rem}
+
+/* Plan Header */
+.plan-hdr{text-align:center;margin-bottom:2.5rem}
+.plan-hdr h1{font-size:2.4rem;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:.5rem}
+.plan-sub{font-size:1.05rem;color:var(--text2);font-weight:500}
+.plan-date{font-size:.82rem;color:var(--text2);margin-top:.5rem;opacity:.7}
+
+/* KPI Row */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2.5rem}
+.kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;text-align:center}
+.kpi-num{font-size:1.6rem;font-weight:800;color:var(--accent2);line-height:1.2;margin-bottom:.25rem}
+.kpi-label{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+
+/* Sticky Tab Nav */
+.plan-tabs{position:sticky;top:55px;z-index:9;background:var(--bg);padding:.75rem 0;margin-bottom:2rem;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.plan-tab{padding:7px 14px;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text2);transition:all .15s;white-space:nowrap}
+.plan-tab:hover{color:var(--text);border-color:var(--text2)}
+.plan-tab.active{color:#fff}
+.plan-tab.grp-foundation{border-color:rgba(99,102,241,.3)}
+.plan-tab.grp-foundation.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.plan-tab.grp-commercial{border-color:rgba(34,197,94,.3)}
+.plan-tab.grp-commercial.active{background:var(--green);border-color:var(--green);color:#fff}
+.plan-tab.grp-execution{border-color:rgba(245,158,11,.3)}
+.plan-tab.grp-execution.active{background:var(--amber);border-color:var(--amber);color:#111}
+
+/* Plan Sections */
+.sec{display:none}
+.sec.active{display:block}
+.sec-hdr{display:flex;align-items:center;gap:12px;margin-bottom:1.5rem}
+.sec-icon{font-size:1.8rem;width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.sec-hdr-text h2{font-size:1.3rem;font-weight:700;color:var(--text)}
+.sec-hdr-text .sec-subtitle{font-size:.82rem;color:var(--text2)}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-bottom:1rem}
+.card-accent{border-left:4px solid var(--accent)}
+.card-green{border-left:4px solid var(--green)}
+.card-amber{border-left:4px solid var(--amber)}
+.card-red{border-left:4px solid var(--red)}
+.card h3{font-size:.95rem;font-weight:700;margin-bottom:.5rem;color:var(--text)}
+.card p{font-size:.9rem;color:var(--text);line-height:1.65}
+.card-label{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:.35rem}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.card-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+
+/* Highlight boxes */
+.hl{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem}
+.hl-label{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:.25rem}
+.hl-value{font-size:1rem;font-weight:600;color:var(--text)}
+.hl-big{font-size:1.4rem;font-weight:800;color:var(--accent2)}
+
+/* Metric cards */
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1rem}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.1rem;text-align:center}
+.metric-card .mc-num{font-size:1.3rem;font-weight:800;color:var(--accent2);margin-bottom:.2rem}
+.metric-card .mc-label{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+
+/* Tables */
+.plan-table{width:100%;border-collapse:collapse;margin-bottom:1rem;border-radius:var(--radius);overflow:hidden}
+.plan-table th{background:var(--surface2);text-align:left;padding:10px 14px;font-size:.78rem;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;font-weight:600;border-bottom:1px solid var(--border)}
+.plan-table td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:.9rem;color:var(--text)}
+.plan-table tr:last-child td{border-bottom:none}
+.plan-table tr:hover td{background:rgba(99,102,241,.04)}
+
+/* Styled lists */
+.styled-list{list-style:none;padding:0;margin:0}
+.styled-list li{padding:8px 0;padding-left:20px;position:relative;font-size:.9rem;color:var(--text);border-bottom:1px solid rgba(46,51,71,.5)}
+.styled-list li:last-child{border-bottom:none}
+.styled-list li::before{content:'';position:absolute;left:0;top:16px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.styled-list.list-green li::before{background:var(--green)}
+.styled-list.list-amber li::before{background:var(--amber)}
+
+/* Tags */
+.tag{display:inline-block;padding:4px 10px;border-radius:6px;font-size:.75rem;font-weight:600;margin:3px 3px 3px 0}
+.tag-accent{background:rgba(99,102,241,.15);color:var(--accent2)}
+.tag-green{background:rgba(34,197,94,.15);color:var(--green)}
+.tag-amber{background:rgba(245,158,11,.15);color:var(--amber)}
+.tag-blue{background:rgba(59,130,246,.15);color:var(--blue)}
+.tag-purple{background:rgba(168,85,247,.15);color:var(--purple)}
+.tag-pink{background:rgba(236,72,153,.15);color:var(--pink)}
+.tag-red{background:rgba(239,68,68,.15);color:var(--red)}
+.tags-wrap{display:flex;flex-wrap:wrap;gap:4px}
+
+/* Warning box */
+.warn-box{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:var(--radius);padding:1rem 1.25rem}
+.warn-box .warn-title{font-size:.82rem;font-weight:700;color:var(--red);margin-bottom:.35rem;display:flex;align-items:center;gap:6px}
+.warn-box p{font-size:.88rem;color:var(--text);line-height:1.6}
+
+/* Funnel */
+.funnel{display:flex;flex-direction:column;gap:0;margin-bottom:1rem}
+.funnel-step{display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);position:relative}
+.funnel-step:first-child{border-radius:var(--radius) var(--radius) 0 0}
+.funnel-step:last-child{border-radius:0 0 var(--radius) var(--radius)}
+.funnel-step:not(:last-child){border-bottom:none}
+.funnel-num{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.funnel-text{font-size:.88rem;color:var(--text)}
+
+/* Timeline bar (launch) */
+.timeline-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-bottom:1.5rem;border-radius:var(--radius);overflow:hidden}
+.tl-week{padding:10px 14px;text-align:center;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .15s}
+.tl-week:nth-child(1){background:rgba(99,102,241,.2);color:var(--accent2)}
+.tl-week:nth-child(2){background:rgba(59,130,246,.2);color:var(--blue)}
+.tl-week:nth-child(3){background:rgba(245,158,11,.2);color:var(--amber)}
+.tl-week:nth-child(4){background:rgba(34,197,94,.2);color:var(--green)}
+
+/* Accordion steps */
+.step-acc{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:.75rem;overflow:hidden}
+.step-hdr{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;background:var(--surface);transition:background .15s;user-select:none}
+.step-hdr:hover{background:var(--surface2)}
+.step-num{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0;color:#fff}
+.step-1 .step-num{background:var(--accent)}
+.step-2 .step-num{background:var(--blue)}
+.step-3 .step-num{background:var(--amber);color:#111}
+.step-4 .step-num{background:var(--green)}
+.step-title{font-weight:600;font-size:.9rem;flex:1}
+.step-arrow{color:var(--text2);transition:transform .2s;font-size:.8rem}
+.step-acc.open .step-arrow{transform:rotate(180deg)}
+.step-body{display:none;padding:0 16px 14px 60px;font-size:.88rem;line-height:1.7;color:var(--text)}
+.step-acc.open .step-body{display:block}
+
+/* Checklist */
+.checklist{list-style:none;padding:0}
+.checklist li{padding:6px 0 6px 28px;position:relative;font-size:.88rem;color:var(--text)}
+.checklist li::before{content:'\2713';position:absolute;left:0;top:6px;width:20px;height:20px;border-radius:50%;background:rgba(34,197,94,.15);color:var(--green);font-size:.7rem;display:flex;align-items:center;justify-content:center;font-weight:700}
+
+/* Milestones timeline */
+.milestones{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem}
+.ms-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;text-align:center;position:relative}
+.ms-card::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:40px;height:4px;border-radius:0 0 4px 4px}
+.ms-card:nth-child(1)::before{background:var(--accent)}
+.ms-card:nth-child(2)::before{background:var(--blue)}
+.ms-card:nth-child(3)::before{background:var(--green)}
+.ms-days{font-size:2rem;font-weight:800;color:var(--accent2);line-height:1}
+.ms-label{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin:.3rem 0 .6rem}
+.ms-text{font-size:.85rem;color:var(--text);line-height:1.5}
+
+/* Plan footer */
+.plan-ftr{text-align:center;padding:2.5rem 0 1rem;border-top:2px solid var(--border);margin-top:3rem}
+.plan-ftr strong{color:var(--accent);font-size:1rem}
+.plan-ftr p{color:var(--text2);font-size:.82rem;margin-top:.3rem}
+
+/* Plan empty */
+.plan-empty{color:var(--text2);font-style:italic;font-size:.9rem;padding:2rem;text-align:center;background:var(--surface);border:1px dashed var(--border);border-radius:var(--radius)}
+
+/* Section action buttons */
+.sec-actions{display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap}
+.sec-action-btn{padding:8px 16px;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text2);transition:all .15s;display:flex;align-items:center;gap:6px}
+.sec-action-btn:hover{color:var(--text);border-color:var(--text2)}
+.sec-action-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sec-action-btn svg{width:14px;height:14px}
+
+/* Discussion panel */
+.disc-panel{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:1.25rem;max-height:400px;overflow-y:auto}
+.disc-panel.active{display:block}
+.disc-panel .disc-header{padding:12px 16px;border-bottom:1px solid var(--border);font-size:.82rem;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;background:var(--surface);z-index:1}
+.disc-msg{padding:10px 16px;border-bottom:1px solid rgba(46,51,71,.4)}
+.disc-msg:last-child{border-bottom:none}
+.disc-msg-role{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+.disc-msg-role.ai{color:var(--accent)}
+.disc-msg-role.user{color:var(--green)}
+.disc-msg-text{font-size:.85rem;color:var(--text);line-height:1.6}
+.disc-empty{padding:16px;text-align:center;color:var(--text2);font-size:.85rem;font-style:italic}
+
+/* Edit panel */
+.edit-panel{display:none;background:var(--surface);border:1px solid var(--accent);border-radius:var(--radius);margin-bottom:1.25rem;padding:16px}
+.edit-panel.active{display:block}
+.edit-panel-title{font-size:.82rem;font-weight:600;color:var(--accent);margin-bottom:8px}
+.edit-panel-hint{font-size:.8rem;color:var(--text2);margin-bottom:10px}
+.edit-input-row{display:flex;gap:8px}
+.edit-input-row textarea{flex:1;padding:10px 14px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:.88rem;font-family:inherit;resize:none;min-height:44px;max-height:120px;line-height:1.5}
+.edit-input-row textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.edit-input-row textarea:disabled{opacity:.5}
+.edit-send-btn{padding:0 16px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600;font-size:.85rem;white-space:nowrap;transition:background .15s}
+.edit-send-btn:hover{background:var(--accent2)}
+.edit-send-btn:disabled{opacity:.4;cursor:not-allowed}
+.edit-status{font-size:.8rem;color:var(--text2);margin-top:8px;display:none}
+.edit-status.error{color:var(--red)}
+.edit-status.success{color:var(--green)}
+
+/* ── Reset Modal ── */
+.modal-bg{display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center}
+.modal-bg.active{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:2rem;max-width:400px;width:90%;text-align:center}
+.modal-box h3{margin-bottom:.5rem}
+.modal-box p{color:var(--text2);font-size:.9rem;margin-bottom:1.5rem}
+.modal-btns{display:flex;gap:10px;justify-content:center}
+.modal-btns button{padding:10px 20px;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;border:none}
+
+/* ── Print ── */
+@media print{
+  .plan-bar,.plan-tabs,.sec-actions,.disc-panel,.edit-panel{display:none!important}
+  .plan-overlay{position:static!important;overflow:visible!important}
+  body{background:#fff!important;color:#222!important}
+  .plan-wrap{padding:0!important;max-width:100%!important}
+  .plan-hdr h1{-webkit-text-fill-color:#6366f1!important;color:#6366f1!important}
+  .sec{display:block!important;page-break-inside:avoid;margin-bottom:2rem}
+  .card,.hl,.kpi-card,.metric-card,.step-acc,.ms-card{background:#fff!important;border:1px solid #ddd!important}
+  .plan-table th{background:#f5f5f5!important}
+  .plan-table td,.plan-table th{border-color:#ddd!important}
+  .card-label,.hl-label,.kpi-label,.mc-label,.sec-subtitle{color:#666!important}
+  .step-body{display:block!important}
+  .plan-ftr{border-color:#ddd!important}
+  .tag{border:1px solid #ccc!important;background:#f5f5f5!important;color:#333!important}
+  .warn-box{background:#fff3f3!important;border-color:#fcc!important}
+  .timeline-bar .tl-week{background:#f0f0f0!important;color:#333!important}
+}
+
+/* ── Responsive ── */
+@media(max-width:768px){
+  .sidebar{display:none}
+  .chat-messages{padding:1rem}
+  .chat-input{padding:.75rem 1rem 1rem}
+  .msg{max-width:90%}
+  .plan-wrap{padding:2rem 1rem}
+  .kpi-row{grid-template-columns:1fr 1fr}
+  .metric-grid{grid-template-columns:1fr 1fr}
+  .card-grid{grid-template-columns:1fr}
+  .milestones{grid-template-columns:1fr}
+  .timeline-bar{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN -->
+<div class="setup" id="setupScreen">
+  <div class="setup-card">
+    <h1>Business Plan Builder</h1>
+    <div class="brand">Operations Director</div>
+    <p>An AI coach will guide you through building your complete business plan and 30-day launch action plan. Just answer the questions naturally — the AI does the heavy lifting.</p>
+    <label>AI Provider</label>
+    <select id="cfgProvider" onchange="updateSetupFields()">
+      <option value="anthropic">Claude (Anthropic)</option>
+      <option value="openai">ChatGPT (OpenAI)</option>
+      <option value="custom">Custom Endpoint</option>
+    </select>
+    <div class="hint">Choose which AI service to use for the conversation.</div>
+
+    <div id="cfgKeyGroup">
+      <label>API Key</label>
+      <input type="password" id="cfgKey" placeholder="sk-...">
+      <div class="hint">Your key is stored locally in your browser only. Never shared.</div>
+    </div>
+
+    <div id="cfgEndpointGroup" style="display:none">
+      <label>Endpoint URL</label>
+      <input type="text" id="cfgEndpoint" placeholder="https://your-proxy.com/api/chat">
+      <div class="hint">Custom endpoint that accepts OpenAI-format chat completions.</div>
+    </div>
+
+    <div class="setup-row">
+      <div>
+        <label>Model</label>
+        <select id="cfgModel">
+          <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
+          <option value="claude-opus-4-20250514">Claude Opus</option>
+          <option value="claude-haiku-4-5-20251001">Claude Haiku</option>
+        </select>
+      </div>
+      <div>
+        <label>Your Name</label>
+        <input type="text" id="cfgName" placeholder="e.g. Sarah">
+      </div>
+    </div>
+
+    <button class="setup-btn" id="setupBtn" onclick="startApp()">Start Building Your Plan</button>
+    <div class="setup-error" id="setupError"></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" id="app" style="display:none">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>Operations Director</h2>
+      <span>Business Plan Builder</span>
+    </div>
+    <div class="section-list" id="sectionList"></div>
+    <div class="sidebar-footer">
+      <button class="btn-plan" id="viewPlanBtn" onclick="showPlan()" disabled>View Your Plan</button>
+      <button onclick="showResetModal()">Start Over</button>
+    </div>
+  </aside>
+
+  <div class="chat-area">
+    <div class="chat-header">
+      <div>
+        <h1 id="chatPhaseTitle">Getting Started</h1>
+        <div class="phase" id="chatPhaseLabel"></div>
+      </div>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="review-panel" id="reviewPanel"></div>
+    <div class="chat-input">
+      <div class="input-row">
+        <textarea id="userInput" placeholder="Type your answer..." rows="1" onkeydown="handleKey(event)" oninput="autoGrow(this)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="handleSend()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PLAN OVERLAY -->
+<div class="plan-overlay" id="planOverlay">
+  <div class="plan-bar">
+    <button class="btn-back" onclick="closePlan()">Back to Chat</button>
+    <button class="btn-pdf" onclick="window.print()">Export as PDF</button>
+  </div>
+  <div class="plan-wrap" id="planContent"></div>
+</div>
+
+<!-- RESET MODAL -->
+<div class="modal-bg" id="resetModal">
+  <div class="modal-box">
+    <h3>Start over?</h3>
+    <p>This will clear your entire conversation and plan data. This cannot be undone.</p>
+    <div class="modal-btns">
+      <button style="background:var(--surface2);color:var(--text2)" onclick="hideResetModal()">Cancel</button>
+      <button style="background:var(--red);color:#fff" onclick="doReset()">Delete Everything</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// DEPLOYMENT CONFIG
+// ══════════════════════════════════════════════════════════════
+var PROXY_ENDPOINT = '';
+
+// ══════════════════════════════════════════════════════════════
+// SECTIONS
+// ══════════════════════════════════════════════════════════════
+var SECTIONS = [
+  { id: 'overview', title: 'Business Idea', icon: '\ud83d\udccb' },
+  { id: 'market', title: 'Target Customer', icon: '\ud83c\udfaf' },
+  { id: 'value', title: 'Your Edge', icon: '\u26a1' },
+  { id: 'products', title: 'Products & Pricing', icon: '\ud83d\udce6' },
+  { id: 'revenue', title: 'Revenue Model', icon: '\ud83d\udcb0' },
+  { id: 'costs', title: 'Costs & Investment', icon: '\ud83d\udcca' },
+  { id: 'team', title: 'Team & Resources', icon: '\ud83d\udc65' },
+  { id: 'marketing', title: 'Marketing & Sales', icon: '\ud83d\udce3' },
+  { id: 'launch', title: '30-Day Launch Plan', icon: '\ud83d\ude80' },
+  { id: 'metrics', title: 'Success Metrics', icon: '\ud83c\udfc6' }
+];
+
+var TAB_GROUPS = {
+  overview:'foundation', market:'foundation', value:'foundation',
+  products:'commercial', revenue:'commercial', costs:'commercial',
+  team:'execution', marketing:'execution', launch:'execution', metrics:'execution'
+};
+
+// ══════════════════════════════════════════════════════════════
+// SYSTEM PROMPT
+// ══════════════════════════════════════════════════════════════
+function buildSystemPrompt(userName) {
+  var name = userName || 'there';
+  return 'You are an expert business planning coach working for Operations Director. You are guiding ' + (name !== 'there' ? name : 'a client') + ' through creating their complete business plan and 30-day launch action plan via a friendly, professional conversation.\n\n' +
+'YOUR PERSONALITY:\n' +
+'- Warm, encouraging, but direct and practical\n' +
+'- You ask smart, specific questions that extract maximum useful information\n' +
+'- You challenge unrealistic assumptions gently but honestly\n' +
+'- You reference UK business context where relevant (Companies House, HMRC, etc.)\n' +
+'- You keep responses concise: 2-4 sentences when asking questions\n' +
+'- You celebrate progress and keep momentum going\n\n' +
+'YOUR GOAL:\n' +
+'Extract all the information needed to create a comprehensive business plan by asking questions one at a time. You are not filling out a form. You are having a strategic planning conversation. Make the client feel like they are working with a top-tier business consultant.\n\n' +
+'CONVERSATION PHASES:\n' +
+'Guide the conversation through these phases in order. For each phase, ask 2-4 focused questions (one at a time) before summarising what you have captured. Adapt based on their answers. If they have already covered something, do not ask again.\n\n' +
+'Phase 1 - THE IDEA: What is the business? What problem does it solve? For whom? What stage are they at?\n' +
+'Phase 2 - THE CUSTOMER: Who exactly is the ideal customer? Paint a vivid picture. What are their pain points? How do they currently solve this?\n' +
+'Phase 3 - THE EDGE: What makes this genuinely different? What is the one-line value proposition? Why would someone choose them?\n' +
+'Phase 4 - THE OFFER: What specific products or services? What pricing? What is the revenue model?\n' +
+'Phase 5 - THE NUMBERS: Revenue targets for Year 1 and Year 3? How many customers needed monthly? Average transaction value?\n' +
+'Phase 6 - THE INVESTMENT: Startup costs? Monthly fixed costs? How are they funding it? When do they break even?\n' +
+'Phase 7 - THE TEAM: What is the founder doing day-to-day? Who else is needed? What tools and software? What skills gaps?\n' +
+'Phase 8 - THE GROWTH: Which marketing channels? What is the sales process end to end? How will they generate leads?\n' +
+'Phase 9 - THE LAUNCH: Target launch date? Week-by-week plan for first 30 days? What must be done before go-live? Include specific AI tools and prompts they can use for each task.\n' +
+'Phase 10 - THE MEASURES: What does success look like at 30, 90, 365 days? Which KPIs matter most? What is the biggest risk and how will they handle it?\n\n' +
+'AI LAUNCH GUIDANCE:\n' +
+'Throughout the conversation, especially in phases 8 and 9, include specific recommendations for how AI tools can accelerate their launch:\n' +
+'- Suggest specific AI prompts they can use (e.g. for writing website copy, creating social media content, building email sequences, analysing competitors)\n' +
+'- Recommend relevant AI tools (ChatGPT, Claude, Canva AI, etc.) for specific tasks\n' +
+'- Help them understand how AI can cut weeks off their launch timeline\n\n' +
+'CRITICAL RULES:\n' +
+'1. Ask ONE question at a time. Never dump multiple questions in one message.\n' +
+'2. Use their previous answers to make your next question specific and contextual.\n' +
+'3. If an answer is vague, ask a follow-up to get specifics before moving on.\n' +
+'4. After gathering enough information for each phase, write a brief encouraging summary of what you have captured.\n' +
+'5. At the END of your summary message (and ONLY summary messages), include a structured data block in this exact format:\n' +
+'   [PLANDATA:section_id]{...valid JSON...}[/PLANDATA]\n' +
+'6. section_id must be one of: overview, market, value, products, revenue, costs, team, marketing, launch, metrics\n' +
+'7. The data block must be the very last thing in your message. Do not write anything after it.\n' +
+'8. Never explain, reference, or draw attention to the data blocks. They are invisible system markers.\n' +
+'9. After all 10 phases are complete, congratulate them warmly and include [PLAN_COMPLETE] at the very end.\n' +
+'10. Do NOT include [PLANDATA:...] blocks in regular question messages. Only include them when you are summarising and completing a phase.\n\n' +
+'REQUIRED JSON FIELDS PER SECTION:\n' +
+'- overview: {"businessName":"","description":"","problem":"","solution":"","industry":"","stage":""}\n' +
+'- market: {"idealCustomer":"","painPoints":["","",""],"currentAlternative":"","marketSize":"","geographicFocus":""}\n' +
+'- value: {"valueProposition":"","usps":["","",""],"competitiveAdvantage":""}\n' +
+'- products: {"products":[{"name":"","description":"","price":""}],"revenueModel":"","pricingStrategy":""}\n' +
+'- revenue: {"revenueTargetY1":"","revenueTargetY3":"","customersPerMonth":"","avgTransactionValue":"","assumptions":""}\n' +
+'- costs: {"startupCosts":[{"item":"","cost":""}],"monthlyCosts":[{"item":"","cost":""}],"fundingSource":"","breakEven":""}\n' +
+'- team: {"founderRole":"","keyHires":[""],"tools":[""],"skillsGaps":""}\n' +
+'- marketing: {"channels":[""],"salesProcess":"","leadGenStrategy":"","marketingBudget":""}\n' +
+'- launch: {"launchDate":"","week1":"","week2":"","week3":"","week4":"","checklist":[""]}\n' +
+'- metrics: {"milestone30":"","milestone90":"","milestone12":"","kpis":["","",""],"biggestRisk":"","riskMitigation":""}\n\n' +
+'START YOUR FIRST MESSAGE:\n' +
+'Welcome ' + (name !== 'there' ? name : 'them') + ' warmly. Tell them you are going to help them build a complete business plan and 30-day launch action plan through a simple conversation. Make them feel excited about the journey. Then ask your first question: what is their business idea? Keep it to 3-4 sentences total.';
+}
+
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
+var config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-20250514', endpoint: '', userName: '' };
+var messages = [];
+var planData = {};
+var completedSections = [];
+var sectionMessages = {}; // Tracks conversation per section: { sectionId: [{role, content}] }
+var lastSectionMsgIndex = 0; // Index of messages at last section capture
+var isLoading = false;
+
+// ══════════════════════════════════════════════════════════════
+// PERSISTENCE
+// ══════════════════════════════════════════════════════════════
+function saveState() {
+  try { localStorage.setItem('od-bplan-v4', JSON.stringify({ config: config, messages: messages, planData: planData, completedSections: completedSections, sectionMessages: sectionMessages, lastSectionMsgIndex: lastSectionMsgIndex })); } catch(e) {}
+}
+
+function loadState() {
+  try {
+    var s = JSON.parse(localStorage.getItem('od-bplan-v4'));
+    if (s) {
+      if (s.config) config = s.config;
+      if (s.messages) messages = s.messages;
+      if (s.planData) planData = s.planData;
+      if (s.completedSections) completedSections = s.completedSections;
+      if (s.sectionMessages) sectionMessages = s.sectionMessages;
+      if (s.lastSectionMsgIndex) lastSectionMsgIndex = s.lastSectionMsgIndex;
+      return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
+// ══════════════════════════════════════════════════════════════
+// SETUP SCREEN
+// ══════════════════════════════════════════════════════════════
+function updateSetupFields() {
+  var provider = document.getElementById('cfgProvider').value;
+  var modelSelect = document.getElementById('cfgModel');
+  var keyGroup = document.getElementById('cfgKeyGroup');
+  var endpointGroup = document.getElementById('cfgEndpointGroup');
+
+  keyGroup.style.display = provider === 'custom' ? 'none' : '';
+  endpointGroup.style.display = provider === 'custom' ? '' : 'none';
+
+  modelSelect.innerHTML = '';
+  if (provider === 'anthropic') {
+    addOption(modelSelect, 'claude-sonnet-4-20250514', 'Claude Sonnet');
+    addOption(modelSelect, 'claude-opus-4-20250514', 'Claude Opus');
+    addOption(modelSelect, 'claude-haiku-4-5-20251001', 'Claude Haiku');
+  } else if (provider === 'openai') {
+    addOption(modelSelect, 'gpt-4o', 'GPT-4o');
+    addOption(modelSelect, 'gpt-4o-mini', 'GPT-4o Mini');
+  } else {
+    addOption(modelSelect, 'default', 'Default');
+  }
+}
+
+function addOption(sel, val, text) {
+  var o = document.createElement('option');
+  o.value = val; o.textContent = text;
+  sel.appendChild(o);
+}
+
+function startApp() {
+  var provider = document.getElementById('cfgProvider').value;
+  var key = document.getElementById('cfgKey').value.trim();
+  var endpoint = document.getElementById('cfgEndpoint').value.trim();
+  var model = document.getElementById('cfgModel').value;
+  var userName = document.getElementById('cfgName').value.trim();
+  var errEl = document.getElementById('setupError');
+
+  if (provider !== 'custom' && !key && !PROXY_ENDPOINT) {
+    errEl.textContent = 'Please enter your API key.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (provider === 'custom' && !endpoint) {
+    errEl.textContent = 'Please enter your endpoint URL.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  config = { provider: provider, apiKey: key, model: model, endpoint: endpoint, userName: userName };
+  // Add a hidden starter message so the API has something to respond to
+  messages = [{ role: 'user', content: 'Hi, I\'m ready to start building my business plan. Please introduce yourself and ask me your first question.' }];
+  saveState();
+  showApp();
+  sendToAI();
+}
+
+function showApp() {
+  document.getElementById('setupScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  renderSections();
+}
+
+// ══════════════════════════════════════════════════════════════
+// API COMMUNICATION
+// ══════════════════════════════════════════════════════════════
+function sendToAI() {
+  if (isLoading) return;
+  isLoading = true;
+  updateInputState();
+  showTyping();
+
+  var systemPrompt = buildSystemPrompt(config.userName);
+  var apiMessages = messages.map(function(m) { return { role: m.role, content: m.content }; });
+
+  // Context window management
+  if (apiMessages.length > 50) {
+    var summary = 'Context: Completed sections: ' + completedSections.join(', ') + '. Plan data so far: ' + JSON.stringify(planData);
+    apiMessages = [{ role: 'user', content: summary }, { role: 'assistant', content: 'Understood, continuing from where we left off.' }].concat(apiMessages.slice(-48));
+  }
+
+  var apiCall;
+  if (config.provider === 'anthropic') {
+    apiCall = callAnthropic(systemPrompt, apiMessages);
+  } else if (config.provider === 'openai') {
+    apiCall = callOpenAI(systemPrompt, apiMessages);
+  } else {
+    apiCall = callCustom(systemPrompt, apiMessages);
+  }
+
+  apiCall.then(function(fullText) {
+    hideTyping();
+
+    var result = extractPlanDataFromText(fullText);
+    var planComplete = fullText.indexOf('[PLAN_COMPLETE]') !== -1;
+    var displayText = result.cleanText.replace('[PLAN_COMPLETE]', '').trim();
+
+    messages.push({ role: 'assistant', content: fullText });
+    addMessageBubble('assistant', displayText);
+
+    if (result.extractedData) {
+      for (var sectionId in result.extractedData) {
+        planData[sectionId] = result.extractedData[sectionId];
+        if (completedSections.indexOf(sectionId) === -1) {
+          completedSections.push(sectionId);
+        }
+        // Capture the conversation messages that belong to this section
+        var secMsgs = [];
+        for (var mi = lastSectionMsgIndex; mi < messages.length; mi++) {
+          var m = messages[mi];
+          var cleanResult = extractPlanDataFromText(m.content);
+          var cleanContent = cleanResult.cleanText.replace('[PLAN_COMPLETE]', '').trim();
+          if (cleanContent) secMsgs.push({ role: m.role, content: cleanContent });
+        }
+        sectionMessages[sectionId] = secMsgs;
+        lastSectionMsgIndex = messages.length;
+        showSectionCaptured(sectionId);
+      }
+    }
+
+    if (planComplete) showPlanCompleteMessage();
+    renderSections();
+    saveState();
+    isLoading = false;
+    updateInputState();
+    document.getElementById('userInput').focus();
+
+  }).catch(function(err) {
+    hideTyping();
+    isLoading = false;
+    updateInputState();
+    // If this was the very first message (only the hidden starter), go back to setup
+    if (messages.length <= 1) {
+      localStorage.removeItem('od-bplan-v4');
+      document.getElementById('app').style.display = 'none';
+      document.getElementById('setupScreen').style.display = 'flex';
+      var errEl = document.getElementById('setupError');
+      errEl.textContent = 'Could not connect to AI: ' + err.message;
+      errEl.style.display = 'block';
+    } else {
+      addMessageBubble('system', 'Something went wrong: ' + err.message + '. Try sending your message again.');
+    }
+  });
+}
+
+function callAnthropic(systemPrompt, apiMessages) {
+  var proxyUrl = PROXY_ENDPOINT || '/api/chat';
+  return fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'anthropic',
+      apiKey: config.apiKey,
+      model: config.model,
+      system: systemPrompt,
+      messages: apiMessages
+    })
+  }).then(function(resp) {
+    if (!resp.ok) return resp.text().then(function(t) { throw new Error('Server error ' + resp.status + ': ' + t.substring(0, 200)); });
+    return resp.json();
+  }).then(function(data) {
+    if (data.error) throw new Error(data.error);
+    if (data.text) return data.text;
+    throw new Error('Unexpected response format');
+  });
+}
+
+function callOpenAI(systemPrompt, apiMessages) {
+  var proxyUrl = PROXY_ENDPOINT || '/api/chat';
+  return fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'openai',
+      apiKey: config.apiKey,
+      model: config.model,
+      system: systemPrompt,
+      messages: apiMessages
+    })
+  }).then(function(resp) {
+    if (!resp.ok) return resp.text().then(function(t) { throw new Error('Server error ' + resp.status + ': ' + t.substring(0, 200)); });
+    return resp.json();
+  }).then(function(data) {
+    if (data.error) throw new Error(data.error);
+    if (data.text) return data.text;
+    throw new Error('Unexpected response format');
+  });
+}
+
+function callCustom(systemPrompt, apiMessages) {
+  var proxyUrl = PROXY_ENDPOINT || '/api/chat';
+  return fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'custom',
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+      model: config.model,
+      system: systemPrompt,
+      messages: apiMessages
+    })
+  }).then(function(resp) {
+    if (!resp.ok) return resp.text().then(function(t) { throw new Error('Server error ' + resp.status + ': ' + t.substring(0, 200)); });
+    return resp.json();
+  }).then(function(data) {
+    if (data.error) throw new Error(data.error);
+    if (data.text) return data.text;
+    throw new Error('Unexpected response format');
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// PLAN DATA EXTRACTION
+// ══════════════════════════════════════════════════════════════
+function extractPlanDataFromText(text) {
+  var extracted = {};
+  var cleanText = text;
+  var match;
+
+  // [PLANDATA:sectionId]{...}[/PLANDATA]
+  var regex = /\[PLANDATA:(\w+)\]([\s\S]*?)\[\/PLANDATA\]/g;
+  while ((match = regex.exec(text)) !== null) {
+    try { extracted[match[1]] = JSON.parse(match[2].trim()); } catch(e) {}
+    cleanText = cleanText.replace(match[0], '');
+  }
+
+  // <plan_data section="id">...</plan_data> fallback
+  var xmlRegex = /<plan_data section="(\w+)">([\s\S]*?)<\/plan_data>/g;
+  while ((match = xmlRegex.exec(text)) !== null) {
+    try { extracted[match[1]] = JSON.parse(match[2].trim()); } catch(e) {}
+    cleanText = cleanText.replace(match[0], '');
+  }
+
+  return { cleanText: cleanText.trim(), extractedData: Object.keys(extracted).length > 0 ? extracted : null };
+}
+
+// ══════════════════════════════════════════════════════════════
+// CHAT UI
+// ══════════════════════════════════════════════════════════════
+function addMessageBubble(role, content) {
+  var container = document.getElementById('chatMessages');
+  var div = document.createElement('div');
+  div.className = 'msg msg-' + (role === 'user' ? 'user' : 'ai');
+
+  var label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = role === 'user' ? (config.userName || 'You') : 'AI Coach';
+
+  var bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.innerHTML = formatMessage(content);
+
+  div.appendChild(label);
+  div.appendChild(bubble);
+  container.appendChild(div);
+  scrollToBottom();
+}
+
+function showSectionCaptured(sectionId) {
+  var section = null;
+  for (var i = 0; i < SECTIONS.length; i++) { if (SECTIONS[i].id === sectionId) { section = SECTIONS[i]; break; } }
+  if (!section) return;
+
+  var container = document.getElementById('chatMessages');
+  var div = document.createElement('div');
+  div.className = 'section-captured';
+  div.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+    '<span>' + section.title + ' captured in your plan</span>';
+  container.appendChild(div);
+  scrollToBottom();
+}
+
+function showPlanCompleteMessage() {
+  var container = document.getElementById('chatMessages');
+  var div = document.createElement('div');
+  div.className = 'section-captured';
+  div.style.cssText = 'border-color:rgba(99,102,241,.3);background:rgba(99,102,241,.1);color:var(--accent2)';
+  div.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' +
+    '<span>Your business plan is complete! Click "View Your Plan" to see it.</span>';
+  container.appendChild(div);
+  scrollToBottom();
+  document.getElementById('viewPlanBtn').disabled = false;
+}
+
+function showTyping() {
+  if (document.getElementById('typingIndicator')) return;
+  var container = document.getElementById('chatMessages');
+  var div = document.createElement('div');
+  div.className = 'msg msg-ai typing';
+  div.id = 'typingIndicator';
+  div.innerHTML = '<div class="msg-label">AI Coach</div><div class="msg-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+  container.appendChild(div);
+  scrollToBottom();
+}
+
+function hideTyping() {
+  var el = document.getElementById('typingIndicator');
+  if (el) el.remove();
+}
+
+function formatMessage(text) {
+  if (!text) return '';
+  var html = escapeHtml(text);
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  var parts = html.split(/\n\n+/);
+  var result = '';
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (!part) continue;
+    var lines = part.split('\n');
+    var isList = lines.length > 1 && lines.every(function(l) { return /^[-\u2022]\s/.test(l.trim()) || /^\d+[\.\)]\s/.test(l.trim()); });
+    if (isList) {
+      result += '<ul>';
+      for (var j = 0; j < lines.length; j++) {
+        var li = lines[j].trim().replace(/^[-\u2022]\s*/, '').replace(/^\d+[\.\)]\s*/, '');
+        if (li) result += '<li>' + li + '</li>';
+      }
+      result += '</ul>';
+    } else {
+      result += '<p>' + part.replace(/\n/g, '<br>') + '</p>';
+    }
+  }
+  return result || '<p>' + html + '</p>';
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function scrollToBottom() {
+  var el = document.getElementById('chatMessages');
+  setTimeout(function() { el.scrollTop = el.scrollHeight; }, 50);
+}
+
+function handleSend() {
+  var input = document.getElementById('userInput');
+  var text = input.value.trim();
+  if (!text || isLoading) return;
+  messages.push({ role: 'user', content: text });
+  addMessageBubble('user', text);
+  input.value = '';
+  input.style.height = 'auto';
+  saveState();
+  sendToAI();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+}
+
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+}
+
+function updateInputState() {
+  document.getElementById('userInput').disabled = isLoading;
+  document.getElementById('sendBtn').disabled = isLoading;
+}
+
+// ══════════════════════════════════════════════════════════════
+// SIDEBAR
+// ══════════════════════════════════════════════════════════════
+var reviewingSection = null; // Track which section is being reviewed in chat
+
+function renderSections() {
+  var list = document.getElementById('sectionList');
+  if (!list) return;
+  var currentIdx = completedSections.length;
+
+  list.innerHTML = SECTIONS.map(function(s, i) {
+    var isDone = completedSections.indexOf(s.id) > -1;
+    var isCurrent = i === currentIdx && !isDone;
+    var isReviewing = reviewingSection === s.id;
+    var cls = isReviewing ? 'reviewing' : (isDone ? 'done' : (isCurrent ? 'active' : ''));
+    var onclick = isDone ? ' onclick="openSectionReview(\'' + s.id + '\')"' : '';
+    return '<div class="section-item ' + cls + '"' + onclick + '><div class="section-dot">' +
+      (isDone ? '&#10003;' : (i + 1)) + '</div><span>' + s.title + '</span></div>';
+  }).join('');
+
+  if (currentIdx < SECTIONS.length) {
+    document.getElementById('chatPhaseTitle').textContent = SECTIONS[currentIdx].title;
+    document.getElementById('chatPhaseLabel').textContent = 'Phase ' + (currentIdx + 1) + ' of ' + SECTIONS.length;
+  } else {
+    document.getElementById('chatPhaseTitle').textContent = 'Plan Complete';
+    document.getElementById('chatPhaseLabel').textContent = 'All sections covered';
+  }
+  document.getElementById('viewPlanBtn').disabled = completedSections.length === 0;
+}
+
+// ══════════════════════════════════════════════════════════════
+// SECTION REVIEW IN CHAT AREA
+// ══════════════════════════════════════════════════════════════
+function openSectionReview(sectionId) {
+  var section = null;
+  var sectionIdx = -1;
+  for (var i = 0; i < SECTIONS.length; i++) {
+    if (SECTIONS[i].id === sectionId) { section = SECTIONS[i]; sectionIdx = i; break; }
+  }
+  if (!section || !planData[sectionId]) return;
+
+  reviewingSection = sectionId;
+  renderSections();
+
+  // Hide chat messages and show review panel
+  document.getElementById('chatMessages').style.display = 'none';
+  var panel = document.getElementById('reviewPanel');
+  panel.classList.add('active');
+
+  // Update chat header
+  document.getElementById('chatPhaseTitle').textContent = 'Reviewing: ' + section.title;
+  document.getElementById('chatPhaseLabel').textContent = 'Click a completed section to review it, or press Back to return to chat';
+
+  var h = '';
+
+  // Header with back button
+  h += '<div class="rp-header">';
+  h += '<div class="rp-icon">' + section.icon + '</div>';
+  h += '<div><div class="rp-title">' + escapeHtml(section.title) + '</div>';
+  h += '<div class="rp-subtitle">Review the discussion and data, or make changes</div></div>';
+  h += '<button class="rp-back" onclick="closeSectionReview()">&#8592; Back to Chat</button>';
+  h += '</div>';
+
+  // Current data summary
+  h += '<div class="rp-section-label">Current Data</div>';
+  var data = planData[sectionId];
+  for (var key in data) {
+    if (!data.hasOwnProperty(key)) continue;
+    var val = data[key];
+    var label = key.replace(/([A-Z])/g, ' $1').replace(/^./, function(s) { return s.toUpperCase(); });
+    h += '<div class="rp-data-card">';
+    h += '<div class="rp-data-label">' + escapeHtml(label) + '</div>';
+    if (Array.isArray(val)) {
+      if (val.length > 0 && typeof val[0] === 'object') {
+        // Array of objects (products, costs) — show as mini list
+        h += '<div class="rp-data-value">';
+        for (var vi = 0; vi < val.length; vi++) {
+          var parts = [];
+          for (var vk in val[vi]) { if (val[vi].hasOwnProperty(vk)) parts.push(val[vi][vk]); }
+          h += '\u2022 ' + escapeHtml(parts.join(' — ')) + '<br>';
+        }
+        h += '</div>';
+      } else {
+        h += '<div class="rp-data-value">' + val.map(function(v) { return '\u2022 ' + escapeHtml(String(v)); }).join('<br>') + '</div>';
+      }
+    } else {
+      h += '<div class="rp-data-value">' + escapeHtml(String(val)) + '</div>';
+    }
+    h += '</div>';
+  }
+
+  // Discussion
+  h += '<div class="rp-section-label">Discussion</div>';
+  var msgs = sectionMessages[sectionId];
+  h += '<div class="rp-disc-wrap">';
+  if (msgs && msgs.length > 0) {
+    for (var mi = 0; mi < msgs.length; mi++) {
+      var m = msgs[mi];
+      if (m.role === 'user' && m.content === 'Hi, I\'m ready to start building my business plan. Please introduce yourself and ask me your first question.') continue;
+      h += '<div class="rp-disc-msg">';
+      h += '<div class="rp-disc-role ' + (m.role === 'user' ? 'user' : 'ai') + '">' + (m.role === 'user' ? (config.userName || 'You') : 'AI Coach') + '</div>';
+      h += '<div class="rp-disc-text">' + formatMessage(m.content) + '</div>';
+      h += '</div>';
+    }
+  } else {
+    h += '<div class="rp-disc-empty">No conversation recorded for this section.</div>';
+  }
+  h += '</div>';
+
+  // Edit section
+  h += '<div class="rp-section-label">Make Changes</div>';
+  h += '<div class="rp-edit-wrap">';
+  h += '<div class="rp-edit-title">Edit this section</div>';
+  h += '<div class="rp-edit-hint">Tell the AI what you want to change, e.g. "Change the price of Full Groom to £75" or "Add a new pain point about parking"</div>';
+  h += '<div class="rp-edit-row">';
+  h += '<textarea id="rpEditInput-' + sectionId + '" placeholder="What would you like to change?" rows="2" onkeydown="handleRpEditKey(event,\'' + sectionId + '\')"></textarea>';
+  h += '<button class="rp-edit-btn" id="rpEditBtn-' + sectionId + '" onclick="sendRpSectionEdit(\'' + sectionId + '\')">Update</button>';
+  h += '</div>';
+  h += '<div class="rp-edit-status" id="rpEditStatus-' + sectionId + '"></div>';
+  h += '</div>';
+
+  panel.innerHTML = h;
+}
+
+function closeSectionReview() {
+  reviewingSection = null;
+  document.getElementById('chatMessages').style.display = 'flex';
+  var panel = document.getElementById('reviewPanel');
+  panel.classList.remove('active');
+  panel.innerHTML = '';
+  renderSections();
+}
+
+function handleRpEditKey(e, sectionId) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendRpSectionEdit(sectionId); }
+}
+
+function sendRpSectionEdit(sectionId) {
+  var input = document.getElementById('rpEditInput-' + sectionId);
+  var btn = document.getElementById('rpEditBtn-' + sectionId);
+  var status = document.getElementById('rpEditStatus-' + sectionId);
+  if (!input || !btn) return;
+
+  var userRequest = input.value.trim();
+  if (!userRequest) return;
+
+  input.disabled = true;
+  btn.disabled = true;
+  status.textContent = 'Updating section...';
+  status.className = 'rp-edit-status';
+  status.style.display = 'block';
+
+  var sectionInfo = null;
+  for (var i = 0; i < SECTIONS.length; i++) {
+    if (SECTIONS[i].id === sectionId) { sectionInfo = SECTIONS[i]; break; }
+  }
+
+  var editSystemPrompt = 'You are a business plan editor. The user has already completed a business plan and wants to amend one section.\n\n' +
+    'CURRENT DATA for the "' + (sectionInfo ? sectionInfo.title : sectionId) + '" section:\n' +
+    JSON.stringify(planData[sectionId], null, 2) + '\n\n' +
+    'The user wants to make changes. Apply their requested changes to the data and output the COMPLETE updated section data.\n\n' +
+    'CRITICAL RULES:\n' +
+    '1. Keep all existing data that the user has NOT asked to change.\n' +
+    '2. Apply only the changes they requested.\n' +
+    '3. Output your response as a brief friendly confirmation (1-2 sentences) of what you changed, followed by the updated data block.\n' +
+    '4. The data block MUST be in this exact format at the END of your message:\n' +
+    '   [PLANDATA:' + sectionId + ']{...complete JSON...}[/PLANDATA]\n' +
+    '5. The JSON must include ALL fields for this section, not just the changed ones.\n';
+
+  var proxyUrl = PROXY_ENDPOINT || '/api/chat';
+  fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      system: editSystemPrompt,
+      messages: [{ role: 'user', content: userRequest }],
+      endpoint: config.endpoint
+    })
+  }).then(function(resp) {
+    if (!resp.ok) return resp.text().then(function(t) { throw new Error('Server error ' + resp.status); });
+    return resp.json();
+  }).then(function(data) {
+    if (data.error) throw new Error(data.error);
+    var fullText = data.text;
+    var result = extractPlanDataFromText(fullText);
+    if (result.extractedData && result.extractedData[sectionId]) {
+      planData[sectionId] = result.extractedData[sectionId];
+      if (!sectionMessages[sectionId]) sectionMessages[sectionId] = [];
+      sectionMessages[sectionId].push({ role: 'user', content: '\u270f\ufe0f Edit: ' + userRequest });
+      sectionMessages[sectionId].push({ role: 'assistant', content: result.cleanText });
+      saveState();
+      status.textContent = '\u2713 Updated! Refreshing...';
+      status.className = 'rp-edit-status success';
+      status.style.display = 'block';
+      input.value = '';
+      setTimeout(function() { openSectionReview(sectionId); }, 800);
+    } else {
+      throw new Error('AI did not return updated data. Try rephrasing.');
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.className = 'rp-edit-status error';
+    status.style.display = 'block';
+    input.disabled = false;
+    btn.disabled = false;
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// PLAN VIEW — RICH LAYOUT
+// ══════════════════════════════════════════════════════════════
+function showPlan() {
+  var wrap = document.getElementById('planContent');
+  var d = planData;
+  var bName = (d.overview && d.overview.businessName) || 'Your Business Plan';
+  var dateStr = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' });
+
+  var h = '';
+
+  // Header
+  h += '<div class="plan-hdr">';
+  h += '<h1>' + escapeHtml(bName) + '</h1>';
+  h += '<div class="plan-sub">Business Plan &amp; 30-Day Launch Action Plan</div>';
+  h += '<div class="plan-date">Generated ' + dateStr + '</div>';
+  h += '</div>';
+
+  // KPI Row
+  var kpiRevY1 = (d.revenue && d.revenue.revenueTargetY1) || '\u2014';
+  var kpiBE = (d.costs && d.costs.breakEven) || '\u2014';
+  var kpiCust = (d.revenue && d.revenue.customersPerMonth) || '\u2014';
+  var kpiLaunch = (d.launch && d.launch.launchDate) || '\u2014';
+  h += '<div class="kpi-row">';
+  h += kpiCard(kpiRevY1, 'Revenue Target Y1');
+  h += kpiCard(kpiBE, 'Break-Even');
+  h += kpiCard(kpiCust, 'Monthly Customers');
+  h += kpiCard(kpiLaunch, 'Launch Date');
+  h += '</div>';
+
+  // Tab Navigation
+  h += '<div class="plan-tabs" id="planTabs">';
+  for (var t = 0; t < SECTIONS.length; t++) {
+    var s = SECTIONS[t];
+    var grp = TAB_GROUPS[s.id];
+    var grpCls = grp === 'foundation' ? 'grp-foundation' : (grp === 'commercial' ? 'grp-commercial' : 'grp-execution');
+    var activeCls = t === 0 ? ' active' : '';
+    h += '<div class="plan-tab ' + grpCls + activeCls + '" onclick="showPlanTab(\'' + s.id + '\',this)">' + s.icon + ' ' + escapeHtml(s.title) + '</div>';
+  }
+  h += '</div>';
+
+  // Sections
+  h += renderOverviewSection(d.overview);
+  h += renderMarketSection(d.market);
+  h += renderValueSection(d.value);
+  h += renderProductsSection(d.products);
+  h += renderRevenueSection(d.revenue);
+  h += renderCostsSection(d.costs);
+  h += renderTeamSection(d.team);
+  h += renderMarketingSection(d.marketing);
+  h += renderLaunchSection(d.launch);
+  h += renderMetricsSection(d.metrics);
+
+  // Footer
+  h += '<div class="plan-ftr"><strong>Powered by Operations Director</strong><p>operationsdirector.co.uk</p></div>';
+
+  wrap.innerHTML = h;
+  document.getElementById('planOverlay').classList.add('active');
+}
+
+function kpiCard(num, label) {
+  return '<div class="kpi-card"><div class="kpi-num">' + escapeHtml(String(num)) + '</div><div class="kpi-label">' + escapeHtml(label) + '</div></div>';
+}
+
+function secStart(id, idx) {
+  var s = SECTIONS[idx];
+  var activeCls = idx === 0 ? ' active' : '';
+  var subtitles = {
+    overview:'The big picture of your business',
+    market:'Who you serve and why they need you',
+    value:'What sets you apart from the competition',
+    products:'Your offerings and how you price them',
+    revenue:'The money model and growth targets',
+    costs:'Investment needed and financial runway',
+    team:'People, tools, and capabilities',
+    marketing:'How you will reach and convert customers',
+    launch:'Your first 30 days, week by week',
+    metrics:'How you will measure and manage success'
+  };
+  var h = '<div class="sec' + activeCls + '" id="sec-' + id + '">';
+  h += '<div class="sec-hdr"><div class="sec-icon">' + s.icon + '</div><div class="sec-hdr-text"><h2>' + escapeHtml(s.title) + '</h2><div class="sec-subtitle">' + (subtitles[id] || '') + '</div></div></div>';
+
+  // Action buttons — View Discussion + Edit Section
+  h += '<div class="sec-actions">';
+  h += '<button class="sec-action-btn" onclick="toggleDiscussion(\'' + id + '\',this)">';
+  h += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+  h += 'View Discussion</button>';
+  h += '<button class="sec-action-btn" onclick="toggleEditPanel(\'' + id + '\',this)">';
+  h += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  h += 'Edit Section</button>';
+  h += '</div>';
+
+  // Discussion panel (hidden by default)
+  h += '<div class="disc-panel" id="disc-' + id + '">';
+  h += '<div class="disc-header">Conversation for this section</div>';
+  var msgs = sectionMessages[id];
+  if (msgs && msgs.length > 0) {
+    for (var mi = 0; mi < msgs.length; mi++) {
+      var m = msgs[mi];
+      if (m.role === 'user' && m.content === 'Hi, I\'m ready to start building my business plan. Please introduce yourself and ask me your first question.') continue;
+      h += '<div class="disc-msg">';
+      h += '<div class="disc-msg-role ' + (m.role === 'user' ? 'user' : 'ai') + '">' + (m.role === 'user' ? (config.userName || 'You') : 'AI Coach') + '</div>';
+      h += '<div class="disc-msg-text">' + formatMessage(m.content) + '</div>';
+      h += '</div>';
+    }
+  } else {
+    h += '<div class="disc-empty">No conversation recorded for this section yet.</div>';
+  }
+  h += '</div>';
+
+  // Edit panel (hidden by default)
+  h += '<div class="edit-panel" id="edit-' + id + '">';
+  h += '<div class="edit-panel-title">Edit this section</div>';
+  h += '<div class="edit-panel-hint">Tell the AI what you want to change. For example: "Change the launch date to June 1st" or "Add another product called Premium Coaching at £150"</div>';
+  h += '<div class="edit-input-row">';
+  h += '<textarea id="editInput-' + id + '" placeholder="What would you like to change?" rows="2" onkeydown="handleEditKey(event,\'' + id + '\')"></textarea>';
+  h += '<button class="edit-send-btn" id="editBtn-' + id + '" onclick="sendSectionEdit(\'' + id + '\')">Update</button>';
+  h += '</div>';
+  h += '<div class="edit-status" id="editStatus-' + id + '"></div>';
+  h += '</div>';
+
+  return h;
+}
+
+function emptySection(id, idx) {
+  return secStart(id, idx) + '<div class="plan-empty">Not yet discussed — continue your conversation to fill this section.</div></div>';
+}
+
+function renderOverviewSection(d) {
+  var idx = 0;
+  if (!d) return emptySection('overview', idx);
+  var h = secStart('overview', idx);
+  // Business name prominent
+  h += '<div class="card card-accent"><div class="card-label">Business Name</div><h3 style="font-size:1.3rem;color:var(--accent2)">' + escapeHtml(d.businessName || '\u2014') + '</h3>';
+  if (d.description) h += '<p style="margin-top:.5rem">' + escapeHtml(d.description) + '</p>';
+  h += '</div>';
+  // Problem / Solution side-by-side
+  h += '<div class="card-grid">';
+  h += '<div class="hl"><div class="hl-label">Problem</div><div class="hl-value">' + escapeHtml(d.problem || '\u2014') + '</div></div>';
+  h += '<div class="hl"><div class="hl-label">Solution</div><div class="hl-value">' + escapeHtml(d.solution || '\u2014') + '</div></div>';
+  h += '</div>';
+  // Tags for industry and stage
+  h += '<div style="margin-top:1rem">';
+  if (d.industry) h += '<span class="tag tag-accent">' + escapeHtml(d.industry) + '</span>';
+  if (d.stage) h += '<span class="tag tag-blue">' + escapeHtml(d.stage) + '</span>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+function renderMarketSection(d) {
+  var idx = 1;
+  if (!d) return emptySection('market', idx);
+  var h = secStart('market', idx);
+  // Ideal customer card
+  h += '<div class="card card-accent"><div class="card-label">Ideal Customer</div><p>' + escapeHtml(d.idealCustomer || '\u2014') + '</p></div>';
+  // Pain points
+  if (d.painPoints && d.painPoints.length > 0) {
+    h += '<div class="card"><div class="card-label">Pain Points</div><ul class="styled-list list-amber">';
+    for (var i = 0; i < d.painPoints.length; i++) {
+      if (d.painPoints[i]) h += '<li>' + escapeHtml(d.painPoints[i]) + '</li>';
+    }
+    h += '</ul></div>';
+  }
+  // Market size + geographic focus as highlight metrics
+  h += '<div class="card-grid">';
+  h += '<div class="hl"><div class="hl-label">Market Size</div><div class="hl-big">' + escapeHtml(d.marketSize || '\u2014') + '</div></div>';
+  h += '<div class="hl"><div class="hl-label">Geographic Focus</div><div class="hl-big">' + escapeHtml(d.geographicFocus || '\u2014') + '</div></div>';
+  h += '</div>';
+  if (d.currentAlternative) {
+    h += '<div class="card" style="margin-top:1rem"><div class="card-label">Current Alternatives</div><p>' + escapeHtml(d.currentAlternative) + '</p></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderValueSection(d) {
+  var idx = 2;
+  if (!d) return emptySection('value', idx);
+  var h = secStart('value', idx);
+  // Value proposition large card
+  h += '<div class="card card-accent" style="border-left-width:5px"><div class="card-label">Value Proposition</div><p style="font-size:1.1rem;font-weight:600;line-height:1.6">' + escapeHtml(d.valueProposition || '\u2014') + '</p></div>';
+  // USPs as grid of feature cards
+  if (d.usps && d.usps.length > 0) {
+    h += '<div class="card-label" style="margin-bottom:.5rem;margin-top:.5rem">Unique Selling Points</div>';
+    h += '<div class="card-grid' + (d.usps.length >= 3 ? '-3' : '') + '">';
+    for (var i = 0; i < d.usps.length; i++) {
+      if (d.usps[i]) h += '<div class="card"><p>' + escapeHtml(d.usps[i]) + '</p></div>';
+    }
+    h += '</div>';
+  }
+  // Competitive advantage highlight
+  if (d.competitiveAdvantage) {
+    h += '<div class="hl" style="margin-top:1rem"><div class="hl-label">Competitive Advantage</div><div class="hl-value">' + escapeHtml(d.competitiveAdvantage) + '</div></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderProductsSection(d) {
+  var idx = 3;
+  if (!d) return emptySection('products', idx);
+  var h = secStart('products', idx);
+  // Products table
+  if (d.products && d.products.length > 0) {
+    h += '<table class="plan-table"><tr><th>Product</th><th>Description</th><th>Price</th></tr>';
+    for (var i = 0; i < d.products.length; i++) {
+      var p = d.products[i];
+      var price = p.price || '\u2014';
+      h += '<tr><td><strong>' + escapeHtml(p.name || '\u2014') + '</strong></td><td>' + escapeHtml(p.description || '\u2014') + '</td><td>' + escapeHtml(String(price)) + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  // Revenue model + pricing strategy highlights
+  h += '<div class="card-grid">';
+  h += '<div class="hl"><div class="hl-label">Revenue Model</div><div class="hl-value">' + escapeHtml(d.revenueModel || '\u2014') + '</div></div>';
+  h += '<div class="hl"><div class="hl-label">Pricing Strategy</div><div class="hl-value">' + escapeHtml(d.pricingStrategy || '\u2014') + '</div></div>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+function renderRevenueSection(d) {
+  var idx = 4;
+  if (!d) return emptySection('revenue', idx);
+  var h = secStart('revenue', idx);
+  // KPI-style metric cards
+  h += '<div class="metric-grid">';
+  h += metricCard(d.revenueTargetY1, 'Revenue Y1');
+  h += metricCard(d.revenueTargetY3, 'Revenue Y3');
+  h += metricCard(d.customersPerMonth, 'Customers / Month');
+  h += metricCard(d.avgTransactionValue, 'Avg Transaction');
+  h += '</div>';
+  // Assumptions highlight
+  if (d.assumptions) {
+    h += '<div class="hl"><div class="hl-label">Key Assumptions</div><div class="hl-value">' + escapeHtml(d.assumptions) + '</div></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function metricCard(val, label) {
+  return '<div class="metric-card"><div class="mc-num">' + escapeHtml(String(val || '\u2014')) + '</div><div class="mc-label">' + escapeHtml(label) + '</div></div>';
+}
+
+function renderCostsSection(d) {
+  var idx = 5;
+  if (!d) return emptySection('costs', idx);
+  var h = secStart('costs', idx);
+  // Startup costs table
+  if (d.startupCosts && d.startupCosts.length > 0) {
+    h += '<div class="card-label" style="margin-bottom:.5rem">Startup Costs</div>';
+    h += '<table class="plan-table"><tr><th>Item</th><th>Cost</th></tr>';
+    for (var i = 0; i < d.startupCosts.length; i++) {
+      var c = d.startupCosts[i];
+      var cost = c.cost || '\u2014';
+      h += '<tr><td>' + escapeHtml(c.item || '\u2014') + '</td><td>' + escapeHtml(String(cost)) + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  // Monthly costs table
+  if (d.monthlyCosts && d.monthlyCosts.length > 0) {
+    h += '<div class="card-label" style="margin-bottom:.5rem">Monthly Costs</div>';
+    h += '<table class="plan-table"><tr><th>Item</th><th>Cost</th></tr>';
+    for (var i = 0; i < d.monthlyCosts.length; i++) {
+      var mc = d.monthlyCosts[i];
+      var mcost = mc.cost || '\u2014';
+      h += '<tr><td>' + escapeHtml(mc.item || '\u2014') + '</td><td>' + escapeHtml(String(mcost)) + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  // Funding + Break-even
+  h += '<div class="card-grid">';
+  h += '<div class="hl"><div class="hl-label">Funding Source</div><div class="hl-value">' + escapeHtml(d.fundingSource || '\u2014') + '</div></div>';
+  h += '<div class="hl"><div class="hl-label">Break-Even Estimate</div><div class="hl-value">' + escapeHtml(d.breakEven || '\u2014') + '</div></div>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+function renderTeamSection(d) {
+  var idx = 6;
+  if (!d) return emptySection('team', idx);
+  var h = secStart('team', idx);
+  // Founder role
+  h += '<div class="card card-accent"><div class="card-label">Founder Role</div><p>' + escapeHtml(d.founderRole || '\u2014') + '</p></div>';
+  // Key hires as tag chips
+  if (d.keyHires && d.keyHires.length > 0) {
+    h += '<div class="card"><div class="card-label">Key Hires Needed</div><div class="tags-wrap">';
+    var tagColors = ['tag-accent','tag-blue','tag-purple','tag-pink','tag-green','tag-amber'];
+    for (var i = 0; i < d.keyHires.length; i++) {
+      if (d.keyHires[i]) h += '<span class="tag ' + tagColors[i % tagColors.length] + '">' + escapeHtml(d.keyHires[i]) + '</span>';
+    }
+    h += '</div></div>';
+  }
+  // Tools as tag chips
+  if (d.tools && d.tools.length > 0) {
+    h += '<div class="card"><div class="card-label">Tools &amp; Software</div><div class="tags-wrap">';
+    for (var i = 0; i < d.tools.length; i++) {
+      if (d.tools[i]) h += '<span class="tag tag-green">' + escapeHtml(d.tools[i]) + '</span>';
+    }
+    h += '</div></div>';
+  }
+  // Skills gaps as warning box
+  if (d.skillsGaps) {
+    h += '<div class="warn-box"><div class="warn-title">\u26a0 Skills Gaps</div><p>' + escapeHtml(d.skillsGaps) + '</p></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderMarketingSection(d) {
+  var idx = 7;
+  if (!d) return emptySection('marketing', idx);
+  var h = secStart('marketing', idx);
+  // Channels as colored tags
+  if (d.channels && d.channels.length > 0) {
+    h += '<div class="card"><div class="card-label">Marketing Channels</div><div class="tags-wrap">';
+    var tagColors = ['tag-accent','tag-green','tag-blue','tag-amber','tag-purple','tag-pink'];
+    for (var i = 0; i < d.channels.length; i++) {
+      if (d.channels[i]) h += '<span class="tag ' + tagColors[i % tagColors.length] + '">' + escapeHtml(d.channels[i]) + '</span>';
+    }
+    h += '</div></div>';
+  }
+  // Sales process as funnel
+  if (d.salesProcess) {
+    h += '<div class="card-label" style="margin-bottom:.5rem">Sales Process</div>';
+    var steps = d.salesProcess.split(/[;\n\.\d]+[\.\)]\s*/).filter(function(s) { return s.trim(); });
+    if (steps.length <= 1) steps = d.salesProcess.split(/,\s*/).filter(function(s) { return s.trim(); });
+    if (steps.length > 1) {
+      h += '<div class="funnel">';
+      for (var i = 0; i < steps.length; i++) {
+        h += '<div class="funnel-step"><div class="funnel-num">' + (i + 1) + '</div><div class="funnel-text">' + escapeHtml(steps[i].trim()) + '</div></div>';
+      }
+      h += '</div>';
+    } else {
+      h += '<div class="card"><p>' + escapeHtml(d.salesProcess) + '</p></div>';
+    }
+  }
+  // Lead gen + budget
+  h += '<div class="card-grid">';
+  h += '<div class="card"><div class="card-label">Lead Generation Strategy</div><p>' + escapeHtml(d.leadGenStrategy || '\u2014') + '</p></div>';
+  h += '<div class="card"><div class="card-label">Marketing Budget</div><p style="font-size:1.2rem;font-weight:700;color:var(--accent2)">' + escapeHtml(d.marketingBudget || '\u2014') + '</p></div>';
+  h += '</div>';
+  h += '</div>';
+  return h;
+}
+
+function renderLaunchSection(d) {
+  var idx = 8;
+  if (!d) return emptySection('launch', idx);
+  var h = secStart('launch', idx);
+  // Launch date
+  if (d.launchDate) {
+    h += '<div class="hl" style="margin-bottom:1.5rem;text-align:center"><div class="hl-label">Target Launch Date</div><div class="hl-big">' + escapeHtml(d.launchDate) + '</div></div>';
+  }
+  // Timeline bar
+  h += '<div class="timeline-bar">';
+  h += '<div class="tl-week">Week 1</div>';
+  h += '<div class="tl-week">Week 2</div>';
+  h += '<div class="tl-week">Week 3</div>';
+  h += '<div class="tl-week">Week 4</div>';
+  h += '</div>';
+  // Week-by-week accordion steps
+  var weeks = [
+    { key:'week1', title:'Week 1 \u2014 Foundation', cls:'step-1' },
+    { key:'week2', title:'Week 2 \u2014 Build', cls:'step-2' },
+    { key:'week3', title:'Week 3 \u2014 Soft Launch', cls:'step-3' },
+    { key:'week4', title:'Week 4 \u2014 Go Live', cls:'step-4' }
+  ];
+  for (var i = 0; i < weeks.length; i++) {
+    var w = weeks[i];
+    var content = d[w.key] || '\u2014';
+    var openCls = i === 0 ? ' open' : '';
+    h += '<div class="step-acc ' + w.cls + openCls + '">';
+    h += '<div class="step-hdr" onclick="togglePlanStep(this)">';
+    h += '<div class="step-num">' + (i + 1) + '</div>';
+    h += '<div class="step-title">' + escapeHtml(w.title) + '</div>';
+    h += '<div class="step-arrow">\u25bc</div>';
+    h += '</div>';
+    h += '<div class="step-body">' + escapeHtml(content) + '</div>';
+    h += '</div>';
+  }
+  // Pre-launch checklist
+  if (d.checklist && d.checklist.length > 0) {
+    h += '<div class="card" style="margin-top:1rem"><div class="card-label">Pre-Launch Checklist</div><ul class="checklist">';
+    for (var i = 0; i < d.checklist.length; i++) {
+      if (d.checklist[i]) h += '<li>' + escapeHtml(d.checklist[i]) + '</li>';
+    }
+    h += '</ul></div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function renderMetricsSection(d) {
+  var idx = 9;
+  if (!d) return emptySection('metrics', idx);
+  var h = secStart('metrics', idx);
+  // Milestones timeline
+  h += '<div class="milestones">';
+  h += '<div class="ms-card"><div class="ms-days">30</div><div class="ms-label">Days</div><div class="ms-text">' + escapeHtml(d.milestone30 || '\u2014') + '</div></div>';
+  h += '<div class="ms-card"><div class="ms-days">90</div><div class="ms-label">Days</div><div class="ms-text">' + escapeHtml(d.milestone90 || '\u2014') + '</div></div>';
+  h += '<div class="ms-card"><div class="ms-days">365</div><div class="ms-label">Days</div><div class="ms-text">' + escapeHtml(d.milestone12 || '\u2014') + '</div></div>';
+  h += '</div>';
+  // KPIs as metric cards
+  if (d.kpis && d.kpis.length > 0) {
+    h += '<div class="card"><div class="card-label">Key Performance Indicators</div><div class="tags-wrap" style="margin-top:.5rem">';
+    for (var i = 0; i < d.kpis.length; i++) {
+      if (d.kpis[i]) h += '<span class="tag tag-accent">' + escapeHtml(d.kpis[i]) + '</span>';
+    }
+    h += '</div></div>';
+  }
+  // Risk warning card
+  if (d.biggestRisk) {
+    h += '<div class="warn-box" style="margin-top:1rem"><div class="warn-title">\u26a0 Biggest Risk</div><p>' + escapeHtml(d.biggestRisk) + '</p>';
+    if (d.riskMitigation) h += '<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid rgba(239,68,68,.2)"><div class="card-label" style="color:var(--green);margin-bottom:.25rem">Mitigation Plan</div><p>' + escapeHtml(d.riskMitigation) + '</p></div>';
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+// ══════════════════════════════════════════════════════════════
+// PLAN TAB NAVIGATION
+// ══════════════════════════════════════════════════════════════
+function showPlanTab(id, tabEl) {
+  // Deactivate all tabs
+  var tabs = document.querySelectorAll('.plan-tab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+  // Activate clicked tab
+  if (tabEl) tabEl.classList.add('active');
+  // Hide all sections, show selected
+  var secs = document.querySelectorAll('.sec');
+  for (var i = 0; i < secs.length; i++) secs[i].classList.remove('active');
+  var target = document.getElementById('sec-' + id);
+  if (target) target.classList.add('active');
+}
+
+// ══════════════════════════════════════════════════════════════
+// PLAN ACCORDION
+// ══════════════════════════════════════════════════════════════
+function togglePlanStep(el) {
+  var acc = el.parentElement;
+  acc.classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════
+// DISCUSSION & EDIT PANELS
+// ══════════════════════════════════════════════════════════════
+function toggleDiscussion(sectionId, btnEl) {
+  var panel = document.getElementById('disc-' + sectionId);
+  if (!panel) return;
+  var isActive = panel.classList.contains('active');
+  // Close all panels first
+  var allPanels = document.querySelectorAll('.disc-panel,.edit-panel');
+  for (var i = 0; i < allPanels.length; i++) allPanels[i].classList.remove('active');
+  var allBtns = document.querySelectorAll('.sec-action-btn');
+  for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
+  // Toggle this one
+  if (!isActive) {
+    panel.classList.add('active');
+    if (btnEl) btnEl.classList.add('active');
+  }
+}
+
+function toggleEditPanel(sectionId, btnEl) {
+  var panel = document.getElementById('edit-' + sectionId);
+  if (!panel) return;
+  var isActive = panel.classList.contains('active');
+  // Close all panels first
+  var allPanels = document.querySelectorAll('.disc-panel,.edit-panel');
+  for (var i = 0; i < allPanels.length; i++) allPanels[i].classList.remove('active');
+  var allBtns = document.querySelectorAll('.sec-action-btn');
+  for (var i = 0; i < allBtns.length; i++) allBtns[i].classList.remove('active');
+  // Toggle this one
+  if (!isActive) {
+    panel.classList.add('active');
+    if (btnEl) btnEl.classList.add('active');
+    var input = document.getElementById('editInput-' + sectionId);
+    if (input) setTimeout(function() { input.focus(); }, 100);
+  }
+}
+
+function handleEditKey(e, sectionId) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSectionEdit(sectionId); }
+}
+
+function sendSectionEdit(sectionId) {
+  var input = document.getElementById('editInput-' + sectionId);
+  var btn = document.getElementById('editBtn-' + sectionId);
+  var status = document.getElementById('editStatus-' + sectionId);
+  if (!input || !btn) return;
+
+  var userRequest = input.value.trim();
+  if (!userRequest) return;
+
+  // Disable inputs
+  input.disabled = true;
+  btn.disabled = true;
+  status.textContent = 'Updating section...';
+  status.className = 'edit-status';
+  status.style.display = 'block';
+
+  // Find the section info
+  var sectionInfo = null;
+  for (var i = 0; i < SECTIONS.length; i++) {
+    if (SECTIONS[i].id === sectionId) { sectionInfo = SECTIONS[i]; break; }
+  }
+
+  // Build a focused prompt for editing just this section
+  var editSystemPrompt = 'You are a business plan editor. The user has already completed a business plan and wants to amend one section.\n\n' +
+    'CURRENT DATA for the "' + (sectionInfo ? sectionInfo.title : sectionId) + '" section:\n' +
+    JSON.stringify(planData[sectionId], null, 2) + '\n\n' +
+    'The user wants to make changes. Apply their requested changes to the data and output the COMPLETE updated section data.\n\n' +
+    'CRITICAL RULES:\n' +
+    '1. Keep all existing data that the user has NOT asked to change.\n' +
+    '2. Apply only the changes they requested.\n' +
+    '3. Output your response as a brief friendly confirmation (1-2 sentences) of what you changed, followed by the updated data block.\n' +
+    '4. The data block MUST be in this exact format at the END of your message:\n' +
+    '   [PLANDATA:' + sectionId + ']{...complete JSON...}[/PLANDATA]\n' +
+    '5. The JSON must include ALL fields for this section, not just the changed ones.\n';
+
+  var editMessages = [
+    { role: 'user', content: userRequest }
+  ];
+
+  // Use the same API call pattern
+  var proxyUrl = PROXY_ENDPOINT || '/api/chat';
+  fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      system: editSystemPrompt,
+      messages: editMessages,
+      endpoint: config.endpoint
+    })
+  }).then(function(resp) {
+    if (!resp.ok) return resp.text().then(function(t) { throw new Error('Server error ' + resp.status); });
+    return resp.json();
+  }).then(function(data) {
+    if (data.error) throw new Error(data.error);
+    var fullText = data.text;
+
+    // Extract updated plan data
+    var result = extractPlanDataFromText(fullText);
+    if (result.extractedData && result.extractedData[sectionId]) {
+      // Update plan data
+      planData[sectionId] = result.extractedData[sectionId];
+
+      // Add edit to section messages history
+      if (!sectionMessages[sectionId]) sectionMessages[sectionId] = [];
+      sectionMessages[sectionId].push({ role: 'user', content: '✏️ Edit: ' + userRequest });
+      sectionMessages[sectionId].push({ role: 'assistant', content: result.cleanText });
+
+      saveState();
+
+      // Success — refresh the plan view
+      status.textContent = '✓ Section updated! Refreshing...';
+      status.className = 'edit-status success';
+      status.style.display = 'block';
+      input.value = '';
+
+      // Re-render the plan after a short delay
+      setTimeout(function() {
+        var activeTabId = sectionId;
+        showPlan();
+        // Re-select the tab we were on
+        var tabs = document.querySelectorAll('.plan-tab');
+        for (var i = 0; i < tabs.length; i++) {
+          if (SECTIONS[i] && SECTIONS[i].id === activeTabId) {
+            showPlanTab(activeTabId, tabs[i]);
+            break;
+          }
+        }
+      }, 800);
+    } else {
+      throw new Error('AI did not return updated data. Try rephrasing your request.');
+    }
+  }).catch(function(err) {
+    status.textContent = 'Error: ' + err.message;
+    status.className = 'edit-status error';
+    status.style.display = 'block';
+    input.disabled = false;
+    btn.disabled = false;
+  });
+}
+
+function closePlan() { document.getElementById('planOverlay').classList.remove('active'); }
+
+// ══════════════════════════════════════════════════════════════
+// RESET
+// ══════════════════════════════════════════════════════════════
+function showResetModal() { document.getElementById('resetModal').classList.add('active'); }
+function hideResetModal() { document.getElementById('resetModal').classList.remove('active'); }
+function doReset() {
+  localStorage.removeItem('od-bplan-v4');
+  messages = []; planData = {}; completedSections = []; sectionMessages = {}; lastSectionMsgIndex = 0;
+  config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-20250514', endpoint: '', userName: '' };
+  hideResetModal();
+  document.getElementById('chatMessages').innerHTML = '';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('setupScreen').style.display = 'flex';
+}
+
+// ══════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════
+(function init() {
+  // Auto-reset if ?reset in URL
+  if (window.location.search.indexOf('reset') > -1) {
+    localStorage.removeItem('od-bplan-v4');
+    window.history.replaceState({}, '', window.location.pathname);
+    return; // show setup screen
+  }
+
+  if (PROXY_ENDPOINT) config.endpoint = PROXY_ENDPOINT;
+
+  var hasState = loadState();
+
+  if (hasState && (config.apiKey || PROXY_ENDPOINT) && messages.length > 0) {
+    showApp();
+    // Rebuild chat from saved messages
+    for (var i = 0; i < messages.length; i++) {
+      var result = extractPlanDataFromText(messages[i].content);
+      var displayText = result.cleanText.replace('[PLAN_COMPLETE]', '').trim();
+      addMessageBubble(messages[i].role, displayText);
+    }
+    if (completedSections.length === SECTIONS.length) showPlanCompleteMessage();
+  } else {
+    // Clear any broken state
+    localStorage.removeItem('od-bplan-v4');
+    messages = []; planData = {}; completedSections = []; sectionMessages = {}; lastSectionMsgIndex = 0;
+    config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-20250514', endpoint: '', userName: '' };
+  }
+})();
+</script>
+</body>
+</html>

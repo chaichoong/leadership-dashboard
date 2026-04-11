@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://chaichoong.github.io/leadership-dashboard/sitemap.xml

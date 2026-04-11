@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations Director — Operating Systems</title>
+<style>
+:root {
+  --bg:#0f1117; --surface:#1a1d27; --surface2:#242836; --border:#2e3347;
+  --text:#e4e7ef; --text2:#8b90a5; --accent:#6366f1; --accent2:#818cf8;
+  --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --blue:#3b82f6; --purple:#a855f7; --pink:#ec4899;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh;
+}
+a { color: var(--accent2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Top Bar */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(15,17,23,0.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.topbar-left { display: flex; align-items: center; gap: 1rem; }
+.topbar-brand { font-weight: 700; font-size: 1.05rem; color: var(--accent2); }
+.topbar-subtitle { font-size: 0.85rem; color: var(--text2); border-left: 1px solid var(--border); padding-left: 1rem; }
+.topbar-stats { display: flex; gap: 1.2rem; font-size: 0.82rem; color: var(--text2); }
+.topbar-stats span strong { color: var(--text); }
+
+/* Container */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* Hero */
+.hero { text-align: center; padding: 4rem 0 3rem; }
+.hero h1 { font-size: 2.6rem; font-weight: 800; margin-bottom: 1rem; letter-spacing: -0.02em; }
+.hero h1 span { color: var(--accent2); }
+.hero p { max-width: 640px; margin: 0 auto 2.5rem; color: var(--text2); font-size: 1.05rem; line-height: 1.7; }
+.hero-stats { display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; }
+.hero-stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 1rem 1.8rem; font-size: 0.88rem; color: var(--text2);
+}
+.hero-stat strong { display: block; color: var(--text); font-size: 1rem; margin-bottom: 0.15rem; }
+
+/* Journey */
+.journey-section { padding: 2rem 0 3rem; }
+.journey-section h2 { text-align: center; font-size: 1.2rem; color: var(--text2); font-weight: 600; margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.journey {
+  display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap;
+  padding: 1rem 0;
+}
+.journey-stage {
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  padding: 0.8rem 1.2rem; position: relative;
+}
+.journey-stage .icon { font-size: 1.5rem; }
+.journey-stage .label {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.journey-stage .count { font-size: 0.72rem; color: var(--text2); }
+.journey-arrow {
+  font-size: 1.2rem; color: var(--border); margin: 0 0.1rem; align-self: center;
+}
+
+/* Category colours */
+.cat-plan { color: var(--blue); }
+.cat-build { color: var(--purple); }
+.cat-attract { color: var(--pink); }
+.cat-convert { color: var(--green); }
+.cat-collect { color: var(--amber); }
+.cat-deliver { color: var(--accent2); }
+.cat-retain { color: var(--red); }
+.cat-backoffice { color: var(--text2); }
+
+/* Grid */
+.category-group { margin-bottom: 3rem; }
+.category-group h2 {
+  font-size: 1rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.6rem;
+}
+.category-group h2 .cat-icon { font-size: 1.2rem; }
+.grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+/* Card */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.4rem; display: flex; flex-direction: column; gap: 0.6rem;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.card.coming-soon { opacity: 0.55; }
+.card.coming-soon:hover { opacity: 0.7; transform: none; border-color: var(--border); }
+.card-id { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.72rem; color: var(--text2); }
+.card-name { font-size: 1.05rem; font-weight: 700; }
+.card-desc { font-size: 0.88rem; color: var(--text2); line-height: 1.55; }
+.card-footer { display: flex; align-items: center; gap: 0.8rem; margin-top: auto; padding-top: 0.6rem; flex-wrap: wrap; }
+.tag {
+  font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 6px;
+  display: inline-flex; align-items: center; gap: 0.3rem;
+}
+.tag-built { background: rgba(34,197,94,0.12); color: var(--green); }
+.tag-coming { background: rgba(245,158,11,0.12); color: var(--amber); }
+.tag-version { font-size: 0.72rem; color: var(--text2); font-family: monospace; }
+.btn-launch {
+  margin-left: auto; background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 0.45rem 1.1rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-launch:hover { background: var(--accent2); text-decoration: none; }
+.btn-sop {
+  font-size: 0.72rem; color: var(--text2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.2rem 0.55rem; transition: color 0.2s, border-color 0.2s;
+}
+.btn-sop:hover { color: var(--accent2); border-color: var(--accent); text-decoration: none; }
+
+/* Footer */
+.footer {
+  text-align: center; padding: 3rem 0 2rem; border-top: 1px solid var(--border);
+  margin-top: 2rem; color: var(--text2); font-size: 0.85rem;
+}
+.footer strong { color: var(--accent2); }
+.footer p { margin: 0.3rem 0; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .topbar { padding: 0 1rem; }
+  .topbar-subtitle { display: none; }
+  .hero h1 { font-size: 1.8rem; }
+  .hero p { font-size: 0.95rem; }
+  .grid { grid-template-columns: 1fr; }
+  .journey { gap: 0.2rem; }
+  .journey-stage { padding: 0.5rem 0.6rem; }
+  .journey-arrow { font-size: 0.9rem; }
+}
+
+/* Print */
+@media print {
+  :root {
+    --bg: #fff; --surface: #fff; --surface2: #f5f5f5; --border: #ddd;
+    --text: #111; --text2: #555; --accent: #4338ca; --accent2: #4338ca;
+  }
+  body { background: #fff; color: #111; }
+  .topbar { position: static; background: #fff; border-bottom: 2px solid #111; }
+  .card { border: 1px solid #ccc; break-inside: avoid; }
+  .card.coming-soon { opacity: 0.7; }
+  .btn-launch { background: #4338ca; color: #fff; }
+}
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-brand">Operations Director</div>
+    <div class="topbar-subtitle">Operating Systems</div>
+  </div>
+  <div class="topbar-stats">
+    <span><strong>13</strong> Operating Systems</span>
+    <span><strong>1</strong> Built</span>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Hero -->
+  <section class="hero">
+    <h1>Operating <span>Systems</span></h1>
+    <p>AI-powered business tools that work. Each operating system is a self-contained web application covering a specific area of your business lifecycle. No subscriptions. No setup. Just results.</p>
+    <div class="hero-stats">
+      <div class="hero-stat"><strong>Built by AI</strong>Designed &amp; coded by artificial intelligence</div>
+      <div class="hero-stat"><strong>One-off Purchase</strong>Pay once, own it forever</div>
+      <div class="hero-stat"><strong>Works Instantly</strong>Open the file and start using it</div>
+    </div>
+  </section>
+
+  <!-- Business Lifecycle Journey -->
+  <section class="journey-section">
+    <h2>Business Lifecycle</h2>
+    <div class="journey" id="journey"></div>
+  </section>
+
+  <!-- Operating Systems Grid -->
+  <main id="grid-container"></main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>Powered by <strong>Operations Director</strong></p>
+    <p>operationsdirector.co.uk</p>
+    <p style="margin-top:0.6rem; font-size:0.78rem;">Built with AI. Delivered as working applications.</p>
+  </footer>
+
+</div>
+
+<script>
+const OS_DATA = [
+  {
+    id: 'PLAN-01', name: 'Business Plan & Launch Plan Builder',
+    desc: 'AI-guided conversation that builds your complete business plan and 30-day action plan. No forms, no templates \u2014 just answer questions naturally.',
+    category: 'PLAN', status: 'built', version: '1.0.0', link: 'business-plan-builder/', sop: 'business-plan-builder/sop.html'
+  },
+  { id: 'PLAN-02', name: 'Brand Identity Builder', desc: 'Create a cohesive brand identity including name analysis, colour palette, typography, and tone of voice guidelines.', category: 'PLAN', status: 'coming' },
+  { id: 'PLAN-03', name: 'Financial Forecast & Startup Budget', desc: 'Build realistic financial projections and a startup budget with AI-guided scenario modelling.', category: 'PLAN', status: 'coming' },
+  { id: 'BUILD-01', name: 'Website Setup Guide', desc: 'Step-by-step guidance to set up your business website, from domain to launch.', category: 'BUILD', status: 'coming' },
+  { id: 'BUILD-02', name: 'Legal & Compliance Launcher', desc: 'Navigate company registration, contracts, GDPR, and essential legal requirements for your business.', category: 'BUILD', status: 'coming' },
+  { id: 'BUILD-03', name: 'Payment & Billing Setup', desc: 'Configure payment processing, invoicing templates, and billing workflows for your business.', category: 'BUILD', status: 'coming' },
+  { id: 'ATTRACT-01', name: 'Marketing Strategy & Channel Planner', desc: 'Define your marketing strategy, identify the right channels, and build a structured plan to reach your audience.', category: 'ATTRACT', status: 'coming' },
+  { id: 'ATTRACT-02', name: 'AI Content Creator & Calendar', desc: 'Generate on-brand content and schedule it across channels with an AI-powered editorial calendar.', category: 'ATTRACT', status: 'coming' },
+  { id: 'ATTRACT-03', name: 'Paid Advertising Manager', desc: 'Plan, budget, and track paid advertising campaigns across Google, Meta, and other platforms.', category: 'ATTRACT', status: 'coming' },
+  { id: 'ATTRACT-04', name: 'Lead Magnet & Funnel Builder', desc: 'Design lead magnets and build conversion funnels that turn visitors into prospects.', category: 'ATTRACT', status: 'coming' },
+  { id: 'CONVERT-01', name: 'Sales Pipeline & CRM', desc: 'Track leads, manage your sales pipeline, and close deals with a lightweight AI-assisted CRM.', category: 'CONVERT', status: 'coming' },
+  { id: 'COLLECT-01', name: 'Invoice & Payment Tracker', desc: 'Create professional invoices, track payments, and manage outstanding balances in one place.', category: 'COLLECT', status: 'coming' },
+  { id: 'DELIVER-01', name: 'Client Onboarding System', desc: 'Automate client onboarding with checklists, welcome sequences, and milestone tracking.', category: 'DELIVER', status: 'coming' },
+];
+
+const CATEGORIES = [
+  { key: 'PLAN', label: 'Plan', icon: '\uD83D\uDCCB', css: 'cat-plan' },
+  { key: 'BUILD', label: 'Build', icon: '\uD83D\uDD27', css: 'cat-build' },
+  { key: 'ATTRACT', label: 'Attract', icon: '\uD83E\uDDF2', css: 'cat-attract' },
+  { key: 'CONVERT', label: 'Convert', icon: '\uD83C\uDFAF', css: 'cat-convert' },
+  { key: 'COLLECT', label: 'Collect', icon: '\uD83D\uDCB0', css: 'cat-collect' },
+  { key: 'DELIVER', label: 'Deliver', icon: '\uD83D\uDCE6', css: 'cat-deliver' },
+  { key: 'RETAIN', label: 'Retain', icon: '\uD83E\uDD1D', css: 'cat-retain' },
+  { key: 'BACK OFFICE', label: 'Back Office', icon: '\uD83D\uDCC2', css: 'cat-backoffice' },
+];
+
+// Build journey
+const journeyEl = document.getElementById('journey');
+CATEGORIES.forEach((cat, i) => {
+  const count = OS_DATA.filter(o => o.category === cat.key).length;
+  const stage = document.createElement('div');
+  stage.className = 'journey-stage';
+  stage.innerHTML = `<span class="icon">${cat.icon}</span><span class="label ${cat.css}">${cat.label}</span><span class="count">${count} OS${count !== 1 ? '' : ''}</span>`;
+  journeyEl.appendChild(stage);
+  if (i < CATEGORIES.length - 1) {
+    const arrow = document.createElement('span');
+    arrow.className = 'journey-arrow';
+    arrow.textContent = '\u2192';
+    journeyEl.appendChild(arrow);
+  }
+});
+
+// Build grid
+const gridContainer = document.getElementById('grid-container');
+CATEGORIES.forEach(cat => {
+  const items = OS_DATA.filter(o => o.category === cat.key);
+  if (!items.length) return;
+  const group = document.createElement('section');
+  group.className = 'category-group';
+  group.innerHTML = `<h2><span class="cat-icon">${cat.icon}</span> <span class="${cat.css}">${cat.label}</span></h2><div class="grid"></div>`;
+  const grid = group.querySelector('.grid');
+  items.forEach(os => {
+    const isBuilt = os.status === 'built';
+    const card = document.createElement('div');
+    card.className = 'card' + (isBuilt ? '' : ' coming-soon');
+    let footer = '';
+    if (isBuilt) {
+      footer = `<span class="tag tag-built">\u2713 Built</span><span class="tag-version">v${os.version}</span><a href="${os.sop}" class="btn-sop">SOP</a><a href="${os.link}" class="btn-launch">Launch \u2192</a>`;
+    } else {
+      footer = `<span class="tag tag-coming">Coming Soon</span>`;
+    }
+    card.innerHTML = `<span class="card-id">${os.id}</span><div class="card-name">${os.name}</div><div class="card-desc">${os.desc}</div><div class="card-footer">${footer}</div>`;
+    grid.appendChild(card);
+  });
+  gridContainer.appendChild(group);
+});
+</script>
+</body>
+</html>

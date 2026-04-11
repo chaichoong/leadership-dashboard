@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Plan Builder — SOP | Operations Director</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #242836;
+            --border: #2e3347;
+            --text: #e4e7ef;
+            --text2: #8b90a5;
+            --accent: #6366f1;
+            --accent2: #818cf8;
+            --green: #22c55e;
+            --amber: #f59e0b;
+            --red: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+
+        a { color: var(--accent2); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4rem;
+        }
+
+        /* Header */
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.85rem;
+            color: var(--text2);
+            margin-bottom: 1.5rem;
+            transition: color 0.2s;
+        }
+        .back-link:hover { color: var(--accent2); text-decoration: none; }
+
+        .page-header {
+            margin-bottom: 2.5rem;
+        }
+        .page-header h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 0.25rem;
+        }
+        .page-header .subtitle {
+            font-size: 1.05rem;
+            color: var(--text2);
+            margin-bottom: 1rem;
+        }
+        .header-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .meta-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.3rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            background: var(--surface2);
+            color: var(--text2);
+            border: 1px solid var(--border);
+        }
+        .meta-badge.status {
+            background: rgba(34, 197, 94, 0.12);
+            color: var(--green);
+            border-color: rgba(34, 197, 94, 0.25);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.75rem;
+            margin-bottom: 1.5rem;
+        }
+        .card h2 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .card h2 .section-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--accent2);
+            margin: 1.25rem 0 0.5rem;
+        }
+        .card p {
+            color: var(--text2);
+            font-size: 0.92rem;
+            margin-bottom: 0.75rem;
+        }
+
+        /* Document Info Grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .info-item {
+            padding: 0.75rem 1rem;
+            background: var(--surface2);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .info-item .label {
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text2);
+            margin-bottom: 0.2rem;
+        }
+        .info-item .value {
+            font-size: 0.9rem;
+            color: var(--text);
+            font-weight: 500;
+        }
+        .info-item .value.status-prod {
+            color: var(--green);
+        }
+
+        /* Step list */
+        .step-list {
+            list-style: none;
+            counter-reset: step-counter;
+        }
+        .step-list li {
+            counter-increment: step-counter;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.85rem;
+            margin-bottom: 0.85rem;
+            color: var(--text2);
+            font-size: 0.92rem;
+        }
+        .step-list li::before {
+            content: counter(step-counter);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.78rem;
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* Sections list (10 sections) */
+        .sections-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+        .section-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            background: var(--surface2);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .section-row .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.78rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .section-row .section-name {
+            font-weight: 600;
+            color: var(--text);
+            font-size: 0.9rem;
+        }
+        .section-row .section-desc {
+            color: var(--text2);
+            font-size: 0.85rem;
+        }
+
+        /* Feature list */
+        .feature-list {
+            list-style: none;
+        }
+        .feature-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6rem;
+            margin-bottom: 0.65rem;
+            font-size: 0.92rem;
+            color: var(--text2);
+        }
+        .feature-list li .feat-icon {
+            color: var(--green);
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .feature-list li strong {
+            color: var(--text);
+        }
+
+        /* Highlight box */
+        .highlight-box {
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin: 1rem 0;
+        }
+        .highlight-box .hl-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--accent2);
+            margin-bottom: 0.35rem;
+        }
+        .highlight-box p {
+            color: var(--text2);
+            font-size: 0.88rem;
+            margin-bottom: 0;
+        }
+
+        /* Warning box */
+        .warning-box {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin: 0.75rem 0;
+        }
+        .warning-box .warn-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--amber);
+            margin-bottom: 0.35rem;
+        }
+        .warning-box p {
+            color: var(--text2);
+            font-size: 0.88rem;
+            margin-bottom: 0.5rem;
+        }
+        .warning-box p:last-child { margin-bottom: 0; }
+
+        /* Tech list */
+        .tech-list {
+            list-style: none;
+        }
+        .tech-list li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+            color: var(--text2);
+            display: flex;
+            gap: 0.5rem;
+        }
+        .tech-list li:last-child { border-bottom: none; }
+        .tech-list li .tech-label {
+            color: var(--text);
+            font-weight: 600;
+            min-width: 120px;
+            flex-shrink: 0;
+        }
+
+        /* Version table */
+        .version-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+        .version-table th {
+            text-align: left;
+            padding: 0.65rem 1rem;
+            background: var(--surface2);
+            color: var(--text2);
+            font-weight: 600;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+        }
+        .version-table td {
+            padding: 0.75rem 1rem;
+            color: var(--text2);
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+        .version-table tr:last-child td { border-bottom: none; }
+
+        /* Dependencies */
+        .dep-list {
+            list-style: none;
+        }
+        .dep-list li {
+            padding: 0.45rem 0;
+            color: var(--text2);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .dep-list li .dep-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+        }
+
+        /* Footer */
+        .page-footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .page-footer .footer-id {
+            font-size: 0.82rem;
+            color: var(--text2);
+            font-weight: 500;
+        }
+        .page-footer a {
+            font-size: 0.82rem;
+        }
+
+        @media (max-width: 640px) {
+            .container { padding: 1.25rem 1rem 3rem; }
+            .page-header h1 { font-size: 1.4rem; }
+            .info-grid { grid-template-columns: 1fr 1fr; }
+            .tech-list li { flex-direction: column; gap: 0.15rem; }
+            .tech-list li .tech-label { min-width: unset; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- Back Link -->
+        <a href="../" class="back-link">&larr; Back to Operating Systems</a>
+
+        <!-- Header -->
+        <div class="page-header">
+            <h1>Business Plan &amp; Launch Plan Builder &mdash; SOP</h1>
+            <div class="subtitle">Standard Operating Procedure</div>
+            <div class="header-meta">
+                <span class="meta-badge">PLAN-01</span>
+                <span class="meta-badge">v1.0.0</span>
+                <span class="meta-badge">Updated 11 April 2026</span>
+                <span class="meta-badge status">Production</span>
+            </div>
+        </div>
+
+        <!-- Document Info Card -->
+        <div class="card">
+            <h2>Document Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="label">Module</div>
+                    <div class="value">Business Plan &amp; Launch Plan Builder</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Module ID</div>
+                    <div class="value">PLAN-01</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Version</div>
+                    <div class="value">1.0.0</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Category</div>
+                    <div class="value">PLAN &mdash; Define the Business</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Status</div>
+                    <div class="value status-prod">Production</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Created</div>
+                    <div class="value">11 April 2026</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Owner</div>
+                    <div class="value">Operations Director</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 1. Purpose -->
+        <div class="card">
+            <h2><span class="section-num">1</span> Purpose</h2>
+            <p>This operating system guides a client from a rough business idea to a complete, structured business plan and 30-day launch action plan through an AI-powered conversation. The AI coach asks questions one at a time, extracts the information naturally, and compiles everything into a professional document with PDF export.</p>
+        </div>
+
+        <!-- 2. Overview -->
+        <div class="card">
+            <h2><span class="section-num">2</span> Overview</h2>
+            <ul class="tech-list">
+                <li><span class="tech-label">Type</span> AI-guided conversational tool</li>
+                <li><span class="tech-label">Technology</span> Single-file HTML/CSS/JS application</li>
+                <li><span class="tech-label">AI Provider</span> Claude (Anthropic) or ChatGPT (OpenAI) or Custom endpoint</li>
+                <li><span class="tech-label">Data Storage</span> Browser localStorage (client-side only)</li>
+                <li><span class="tech-label">Output</span> 10-section business plan + 30-day launch plan with PDF export</li>
+                <li><span class="tech-label">Requirements</span> No installation required &mdash; runs in any modern web browser</li>
+            </ul>
+        </div>
+
+        <!-- 3. Setup Instructions -->
+        <div class="card">
+            <h2><span class="section-num">3</span> Setup Instructions</h2>
+
+            <h3>For Operations Director Team (Deployment)</h3>
+            <ol class="step-list">
+                <li>The operating system is hosted on GitHub Pages</li>
+                <li>Access it at: <em>[URL will be updated after deployment]</em></li>
+                <li>For local testing: serve via Python HTTP server through the proxy server (<code>serve.py</code>)</li>
+            </ol>
+
+            <h3>For Clients (End Users)</h3>
+            <ol class="step-list" style="counter-reset: step-counter;">
+                <li>Open the Business Plan Builder link in your browser</li>
+                <li>Choose your AI provider (Claude recommended)</li>
+                <li>Enter your API key (get one from <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>)</li>
+                <li>Type your name</li>
+                <li>Click <strong>"Start Building Your Plan"</strong></li>
+                <li>Answer the AI coach's questions naturally &mdash; one at a time</li>
+                <li>Watch sections get completed in the sidebar as you go</li>
+                <li>Click <strong>"View Your Plan"</strong> at any time to see your progress</li>
+                <li>When all 10 sections are done, export as PDF</li>
+            </ol>
+
+            <div class="highlight-box">
+                <div class="hl-title">Tip</div>
+                <p>Your progress is automatically saved in the browser. You can close the tab and come back later &mdash; everything will still be there.</p>
+            </div>
+        </div>
+
+        <!-- 4. The 10 Sections -->
+        <div class="card">
+            <h2><span class="section-num">4</span> The 10 Sections</h2>
+            <div class="sections-grid">
+                <div class="section-row">
+                    <span class="num">1</span>
+                    <div>
+                        <div class="section-name">Business Idea</div>
+                        <div class="section-desc">What's the business, what problem does it solve</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">2</span>
+                    <div>
+                        <div class="section-name">Target Customer</div>
+                        <div class="section-desc">Who exactly is the ideal customer</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">3</span>
+                    <div>
+                        <div class="section-name">Your Edge</div>
+                        <div class="section-desc">What makes this genuinely different</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">4</span>
+                    <div>
+                        <div class="section-name">Products &amp; Pricing</div>
+                        <div class="section-desc">Specific offerings and price points</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">5</span>
+                    <div>
+                        <div class="section-name">Revenue Model</div>
+                        <div class="section-desc">Revenue targets and financial model</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">6</span>
+                    <div>
+                        <div class="section-name">Costs &amp; Investment</div>
+                        <div class="section-desc">Startup and monthly costs, funding</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">7</span>
+                    <div>
+                        <div class="section-name">Team &amp; Resources</div>
+                        <div class="section-desc">People, tools, skills needed</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">8</span>
+                    <div>
+                        <div class="section-name">Marketing &amp; Sales</div>
+                        <div class="section-desc">Channels, sales process, lead generation</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">9</span>
+                    <div>
+                        <div class="section-name">30-Day Launch Plan</div>
+                        <div class="section-desc">Week-by-week launch action plan with AI tools</div>
+                    </div>
+                </div>
+                <div class="section-row">
+                    <span class="num">10</span>
+                    <div>
+                        <div class="section-name">Success Metrics</div>
+                        <div class="section-desc">Milestones at 30, 90, 365 days, KPIs, risks</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Key Features -->
+        <div class="card">
+            <h2><span class="section-num">5</span> Key Features</h2>
+            <ul class="feature-list">
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>Conversational AI</strong> &mdash; Asks one question at a time, adapts based on answers</div>
+                </li>
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>Section Review</strong> &mdash; Click any completed section to review the discussion and data</div>
+                </li>
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>Edit Sections</strong> &mdash; Make changes to any section &mdash; AI updates the plan automatically</div>
+                </li>
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>Session Persistence</strong> &mdash; Progress saved in browser &mdash; come back anytime</div>
+                </li>
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>PDF Export</strong> &mdash; Print-ready business plan document</div>
+                </li>
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>UK Business Context</strong> &mdash; References Companies House, HMRC, UK regulations</div>
+                </li>
+                <li>
+                    <span class="feat-icon">&#10003;</span>
+                    <div><strong>AI Launch Guidance</strong> &mdash; Includes specific AI tools and prompts for launch tasks</div>
+                </li>
+            </ul>
+        </div>
+
+        <!-- 6. Technical Architecture -->
+        <div class="card">
+            <h2><span class="section-num">6</span> Technical Architecture</h2>
+            <ul class="tech-list">
+                <li><span class="tech-label">Codebase</span> Single HTML file (~1500 lines) with inline CSS and JavaScript</li>
+                <li><span class="tech-label">API Routing</span> API calls routed through local proxy server (<code>serve.py</code>) to avoid CORS</li>
+                <li><span class="tech-label">Proxy Support</span> Supports Anthropic, OpenAI, and custom API endpoints</li>
+                <li><span class="tech-label">Data Extraction</span> Plan data extracted from AI responses using <code>[PLANDATA:section_id]{JSON}[/PLANDATA]</code> markers</li>
+                <li><span class="tech-label">Persistence</span> State persisted to localStorage under key <code>od-bplan-v4</code></li>
+            </ul>
+        </div>
+
+        <!-- 7. Troubleshooting -->
+        <div class="card">
+            <h2><span class="section-num">7</span> Troubleshooting</h2>
+
+            <div class="warning-box">
+                <div class="warn-title">"Failed to fetch"</div>
+                <p>Check the proxy server is running. Make sure your API key is valid and has not expired.</p>
+            </div>
+
+            <div class="warning-box">
+                <div class="warn-title">"Could not connect to AI"</div>
+                <p>Verify your API key is correct. Check billing is active on your API provider account (Anthropic or OpenAI).</p>
+            </div>
+
+            <div class="warning-box">
+                <div class="warn-title">Stuck on setup screen</div>
+                <p>Clear your browser data for this site, or add <code>?reset=1</code> to the end of the URL to force a fresh start.</p>
+            </div>
+
+            <div class="warning-box">
+                <div class="warn-title">Lost progress</div>
+                <p>Data is stored in your browser's localStorage. Using a different browser or device won't have your saved progress. Stick to the same browser you started with.</p>
+            </div>
+        </div>
+
+        <!-- 8. Version History -->
+        <div class="card">
+            <h2><span class="section-num">8</span> Version History</h2>
+            <table class="version-table">
+                <thead>
+                    <tr>
+                        <th>Version</th>
+                        <th>Date</th>
+                        <th>Changes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1.0.0</td>
+                        <td>11 April 2026</td>
+                        <td>Initial release &mdash; conversational AI builder with 10 sections, plan view with KPI cards, tab navigation, rich card layouts, discussion review, section editing, PDF export</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 9. Dependencies -->
+        <div class="card">
+            <h2><span class="section-num">9</span> Dependencies</h2>
+            <ul class="dep-list">
+                <li><span class="dep-dot"></span> Modern web browser (Chrome, Firefox, Safari, Edge)</li>
+                <li><span class="dep-dot"></span> API key from Anthropic (Claude) or OpenAI (ChatGPT)</li>
+                <li><span class="dep-dot"></span> Proxy server (<code>serve.py</code>) for local deployment</li>
+                <li><span class="dep-dot"></span> Internet connection for AI API calls</li>
+            </ul>
+        </div>
+
+        <!-- Footer -->
+        <div class="page-footer">
+            <span class="footer-id">Operations Director &mdash; PLAN-01 v1.0.0</span>
+            <a href="../">&larr; Back to Operating Systems hub</a>
+        </div>
+
+    </div>
+</body>
+</html>
