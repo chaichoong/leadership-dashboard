@@ -4413,8 +4413,17 @@
             if (rent <= 0) return;
 
             const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-            const daysOverdue = Number(getField(tenancy, F.tenDaysOverdue)) || 0;
             const paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
+
+            // Calculate days overdue directly — don't rely on Airtable formula
+            // which may not be populated for all tenancies
+            const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
+            let daysOverdue = 0;
+            if (today >= dueThisMonth) {
+                daysOverdue = Math.floor((today - dueThisMonth) / 86400000);
+            }
+            // If we're early in the month and due day hasn't passed yet, check last month
+            // (in case they didn't pay last month either — but that would already be flagged)
 
             // Flag as potential CFV if: 2+ days overdue AND not paid this month
             if (daysOverdue >= CFV_TOLERANCE_DAYS && !paidThisMonth) {
