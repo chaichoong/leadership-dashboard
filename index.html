@@ -1046,13 +1046,13 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',  icon: '📊', pageVer: '2.0', sopFile: 'sop.html',                   sopVer: '2.0', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',  icon: '📊', pageVer: '2.3', sopFile: 'sop.html',                   sopVer: '2.0', standalone: 'index.html#overview' },
         { id: 'airtable',   name: 'Contractor Job List',   icon: '🔧', pageVer: '1.0', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.0', standalone: 'index.html#airtable' },
-        { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '1.0', sopFile: 'sop-invoices.html',           sopVer: '1.0', standalone: 'index.html#invoices' },
-        { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.0', sopFile: 'sop-cfvs.html',               sopVer: '1.0', standalone: 'index.html#cfv' },
+        { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '1.2', sopFile: 'sop-invoices.html',           sopVer: '1.0', standalone: 'index.html#invoices' },
+        { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.0', standalone: 'index.html#cfv' },
         { id: 'comms',      name: 'Inbound Comms',         icon: '📨', pageVer: '2.1', sopFile: 'inbound-comms-sop.html',      sopVer: '2.1', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
-        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.0', sopFile: 'sop-sitemap.html',            sopVer: '1.0', standalone: 'index.html#sitemap' },
+        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.0', standalone: 'index.html#sitemap' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
@@ -4948,21 +4948,15 @@
         section.style.display = 'block';
         container.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8">Loading full comment history...</div>';
 
-        // Get linked tenant ID for this tenancy
-        const tenancy = allTenancies.find(t => t.id === tenancyId);
-        const tenantLookup = buildTenantLookup();
-        const tenant = tenancy ? getTenantForTenancy(tenancy, tenantLookup) : null;
-        const tenantId = tenant ? tenant.id : null;
-        const tenantName = tenant ? (getField(tenant, F.tenantName) || '') : '';
+        // Fetch all comments from the tenancy record
+        const tenancyComments = await fetchAllComments(TABLES.tenancies, tenancyId);
 
-        // Fetch comments from both tenancy AND tenant records in parallel
-        const [tenancyComments, tenantComments] = await Promise.all([
-            fetchAllComments(TABLES.tenancies, tenancyId),
-            tenantId ? fetchAllComments(TABLES.tenants, tenantId) : Promise.resolve([])
-        ]);
-
-        const tenancyHtml = formatCommentsList(tenancyComments, 'No tenancy comments yet.');
-        const tenantHtml = tenantId ? formatCommentsList(tenantComments, 'No tenant comments yet.') : '';
+        let commentsHtml = '';
+        if (tenancyComments.length > 0) {
+            commentsHtml = formatCommentsList(tenancyComments, '');
+        } else {
+            commentsHtml = '<div style="color:#94a3b8;font-size:12px;padding:12px 0">No comments yet. Your Airtable PAT may need the <strong>data.recordComments:read</strong> scope — update at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>.</div>';
+        }
 
         container.innerHTML = `
             <div class="cfv-comment-box">
@@ -4971,13 +4965,9 @@
                     <button class="cfv-action-btn" onclick="document.getElementById('cfvCommentsSection').style.display='none'">Close</button>
                 </div>
                 <div style="font-size:12px;font-weight:700;color:#1e293b;margin-bottom:6px;padding-top:8px">Tenancy Comments (${tenancyComments.length})</div>
-                <div class="cfv-comment-list" style="max-height:300px">${tenancyHtml}</div>
-                ${tenantId ? `
-                    <div style="font-size:12px;font-weight:700;color:#1e293b;margin:12px 0 6px;padding-top:8px;border-top:1px solid #e2e8f0">Tenant Comments — ${escHtml(tenantName)} (${tenantComments.length})</div>
-                    <div class="cfv-comment-list" style="max-height:200px">${tenantHtml}</div>
-                ` : ''}
+                <div class="cfv-comment-list" style="max-height:400px">${commentsHtml}</div>
                 <div style="margin-top:12px;padding-top:8px;border-top:1px solid #e2e8f0">
-                    <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment to the tenancy record..."></textarea>
+                    <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..."></textarea>
                     <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
                 </div>
             </div>
