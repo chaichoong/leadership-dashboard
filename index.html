@@ -4401,6 +4401,22 @@
                         entry.paymentDetected = true;
                     }
                 }
+
+                // Re-flag check: if CFV Actioned but next due date has passed (2+ days) with no payment
+                if (statusName === 'cfv actioned' && !paidDetected) {
+                    const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
+                    const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
+                    const daysSinceDue = today >= dueThisMonth ? Math.floor((today - dueThisMonth) / 86400000) : 0;
+                    const paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
+
+                    if (daysSinceDue >= CFV_TOLERANCE_DAYS && !paidThisMonth) {
+                        const reflagDismissKey = 'cfv_reflag_dismissed_' + tenancy.id;
+                        if (!localStorage.getItem(reflagDismissKey)) {
+                            entry.reflagged = true;
+                        }
+                    }
+                }
+
                 cfvList.push(entry);
                 return;
             }
@@ -4601,7 +4617,9 @@
         });
 
         tbody.innerHTML = filteredList.map((entry, idx) => {
-            const statusBadge = entry.status === 'cfv actioned'
+            const statusBadge = entry.reflagged
+                ? '<span class="cfv-status-badge potential">Re-flagged ⚠</span>'
+                : entry.status === 'cfv actioned'
                 ? '<span class="cfv-status-badge cfv-actioned">CFV Actioned</span>'
                 : entry.status === 'potential'
                 ? '<span class="cfv-status-badge potential">Potential CFV</span>'
@@ -4643,10 +4661,18 @@
                     <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
+            } else if (entry.reflagged) {
+                // CFV Actioned but re-flagged — confirm as CFV again or dismiss
+                actionsHtml = `
+                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                `;
             } else {
-                // CFV Actioned — can return to In Payment
+                // CFV Actioned — can return to In Payment or move back to CFV
                 actionsHtml = `
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
+                    <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
@@ -4708,14 +4734,27 @@
 
     // Confirmation step before any status change
     function cfvConfirmAction(action, tenancyId, surname, btn) {
-        const actionLabel = action === 'actioned' ? 'Mark as CFV Actioned' : 'Return to In Payment';
-        const msg = `Are you sure you want to ${actionLabel} for ${surname}?`;
+        const labels = { actioned: 'Mark as CFV Actioned', inpayment: 'Return to In Payment', cfv: 'Move back to CFV' };
+        const msg = `Are you sure you want to ${labels[action] || action} for ${surname}?`;
         if (!confirm(msg)) return;
-        if (action === 'actioned') {
-            cfvMarkActioned(tenancyId, btn);
-        } else {
-            cfvReturnToPayment(tenancyId, btn);
-        }
+        if (action === 'actioned') cfvMarkActioned(tenancyId, btn);
+        else if (action === 'cfv') cfvMoveToCFV(tenancyId, btn);
+        else cfvReturnToPayment(tenancyId, btn);
+    }
+
+    async function cfvMoveToCFV(tenancyId, btn) {
+        btn.textContent = '...';
+        btn.disabled = true;
+        const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
+        await addTenancyComment(tenancyId, 'Moved back to CFV from CFV Actioned via Leadership Dashboard.');
+        const rec = allTenancies.find(t => t.id === tenancyId);
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
+        btn.textContent = 'Done ✓';
+        btn.style.background = '#fee2e2';
+        btn.style.color = '#dc2626';
+        setTimeout(() => renderCFVTab(), 1500);
+        setTimeout(() => loadDashboard(), 3000);
     }
 
     function cfvDismissReturn(tenancyId, btn) {
@@ -4756,6 +4795,29 @@
         btn.style.background = '#dcfce7';
         btn.style.color = '#16a34a';
         setTimeout(() => renderCFVTab(), 1500);
+    }
+
+    // Re-flag: confirm CFV Actioned back to CFV
+    async function cfvConfirmReflag(tenancyId, surname, btn) {
+        if (!confirm(`Re-flag ${surname} as CFV? Payment still hasn't come through.`)) return;
+        btn.textContent = '...';
+        btn.disabled = true;
+        const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
+        await addTenancyComment(tenancyId, 'Re-flagged as CFV — payment not received on next due date.');
+        const rec = allTenancies.find(t => t.id === tenancyId);
+        if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
+        localStorage.removeItem('cfv_reflag_dismissed_' + tenancyId);
+        btn.textContent = 'Confirmed ✓';
+        setTimeout(() => renderCFVTab(), 1500);
+        setTimeout(() => loadDashboard(), 3000);
+    }
+
+    // Dismiss re-flag — keep as CFV Actioned
+    function cfvDismissReflag(tenancyId, btn) {
+        localStorage.setItem('cfv_reflag_dismissed_' + tenancyId, new Date().toISOString());
+        btn.textContent = 'Dismissed';
+        setTimeout(() => renderCFVTab(), 1000);
     }
 
     async function cfvMarkActioned(tenancyId, btn) {
@@ -4814,38 +4876,56 @@
         } catch (e) { console.warn('Failed to add comment:', e); }
     }
 
-    async function fetchTenancyComments(recordId) {
+    // Fetch ALL comments from a record (paginate if needed)
+    async function fetchAllComments(tableId, recordId) {
         if (!PAT) return [];
+        const all = [];
+        let offset = null;
         try {
-            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${recordId}/comments`, {
-                headers: { 'Authorization': 'Bearer ' + PAT }
-            });
-            if (!resp.ok) return [];
-            const data = await resp.json();
-            return (data.comments || []).slice(0, 10); // latest 10
-        } catch (e) { return []; }
+            do {
+                let url = `https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recordId}/comments`;
+                if (offset) url += '?offset=' + encodeURIComponent(offset);
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!resp.ok) break;
+                const data = await resp.json();
+                all.push(...(data.comments || []));
+                offset = data.offset || null;
+            } while (offset);
+        } catch (e) { console.warn('Failed to fetch comments:', e); }
+        return all;
+    }
+
+    function formatCommentsList(comments, emptyMsg) {
+        if (comments.length === 0) return `<div style="color:#94a3b8;font-size:12px;padding:8px 0">${emptyMsg}</div>`;
+        return comments.map(c => {
+            const d = new Date(c.createdTime);
+            const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            const author = c.author?.name || c.author?.email || 'System';
+            return `<div class="cfv-comment-item"><span class="cfv-comment-date">${dateStr} — ${escHtml(author)}</span><br>${escHtml(c.text)}</div>`;
+        }).join('');
     }
 
     async function cfvShowComments(tenancyId, surname, ref) {
         const section = document.getElementById('cfvCommentsSection');
         const container = document.getElementById('cfvCommentsContainer');
         section.style.display = 'block';
+        container.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8">Loading full comment history...</div>';
 
-        container.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8">Loading comments...</div>';
+        // Get linked tenant ID for this tenancy
+        const tenancy = allTenancies.find(t => t.id === tenancyId);
+        const tenantLookup = buildTenantLookup();
+        const tenant = tenancy ? getTenantForTenancy(tenancy, tenantLookup) : null;
+        const tenantId = tenant ? tenant.id : null;
+        const tenantName = tenant ? (getField(tenant, F.tenantName) || '') : '';
 
-        const comments = await fetchTenancyComments(tenancyId);
+        // Fetch comments from both tenancy AND tenant records in parallel
+        const [tenancyComments, tenantComments] = await Promise.all([
+            fetchAllComments(TABLES.tenancies, tenancyId),
+            tenantId ? fetchAllComments(TABLES.tenants, tenantId) : Promise.resolve([])
+        ]);
 
-        let commentsHtml = '';
-        if (comments.length > 0) {
-            commentsHtml = comments.map(c => {
-                const d = new Date(c.createdTime);
-                const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-                const author = c.author?.name || c.author?.email || 'System';
-                return `<div class="cfv-comment-item"><span class="cfv-comment-date">${dateStr} — ${escHtml(author)}</span><br>${escHtml(c.text)}</div>`;
-            }).join('');
-        } else {
-            commentsHtml = '<div style="color:#94a3b8;font-size:12px;padding:8px 0">No comments yet.</div>';
-        }
+        const tenancyHtml = formatCommentsList(tenancyComments, 'No tenancy comments yet.');
+        const tenantHtml = tenantId ? formatCommentsList(tenantComments, 'No tenant comments yet.') : '';
 
         container.innerHTML = `
             <div class="cfv-comment-box">
@@ -4853,13 +4933,19 @@
                     <span class="cfv-comment-tenant">${escHtml(surname)} — ${escHtml(ref)}</span>
                     <button class="cfv-action-btn" onclick="document.getElementById('cfvCommentsSection').style.display='none'">Close</button>
                 </div>
-                <div class="cfv-comment-list">${commentsHtml}</div>
-                <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..."></textarea>
-                <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
+                <div style="font-size:12px;font-weight:700;color:#1e293b;margin-bottom:6px;padding-top:8px">Tenancy Comments (${tenancyComments.length})</div>
+                <div class="cfv-comment-list" style="max-height:300px">${tenancyHtml}</div>
+                ${tenantId ? `
+                    <div style="font-size:12px;font-weight:700;color:#1e293b;margin:12px 0 6px;padding-top:8px;border-top:1px solid #e2e8f0">Tenant Comments — ${escHtml(tenantName)} (${tenantComments.length})</div>
+                    <div class="cfv-comment-list" style="max-height:200px">${tenantHtml}</div>
+                ` : ''}
+                <div style="margin-top:12px;padding-top:8px;border-top:1px solid #e2e8f0">
+                    <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment to the tenancy record..."></textarea>
+                    <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
+                </div>
             </div>
         `;
 
-        // Scroll to comments
         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
