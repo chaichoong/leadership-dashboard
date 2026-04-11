@@ -2402,10 +2402,12 @@
             <div class="kpi-card">
                 <div class="kpi-card-label">Opening Balance</div>
                 <div class="kpi-card-value">${fmt(openingBalance)}</div>
+                <div class="kpi-card-sub">Santander + TNT Zempler</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Total In</div>
                 <div class="kpi-card-value text-green">${fmt(totalIn)}</div>
+                <div class="kpi-card-sub">Projected inflows over 31 days</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Total Out (incl. Reserves)</div>
@@ -2415,10 +2417,12 @@
             <div class="kpi-card">
                 <div class="kpi-card-label">Net Change (after Reserves)</div>
                 <div class="kpi-card-value ${netChangeAfterVar >= 0 ? 'text-green' : 'text-red'}">${netChangeAfterVar >= 0 ? '+' : '-'}${fmt(netChangeAfterVar)}</div>
+                <div class="kpi-card-sub">Income minus all costs and reserves</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Final Balance (after Reserves)</div>
                 <div class="kpi-card-value" style="color:#d97706">${fmt(finalBalanceAfterVar)}</div>
+                <div class="kpi-card-sub">Day 31 on the orange line</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Lowest Balance (after Reserves)</div>
