@@ -1696,6 +1696,33 @@
             })
             .join('');
 
+        // Detect potential CFVs for the alert badge on the Leadership Dashboard
+        let potentialCfvCount = 0;
+        const todayForCfv = new Date();
+        todayForCfv.setHours(0,0,0,0);
+        tenancies.forEach(t => {
+            const status = getPaymentStatusName(getField(t, F.tenPayStatus)).toLowerCase().trim();
+            if (status !== 'in payment') return;
+            if (!isTenantStatusActive(t)) return;
+            const rent = Number(getField(t, F.tenRent)) || 0;
+            if (rent <= 0) return;
+            const dueDay = getNumVal(t, F.tenDueDay, 1);
+            const dueThisMonth = new Date(todayForCfv.getFullYear(), todayForCfv.getMonth(), dueDay);
+            const daysOver = todayForCfv >= dueThisMonth ? Math.floor((todayForCfv - dueThisMonth) / 86400000) : 0;
+            const paid = getField(t, F.tenPaidThisMonth);
+            if (daysOver >= CFV_TOLERANCE_DAYS && !paid && !localStorage.getItem('cfv_dismissed_' + t.id)) {
+                potentialCfvCount++;
+            }
+        });
+
+        const potentialCfvAlert = potentialCfvCount > 0
+            ? `<div onclick="switchTab('cfv')" style="margin-top:8px;padding:8px 12px;background:#fef3c7;border:1px solid #d97706;border-radius:6px;cursor:pointer;font-size:12px;color:#92400e;display:flex;align-items:center;gap:6px">
+                <span style="font-size:16px">⚠️</span>
+                <span><strong>${potentialCfvCount} potential CFV${potentialCfvCount !== 1 ? 's' : ''}</strong> detected — click to review</span>
+                <span style="margin-left:auto;font-size:10px;color:#d97706">View CFVs →</span>
+               </div>`
+            : '';
+
         document.getElementById('tenancyCards').innerHTML = `
             ${expandableCard('Total Tenancies', activeTenancies.length, '', allTenancyDetails)}
             ${expandableCard('In Payment', inPaymentTenancies.length, '', tenancyDetailList(inPaymentTenancies), 'text-green')}
@@ -1707,6 +1734,16 @@
                 <div class="progress-bar"><div class="progress-bar-fill ${Number(paidRate) >= 80 ? 'green' : Number(paidRate) >= 60 ? 'amber' : 'red'}" style="width:${paidRate}%"></div></div>
             </div>
         `;
+
+        // Show alert banner below tenancy metrics if potential CFVs detected
+        const existingAlert = document.getElementById('cfvAlertBanner');
+        if (existingAlert) existingAlert.remove();
+        if (potentialCfvAlert) {
+            const alertDiv = document.createElement('div');
+            alertDiv.id = 'cfvAlertBanner';
+            alertDiv.innerHTML = potentialCfvAlert;
+            document.getElementById('tenancyCards').parentElement.appendChild(alertDiv);
+        }
 
         // ── SECTION 4: 31-Day Operational Metrics ──
         const thirtyDaysAgo = new Date(today);
