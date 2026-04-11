@@ -1555,7 +1555,7 @@
                 <div class="kpi-card-value">${fmt(openingBalance)}</div>
                 <div class="kpi-card-sub">Santander ${fmt(santBal)} | TNT Zempler ${fmt(zempBal)}</div>
             </div>
-            ${expandableCard('Monthly Income', `<span class="text-amber">£${Math.floor(inPaymentIncome).toLocaleString('en-GB')}</span> <span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span> <span class="text-green">£${Math.floor(monthlyIncome).toLocaleString('en-GB')}</span>`,
+            ${expandableCard('Monthly Income', `<span style="color:#d97706">£${Math.floor(inPaymentIncome).toLocaleString('en-GB')}</span> <span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span> <span style="color:#16a34a">£${Math.floor(monthlyIncome).toLocaleString('en-GB')}</span>`,
                 `${inPaymentCount} In Payment (confirmed) + ${cfvActionedCount} CFV Actioned (expected)`,
                 `<div style="margin-bottom:8px;font-weight:600;color:#1e293b">In Payment (${inPaymentCount})</div>` +
                 [...inPaymentTenanciesS1].sort((a,b) => (Number(getField(a, F.tenDueDay))||99) - (Number(getField(b, F.tenDueDay))||99)).map(r => {
@@ -1584,12 +1584,12 @@
             )}
             <div class="kpi-card">
                 <div class="kpi-card-label">Monthly Gross Profit</div>
-                <div class="kpi-card-value"><span class="text-amber">£${Math.floor(grossProfitLow).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span class="text-green">£${Math.floor(grossProfitHigh).toLocaleString('en-GB')}</span></div>
+                <div class="kpi-card-value"><span style="color:#d97706">£${Math.floor(grossProfitLow).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">£${Math.floor(grossProfitHigh).toLocaleString('en-GB')}</span></div>
                 <div class="kpi-card-sub">In Payment only → incl. CFV Actioned</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Gross Margin</div>
-                <div class="kpi-card-value"><span class="text-amber">${grossMarginLow}%</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span class="text-green">${grossMarginHigh}%</span></div>
+                <div class="kpi-card-value"><span style="color:#d97706">${grossMarginLow}%</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">${grossMarginHigh}%</span></div>
                 <div class="kpi-card-sub">In Payment only → incl. CFV Actioned</div>
             </div>
         `;
@@ -2387,7 +2387,17 @@
         const finalBalance = balance;
         const netChange = finalBalance - openingBalance;
 
-        // Cash flow KPI cards
+        // After variable costs figures (orange line values)
+        const totalVarCostReserve = dailyVarCostReserve * days.length;
+        const finalBalanceAfterVar = finalBalance - totalVarCostReserve;
+        const netChangeAfterVar = finalBalanceAfterVar - openingBalance;
+        let lowestBalAfterVar = openingBalance;
+        let lowestDayAfterVar = '';
+        chartDataWorstCase.forEach((v, idx) => {
+            if (v < lowestBalAfterVar) { lowestBalAfterVar = v; lowestDayAfterVar = chartLabels[idx]; }
+        });
+
+        // Cash flow KPI cards — based on After Variable Costs (orange line)
         document.getElementById('cashflowKPIs').innerHTML = `
             <div class="kpi-card">
                 <div class="kpi-card-label">Opening Balance</div>
@@ -2398,21 +2408,22 @@
                 <div class="kpi-card-value text-green">${fmt(totalIn)}</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Total Out</div>
-                <div class="kpi-card-value text-red">${fmt(totalOut)}</div>
+                <div class="kpi-card-label">Total Out (incl. Reserves)</div>
+                <div class="kpi-card-value text-red">${fmt(totalOut + totalVarCostReserve)}</div>
+                <div class="kpi-card-sub">Fixed ${fmt(totalOut)} + Variable ${fmt(totalVarCostReserve)}</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Net Change</div>
-                <div class="kpi-card-value ${netChange >= 0 ? 'text-green' : 'text-red'}">${netChange >= 0 ? '+' : '-'}${fmt(netChange)}</div>
+                <div class="kpi-card-label">Net Change (after Reserves)</div>
+                <div class="kpi-card-value ${netChangeAfterVar >= 0 ? 'text-green' : 'text-red'}">${netChangeAfterVar >= 0 ? '+' : '-'}${fmt(netChangeAfterVar)}</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Final Balance</div>
-                <div class="kpi-card-value ${finalBalance >= 0 ? 'text-green' : 'text-red'}">${fmt(finalBalance)}</div>
+                <div class="kpi-card-label">Final Balance (after Reserves)</div>
+                <div class="kpi-card-value" style="color:#d97706">${fmt(finalBalanceAfterVar)}</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Lowest Balance</div>
-                <div class="kpi-card-value ${lowestBal >= 0 ? 'text-amber' : 'text-red'}">${fmtAccounting(lowestBal)}</div>
-                <div class="kpi-card-sub">${lowestDay}</div>
+                <div class="kpi-card-label">Lowest Balance (after Reserves)</div>
+                <div class="kpi-card-value ${lowestBalAfterVar >= 0 ? '' : 'text-red'}" style="${lowestBalAfterVar >= 0 ? 'color:#d97706' : ''}">${fmtAccounting(lowestBalAfterVar)}</div>
+                <div class="kpi-card-sub">${lowestDayAfterVar}</div>
             </div>
         `;
 
