@@ -4923,7 +4923,12 @@
                 let url = `https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recordId}/comments`;
                 if (offset) url += '?offset=' + encodeURIComponent(offset);
                 const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
-                if (!resp.ok) break;
+                if (!resp.ok) {
+                    if (resp.status === 403 || resp.status === 422) {
+                        console.error('Comments API rejected — PAT likely missing data.recordComments:read scope. Status:', resp.status);
+                    }
+                    break;
+                }
                 const data = await resp.json();
                 all.push(...(data.comments || []));
                 offset = data.offset || null;
