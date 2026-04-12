@@ -905,6 +905,22 @@
                 <div class="cards-grid" id="invoiceSummaryCards"></div>
             </div>
             <div class="section">
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px">
+                        Sort by:
+                        <select id="invSortBy" onchange="renderInvoiceTab()" style="font-size:12px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">
+                            <option value="date">Date (oldest first)</option>
+                            <option value="date-desc">Date (newest first)</option>
+                            <option value="amount">Amount (high→low)</option>
+                            <option value="amount-asc">Amount (low→high)</option>
+                            <option value="payee">Payee (A→Z)</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px">
+                        Filter:
+                        <input id="invFilterText" type="text" placeholder="Search payee, description, ref…" oninput="renderInvoiceTab()" style="font-size:12px;padding:2px 8px;border:1px solid #e2e8f0;border-radius:4px;width:220px">
+                    </label>
+                </div>
                 <div class="invoice-table-wrapper">
                     <table class="invoice-table">
                         <thead>
@@ -3468,14 +3484,29 @@
         // Cross-reference with Airtable transactions for AI matching
         const txMatches = matchInvoicesToTransactions(sourceData, allTransactions);
 
-        // Sort by effective date (due date if known, else email date), oldest first
-        const sorted = [...sourceData].sort((a, b) =>
-            new Date(a.dueDate || a.emailDate) - new Date(b.dueDate || b.emailDate)
-        );
+        // Filter by search text
+        const filterText = (document.getElementById('invFilterText')?.value || '').toLowerCase().trim();
+        const filtered = filterText
+            ? sourceData.filter(inv =>
+                (inv.payee || '').toLowerCase().includes(filterText) ||
+                (inv.desc || '').toLowerCase().includes(filterText) ||
+                (inv.ref || '').toLowerCase().includes(filterText))
+            : sourceData;
 
-        // Summary calculations
+        // Sort based on dropdown selection
+        const sortBy = document.getElementById('invSortBy')?.value || 'date';
+        const sorted = [...filtered].sort((a, b) => {
+            if (sortBy === 'date') return new Date(a.dueDate || a.emailDate) - new Date(b.dueDate || b.emailDate);
+            if (sortBy === 'date-desc') return new Date(b.dueDate || b.emailDate) - new Date(a.dueDate || a.emailDate);
+            if (sortBy === 'amount') return (b.amount || 0) - (a.amount || 0);
+            if (sortBy === 'amount-asc') return (a.amount || 0) - (b.amount || 0);
+            if (sortBy === 'payee') return (a.payee || '').localeCompare(b.payee || '');
+            return 0;
+        });
+
+        // Summary calculations (always based on all unpaid, not filtered)
         let knownTotal = 0, unknownCount = 0, overdueCount = 0;
-        sorted.forEach(inv => {
+        sourceData.forEach(inv => {
             if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
             if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
         });
