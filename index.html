@@ -707,7 +707,7 @@
             <input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off">
             <button class="auth-btn" onclick="authenticate()">Connect</button>
             <div class="auth-error" id="authError">Invalid token. Please check and try again.</div>
-            <div class="auth-note">Your token is stored in this browser tab only and cleared when you close it. No data is sent anywhere except Airtable's API.</div>
+            <div class="auth-note">Your token is saved in this browser so you stay logged in. Use "Logout" in the sidebar to clear it. No data is sent anywhere except Airtable's API.</div>
         </div>
     </div>
 
@@ -725,7 +725,7 @@
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <h1>&#x2699;&#xFE0F; Operations Director</h1>
-            <p>Kevin Brittain &bull; Founder</p>
+            <p>Kevin Brittain &bull; Founder &nbsp;<a href="#" onclick="event.preventDefault();logout()" style="color:#94a3b8;font-size:10px;text-decoration:underline">Logout</a></p>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
@@ -1304,14 +1304,21 @@
         const input = document.getElementById('patInput').value.trim();
         if (!input) return;
         PAT = input;
-        sessionStorage.setItem('_dlr_pat', input);
+        localStorage.setItem('_dlr_pat', input);
         document.getElementById('authScreen').style.display = 'none';
         loadDashboard();
     }
 
+    function logout() {
+        PAT = '';
+        localStorage.removeItem('_dlr_pat');
+        document.getElementById('authScreen').style.display = 'flex';
+        document.getElementById('dashboard').style.display = 'none';
+    }
+
     // Check session on load
     (function init() {
-        const saved = sessionStorage.getItem('_dlr_pat');
+        const saved = localStorage.getItem('_dlr_pat');
         if (saved) {
             PAT = saved;
             document.getElementById('authScreen').style.display = 'none';
@@ -1339,7 +1346,7 @@
                 headers: { 'Authorization': `Bearer ${PAT}` }
             });
             if (resp.status === 401 || resp.status === 403) {
-                sessionStorage.removeItem('_dlr_pat');
+                localStorage.removeItem('_dlr_pat');
                 document.getElementById('authScreen').style.display = 'flex';
                 document.getElementById('authError').style.display = 'block';
                 document.getElementById('loadingOverlay').style.display = 'none';
