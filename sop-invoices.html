@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>Invoices &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Invoice ingestion, AI matching, approval workflow and payment tracking</div>
-    <div class="version">Version 1.0 &middot; 11 April 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.2 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -352,11 +352,12 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         <a href="#columns"><span class="toc-num">2</span> Invoice Table Columns</a>
         <a href="#kpi"><span class="toc-num">3</span> KPI Summary Cards</a>
         <a href="#ai"><span class="toc-num">4</span> AI Matching Logic</a>
-        <a href="#approve"><span class="toc-num">5</span> Approve / Reject Flow</a>
-        <a href="#paid"><span class="toc-num">6</span> Mark as Paid</a>
-        <a href="#kb"><span class="toc-num">7</span> Knowledge Base</a>
-        <a href="#gas"><span class="toc-num">8</span> Google Apps Script Setup</a>
-        <a href="#troubleshooting"><span class="toc-num">9</span> Troubleshooting</a>
+        <a href="#inline"><span class="toc-num">5</span> Inline Match Suggestions</a>
+        <a href="#approve"><span class="toc-num">6</span> Approve / Reject Flow</a>
+        <a href="#paid"><span class="toc-num">7</span> Mark as Paid</a>
+        <a href="#kb"><span class="toc-num">8</span> Knowledge Base</a>
+        <a href="#gas"><span class="toc-num">9</span> Google Apps Script Setup</a>
+        <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
       </div>
     </div>
   </div>
@@ -450,9 +451,28 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 5. Approve / Reject Flow -->
+  <!-- 5. Inline Match Suggestions (v1.2) -->
+  <div class="section" id="inline">
+    <h2 class="section-title"><span class="icon">&#129302;</span> 5. Inline Match Suggestions</h2>
+    <div class="card">
+      <p>When the AI engine identifies a probable supplier match, a <strong>match suggestion row</strong> appears directly beneath the invoice row in the table. This allows one-click approval or rejection without opening an expanded detail panel.</p>
+      <div class="card-header">How Inline Suggestions Work</div>
+      <ol class="steps">
+        <li>After AI matching runs, invoices with a suggested supplier display a highlighted sub-row showing the proposed match and confidence score.</li>
+        <li>Click <strong>Approve</strong> (green) to accept the suggestion — the supplier is linked and the invoice moves to the approval queue.</li>
+        <li>Click <strong>Reject</strong> (grey/red on hover) to dismiss the suggestion — the invoice remains pending for manual assignment.</li>
+        <li>Approved and rejected decisions are recorded in the Airtable record and used to improve future AI accuracy.</li>
+      </ol>
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>Inline suggestions only appear for invoices where AI confidence is between 60&ndash;84%. High-confidence matches (&ge;85%) are auto-applied with no manual step required.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Approve / Reject Flow -->
   <div class="section" id="approve">
-    <h2 class="section-title"><span class="icon">&#9989;</span> 5. Approve / Reject Flow</h2>
+    <h2 class="section-title"><span class="icon">&#9989;</span> 6. Approve / Reject Flow</h2>
     <div class="card">
       <div class="card-header">Review Workflow</div>
       <ol class="steps">
@@ -469,9 +489,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 6. Mark as Paid -->
+  <!-- 7. Mark as Paid -->
   <div class="section" id="paid">
-    <h2 class="section-title"><span class="icon">&#128181;</span> 6. Mark as Paid</h2>
+    <h2 class="section-title"><span class="icon">&#128181;</span> 7. Mark as Paid</h2>
     <div class="card">
       <ol class="steps">
         <li>Once payment has been made via the bank, return to the Invoices tab.</li>
@@ -486,9 +506,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 7. Knowledge Base -->
+  <!-- 8. Knowledge Base -->
   <div class="section" id="kb">
-    <h2 class="section-title"><span class="icon">&#128218;</span> 7. Knowledge Base</h2>
+    <h2 class="section-title"><span class="icon">&#128218;</span> 8. Knowledge Base</h2>
     <div class="card">
       <div class="card-header">Key Concepts</div>
       <ul>
@@ -500,9 +520,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 8. Google Apps Script Setup -->
+  <!-- 9. Google Apps Script Setup -->
   <div class="section" id="gas">
-    <h2 class="section-title"><span class="icon">&#9881;</span> 8. Google Apps Script Setup</h2>
+    <h2 class="section-title"><span class="icon">&#9881;</span> 9. Google Apps Script Setup</h2>
     <div class="card">
       <div class="card-header">How the Ingestion Script Works</div>
       <ol class="steps">
@@ -519,9 +539,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 9. Troubleshooting -->
+  <!-- 10. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 9. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 10. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
         <div class="ts-problem">Invoice email not appearing in the system</div>

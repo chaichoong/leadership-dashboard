@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Detection, chase sequences, payment tracking and resolution of missing rent payments</div>
-    <div class="version">Version 1.0 &middot; 11 April 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.4 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -351,13 +351,15 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         <a href="#overview"><span class="toc-num">1</span> Overview &amp; Detection Logic</a>
         <a href="#columns"><span class="toc-num">2</span> CFV Table Columns</a>
         <a href="#lifecycle"><span class="toc-num">3</span> CFV Lifecycle Flow</a>
-        <a href="#overdue"><span class="toc-num">4</span> Days Overdue Calculation</a>
-        <a href="#chase"><span class="toc-num">5</span> 3-Stage Chase Sequence</a>
-        <a href="#payment"><span class="toc-num">6</span> Payment Detection</a>
-        <a href="#actions"><span class="toc-num">7</span> Action Buttons</a>
-        <a href="#comments"><span class="toc-num">8</span> Comments System</a>
-        <a href="#status-ids"><span class="toc-num">9</span> Airtable Status IDs</a>
-        <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
+        <a href="#potential"><span class="toc-num">4</span> Potential CFVs</a>
+        <a href="#overdue"><span class="toc-num">5</span> Days Overdue Calculation</a>
+        <a href="#chase"><span class="toc-num">6</span> 3-Stage Chase Sequence</a>
+        <a href="#payment"><span class="toc-num">7</span> Payment Detection</a>
+        <a href="#uccheck"><span class="toc-num">8</span> UC Check</a>
+        <a href="#actions"><span class="toc-num">9</span> Action Buttons</a>
+        <a href="#comments"><span class="toc-num">10</span> Comments System</a>
+        <a href="#status-ids"><span class="toc-num">11</span> Airtable Status IDs</a>
+        <a href="#troubleshooting"><span class="toc-num">12</span> Troubleshooting</a>
       </div>
     </div>
   </div>
@@ -430,9 +432,31 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 4. Days Overdue Calculation -->
+  <!-- 4. Potential CFVs (v1.4) -->
+  <div class="section" id="potential">
+    <h2 class="section-title"><span class="icon">&#9888;&#65039;</span> 4. Potential CFVs</h2>
+    <div class="card">
+      <p>A <strong>Potential CFV</strong> is a pre-emptive alert raised when the system detects a high probability of a missed payment before the 3rd-of-month confirmation scan. Common triggers include:</p>
+      <ul>
+        <li>A tenant with a history of late payments approaching their due date</li>
+        <li>A tenancy flagged as at-risk in Airtable</li>
+        <li>No incoming bank transaction matching the expected rent by the 2nd of the month</li>
+      </ul>
+      <div class="metrics-bar">
+        <span class="metric-chip mc-red">CFV &mdash; Confirmed void (no payment received)</span>
+        <span class="metric-chip mc-amber" style="background:#fce7f3;color:#be185d">Potential &mdash; Likely void, unconfirmed</span>
+        <span class="metric-chip mc-amber">CFV Actioned &mdash; Void acknowledged, action taken</span>
+      </div>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>Potential CFVs appear in the dashboard with a pink badge. They do not trigger chase communications until confirmed as a full CFV. Monitor them and convert manually if payment is not received.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Days Overdue Calculation -->
   <div class="section" id="overdue">
-    <h2 class="section-title"><span class="icon">&#128197;</span> 4. Days Overdue Calculation</h2>
+    <h2 class="section-title"><span class="icon">&#128197;</span> 5. Days Overdue Calculation</h2>
     <div class="card">
       <p>The <strong>Days Overdue</strong> field is a live formula: <code>DATETIME_DIFF(TODAY(), {Due Date}, 'days')</code></p>
       <p>This value drives the colour coding on the dashboard:</p>
@@ -448,9 +472,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 5. 3-Stage Chase Sequence -->
+  <!-- 6. 3-Stage Chase Sequence -->
   <div class="section" id="chase">
-    <h2 class="section-title"><span class="icon">&#128172;</span> 5. 3-Stage Chase Sequence</h2>
+    <h2 class="section-title"><span class="icon">&#128172;</span> 6. 3-Stage Chase Sequence</h2>
 
     <div class="wf-card">
       <div class="wf-header">
@@ -501,9 +525,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 6. Payment Detection -->
+  <!-- 7. Payment Detection -->
   <div class="section" id="payment">
-    <h2 class="section-title"><span class="icon">&#128181;</span> 6. Payment Detection</h2>
+    <h2 class="section-title"><span class="icon">&#128181;</span> 7. Payment Detection</h2>
     <div class="card">
       <p>Payments are detected through the daily bank transaction reconciliation process. When a payment is matched to a tenant with an open CFV:</p>
       <ol class="steps">
@@ -519,9 +543,27 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 7. Action Buttons -->
+  <!-- 8. UC Check (v1.4) -->
+  <div class="section" id="uccheck">
+    <h2 class="section-title"><span class="icon">&#128269;</span> 8. UC Check</h2>
+    <div class="card">
+      <p>The <strong>UC Check</strong> button appears on cash flow rows in the overview where a tenant receives Universal Credit housing payments. It allows you to verify whether a UC payment is expected or has been confirmed for a given period.</p>
+      <ol class="steps">
+        <li>Click the purple <strong>UC</strong> button next to the relevant cash flow row.</li>
+        <li>The system queries the tenant's payment schedule and displays the expected UC payment date and amount.</li>
+        <li>If the payment has been confirmed received, the button turns green (<strong>Done</strong>).</li>
+        <li>If no payment is detected, leave the CFV open and proceed with the standard chase sequence.</li>
+      </ol>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>UC payments are typically received on a fixed day each month set by DWP. Delays of 1&ndash;3 working days are normal. Only escalate to a CFV if payment is more than 5 working days late.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Action Buttons -->
   <div class="section" id="actions">
-    <h2 class="section-title"><span class="icon">&#128296;</span> 7. Action Buttons</h2>
+    <h2 class="section-title"><span class="icon">&#128296;</span> 9. Action Buttons</h2>
     <div class="card">
       <p>The CFV dashboard row provides the following action buttons:</p>
       <div class="grid-2">
@@ -545,9 +587,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 8. Comments System -->
+  <!-- 10. Comments System -->
   <div class="section" id="comments">
-    <h2 class="section-title"><span class="icon">&#128221;</span> 8. Comments System</h2>
+    <h2 class="section-title"><span class="icon">&#128221;</span> 10. Comments System</h2>
     <div class="card">
       <p>Every CFV has a running Comments log that records all activity:</p>
       <ul>
@@ -562,9 +604,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 9. Airtable Status IDs -->
+  <!-- 11. Airtable Status IDs -->
   <div class="section" id="status-ids">
-    <h2 class="section-title"><span class="icon">&#128736;</span> 9. Airtable Status IDs</h2>
+    <h2 class="section-title"><span class="icon">&#128736;</span> 11. Airtable Status IDs</h2>
     <div class="card">
       <p>The dashboard code references Airtable single-select option IDs when updating CFV status. These IDs are environment-specific and must match your Airtable base configuration.</p>
       <table class="label-table">
@@ -572,8 +614,10 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
           <tr><th>Status</th><th>Display Colour</th><th>Usage</th></tr>
         </thead>
         <tbody>
-          <tr><td><span class="label-badge lb-3">Open</span></td><td>Red</td><td>Newly detected CFV, no action taken yet</td></tr>
-          <tr><td><span class="label-badge lb-2">Chasing</span></td><td>Amber</td><td>Chase sequence in progress</td></tr>
+          <tr><td><span class="label-badge lb-3">CFV</span></td><td>Red</td><td>Confirmed void &mdash; no payment received, chase sequence active</td></tr>
+          <tr><td><span class="label-badge lb-2">CFV Actioned</span></td><td>Amber</td><td>Void acknowledged and action taken (e.g. payment plan agreed)</td></tr>
+          <tr><td><span class="label-badge lb-7" style="background:#fce7f3;color:#be185d">Potential</span></td><td>Pink</td><td>Likely void detected early, not yet confirmed &mdash; monitor only</td></tr>
+          <tr><td><span class="label-badge lb-2">Chasing</span></td><td>Amber</td><td>Chase communications in progress</td></tr>
           <tr><td><span class="label-badge lb-6">Promised</span></td><td>Purple</td><td>Tenant has committed to a payment date</td></tr>
           <tr><td><span class="label-badge lb-4">Paid</span></td><td>Green</td><td>Full payment received and reconciled</td></tr>
           <tr><td><span class="label-badge lb-8">Written Off</span></td><td>Grey</td><td>Debt deemed unrecoverable, removed from active view</td></tr>
@@ -586,9 +630,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
-  <!-- 10. Troubleshooting -->
+  <!-- 12. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 10. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 12. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
         <div class="ts-problem">CFV not generated for a known missed payment</div>
