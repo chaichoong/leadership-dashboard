@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>&#x1F4E8; Inbound Comms Tracker</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
-    <div class="version">Version 3.0 &bull; Last Updated: 12 April 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 3.1 &bull; Last Updated: 12 April 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -363,6 +363,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="toc">
     <h2>&#x1F4D1; Table of Contents</h2>
     <div class="toc-grid">
+      <a href="#setup" style="font-weight:600; color: var(--blue-700);"><span class="toc-num" style="background: var(--green-600);">0</span> First-Time Setup Guide</a>
       <a href="#architecture"><span class="toc-num">1</span> System Architecture</a>
       <a href="#labels"><span class="toc-num">2</span> The 9 Gmail Labels</a>
       <a href="#inbox"><span class="toc-num">3</span> Inbox Triage Workflow</a>
@@ -382,6 +383,205 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <a href="#troubleshooting"><span class="toc-num">17</span> Troubleshooting</a>
       <a href="#limitations"><span class="toc-num">18</span> Known Limitations</a>
       <a href="#technical"><span class="toc-num">19</span> Technical Reference</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 0. FIRST-TIME SETUP GUIDE ============ -->
+<div class="section" id="setup">
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 0. First-Time Setup Guide</h2>
+
+  <div class="card" style="border-left: 4px solid var(--green-500);">
+    <div class="card-header">&#x1F4CB; What You Will Need</div>
+    <p>Before starting, make sure you have access to the following:</p>
+    <ul>
+      <li>A <strong>Google account</strong> (Gmail) that you want to manage</li>
+      <li>A <strong>GitHub account</strong> (free) for hosting the app</li>
+      <li>A <strong>Cloudflare account</strong> (free tier) for the AI proxy worker</li>
+      <li>An <strong>Anthropic API key</strong> (for Claude AI features)</li>
+      <li>An <strong>Airtable account</strong> (free tier, optional) for task automation</li>
+    </ul>
+    <p style="margin-top: 0.75rem; font-size: 0.88rem; color: var(--slate-500);">Estimated setup time: 30 to 45 minutes for all steps.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F1E6; Step 1: Create Gmail Labels</div>
+    <p>Create the following 9 labels in your Gmail account. The numbering prefix is essential because the app uses it to identify each label.</p>
+    <ol class="steps">
+      <li>Open <strong>Gmail</strong> and go to <strong>Settings &gt; Labels</strong></li>
+      <li>Click <strong>"Create new label"</strong> for each of the following:
+        <ul style="margin-top: 0.5rem;">
+          <li><code>1: To Respond</code></li>
+          <li><code>2: Follow Up</code></li>
+          <li><code>3: To Pay</code></li>
+          <li><code>4: Paid</code></li>
+          <li><code>5: Responded</code></li>
+          <li><code>6: Newsletter</code></li>
+          <li><code>7: Delete &amp; Unsubscribe</code></li>
+          <li><code>8: Task created</code></li>
+          <li><code>9: Task completed</code></li>
+        </ul>
+      </li>
+      <li>The exact names must match (including the number, colon, and space)</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F1E7; Step 2: Set Up Google Cloud Project</div>
+    <p>The app needs a Google Cloud project to access Gmail via API.</p>
+    <ol class="steps">
+      <li>Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a></li>
+      <li>Create a <strong>new project</strong> (e.g. "Inbound Comms Tracker")</li>
+      <li>Enable the <strong>Gmail API</strong>:
+        <ul>
+          <li>Go to <strong>APIs &amp; Services &gt; Library</strong></li>
+          <li>Search for "Gmail API" and click <strong>Enable</strong></li>
+        </ul>
+      </li>
+      <li>Create an <strong>API Key</strong>:
+        <ul>
+          <li>Go to <strong>APIs &amp; Services &gt; Credentials</strong></li>
+          <li>Click <strong>"Create Credentials" &gt; "API Key"</strong></li>
+          <li>Restrict the key: set <strong>Application restrictions</strong> to "HTTP referrers" and add your GitHub Pages URL (e.g. <code>https://yourusername.github.io/*</code>)</li>
+          <li>Under <strong>API restrictions</strong>, select "Restrict key" and choose <strong>Gmail API</strong></li>
+        </ul>
+      </li>
+      <li>Create an <strong>OAuth 2.0 Client ID</strong>:
+        <ul>
+          <li>Click <strong>"Create Credentials" &gt; "OAuth client ID"</strong></li>
+          <li>Application type: <strong>Web application</strong></li>
+          <li>Under <strong>Authorized JavaScript origins</strong>, add: <code>https://yourusername.github.io</code></li>
+          <li>No redirect URIs needed</li>
+          <li>Copy the <strong>Client ID</strong> (you will need it later)</li>
+        </ul>
+      </li>
+      <li>Configure the <strong>OAuth consent screen</strong>:
+        <ul>
+          <li>Go to <strong>APIs &amp; Services &gt; OAuth consent screen</strong></li>
+          <li>User type: <strong>External</strong></li>
+          <li>Add the Gmail scopes: <code>gmail.readonly</code>, <code>gmail.modify</code>, <code>gmail.send</code>, <code>gmail.compose</code></li>
+          <li>Add your email as a <strong>test user</strong> (required while in "Testing" status)</li>
+        </ul>
+      </li>
+    </ol>
+    <div class="info-box warn" style="margin-top: 0.75rem;">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div>While the app is in "Testing" mode, only users listed as test users can sign in. To allow anyone, you must submit the app for <strong>Google verification</strong>.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F1E8; Step 3: Deploy the Cloudflare Worker</div>
+    <p>The Cloudflare Worker acts as a secure proxy between the app and the Claude AI API.</p>
+    <ol class="steps">
+      <li>Go to <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> and sign in (or create a free account)</li>
+      <li>Navigate to <strong>Workers &amp; Pages</strong></li>
+      <li>Click <strong>"Create"</strong> and choose <strong>"Create Worker"</strong></li>
+      <li>Name it something like <code>claude-proxy</code> and click <strong>Deploy</strong></li>
+      <li>Click <strong>"Edit code"</strong> and paste the full worker source code (provided with the app)</li>
+      <li>Update the <strong>allowed origin</strong> in the worker code to match your GitHub Pages URL:
+        <pre style="background: var(--slate-100); padding: 0.5rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.5rem; overflow-x: auto;">const isAllowed = origin === 'https://yourusername.github.io'
+  || referer.startsWith('https://yourusername.github.io/');</pre>
+      </li>
+      <li>Click <strong>Deploy</strong></li>
+      <li>Add environment secrets:
+        <ul>
+          <li>Go to <strong>Settings &gt; Variables &amp; Secrets</strong></li>
+          <li>Add <code>CLAUDE_API_KEY</code> with your Anthropic API key</li>
+        </ul>
+      </li>
+      <li>Create a <strong>KV Namespace</strong> for cloud sync (optional but recommended):
+        <ul>
+          <li>Go to <strong>Workers &amp; Pages &gt; KV</strong></li>
+          <li>Create a namespace called <code>SHARED_DATA</code></li>
+          <li>Go back to your worker <strong>Settings &gt; Bindings</strong></li>
+          <li>Add a KV binding: variable name <code>SHARED_DATA</code>, select the namespace you created</li>
+        </ul>
+      </li>
+    </ol>
+    <p style="margin-top: 0.5rem; font-size: 0.88rem;">Your worker URL will be: <code>https://your-worker-name.your-subdomain.workers.dev</code></p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F1E9; Step 4: Configure and Deploy the Web App</div>
+    <p>Update the source code with your own credentials, then deploy to GitHub Pages.</p>
+    <ol class="steps">
+      <li>Open <code>follow-up.html</code> in a text editor</li>
+      <li>Find and replace these values near the top of the <code>&lt;script&gt;</code> section:
+        <ul style="margin-top: 0.5rem;">
+          <li><code>CLIENT_ID</code>: paste your Google OAuth Client ID</li>
+          <li><code>API_KEY</code>: paste your Google API Key</li>
+          <li><code>WORKER_BASE</code>: paste your Cloudflare Worker URL</li>
+        </ul>
+      </li>
+      <li>Create a <strong>new GitHub repository</strong> (e.g. <code>inbound-comms-tracker</code>)</li>
+      <li>Upload <code>follow-up.html</code> as <code>index.html</code> to the repository</li>
+      <li>Enable <strong>GitHub Pages</strong>:
+        <ul>
+          <li>Go to repository <strong>Settings &gt; Pages</strong></li>
+          <li>Source: <strong>Deploy from a branch</strong></li>
+          <li>Branch: <strong>main</strong>, folder: <strong>/ (root)</strong></li>
+          <li>Click <strong>Save</strong></li>
+        </ul>
+      </li>
+      <li>Your app will be live at <code>https://yourusername.github.io/inbound-comms-tracker</code> within a few minutes</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F1EA; Step 5: Airtable Integration (Optional)</div>
+    <p>If you want automatic task creation when emails are labelled "8: Task created", set up the Airtable connection.</p>
+    <ol class="steps">
+      <li>Create an <a href="https://airtable.com" target="_blank">Airtable</a> base with a table for tasks</li>
+      <li>The table needs these fields (exact field types matter):
+        <ul style="margin-top: 0.5rem;">
+          <li><strong>Task Name</strong> (Single line text)</li>
+          <li><strong>Status</strong> (Single select, with options including "Today" and "Completed")</li>
+          <li><strong>Assignee</strong> (Collaborator)</li>
+          <li><strong>Priority</strong> (Single select, with options including "Urgent")</li>
+          <li><strong>Time Estimate</strong> (Single select)</li>
+          <li><strong>Description</strong> (Long text)</li>
+          <li><strong>Inbound Communication Task</strong> (Checkbox)</li>
+          <li><strong>Inbound Source Type</strong> (Single select)</li>
+          <li><strong>Inbound Message Content</strong> (Long text)</li>
+          <li><strong>Inbound Sender</strong> (Single line text)</li>
+          <li><strong>Inbound Date Received</strong> (Date)</li>
+          <li><strong>Inbound Note URL Link</strong> (URL)</li>
+          <li><strong>Due Date</strong> (Date)</li>
+        </ul>
+      </li>
+      <li>Create a <strong>Personal Access Token</strong> at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>:
+        <ul>
+          <li>Scopes needed: <code>data.records:read</code> and <code>data.records:write</code></li>
+          <li>Grant access to your base</li>
+        </ul>
+      </li>
+      <li>In the app, open <strong>Settings</strong> (gear icon) and enter:
+        <ul>
+          <li><strong>Airtable PAT</strong>: your Personal Access Token</li>
+          <li><strong>Base ID</strong>: found in the Airtable URL (<code>app...</code>)</li>
+          <li><strong>Table ID</strong>: found in the Airtable URL (<code>tbl...</code>)</li>
+          <li><strong>Assignee ID</strong>: the user ID to assign tasks to (<code>usr...</code>)</li>
+        </ul>
+      </li>
+    </ol>
+    <div class="info-box" style="margin-top: 0.75rem;">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div>To find your Airtable Base ID and Table ID, open your base in a browser. The URL format is: <code>airtable.com/appXXXXXX/tblYYYYYY/...</code>. The <code>app</code> part is your Base ID, the <code>tbl</code> part is your Table ID.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F1EB; Step 6: First Sign-In and Knowledge Base</div>
+    <ol class="steps">
+      <li>Open your deployed app URL in a browser</li>
+      <li>Click <strong>"Sign in with Google"</strong> and authorize the requested permissions</li>
+      <li>The app will prompt you to <strong>Build Knowledge Base</strong>. Click "Build KB" to let the AI learn your label patterns from your 20 most recent emails per label.</li>
+      <li>Once the KB is built, switch to the <strong>Inbox</strong> view to start triaging unlabelled emails with AI-powered suggestions</li>
+    </ol>
+    <div class="info-box" style="margin-top: 0.75rem;">
+      <span class="ib-icon">&#x2705;</span>
+      <div><strong>Setup complete.</strong> The app is now fully operational. Refer to the sections below for detailed workflows for each label, AI features, backup options, and troubleshooting.</div>
     </div>
   </div>
 </div>
@@ -1587,7 +1787,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
 <!-- ============ FOOTER ============ -->
 <div style="text-align: center; padding: 2rem 0 1rem; color: var(--slate-400); font-size: 0.82rem; border-top: 1px solid var(--slate-200); margin-top: 2rem;">
-  Inbound Comms Tracker &mdash; Standard Operating Procedure &bull; Version 3.0 &bull; 12 April 2026<br>
+  Inbound Comms Tracker &mdash; Standard Operating Procedure &bull; Version 3.1 &bull; 12 April 2026<br>
   Prepared for handover and ongoing management reference
 </div>
 
