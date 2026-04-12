@@ -881,13 +881,30 @@
 
         </div><!-- end tab-overview -->
 
-        <!-- Tab 2: Airtable View -->
-        <div class="tab-panel" id="tab-airtable">
+        <!-- Tab 2: Contractor Job List (Airtable embed) -->
+        <div class="tab-panel" id="tab-airtable" style="position:relative">
+            <div id="airtableLoader" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#f8fafc;z-index:2;border-radius:8px">
+                <div style="text-align:center;color:#64748b">
+                    <div style="width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px"></div>
+                    <div style="font-size:14px;font-weight:500">Loading Contractor Job List&hellip;</div>
+                </div>
+            </div>
+            <div id="airtableError" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;background:#fef2f2;z-index:2;border-radius:8px">
+                <div style="text-align:center;color:#991b1b;max-width:400px">
+                    <div style="font-size:2rem;margin-bottom:8px">&#9888;&#65039;</div>
+                    <div style="font-size:15px;font-weight:600;margin-bottom:4px">Failed to load Contractor Job List</div>
+                    <div style="font-size:13px;color:#b91c1c;margin-bottom:12px">The Airtable view may be temporarily unavailable. Check your internet connection and try again.</div>
+                    <button onclick="retryAirtableLoad()" style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500">Retry</button>
+                </div>
+            </div>
             <iframe class="tab-panel-iframe" id="airtableFrame"
                 src=""
                 data-src="https://airtable.com/embed/appnqjDpqDniH3IRl/shrFbO4lsRlSC6swt"
+                title="Contractor Job List"
                 loading="lazy"
-                allowfullscreen>
+                allowfullscreen
+                onload="document.getElementById('airtableLoader').style.display='none'"
+                onerror="document.getElementById('airtableLoader').style.display='none';document.getElementById('airtableError').style.display='flex'">
             </iframe>
         </div>
 
@@ -1066,7 +1083,7 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',  icon: '📊', pageVer: '2.3', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
-        { id: 'airtable',   name: 'Contractor Job List',   icon: '🔧', pageVer: '1.0', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.0', standalone: 'index.html#airtable' },
+        { id: 'airtable',   name: 'Contractor Job List',   icon: '🔧', pageVer: '1.1', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.1', standalone: 'index.html#airtable' },
         { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '1.2', sopFile: 'sop-invoices.html',           sopVer: '1.2', standalone: 'index.html#invoices' },
         { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
         { id: 'comms',      name: 'Inbound Comms',         icon: '📨', pageVer: '2.1', sopFile: 'inbound-comms-sop.html',      sopVer: '2.1', standalone: 'follow-up.html' },
@@ -2814,7 +2831,19 @@
         // Lazy-load iframes on first switch
         if (tabId === 'airtable') {
             const frame = document.getElementById('airtableFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('airtable.com')) frame.src = frame.dataset.src;
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('airtable.com')) {
+                document.getElementById('airtableLoader').style.display = 'flex';
+                document.getElementById('airtableError').style.display = 'none';
+                frame.src = frame.dataset.src;
+                // Timeout fallback — if iframe hasn't loaded after 15s, show error
+                setTimeout(() => {
+                    const loader = document.getElementById('airtableLoader');
+                    if (loader.style.display !== 'none') {
+                        loader.style.display = 'none';
+                        document.getElementById('airtableError').style.display = 'flex';
+                    }
+                }, 15000);
+            }
         }
         if (tabId === 'comms') {
             const frame = document.getElementById('commsFrame');
@@ -2852,9 +2881,21 @@
         // /OS-INTEGRATION: Lazy-load
 
         // Refresh data on tab switch (but don't interrupt if already loading)
-        if (PAT && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
+        // Skip reload for iframe-only tabs that don't use API data
+        const iframeOnlyTabs = ['airtable', 'comms', 'compliance', 'os-hub', 'os-bplan'];
+        if (PAT && !iframeOnlyTabs.includes(tabId) && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
             loadDashboard();
         }
+    }
+
+    function retryAirtableLoad() {
+        const frame = document.getElementById('airtableFrame');
+        const loader = document.getElementById('airtableLoader');
+        const error = document.getElementById('airtableError');
+        error.style.display = 'none';
+        loader.style.display = 'flex';
+        frame.src = '';
+        setTimeout(() => { frame.src = frame.dataset.src; }, 100);
     }
 
     // ── Site Map Renderer ──

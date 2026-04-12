@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>Contractor Job List &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Viewing and managing outstanding contractor maintenance jobs</div>
-    <div class="version">Version 1.0 &middot; 11 April 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 1.1 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -346,9 +346,10 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <div class="toc-grid">
         <a href="#overview"><span class="toc-num">1</span> Overview</a>
         <a href="#datasource"><span class="toc-num">2</span> Data Source</a>
-        <a href="#access"><span class="toc-num">3</span> How to Access</a>
-        <a href="#using"><span class="toc-num">4</span> Using the View</a>
-        <a href="#troubleshooting"><span class="toc-num">5</span> Troubleshooting</a>
+        <a href="#dataflow"><span class="toc-num">3</span> Data Flow</a>
+        <a href="#access"><span class="toc-num">4</span> How to Access</a>
+        <a href="#using"><span class="toc-num">5</span> Using the View</a>
+        <a href="#troubleshooting"><span class="toc-num">6</span> Troubleshooting</a>
       </div>
     </div>
   </div>
@@ -381,21 +382,58 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     </div>
   </div>
 
+  <!-- Data Flow -->
+  <div class="section" id="dataflow">
+    <h2 class="section-title"><span class="icon">&#128260;</span> Data Flow</h2>
+    <div class="card">
+      <div class="card-header">How data reaches the Contractor Job List</div>
+      <div class="flow">
+        <div class="flow-step primary">
+          <span class="flow-icon">&#128221;</span>
+          Job Created
+          <span class="flow-sub">Claude Code skill or manual entry</span>
+        </div>
+        <span class="flow-arrow">&#10132;</span>
+        <div class="flow-step">
+          <span class="flow-icon">&#128451;</span>
+          Airtable Tasks Table
+          <span class="flow-sub">Maintenance Ticket = true</span>
+        </div>
+        <span class="flow-arrow">&#10132;</span>
+        <div class="flow-step">
+          <span class="flow-icon">&#128065;</span>
+          Shared View Filter
+          <span class="flow-sub">Active jobs first, by due date</span>
+        </div>
+        <span class="flow-arrow">&#10132;</span>
+        <div class="flow-step success">
+          <span class="flow-icon">&#128187;</span>
+          Dashboard Iframe
+          <span class="flow-sub">Embedded in Leadership Dashboard</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 3. How to Access -->
   <div class="section" id="access">
-    <h2 class="section-title"><span class="icon">&#128279;</span> 3. How to Access</h2>
+    <h2 class="section-title"><span class="icon">&#128279;</span> 4. How to Access</h2>
     <div class="card">
       <ol class="steps">
         <li>Open the Leadership Dashboard in your browser.</li>
-        <li>Click the <strong>Contractor Jobs</strong> tab in the navigation bar.</li>
+        <li>Click <strong>Contractor Job List</strong> in the sidebar navigation.</li>
         <li>The job list loads automatically, showing all active maintenance tickets.</li>
       </ol>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>The Contractor Job List does not require an Airtable PAT &mdash; it loads directly from a public shared view. Other dashboard tabs (e.g. Leadership Dashboard overview) require a PAT to display data.</span>
+      </div>
     </div>
   </div>
 
   <!-- 4. Using the View -->
   <div class="section" id="using">
-    <h2 class="section-title"><span class="icon">&#128065;</span> 4. Using the View</h2>
+    <h2 class="section-title"><span class="icon">&#128065;</span> 5. Using the View</h2>
     <div class="card">
       <div class="card-header">What You Can Do</div>
       <ul>
@@ -408,12 +446,16 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         <span class="ib-icon">&#128161;</span>
         <span>To add a new contractor job, use the Claude Code command "add a job" or create a record directly in the Airtable Tasks table with the Maintenance Ticket checkbox ticked.</span>
       </div>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>The filtering, sorting, and row-expand features above are provided by the Airtable shared view embedded in the dashboard. If the shared view is reconfigured in Airtable, the available filters and layout may change. Always verify the shared view settings match this SOP after making changes in Airtable.</span>
+      </div>
     </div>
   </div>
 
   <!-- 5. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 5. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 6. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
         <div class="ts-problem">Job not appearing in the list</div>
