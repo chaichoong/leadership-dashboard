@@ -3393,9 +3393,9 @@
     async function triggerGmailInvoiceSync() {
         if (!GMAIL_SCRIPT_URL) return;
         try {
-            const resp = await fetch(GMAIL_SCRIPT_URL + '?action=sync', { mode: 'cors', redirect: 'follow' });
+            await fetch(GMAIL_SCRIPT_URL + '?action=sync', { mode: 'no-cors', redirect: 'follow' });
             // After sync, refresh from Airtable to pick up any new invoices
-            if (resp.ok) setTimeout(fetchInvoicesFromAirtable, 3000);
+            setTimeout(fetchInvoicesFromAirtable, 3000);
         } catch (e) {
             console.warn('Gmail sync trigger failed (expected on first deploy):', e.message);
         }
@@ -3716,7 +3716,7 @@
             if (GMAIL_SCRIPT_URL && threadId) {
                 try {
                     const url = GMAIL_SCRIPT_URL + '?action=markPaid&threadId=' + encodeURIComponent(threadId);
-                    await fetch(url, { redirect: 'follow', mode: 'cors' });
+                    await fetch(url, { redirect: 'follow', mode: 'no-cors' });
                 } catch (fetchErr) {
                     console.warn('Gmail mark-paid failed (will retry on next sync):', fetchErr.message);
                 }
