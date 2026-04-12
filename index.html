@@ -1182,8 +1182,8 @@
         { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
         { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
         { id: 'comms',      name: 'Inbound Comms',         icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },
-        { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.1', sopFile: 'sop-compliance.html',         sopVer: '2.0', standalone: 'compliance.html' },
-        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.2', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
+        { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
+        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',  icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
         { id: 'os-bplan',  name: 'Business Plan Builder',  icon: '📋', pageVer: '1.0', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
@@ -5585,6 +5585,7 @@
         return `You are the AI analyst for the Operations Director dashboard \u2014 a property management leadership tool.
 
 RULES:
+- Always write in British English (UK spelling: analyse, colour, organise, centre, etc.).
 - Be concise and data-driven. Use \u00a3 with commas for monetary values.
 - When data is available, give the numbers \u2014 don't hedge.
 - Flag risks in plain language. Suggest specific actions.
