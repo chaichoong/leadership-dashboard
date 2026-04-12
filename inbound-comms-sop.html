@@ -1648,20 +1648,20 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <p>The following are known limitations of the current system. These are accepted trade-offs, not bugs.</p>
     <div style="margin-top: 0.75rem;">
       <div class="ts-item">
-        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; API keys hardcoded in public repo</div>
-        <div class="ts-solution">The Google Client ID, API Key, and Airtable tokens are embedded in the public GitHub repository HTML file. This is a known security trade-off for simplicity.</div>
+        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Google Client ID and API Key visible in public repo</div>
+        <div class="ts-solution">The Google Client ID and API Key are embedded in the public HTML file. The API Key is restricted by HTTP referrer and API scope, and the Cloudflare Worker validates request origins. The Airtable PAT is stored in the user's browser localStorage, not in the source code.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Basic AI learning system</div>
         <div class="ts-solution">AI learning is based on a lookup table of corrections, not sophisticated machine learning. It stores past corrections and feeds them into future prompts.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Gmail API rate limiting workaround</div>
-        <div class="ts-solution">Rate limits are handled with 300ms delays between requests. This is a simple workaround, not proper exponential backoff with retry logic.</div>
+        <div class="ts-problem" style="color: var(--green-600);">&#x2705; Exponential backoff for rate limits</div>
+        <div class="ts-solution">Gmail API rate limits (429) and server errors (503/529) are handled with exponential backoff and automatic retries (up to 3 attempts). Sequential label changes also use 300ms delays to stay within quota.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Single HTML file architecture (~150KB)</div>
-        <div class="ts-solution">The entire app is a single HTML file with embedded CSS and JavaScript. This works but becomes harder to maintain as it grows.</div>
+        <div class="ts-solution">The entire app is a single HTML file with embedded CSS and JavaScript. This simplifies deployment but becomes harder to maintain as it grows.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; No collaborative features</div>
@@ -1669,7 +1669,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       </div>
       <div class="ts-item">
         <div class="ts-problem" style="color: var(--green-600);">&#x2705; Global search available</div>
-        <div class="ts-solution">Local search (&#x201C;This Label&#x201D;) only covers emails loaded in the current view. Use <strong>Global search (&#x201C;All Emails&#x201D;)</strong> to search across your entire Gmail account. Global search is capped at 100 results and may return emails outside the 9 numbered labels.</div>
+        <div class="ts-solution">Local search ("This Label") only covers emails loaded in the current view. Use <strong>Global search ("All Emails")</strong> to search across your entire Gmail account. Global search is capped at 100 results and may return emails outside the 9 numbered labels.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Single-level undo only</div>
@@ -1678,6 +1678,14 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <div class="ts-item">
         <div class="ts-problem" style="color: var(--amber-600);">&#x1F7E1; Audit log limited to 500 entries</div>
         <div class="ts-solution">The audit log stores a maximum of 500 entries in localStorage. Older entries are trimmed automatically. Export as CSV before clearing if you need a full history.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--green-600);">&#x2705; Proactive OAuth token refresh</div>
+        <div class="ts-solution">The app automatically refreshes the Google OAuth token 5 minutes before expiry, preventing mid-session authentication failures.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem" style="color: var(--green-600);">&#x2705; XSS-safe HTML rendering</div>
+        <div class="ts-solution">Email HTML is sanitized via DOMParser with a strict tag and attribute allowlist. Script tags, event handlers, javascript: URIs, and data: URIs are all stripped before rendering.</div>
       </div>
     </div>
   </div>
