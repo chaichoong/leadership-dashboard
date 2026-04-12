@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>&#x1F4E8; Inbound Comms Tracker</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
-    <div class="version">Version 2.2 &bull; Last Updated: 30 March 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 3.0 &bull; Last Updated: 12 April 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -392,7 +392,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
   <div class="card">
     <div class="card-header">&#x1F310; Component Overview</div>
-    <p>The Inbound Comms Tracker is a client-side web application that orchestrates email management across six connected services:</p>
+    <p>The Inbound Comms Tracker is a client-side web application that orchestrates email management across five connected services:</p>
 
     <div class="arch-diagram">
       <div class="arch-box highlight">
@@ -418,12 +418,12 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <div class="arch-box" style="border-color: var(--green-500); background: var(--green-50);">
         <div class="arch-icon">&#x1F4CA;</div>
         <div class="arch-title">Airtable</div>
-        <div class="arch-desc">Operations Director base<br>Task creation &amp; tracking</div>
+        <div class="arch-desc">Operations Director base<br>Real-time task creation<br>&amp; completion detection</div>
       </div>
       <div class="arch-box" style="border-color: var(--amber-500); background: var(--amber-50);">
-        <div class="arch-icon">&#x23F0;</div>
-        <div class="arch-title">Claude Scheduled Tasks</div>
-        <div class="arch-desc">8am, 12pm, 4pm UK<br>Airtable task automation</div>
+        <div class="arch-icon">&#x1F510;</div>
+        <div class="arch-title">OAuth Token Manager</div>
+        <div class="arch-desc">Auto-refresh 5 min<br>before token expiry</div>
       </div>
       <div class="arch-box" style="border-color: var(--blue-500); background: var(--blue-50);">
         <div class="arch-icon">&#x2601;&#xFE0F;</div>
@@ -443,7 +443,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         </thead>
         <tbody>
           <tr><td><code>POST</code></td><td><code>/</code></td><td>Claude API proxy &mdash; forwards AI requests to Claude (Haiku &amp; Sonnet)</td></tr>
-          <tr><td><code>POST</code></td><td><code>/gmail-labels</code></td><td>Gmail label modification &mdash; adds/removes labels on messages server-side</td></tr>
+          <tr><td><code>POST</code></td><td><code>/gmail-labels</code></td><td>Gmail label modification (legacy, no longer used by the web app)</td></tr>
           <tr><td><code>GET</code></td><td><code>/shared-data</code></td><td>Retrieve shared data from KV (knowledge base, corrections, KB build date)</td></tr>
           <tr><td><code>POST</code></td><td><code>/shared-data</code></td><td>Save shared data to KV (key, data, timestamp)</td></tr>
         </tbody>
@@ -944,38 +944,43 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
   <div class="card">
     <div class="card-header">&#x1F504; Airtable Task Automation Flow</div>
-    <p>This is the most complex workflow, involving automated scheduled tasks that bridge Gmail and Airtable.</p>
+    <p>This workflow bridges Gmail and Airtable in <strong>real-time</strong>. When an email is moved to label 8, a task is created instantly in Airtable. When a task is completed in Airtable, the email automatically moves to label 9 on next page load.</p>
 
     <div class="flow" style="padding: 1.5rem 0;">
       <div class="flow-step primary">
         <span class="flow-icon">&#x1F4E7;</span>
         Email moved to<br>Label 8
-        <span class="flow-sub">Via web app</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step" style="background: var(--amber-50); border-color: var(--amber-500);">
-        <span class="flow-icon">&#x23F0;</span>
-        Scheduled Task<br>Runs
-        <span class="flow-sub">8am / 12pm / 4pm</span>
+        <span class="flow-sub">Via web app dropdown</span>
       </div>
       <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
       <div class="flow-step purple">
         <span class="flow-icon">&#x1F916;</span>
-        AI Creates<br>Airtable Task
-        <span class="flow-sub">Title, desc, fields</span>
+        AI Generates<br>Task Content
+        <span class="flow-sub">Title + description<br>via Claude Haiku</span>
       </div>
       <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
       <div class="flow-step" style="background: var(--green-50); border-color: var(--green-500);">
         <span class="flow-icon">&#x1F4CA;</span>
-        Task in<br>Airtable
-        <span class="flow-sub">Assigned to Mica</span>
+        Task Created<br>in Airtable
+        <span class="flow-sub">Instant via API</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <div class="flow-step" style="background: var(--amber-50); border-color: var(--amber-500);">
+        <span class="flow-icon">&#x2705;</span>
+        Task Completed<br>in Airtable
+        <span class="flow-sub">By assignee</span>
       </div>
       <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
       <div class="flow-step success">
-        <span class="flow-icon">&#x2705;</span>
-        Task Done<br>&rarr; Label 9
-        <span class="flow-sub">Auto-moved via worker</span>
+        <span class="flow-icon">&#x1F4E9;</span>
+        Email Auto-Moves<br>to Label 9
+        <span class="flow-sub">On next page load</span>
       </div>
+    </div>
+
+    <div class="info-box info" style="margin-top: 0.75rem;">
+      <span class="ib-icon">&#x26A1;</span>
+      <div><strong>Real-time integration:</strong> Task creation happens immediately when the label change occurs (from any page: inbox apply, label dropdown, or bulk apply). No scheduled delay. Duplicate detection prevents the same email creating multiple tasks.</div>
     </div>
   </div>
 
@@ -993,8 +998,8 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
       </div>
 
-      <h4>&#x1F916; Automated Task Creation Details</h4>
-      <p>The scheduled task <code>inbound-comms-create-airtable-tasks</code> reads emails in label 8 and creates Airtable records with:</p>
+      <h4>&#x1F916; Real-Time Task Creation Details</h4>
+      <p>When an email is moved to label 8 (via dropdown or inbox apply), the app <strong>immediately</strong> creates an Airtable record with:</p>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1.5rem; margin-top: 0.5rem; font-size: 0.88rem;">
         <div><strong>Title:</strong> "INBOUND: [AI-generated action item]"</div>
         <div><strong>Assignee:</strong> Mica Albovias</div>
@@ -1010,7 +1015,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
       <div class="info-box info" style="margin-top: 0.75rem;">
         <span class="ib-icon">&#x1F3F7;&#xFE0F;</span>
-        <div><strong>Gmail label search syntax:</strong> The scheduled task searches using <code>label:8:-task-created</code> (keep colon, replace spaces with hyphens).</div>
+        <div><strong>Duplicate prevention:</strong> Before creating a task, the app checks Airtable for existing records linked to the same Gmail thread ID. If one exists, it skips creation and shows "Airtable task already exists".</div>
       </div>
     </div>
   </div>
@@ -1030,11 +1035,11 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         <span class="metric-chip mc-blue"><span class="dot blue"></span> Total</span>
       </div>
 
-      <p style="margin-top: 0.75rem;">The second scheduled task (<code>inbound-comms-complete-tasks</code>) monitors Airtable for completed inbound communication tasks and <strong>automatically moves emails from label 8 to label 9</strong> via the <code>/gmail-labels</code> Cloudflare Worker endpoint.</p>
+      <p style="margin-top: 0.75rem;">When you navigate to <strong>label 8</strong>, the app automatically queries Airtable for any inbound tasks marked "Completed". Matching emails are <strong>instantly moved from label 8 to label 9</strong> and a success toast shows how many were moved.</p>
 
       <div class="info-box info">
-        <span class="ib-icon">&#x23F0;</span>
-        <div><strong>Both scheduled tasks</strong> run at <strong>8am, 12pm, and 4pm UK time</strong> via Claude Desktop's Scheduled section. They require tool permissions approved on first run.</div>
+        <span class="ib-icon">&#x26A1;</span>
+        <div><strong>Completion check runs on every label 8 page load.</strong> No scheduled tasks needed. The app uses the Gmail API directly to modify labels, which is faster and more reliable than the previous Cloudflare Worker approach.</div>
       </div>
     </div>
   </div>
@@ -1284,8 +1289,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <div class="card-header">&#x2699;&#xFE0F; Settings Panel</div>
       <p>Access via the gear icon in the header bar.</p>
       <ul>
-        <li><strong>Sender Name</strong> &mdash; Used in all AI-drafted emails</li>
-        <li><strong>Knowledge Base</strong> &mdash; Context entries that improve AI response quality. Add information about your business, communication style, etc.</li>
+        <li><strong>Sender Name</strong> &mdash; Used in all AI-drafted emails for sign-off</li>
+        <li><strong>Airtable Integration</strong> &mdash; Personal Access Token for real-time task creation (required for label 8 automation). Optional: Base ID, Table ID, and Assignee ID for custom configurations</li>
+        <li><strong>Knowledge Base</strong> &mdash; Auto-built by fetching 20 recent emails from each numbered label and extracting sender/subject patterns. Click "Build KB" to generate. A prompt appears automatically on first visit to the inbox if no KB exists</li>
         <li><strong>Backup &amp; Restore</strong> &mdash; Manual export/import of all app data as JSON</li>
         <li><strong>Audit Log</strong> &mdash; View, export (CSV), and clear action history</li>
       </ul>
@@ -1295,6 +1301,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <p><strong>sessionStorage</strong> (clears on tab close):</p>
       <ul>
         <li>Gmail authentication token</li>
+        <li>Token expiry timestamp (for proactive refresh)</li>
       </ul>
       <p style="margin-top: 0.5rem;"><strong>localStorage</strong> (persists in browser):</p>
       <ul>
@@ -1307,7 +1314,9 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
         <li>Response amendments</li>
         <li>Applied today counts</li>
         <li>Sender name</li>
+        <li>Airtable PAT and config (base ID, table ID, assignee)</li>
         <li>Audit log (max 500 entries)</li>
+        <li>Auto-backup data snapshot</li>
         <li>Last backup timestamp</li>
       </ul>
       <p style="margin-top: 0.5rem;"><strong>Cloudflare KV</strong> (cloud, multi-device):</p>
@@ -1530,24 +1539,28 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   </div>
 
   <div class="card">
-    <div class="card-header">&#x23F0; Scheduled Tasks Reference</div>
+    <div class="card-header">&#x1F4CA; Airtable Integration Reference</div>
     <table class="label-table">
       <thead>
-        <tr><th>Task Name</th><th>Schedule</th><th>Function</th></tr>
+        <tr><th>Function</th><th>Trigger</th><th>Details</th></tr>
       </thead>
       <tbody>
         <tr>
-          <td><code>inbound-comms-create-airtable-tasks</code></td>
-          <td>8am, 12pm, 4pm UK</td>
-          <td>Reads label 8 emails (search: <code>label:8:-task-created</code>), creates Airtable tasks with AI-generated titles and descriptions. Defaults: Status=Today, Priority=Urgent, Time=15min, Due=Today.</td>
+          <td><strong>Task Creation</strong></td>
+          <td>Real-time (on label change to 8)</td>
+          <td>AI generates title ("INBOUND: ...") and description via Claude Haiku. Creates record with Status=Today, Priority=Urgent, Time=15min, Due=Today. Checks for duplicates first.</td>
         </tr>
         <tr>
-          <td><code>inbound-comms-complete-tasks</code></td>
-          <td>8am, 12pm, 4pm UK</td>
-          <td>Checks Airtable for completed inbound tasks, moves emails from label 8 to 9 via <code>/gmail-labels</code> worker endpoint.</td>
+          <td><strong>Completion Check</strong></td>
+          <td>On label 8 page load</td>
+          <td>Queries Airtable for tasks with "Completed" status and "Inbound Communication Task" = true. Moves matching emails from label 8 to 9 via Gmail API directly.</td>
         </tr>
       </tbody>
     </table>
+    <div class="info-box warn" style="margin-top: 0.75rem;">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Requires Airtable PAT</strong> configured in Settings. Without it, task creation shows an error and completion check is silently skipped. Token needs <code>data.records:read</code> and <code>data.records:write</code> scopes.</div>
+    </div>
   </div>
 
   <div class="card">
@@ -1574,7 +1587,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 
 <!-- ============ FOOTER ============ -->
 <div style="text-align: center; padding: 2rem 0 1rem; color: var(--slate-400); font-size: 0.82rem; border-top: 1px solid var(--slate-200); margin-top: 2rem;">
-  Inbound Comms Tracker &mdash; Standard Operating Procedure &bull; Version 2.2 &bull; 30 March 2026<br>
+  Inbound Comms Tracker &mdash; Standard Operating Procedure &bull; Version 3.0 &bull; 12 April 2026<br>
   Prepared for handover and ongoing management reference
 </div>
 

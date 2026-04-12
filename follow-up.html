@@ -795,6 +795,10 @@
                 <label>Airtable Integration</label>
                 <input type="text" id="airtablePat" placeholder="Airtable Personal Access Token" style="font-family:monospace; font-size:12px;" />
                 <p class="settings-info">Required for auto-creating tasks when emails are moved to "8: Task created". Get a token from airtable.com/create/tokens with data.records:write and data.records:read scopes.</p>
+                <input type="text" id="airtableBaseId" placeholder="Base ID (e.g. appXXXXXXXXXXXXX)" style="font-family:monospace; font-size:12px; margin-top:8px;" />
+                <input type="text" id="airtableTableId" placeholder="Table ID (e.g. tblXXXXXXXXXXXXX)" style="font-family:monospace; font-size:12px; margin-top:8px;" />
+                <input type="text" id="airtableAssignee" placeholder="Assignee User ID (e.g. usrXXXXXXXXXXXXX)" style="font-family:monospace; font-size:12px; margin-top:8px;" />
+                <p class="settings-info" style="margin-top:4px;">Base ID, Table ID, and Assignee are optional — defaults are pre-configured.</p>
                 <p class="settings-info" id="airtableStatus" style="margin-top:4px;"></p>
             </div>
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
@@ -903,7 +907,30 @@
     let undoToastTimer = null;
 
     // Cloud sync
-    const SHARED_KEYS = ['knowledge_base', 'kb_last_built', 'ai_corrections'];
+    const SHARED_KEYS = ['label_knowledge_base', 'kb_last_built', 'ai_corrections'];
+
+    // ============================================================
+    // RETRY WITH BACKOFF (rate limit handling)
+    // ============================================================
+    async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (err) {
+                const status = err?.status || err?.result?.error?.code || 0;
+                const isRateLimited = status === 429;
+                const isOverloaded = status === 529 || status === 503;
+                if ((isRateLimited || isOverloaded) && attempt < maxRetries) {
+                    const retryAfter = err?.headers?.get?.('Retry-After');
+                    const delay = retryAfter ? parseInt(retryAfter) * 1000 : baseDelay * Math.pow(2, attempt);
+                    console.warn(`Rate limited (${status}), retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+                    await new Promise(r => setTimeout(r, delay));
+                } else {
+                    throw err;
+                }
+            }
+        }
+    }
 
     // ============================================================
     // AUTH
@@ -914,12 +941,28 @@
             const stored = sessionStorage.getItem('gmail_token');
             if (stored) {
                 accessToken = stored;
+                const storedExpiry = sessionStorage.getItem('gmail_token_expires');
+                if (storedExpiry) {
+                    tokenExpiresAt = parseInt(storedExpiry);
+                    if (tokenExpiresAt <= Date.now()) {
+                        // Token expired while page was closed — clear and require re-auth
+                        sessionStorage.removeItem('gmail_token');
+                        sessionStorage.removeItem('gmail_token_expires');
+                        accessToken = null;
+                        return;
+                    }
+                    const remainingSecs = Math.floor((tokenExpiresAt - Date.now()) / 1000);
+                    scheduleTokenRefresh(remainingSecs);
+                }
                 gapi.client.setToken({ access_token: accessToken });
                 showApp();
                 loadEmails();
             }
         });
     }
+
+    let tokenExpiresAt = 0; // timestamp when token expires
+    let tokenRefreshTimer = null;
 
     function gisLoaded() {
         tokenClient = google.accounts.oauth2.initTokenClient({
@@ -928,11 +971,49 @@
             callback: (resp) => {
                 if (resp.error) { showError('Authentication failed: ' + resp.error); return; }
                 accessToken = resp.access_token;
+                tokenExpiresAt = Date.now() + ((resp.expires_in || 3600) * 1000);
                 sessionStorage.setItem('gmail_token', accessToken);
+                sessionStorage.setItem('gmail_token_expires', tokenExpiresAt.toString());
+                scheduleTokenRefresh(resp.expires_in || 3600);
                 showApp();
                 loadEmails();
             },
         });
+    }
+
+    function scheduleTokenRefresh(expiresInSeconds) {
+        if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+        // Refresh 5 minutes before expiry
+        const refreshIn = Math.max((expiresInSeconds - 300) * 1000, 60000);
+        tokenRefreshTimer = setTimeout(() => {
+            if (accessToken && tokenClient) {
+                console.log('Proactively refreshing OAuth token...');
+                tokenClient.requestAccessToken({ prompt: '' });
+            }
+        }, refreshIn);
+    }
+
+    function isTokenExpired() {
+        return tokenExpiresAt > 0 && Date.now() > tokenExpiresAt - 60000; // 1 min buffer
+    }
+
+    async function ensureValidToken() {
+        if (isTokenExpired() && tokenClient) {
+            return new Promise((resolve, reject) => {
+                const origCallback = tokenClient.callback;
+                tokenClient.callback = (resp) => {
+                    if (resp.error) { reject(new Error(resp.error)); return; }
+                    accessToken = resp.access_token;
+                    tokenExpiresAt = Date.now() + ((resp.expires_in || 3600) * 1000);
+                    sessionStorage.setItem('gmail_token', accessToken);
+                    sessionStorage.setItem('gmail_token_expires', tokenExpiresAt.toString());
+                    gapi.client.setToken({ access_token: accessToken });
+                    scheduleTokenRefresh(resp.expires_in || 3600);
+                    resolve();
+                };
+                tokenClient.requestAccessToken({ prompt: '' });
+            });
+        }
     }
 
     function handleAuth() {
@@ -941,9 +1022,12 @@
     }
 
     function handleSignout() {
+        if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
         if (accessToken) google.accounts.oauth2.revoke(accessToken);
         accessToken = null;
+        tokenExpiresAt = 0;
         sessionStorage.removeItem('gmail_token');
+        sessionStorage.removeItem('gmail_token_expires');
         document.getElementById('authScreen').style.display = 'flex';
         document.getElementById('mainApp').style.display = 'none';
     }
@@ -1133,6 +1217,9 @@
     function openSettings() {
         document.getElementById('senderName').value = localStorage.getItem('sender_name') || '';
         document.getElementById('airtablePat').value = localStorage.getItem('airtable_pat') || '';
+        document.getElementById('airtableBaseId').value = localStorage.getItem('airtable_base_id') || '';
+        document.getElementById('airtableTableId').value = localStorage.getItem('airtable_table_id') || '';
+        document.getElementById('airtableAssignee').value = localStorage.getItem('airtable_assignee') || '';
         updateAirtableStatus();
         updateKbStatusDisplay();
         renderAuditLog();
@@ -1145,10 +1232,10 @@
     // BACKUP & RESTORE
     // ============================================================
     const BACKUP_KEYS = [
-        'knowledge_base', 'kb_last_built', 'ai_corrections', 'ai_accuracy_log',
+        'label_knowledge_base', 'kb_last_built', 'ai_corrections', 'ai_accuracy_log',
         'delay_payment_log', 'read_newsletters', 'unsubscribe_log',
         'sender_name', 'applied_today_count', 'applied_today_date',
-        'response_amendments', 'airtable_pat'
+        'response_amendments'
     ];
 
     function exportBackup() {
@@ -1215,6 +1302,18 @@
         const pat = document.getElementById('airtablePat').value.trim();
         if (pat) localStorage.setItem('airtable_pat', pat);
         else localStorage.removeItem('airtable_pat');
+
+        const baseId = document.getElementById('airtableBaseId').value.trim();
+        if (baseId) localStorage.setItem('airtable_base_id', baseId);
+        else localStorage.removeItem('airtable_base_id');
+
+        const tableId = document.getElementById('airtableTableId').value.trim();
+        if (tableId) localStorage.setItem('airtable_table_id', tableId);
+        else localStorage.removeItem('airtable_table_id');
+
+        const assignee = document.getElementById('airtableAssignee').value.trim();
+        if (assignee) localStorage.setItem('airtable_assignee', assignee);
+        else localStorage.removeItem('airtable_assignee');
 
         closeSettings();
     }
@@ -1342,6 +1441,7 @@
         document.getElementById('emailListBody').innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading emails...</div></div>';
         document.getElementById('paginationBar').style.display = 'none';
         clearError();
+        try { await ensureValidToken(); } catch (e) { console.warn('Token refresh failed, continuing with existing token'); }
 
         // Reset search and pagination
         currentPage = 1;
@@ -1663,6 +1763,7 @@
 
     function parseThread(thread) {
         const messages = thread.messages || [];
+        if (messages.length === 0) return null;
         const firstMsg = messages[0];
         const lastMsg = messages[messages.length - 1];
 
@@ -1737,27 +1838,27 @@
     // VIEW SWITCHING
     // ============================================================
     function isToPayView() {
-        return currentLabel.toLowerCase().includes('to pay') || currentLabel.startsWith('3');
+        return currentLabel.toLowerCase().includes('to pay') || /^3[.:]\s/.test(currentLabel);
     }
 
     function isFollowUpView() {
-        return currentLabel.toLowerCase().includes('follow') || currentLabel.startsWith('2');
+        return currentLabel.toLowerCase().includes('follow') || /^2[.:]\s/.test(currentLabel);
     }
 
     function isToRespondView() {
-        return currentLabel.toLowerCase().includes('to respond') || currentLabel.startsWith('1');
+        return currentLabel.toLowerCase().includes('to respond') || /^1[.:]\s/.test(currentLabel);
     }
 
     function isNewsletterView() {
-        return currentLabel.toLowerCase().includes('newsletter') || currentLabel.startsWith('6');
+        return currentLabel.toLowerCase().includes('newsletter') || /^6[.:]\s/.test(currentLabel);
     }
 
     function isDeleteView() {
-        return currentLabel.toLowerCase().includes('delete') || currentLabel.startsWith('7');
+        return currentLabel.toLowerCase().includes('delete') || /^7[.:]\s/.test(currentLabel);
     }
 
     function isTaskCreatedView() {
-        return currentLabel.toLowerCase().includes('task created') || currentLabel.startsWith('8');
+        return currentLabel.toLowerCase().includes('task created') || /^8[.:]\s/.test(currentLabel);
     }
 
     function isComplianceView() {
@@ -1765,7 +1866,7 @@
     }
 
     function isTaskCompletedView() {
-        return currentLabel.toLowerCase().includes('task completed') || currentLabel.startsWith('9');
+        return currentLabel.toLowerCase().includes('task completed') || /^9[.:]\s/.test(currentLabel);
     }
 
     // Unsubscribe tracking
@@ -1774,8 +1875,9 @@
     }
 
     function logUnsubscribe(threadId, sender, method) {
-        const log = getUnsubscribeLog();
+        let log = getUnsubscribeLog();
         log.push({ threadId, sender, method, date: new Date().toISOString() });
+        if (log.length > 500) log = log.slice(-500);
         localStorage.setItem('unsubscribe_log', JSON.stringify(log));
     }
 
@@ -1915,9 +2017,10 @@
     }
 
     function markNewsletterRead(threadId) {
-        const read = getReadNewsletters();
+        let read = getReadNewsletters();
         if (!read.includes(threadId)) {
             read.push(threadId);
+            if (read.length > 1000) read = read.slice(-1000);
             localStorage.setItem('read_newsletters', JSON.stringify(read));
         }
     }
@@ -2125,8 +2228,8 @@
     // ============================================================
     // AIRTABLE INTEGRATION
     // ============================================================
-    const AIRTABLE_BASE_ID = 'appnqjDpqDniH3IRl';
-    const AIRTABLE_TABLE_ID = 'tblqB8b22hKBL4PF1';
+    const AIRTABLE_BASE_ID_DEFAULT = 'appnqjDpqDniH3IRl';
+    const AIRTABLE_TABLE_ID_DEFAULT = 'tblqB8b22hKBL4PF1';
     const AIRTABLE_FIELDS = {
         taskName: 'fldgFjGBw6bTKJFCD',
         status: 'fldx4qCw17UfrKpaN',
@@ -2142,11 +2245,23 @@
         noteUrl: 'fldXf1p0vtHqOZcKl',
         dueDate: 'fld7XP8w8kbxfETV4'
     };
-    const AIRTABLE_ASSIGNEE_ID = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
+    const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
 
     function getAirtablePat() {
         return localStorage.getItem('airtable_pat') || '';
+    }
+
+    function getAirtableBaseId() {
+        return localStorage.getItem('airtable_base_id') || AIRTABLE_BASE_ID_DEFAULT;
+    }
+
+    function getAirtableTableId() {
+        return localStorage.getItem('airtable_table_id') || AIRTABLE_TABLE_ID_DEFAULT;
+    }
+
+    function getAirtableAssignee() {
+        return localStorage.getItem('airtable_assignee') || AIRTABLE_ASSIGNEE_DEFAULT;
     }
 
     async function generateAirtableTaskContent(email) {
@@ -2199,7 +2314,7 @@ Respond with ONLY the JSON object, no markdown.`;
         const gmailUrl = 'https://mail.google.com/mail/u/0/#inbox/' + email.threadId;
         try {
             const checkResp = await fetch(
-                `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}?filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${AIRTABLE_FIELDS.noteUrl}})`)}&maxRecords=1`,
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${AIRTABLE_FIELDS.noteUrl}})`)}&maxRecords=1`,
                 { headers: { 'Authorization': 'Bearer ' + pat } }
             );
             if (checkResp.ok) {
@@ -2222,7 +2337,7 @@ Respond with ONLY the JSON object, no markdown.`;
             fields: {
                 [AIRTABLE_FIELDS.taskName]: content.title,
                 [AIRTABLE_FIELDS.status]: { name: 'Today' },
-                [AIRTABLE_FIELDS.assignee]: [{ id: AIRTABLE_ASSIGNEE_ID }],
+                [AIRTABLE_FIELDS.assignee]: [{ id: getAirtableAssignee() }],
                 [AIRTABLE_FIELDS.priority]: { name: 'Urgent' },
                 [AIRTABLE_FIELDS.timeEstimate]: { name: '15 min' },
                 [AIRTABLE_FIELDS.description]: content.description,
@@ -2237,7 +2352,7 @@ Respond with ONLY the JSON object, no markdown.`;
         };
 
         try {
-            const resp = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}`, {
+            const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
                 method: 'POST',
                 headers: {
                     'Authorization': 'Bearer ' + pat,
@@ -2274,7 +2389,7 @@ Respond with ONLY the JSON object, no markdown.`;
             );
             const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl].map(f => 'fields%5B%5D=' + f).join('&');
             const resp = await fetch(
-                `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}?${fields}&filterByFormula=${formula}&maxRecords=50`,
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=50`,
                 { headers: { 'Authorization': 'Bearer ' + pat } }
             );
 
@@ -2385,7 +2500,7 @@ Respond with ONLY the JSON object, no markdown.`;
 
         let records = [], offset = null;
         do {
-            let url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COMPLIANCE_PROPS_TABLE}?returnFieldsByFieldId=true`;
+            let url = `https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_PROPS_TABLE}?returnFieldsByFieldId=true`;
             url += `&fields%5B%5D=${PROP_FIELDS.property}&fields%5B%5D=${PROP_FIELDS.shortName}`;
             if (offset) url += '&offset=' + offset;
             const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + pat } });
@@ -2418,7 +2533,7 @@ Respond with ONLY the JSON object, no markdown.`;
         // Check Airtable for existing cert with this Gmail URL
         try {
             const checkResp = await fetch(
-                `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${CERT_FIELDS.notes}})`)}&maxRecords=1`,
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${CERT_FIELDS.notes}})`)}&maxRecords=1`,
                 { headers: { 'Authorization': 'Bearer ' + pat } }
             );
             if (checkResp.ok) {
@@ -2519,7 +2634,7 @@ Respond with ONLY valid JSON, no markdown.`;
                 };
                 if (cert.renewal_date) record.fields[CERT_FIELDS.renewalDate] = cert.renewal_date;
 
-                const resp = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${COMPLIANCE_CERTS_TABLE}`, {
+                const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}`, {
                     method: 'POST',
                     headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ records: [record] })
@@ -3162,8 +3277,9 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
     }
 
     function logDelayPayment(threadId, subject, recipient) {
-        const log = getDelayPaymentLog();
+        let log = getDelayPaymentLog();
         log.push({ threadId, subject, recipient, date: new Date().toISOString() });
+        if (log.length > 500) log = log.slice(-500);
         localStorage.setItem('delay_payment_log', JSON.stringify(log));
     }
 
@@ -3184,9 +3300,8 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
 
     function getPlainText(msg) {
         if (!msg.isHtml) return msg.body;
-        const div = document.createElement('div');
-        div.innerHTML = msg.body;
-        return div.textContent || div.innerText || '';
+        const doc = new DOMParser().parseFromString(msg.body, 'text/html');
+        return doc.body.textContent || '';
     }
 
     // ============================================================
@@ -3763,12 +3878,49 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
     }
 
     function sanitizeHtml(html) {
-        return html
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/\son\w+="[^"]*"/gi, '')
-            .replace(/\son\w+='[^']*'/gi, '')
-            .replace(/javascript:/gi, '');
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const ALLOWED_TAGS = new Set([
+            'a','b','i','u','em','strong','p','br','div','span','ul','ol','li',
+            'h1','h2','h3','h4','h5','h6','table','thead','tbody','tr','td','th',
+            'img','blockquote','pre','code','hr','sub','sup','small','big',
+            'dl','dt','dd','caption','col','colgroup','figure','figcaption',
+            'abbr','address','cite','del','ins','mark','s','wbr','center','font'
+        ]);
+        const ALLOWED_ATTRS = new Set([
+            'href','src','alt','title','width','height','style','class','id',
+            'colspan','rowspan','align','valign','border','cellpadding','cellspacing',
+            'color','size','face','bgcolor','background','dir','lang'
+        ]);
+        function cleanNode(node) {
+            const children = Array.from(node.childNodes);
+            for (const child of children) {
+                if (child.nodeType === 1) { // Element
+                    const tag = child.tagName.toLowerCase();
+                    if (!ALLOWED_TAGS.has(tag)) {
+                        // Replace disallowed element with its children
+                        while (child.firstChild) node.insertBefore(child.firstChild, child);
+                        node.removeChild(child);
+                    } else {
+                        // Remove disallowed attributes
+                        const attrs = Array.from(child.attributes);
+                        for (const attr of attrs) {
+                            const name = attr.name.toLowerCase();
+                            if (name.startsWith('on') || !ALLOWED_ATTRS.has(name)) {
+                                child.removeAttribute(attr.name);
+                            } else if (name === 'href' || name === 'src') {
+                                const val = attr.value.trim().toLowerCase();
+                                if (val.startsWith('javascript:') || val.startsWith('data:text')) {
+                                    child.removeAttribute(attr.name);
+                                }
+                            }
+                        }
+                        cleanNode(child);
+                    }
+                }
+            }
+        }
+        cleanNode(doc.body);
+        return doc.body.innerHTML;
     }
 
     // ============================================================
@@ -4720,19 +4872,29 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
     function checkAutoBackup() {
         const lastBackup = localStorage.getItem('last_auto_backup');
         if (!lastBackup) {
-            // Never backed up - do it now
-            exportBackup();
+            triggerAutoBackup();
             return;
         }
         const hoursSince = (Date.now() - parseInt(lastBackup)) / (1000 * 60 * 60);
         if (hoursSince >= 24) {
-            exportBackup();
+            triggerAutoBackup();
         }
     }
 
     function triggerAutoBackup() {
-        // Called after key actions - just export silently
-        exportBackup();
+        // Save backup data to localStorage silently (no file download)
+        const backup = { _meta: { exportDate: new Date().toISOString(), version: '1.0', source: 'inbound-comms-tracker' } };
+        for (const key of BACKUP_KEYS) {
+            const val = localStorage.getItem(key);
+            if (val !== null) backup[key] = val;
+        }
+        try {
+            localStorage.setItem('auto_backup_data', JSON.stringify(backup));
+            localStorage.setItem('last_auto_backup', Date.now().toString());
+        } catch (e) {
+            console.warn('Auto-backup storage failed:', e);
+        }
+        updateBackupIndicator();
     }
 
     function updateBackupIndicator() {
@@ -4952,29 +5114,6 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
     // ============================================================
     // PROXY LABEL MODIFICATION (for scheduled tasks)
     // ============================================================
-    async function modifyLabelsViaProxy(messageIds, addLabelIds, removeLabelIds) {
-        try {
-            const response = await fetch(CLAUDE_PROXY + '/gmail-labels', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    accessToken: accessToken,
-                    messageIds: messageIds,
-                    addLabelIds: addLabelIds,
-                    removeLabelIds: removeLabelIds
-                })
-            });
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(err.error?.message || `API error ${response.status}`);
-            }
-            return await response.json();
-        } catch (err) {
-            console.error('Proxy label modification failed:', err);
-            throw err;
-        }
-    }
-
     // ============================================================
     // UTILITY HELPERS
     // ============================================================
