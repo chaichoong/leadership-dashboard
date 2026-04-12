@@ -2838,9 +2838,17 @@
         if (integrity) {
             const total = PAGE_REGISTRY.length;
             const allGood = matched === total;
-            const updateAllBtn = outOfSync.length > 0
-                ? `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates()" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${outOfSync.length})</button>`
-                : '';
+            const sopRequested = localStorage.getItem('_sop_update_requested');
+            // Clear the requested flag if everything is now in sync
+            if (outOfSync.length === 0 && sopRequested) localStorage.removeItem('_sop_update_requested');
+            let updateAllBtn = '';
+            if (outOfSync.length > 0) {
+                if (sopRequested) {
+                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${outOfSync.length} SOPs)</button>`;
+                } else {
+                    updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${outOfSync.length})</button>`;
+                }
+            }
             integrity.innerHTML = `
                 <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
                     <div class="kpi-card" style="flex:1;min-width:200px;padding:12px 16px">
@@ -2897,19 +2905,26 @@
         }
     }
 
-    async function requestAllSOPUpdates() {
+    async function requestAllSOPUpdates(btn) {
         if (!confirm('Queue SOP updates for all out-of-sync pages?')) return;
+        btn.textContent = 'Requesting...';
+        btn.disabled = true;
         for (const p of PAGE_REGISTRY) {
             if (p.pageVer !== p.sopVer) {
                 await requestSOPUpdate(p.id, p.sopFile, p.pageVer, p.name, { textContent: '', disabled: false, style: {} });
                 await new Promise(r => setTimeout(r, 300));
             }
         }
+        // Mark as requested in localStorage so it persists across refreshes
+        localStorage.setItem('_sop_update_requested', new Date().toISOString());
+        btn.textContent = '✓ Update Requested — Processing';
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#16a34a';
+        btn.style.borderColor = '#16a34a';
         const toast = document.getElementById('shareToast');
         toast.textContent = 'All SOP updates queued — will be processed automatically';
         toast.style.display = 'block';
         setTimeout(() => { toast.style.display = 'none'; }, 4000);
-        renderSiteMap();
     }
 
     // Share current page — copies the deep link to clipboard
