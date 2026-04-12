@@ -312,8 +312,8 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 <div class="header">
   <div class="header-inner">
     <h1>Property Compliance &mdash; Standard Operating Procedure</h1>
-    <div class="subtitle">Tracking gas, electrical, EPC and licensing compliance across all properties</div>
-    <div class="version">Version 1.0 &middot; 11 April 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="subtitle">Tracking gas, electrical, and insurance compliance across all properties</div>
+    <div class="version">Version 2.0 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -325,16 +325,20 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <h2><span class="icon">&#9889;</span> Quick Reference</h2>
     <div class="qr-grid">
       <div class="qr-item">
-        <div class="qr-label">Data Source</div>
-        <div class="qr-value">Airtable &mdash; Properties &amp; Compliance Tables</div>
-      </div>
-      <div class="qr-item">
         <div class="qr-label">Dashboard</div>
-        <div class="qr-value">Leadership Dashboard &mdash; Compliance tab</div>
+        <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/" target="_blank">Leadership Dashboard</a> &rarr; Compliance tab</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Alert Threshold</div>
-        <div class="qr-value">30 days before expiry = amber; overdue = red</div>
+        <div class="qr-label">Gmail Integration</div>
+        <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/" target="_blank">Inbound Comms Tracker</a> &rarr; Label <code>10: property compliance</code></div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Data Source</div>
+        <div class="qr-value">Airtable &mdash; Properties, Units &amp; Certs tables</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Alert Thresholds</div>
+        <div class="qr-value">&#128994; Active &middot; &#128992; Expiring within 30 days &middot; &#128308; Expired / overdue</div>
       </div>
     </div>
   </div>
@@ -346,9 +350,14 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <div class="toc-grid">
         <a href="#overview"><span class="toc-num">1</span> Overview</a>
         <a href="#access"><span class="toc-num">2</span> How to Access</a>
-        <a href="#features"><span class="toc-num">3</span> Features</a>
-        <a href="#datasource"><span class="toc-num">4</span> Data Source</a>
-        <a href="#troubleshooting"><span class="toc-num">5</span> Troubleshooting</a>
+        <a href="#cert-types"><span class="toc-num">3</span> Certificate Types</a>
+        <a href="#dashboard"><span class="toc-num">4</span> Dashboard Features</a>
+        <a href="#gmail"><span class="toc-num">5</span> Gmail Integration</a>
+        <a href="#audit-trail"><span class="toc-num">6</span> Audit Trail</a>
+        <a href="#blocks"><span class="toc-num">7</span> Blocks &amp; Apartments</a>
+        <a href="#agents"><span class="toc-num">8</span> Agent-Managed Properties</a>
+        <a href="#datasource"><span class="toc-num">9</span> Data Source &amp; Airtable</a>
+        <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
       </div>
     </div>
   </div>
@@ -357,29 +366,37 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="overview">
     <h2 class="section-title"><span class="icon">&#128203;</span> 1. Overview</h2>
     <div class="card">
-      <p>The Property Compliance module tracks all mandatory safety and regulatory certifications across the portfolio. It provides a single view of compliance status per property, highlighting items that are approaching expiry or already overdue.</p>
-      <p>Compliance items tracked include:</p>
-      <div class="grid-2">
-        <div class="card" style="border-left: 4px solid var(--blue-500);">
-          <div class="card-header"><span class="dot blue"></span> Gas Safety Certificate (CP12)</div>
-          <p>Annual requirement for all properties with gas appliances. Must be renewed before the expiry date.</p>
+      <p>The Property Compliance system monitors mandatory safety certifications across the full property portfolio. It has two integrated components:</p>
+      <ul>
+        <li><strong>Compliance Dashboard</strong> (compliance.html) &mdash; a read-only matrix showing current cert status for every property, with colour-coded expiry warnings.</li>
+        <li><strong>Gmail Integration</strong> (via the Inbound Comms Tracker, follow-up.html) &mdash; when compliance emails arrive in Gmail, labelling them as <code>10: property compliance</code> triggers AI extraction of certificate details, which are automatically written to Airtable.</li>
+      </ul>
+      <p>Together they create a hands-off pipeline: emails arrive, get labelled, AI extracts the details, Airtable is updated, and the dashboard reflects the latest status.</p>
+
+      <!-- Architecture diagram -->
+      <div class="arch-diagram">
+        <div class="arch-box">
+          <div class="arch-icon">&#128231;</div>
+          <div class="arch-title">Gmail</div>
+          <div class="arch-desc">Compliance emails arrive in inbox</div>
         </div>
-        <div class="card" style="border-left: 4px solid var(--amber-500);">
-          <div class="card-header"><span class="dot amber"></span> Electrical Installation (EICR)</div>
-          <p>Required every 5 years. Must be satisfactory or have remedial works completed within 28 days of the report.</p>
+        <div class="arch-connector">&#10230;</div>
+        <div class="arch-box highlight">
+          <div class="arch-icon">&#129302;</div>
+          <div class="arch-title">AI Processing</div>
+          <div class="arch-desc">Claude Haiku extracts cert type, property, renewal date</div>
         </div>
-        <div class="card" style="border-left: 4px solid var(--green-500);">
-          <div class="card-header"><span class="dot green"></span> Energy Performance Certificate (EPC)</div>
-          <p>Valid for 10 years. Must be rated E or above for rental properties (minimum requirement).</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--red-500);">
-          <div class="card-header"><span class="dot red"></span> HMO / Selective Licence</div>
-          <p>Required for Houses in Multiple Occupation or properties in selective licensing areas. Typically valid for 5 years.</p>
+        <div class="arch-connector">&#10230;</div>
+        <div class="arch-box">
+          <div class="arch-icon">&#128451;</div>
+          <div class="arch-title">Airtable</div>
+          <div class="arch-desc">Cert records created with full audit trail</div>
         </div>
       </div>
+
       <div class="info-box danger">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span>Operating without a valid gas safety certificate is a criminal offence. The dashboard flags any property where the CP12 has expired in red with highest priority.</span>
+        <span>Operating without a valid gas safety certificate is a criminal offence. The dashboard flags any property where the GSC has expired in red with highest priority.</span>
       </div>
     </div>
   </div>
@@ -388,70 +405,305 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="access">
     <h2 class="section-title"><span class="icon">&#128279;</span> 2. How to Access</h2>
     <div class="card">
+      <div class="card-header">Compliance Dashboard</div>
       <ol class="steps">
-        <li>Open the Leadership Dashboard in your browser.</li>
-        <li>Click the <strong>Compliance</strong> tab in the navigation bar.</li>
+        <li>Open the <a href="https://chaichoong.github.io/leadership-dashboard/" target="_blank">Leadership Dashboard</a> in your browser.</li>
+        <li>Click the <strong>Compliance</strong> tab in the top navigation bar.</li>
+        <li>If prompted, enter your Airtable Personal Access Token (PAT). This is saved in your browser and shared with the Inbound Comms Tracker automatically.</li>
         <li>The compliance matrix loads, showing all properties with their certification statuses colour-coded.</li>
+        <li>Click <strong>Refresh</strong> in the top-right corner to reload data at any time.</li>
       </ol>
     </div>
-  </div>
-
-  <!-- 3. Features -->
-  <div class="section" id="features">
-    <h2 class="section-title"><span class="icon">&#128296;</span> 3. Features</h2>
     <div class="card">
-      <div class="card-header">Dashboard Features</div>
-      <ul>
-        <li><strong>Compliance Matrix</strong> &mdash; A grid showing each property as a row and each compliance type as a column. Cells are colour-coded: green (valid), amber (expiring within 30 days), red (expired).</li>
-        <li><strong>Summary KPIs</strong> &mdash; Header cards showing total compliant properties, items expiring soon, and overdue items.</li>
-        <li><strong>Expiry Timeline</strong> &mdash; Upcoming expiry dates sorted chronologically so renewals can be planned in advance.</li>
-        <li><strong>Certificate Links</strong> &mdash; Click a cell to view the uploaded certificate document (PDF stored in Airtable attachments).</li>
-        <li><strong>Filtering</strong> &mdash; Filter by property, compliance type, or status (Valid / Expiring / Expired).</li>
-      </ul>
+      <div class="card-header">Inbound Comms Tracker (Email Processing)</div>
+      <ol class="steps">
+        <li>Open the Leadership Dashboard and click the <strong>Inbound Comms</strong> tab.</li>
+        <li>Connect your Gmail account and configure your Airtable PAT in Settings (if not already done).</li>
+        <li>Select the <code>10: property compliance</code> label from the label dropdown to view compliance emails.</li>
+      </ol>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>Use the Expiry Timeline to batch-schedule renewals. Booking multiple gas checks in the same week is more cost-effective than individual visits.</span>
+        <span>The Airtable PAT is shared between the Compliance Dashboard and Inbound Comms Tracker. Enter it once in either page and it works in both.</span>
       </div>
     </div>
   </div>
 
-  <!-- 4. Data Source -->
-  <div class="section" id="datasource">
-    <h2 class="section-title"><span class="icon">&#128451;</span> 4. Data Source</h2>
+  <!-- 3. Certificate Types -->
+  <div class="section" id="cert-types">
+    <h2 class="section-title"><span class="icon">&#128220;</span> 3. Certificate Types</h2>
     <div class="card">
-      <div class="card-header">Airtable Configuration</div>
+      <p>The system tracks three main certificate types, displayed as columns on the dashboard:</p>
+      <div class="grid-2">
+        <div class="card" style="border-left: 4px solid var(--blue-500);">
+          <div class="card-header"><span class="dot blue"></span> Gas Safety Certificate (GSC)</div>
+          <p><strong>Renewal:</strong> Annual (every 12 months)</p>
+          <p>Required for all properties with gas appliances. Blocks of apartments: N/A at unit level if the building has no individual gas supply (shown as N/A on dashboard).</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--amber-500);">
+          <div class="card-header"><span class="dot amber"></span> Electrical Installation (EICR)</div>
+          <p><strong>Renewal:</strong> Every 5 years</p>
+          <p>Mandatory for all rental properties. In blocks, each apartment has its own EICR.</p>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card" style="border-left: 4px solid var(--green-500);">
+          <div class="card-header"><span class="dot green"></span> Landlord Insurance</div>
+          <p><strong>Renewal:</strong> Annual</p>
+          <p>Building-level cover. In blocks, shown at the property level rather than per-apartment.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--purple-500);">
+          <div class="card-header"><span class="dot blue"></span> Fire Alarm</div>
+          <p><strong>Tracked in Airtable</strong> but does not have a dedicated dashboard column. Emails mentioning fire alarm certificates are still processed and stored.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Dashboard Features -->
+  <div class="section" id="dashboard">
+    <h2 class="section-title"><span class="icon">&#128296;</span> 4. Dashboard Features</h2>
+    <div class="card">
+      <div class="card-header">What You See</div>
       <ul>
-        <li><strong>Base:</strong> Operations Director</li>
-        <li><strong>Tables:</strong> Properties (for property details) and Compliance (for certificate records)</li>
-        <li><strong>Relationship:</strong> Each compliance record is linked to a property via the Property field</li>
-        <li><strong>Key fields:</strong> Compliance Type, Issue Date, Expiry Date, Status, Certificate (attachment), Engineer/Provider</li>
+        <li><strong>Summary Bar</strong> &mdash; Four KPI cards at the top: Expired (red), Expiring within 30 days (amber), Active (green), and No Cert (grey).</li>
+        <li><strong>Self-Managed Properties</strong> &mdash; The main table showing each property as a row with three cert columns (GSC, EICR, Insurance). Each cell is colour-coded and shows the renewal date.</li>
+        <li><strong>Agent-Managed Properties</strong> &mdash; A separate section below, grouped by managing agent (e.g. Roc Immo, Intus, Cheffins). These are shown for visibility but managed by the agent.</li>
+        <li><strong>Blocks &amp; Apartments</strong> &mdash; Properties marked as &ldquo;Block&rdquo; in Airtable expand into their individual units, each with its own cert row.</li>
+        <li><strong>Airtable Links</strong> &mdash; Click any cert cell to open that record directly in Airtable for editing.</li>
+        <li><strong>Refresh Button</strong> &mdash; Top-right corner, reloads all data from Airtable without a full page refresh.</li>
+        <li><strong>Back to Dashboard</strong> &mdash; Returns to the main Leadership Dashboard overview tab.</li>
       </ul>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span>When a new certificate is uploaded, update the Issue Date and Expiry Date fields. The dashboard calculates status (Valid/Expiring/Expired) automatically from the Expiry Date.</span>
+        <span>The dashboard always shows the <strong>latest</strong> (most recent renewal date) certificate per property and type. Older certs are preserved in Airtable as an audit trail but do not appear on the dashboard.</span>
+      </div>
+
+      <!-- Status legend -->
+      <h4 style="margin-top: 1rem;">Status Colour Codes</h4>
+      <div class="metrics-bar">
+        <div class="metric-chip mc-green"><span class="dot green"></span> Active &mdash; valid, more than 30 days remaining</div>
+        <div class="metric-chip mc-amber"><span class="dot amber"></span> Expiring &mdash; 30 days or fewer remaining</div>
+        <div class="metric-chip mc-red"><span class="dot red"></span> Expired &mdash; renewal date has passed</div>
       </div>
     </div>
   </div>
 
-  <!-- 5. Troubleshooting -->
+  <!-- 5. Gmail Integration -->
+  <div class="section" id="gmail">
+    <h2 class="section-title"><span class="icon">&#128231;</span> 5. Gmail Integration</h2>
+    <div class="card">
+      <div class="card-header">How It Works</div>
+      <p>The Inbound Comms Tracker processes compliance emails automatically when they are labelled in Gmail.</p>
+
+      <!-- Flow diagram -->
+      <div class="flow">
+        <div class="flow-step primary">
+          <span class="flow-icon">&#128231;</span>
+          Email arrives
+          <span class="flow-sub">Gas cert, EICR, insurance</span>
+        </div>
+        <span class="flow-arrow">&#10230;</span>
+        <div class="flow-step warning">
+          <span class="flow-icon">&#127991;</span>
+          Label applied
+          <span class="flow-sub">10: property compliance</span>
+        </div>
+        <span class="flow-arrow">&#10230;</span>
+        <div class="flow-step purple">
+          <span class="flow-icon">&#129302;</span>
+          AI extraction
+          <span class="flow-sub">Claude Haiku via proxy</span>
+        </div>
+        <span class="flow-arrow">&#10230;</span>
+        <div class="flow-step success">
+          <span class="flow-icon">&#9989;</span>
+          Airtable updated
+          <span class="flow-sub">New cert created</span>
+        </div>
+      </div>
+
+      <h4>Step-by-Step</h4>
+      <ol class="steps">
+        <li>A compliance email arrives in Gmail (e.g. gas safety certificate from an engineer, EICR report, insurance renewal confirmation).</li>
+        <li>In the Inbound Comms Tracker, use the label dropdown or AI suggestion to apply the <code>10: property compliance</code> label. This triggers processing automatically.</li>
+        <li>The system sends the email subject and body to Claude Haiku, which extracts: <strong>cert_type</strong> (GSC, EICR, Landlord Insurance, or Fire Alarm), <strong>property_name</strong>, <strong>renewal_date</strong>, and a brief <strong>summary</strong>.</li>
+        <li>The extracted data is matched against your Airtable Properties table. If a match is found, a new cert record is created in the Certs table with a link back to the original Gmail message.</li>
+        <li>Any older certs of the same type for the same property are automatically marked as &ldquo;Expired&rdquo; (see Audit Trail below).</li>
+        <li>The compliance dashboard immediately reflects the new cert on the next Refresh.</li>
+      </ol>
+
+      <h4>Bulk Processing</h4>
+      <p>When viewing the <code>10: property compliance</code> label, a compliance banner appears showing how many emails have been processed vs pending. Click <strong>Process All Pending</strong> to batch-process all unprocessed emails in one go.</p>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>The AI can only extract details that are present in the email text. If an email just says &ldquo;certificate attached&rdquo; with no property name or date, it will show as &ldquo;No Match&rdquo; and need manual entry in Airtable.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Audit Trail -->
+  <div class="section" id="audit-trail">
+    <h2 class="section-title"><span class="icon">&#128218;</span> 6. Audit Trail</h2>
+    <div class="card">
+      <p>The system maintains a <strong>full audit trail</strong> of every certificate ever received. Old records are never deleted.</p>
+
+      <h4>How It Works</h4>
+      <ul>
+        <li>When a new compliance email is processed, a <strong>new cert record</strong> is always created in Airtable (never overwritten).</li>
+        <li>After creation, any <strong>older certs</strong> of the same property and type are automatically set to &ldquo;Expired&rdquo; status.</li>
+        <li>The compliance dashboard only shows certs with the <strong>latest renewal date</strong> per property and type &mdash; expired records are filtered out.</li>
+        <li>All historical records remain in Airtable, searchable and traceable, each with a link to the original Gmail message.</li>
+      </ul>
+
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>To view the full certificate history for a property, open the property record in Airtable and look at all linked cert records. Each one includes the Gmail link and processing date.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Blocks & Apartments -->
+  <div class="section" id="blocks">
+    <h2 class="section-title"><span class="icon">&#127970;</span> 7. Blocks &amp; Apartments</h2>
+    <div class="card">
+      <p>Properties with a &ldquo;Block&rdquo; type in Airtable are handled differently from standard houses or flats:</p>
+
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Cert Type</th>
+            <th>Block-Level or Per-Unit?</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>GSC</strong></td>
+            <td>N/A for most blocks</td>
+            <td>Unless individual apartments have their own gas supply, GSC shows as N/A for block units</td>
+          </tr>
+          <tr>
+            <td><strong>EICR</strong></td>
+            <td>Per unit</td>
+            <td>Each apartment within a block has its own EICR record and expiry date</td>
+          </tr>
+          <tr>
+            <td><strong>Insurance</strong></td>
+            <td>Building-level</td>
+            <td>One policy covers the whole block. Applied at the property level and inherited by all units</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>On the dashboard, blocks expand into rows for each apartment. Units are listed alphabetically beneath the block name.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Agent-Managed Properties -->
+  <div class="section" id="agents">
+    <h2 class="section-title"><span class="icon">&#128101;</span> 8. Agent-Managed Properties</h2>
+    <div class="card">
+      <p>Properties with a managing agent recorded in Airtable appear in a separate &ldquo;Agent-Managed&rdquo; section at the bottom of the dashboard. They are grouped by agent name and sorted alphabetically.</p>
+      <p>Agent-managed properties are <strong>excluded from the summary KPI counts</strong> at the top of the dashboard, since compliance responsibility sits with the agent. However, they are still shown so you can monitor overall portfolio status.</p>
+
+      <h4>Adding or Updating Agent Info</h4>
+      <p>To mark a property as agent-managed, set the <strong>Agent</strong> field in the Airtable Properties table. The dashboard recognises the following agents and automatically groups them:</p>
+      <ul>
+        <li>Roc Immo</li>
+        <li>Intus</li>
+        <li>Mears</li>
+        <li>Cheffins</li>
+        <li>Sequence</li>
+        <li>Simon Collins</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 9. Data Source -->
+  <div class="section" id="datasource">
+    <h2 class="section-title"><span class="icon">&#128451;</span> 9. Data Source &amp; Airtable</h2>
+    <div class="card">
+      <div class="card-header">Airtable Structure</div>
+      <p>The system reads from three tables in the <strong>Operations Director</strong> base:</p>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Purpose</th>
+            <th>Key Fields</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Properties</strong></td>
+            <td>All properties in the portfolio</td>
+            <td>Property Name, Short Name, Property Type (Standard/Block), Agent, linked Units</td>
+          </tr>
+          <tr>
+            <td><strong>Units</strong></td>
+            <td>Individual apartments within blocks</td>
+            <td>Unit Name, linked Property</td>
+          </tr>
+          <tr>
+            <td><strong>Certs</strong></td>
+            <td>Certificate records (one per cert received)</td>
+            <td>Type (select: GSC, EICR, Landlord Insurance, Fire Alarm), linked Property, linked Unit, Status (Active/Expired), Renewal Date, Notes (contains Gmail link)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>Adding a Certificate Manually</h4>
+      <ol class="steps">
+        <li>Open the Certs table in Airtable.</li>
+        <li>Create a new record.</li>
+        <li>Set the <strong>Type</strong> (GSC, EICR, or Landlord Insurance).</li>
+        <li>Link it to the correct <strong>Property</strong> (and <strong>Unit</strong> if applicable for blocks).</li>
+        <li>Set the <strong>Renewal Date</strong> (the date the cert expires or is next due).</li>
+        <li>Set <strong>Status</strong> to Active. The dashboard will pick it up on next refresh.</li>
+      </ol>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>You only need to add certs manually for situations not covered by email (e.g. certificates received by post). Email-based certs are created automatically via the Gmail integration.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 5. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 10. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
-        <div class="ts-problem">Property showing as non-compliant despite valid certificate</div>
-        <div class="ts-solution">Check the Expiry Date field in the Airtable Compliance record. Ensure the date is correct and in the future. Also verify the compliance type matches the expected category.</div>
+        <div class="ts-problem">Dashboard shows &ldquo;No Cert&rdquo; despite having a valid certificate</div>
+        <div class="ts-solution">Check the Certs table in Airtable. Ensure the cert record has the correct Property linked, the correct Type selected, and a Renewal Date set. Also check that Status is &ldquo;Active&rdquo; (not &ldquo;Expired&rdquo;). Click Refresh on the dashboard.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Certificate PDF not loading when clicked</div>
-        <div class="ts-solution">Airtable attachment URLs expire periodically. Re-upload the PDF to the Compliance record attachment field. Refresh the dashboard after uploading.</div>
+        <div class="ts-problem">Email processed but shows &ldquo;No Match&rdquo;</div>
+        <div class="ts-solution">The AI could not match the property name in the email to any property in Airtable. Check that the property name or short name in Airtable matches what appears in the email. You may need to add a short name alias.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Property missing from the compliance matrix</div>
-        <div class="ts-solution">The property must exist in the Properties table and have at least one linked Compliance record. Add the property to Airtable if it is new, or create the initial compliance records.</div>
+        <div class="ts-problem">Email processing failed</div>
+        <div class="ts-solution">This usually means the AI could not extract valid JSON from the email content, or the Airtable API returned an error. Try the &ldquo;Process All Pending&rdquo; button to retry. If it persists, check the browser console for detailed error messages.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Amber warning not appearing for expiring items</div>
-        <div class="ts-solution">The 30-day threshold is calculated from today's date. Check that the Expiry Date is within 30 days. If the dashboard date seems off, verify browser time zone settings and clear cache.</div>
+        <div class="ts-problem">PAT authentication prompt keeps appearing</div>
+        <div class="ts-solution">Your Airtable Personal Access Token may have expired or been revoked. Generate a new one from <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a> with read/write access to the Operations Director base, then enter it in Settings.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Property missing from the dashboard entirely</div>
+        <div class="ts-solution">The property must exist in the Airtable Properties table. Add it there first, then create cert records linked to it. Properties appear on the dashboard regardless of whether they have certs (they just show blank cells).</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Old expired certificate still showing on the dashboard</div>
+        <div class="ts-solution">The dashboard filters out certs with &ldquo;Expired&rdquo; status and shows only the latest renewal date. If an old cert is still showing, check that its Status in Airtable is correctly set to &ldquo;Expired&rdquo;, or that a newer Active cert exists.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Compliance label not appearing in the Inbound Comms Tracker dropdown</div>
+        <div class="ts-solution">Ensure the Gmail label is named exactly <code>10: property compliance</code> (with the number prefix). The dropdown shows labels matching the pattern <code>N: label name</code> where N is a number. Refresh the page after creating the label in Gmail.</div>
       </div>
     </div>
   </div>

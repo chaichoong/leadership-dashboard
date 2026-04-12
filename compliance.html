@@ -200,7 +200,8 @@
             <div class="header-right">
                 <span class="refresh-dot"></span>
                 <span id="liveDate">Live data</span>
-                <a href="dashboard.html">Back to Dashboard</a>
+                <a href="#" onclick="loadData(); return false;">Refresh</a>
+                <a href="#" onclick="goToDashboard(); return false;">Back to Dashboard</a>
             </div>
         </div>
         <div class="summary-bar" id="summaryBar"></div>
@@ -275,19 +276,32 @@ const FU = {
 
 let PAT = '';
 
+function goToDashboard() {
+    try {
+        if (window.parent && window.parent !== window && typeof window.parent.switchTab === 'function') {
+            window.parent.switchTab('overview');
+            return;
+        }
+    } catch (e) { /* cross-origin, fall through */ }
+    window.location.href = 'index.html';
+}
+
 function authenticate() {
     const input = document.getElementById('patInput').value.trim();
     if (!input) return;
     PAT = input;
     sessionStorage.setItem('_dlr_pat', input);
+    localStorage.setItem('airtable_pat', input); // share with Inbound Comms Tracker
     document.getElementById('authScreen').style.display = 'none';
     loadData();
 }
 
 (function init() {
-    const saved = sessionStorage.getItem('_dlr_pat');
+    // Check shared localStorage (set by Inbound Comms Tracker) first, then sessionStorage
+    const saved = localStorage.getItem('airtable_pat') || sessionStorage.getItem('_dlr_pat');
     if (saved) {
         PAT = saved;
+        sessionStorage.setItem('_dlr_pat', saved);
         document.getElementById('authScreen').style.display = 'none';
         loadData();
     }
@@ -460,17 +474,26 @@ async function loadData() {
             }
         }
 
+        // Helper: keep the cert with the latest renewal date (or prefer any date over none)
+        function isNewer(existing, candidate) {
+            if (!existing) return true;
+            if (!candidate.d) return false;
+            if (!existing.d) return true;
+            return candidate.d > existing.d; // ISO date string comparison
+        }
+
         for (const c of certs) {
+            if (c.s === 'Expired') continue; // skip expired certs — only show current
             const certObj = { s: c.s, d: c.d, recId: c.recId };
             const key = c.type === 'GSC' ? 'gsc' : c.type === 'EICR' ? 'eicr' : 'ins';
 
             if (c.unitId && blockRows[c.unitId]) {
-                blockRows[c.unitId][key] = certObj;
+                if (isNewer(blockRows[c.unitId][key], certObj)) blockRows[c.unitId][key] = certObj;
             } else if (c.propertyId && stdRows[c.propertyId]) {
-                stdRows[c.propertyId][key] = certObj;
+                if (isNewer(stdRows[c.propertyId][key], certObj)) stdRows[c.propertyId][key] = certObj;
             } else if (c.propertyId && blockPropIds.has(c.propertyId)) {
                 for (const uid of props[c.propertyId].unitIds) {
-                    if (!blockRows[uid][key]) blockRows[uid][key] = certObj;
+                    if (isNewer(blockRows[uid][key], certObj)) blockRows[uid][key] = certObj;
                 }
             }
         }

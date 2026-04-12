@@ -2480,6 +2480,7 @@ Respond with ONLY the JSON object, no markdown.`;
         property:  'fldy2t735TV5e1DIL',
         shortName: 'fldqMbR329TNY974G',
     };
+    const VALID_CERT_TYPES = ['GSC', 'EICR', 'Landlord Insurance', 'Fire Alarm'];
 
     let compliancePropsCache = null;
 
@@ -2533,7 +2534,7 @@ Respond with ONLY the JSON object, no markdown.`;
         // Check Airtable for existing cert with this Gmail URL
         try {
             const checkResp = await fetch(
-                `https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${CERT_FIELDS.notes}})`)}&maxRecords=1`,
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&fieldIdsInFormula=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${CERT_FIELDS.notes}})`)}&maxRecords=1`,
                 { headers: { 'Authorization': 'Bearer ' + pat } }
             );
             if (checkResp.ok) {
@@ -2599,9 +2600,13 @@ Respond with ONLY valid JSON, no markdown.`;
             const text = data.content?.[0]?.text || '';
             let extracted;
             try {
-                const jsonMatch = text.match(/[\[{][\s\S]*[\]}]/);
-                extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-            } catch { extracted = null; }
+                extracted = JSON.parse(text);
+            } catch {
+                try {
+                    const jsonMatch = text.match(/[\[{][\s\S]*?[\]}]/);
+                    extracted = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+                } catch { extracted = null; }
+            }
 
             if (!extracted) {
                 markComplianceProcessed(email.threadId, { status: 'failed', error: 'Could not parse AI response' });
@@ -2614,6 +2619,12 @@ Respond with ONLY valid JSON, no markdown.`;
 
             for (const cert of certs) {
                 if (!cert.cert_type || !cert.property_name) continue;
+
+                // Validate cert type
+                if (!VALID_CERT_TYPES.includes(cert.cert_type)) {
+                    console.warn('Invalid cert type:', cert.cert_type, '— skipping');
+                    continue;
+                }
 
                 const matchedProp = properties.find(p =>
                     p.name.toLowerCase() === cert.property_name.toLowerCase() ||
@@ -2643,6 +2654,36 @@ Respond with ONLY valid JSON, no markdown.`;
                 if (resp.ok) {
                     created++;
                     addAuditEntry('compliance_cert', `Created ${cert.cert_type} cert for ${matchedProp.shortName} from "${truncate(email.subject, 40)}"`);
+
+                    // Audit trail: mark older certs of same property+type as Expired
+                    try {
+                        const newRec = await resp.json().catch(() => null);
+                        const newRecId = newRec?.records?.[0]?.id;
+                        const filterFormula = `AND({${CERT_FIELDS.type}}='${cert.cert_type}',FIND('${matchedProp.id}',ARRAYJOIN({${CERT_FIELDS.property}})))`;
+                        const oldUrl = `https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&fieldIdsInFormula=true&filterByFormula=${encodeURIComponent(filterFormula)}`;
+                        const oldResp = await fetch(oldUrl, { headers: { 'Authorization': 'Bearer ' + pat } });
+                        if (oldResp.ok) {
+                            const oldData = await oldResp.json();
+                            const toExpire = (oldData.records || []).filter(r => r.id !== newRecId && r.fields[CERT_FIELDS.status]?.name !== 'Expired');
+                            if (toExpire.length > 0) {
+                                // Batch update up to 10 at a time
+                                for (let b = 0; b < toExpire.length; b += 10) {
+                                    const batch = toExpire.slice(b, b + 10).map(r => ({
+                                        id: r.id,
+                                        fields: { [CERT_FIELDS.status]: { name: 'Expired' } }
+                                    }));
+                                    await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}`, {
+                                        method: 'PATCH',
+                                        headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ records: batch })
+                                    });
+                                }
+                                console.log(`Marked ${toExpire.length} older ${cert.cert_type} cert(s) for ${matchedProp.shortName} as Expired`);
+                            }
+                        }
+                    } catch (auditErr) {
+                        console.warn('Audit trail update failed (non-blocking):', auditErr);
+                    }
                 } else {
                     const errData = await resp.json().catch(() => ({}));
                     console.error('Cert creation failed:', errData);
@@ -2671,7 +2712,7 @@ Respond with ONLY valid JSON, no markdown.`;
         if (!pat) { showError('Airtable token required. Go to Settings.'); return; }
 
         const processed = getProcessedCompliance();
-        const pending = allEmails.filter(e => !processed[e.threadId] || processed[e.threadId].status === 'failed');
+        const pending = allEmails.filter(e => !processed[e.threadId] || ['failed', 'error', 'no_match'].includes(processed[e.threadId].status));
         if (pending.length === 0) { showSuccess('All compliance emails already processed.'); return; }
 
         const btn = document.getElementById('processAllComplianceBtn');
