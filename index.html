@@ -743,7 +743,7 @@
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Admin</div>
-            <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync Monitor</span></div>
+            <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync Monitor</span><span id="fintableBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
         </div>
     </div>
 
@@ -775,6 +775,9 @@
                 <span>Live — smart refresh every 15 minutes (defers while active) | Last updated: <span id="lastUpdated"></span></span>
             </div>
         </div>
+
+        <!-- Fintable Sync Alert Banner (hidden when all OK) -->
+        <div id="fintableAlertBanner" style="display:none"></div>
 
         <!-- Balance Calculator Tool -->
         <div>
@@ -1479,8 +1482,9 @@
                 airtableFetch(TABLES.businesses),
             ]);
 
-            // Fire Gmail fetch in parallel (non-blocking — doesn't delay dashboard render)
+            // Fire Gmail fetch and Fintable sync check in parallel (non-blocking — doesn't delay dashboard render)
             fetchInvoicesFromGmail();
+            checkFintableSyncStatus();
 
             allTransactions = transactions;
             allTenancies = tenancies;
@@ -5106,9 +5110,15 @@
 
     // ─── Fintable Sync Monitor ───────────────────────────────────────
     let fintableLoaded = false;
+    let fintableAccountsCache = null;
 
-    async function loadFintableSyncMonitor() {
-        if (!PAT) return;
+    const FINTABLE_EXCLUDED = [
+        'Cafe Zempler', 'Personal Santander Maintenance', 'Personal Santander Budget',
+        'Personal Santander Investing', 'SHL Zempler', 'Two Chefs Zempler', 'Two Chefs Stripe'
+    ];
+
+    async function fetchFintableAccounts() {
+        if (!PAT) return [];
         const ACCOUNTS_TABLE = 'tbl1nr0EcX2T62KME';
         const fields = [
             'fldqr09KqLGGYCYkC',  // *Name
@@ -5119,7 +5129,6 @@
             'fldIyCsxvjoBqju3y'   // **Fintable User
         ];
 
-        // Fetch accounts synced in the last 183 days (~6 months)
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setDate(sixMonthsAgo.getDate() - 183);
 
@@ -5139,18 +5148,93 @@
             offset = data.offset || null;
         } while (offset);
 
-        // Exclude inactive/unwanted accounts
-        const EXCLUDED_ALIASES = [
-            'Cafe Zempler', 'Personal Santander Maintenance', 'Personal Santander Budget',
-            'Personal Santander Investing', 'SHL Zempler', 'Two Chefs Zempler', 'Two Chefs Stripe'
-        ];
-        allRecords = allRecords.filter(r => {
-            const alias = r.fields['Account Alias'] || '';
-            return !EXCLUDED_ALIASES.includes(alias);
-        });
+        return allRecords.filter(r => !FINTABLE_EXCLUDED.includes(r.fields['Account Alias'] || ''));
+    }
 
-        renderFintableMonitor(allRecords);
+    function classifyFintableAccount(record) {
+        const f = record.fields;
+        const alias = f['Account Alias'] || f['*Name'] || 'Unknown';
+        const lastSync = f['**Last Successful Update'] ? new Date(f['**Last Successful Update']) : null;
+        const hoursAgo = lastSync ? (new Date() - lastSync) / (1000 * 60 * 60) : Infinity;
+
+        let status;
+        if (hoursAgo <= 24) status = 'ok';
+        else if (hoursAgo <= 72) status = 'warning';
+        else if (hoursAgo <= 168) status = 'alert';
+        else status = 'critical';
+
+        return { alias, status, hoursAgo };
+    }
+
+    function updateFintableAlerts(records) {
+        const classified = records.map(classifyFintableAccount);
+        const critical = classified.filter(a => a.status === 'critical');
+        const alert = classified.filter(a => a.status === 'alert');
+        const warning = classified.filter(a => a.status === 'warning');
+        const problemCount = critical.length + alert.length;
+
+        // Sidebar badge
+        const badge = document.getElementById('fintableBadge');
+        if (critical.length > 0) {
+            badge.style.display = 'inline-block';
+            badge.style.background = '#ef4444';
+            badge.textContent = critical.length;
+        } else if (alert.length > 0) {
+            badge.style.display = 'inline-block';
+            badge.style.background = '#f97316';
+            badge.textContent = alert.length;
+        } else if (warning.length > 0) {
+            badge.style.display = 'inline-block';
+            badge.style.background = '#eab308';
+            badge.textContent = warning.length;
+        } else {
+            badge.style.display = 'none';
+        }
+
+        // Alert banner on Leadership Dashboard
+        const banner = document.getElementById('fintableAlertBanner');
+        if (problemCount === 0) {
+            banner.style.display = 'none';
+            return;
+        }
+
+        const parts = [];
+        if (critical.length > 0) parts.push(`<strong>${critical.length}</strong> need${critical.length === 1 ? 's' : ''} reconnecting (7+ days)`);
+        if (alert.length > 0) parts.push(`<strong>${alert.length}</strong> stale (3–7 days)`);
+
+        const bgColor = critical.length > 0 ? '#fef2f2' : '#fff7ed';
+        const borderColor = critical.length > 0 ? '#fecaca' : '#fed7aa';
+        const iconColor = critical.length > 0 ? '#dc2626' : '#ea580c';
+
+        banner.style.display = 'block';
+        banner.innerHTML = `<div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="switchTab('fintable')">
+            <span style="font-size:20px">&#x1F50C;</span>
+            <div style="flex:1">
+                <div style="font-weight:600;font-size:13px;color:${iconColor}">Fintable Sync Alert</div>
+                <div style="font-size:12px;color:#64748b">${parts.join(' · ')} — <span style="color:${iconColor};text-decoration:underline">View Sync Monitor</span></div>
+            </div>
+        </div>`;
+    }
+
+    async function loadFintableSyncMonitor() {
+        if (!PAT) return;
+        // Use cached data if available, otherwise fetch fresh
+        if (!fintableAccountsCache) {
+            fintableAccountsCache = await fetchFintableAccounts();
+            updateFintableAlerts(fintableAccountsCache);
+        }
+        renderFintableMonitor(fintableAccountsCache);
         fintableLoaded = true;
+    }
+
+    // Background check — runs on dashboard load without rendering the full table
+    async function checkFintableSyncStatus() {
+        try {
+            fintableAccountsCache = await fetchFintableAccounts();
+            updateFintableAlerts(fintableAccountsCache);
+        } catch (e) {
+            console.error('Fintable sync check failed:', e);
+        }
     }
 
     function renderFintableMonitor(records) {
