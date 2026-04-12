@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Leadership Dashboard — Standard Operating Procedure</title>
+<title>Leadership Dashboard - Standard Operating Procedure</title>
 <style>
 /* ====== RESET & BASE ====== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -123,6 +123,14 @@ body {
 .flow-arrow {
   font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
 }
+.flow-arrow-down {
+  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
+  font-size: 1.4rem; color: var(--slate-400);
+}
+
+/* Vertical flow */
+.flow-vertical { flex-direction: column; align-items: center; }
+.flow-vertical .flow-step { min-width: 200px; }
 
 /* ====== ARCHITECTURE DIAGRAM ====== */
 .arch-diagram {
@@ -162,6 +170,9 @@ body {
 .label-badge.lb-4 { background: #dcfce7; color: #166534; }
 .label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
 .label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
+.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
+.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
+.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
 
 /* ====== WORKFLOW CARDS ====== */
 .wf-card {
@@ -185,9 +196,13 @@ body {
 .wf-body { padding: 1.25rem 1.5rem; }
 .wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
 .wf-body h4:first-child { margin-top: 0; }
+
+/* Colour coding for workflow numbers */
 .wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
 .wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
 .wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
+.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
+.wf-num.wf-9 { background: #059669; }
 
 /* ====== STEP LISTS ====== */
 .steps { counter-reset: step; list-style: none; padding: 0; }
@@ -252,12 +267,20 @@ code {
 /* ====== TWO-COL GRID ====== */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
+/* ====== AIRTABLE FLOW ====== */
+.at-flow {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+  align-items: center; padding: 1rem 0;
+}
+.at-flow .flow-step { min-width: auto; }
+
 /* ====== PRINT ====== */
 @media print {
   body { background: white; font-size: 10pt; }
   .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
   .section { break-inside: avoid; }
+  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
 /* ====== RESPONSIVE ====== */
@@ -270,6 +293,7 @@ code {
   .grid-2 { grid-template-columns: 1fr; }
   .flow { flex-direction: column; }
   .flow-arrow { transform: rotate(90deg); }
+  .at-flow { grid-template-columns: 1fr; }
   .container { padding: 0 1rem 3rem; }
 }
 
@@ -284,327 +308,722 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 </head>
 <body>
 
-<!-- ====== HEADER ====== -->
+<!-- ============ HEADER ============ -->
 <div class="header">
   <div class="header-inner">
-    <h1>Leadership Dashboard &mdash; Standard Operating Procedure</h1>
-    <div class="subtitle">Overview, authentication, navigation, KPI cards, cash flow forecast and AI commentary</div>
-    <div class="version">Version 2.3 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
+    <h1>&#x1F4CA; Leadership Dashboard</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
+    <div class="version">Version 2.3 &bull; 12 April 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
-<!-- ====== CONTAINER ====== -->
 <div class="container">
 
-  <!-- Quick Reference -->
-  <div class="quick-ref">
-    <h2><span class="icon">&#9889;</span> Quick Reference</h2>
-    <div class="qr-grid">
-      <div class="qr-item">
-        <div class="qr-label">Hosted On</div>
-        <div class="qr-value">GitHub Pages &mdash; <code>index.html</code></div>
-      </div>
-      <div class="qr-item">
-        <div class="qr-label">Data Source</div>
-        <div class="qr-value">Airtable &mdash; base <code>appnqjDpqDniH3IRl</code></div>
-      </div>
-      <div class="qr-item">
-        <div class="qr-label">Refresh Rate</div>
-        <div class="qr-value">Smart refresh every 15 minutes (defers while active)</div>
-      </div>
-      <div class="qr-item">
-        <div class="qr-label">Access</div>
-        <div class="qr-value">PIN-protected &mdash; token stored in <code>localStorage</code></div>
-      </div>
+<!-- ============ QUICK REFERENCE ============ -->
+<div class="quick-ref">
+  <h2>&#x26A1; Quick Reference</h2>
+  <div class="qr-grid">
+    <div class="qr-item">
+      <div class="qr-label">Web App URL</div>
+      <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard" target="_blank">chaichoong.github.io/leadership-dashboard</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Account</div>
+      <div class="qr-value">kevin@runpreneur.org.uk<br>(kevinbrittain@gmail.com)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">GitHub Repository</div>
+      <div class="qr-value"><a href="https://github.com/chaichoong/leadership-dashboard" target="_blank">chaichoong/leadership-dashboard</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Airtable Base</div>
+      <div class="qr-value">&#x2699;&#xFE0F; Operations Director<br><code>appnqjDpqDniH3IRl</code></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Source File (Edit Here)</div>
+      <div class="qr-value">Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <strong>dashboard.html</strong></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">SOP Document</div>
+      <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/sop.html" target="_blank">chaichoong.github.io/leadership-dashboard/sop.html</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Apps Script</div>
+      <div class="qr-value">Deployed as web app under Kevin&rsquo;s Google account</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Gmail Label</div>
+      <div class="qr-value"><span class="label-badge lb-3">3. to pay</span></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Smart Refresh</div>
+      <div class="qr-value">Every 15 minutes<br>(defers while active)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Technology</div>
+      <div class="qr-value">Static HTML + JavaScript<br>(no server required)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Authentication</div>
+      <div class="qr-value">Airtable Personal Access Token<br>(session only)</div>
     </div>
   </div>
-
-  <!-- Table of Contents -->
-  <div class="section">
-    <div class="toc">
-      <h2>Table of Contents</h2>
-      <div class="toc-grid">
-        <a href="#purpose"><span class="toc-num">1</span> Purpose &amp; Architecture</a>
-        <a href="#auth"><span class="toc-num">2</span> Authentication</a>
-        <a href="#navigation"><span class="toc-num">3</span> Sidebar Navigation</a>
-        <a href="#kpi"><span class="toc-num">4</span> KPI Cards &amp; Sections</a>
-        <a href="#cashflow"><span class="toc-num">5</span> Cash Flow Forecast</a>
-        <a href="#calculator"><span class="toc-num">6</span> Balance Calculator</a>
-        <a href="#ai"><span class="toc-num">7</span> AI Analysis &amp; Commentary</a>
-        <a href="#refresh"><span class="toc-num">8</span> Smart Refresh</a>
-        <a href="#sharing"><span class="toc-num">9</span> Sharing</a>
-        <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- 1. Purpose & Architecture -->
-  <div class="section" id="purpose">
-    <h2 class="section-title"><span class="icon">&#127919;</span> 1. Purpose &amp; Architecture</h2>
-    <div class="card">
-      <p>The Leadership Dashboard is a single-page HTML application hosted on GitHub Pages that provides a real-time operational view of the property portfolio. All data is fetched at runtime from Airtable using a Personal Access Token (PAT) stored in the browser.</p>
-      <p>The dashboard is the central hub for daily operations and is the entry point for all other pages in the ecosystem.</p>
-    </div>
-    <div class="card">
-      <div class="card-header">System Architecture</div>
-      <div class="arch-diagram">
-        <div class="arch-box highlight">
-          <div class="arch-icon">&#128451;</div>
-          <div class="arch-title">Airtable</div>
-          <div class="arch-desc">Single source of truth for all operational data</div>
-        </div>
-        <div class="arch-connector">&#10132;</div>
-        <div class="arch-box highlight">
-          <div class="arch-icon">&#128202;</div>
-          <div class="arch-title">dashboard.html</div>
-          <div class="arch-desc">Fetches data via REST API, renders in browser</div>
-        </div>
-        <div class="arch-connector">&#10132;</div>
-        <div class="arch-box">
-          <div class="arch-icon">&#127760;</div>
-          <div class="arch-title">GitHub Pages</div>
-          <div class="arch-desc">Static hosting, publicly accessible URL</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 2. Authentication -->
-  <div class="section" id="auth">
-    <h2 class="section-title"><span class="icon">&#128274;</span> 2. Authentication</h2>
-    <div class="card">
-      <p>The dashboard uses a PIN-based authentication screen on first load. The PIN is the Airtable Personal Access Token (PAT) for the operational base. Once entered, it is stored in <code>localStorage</code> so you are not prompted again on the same browser.</p>
-      <div class="card-header">Login Flow</div>
-      <ol class="steps">
-        <li>Navigate to the dashboard URL. The auth screen appears if no token is found in <code>localStorage</code>.</li>
-        <li>Enter the Airtable PAT in the input field and click <strong>Access Dashboard</strong>.</li>
-        <li>The system validates the token by making a test API call. If valid, the dashboard loads.</li>
-        <li>If the token is rejected, an error message appears. Check the token has not expired and has the correct scopes.</li>
-      </ol>
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>The PAT requires <strong>read</strong> and <strong>write</strong> scopes on the Airtable base. A read-only token will allow the dashboard to load but will prevent status updates (Mark as Paid, CFV actions, etc.).</span>
-      </div>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>To log out or switch tokens, open the browser console and run <code>localStorage.clear()</code>, then refresh the page.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 3. Sidebar Navigation -->
-  <div class="section" id="navigation">
-    <h2 class="section-title"><span class="icon">&#128203;</span> 3. Sidebar Navigation</h2>
-    <div class="card">
-      <p>The dashboard uses a fixed sidebar on the left for navigation. Each item switches the main content area to the corresponding module. The sidebar collapses on mobile via a hamburger toggle.</p>
-      <table class="label-table">
-        <thead>
-          <tr><th>Icon</th><th>Module</th><th>Description</th><th>SOP</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>&#128202;</td><td><strong>Leadership Dashboard</strong></td><td>Overview: KPIs, cash flow, AI commentary</td><td><a href="sop.html">sop.html</a></td></tr>
-          <tr><td>&#128295;</td><td><strong>Contractor Job List</strong></td><td>Embedded Airtable view of maintenance jobs</td><td><a href="sop-contractor-jobs.html">sop-contractor-jobs.html</a></td></tr>
-          <tr><td>&#129534;</td><td><strong>Invoices</strong></td><td>Invoice ingestion, AI matching, approval and payment</td><td><a href="sop-invoices.html">sop-invoices.html</a></td></tr>
-          <tr><td>&#128680;</td><td><strong>CFVs</strong></td><td>Cash flow voids &mdash; missing rent detection and chase</td><td><a href="sop-cfvs.html">sop-cfvs.html</a></td></tr>
-          <tr><td>&#128232;</td><td><strong>Inbound Comms</strong></td><td>Email triage, AI label suggestions, follow-up drafting</td><td><a href="inbound-comms-sop.html">inbound-comms-sop.html</a></td></tr>
-          <tr><td>&#9989;</td><td><strong>Property Compliance</strong></td><td>Compliance certificate tracking and renewal alerts</td><td><a href="sop-compliance.html">sop-compliance.html</a></td></tr>
-          <tr><td>&#128279;</td><td><strong>Site Map &amp; Links</strong></td><td>Page registry, version tracking, integrity checks</td><td><a href="sop-sitemap.html">sop-sitemap.html</a></td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- 4. KPI Cards & Sections -->
-  <div class="section" id="kpi">
-    <h2 class="section-title"><span class="icon">&#128200;</span> 4. KPI Cards &amp; Sections</h2>
-    <div class="card">
-      <p>The overview page is organised into four sections, each containing a grid of KPI cards. Cards expand on click to reveal a detailed breakdown. All values are fetched live from Airtable on page load and on each smart refresh cycle.</p>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-1">1</span>
-        <h3>Financial Overview</h3>
-        <span class="wf-tag">Income &amp; expenditure</span>
-      </div>
-      <div class="wf-body">
-        <p>Tracks current-month income, expenditure, and net position against budget. Cards include total rent collected, outstanding invoices, and month-to-date spend by category. Click any card to expand the per-property or per-supplier breakdown.</p>
-      </div>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-2">2</span>
-        <h3>Portfolio Overview</h3>
-        <span class="wf-tag">Properties &amp; occupancy</span>
-      </div>
-      <div class="wf-body">
-        <p>Displays total properties, current occupancy rate, void units, and units in the pipeline. Progress bars show occupancy against target. A red or amber card indicates occupancy has fallen below the threshold configured in Airtable.</p>
-      </div>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-3">3</span>
-        <h3>Tenancy Metrics</h3>
-        <span class="wf-tag">Tenants &amp; renewals</span>
-      </div>
-      <div class="wf-body">
-        <p>Shows active tenancies, tenancies expiring within 30 / 60 / 90 days, and tenancies currently in arrears. Expand any card to see the specific tenants and properties affected.</p>
-      </div>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-4">4</span>
-        <h3>31-Day Operational Metrics</h3>
-        <span class="wf-tag">Rolling 31-day window</span>
-      </div>
-      <div class="wf-body">
-        <p>A rolling view of the past 31 days covering maintenance jobs raised, completed, and overdue; invoices processed; and CFVs opened and resolved. This section gives a quick health-check on operational throughput.</p>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">KPI Card Colour Coding</div>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green">Green &mdash; On target or above</span>
-        <span class="metric-chip mc-amber">Amber &mdash; Below target, monitor</span>
-        <span class="metric-chip mc-red">Red &mdash; Critical, action required</span>
-        <span class="metric-chip mc-blue">Blue &mdash; Informational</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 5. Cash Flow Forecast -->
-  <div class="section" id="cashflow">
-    <h2 class="section-title"><span class="icon">&#128184;</span> 5. Cash Flow Forecast</h2>
-    <div class="card">
-      <p>The <strong>31-Day Cash Flow Forecast</strong> section projects daily inflows and outflows for the next 31 days based on scheduled rent receipts, expected invoices, and known recurring costs from Airtable.</p>
-      <div class="card-header">Reading the Forecast</div>
-      <table class="label-table">
-        <thead>
-          <tr><th>Column</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><strong>Date</strong></td><td>Calendar day. Weekend rows are shaded grey.</td></tr>
-          <tr><td><strong>Opening</strong></td><td>Balance at the start of the day.</td></tr>
-          <tr><td><strong>In</strong></td><td>Expected inflows (rent payments, refunds, etc.).</td></tr>
-          <tr><td><strong>Out</strong></td><td>Scheduled outflows (invoices, recurring costs).</td></tr>
-          <tr><td><strong>Net</strong></td><td>In minus Out for the day.</td></tr>
-          <tr><td><strong>Closing</strong></td><td>Projected balance at end of day. Red if negative.</td></tr>
-        </tbody>
-      </table>
-      <div class="info-box tip">
-        <span class="ib-icon">&#128161;</span>
-        <span>Click any forecast row to expand it and see the individual transactions contributing to that day's inflows and outflows.</span>
-      </div>
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>The forecast is based on <em>expected</em> transactions. Actual bank movements are confirmed separately through the daily reconciliation. Use the Balance Calculator to stress-test scenarios.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 6. Balance Calculator -->
-  <div class="section" id="calculator">
-    <h2 class="section-title"><span class="icon">&#9874;</span> 6. Balance Calculator</h2>
-    <div class="card">
-      <p>The <strong>Balance Calculator</strong> is a collapsible tool at the top of the overview page. It allows you to select a subset of forecast transactions and calculate the projected closing balance given a known opening balance.</p>
-      <div class="card-header">How to Use</div>
-      <ol class="steps">
-        <li>Click <strong>Balance Calculator</strong> to expand the panel.</li>
-        <li>Enter your current bank balance in the <strong>Opening Balance</strong> field.</li>
-        <li>Use the filter buttons to select <strong>Inflows Only</strong>, <strong>Outflows Only</strong>, or <strong>Select All</strong>.</li>
-        <li>Tick or untick individual transactions in the list to include or exclude them from the calculation.</li>
-        <li>The <strong>Closing Balance</strong> updates in real time as you make selections.</li>
-      </ol>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>Use the Balance Calculator to answer questions like &ldquo;If I pay all outstanding invoices this week, what will my balance be on Friday?&rdquo; before committing to payments.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 7. AI Analysis & Commentary -->
-  <div class="section" id="ai">
-    <h2 class="section-title"><span class="icon">&#129302;</span> 7. AI Analysis &amp; Commentary</h2>
-    <div class="card">
-      <p>The <strong>AI Analysis &amp; Commentary</strong> section at the bottom of the overview page generates a natural-language summary of the current operational state. It highlights key risks, positive trends, and recommended actions based on the live data.</p>
-      <p>The commentary is regenerated on each page load and smart refresh. It considers:</p>
-      <ul>
-        <li>Cash flow position and any projected negative balance days</li>
-        <li>Open CFVs and their days overdue</li>
-        <li>Invoices awaiting approval or overdue for payment</li>
-        <li>Tenancies expiring or in arrears</li>
-        <li>Maintenance jobs overdue</li>
-      </ul>
-      <div class="info-box tip">
-        <span class="ib-icon">&#128161;</span>
-        <span>The AI commentary is a summary aid, not a replacement for reviewing the underlying data. Always verify flagged items directly in Airtable or the relevant dashboard tab before taking action.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 8. Smart Refresh -->
-  <div class="section" id="refresh">
-    <h2 class="section-title"><span class="icon">&#128260;</span> 8. Smart Refresh</h2>
-    <div class="card">
-      <p>The dashboard uses a <strong>smart refresh</strong> system that automatically reloads all data every 15 minutes. The refresh is deferred if the user is actively interacting with the page to avoid interruptions.</p>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> Green dot &mdash; Live and refreshing normally</span>
-      </div>
-      <p style="margin-top:0.75rem">The last updated timestamp in the header shows when data was most recently fetched. To force an immediate refresh, click the browser reload button or navigate away and back.</p>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>The 15-minute interval is hardcoded in <code>dashboard.html</code> as <code>REFRESH_INTERVAL = 15 * 60 * 1000</code>. To change it, update this constant and redeploy.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 9. Sharing -->
-  <div class="section" id="sharing">
-    <h2 class="section-title"><span class="icon">&#128279;</span> 9. Sharing</h2>
-    <div class="card">
-      <p>A <strong>Share</strong> button is fixed in the top-right corner of the dashboard. Clicking it copies the current page URL to the clipboard and shows a confirmation toast.</p>
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>Anyone with the URL can see the auth screen, but they will need the Airtable PAT to access data. Do not share the PAT. If a shared user needs read-only access, create a separate read-only Airtable token for them.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 10. Troubleshooting -->
-  <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 10. Troubleshooting</h2>
-    <div class="card">
-      <div class="ts-item">
-        <div class="ts-problem">Dashboard shows auth screen despite entering the correct PIN</div>
-        <div class="ts-solution">The PAT may have expired. Log in to Airtable, navigate to Account &rarr; Developer Hub, and verify the token is active. Generate a new token if needed and re-enter it on the auth screen.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">KPI cards show &ldquo;Loading&rdquo; indefinitely</div>
-        <div class="ts-solution">Open the browser developer tools (F12) and check the Console and Network tabs for failed API requests. Common causes: expired PAT, Airtable API rate limit (429), or a network connectivity issue.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Cash flow chart is blank</div>
-        <div class="ts-solution">Verify the Chart.js CDN link is reachable. If offline, the chart will not render. The data table below the chart is still populated from Airtable data. Check the browser console for script load errors.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">AI commentary not appearing</div>
-        <div class="ts-solution">The AI commentary relies on a successful data fetch. If any upstream section fails to load, the commentary may be empty or show an error message. Resolve the data fetch issue first, then refresh.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Sidebar not visible on mobile</div>
-        <div class="ts-solution">Tap the hamburger icon (&#9776;) in the top-left corner to open the sidebar. On screens narrower than 768px the sidebar is hidden by default and must be toggled manually.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Data looks stale after a known Airtable update</div>
-        <div class="ts-solution">Wait up to 15 minutes for the next smart refresh cycle, or force a reload with Cmd+Shift+R (Mac) / Ctrl+Shift+R (Windows) to bypass the browser cache.</div>
-      </div>
-    </div>
-  </div>
-
 </div>
+
+<!-- ============ TABLE OF CONTENTS ============ -->
+<div class="section">
+  <div class="toc">
+    <h2>&#x1F4D1; Table of Contents</h2>
+    <div class="toc-grid">
+      <a href="#architecture"><span class="toc-num">1</span> System Architecture</a>
+      <a href="#access"><span class="toc-num">2</span> Access &amp; Authentication</a>
+      <a href="#tabs"><span class="toc-num">3</span> Platform Navigation</a>
+      <a href="#financial"><span class="toc-num">4</span> Financial Overview</a>
+      <a href="#portfolio"><span class="toc-num">5</span> Portfolio &amp; Tenancy Metrics</a>
+      <a href="#cashflow"><span class="toc-num">6</span> 31-Day Cash Flow Forecast</a>
+      <a href="#reconciliation"><span class="toc-num">7</span> Reconciliation Matching Logic</a>
+      <a href="#balance-calc"><span class="toc-num">8</span> Balance Calculator</a>
+      <a href="#ai-commentary"><span class="toc-num">9</span> AI Commentary &amp; Credit Card Plan</a>
+      <a href="#smart-refresh"><span class="toc-num">10</span> Smart Refresh System</a>
+      <a href="#mobile"><span class="toc-num">11</span> Mobile Responsive Design</a>
+      <a href="#apps-script"><span class="toc-num">12</span> Google Apps Script Setup</a>
+      <a href="#troubleshooting"><span class="toc-num">13</span> Troubleshooting</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 1. SYSTEM ARCHITECTURE ============ -->
+<div class="section" id="architecture">
+  <h2 class="section-title"><span class="icon">&#x1F3D7;</span> 1. System Architecture</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F310; Component Overview</div>
+    <p>The Leadership Dashboard is a client-side HTML/JavaScript application that combines financial data from Airtable with invoice data from Gmail. It runs entirely in the browser with no back-end server, connecting directly to external APIs via personal access tokens and a Google Apps Script web app.</p>
+
+    <div class="arch-diagram">
+      <div class="arch-box highlight">
+        <div class="arch-icon">&#x1F4CA;</div>
+        <div class="arch-title">Airtable</div>
+        <div class="arch-desc">6 tables via<br>REST API + PAT</div>
+      </div>
+      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
+      <div class="arch-box highlight" style="border-color: var(--indigo-500); background: var(--indigo-50);">
+        <div class="arch-icon">&#x1F4BB;</div>
+        <div class="arch-title">Dashboard</div>
+        <div class="arch-desc">Static HTML/JS<br>Client-side processing</div>
+      </div>
+      <div class="arch-connector">&#x2B05;&#xFE0F;</div>
+      <div class="arch-box highlight" style="border-color: var(--green-500); background: var(--green-50);">
+        <div class="arch-icon">&#x1F4E7;</div>
+        <div class="arch-title">Gmail</div>
+        <div class="arch-desc">Apps Script web app<br>Invoice extraction</div>
+      </div>
+    </div>
+
+    <p>The dashboard reads from six Airtable tables: <strong>Transactions</strong>, <strong>Tenancies</strong>, <strong>Tenants</strong>, <strong>Rental Units</strong>, <strong>Fixed Costs</strong>, and <strong>Tasks</strong>. It also fetches invoice data from a deployed Google Apps Script that reads emails labelled <span class="label-badge lb-3">3. to pay</span>.</p>
+  </div>
+</div>
+
+<!-- ============ 2. ACCESS & AUTHENTICATION ============ -->
+<div class="section" id="access">
+  <h2 class="section-title"><span class="icon">&#x1F511;</span> 2. Access &amp; Authentication</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F6AA; Opening the Dashboard</div>
+    <ol class="steps">
+      <li>Open the <strong>dashboard.html</strong> file from Google Drive (double-click or open in browser).</li>
+      <li>On first load, the login screen appears requesting your <strong>Airtable Personal Access Token</strong> (PAT).</li>
+      <li>Enter your PAT and click <strong>Connect</strong>. The dashboard loads all data from Airtable and Gmail.</li>
+      <li>The token is stored in <code>sessionStorage</code> and persists until you close the browser tab.</li>
+      <li>If the session expires or you close the tab, re-enter the PAT on next visit.</li>
+    </ol>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F512;</span>
+      <div><strong>Session-only storage:</strong> Your PAT is stored in <code>sessionStorage</code> only. It is automatically cleared when the browser tab is closed. No credentials are persisted to disk or sent to any third-party service.</div>
+    </div>
+
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Security note:</strong> No credentials are sent anywhere except directly to the Airtable API (<code>api.airtable.com</code>) and the Google Apps Script web app URL. There is no intermediary server.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 3. DASHBOARD TABS OVERVIEW ============ -->
+<div class="section" id="tabs">
+  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 3. Platform Navigation</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F5C2; Sidebar Navigation</div>
+    <p>The Operations Hub uses a <strong>fixed left sidebar</strong> (220px wide) for navigation between pages. Each page is a standalone section that can also be accessed via its own URL for sharing. The sidebar replaces the previous horizontal tab bar.</p>
+
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Purpose</th>
+          <th>Standalone URL</th>
+          <th>Own SOP</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="label-badge lb-1">Leadership Dashboard</span></td>
+          <td>Financial overview, portfolio metrics, 31-day cash flow forecast, reconciliation, AI commentary, balance calculator</td>
+          <td><code>index.html#overview</code></td>
+          <td><a href="sop.html">sop.html</a></td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-2">Contractor Job List</span></td>
+          <td>Active maintenance jobs via Airtable embed</td>
+          <td><code>index.html#airtable</code></td>
+          <td><a href="sop-contractor-jobs.html">sop-contractor-jobs.html</a></td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-3">Invoices</span></td>
+          <td>Gmail invoices, AI matching, mark-as-paid</td>
+          <td><code>index.html#invoices</code></td>
+          <td><a href="sop-invoices.html">sop-invoices.html</a></td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-7">CFVs</span></td>
+          <td>Cash flow void detection, chase tracking, comments</td>
+          <td><code>index.html#cfv</code></td>
+          <td><a href="sop-cfvs.html">sop-cfvs.html</a></td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-6">Inbound Comms</span></td>
+          <td>Email triage, AI label suggestions, follow-up management</td>
+          <td><code>follow-up.html</code></td>
+          <td><a href="inbound-comms-sop.html">inbound-comms-sop.html</a></td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-4">Property Compliance</span></td>
+          <td>Property compliance tracking, document status, expiry monitoring</td>
+          <td><code>compliance.html</code></td>
+          <td><a href="sop-compliance.html">sop-compliance.html</a></td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-5">Site Map &amp; Links</span></td>
+          <td>Page registry, version tracking, SOP sync status, shareable links</td>
+          <td><code>index.html#sitemap</code></td>
+          <td><a href="sop-sitemap.html">sop-sitemap.html</a></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F504;</span>
+      <div><strong>Page switching:</strong> Clicking a sidebar item switches the view and triggers a data refresh. The URL hash updates automatically (e.g., <code>#cfv</code>) for deep-linking and sharing.</div>
+    </div>
+
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4F1;</span>
+      <div><strong>Mobile:</strong> On screens &le;768px, the sidebar collapses. Tap the hamburger menu (&#9776;) at the top-left to open it as an overlay. Tap outside to close.</div>
+    </div>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F517;</span>
+      <div><strong>Share button:</strong> A blue &ldquo;Share&rdquo; button at the top-right of every page copies the current page&rsquo;s deep link to your clipboard for sharing with others.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 4. FINANCIAL OVERVIEW ============ -->
+<div class="section" id="financial">
+  <h2 class="section-title"><span class="icon">&#x1F4B7;</span> 4. Financial Overview</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F3E6; Combined Account Balances</div>
+    <p>The financial overview section displays the combined position across the two main business accounts: <strong>Santander</strong> (TNT Property Services Ltd) and <strong>TNT Mgt Zempler</strong> (TNT Property Management Ltd). The opening balance is calculated from the most recent reconciled transactions in Airtable.</p>
+
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Description</th>
+          <th>Value / Target</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Opening Balance</strong></td>
+          <td>Combined balance from Santander + TNT Mgt Zempler at the start of the forecast period</td>
+          <td>Calculated from Airtable</td>
+        </tr>
+        <tr>
+          <td><strong>Monthly Income</strong></td>
+          <td>Projected rental income from active tenancies for the current month</td>
+          <td>Calculated from Tenancies</td>
+        </tr>
+        <tr>
+          <td><strong>Clear Profit Target</strong></td>
+          <td>The minimum net profit the business aims to retain each month after all costs</td>
+          <td><strong>&pound;10,000</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Required Gross Profit</strong></td>
+          <td>Total revenue needed to cover fixed costs and achieve the clear profit target</td>
+          <td><strong>&pound;17,500</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 5. PORTFOLIO & TENANCY METRICS ============ -->
+<div class="section" id="portfolio">
+  <h2 class="section-title"><span class="icon">&#x1F3E0;</span> 5. Portfolio &amp; Tenancy Metrics</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">&#x1F3D8; Portfolio Metrics</div>
+      <p>Portfolio metrics are drawn from the <strong>Rental Units</strong> table and show property occupancy at a glance:</p>
+      <ul>
+        <li><strong>Total Units:</strong> Count of all rental units in the portfolio</li>
+        <li><strong>Occupied:</strong> Units with an active tenancy assigned</li>
+        <li><strong>Void:</strong> Units currently without a tenant</li>
+        <li><strong>Occupancy Rate:</strong> Percentage of occupied vs total units</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">&#x1F465; Tenancy Status Breakdown</div>
+      <p>Tenancy metrics show the payment health of active tenants from the <strong>Tenancies</strong> and <strong>Tenants</strong> tables:</p>
+      <ul>
+        <li><strong>In Payment:</strong> Tenants currently paying rent on schedule</li>
+        <li><strong>CFV (Consideration for Vulnerability):</strong> Tenants flagged for review</li>
+        <li><strong>CFV Actioned:</strong> CFV cases where action has been taken</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F6A6; Traffic Light System</div>
+    <p>Key metrics are displayed using a traffic light system to provide at-a-glance health indicators. Each metric is shown as a coloured chip:</p>
+
+    <div class="metrics-bar" style="margin-top: 0.75rem;">
+      <span class="metric-chip mc-green"><span class="dot green"></span> Green &mdash; On target</span>
+      <span class="metric-chip mc-amber"><span class="dot amber"></span> Amber &mdash; Needs attention</span>
+      <span class="metric-chip mc-red"><span class="dot red"></span> Red &mdash; Action required</span>
+    </div>
+
+    <p style="margin-top: 0.75rem;">Thresholds are applied to occupancy rate, CFV count, void count, and cash flow closing balance. Green indicates healthy operation, amber signals early warning, and red requires immediate review.</p>
+  </div>
+</div>
+
+<!-- ============ 6. 31-DAY CASH FLOW FORECAST ============ -->
+<div class="section" id="cashflow">
+  <h2 class="section-title"><span class="icon">&#x1F4C5;</span> 6. 31-Day Cash Flow Forecast</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C8; Forecast Logic</div>
+    <p>The cash flow forecast projects daily inflows and outflows for the next 31 days, starting from today&rsquo;s combined opening balance. It draws on tenancy rent schedules, fixed cost due dates, and reconciliation data to avoid double-counting.</p>
+
+    <div class="flow">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F3E0;</span>
+        Active Tenancies
+        <span class="flow-sub">Rent schedules</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step warning">
+        <span class="flow-icon">&#x1F4C5;</span>
+        Project Due Dates
+        <span class="flow-sub">+Fixed costs</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step purple">
+        <span class="flow-icon">&#x1F50D;</span>
+        Match vs Reconciled
+        <span class="flow-sub">Avoid double-count</span>
+      </div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F4CA;</span>
+        Daily Forecast
+        <span class="flow-sub">31-day view</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-1">A</span>
+      <h3>Income Projection</h3>
+      <span class="wf-tag">Inflows</span>
+    </div>
+    <div class="wf-body">
+      <h4>How rental income is projected</h4>
+      <ol class="steps">
+        <li>All <strong>active tenancies</strong> are retrieved from the Tenancies table with their rent amount and payment day.</li>
+        <li>Each tenant&rsquo;s <strong>status is checked</strong> &mdash; only tenants marked as &ldquo;In Payment&rdquo; contribute to the income forecast.</li>
+        <li>Tenants receiving <strong>Universal Credit (UC)</strong> are marked separately; their payment may arrive on different dates to direct-pay tenants.</li>
+        <li>For each day in the 31-day window, the system calculates whether a rent payment falls on that day based on the tenant&rsquo;s payment frequency and due date.</li>
+        <li>The projected amount is checked against <strong>reconciled transactions</strong> to avoid counting payments that have already arrived.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num wf-3">B</span>
+      <h3>Cost Projection</h3>
+      <span class="wf-tag">Outflows</span>
+    </div>
+    <div class="wf-body">
+      <h4>How fixed costs are projected</h4>
+      <ol class="steps">
+        <li>All <strong>active fixed costs</strong> are loaded from the Fixed Costs table, including due day and payment frequency (weekly, monthly, quarterly, annually).</li>
+        <li>For each cost, the <strong>next due date</strong> is calculated based on its frequency and last known payment date.</li>
+        <li>Costs are placed on the appropriate day within the 31-day forecast window.</li>
+        <li>Like income, projected costs are cross-referenced against <strong>reconciled transactions</strong> to prevent double-counting.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CA; Forecast Table Columns</div>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Date</strong></td><td>Calendar date for the forecast row</td></tr>
+        <tr><td><strong>Opening</strong></td><td>Balance at the start of the day (previous day&rsquo;s closing)</td></tr>
+        <tr><td><strong>In</strong></td><td>Total projected inflows for the day (rent payments)</td></tr>
+        <tr><td><strong>Out</strong></td><td>Total projected outflows for the day (fixed costs)</td></tr>
+        <tr><td><strong>Net</strong></td><td>In minus Out for the day</td></tr>
+        <tr><td><strong>Closing</strong></td><td>Opening + Net &mdash; carries forward as next day&rsquo;s opening</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 7. RECONCILIATION MATCHING LOGIC ============ -->
+<div class="section" id="reconciliation">
+  <h2 class="section-title"><span class="icon">&#x1F50D;</span> 7. Reconciliation Matching Logic</h2>
+
+  <div class="info-box danger">
+    <span class="ib-icon">&#x1F6A8;</span>
+    <div><strong>Critical system:</strong> The reconciliation matching logic is essential for preventing double-counting of transactions that have already been paid. If a projected income or cost has already been settled in the bank, the matching engine ensures it is excluded from the forecast to maintain accuracy.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C6; Date Matching Window</div>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Lookback</strong></td>
+          <td>5 days before expected date</td>
+          <td>Catches early payments (e.g., rent paid a few days ahead)</td>
+        </tr>
+        <tr>
+          <td><strong>Look-ahead</strong></td>
+          <td>5 days after expected date</td>
+          <td>Catches late payments (e.g., delayed bank transfers)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid-2">
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-4">&#x2191;</span>
+        <h3>Inflow Matching (3-Tier)</h3>
+        <span class="wf-tag">Income</span>
+      </div>
+      <div class="wf-body">
+        <h4>Tier 1: Strong Match</h4>
+        <p>Two or more keywords from the tenant name or reference appear in the bank transaction description. This is the highest-confidence match.</p>
+
+        <h4>Tier 2: Good Match</h4>
+        <p>One keyword from the tenant name plus the amount matches within <strong>30%</strong> of the expected rent. Provides reasonable confidence with a partial name match.</p>
+
+        <h4>Tier 3: Fallback Match</h4>
+        <p>The transaction amount matches the expected rent <strong>exactly</strong> (to the penny). Used only when no keyword matches are found, as an amount-only match is the weakest signal.</p>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <span class="wf-num wf-3">&#x2193;</span>
+        <h3>Outflow Matching</h3>
+        <span class="wf-tag">Costs</span>
+      </div>
+      <div class="wf-body">
+        <h4>Matching Criteria</h4>
+        <p>Outflow matching requires all three conditions to be met:</p>
+        <ul>
+          <li><strong>Keyword match:</strong> At least one keyword from the cost name appears in the transaction description</li>
+          <li><strong>Amount match:</strong> The transaction amount is within <strong>33%</strong> of the expected cost, or within <strong>&pound;1</strong> (whichever is more generous)</li>
+          <li><strong>Sub-category compatibility:</strong> The transaction&rsquo;s Airtable sub-category is compatible with the fixed cost&rsquo;s category</li>
+        </ul>
+
+        <div class="info-box tip">
+          <span class="ib-icon">&#x1F4A1;</span>
+          <div><strong>Why sub-category matters:</strong> The sub-category check prevents false matches where two different costs share a similar name or amount. For example, two utility bills of similar value would not be confused if their sub-categories differ.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 8. BALANCE CALCULATOR ============ -->
+<div class="section" id="balance-calc">
+  <h2 class="section-title"><span class="icon">&#x1F527;</span> 8. Balance Calculator</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F9EE; Interactive What-If Tool</div>
+    <p>The Balance Calculator is an interactive what-if tool that allows you to model different cash flow scenarios by selectively including or excluding individual inflows and outflows from the 31-day forecast. It is accessed by clicking the <strong>wrench icon</strong> on the dashboard toolbar.</p>
+
+    <h4 style="margin-top: 1rem;">How It Works</h4>
+    <ol class="steps">
+      <li>Click the <strong>wrench icon</strong> to open the Balance Calculator panel.</li>
+      <li>Each projected inflow and outflow is listed with a <strong>checkbox</strong>. Ticked items are included in the forecast; unticked items are excluded.</li>
+      <li>Select or deselect individual items to see how the closing balance changes in real time.</li>
+      <li>Use the <strong>filter buttons</strong> to quickly adjust selections: <strong>Select All</strong>, <strong>Deselect All</strong>, <strong>Inflows Only</strong>, or <strong>Outflows Only</strong>.</li>
+      <li>The selected state is saved to <code>sessionStorage</code> so it persists during your browser session.</li>
+      <li>Selections <strong>auto-reset daily</strong> to ensure each day starts with a clean forecast.</li>
+    </ol>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4BE;</span>
+      <div><strong>State persistence:</strong> Your Balance Calculator selections are stored in <code>sessionStorage</code> and will persist while your browser tab is open. They automatically reset at midnight to provide a fresh forecast each day.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 9. AI COMMENTARY & CREDIT CARD PLAN ============ -->
+<div class="section" id="ai-commentary">
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 9. AI Commentary &amp; Credit Card Plan</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4AC; AI Commentary Topics</div>
+    <p>The AI commentary section provides an automated narrative analysis of the dashboard data. It covers the following topics to give a holistic view of the business position:</p>
+    <ul>
+      <li><strong>Financial Health:</strong> Overall cash position, income vs expenditure trends, and balance trajectory</li>
+      <li><strong>Occupancy Analysis:</strong> Void rates, tenant turnover, and impact on projected income</li>
+      <li><strong>Maintenance &amp; Wages:</strong> Comparison of actual spend against budget allocations</li>
+      <li><strong>CFV Risk Assessment:</strong> Impact of tenants under consideration for vulnerability on rental income</li>
+      <li><strong>Quick Wins:</strong> Actionable suggestions to improve cash position in the short term</li>
+    </ul>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">&#x1F4B0; Monthly Budget Allocations</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Monthly Budget</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Maintenance</strong></td><td>&pound;3,000</td></tr>
+          <tr><td><strong>Wages</strong></td><td>&pound;3,000</td></tr>
+          <tr><td><strong>CFV Allowance</strong></td><td>&pound;1,500</td></tr>
+          <tr><td><strong>Clear Profit Target</strong></td><td>&pound;10,000</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">&#x1F4B3; Credit Card Overview</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Card</th>
+            <th>Balance Logic</th>
+            <th>Payment Day</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Lloyds</strong></td>
+            <td>Negative = owed to bank</td>
+            <td>23rd</td>
+          </tr>
+          <tr>
+            <td><strong>AmEx</strong></td>
+            <td>Positive = owed to bank</td>
+            <td>28th</td>
+          </tr>
+          <tr>
+            <td><strong>Santander</strong></td>
+            <td>&pound;5,500 minus available = owed</td>
+            <td>14th</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4C5; Credit Card Payment Logic</div>
+    <p>The dashboard calculates recommended credit card payments based on several business rules:</p>
+    <ul>
+      <li><strong>Friday-based payments:</strong> Payments are scheduled to coincide with Fridays to align with business cash flow cycles</li>
+      <li><strong>7-day lookahead:</strong> The system looks 7 days ahead to identify upcoming payment due dates</li>
+      <li><strong>&pound;750 buffer:</strong> A buffer of &pound;750 is maintained in the business account before credit card payments are recommended</li>
+      <li><strong>Minimum payment:</strong> Either 2% of the outstanding balance or &pound;25, whichever is greater</li>
+    </ul>
+  </div>
+</div>
+
+<!-- Sections 10-13 (Invoices, Invoice Matching, CFVs, CFV Lifecycle) moved to separate SOPs:
+     sop-invoices.html and sop-cfvs.html -->
+
+<!-- ============ 10. SMART REFRESH ============ -->
+<!-- ============ 14. SMART REFRESH ============ -->
+<div class="section" id="smart-refresh">
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 10. Smart Refresh System</h2>
+
+  <div class="card">
+    <div class="card-header">&#x23F0; Refresh Configuration</div>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Parameter</th>
+          <th>Value</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Refresh Interval</strong></td>
+          <td>15 minutes</td>
+          <td>Data is automatically refreshed from Airtable and Gmail every 15 minutes</td>
+        </tr>
+        <tr>
+          <td><strong>Idle Threshold</strong></td>
+          <td>15 minutes</td>
+          <td>User must be idle for 15 minutes before an auto-refresh fires</td>
+        </tr>
+        <tr>
+          <td><strong>Activity Tracking</strong></td>
+          <td>Clicks, keystrokes, input</td>
+          <td>Mouse clicks, keyboard presses, and form input all count as user activity</td>
+        </tr>
+        <tr>
+          <td><strong>Tab Switch</strong></td>
+          <td>Immediate refresh</td>
+          <td>Switching between dashboard tabs triggers an immediate data refresh</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F6E1;&#xFE0F;</span>
+      <div><strong>Defers while active:</strong> The smart refresh system monitors user activity (clicks, keystrokes, and input). If you are actively working in the dashboard, the automatic refresh is deferred until you become idle. This prevents data reload from interrupting form edits, Balance Calculator adjustments, or invoice reviews.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 13. GOOGLE APPS SCRIPT SETUP ============ -->
+<!-- ============ 15. MOBILE ============ -->
+<div class="section" id="mobile">
+  <h2 class="section-title"><span class="icon">&#x1F4F1;</span> 11. Mobile Responsive Design</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4F1; Breakpoints</div>
+    <p>The dashboard is fully responsive with two CSS breakpoints:</p>
+    <table class="label-table">
+      <thead><tr><th>Breakpoint</th><th>Target</th><th>Key Changes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>&le;768px</code></td>
+          <td>Tablet / iPad</td>
+          <td>Cards stack single-column, tabs wrap, cash flow table scrolls horizontally, calculator goes full-width, touch targets enlarged to 36px</td>
+        </tr>
+        <tr>
+          <td><code>&le;480px</code></td>
+          <td>Phone / iPhone</td>
+          <td>Tabs stack vertically, Invoice Ref column hidden, chart height reduced, calculator summary single-column, touch targets 44px minimum, body padding tightened</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4F2; Mobile Access</div>
+    <p>Access the dashboard on any mobile device at <a href="https://chaichoong.github.io/leadership-dashboard" target="_blank">chaichoong.github.io/leadership-dashboard</a>. Enter your Airtable PAT to authenticate. All tabs and features work on mobile including the balance calculator, invoice click-to-edit, and CFV actions.</p>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div><strong>Tip:</strong> On iPhone, tap Share &rarr; Add to Home Screen to create an app-like shortcut. The dashboard loads full-screen without the Safari address bar.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 16. APPS SCRIPT ============ -->
+<div class="section" id="apps-script">
+  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 12. Google Apps Script Setup</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F680; Deployment Steps</div>
+    <ol class="steps">
+      <li>Open <strong>Google Apps Script</strong> at <code>script.google.com</code> and create a new project (or open the existing one).</li>
+      <li>Paste the Apps Script code that handles reading emails from the <span class="label-badge lb-3">3. to pay</span> label, extracting invoice fields, and processing <code>markPaid</code> actions.</li>
+      <li>Click <strong>Deploy &gt; New deployment</strong> and select <strong>Web app</strong> as the deployment type.</li>
+      <li>Set <strong>Execute as: Me</strong> (Kevin&rsquo;s Google account) and <strong>Who has access: Anyone</strong> (so the dashboard can call it without OAuth).</li>
+      <li>Copy the <strong>Web app URL</strong> and paste it into the dashboard&rsquo;s <code>GMAIL_SCRIPT_URL</code> configuration constant.</li>
+      <li>Test by loading the Invoices tab &mdash; invoices should appear with a <span class="label-badge lb-4">Live</span> badge.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4E7; What the Script Does</div>
+    <ul>
+      <li><strong>Reads emails:</strong> Fetches all threads with the <span class="label-badge lb-3">3. to pay</span> Gmail label</li>
+      <li><strong>Extracts fields:</strong> Parses the email subject, sender, body, and attachments to extract payee, amount, due date, and reference</li>
+      <li><strong>OCR for PDFs:</strong> If a PDF attachment is present, the script can use Google Drive&rsquo;s built-in OCR to extract text from the PDF for field extraction</li>
+      <li><strong>markPaid action:</strong> When called with a <code>markPaid</code> action, the script moves the email thread from <span class="label-badge lb-3">3. to pay</span> to <span class="label-badge lb-4">4: paid</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ 14. TROUBLESHOOTING ============ -->
+<div class="section" id="troubleshooting">
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 13. Troubleshooting</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F527; General Issues</div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Dashboard shows login screen / &ldquo;Session expired&rdquo;</div>
+      <div class="ts-solution">Your Airtable PAT has expired or the browser tab was closed. Re-enter your PAT on the login screen. The token is stored in <code>sessionStorage</code> and does not persist after the tab is closed.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Refresh interrupts my work / reloads while editing</div>
+      <div class="ts-solution">The smart refresh system should defer while you are active. If it is not detecting your activity, ensure you have interacted with the dashboard (click, keystroke, or input) within the last 15 minutes. The idle threshold must be exceeded before an auto-refresh fires.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">A reconciled payment still appears in the forecast</div>
+      <div class="ts-solution">The reconciliation matching engine uses a &plusmn;5 day window. If the payment fell outside this window (e.g., more than 5 days early or late), it will not be matched. Check the transaction date in Airtable and adjust if needed.</div>
+    </div>
+  </div>
+
+  <div class="info-box info">
+    <span class="ib-icon">&#x1F4D6;</span>
+    <div><strong>Other SOPs:</strong> For Invoices troubleshooting see <a href="sop-invoices.html">sop-invoices.html</a>. For CFV troubleshooting see <a href="sop-cfvs.html">sop-cfvs.html</a>. All SOPs are listed on the <a href="index.html#sitemap">Site Map</a>.</div>
+  </div>
+</div>
+
+</div><!-- end .container -->
 </body>
 </html>
