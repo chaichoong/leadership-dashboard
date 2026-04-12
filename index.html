@@ -1094,6 +1094,28 @@
         categories:    'tbleWb8ioptnEwPR8',
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
+        invoices:      'tblkOTKIG2Tyiy9aM',
+    };
+
+    // Dashboard Invoices field IDs (Airtable)
+    const INV = {
+        threadId:      'fld1qMPjybCraA54H',
+        payee:         'fldBVAMn9vA1by7MN',
+        desc:          'fldT0onwVg9JDJ1sv',
+        amount:        'fldauZCUSWeIfGryG',
+        emailDate:     'fldEpaivUV4uXW3DP',
+        dueDate:       'fldrZ0BrweP0VCVyR',
+        ref:           'fldKq7JbfOIxeu1ai',
+        hasAttachment: 'fldt8sjSwrfzcfwwJ',
+        hasPdf:        'fldSJg8aLjPlD75rz',
+        gmailUrl:      'fldeFqA4TVNzDEMCh',
+        msgId:         'fldnbLSFMemMuLSzP',
+        status:        'fldJ5InUPlY4t7MgP',
+        paidDate:      'fld9GqL9RlLWPAymx',
+        matchRejected: 'fldSn94PRMyScVZA7',
+        isEstimate:    'fld4DNJoLG76I4xvz',
+        notes:         'fldV2xsw9en67ts0o',
+        matchedTx:     'fldpHf5vYCIgj3Scz',
     };
 
     // Field IDs
@@ -1129,6 +1151,7 @@
         txAccountAlias:   'fldBrjlbeaKFm3WzQ',
         txVendor:         'fld0Xr8sboQ0ekJQJ',
         txDescription:    'fldsbuAJCTsXHug4C',
+        txInvoiceData:    'fldT5qfiyt5DTLrp8',
         txTeamMember:     'fldMwliSwEhLuumvd',
         // Tenancy — tenant active/former status (rollup from Tenants table)
         tenStatus:        'fldgWAyha1Uij1SZP',
@@ -1482,8 +1505,9 @@
                 airtableFetch(TABLES.businesses),
             ]);
 
-            // Fire Gmail fetch and Fintable sync check in parallel (non-blocking — doesn't delay dashboard render)
-            fetchInvoicesFromGmail();
+            // Fire invoice fetch from Airtable + Gmail sync + Fintable sync check in parallel (non-blocking)
+            fetchInvoicesFromAirtable();
+            triggerGmailInvoiceSync();
             checkFintableSyncStatus();
 
             allTransactions = transactions;
@@ -3318,57 +3342,63 @@
         }
     }
 
-    // ── Invoices Tab ──
-    // Live data fetched from Gmail via Apps Script, with static fallback
-    let liveInvoiceData = null;
+    // ── Invoices Tab — backed by Airtable ──
+    let airtableInvoices = [];
     let invoiceRefreshedAt = null;
 
-    async function fetchInvoicesFromGmail() {
-        if (!GMAIL_SCRIPT_URL) return null;
+    async function fetchInvoicesFromAirtable() {
+        if (!PAT) return;
         try {
-            const resp = await fetch(GMAIL_SCRIPT_URL);
+            const params = new URLSearchParams({
+                'filterByFormula': "NOT({Status}='Paid')",
+                'sort[0][field]': 'Email Date',
+                'sort[0][direction]': 'asc',
+            });
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`;
+            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const data = await resp.json();
-            if (data.error) { console.warn('Gmail script error:', data.error); return null; }
-            liveInvoiceData = data.invoices || [];
-            invoiceRefreshedAt = data.refreshedAt ? new Date(data.refreshedAt) : new Date();
-            // Re-render if the invoices tab is currently visible
+            airtableInvoices = data.records.map(r => {
+                const f = r.fields;
+                return {
+                    recordId:      r.id,
+                    id:            f[INV.msgId] || f[INV.threadId] || '',
+                    threadId:      f[INV.threadId] || '',
+                    payee:         f[INV.payee] || '',
+                    desc:          f[INV.desc] || '',
+                    amount:        f[INV.amount] !== undefined && f[INV.amount] !== null ? f[INV.amount] : null,
+                    emailDate:     f[INV.emailDate] || null,
+                    dueDate:       f[INV.dueDate] || null,
+                    ref:           f[INV.ref] || '',
+                    hasAttachment: !!f[INV.hasAttachment],
+                    hasPdf:        !!f[INV.hasPdf],
+                    gmailUrl:      f[INV.gmailUrl] || `https://mail.google.com/mail/u/0/#all/${f[INV.threadId] || ''}`,
+                    status:        typeof f[INV.status] === 'object' ? (f[INV.status]?.name || 'Unpaid') : (f[INV.status] || 'Unpaid'),
+                    isEstimate:    !!f[INV.isEstimate],
+                    matchRejected: !!f[INV.matchRejected],
+                };
+            });
+            invoiceRefreshedAt = new Date();
             invoiceTabRendered = false;
             if (document.getElementById('tab-invoices').classList.contains('active')) {
                 renderInvoiceTab();
             }
-            return liveInvoiceData;
         } catch (e) {
-            console.warn('Gmail invoice fetch failed, using static data:', e.message);
-            return null;
+            console.warn('Airtable invoice fetch failed:', e.message);
         }
     }
 
-    // Static fallback data parsed from Gmail label "3. to pay" — 28 Mar 2026
-    const INVOICE_DATA = [
-        { id:"19686c14a359e598", payee:"Onyx Bureau",                          desc:"Invoice ONYX888-0219 — Client Acquisition",                              amount:3000.00, emailDate:"2025-04-30", dueDate:"2025-05-30", ref:"ONYX888-0219",  hasAttachment:true  },
-        { id:"19ba391ecd10ceca", payee:"Roy Lavin",                             desc:"Utility payment — 5 Woodcock Close",                                      amount:40.00,   emailDate:"2026-01-09", dueDate:null,         ref:null,            hasAttachment:false },
-        { id:"19bc2460f570dd56", payee:"Roy Lavin",                             desc:"Reimbursement — Viola Street (eBay purchase)",                            amount:30.45,   emailDate:"2026-01-15", dueDate:null,         ref:null,            hasAttachment:true  },
-        { id:"19bd56d51a35ceab", payee:"Roy Lavin",                             desc:"Sky Digital direct debit — Duckworth",                                    amount:37.00,   emailDate:"2026-01-19", dueDate:"2026-01-23", ref:null,            hasAttachment:true  },
-        { id:"19c239174234659c", payee:"Brett Wilson LLP",                      desc:"Invoice 15840 — Legal services Oct 2025–Feb 2026",                        amount:225.00,  emailDate:"2026-02-03", dueDate:null,         ref:"15840",         hasAttachment:true  },
-        { id:"19c5c7bfa7abb164", payee:"Roy Lavin",                             desc:"Expense report — various properties",                                     amount:264.02,  emailDate:"2026-02-14", dueDate:null,         ref:null,            hasAttachment:false },
-        { id:"19c8ae685371c2f1", payee:"Athertons Exterior Cleaning",           desc:"Invoice 002KBRI26 — Exterior cleaning",                                   amount:45.00,   emailDate:"2026-02-23", dueDate:"2026-03-02", ref:"002KBRI26",     hasAttachment:true  },
-        { id:"19c98b27bef8f115", payee:"Fylde Borough Council",                 desc:"Invoice 73335872 — Bin lease / commercial waste",                         amount:null,    emailDate:"2026-02-26", dueDate:null,         ref:"73335872",      hasAttachment:true  },
-        { id:"19cae67550f3d1f0", payee:"Oldham Council",                        desc:"Invoice 41052677 — Housing Benefits overpayment",                         amount:15.99,   emailDate:"2026-03-02", dueDate:null,         ref:"41052677",      hasAttachment:true  },
-        { id:"19cb48607a939a9c", payee:"Fylde Borough Council",                 desc:"Sect 59 demand — Duckworth Buildings default works",                      amount:471.56,  emailDate:"2026-03-03", dueDate:null,         ref:null,            hasAttachment:true  },
-        { id:"19cd751821b37d5b", payee:"Fylde Borough Council",                 desc:"Invoice 73330343 — Bin lease, Duckworth Building Apartments",             amount:121.90,  emailDate:"2026-03-10", dueDate:null,         ref:"73330343",      hasAttachment:true  },
-        { id:"19cd352c15e227b2", payee:"PPE & Sons Heating & Plumbing Ltd",     desc:"Invoice INV-0549 — Bath waste kit & trap replacement",                    amount:168.00,  emailDate:"2026-03-09", dueDate:"2026-03-16", ref:"INV-0549",      hasAttachment:true  },
-        { id:"19d1792ccacb56d6", payee:"RoC Immo Ltd (Rob Jackson)",            desc:"4AP Invoice — Taps, flexi hoses & labour",                               amount:83.27,   emailDate:"2026-03-12", dueDate:null,         ref:null,            hasAttachment:false },
-        { id:"19cfb53a93da54c2", payee:"DD Fire Alarms Ltd",                    desc:"Estimate 1724 — Fire alarm & emergency lighting service, Duckworth",      amount:258.00,  emailDate:"2026-03-17", dueDate:"2026-03-18", ref:"1724",          hasAttachment:true,  isEstimate:true },
-        { id:"19cd8e5796497d32", payee:"DD Fire Alarms Ltd",                    desc:"Invoice 40893 — Fire panel remedial, faulty device flat 8",               amount:121.80,  emailDate:"2026-03-10", dueDate:"2026-03-27", ref:"40893",         hasAttachment:true  },
-        { id:"19d08f7bd65e059f", payee:"Gary Marsh (Roofline)",                 desc:"Invoice — Snagging jobs, northern properties",                            amount:null,    emailDate:"2026-03-20", dueDate:null,         ref:null,            hasAttachment:true  },
-        { id:"19d0cd31f41bd345", payee:"Naturally Neat Ltd",                    desc:"Cleaning Invoice (via Roy Lavin)",                                        amount:null,    emailDate:"2026-03-20", dueDate:null,         ref:null,            hasAttachment:true  },
-        { id:"19d15b933583230b", payee:"Gary Marsh (Roofline)",                 desc:"Invoice — Waste removal: 1406 Oldham Rd & 5 Woodcock",                   amount:null,    emailDate:"2026-03-22", dueDate:null,         ref:null,            hasAttachment:true  },
-        { id:"19d203633f2f048e", payee:"Shelley & Co (Simon Rice)",             desc:"Appointment Invoice — Legal",                                             amount:null,    emailDate:"2026-03-24", dueDate:null,         ref:null,            hasAttachment:true  },
-        { id:"19d246060572f194", payee:"DD Fire Alarms Ltd",                    desc:"Invoice 41496 — Battery replacement, 1-3 Duckworth Building",            amount:72.00,   emailDate:"2026-03-25", dueDate:"2026-03-25", ref:"41496",         hasAttachment:true  },
-        { id:"19d29949ad7e4f91", payee:"Property Redress Scheme",               desc:"Invoice PRS049387 — Membership renewal 2026–2027",                        amount:null,    emailDate:"2026-03-26", dueDate:null,         ref:"PRS049387",     hasAttachment:false },
-        { id:"19d2f29f2ff2a3b6", payee:"Gary Marsh (Roofline)",                 desc:"Invoice — Room refurb & kitchen, 55 Elmdon Place",                       amount:null,    emailDate:"2026-03-27", dueDate:null,         ref:null,            hasAttachment:true  },
-    ];
+    // Trigger Gmail → Airtable sync via Apps Script (fire-and-forget)
+    async function triggerGmailInvoiceSync() {
+        if (!GMAIL_SCRIPT_URL) return;
+        try {
+            const resp = await fetch(GMAIL_SCRIPT_URL + '?action=sync', { mode: 'cors', redirect: 'follow' });
+            // After sync, refresh from Airtable to pick up any new invoices
+            if (resp.ok) setTimeout(fetchInvoicesFromAirtable, 3000);
+        } catch (e) {
+            console.warn('Gmail sync trigger failed (expected on first deploy):', e.message);
+        }
+    }
 
     function fmtInvDate(dateStr) {
         if (!dateStr) return '—';
@@ -3378,78 +3408,26 @@
 
     let invoiceTabRendered = false;
     function renderInvoiceTab() {
-        // Always re-render so AI matching runs fresh against latest transaction data
         invoiceTabRendered = true;
-
         const today = new Date();
         today.setHours(0,0,0,0);
 
-        // MERGE: live data + static data — live wins for populated fields, static fills gaps
-        let sourceData;
-        let isLive = false;
-        if (liveInvoiceData && liveInvoiceData.length > 0) {
-            isLive = true;
-            // Build lookup of static data by thread/message ID for gap-filling
-            const staticById = {};
-            INVOICE_DATA.forEach(s => { staticById[s.id] = s; });
-            // Merge: for each live invoice, fill in blanks from static
-            sourceData = liveInvoiceData.map(live => {
-                const staticMatch = staticById[live.id] || staticById[live.threadId] || null;
-                if (!staticMatch) return live;
-                return {
-                    ...live,
-                    amount:  live.amount !== null && live.amount !== undefined ? live.amount : staticMatch.amount,
-                    dueDate: live.dueDate || staticMatch.dueDate,
-                    ref:     (live.ref && /\d/.test(live.ref)) ? live.ref : staticMatch.ref,
-                    payee:   live.payee && live.payee.length > 2 ? live.payee : staticMatch.payee,
-                    desc:    live.desc && live.desc.length > 5 ? live.desc : staticMatch.desc,
-                    isEstimate: live.isEstimate || staticMatch.isEstimate,
-                };
-            });
-            // Also add any static invoices not present in live data (shouldn't happen, but safety net)
-            const liveIds = new Set(sourceData.map(l => l.id).concat(sourceData.map(l => l.threadId)));
-            INVOICE_DATA.forEach(s => {
-                if (!liveIds.has(s.id)) sourceData.push(s);
-            });
-        } else {
-            sourceData = INVOICE_DATA;
-        }
+        // Source data comes directly from Airtable — no localStorage merging needed
+        const sourceData = airtableInvoices.filter(inv => inv.status !== 'Paid');
 
         // Update the "Last refreshed" text
         const refreshSpan = document.querySelector('#tab-invoices .section span[style*="font-size:12px"]');
         if (refreshSpan) {
             const refreshTime = invoiceRefreshedAt
                 ? invoiceRefreshedAt.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
-                : '28 Mar 2026 (static)';
-            const liveLabel = isLive
-                ? '<span style="color:#16a34a;font-weight:600">Live</span>'
-                : '<span style="color:#d97706;font-weight:600">Static</span>';
-            refreshSpan.innerHTML = `Gmail label: <strong style="color:#64748b">3. to pay</strong> &nbsp;·&nbsp; ${liveLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong>${isLive ? '' : ' &nbsp;·&nbsp; Deploy Apps Script for live data'}`;
+                : 'Not yet loaded';
+            const statusLabel = airtableInvoices.length > 0
+                ? '<span style="color:#16a34a;font-weight:600">Airtable</span>'
+                : '<span style="color:#d97706;font-weight:600">Loading…</span>';
+            refreshSpan.innerHTML = `Source: <strong style="color:#64748b">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:#2563eb;font-size:11px;text-decoration:underline">Refresh from Gmail</a>`;
         }
 
-        // ── Apply localStorage overrides into source data ──
-        // User-edited fields ALWAYS take priority over live/static data
-        sourceData.forEach(inv => {
-            const key = inv.id || inv.threadId;
-            const sAmt = localStorage.getItem('inv_amt_' + key);
-            const sPayee = localStorage.getItem('inv_payee_' + key);
-            const sDesc = localStorage.getItem('inv_desc_' + key);
-            const sRef = localStorage.getItem('inv_ref_' + key);
-            const sDue = localStorage.getItem('inv_due_' + key);
-            if (sAmt) inv.amount = parseFloat(sAmt);
-            if (sPayee) inv.payee = sPayee;
-            if (sDesc) inv.desc = sDesc;
-            if (sRef) inv.ref = sRef;
-            if (sDue) inv.dueDate = sDue;
-        });
-
-        // ── Filter out invoices marked as paid (localStorage or removed from Gmail label) ──
-        sourceData = sourceData.filter(inv => {
-            const key = inv.id || inv.threadId;
-            return !localStorage.getItem('inv_paid_' + key);
-        });
-
-        // ── Cross-reference remaining invoices with Airtable transactions ──
+        // Cross-reference with Airtable transactions for AI matching
         const txMatches = matchInvoicesToTransactions(sourceData, allTransactions);
 
         // Sort by effective date (due date if known, else email date), oldest first
@@ -3457,8 +3435,7 @@
             new Date(a.dueDate || a.emailDate) - new Date(b.dueDate || b.emailDate)
         );
 
-        // Summary calculations — all paid invoices are already filtered out above
-        // so everything remaining is genuinely unpaid
+        // Summary calculations
         let knownTotal = 0, unknownCount = 0, overdueCount = 0;
         sorted.forEach(inv => {
             if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
@@ -3472,7 +3449,7 @@
                 <div class="kpi-card">
                     <div class="kpi-card-label">Unpaid Invoices</div>
                     <div class="kpi-card-value">${sorted.length}</div>
-                    <div class="kpi-card-sub">From Gmail label "3. to pay"</div>
+                    <div class="kpi-card-sub">Synced from Gmail "3. to pay"</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Known Amount Due</div>
@@ -3503,16 +3480,11 @@
             const displayDate = fmtInvDate(inv.dueDate || inv.emailDate);
             const dateCell = `<strong>${displayDate}</strong>`;
 
-            // Check if matched to a transaction (suggestion — not auto-paid)
             const matchKey = inv.id || inv.threadId;
             const match = txMatches[matchKey];
-            const isApproved = isInvoiceApproved(matchKey);
-            const isRejected = isMatchRejected(matchKey);
 
             let badge = '';
-            if (isApproved) {
-                badge = `<span class="inv-badge paid">Paid ✓</span>`;
-            } else if (inv.isEstimate) {
+            if (inv.isEstimate) {
                 badge = '<span class="inv-badge estimate">Estimate</span>';
             } else if (isOverdue) {
                 badge = '<span class="inv-badge overdue">Overdue</span>';
@@ -3522,62 +3494,52 @@
                 badge = '<span class="inv-badge upcoming">Upcoming</span>';
             }
 
-            const invKey = inv.id || inv.threadId;
-
-            // Values already merged from localStorage into source data above
             const displayAmt = inv.amount;
             const displayPayee = (inv.payee || '').trim();
             const displayDesc = (inv.desc || '').trim();
             const displayRef = (inv.ref || '').trim();
-            const displayDue = inv.dueDate || null;
 
-            // Editable fields — click empty ones to enter data
+            // Editable fields — click empty ones to enter data (saves to Airtable)
             const amountHtml = displayAmt !== null
                 ? `<span class="inv-amount">${fmt(displayAmt)}</span>`
-                : `<span class="inv-amount unknown" onclick="event.stopPropagation(); editInvField(this,'${invKey}','amt','number')" title="Click to enter amount" style="cursor:pointer">Enter £ ✏️</span>`;
+                : `<span class="inv-amount unknown" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.amount}','number')" title="Click to enter amount" style="cursor:pointer">Enter £ ✏️</span>`;
 
             const payeeHtml = displayPayee
                 ? escHtml(displayPayee)
-                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${invKey}','payee','text')" title="Click to enter payee">Enter payee ✏️</span>`;
+                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.payee}','text')" title="Click to enter payee">Enter payee ✏️</span>`;
 
             const descHtml = displayDesc
                 ? escHtml(displayDesc)
-                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${invKey}','desc','text')" title="Click to enter description">Enter description ✏️</span>`;
+                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.desc}','text')" title="Click to enter description">Enter description ✏️</span>`;
 
             const refHtml = displayRef
                 ? `<span style="font-family:monospace;font-size:11px;color:#64748b">${escHtml(displayRef)}</span>`
-                : `<span style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${invKey}','ref','text')" title="Click to enter ref">Add ref ✏️</span>`;
+                : `<span style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to enter ref">Add ref ✏️</span>`;
 
             const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
             const threadId = inv.threadId || inv.id;
 
-            // AI match suggestion row (shown below the invoice row when a match is found)
-            // Only show if: match exists, not already approved, and not rejected
+            // AI match suggestion row
             let matchRow = '';
-            if (match && !isApproved && !isRejected) {
+            if (match && !inv.matchRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
                     <td colspan="7" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                             <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
                             <div style="margin-left:auto;display:flex;gap:6px">
-                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${threadId}','${matchKey}','${match.txRecordId}','${gmailUrl}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
-                                <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch('${matchKey}',${idx})" title="Dismiss this suggestion">✗ Reject</button>
+                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${inv.recordId}','${threadId}','${match.txRecordId}','${gmailUrl}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
+                                <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch('${inv.recordId}',${idx})" title="Dismiss this suggestion">✗ Reject</button>
                             </div>
                         </div>
                     </td>
                 </tr>`;
             }
 
-            // Action column: manual mark-as-paid button (always available)
-            let actionHtml = '';
-            if (isApproved) {
-                actionHtml = `<span style="color:#16a34a;font-size:11px;font-weight:600">Paid ✓</span>`;
-            } else {
-                actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${threadId}','${matchKey}','','${gmailUrl}',this)" title="Manually mark as paid and move to 4: paid label">Mark Paid</button>`;
-            }
+            // Action column
+            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${inv.recordId}','${threadId}','','${gmailUrl}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
-            return `<tr class="${isApproved ? 'inv-paid' : ''}" onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
+            return `<tr onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
                 <td style="text-align:center;color:#94a3b8;font-size:11px;font-weight:600">${idx + 1}</td>
                 <td style="white-space:nowrap;min-width:100px">${dateCell}<br>${badge}</td>
                 <td style="font-weight:600;max-width:160px">${payeeHtml}</td>
@@ -3590,34 +3552,26 @@
     }
 
     // ── Match invoices to Airtable transactions ──
-    // Strict matching: exact amount + payee keywords + tx date must be on or after invoice date
-    // Returns { [invoiceId]: { txRecordId, txDate, txLabel, txAmount } }
     function matchInvoicesToTransactions(invoices, transactions) {
         const matches = {};
         if (!transactions || !transactions.length) return matches;
 
         invoices.forEach(inv => {
-            // localStorage values already merged into source data before this function is called
             const invAmount = inv.amount;
-            if (invAmount === null || invAmount === 0) return; // can't match without a known amount
+            if (invAmount === null || invAmount === 0) return;
             const invKeywords = extractInvKeywords((inv.payee || '') + ' ' + (inv.desc || ''));
             const invDate = new Date(inv.dueDate || inv.emailDate);
 
             for (const tx of transactions) {
                 const txAmt = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
                 if (txAmt === 0) continue;
-
-                // 1. EXACT amount match (within £0.02 for rounding)
                 if (Math.abs(txAmt - invAmount) > 0.02) continue;
 
-                // 2. Transaction date must be on or after the invoice date
                 const txDateStr = getField(tx, F.txDate);
                 if (!txDateStr) continue;
                 const txDate = new Date(txDateStr);
                 if (txDate < invDate) continue;
 
-                // 3. Payee keyword match: at least 2 keywords must match,
-                //    OR 1 distinctive keyword (5+ chars) must match
                 const txVendor = String(getField(tx, F.txVendor) || '').toLowerCase();
                 const txDesc = String(getField(tx, F.txDescription) || '').toLowerCase();
                 const txText = txVendor + ' ' + txDesc;
@@ -3656,24 +3610,46 @@
             .filter(w => w.length >= 3 && !stop.has(w));
     }
 
-    // ── Click-to-edit any invoice field ──
-    function editInvField(el, invoiceId, fieldType, inputType) {
+    // ── Click-to-edit any invoice field — saves to Airtable ──
+    function editInvField(el, recordId, fieldId, inputType) {
         const input = document.createElement('input');
         input.type = inputType === 'number' ? 'number' : 'text';
         if (inputType === 'number') { input.step = '0.01'; input.placeholder = '0.00'; }
-        else { input.placeholder = fieldType === 'payee' ? 'Payee name' : fieldType === 'desc' ? 'Description' : fieldType === 'ref' ? 'Invoice ref' : 'DD/MM/YYYY'; }
-        const w = inputType === 'number' ? '80px' : (fieldType === 'ref' ? '90px' : '150px');
+        else { input.placeholder = fieldId === INV.payee ? 'Payee name' : fieldId === INV.desc ? 'Description' : fieldId === INV.ref ? 'Invoice ref' : 'Value'; }
+        const w = inputType === 'number' ? '80px' : (fieldId === INV.ref ? '90px' : '150px');
         input.style.cssText = `width:${w};padding:3px 6px;font-size:12px;border:1px solid #2563eb;border-radius:4px;${inputType === 'number' ? 'text-align:right;' : ''}`;
 
-        function save() {
+        async function save() {
             const val = input.value.trim();
             if (!val) { renderInvoiceTab(); return; }
+            let fieldValue;
             if (inputType === 'number') {
                 const num = parseFloat(val);
                 if (isNaN(num) || num <= 0) { renderInvoiceTab(); return; }
-                localStorage.setItem('inv_amt_' + invoiceId, num.toString());
+                fieldValue = num;
             } else {
-                localStorage.setItem('inv_' + fieldType + '_' + invoiceId, val);
+                fieldValue = val;
+            }
+            // Save to Airtable
+            input.disabled = true;
+            input.style.opacity = '0.5';
+            try {
+                await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [fieldId]: fieldValue } })
+                });
+                // Update local data so re-render shows new value without refetching
+                const inv = airtableInvoices.find(i => i.recordId === recordId);
+                if (inv) {
+                    if (fieldId === INV.amount) inv.amount = fieldValue;
+                    else if (fieldId === INV.payee) inv.payee = fieldValue;
+                    else if (fieldId === INV.desc) inv.desc = fieldValue;
+                    else if (fieldId === INV.ref) inv.ref = fieldValue;
+                    else if (fieldId === INV.dueDate) inv.dueDate = fieldValue;
+                }
+            } catch (e) {
+                console.error('Failed to save invoice field to Airtable:', e);
             }
             renderInvoiceTab();
         }
@@ -3687,70 +3663,70 @@
         input.focus();
     }
 
-    // ── AI match approval state — persisted in localStorage ──
-    function isInvoiceApproved(key) {
-        return !!localStorage.getItem('inv_paid_' + key);
-    }
-    function isMatchRejected(key) {
-        return !!localStorage.getItem('inv_reject_' + key);
-    }
-
-    async function approveMatch(threadId, invoiceKey, txRecordId, gmailUrl, btn, rowIdx) {
-        // Immediately mark as paid in localStorage — this persists across refreshes
-        localStorage.setItem('inv_paid_' + invoiceKey, '1');
-
-        // Hide the suggestion row
+    // ── Approve AI match — mark paid in Airtable + move Gmail label ──
+    async function approveMatch(recordId, threadId, txRecordId, gmailUrl, btn, rowIdx) {
         const suggRow = document.getElementById('inv-match-' + rowIdx);
         if (suggRow) suggRow.style.display = 'none';
 
-        // Do the Gmail label move + Airtable link
         const parentRow = suggRow ? suggRow.previousElementSibling : null;
         const markBtn = parentRow ? parentRow.querySelector('.inv-mark-paid-btn') : btn;
-        await markInvoicePaid(threadId, invoiceKey, txRecordId, gmailUrl, markBtn || btn);
+        await markInvoicePaid(recordId, threadId, txRecordId, gmailUrl, markBtn || btn);
     }
 
-    function rejectMatch(invoiceKey, rowIdx) {
-        // Persist rejection so the suggestion doesn't reappear on refresh
-        localStorage.setItem('inv_reject_' + invoiceKey, '1');
+    // ── Reject AI match — persist rejection in Airtable ──
+    async function rejectMatch(recordId, rowIdx) {
         const suggRow = document.getElementById('inv-match-' + rowIdx);
         if (suggRow) suggRow.style.display = 'none';
+        // Persist rejection in Airtable so it doesn't reappear
+        try {
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [INV.matchRejected]: true } })
+            });
+            const inv = airtableInvoices.find(i => i.recordId === recordId);
+            if (inv) inv.matchRejected = true;
+        } catch (e) {
+            console.error('Failed to save match rejection:', e);
+        }
     }
 
-    // ── Mark invoice as paid: move Gmail label + attach link to Airtable tx ──
-    async function markInvoicePaid(threadId, invoiceKey, txRecordId, gmailUrl, btn) {
+    // ── Mark invoice as paid: update Airtable + move Gmail label + link transaction ──
+    async function markInvoicePaid(recordId, threadId, txRecordId, gmailUrl, btn) {
         btn.classList.add('loading');
         btn.textContent = 'Processing...';
 
-        // ALWAYS mark as paid in localStorage first — this ensures persistence
-        localStorage.setItem('inv_paid_' + invoiceKey, '1');
-
         try {
-            // 1. Move Gmail label from "3. to pay" to "4: paid"
-            if (GMAIL_SCRIPT_URL) {
-                const url = GMAIL_SCRIPT_URL + '?action=markPaid&threadId=' + encodeURIComponent(threadId);
+            // 1. Update Airtable: status → Paid, set paid date, link transaction if matched
+            const paidFields = {
+                [INV.status]: 'Paid',
+                [INV.paidDate]: new Date().toISOString().slice(0, 10),
+            };
+            if (txRecordId) {
+                paidFields[INV.matchedTx] = [{ id: txRecordId }];
+            }
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: paidFields })
+            });
+
+            // 2. Move Gmail label from "3. to pay" to "4: paid"
+            if (GMAIL_SCRIPT_URL && threadId) {
                 try {
-                    const resp = await fetch(url, { redirect: 'follow', mode: 'cors' });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        if (!data.success) console.warn('Gmail mark-paid warning:', data.error);
-                    } else {
-                        console.warn('Gmail mark-paid HTTP error:', resp.status);
-                    }
+                    const url = GMAIL_SCRIPT_URL + '?action=markPaid&threadId=' + encodeURIComponent(threadId);
+                    await fetch(url, { redirect: 'follow', mode: 'cors' });
                 } catch (fetchErr) {
-                    console.warn('Gmail mark-paid fetch failed (CORS?):', fetchErr.message);
+                    console.warn('Gmail mark-paid failed (will retry on next sync):', fetchErr.message);
                 }
             }
 
-            // 2. Attach Gmail link to the Airtable transaction's "Invoice Data" field
+            // 3. Attach Gmail link to the Airtable transaction's "Invoice Data" field
             if (txRecordId && PAT) {
-                const patchUrl = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txRecordId}`;
-                await fetch(patchUrl, {
+                await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txRecordId}`, {
                     method: 'PATCH',
-                    headers: {
-                        'Authorization': 'Bearer ' + PAT,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ fields: { 'fldT5qfiyt5DTLrp8': gmailUrl } })
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [F.txInvoiceData]: gmailUrl } })
                 });
             }
 
@@ -3759,18 +3735,19 @@
             btn.style.color = '#16a34a';
             btn.style.borderColor = '#16a34a';
 
-            // Refresh invoice data after a short delay
+            // Remove from local array and re-render
+            airtableInvoices = airtableInvoices.filter(i => i.recordId !== recordId);
             setTimeout(() => {
                 invoiceTabRendered = false;
-                fetchInvoicesFromGmail();
-            }, 2000);
+                renderInvoiceTab();
+            }, 1500);
 
         } catch (e) {
             console.error('Mark as paid failed:', e);
             btn.textContent = 'Failed';
             btn.style.background = '#fee2e2';
             btn.classList.remove('loading');
-            setTimeout(() => { btn.textContent = 'Move to Paid'; btn.style.background = ''; }, 3000);
+            setTimeout(() => { btn.textContent = 'Mark Paid'; btn.style.background = ''; }, 3000);
         }
     }
 

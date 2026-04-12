@@ -1,5 +1,5 @@
 /**
- * Gmail Invoice Parser — Google Apps Script (v2)
+ * Gmail Invoice Sync — Google Apps Script (v3 — Airtable-backed)
  *
  * SETUP:
  *   1. Go to script.google.com → New Project
@@ -7,206 +7,343 @@
  *   3. IMPORTANT: Enable the Drive Advanced Service:
  *      - In the left sidebar, click the "+" next to "Services"
  *      - Scroll to "Drive API" → click "Add"
- *   4. Deploy → New Deployment → Web app
+ *   4. Set Script Properties (File → Project properties → Script properties):
+ *      - AIRTABLE_PAT  = your Airtable Personal Access Token
+ *      - AIRTABLE_BASE = appnqjDpqDniH3IRl
+ *      - AIRTABLE_TABLE = tblkOTKIG2Tyiy9aM
+ *   5. Deploy → New Deployment → Web app
  *      - Execute as: Me
  *      - Who has access: Anyone
- *   5. Copy the URL into dashboard.html as GMAIL_SCRIPT_URL
+ *   6. Copy the URL into dashboard index.html as GMAIL_SCRIPT_URL
+ *   7. Set up a time-driven trigger:
+ *      - Triggers → Add Trigger → syncGmailToAirtable
+ *      - Time-driven → Minutes timer → Every 15 minutes
  *
- * FEATURES:
- *   - Reads Gmail "3. to pay" label
- *   - Extracts invoice data from email body + subject across all thread messages
- *   - OCR reads PDF/image attachments when amount not found in text
- *   - Caches OCR results so repeat requests are fast
- *   - ?action=markPaid&threadId=xxx  →  moves email to "4: paid" label
+ * ACTIONS (via query string):
+ *   ?action=sync          → Manually trigger Gmail → Airtable sync
+ *   ?action=markPaid&threadId=xxx → Move email to "4: paid" label + update Airtable
+ *   (no action)           → Returns { status: 'ok' }
  */
+
+// ═══════════════════════════════════════════
+// Configuration
+// ═══════════════════════════════════════════
+
+function getConfig() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    pat:   props.getProperty('AIRTABLE_PAT'),
+    base:  props.getProperty('AIRTABLE_BASE') || 'appnqjDpqDniH3IRl',
+    table: props.getProperty('AIRTABLE_TABLE') || 'tblkOTKIG2Tyiy9aM',
+  };
+}
+
+// Airtable field IDs
+var FIELDS = {
+  threadId:      'fld1qMPjybCraA54H',
+  payee:         'fldBVAMn9vA1by7MN',
+  desc:          'fldT0onwVg9JDJ1sv',
+  amount:        'fldauZCUSWeIfGryG',
+  emailDate:     'fldEpaivUV4uXW3DP',
+  dueDate:       'fldrZ0BrweP0VCVyR',
+  ref:           'fldKq7JbfOIxeu1ai',
+  hasAttachment: 'fldt8sjSwrfzcfwwJ',
+  hasPdf:        'fldSJg8aLjPlD75rz',
+  gmailUrl:      'fldeFqA4TVNzDEMCh',
+  msgId:         'fldnbLSFMemMuLSzP',
+  status:        'fldJ5InUPlY4t7MgP',
+  paidDate:      'fld9GqL9RlLWPAymx',
+  isEstimate:    'fld4DNJoLG76I4xvz',
+};
+
+
+// ═══════════════════════════════════════════
+// Web App Entry Point
+// ═══════════════════════════════════════════
 
 function doGet(e) {
   try {
     var params = e ? (e.parameter || {}) : {};
 
-    // ── Action: Mark as Paid ──
     if (params.action === 'markPaid' && params.threadId) {
       return handleMarkPaid(params.threadId);
     }
 
-    // ── Default: Return invoice list ──
-    var label = GmailApp.getUserLabelByName('3. to pay');
-    if (!label) {
-      return jsonResponse({ error: 'Label "3. to pay" not found', invoices: [] });
+    if (params.action === 'sync') {
+      var result = syncGmailToAirtable();
+      return jsonResponse(result);
     }
 
-    var threads = label.getThreads(0, 50);
-    var seen = {};
-    var invoices = [];
-    var cache = PropertiesService.getScriptProperties();
+    return jsonResponse({ status: 'ok', message: 'Gmail Invoice Sync v3' });
 
-    for (var t = 0; t < threads.length; t++) {
-      var thread = threads[t];
-      var threadId = thread.getId();
-      if (seen[threadId]) continue;
-      seen[threadId] = true;
+  } catch (err) {
+    return jsonResponse({ error: String(err) });
+  }
+}
 
-      var messages = thread.getMessages();
-      var latestMsg = messages[messages.length - 1];
-      var latestSubject = latestMsg.getSubject() || '';
-      var latestFrom = latestMsg.getFrom() || '';
-      var latestDate = latestMsg.getDate();
-      var msgId = latestMsg.getId();
 
-      // Combine body text from ALL messages in thread
-      // CRITICAL: try getPlainBody() first, fall back to getBody() (HTML) with tags stripped
-      var fullBody = '';
-      var allSubjects = '';
-      for (var mi = 0; mi < messages.length; mi++) {
-        var plain = messages[mi].getPlainBody() || '';
-        if (!plain || plain.trim().length < 20) {
-          // HTML-only email (QuickBooks, Xero, Stripe, etc.) — strip HTML tags
-          var html = messages[mi].getBody() || '';
-          plain = html
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<\/?(p|div|tr|td|th|li|h[1-6])[^>]*>/gi, '\n')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&pound;/gi, '£')
-            .replace(/&amp;/gi, '&')
-            .replace(/&lt;/gi, '<')
-            .replace(/&gt;/gi, '>')
-            .replace(/&nbsp;/gi, ' ')
-            .replace(/&#47;/gi, '/')
-            .replace(/&[#\w]+;/gi, ' ')
-            .replace(/\s+/g, ' ');
-        }
-        fullBody += plain + '\n';
-        allSubjects += (messages[mi].getSubject() || '') + '\n';
-      }
+// ═══════════════════════════════════════════
+// Gmail → Airtable Sync
+// ═══════════════════════════════════════════
 
-      // Collect all attachments across the thread
-      var allAttachments = [];
-      for (var mi2 = 0; mi2 < messages.length; mi2++) {
-        var atts = messages[mi2].getAttachments();
-        for (var ai = 0; ai < atts.length; ai++) {
-          allAttachments.push(atts[ai]);
-        }
-      }
+function syncGmailToAirtable() {
+  var config = getConfig();
+  if (!config.pat) return { error: 'AIRTABLE_PAT not set in Script Properties' };
 
-      // --- Extract payee ---
-      var payee = latestFrom.replace(/<[^>]+>/, '').replace(/"/g, '').trim();
+  var label = GmailApp.getUserLabelByName('3. to pay');
+  if (!label) return { error: 'Gmail label "3. to pay" not found', synced: 0 };
 
-      // --- Extract from body + subject ---
-      var amount = extractAmount(fullBody, allSubjects);
-      var dueDate = extractDueDate(fullBody);
-      var ref = extractRef(fullBody, allSubjects);
+  var threads = label.getThreads(0, 50);
+  var cache = PropertiesService.getScriptProperties();
 
-      // --- Check attachment types ---
-      var hasPdf = false;
-      var hasImage = false;
-      for (var a = 0; a < allAttachments.length; a++) {
-        var ct = allAttachments[a].getContentType() || '';
-        if (ct === 'application/pdf') hasPdf = true;
-        if (ct.indexOf('image/') === 0 && allAttachments[a].getSize() > 5000) hasImage = true;
-      }
+  // Fetch existing Airtable records to avoid duplicates
+  var existingThreadIds = getExistingThreadIds(config);
 
-      // --- OCR attachments if amount still unknown ---
-      if (amount === null && (hasPdf || hasImage)) {
-        var cacheKey = 'ocr_v3_' + threadId;
-        var cached = cache.getProperty(cacheKey);
+  var created = 0;
+  var updated = 0;
 
-        if (cached) {
-          try {
-            var ocrData = JSON.parse(cached);
-            if (ocrData.amount !== null && ocrData.amount !== undefined) amount = ocrData.amount;
-            if (!dueDate && ocrData.dueDate) dueDate = ocrData.dueDate;
-            if (!ref && ocrData.ref) ref = ocrData.ref;
-          } catch (parseErr) { /* ignore bad cache */ }
-        } else {
-          // OCR the first suitable attachment (PDF first, then images)
-          var ocrText = '';
-          // Try PDFs first
-          for (var a2 = 0; a2 < allAttachments.length && !ocrText; a2++) {
-            if (allAttachments[a2].getContentType() === 'application/pdf') {
-              try { ocrText = ocrAttachment(allAttachments[a2]); } catch (err) { /* skip */ }
-            }
-          }
-          // Then try images if no PDF text found
-          if (!ocrText || ocrText.length < 10) {
-            for (var a3 = 0; a3 < allAttachments.length && (!ocrText || ocrText.length < 10); a3++) {
-              var ct3 = allAttachments[a3].getContentType() || '';
-              if (ct3.indexOf('image/') === 0 && allAttachments[a3].getSize() > 5000) {
-                try { ocrText = ocrAttachment(allAttachments[a3]); } catch (err2) { /* skip */ }
-              }
-            }
-          }
+  for (var t = 0; t < threads.length; t++) {
+    var thread = threads[t];
+    var threadId = thread.getId();
 
-          if (ocrText && ocrText.length > 10) {
-            var ocrAmount = extractAmount(ocrText, '');
-            var ocrDueDate = extractDueDate(ocrText);
-            var ocrRef = extractRef(ocrText, '');
+    // Parse the email
+    var parsed = parseThread(thread, cache);
 
-            if (ocrAmount !== null) amount = ocrAmount;
-            if (!dueDate && ocrDueDate) dueDate = ocrDueDate;
-            if (!ref && ocrRef) ref = ocrRef;
-
-            // Cache for future requests
-            try {
-              cache.setProperty(cacheKey, JSON.stringify({
-                amount: ocrAmount, dueDate: ocrDueDate, ref: ocrRef
-              }));
-            } catch (cacheErr) { /* storage full, ignore */ }
-          }
-        }
-      }
-
-      invoices.push({
-        id: msgId,
-        threadId: threadId,
-        payee: payee,
-        desc: latestSubject,
-        amount: amount,
-        emailDate: fmtDate(latestDate),
-        dueDate: dueDate,
-        ref: ref,
-        hasAttachment: allAttachments.length > 0,
-        hasPdf: hasPdf,
-        gmailUrl: 'https://mail.google.com/mail/u/0/#all/' + msgId
-      });
+    if (existingThreadIds[threadId]) {
+      // Record exists — only update fields that were originally extracted (not user-edited ones)
+      // We update: payee, desc, gmailUrl (in case message ID changed)
+      // We do NOT overwrite: amount, dueDate, ref (user may have manually entered these)
+      updated++;
+      continue; // Skip updates for now — user edits take priority
     }
 
-    return jsonResponse({
-      invoices: invoices,
-      refreshedAt: new Date().toISOString(),
-      count: invoices.length
+    // Create new record in Airtable
+    var fields = {};
+    fields[FIELDS.threadId] = threadId;
+    fields[FIELDS.msgId] = parsed.msgId;
+    fields[FIELDS.payee] = parsed.payee;
+    fields[FIELDS.desc] = parsed.desc;
+    if (parsed.amount !== null) fields[FIELDS.amount] = parsed.amount;
+    fields[FIELDS.emailDate] = parsed.emailDate;
+    if (parsed.dueDate) fields[FIELDS.dueDate] = parsed.dueDate;
+    if (parsed.ref) fields[FIELDS.ref] = parsed.ref;
+    if (parsed.hasAttachment) fields[FIELDS.hasAttachment] = true;
+    if (parsed.hasPdf) fields[FIELDS.hasPdf] = true;
+    fields[FIELDS.gmailUrl] = parsed.gmailUrl;
+    fields[FIELDS.status] = parsed.isEstimate ? 'Estimate' : 'Unpaid';
+    if (parsed.isEstimate) fields[FIELDS.isEstimate] = true;
+
+    createAirtableRecord(config, fields);
+    created++;
+
+    // Rate limit: Airtable allows 5 requests/second
+    if (created % 4 === 0) Utilities.sleep(1200);
+  }
+
+  return { success: true, threadsScanned: threads.length, created: created, skippedExisting: updated };
+}
+
+
+// ═══════════════════════════════════════════
+// Parse a Gmail thread into invoice data
+// ═══════════════════════════════════════════
+
+function parseThread(thread, cache) {
+  var threadId = thread.getId();
+  var messages = thread.getMessages();
+  var latestMsg = messages[messages.length - 1];
+  var latestSubject = latestMsg.getSubject() || '';
+  var latestFrom = latestMsg.getFrom() || '';
+  var latestDate = latestMsg.getDate();
+  var msgId = latestMsg.getId();
+
+  // Combine body text from ALL messages in thread
+  var fullBody = '';
+  var allSubjects = '';
+  for (var mi = 0; mi < messages.length; mi++) {
+    var plain = messages[mi].getPlainBody() || '';
+    if (!plain || plain.trim().length < 20) {
+      var html = messages[mi].getBody() || '';
+      plain = html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?(p|div|tr|td|th|li|h[1-6])[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&pound;/gi, '£')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&#47;/gi, '/')
+        .replace(/&[#\w]+;/gi, ' ')
+        .replace(/\s+/g, ' ');
+    }
+    fullBody += plain + '\n';
+    allSubjects += (messages[mi].getSubject() || '') + '\n';
+  }
+
+  // Collect all attachments
+  var allAttachments = [];
+  for (var mi2 = 0; mi2 < messages.length; mi2++) {
+    var atts = messages[mi2].getAttachments();
+    for (var ai = 0; ai < atts.length; ai++) {
+      allAttachments.push(atts[ai]);
+    }
+  }
+
+  var payee = latestFrom.replace(/<[^>]+>/, '').replace(/"/g, '').trim();
+  var amount = extractAmount(fullBody, allSubjects);
+  var dueDate = extractDueDate(fullBody);
+  var ref = extractRef(fullBody, allSubjects);
+
+  var hasPdf = false;
+  var hasImage = false;
+  for (var a = 0; a < allAttachments.length; a++) {
+    var ct = allAttachments[a].getContentType() || '';
+    if (ct === 'application/pdf') hasPdf = true;
+    if (ct.indexOf('image/') === 0 && allAttachments[a].getSize() > 5000) hasImage = true;
+  }
+
+  // OCR attachments if amount still unknown
+  if (amount === null && (hasPdf || hasImage)) {
+    var cacheKey = 'ocr_v3_' + threadId;
+    var cached = cache.getProperty(cacheKey);
+
+    if (cached) {
+      try {
+        var ocrData = JSON.parse(cached);
+        if (ocrData.amount !== null && ocrData.amount !== undefined) amount = ocrData.amount;
+        if (!dueDate && ocrData.dueDate) dueDate = ocrData.dueDate;
+        if (!ref && ocrData.ref) ref = ocrData.ref;
+      } catch (parseErr) { /* ignore */ }
+    } else {
+      var ocrText = '';
+      for (var a2 = 0; a2 < allAttachments.length && !ocrText; a2++) {
+        if (allAttachments[a2].getContentType() === 'application/pdf') {
+          try { ocrText = ocrAttachment(allAttachments[a2]); } catch (err) { /* skip */ }
+        }
+      }
+      if (!ocrText || ocrText.length < 10) {
+        for (var a3 = 0; a3 < allAttachments.length && (!ocrText || ocrText.length < 10); a3++) {
+          var ct3 = allAttachments[a3].getContentType() || '';
+          if (ct3.indexOf('image/') === 0 && allAttachments[a3].getSize() > 5000) {
+            try { ocrText = ocrAttachment(allAttachments[a3]); } catch (err2) { /* skip */ }
+          }
+        }
+      }
+
+      if (ocrText && ocrText.length > 10) {
+        var ocrAmount = extractAmount(ocrText, '');
+        var ocrDueDate = extractDueDate(ocrText);
+        var ocrRef = extractRef(ocrText, '');
+
+        if (ocrAmount !== null) amount = ocrAmount;
+        if (!dueDate && ocrDueDate) dueDate = ocrDueDate;
+        if (!ref && ocrRef) ref = ocrRef;
+
+        try {
+          cache.setProperty(cacheKey, JSON.stringify({
+            amount: ocrAmount, dueDate: ocrDueDate, ref: ocrRef
+          }));
+        } catch (cacheErr) { /* storage full */ }
+      }
+    }
+  }
+
+  // Detect estimate vs invoice
+  var isEstimate = /\b(estimate|quotation|quote)\b/i.test(latestSubject + ' ' + fullBody.substring(0, 500));
+
+  return {
+    threadId: threadId,
+    msgId: msgId,
+    payee: payee,
+    desc: latestSubject,
+    amount: amount,
+    emailDate: fmtDate(latestDate),
+    dueDate: dueDate,
+    ref: ref,
+    hasAttachment: allAttachments.length > 0,
+    hasPdf: hasPdf,
+    gmailUrl: 'https://mail.google.com/mail/u/0/#all/' + msgId,
+    isEstimate: isEstimate,
+  };
+}
+
+
+// ═══════════════════════════════════════════
+// Airtable API Helpers
+// ═══════════════════════════════════════════
+
+function getExistingThreadIds(config) {
+  var map = {};
+  var offset = null;
+
+  do {
+    var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table +
+      '?fields%5B%5D=' + FIELDS.threadId +
+      '&pageSize=100';
+    if (offset) url += '&offset=' + offset;
+
+    var resp = UrlFetchApp.fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + config.pat },
+      muteHttpExceptions: true
     });
 
-  } catch (e) {
-    return jsonResponse({ error: String(e), invoices: [] });
+    if (resp.getResponseCode() !== 200) {
+      Logger.log('Airtable list error: ' + resp.getContentText());
+      break;
+    }
+
+    var data = JSON.parse(resp.getContentText());
+    (data.records || []).forEach(function(r) {
+      var tid = r.fields[FIELDS.threadId];
+      if (tid) map[tid] = r.id;
+    });
+
+    offset = data.offset || null;
+  } while (offset);
+
+  return map;
+}
+
+function createAirtableRecord(config, fields) {
+  var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table;
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    headers: {
+      'Authorization': 'Bearer ' + config.pat,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify({ fields: fields }),
+    muteHttpExceptions: true
+  });
+
+  if (resp.getResponseCode() !== 200) {
+    Logger.log('Airtable create error: ' + resp.getContentText());
   }
+  return resp.getResponseCode() === 200;
+}
+
+function updateAirtableRecord(config, recordId, fields) {
+  var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table + '/' + recordId;
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'patch',
+    headers: {
+      'Authorization': 'Bearer ' + config.pat,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify({ fields: fields }),
+    muteHttpExceptions: true
+  });
+
+  if (resp.getResponseCode() !== 200) {
+    Logger.log('Airtable update error: ' + resp.getContentText());
+  }
+  return resp.getResponseCode() === 200;
 }
 
 
 // ═══════════════════════════════════════════
-// OCR — Extract text from PDF/image via Drive
-// ═══════════════════════════════════════════
-
-function ocrAttachment(attachment) {
-  var blob = attachment.copyBlob();
-  var tempFile = DriveApp.createFile(blob);
-  try {
-    // Drive Advanced Service: insert as Google Doc with OCR enabled
-    var resource = { title: 'tmp_invoice_ocr', mimeType: 'application/vnd.google-apps.document' };
-    var docFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'en' });
-    var doc = DocumentApp.openById(docFile.id);
-    var text = doc.getBody().getText();
-    DriveApp.getFileById(docFile.id).setTrashed(true);
-    return text || '';
-  } catch (e) {
-    return '';
-  } finally {
-    try { tempFile.setTrashed(true); } catch (x) {}
-  }
-}
-
-
-// ═══════════════════════════════════════════
-// Mark as Paid — move to "4: paid" label
+// Mark as Paid — Gmail label move + Airtable update
 // ═══════════════════════════════════════════
 
 function handleMarkPaid(threadId) {
@@ -223,8 +360,20 @@ function handleMarkPaid(threadId) {
     thread.removeLabel(toPayLabel);
     thread.addLabel(paidLabel);
 
-    // Clear OCR cache for this thread
+    // Clear OCR cache
     try { PropertiesService.getScriptProperties().deleteProperty('ocr_v3_' + threadId); } catch (x) {}
+
+    // Also update Airtable if the record exists
+    var config = getConfig();
+    if (config.pat) {
+      var existing = getExistingThreadIds(config);
+      if (existing[threadId]) {
+        var fields = {};
+        fields[FIELDS.status] = 'Paid';
+        fields[FIELDS.paidDate] = fmtDate(new Date());
+        updateAirtableRecord(config, existing[threadId], fields);
+      }
+    }
 
     return jsonResponse({ success: true, threadId: threadId });
   } catch (e) {
@@ -234,16 +383,36 @@ function handleMarkPaid(threadId) {
 
 
 // ═══════════════════════════════════════════
+// OCR — Extract text from PDF/image via Drive
+// ═══════════════════════════════════════════
+
+function ocrAttachment(attachment) {
+  var blob = attachment.copyBlob();
+  var tempFile = DriveApp.createFile(blob);
+  try {
+    var resource = { title: 'tmp_invoice_ocr', mimeType: 'application/vnd.google-apps.document' };
+    var docFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'en' });
+    var doc = DocumentApp.openById(docFile.id);
+    var text = doc.getBody().getText();
+    DriveApp.getFileById(docFile.id).setTrashed(true);
+    return text || '';
+  } catch (e) {
+    return '';
+  } finally {
+    try { tempFile.setTrashed(true); } catch (x) {}
+  }
+}
+
+
+// ═══════════════════════════════════════════
 // Amount extraction
 // ═══════════════════════════════════════════
 
 function extractAmount(body, subject) {
-  // Combined text: body first, then subjects
   var texts = [body, subject];
   for (var t = 0; t < texts.length; t++) {
     var txt = texts[t] || '';
 
-    // 1. Explicit total/due patterns
     var totalPatterns = [
       /(?:Total|Amount due|Balance due|Amount remaining|Amount outstanding|total amount of|Total due|total payable|Amount\s+remaining)\s*[:\s]*£\s*([\d,]+\.?\d*)/i,
       /(?:Balance due|Amount due|Total due)\s*£\s*([\d,]+\.?\d*)/i,
@@ -254,13 +423,10 @@ function extractAmount(body, subject) {
       if (m) return parseFloat(m[1].replace(/,/g, ''));
     }
 
-    // 2. DUE DD/MM/YYYY £amount pattern (QuickBooks style)
     var dueAmtMatch = txt.match(/DUE\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s*£\s*([\d,]+\.?\d*)/i);
     if (dueAmtMatch) return parseFloat(dueAmtMatch[1].replace(/,/g, ''));
   }
 
-  // 3. Generic £amount pattern from body — take the LAST match
-  //    (the last £ figure is more likely the total/balance than the first line item)
   var bodyText = body || '';
   var allAmounts = [];
   var genericRe = /£\s*([\d,]+\.\d{2})/g;
@@ -270,7 +436,6 @@ function extractAmount(body, subject) {
   }
   if (allAmounts.length > 0) return allAmounts[allAmounts.length - 1];
 
-  // 4. Subject line £amount
   var subjectMatch = (subject || '').match(/£\s*([\d,]+\.?\d*)/);
   if (subjectMatch) return parseFloat(subjectMatch[1].replace(/,/g, ''));
 
@@ -299,30 +464,23 @@ function extractDueDate(body) {
 
 
 // ═══════════════════════════════════════════
-// Invoice reference extraction (strict)
-// Only matches refs that contain at least one digit
+// Invoice reference extraction
 // ═══════════════════════════════════════════
 
 function extractRef(body, subject) {
   var patterns = [
-    // Explicit labelled refs: "Invoice No. 41496", "Invoice #ONYX888-0219"
     /(?:Invoice|INVOICE)\s*(?:NO\.?|#|Ref\.?|Reference|number)[:\.\s]+([A-Z0-9][\w\-]{2,20})/i,
-    // INV-nnnn pattern (Xero etc)
     /(INV-\d{3,10})/i,
-    // Estimate No.: 1724
     /(?:Estimate|ESTIMATE)\s*(?:NO\.?|#)[:\.\s]+(\d{3,10})/i,
-    // "invoice reference PRS049387"
     /(?:invoice\s+reference)[:\.\s]+([A-Z0-9][\w\-]{3,20})/i,
-    // "Invoice 41496 from" (subject line pattern)
     /Invoice\s+(\d{3,10})\s+from/i,
-    // "#ONYX888-0219" style
     /#([A-Z0-9][\w\-]{4,20})/
   ];
-  var sources = [subject || '', body || '']; // check subject first for cleaner refs
+  var sources = [subject || '', body || ''];
   for (var s = 0; s < sources.length; s++) {
     for (var i = 0; i < patterns.length; i++) {
       var m = sources[s].match(patterns[i]);
-      if (m && m[1] && /\d/.test(m[1])) return m[1]; // must contain at least one digit
+      if (m && m[1] && /\d/.test(m[1])) return m[1];
     }
   }
   return null;
@@ -335,14 +493,12 @@ function extractRef(body, subject) {
 
 function parseDateStr(str) {
   if (!str) return null;
-  // DD/MM/YYYY or DD-MM-YYYY
   var slashMatch = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
   if (slashMatch) {
     var d = slashMatch[1], m = slashMatch[2], y = slashMatch[3];
     if (y.length === 2) y = '20' + y;
     return y + '-' + pad(m) + '-' + pad(d);
   }
-  // DD Month YYYY
   var months = { january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',
     july:'07',august:'08',september:'09',october:'10',november:'11',december:'12',
     jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',

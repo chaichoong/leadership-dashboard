@@ -313,7 +313,7 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="header-inner">
     <h1>Invoices &mdash; Standard Operating Procedure</h1>
     <div class="subtitle">Invoice ingestion, AI matching, approval workflow and payment tracking</div>
-    <div class="version">Version 1.2 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
+    <div class="version">Version 2.0 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -325,16 +325,16 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <h2><span class="icon">&#9889;</span> Quick Reference</h2>
     <div class="qr-grid">
       <div class="qr-item">
-        <div class="qr-label">Data Source</div>
-        <div class="qr-value">Airtable &mdash; Invoices Table</div>
+        <div class="qr-label">Source of Truth</div>
+        <div class="qr-value">Airtable &mdash; "Dashboard Invoices" table (<code>tblkOTKIG2Tyiy9aM</code>)</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Trigger</div>
-        <div class="qr-value">Gmail invoice emails via Apps Script</div>
+        <div class="qr-label">Airtable Base</div>
+        <div class="qr-value"><code>appnqjDpqDniH3IRl</code></div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">AI Engine</div>
-        <div class="qr-value">Claude / OpenAI for supplier matching</div>
+        <div class="qr-label">Gmail Sync</div>
+        <div class="qr-value">Apps Script &mdash; 15-min trigger + manual "Refresh from Gmail"</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">Dashboard</div>
@@ -366,20 +366,24 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="overview">
     <h2 class="section-title"><span class="icon">&#128202;</span> 1. Overview &amp; Data Flow</h2>
     <div class="card">
-      <p>The Invoices module automates the full invoice lifecycle: ingestion from email, AI-powered supplier matching, manual approval, and payment tracking. All invoice data lives in Airtable and is rendered in real time on the Leadership Dashboard.</p>
+      <p>The Invoices module (v2.0) manages the full invoice lifecycle with <strong>Airtable as the single source of truth</strong>. Gmail emails labelled "3. to pay" are synced to the Airtable "Dashboard Invoices" table by an Apps Script running every 15 minutes. The Leadership Dashboard reads from Airtable, and all user edits (amounts, payees, references, due dates) write directly back to Airtable via API &mdash; so data persists across browsers and devices. AI matching cross-references invoices against bank transactions for one-click payment reconciliation.</p>
     </div>
     <div class="card">
       <div class="card-header">End-to-End Data Flow</div>
       <div class="flow">
-        <div class="flow-step primary"><span class="flow-icon">&#128231;</span>Gmail Inbox<span class="flow-sub">Invoice emails</span></div>
+        <div class="flow-step primary"><span class="flow-icon">&#128231;</span>Gmail<span class="flow-sub">"3. to pay" label</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step warning"><span class="flow-icon">&#9881;</span>Apps Script<span class="flow-sub">Parse &amp; extract</span></div>
+        <div class="flow-step warning"><span class="flow-icon">&#9881;</span>Apps Script<span class="flow-sub">15-min sync to Airtable</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step purple"><span class="flow-icon">&#129302;</span>AI Matching<span class="flow-sub">Supplier + cost code</span></div>
+        <div class="flow-step"><span class="flow-icon">&#128451;</span>Airtable<span class="flow-sub">Source of truth</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step"><span class="flow-icon">&#128451;</span>Airtable<span class="flow-sub">Invoice record</span></div>
+        <div class="flow-step success"><span class="flow-icon">&#9989;</span>Dashboard<span class="flow-sub">View, edit &amp; pay</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step success"><span class="flow-icon">&#9989;</span>Dashboard<span class="flow-sub">Review &amp; pay</span></div>
+        <div class="flow-step purple"><span class="flow-icon">&#129302;</span>AI Matching<span class="flow-sub">Transaction match</span></div>
+      </div>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span><strong>Key change from v1.x:</strong> Data no longer relies on browser localStorage. All invoice records, edits, and match decisions are stored in Airtable and persist across devices and browsers.</span>
       </div>
     </div>
   </div>
@@ -393,16 +397,17 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
           <tr><th>Column</th><th>Type</th><th>Description</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>Invoice ID</strong></td><td>Auto-number</td><td>Unique identifier for each invoice record</td></tr>
-          <tr><td><strong>Supplier</strong></td><td>Linked record</td><td>Matched supplier from Contacts table</td></tr>
-          <tr><td><strong>Amount</strong></td><td>Currency</td><td>Invoice total (GBP)</td></tr>
-          <tr><td><strong>Date Received</strong></td><td>Date</td><td>Date the invoice email was processed</td></tr>
-          <tr><td><strong>Due Date</strong></td><td>Date</td><td>Payment deadline extracted from invoice</td></tr>
-          <tr><td><strong>Status</strong></td><td>Single select</td><td>Pending / Approved / Rejected / Paid</td></tr>
-          <tr><td><strong>AI Confidence</strong></td><td>Percent</td><td>Match confidence score from AI engine</td></tr>
-          <tr><td><strong>Cost Code</strong></td><td>Single select</td><td>Expense category assigned by AI or manually</td></tr>
-          <tr><td><strong>Attachment</strong></td><td>Attachment</td><td>Original invoice PDF from email</td></tr>
-          <tr><td><strong>Notes</strong></td><td>Long text</td><td>Reviewer comments or queries</td></tr>
+          <tr><td><strong>Subject</strong></td><td>Text</td><td>Email subject line &mdash; used as the invoice description in the dashboard</td></tr>
+          <tr><td><strong>Payee</strong></td><td>Text</td><td>Who the invoice is from &mdash; editable inline on the dashboard, saved to Airtable</td></tr>
+          <tr><td><strong>Amount</strong></td><td>Currency</td><td>Invoice total (GBP) &mdash; editable inline; click the empty cell to enter</td></tr>
+          <tr><td><strong>Ref</strong></td><td>Text</td><td>Payment reference &mdash; editable inline on the dashboard</td></tr>
+          <tr><td><strong>Due Date</strong></td><td>Date</td><td>Payment deadline &mdash; editable inline on the dashboard</td></tr>
+          <tr><td><strong>Date Received</strong></td><td>Date</td><td>Date the invoice email was synced from Gmail</td></tr>
+          <tr><td><strong>Status</strong></td><td>Single select</td><td>Unpaid / Paid &mdash; controlled by the mark-paid workflow</td></tr>
+          <tr><td><strong>Paid Date</strong></td><td>Date</td><td>Date the invoice was marked as paid</td></tr>
+          <tr><td><strong>Gmail Message ID</strong></td><td>Text</td><td>Unique Gmail ID used for deduplication and label management</td></tr>
+          <tr><td><strong>Gmail Thread ID</strong></td><td>Text</td><td>Thread ID used to locate the email in Gmail</td></tr>
+          <tr><td><strong>Matched Transaction</strong></td><td>Linked record</td><td>Link to the matching bank transaction record in the Transactions table</td></tr>
         </tbody>
       </table>
     </div>
@@ -412,23 +417,23 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="kpi">
     <h2 class="section-title"><span class="icon">&#128200;</span> 3. KPI Summary Cards</h2>
     <div class="card">
-      <p>The dashboard header displays four real-time KPI cards summarising the current invoice state:</p>
+      <p>The dashboard header displays four real-time KPI summary cards calculated from the Airtable data:</p>
       <div class="grid-2">
         <div class="card" style="border-left: 4px solid var(--blue-500);">
-          <div class="card-header"><span class="dot blue"></span> Total Outstanding</div>
-          <p>Sum of all invoices in <strong>Pending</strong> or <strong>Approved</strong> status. Indicates cash commitment not yet settled.</p>
+          <div class="card-header"><span class="dot blue"></span> Unpaid Count</div>
+          <p>Total number of invoices where Status is not "Paid". Shows how many invoices still need attention.</p>
+        </div>
+        <div class="card" style="border-left: 4px solid var(--green-500);">
+          <div class="card-header"><span class="dot green"></span> Known Amount Due</div>
+          <p>Sum of all unpaid invoices that have an <strong>Amount</strong> value entered. This is the confirmed cash commitment.</p>
         </div>
         <div class="card" style="border-left: 4px solid var(--amber-500);">
-          <div class="card-header"><span class="dot amber"></span> Awaiting Approval</div>
-          <p>Count of invoices still in <strong>Pending</strong> status requiring manual review before payment.</p>
+          <div class="card-header"><span class="dot amber"></span> Unknown Amounts</div>
+          <p>Count of unpaid invoices where the <strong>Amount</strong> field is still empty. These need the user to click and enter the value.</p>
         </div>
         <div class="card" style="border-left: 4px solid var(--red-500);">
           <div class="card-header"><span class="dot red"></span> Overdue</div>
-          <p>Invoices where <strong>Due Date &lt; Today</strong> and status is not Paid. Triggers escalation.</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--green-500);">
-          <div class="card-header"><span class="dot green"></span> Paid This Month</div>
-          <p>Total value of invoices marked as <strong>Paid</strong> within the current calendar month.</p>
+          <p>Invoices where <strong>Due Date &lt; Today</strong> and status is not Paid. Highlights invoices that need immediate action.</p>
         </div>
       </div>
     </div>
@@ -438,34 +443,34 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="ai">
     <h2 class="section-title"><span class="icon">&#129302;</span> 4. AI Matching Logic</h2>
     <div class="card">
-      <p>When an invoice email arrives, the AI engine performs two matching tasks:</p>
+      <p>The AI matching engine cross-references unpaid invoices against the <strong>Airtable Transactions table</strong> (bank transactions) to find likely payment matches:</p>
       <ol class="steps">
-        <li><strong>Supplier Matching</strong> &mdash; The sender email and invoice text are compared against the Contacts table. A confidence score (0&ndash;100%) is assigned.</li>
-        <li><strong>Cost Code Assignment</strong> &mdash; Based on historic invoices from the same supplier and the line-item descriptions, a cost code is suggested.</li>
-        <li><strong>Threshold Check</strong> &mdash; If confidence &ge; 85%, the match is auto-applied. Below 85%, the invoice is flagged for manual review.</li>
+        <li><strong>Exact Amount Match</strong> &mdash; The system looks for bank transactions where the amount exactly matches the invoice amount.</li>
+        <li><strong>Date Window</strong> &mdash; Matching transactions must fall within a reasonable date range around the invoice due date.</li>
+        <li><strong>Keyword Matching</strong> &mdash; Transaction descriptions are compared against the invoice payee name and subject for additional confirmation.</li>
+        <li><strong>Suggestion Display</strong> &mdash; When a match is found, an inline suggestion row appears beneath the invoice with the matched transaction details.</li>
       </ol>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>The AI model improves over time. Each manual correction feeds back into the training data for future matching accuracy.</span>
+        <span>The matching runs automatically when the dashboard loads. It only considers transactions that are not already linked to another invoice.</span>
       </div>
     </div>
   </div>
 
-  <!-- 5. Inline Match Suggestions (v1.2) -->
+  <!-- 5. Inline Match Suggestions -->
   <div class="section" id="inline">
     <h2 class="section-title"><span class="icon">&#129302;</span> 5. Inline Match Suggestions</h2>
     <div class="card">
-      <p>When the AI engine identifies a probable supplier match, a <strong>match suggestion row</strong> appears directly beneath the invoice row in the table. This allows one-click approval or rejection without opening an expanded detail panel.</p>
+      <p>When the AI engine finds a likely transaction match for an invoice, a <strong>match suggestion row</strong> appears directly beneath the invoice row in the table. This allows one-click approval or rejection without leaving the page.</p>
       <div class="card-header">How Inline Suggestions Work</div>
       <ol class="steps">
-        <li>After AI matching runs, invoices with a suggested supplier display a highlighted sub-row showing the proposed match and confidence score.</li>
-        <li>Click <strong>Approve</strong> (green) to accept the suggestion — the supplier is linked and the invoice moves to the approval queue.</li>
-        <li>Click <strong>Reject</strong> (grey/red on hover) to dismiss the suggestion — the invoice remains pending for manual assignment.</li>
-        <li>Approved and rejected decisions are recorded in the Airtable record and used to improve future AI accuracy.</li>
+        <li>After AI matching runs, invoices with a suggested transaction display a highlighted sub-row showing the matched bank transaction details (date, amount, description).</li>
+        <li>Click <strong>Approve</strong> to accept the match &mdash; this triggers the full Mark as Paid workflow (see Section 7), linking the transaction and marking the invoice as paid.</li>
+        <li>Click <strong>Reject</strong> to dismiss the suggestion &mdash; the rejection is saved in Airtable so the same transaction will not be suggested again for this invoice.</li>
       </ol>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>Inline suggestions only appear for invoices where AI confidence is between 60&ndash;84%. High-confidence matches (&ge;85%) are auto-applied with no manual step required.</span>
+        <span>Suggestions only appear for invoices that have an Amount entered. If the Amount field is empty, no matching can be performed &mdash; enter the amount first.</span>
       </div>
     </div>
   </div>
@@ -477,14 +482,14 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
       <div class="card-header">Review Workflow</div>
       <ol class="steps">
         <li>Open the Invoices tab on the Leadership Dashboard.</li>
-        <li>Invoices in <strong>Pending</strong> status appear at the top of the table.</li>
-        <li>Click an invoice row to expand the detail panel showing the PDF attachment, supplier match, and suggested cost code.</li>
-        <li>Review the details. If correct, click <strong>Approve</strong>. If incorrect, click <strong>Reject</strong> and add a note explaining the reason.</li>
-        <li>Approved invoices move to the payment queue. Rejected invoices are returned for correction or deletion.</li>
+        <li>All unpaid invoices are displayed (fetched from Airtable where Status != "Paid").</li>
+        <li>Fill in any missing details by clicking empty fields &mdash; <strong>Amount</strong>, <strong>Payee</strong>, <strong>Ref</strong>, and <strong>Due Date</strong> are all editable inline. Each edit saves directly to Airtable.</li>
+        <li>If a transaction match suggestion appears beneath an invoice, review the details. Click <strong>Approve</strong> to accept (triggers mark-paid) or <strong>Reject</strong> to dismiss (saved in Airtable).</li>
+        <li>For invoices without an automatic match, use the <strong>Mark as Paid</strong> button manually once payment has been made.</li>
       </ol>
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>Invoices over &pound;500 require a second approval step. The system will prompt for confirmation before finalising.</span>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>All edits persist in Airtable. You can close your browser, switch devices, or clear your cache &mdash; your data will still be there next time you open the dashboard.</span>
       </div>
     </div>
   </div>
@@ -493,15 +498,20 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="paid">
     <h2 class="section-title"><span class="icon">&#128181;</span> 7. Mark as Paid</h2>
     <div class="card">
+      <p>Marking an invoice as paid triggers <strong>three actions</strong> simultaneously:</p>
       <ol class="steps">
-        <li>Once payment has been made via the bank, return to the Invoices tab.</li>
-        <li>Locate the approved invoice and click <strong>Mark as Paid</strong>.</li>
-        <li>Enter the payment date and reference number if applicable.</li>
-        <li>The status changes to <strong>Paid</strong> and the record moves to the archive view.</li>
+        <li><strong>Airtable Update</strong> &mdash; The invoice record's Status is set to "Paid" and the Paid Date is set to today. If a matched transaction was approved, the Matched Transaction linked record is also set.</li>
+        <li><strong>Gmail Label Move</strong> &mdash; The original email is moved from the <strong>"3. to pay"</strong> Gmail label to <strong>"4: paid"</strong> via the Apps Script proxy. This keeps Gmail in sync with the dashboard.</li>
+        <li><strong>Transaction Link</strong> &mdash; If the payment was matched to a bank transaction (via AI matching or manual selection), the Airtable Transactions record is linked to the invoice.</li>
+      </ol>
+      <div class="card-header" style="margin-top: 1rem;">How to Mark as Paid</div>
+      <ol class="steps">
+        <li>Click the <strong>Mark as Paid</strong> button on the invoice row, OR click <strong>Approve</strong> on a transaction match suggestion (which triggers mark-paid automatically).</li>
+        <li>The invoice row disappears from the unpaid list and the KPI cards update immediately.</li>
       </ol>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span>Paid invoices are not deleted. They remain in Airtable for audit and reporting purposes and contribute to monthly spend analysis.</span>
+        <span>Paid invoices are not deleted. They remain in Airtable for audit and reporting purposes. The dashboard simply filters them out by only showing records where Status != "Paid".</span>
       </div>
     </div>
   </div>
@@ -512,10 +522,11 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <div class="card">
       <div class="card-header">Key Concepts</div>
       <ul>
-        <li><strong>Invoice vs. Statement</strong> &mdash; Only invoices (requests for payment) should enter the system. Statements are informational and should not be processed.</li>
-        <li><strong>Duplicate Detection</strong> &mdash; The system checks invoice number + supplier + amount to prevent duplicate entries. Flagged duplicates appear with an amber warning badge.</li>
-        <li><strong>Recurring Invoices</strong> &mdash; Regular monthly invoices from known suppliers can be auto-approved if the amount matches the expected value within a 5% tolerance.</li>
-        <li><strong>Credit Notes</strong> &mdash; Credit notes appear as negative amounts and automatically offset against outstanding invoices from the same supplier.</li>
+        <li><strong>Airtable is the source of truth</strong> &mdash; All invoice data lives in the "Dashboard Invoices" table. The dashboard reads from and writes to Airtable. Nothing is stored in browser localStorage.</li>
+        <li><strong>Gmail labels drive the workflow</strong> &mdash; "3. to pay" means unpaid, "4: paid" means paid. The Apps Script sync reads from "3. to pay" and the mark-paid workflow moves emails to "4: paid".</li>
+        <li><strong>Deduplication</strong> &mdash; The sync script uses the Gmail Message ID to prevent the same email from creating multiple Airtable records.</li>
+        <li><strong>Inline editing</strong> &mdash; Empty fields (Amount, Payee, Ref, Due Date) can be clicked on directly in the dashboard table to enter values. Each edit is saved to Airtable immediately.</li>
+        <li><strong>Transaction matching</strong> &mdash; The AI matching compares invoices against the Airtable Transactions table using exact amount + date proximity + keyword matching. Matches can be Approved (triggers mark-paid) or Rejected (saved in Airtable).</li>
       </ul>
     </div>
   </div>
@@ -524,17 +535,37 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
   <div class="section" id="gas">
     <h2 class="section-title"><span class="icon">&#9881;</span> 9. Google Apps Script Setup</h2>
     <div class="card">
-      <div class="card-header">How the Ingestion Script Works</div>
+      <div class="card-header">How the Gmail-to-Airtable Sync Works</div>
       <ol class="steps">
-        <li>A time-driven trigger runs every 15 minutes, scanning the Gmail inbox for emails matching the invoice label.</li>
-        <li>The script extracts sender, subject, date, and any PDF attachments.</li>
-        <li>Extracted data is sent to the AI matching endpoint for supplier and cost code identification.</li>
-        <li>A new record is created in the Airtable Invoices table via the Airtable API with the matched data and attachment.</li>
-        <li>The processed email is moved to the "Invoices/Processed" Gmail label to prevent reprocessing.</li>
+        <li>The <code>syncGmailToAirtable</code> function runs on a <strong>15-minute time trigger</strong>, scanning Gmail for threads with the <strong>"3. to pay"</strong> label.</li>
+        <li>For each email thread, the script extracts the subject, sender, date, Gmail message ID and thread ID.</li>
+        <li>Before creating a new record, it checks Airtable for an existing record with the same Gmail Message ID to <strong>prevent duplicates</strong>.</li>
+        <li>New invoices are created in the "Dashboard Invoices" table with Status set to "Unpaid" and the extracted email details.</li>
+        <li>The sync can also be triggered manually from the dashboard by clicking the <strong>"Refresh from Gmail"</strong> link, which calls the Apps Script web app endpoint.</li>
+      </ol>
+      <div class="card-header" style="margin-top: 1rem;">Required Script Properties</div>
+      <p>The following must be set in the Apps Script project under <strong>Project Settings &gt; Script Properties</strong>:</p>
+      <table class="label-table">
+        <thead>
+          <tr><th>Property</th><th>Value</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>AIRTABLE_PAT</code></td><td>pat...</td><td>Airtable Personal Access Token with read/write access to the base</td></tr>
+          <tr><td><code>AIRTABLE_BASE</code></td><td><code>appnqjDpqDniH3IRl</code></td><td>The Airtable base ID</td></tr>
+          <tr><td><code>AIRTABLE_TABLE</code></td><td><code>tblkOTKIG2Tyiy9aM</code></td><td>The "Dashboard Invoices" table ID</td></tr>
+        </tbody>
+      </table>
+      <div class="card-header" style="margin-top: 1rem;">Setting Up the Time Trigger</div>
+      <ol class="steps">
+        <li>Open the Apps Script project in the Google Apps Script editor.</li>
+        <li>Go to <strong>Triggers</strong> (clock icon in the left sidebar).</li>
+        <li>Click <strong>+ Add Trigger</strong>.</li>
+        <li>Set the function to <code>syncGmailToAirtable</code>, event source to "Time-driven", type to "Minutes timer", interval to "Every 15 minutes".</li>
+        <li>Click <strong>Save</strong> and authorise the required permissions when prompted.</li>
       </ol>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span>If the Apps Script quota is exceeded (e.g. too many API calls), ingestion pauses until the next quota reset. Check the Apps Script dashboard for execution logs.</span>
+        <span>If the Apps Script quota is exceeded (e.g. too many API calls), syncing pauses until the next quota reset. Check the Apps Script dashboard for execution logs.</span>
       </div>
     </div>
   </div>
@@ -544,24 +575,28 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <h2 class="section-title"><span class="icon">&#128295;</span> 10. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
-        <div class="ts-problem">Invoice email not appearing in the system</div>
-        <div class="ts-solution">Check that the email has the correct Gmail label applied. Verify the Apps Script trigger is active in the Apps Script dashboard. Review execution logs for errors.</div>
+        <div class="ts-problem">Invoice email not appearing in the dashboard</div>
+        <div class="ts-solution">Check that the email has the <strong>"3. to pay"</strong> Gmail label applied. Verify the Apps Script 15-minute trigger is active in the Apps Script dashboard. Try clicking "Refresh from Gmail" on the dashboard to trigger a manual sync. Check the Apps Script execution logs for errors.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Wrong supplier match</div>
-        <div class="ts-solution">Manually correct the supplier in Airtable. The correction will be fed back to improve future AI matching. Check if the supplier exists in the Contacts table.</div>
+        <div class="ts-problem">Edits not saving</div>
+        <div class="ts-solution">All edits save directly to Airtable via API. Check your internet connection. Open the browser developer console (F12) and look for API error messages. Verify the Airtable PAT has not expired.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Duplicate invoice detected</div>
-        <div class="ts-solution">Review both records. If genuinely duplicate, reject the newer entry. If the supplier has issued two invoices with the same number, add a distinguishing note and approve both.</div>
+        <div class="ts-problem">No transaction match suggestions appearing</div>
+        <div class="ts-solution">The AI matching requires an <strong>Amount</strong> to be entered on the invoice. If the amount is filled in, check that there are bank transactions in the Airtable Transactions table that haven't already been linked to other invoices.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Gmail label not moving when marking as paid</div>
+        <div class="ts-solution">The label move is handled by the Apps Script proxy. Check that the Gmail Message ID is correctly stored on the Airtable record. Verify the Apps Script web app is deployed and accessible. Check execution logs for errors.</div>
       </div>
       <div class="ts-item">
         <div class="ts-problem">KPI cards showing stale data</div>
-        <div class="ts-solution">Refresh the dashboard page. If data remains stale, check the Airtable API connection and verify the data fetch function in the dashboard source code.</div>
+        <div class="ts-solution">Refresh the dashboard page. If data remains stale, check the Airtable API connection in the browser console. Verify the Airtable PAT and base/table IDs are correct.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">PDF attachment not loading</div>
-        <div class="ts-solution">Ensure the attachment URL from Airtable has not expired. Re-upload the PDF manually if needed. Check browser CORS settings if viewing cross-origin.</div>
+        <div class="ts-problem">Duplicate invoice records in Airtable</div>
+        <div class="ts-solution">The sync script checks Gmail Message ID to prevent duplicates. If duplicates appear, check if the same email has been processed by multiple triggers. Delete the duplicate directly in Airtable.</div>
       </div>
     </div>
   </div>
