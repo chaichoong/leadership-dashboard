@@ -233,6 +233,10 @@
         .inv-approve-btn:hover { background: #16a34a; color: white; }
         .inv-reject-btn { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 4px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; }
         .inv-reject-btn:hover { background: #fee2e2; color: #dc2626; border-color: #dc2626; }
+        @keyframes inv-save-ok { 0% { background: #dcfce7; } 100% { background: transparent; } }
+        @keyframes inv-save-fail { 0% { background: #fee2e2; } 100% { background: transparent; } }
+        .inv-flash-ok { animation: inv-save-ok 1.2s ease-out; }
+        .inv-flash-fail { animation: inv-save-fail 1.5s ease-out; }
         .invoice-table tr.inv-paid { opacity: 0.55; }
         .invoice-table tr.inv-paid td:first-child { border-left: 3px solid #16a34a; }
         .inv-badge.paid { background: #dcfce7; color: #16a34a; }
@@ -3540,7 +3544,7 @@
             // Action column
             const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${inv.recordId}','${threadId}','','${gmailUrl}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
-            return `<tr onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
+            return `<tr data-record-id="${inv.recordId}" onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
                 <td style="text-align:center;color:#94a3b8;font-size:11px;font-weight:600">${idx + 1}</td>
                 <td style="white-space:nowrap;min-width:100px">${dateCell}<br>${badge}</td>
                 <td style="font-weight:600;max-width:160px">${payeeHtml}</td>
@@ -3634,12 +3638,14 @@
             // Save to Airtable
             input.disabled = true;
             input.style.opacity = '0.5';
+            let saveOk = false;
             try {
-                await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
                     method: 'PATCH',
                     headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fields: { [fieldId]: fieldValue } })
                 });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 // Update local data so re-render shows new value without refetching
                 const inv = airtableInvoices.find(i => i.recordId === recordId);
                 if (inv) {
@@ -3649,10 +3655,22 @@
                     else if (fieldId === INV.ref) inv.ref = fieldValue;
                     else if (fieldId === INV.dueDate) inv.dueDate = fieldValue;
                 }
+                saveOk = true;
             } catch (e) {
                 console.error('Failed to save invoice field to Airtable:', e);
             }
+            // Map field to column index: payee=2, desc=3, ref=4, amount=5
+            const flashCol = fieldId === INV.payee ? 2 : fieldId === INV.desc ? 3 : fieldId === INV.ref ? 4 : fieldId === INV.amount ? 5 : -1;
             renderInvoiceTab();
+            // Flash the cell green (saved) or red (failed) after re-render
+            if (flashCol >= 0) {
+                const newRow = document.querySelector(`tr[data-record-id="${recordId}"]`);
+                const newTd = newRow && newRow.cells[flashCol];
+                if (newTd) {
+                    newTd.classList.add(saveOk ? 'inv-flash-ok' : 'inv-flash-fail');
+                    setTimeout(() => newTd.classList.remove('inv-flash-ok', 'inv-flash-fail'), 1500);
+                }
+            }
         }
 
         input.onkeydown = function(e) {
