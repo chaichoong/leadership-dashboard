@@ -3388,8 +3388,40 @@
             if (document.getElementById('tab-invoices').classList.contains('active')) {
                 renderInvoiceTab();
             }
+            fetchGmailLabelCount();
         } catch (e) {
             console.warn('Airtable invoice fetch failed:', e.message);
+        }
+    }
+
+    // Fetch Gmail "3. to pay" label count from Apps Script
+    let lastGmailCount = null;
+    async function fetchGmailLabelCount() {
+        if (!GMAIL_SCRIPT_URL) return;
+        try {
+            const resp = await fetch(GMAIL_SCRIPT_URL + '?action=count');
+            if (resp.ok) {
+                const data = await resp.json();
+                if (typeof data.gmailCount === 'number') {
+                    lastGmailCount = data.gmailCount;
+                    updateSyncHealthIndicator();
+                }
+            }
+        } catch (e) {
+            console.warn('Gmail count fetch failed:', e.message);
+        }
+    }
+
+    function updateSyncHealthIndicator() {
+        const el = document.getElementById('invSyncHealth');
+        if (!el) return;
+        const dashCount = airtableInvoices.filter(inv => inv.status !== 'Paid').length;
+        if (lastGmailCount === null) {
+            el.innerHTML = `<span style="color:#64748b">Dashboard: <strong>${dashCount}</strong> unpaid</span>`;
+        } else if (dashCount === lastGmailCount) {
+            el.innerHTML = `<span style="color:#16a34a">Dashboard: <strong>${dashCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ✓ In sync</span>`;
+        } else {
+            el.innerHTML = `<span style="color:#d97706">Dashboard: <strong>${dashCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ⚠️ Mismatch</span>`;
         }
     }
 
@@ -3429,8 +3461,9 @@
             const statusLabel = airtableInvoices.length > 0
                 ? '<span style="color:#16a34a;font-weight:600">Airtable</span>'
                 : '<span style="color:#d97706;font-weight:600">Loading…</span>';
-            refreshSpan.innerHTML = `Source: <strong style="color:#64748b">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:#2563eb;font-size:11px;text-decoration:underline">Refresh from Gmail</a>`;
+            refreshSpan.innerHTML = `Source: <strong style="color:#64748b">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:#2563eb;font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
         }
+        updateSyncHealthIndicator();
 
         // Cross-reference with Airtable transactions for AI matching
         const txMatches = matchInvoicesToTransactions(sourceData, allTransactions);

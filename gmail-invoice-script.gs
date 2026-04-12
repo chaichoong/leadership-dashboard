@@ -22,6 +22,7 @@
  * ACTIONS (via query string):
  *   ?action=sync          → Manually trigger Gmail → Airtable sync
  *   ?action=markPaid&threadId=xxx → Move email to "4: paid" label + update Airtable
+ *   ?action=count         → Returns { gmailCount: N } for "3. to pay" label
  *   (no action)           → Returns { status: 'ok' }
  */
 
@@ -67,6 +68,12 @@ function doGet(e) {
 
     if (params.action === 'markPaid' && params.threadId) {
       return handleMarkPaid(params.threadId);
+    }
+
+    if (params.action === 'count') {
+      var label = GmailApp.getUserLabelByName('3. to pay');
+      var count = label ? label.getThreads(0, 100).length : 0;
+      return jsonResponse({ gmailCount: count });
     }
 
     if (params.action === 'sync') {
@@ -280,6 +287,7 @@ function getExistingThreadIds(config) {
   do {
     var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table +
       '?fields%5B%5D=' + FIELDS.threadId +
+      '&returnFieldsByFieldId=true' +
       '&pageSize=100';
     if (offset) url += '&offset=' + offset;
 
