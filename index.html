@@ -2565,7 +2565,7 @@
                     const ucBtn = (f.isUC && daysFromToday >= 0 && daysFromToday <= 7)
                         ? (ucChecked
                             ? ` <button class="uc-check-btn done" disabled title="UC Check already requested">UC Check Requested</button>`
-                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escHtml(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Karlo to call UC and confirm this payment">UC Check</button>`)
+                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escHtml(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Mica to call UC and confirm this payment">UC Check</button>`)
                         : '';
                     const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
@@ -3247,7 +3247,7 @@
     }
 
     // ── UC Check Task Creator ──
-    // Creates a task in Airtable assigned to Karlo to call Universal Credit
+    // Creates a task in Airtable assigned to Mica to call Universal Credit
     // Track which UC checks have been requested (persists across auto-refresh)
     function isUCCheckRequested(tenancyId) {
         try {
@@ -3268,8 +3268,8 @@
     }
 
     const UC_TASK_CONFIG = {
-        assigneeEmail: 'karlomiguel.teves@gmail.com',
-        teamMemberId: 'recepbO2GUxeDO03i',     // Karlo Teves
+        assigneeEmail: 'micaa.work@gmail.com',
+        teamMemberId: 'rec4b5MDoaxEC7WRE',     // Mica Albovias
         projectId: 'recpg9gSr5Wh1X1Kv',        // £4,000 profit project
         priorityName: 'Project',
         statusName: 'Today',
@@ -3363,7 +3363,7 @@
             setTimeout(() => {
                 btn.textContent = 'UC Check';
                 btn.style.background = '';
-                btn.title = 'Create task for Karlo to call UC and confirm this payment';
+                btn.title = 'Create task for Mica to call UC and confirm this payment';
                 btn.disabled = false;
             }, 5000);
         }
