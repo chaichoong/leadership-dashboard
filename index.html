@@ -3524,13 +3524,13 @@
             summaryCards.innerHTML = `
                 <div class="kpi-card">
                     <div class="kpi-card-label">Unpaid Invoices</div>
-                    <div class="kpi-card-value">${sorted.length}</div>
+                    <div class="kpi-card-value">${sourceData.length}</div>
                     <div class="kpi-card-sub">Synced from Gmail "3. to pay"</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Known Amount Due</div>
                     <div class="kpi-card-value text-red">${fmt(knownTotal)}</div>
-                    <div class="kpi-card-sub">${sorted.length - unknownCount} of ${sorted.length} invoices with amounts</div>
+                    <div class="kpi-card-sub">${sourceData.length - unknownCount} of ${sourceData.length} invoices with amounts</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Amount Unknown</div>
