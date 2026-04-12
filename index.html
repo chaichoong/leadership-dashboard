@@ -3353,6 +3353,7 @@
                 'filterByFormula': "NOT({Status}='Paid')",
                 'sort[0][field]': 'Email Date',
                 'sort[0][direction]': 'asc',
+                'returnFieldsByFieldId': 'true',
             });
             const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`;
             const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
