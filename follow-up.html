@@ -2659,12 +2659,20 @@ Respond with ONLY valid JSON, no markdown.`;
                     try {
                         const newRec = await resp.json().catch(() => null);
                         const newRecId = newRec?.records?.[0]?.id;
-                        const filterFormula = `AND({${CERT_FIELDS.type}}='${cert.cert_type}',FIND('${matchedProp.id}',ARRAYJOIN({${CERT_FIELDS.property}})))`;
+                        // Filter by cert type only, then match property client-side
+                        // (ARRAYJOIN on linked records returns names not IDs, so server-side property filter is unreliable)
+                        const filterFormula = `{${CERT_FIELDS.type}}='${cert.cert_type}'`;
                         const oldUrl = `https://api.airtable.com/v0/${getAirtableBaseId()}/${COMPLIANCE_CERTS_TABLE}?returnFieldsByFieldId=true&fieldIdsInFormula=true&filterByFormula=${encodeURIComponent(filterFormula)}`;
                         const oldResp = await fetch(oldUrl, { headers: { 'Authorization': 'Bearer ' + pat } });
                         if (oldResp.ok) {
                             const oldData = await oldResp.json();
-                            const toExpire = (oldData.records || []).filter(r => r.id !== newRecId && r.fields[CERT_FIELDS.status]?.name !== 'Expired');
+                            const toExpire = (oldData.records || []).filter(r => {
+                                if (r.id === newRecId) return false;
+                                if (r.fields[CERT_FIELDS.status]?.name === 'Expired') return false;
+                                // Match by property linked record ID
+                                const propIds = Array.isArray(r.fields[CERT_FIELDS.property]) ? r.fields[CERT_FIELDS.property] : [];
+                                return propIds.includes(matchedProp.id);
+                            });
                             if (toExpire.length > 0) {
                                 // Batch update up to 10 at a time
                                 for (let b = 0; b < toExpire.length; b += 10) {
