@@ -209,19 +209,8 @@
         .cfv-chase-badge.stage-1 { background: #dbeafe; color: #2563eb; }
         .cfv-chase-badge.stage-2 { background: #fef3c7; color: #d97706; }
         .cfv-chase-badge.stage-3 { background: #fee2e2; color: #dc2626; }
-        .cfv-action-btn { padding: 4px 10px; font-size: 10px; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 4px; cursor: pointer; background: white; white-space: nowrap; transition: opacity 0.15s; }
+        .cfv-action-btn { padding: 4px 10px; font-size: 10px; font-weight: 600; border: 1px solid #e2e8f0; border-radius: 4px; cursor: pointer; background: white; white-space: nowrap; }
         .cfv-action-btn:hover { background: #f8fafc; }
-        .cfv-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .cfv-action-btn.cfv-loading { position: relative; color: transparent !important; pointer-events: none; }
-        .cfv-action-btn.cfv-loading::after { content: ''; position: absolute; top: 50%; left: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid #94a3b8; border-top-color: transparent; border-radius: 50%; animation: cfvSpin 0.6s linear infinite; }
-        @keyframes cfvSpin { to { transform: rotate(360deg); } }
-        .cfv-empty-state { text-align: center; padding: 60px 20px; color: #94a3b8; }
-        .cfv-empty-state .cfv-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
-        .cfv-empty-state .cfv-empty-title { font-size: 16px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
-        .cfv-empty-state .cfv-empty-sub { font-size: 13px; }
-        .cfv-sidebar-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 10px; font-weight: 700; line-height: 1; }
-        .cfv-sidebar-badge.cfv-red { background: #dc2626; color: white; }
-        .cfv-sidebar-badge.cfv-orange { background: #d97706; color: white; }
         .cfv-action-btn.primary { background: #2563eb; color: white; border-color: #2563eb; }
         .cfv-action-btn.primary:hover { background: #1d4ed8; }
         .cfv-action-btn.success { background: #16a34a; color: white; border-color: #16a34a; }
@@ -707,6 +696,68 @@
         }
 
         .dashboard { display: none; }
+
+        /* ── AI Assistant ── */
+        .ai-bubble {
+            position: fixed; bottom: 24px; right: 24px;
+            width: 56px; height: 56px; border-radius: 50%;
+            background: #0891b2; color: white;
+            display: flex !important; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 500;
+            box-shadow: 0 4px 16px rgba(8,145,178,0.35);
+            transition: transform 0.15s;
+        }
+        .ai-bubble.hidden { display: none !important; }
+        .ai-bubble:hover { transform: scale(1.05); }
+        .ai-panel {
+            position: fixed; bottom: 24px; right: 24px;
+            width: 420px; height: 600px; max-height: 80vh;
+            background: white; border-radius: 16px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+            z-index: 501; display: none; flex-direction: column;
+        }
+        .ai-panel.open { display: flex; animation: ai-spring-in 0.25s ease-out; }
+        @keyframes ai-spring-in { from { opacity: 0; transform: translateY(16px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .ai-panel-header {
+            padding: 16px;
+            background: linear-gradient(135deg, #1e293b, #334155);
+            color: white; border-radius: 16px 16px 0 0;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .ai-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+        .ai-msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+        .ai-msg.user { align-self: flex-end; background: #eff6ff; color: #1e293b; border-bottom-right-radius: 4px; }
+        .ai-msg.assistant { align-self: flex-start; background: #f8fafc; color: #1e293b; border-bottom-left-radius: 4px; border: 1px solid #e2e8f0; }
+        .ai-msg.assistant strong { color: #1e293b; }
+        .ai-input-bar { padding: 12px 16px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; }
+        .ai-input { flex: 1; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 13px; outline: none; resize: none; font-family: inherit; }
+        .ai-input:focus { border-color: #2563eb; }
+        .ai-send-btn { width: 36px; height: 36px; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .ai-send-btn:hover { background: #1d4ed8; }
+        .ai-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid #f1f5f9; }
+        .ai-chip { padding: 4px 10px; font-size: 11px; font-weight: 500; background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+        .ai-chip:hover { background: #2563eb; color: white; }
+        .ai-typing { display: flex; gap: 4px; padding: 8px; align-items: center; }
+        .ai-typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: ai-bounce 1.4s infinite; }
+        @keyframes ai-bounce { 0%,80%,100% { transform: translateY(0); } 40% { transform: translateY(-8px); } }
+        .ai-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .ai-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        /* Command Palette */
+        .ai-cmd-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 600; display: flex; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+        .ai-cmd-panel { background: white; border-radius: 12px; width: 480px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.2); overflow: hidden; }
+        .ai-cmd-input { width: 100%; padding: 14px 16px; border: none; border-bottom: 1px solid #e2e8f0; font-size: 14px; outline: none; }
+        .ai-cmd-list { max-height: 320px; overflow-y: auto; }
+        .ai-cmd-item { padding: 10px 16px; cursor: pointer; font-size: 13px; color: #1e293b; border-bottom: 1px solid #f1f5f9; }
+        .ai-cmd-item:hover { background: #eff6ff; color: #2563eb; }
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .ai-panel { bottom: 0; left: 0; right: 0; width: auto; height: 70vh; border-radius: 16px 16px 0 0; }
+        }
+        @media (max-width: 480px) {
+            .ai-panel { height: 100vh; max-height: 100vh; border-radius: 0; }
+        }
+        /* Hide bubble via JS when panel is open — sibling selector unreliable */
+
     </style>
 </head>
 <body>
@@ -716,20 +767,6 @@
             <h2>Operations Director</h2>
             <p>Enter your Airtable Personal Access Token to connect</p>
             <input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off">
-            <details style="text-align:left;margin:10px 0 6px;font-size:12px;color:#64748b;cursor:pointer">
-                <summary style="font-weight:600">Advanced settings</summary>
-                <label style="display:block;margin-top:8px;font-size:11px;color:#475569">Gmail Script URL <span style="opacity:0.5">(optional)</span></label>
-                <input type="text" class="auth-input" id="gmailUrlInput" placeholder="https://script.google.com/macros/s/..." autocomplete="off" style="font-size:12px;margin-top:4px">
-                <div style="margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0">
-                    <div style="font-weight:600;font-size:11px;color:#475569;margin-bottom:6px">CFV Status Option IDs <span style="opacity:0.5">(from Airtable)</span></div>
-                    <label style="display:block;font-size:11px;color:#475569;margin-top:4px">In Payment</label>
-                    <input type="text" class="auth-input" id="cfvIdInPayment" value="sel4I99slfpd7Vc1t" autocomplete="off" style="font-size:11px;margin-top:2px;padding:6px 8px">
-                    <label style="display:block;font-size:11px;color:#475569;margin-top:4px">CFV</label>
-                    <input type="text" class="auth-input" id="cfvIdCfv" value="sel2mWzsvOd8d8de0" autocomplete="off" style="font-size:11px;margin-top:2px;padding:6px 8px">
-                    <label style="display:block;font-size:11px;color:#475569;margin-top:4px">CFV Actioned</label>
-                    <input type="text" class="auth-input" id="cfvIdActioned" value="selmhFXah5Bodgg9x" autocomplete="off" style="font-size:11px;margin-top:2px;padding:6px 8px">
-                </div>
-            </details>
             <button class="auth-btn" onclick="authenticate()">Connect</button>
             <div class="auth-error" id="authError">Invalid token. Please check and try again.</div>
             <div class="auth-note">Your token is saved in this browser so you stay logged in. Use "Logout" in the sidebar to clear it. No data is sent anywhere except Airtable's API.</div>
@@ -756,7 +793,7 @@
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
             <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List</span></div>
             <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span></div>
-            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
+            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span></div>
             <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
             <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
         </nav>
@@ -768,7 +805,7 @@
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
-            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span><span id="sitemapBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span></div>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Admin</div>
@@ -779,6 +816,37 @@
     <!-- Share button + toast -->
     <button class="share-btn" onclick="shareCurrentPage()">&#x1F517; Share</button>
     <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
+
+    <!-- AI Assistant -->
+    <div class="ai-bubble" id="aiBubble" onclick="toggleAIPanel()" title="AI Assistant (Cmd+K)">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
+    </div>
+    <div class="ai-panel" id="aiPanel">
+      <div class="ai-panel-header">
+        <div>
+          <div style="font-size:14px;font-weight:700">AI Assistant</div>
+          <div style="font-size:10px;opacity:0.7">Ask anything about your data</div>
+        </div>
+        <button onclick="toggleAIPanel()" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;padding:4px">&#x2715;</button>
+      </div>
+      <div class="ai-messages" id="aiMessages">
+        <div class="ai-msg assistant">Hello! I'm your AI analyst. I can see all your dashboard data. Ask me anything, or try one of the quick actions below.</div>
+      </div>
+      <div class="ai-chips" id="aiChips"></div>
+      <div class="ai-input-bar">
+        <textarea class="ai-input" id="aiInput" rows="1" placeholder="Ask about your data..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage()}"></textarea>
+        <button class="ai-send-btn" onclick="sendAIMessage()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+    <!-- Command Palette -->
+    <div class="ai-cmd-overlay" id="aiCmdOverlay" onclick="closeCmdPalette()" style="display:none">
+      <div class="ai-cmd-panel" onclick="event.stopPropagation()">
+        <input class="ai-cmd-input" id="aiCmdInput" placeholder="Search commands..." oninput="filterCmdPalette()">
+        <div class="ai-cmd-list" id="aiCmdList"></div>
+      </div>
+    </div>
 
     <!-- Dashboard -->
     <div class="app-layout">
@@ -966,39 +1034,35 @@
         </div>
 
         <!-- Tab 4: CFVs -->
-        <div class="tab-panel" id="tab-cfv" role="tabpanel" aria-label="Cash Flow Voids">
+        <div class="tab-panel" id="tab-cfv">
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids</h2>
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-size:12px;color:#94a3b8">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
-                        <button class="cfv-action-btn" aria-label="Download CFV data as CSV" onclick="cfvExportCSV()" style="padding:5px 12px">&#x1F4E5; CSV</button>
-                        <button class="cfv-action-btn" aria-label="Print CFV report" onclick="cfvPrintReport()" style="padding:5px 12px">&#x1F5A8; Print</button>
-                    </div>
+                    <span style="font-size:12px;color:#94a3b8">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
                 </div>
-                <div class="cards-grid" id="cfvSummaryCards" role="region" aria-label="CFV summary statistics"></div>
+                <div class="cards-grid" id="cfvSummaryCards"></div>
             </div>
             <div class="section">
                 <div class="invoice-table-wrapper">
-                    <table class="invoice-table" id="cfvTable" role="table" aria-label="Cash flow voids list">
+                    <table class="invoice-table" id="cfvTable">
                         <thead>
                             <tr>
-                                <th scope="col">Tenant</th>
-                                <th scope="col">Property</th>
-                                <th scope="col" style="text-align:right">Rent</th>
-                                <th scope="col">Due Day</th>
-                                <th scope="col">Days Overdue</th>
-                                <th scope="col">Status</th>
-                                <th scope="col">Chase</th>
-                                <th scope="col">Contact</th>
-                                <th scope="col">Actions</th>
+                                <th>Tenant</th>
+                                <th>Property</th>
+                                <th style="text-align:right">Rent</th>
+                                <th>Due Day</th>
+                                <th>Days Overdue</th>
+                                <th>Status</th>
+                                <th>Chase</th>
+                                <th>Contact</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="cfvTableBody"></tbody>
                     </table>
                 </div>
             </div>
-            <div class="section" id="cfvCommentsSection" style="display:none" role="region" aria-label="Comments and updates">
+            <div class="section" id="cfvCommentsSection" style="display:none">
                 <h2 class="section-title" style="font-size:15px">Comments &amp; Updates</h2>
                 <div id="cfvCommentsContainer"></div>
             </div>
@@ -1063,47 +1127,31 @@
         <!-- Tab 8: Fintable Sync Monitor (Admin) -->
         <div class="tab-panel" id="tab-fintable">
             <div class="section">
-                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:4px">
-                    <h2 class="section-title" style="margin-bottom:0">Fintable Sync Monitor</h2>
-                    <div style="display:flex;align-items:center;gap:12px">
-                        <span id="fintableLastChecked" style="font-size:11px;color:#94a3b8"></span>
-                        <button id="fintableRefreshBtn" onclick="refreshFintable()" style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:500;color:#475569;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all 0.15s">&#x21BB; Refresh</button>
-                    </div>
-                </div>
+                <h2 class="section-title">Fintable Sync Monitor</h2>
                 <p style="color:#64748b;font-size:13px;margin-bottom:16px">Monitors active bank account syncs from Fintable. Accounts that haven't synced recently are flagged so you can reconnect them.</p>
 
                 <!-- Summary cards -->
-                <div id="fintableSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px">
-                    <!-- Loading skeleton -->
-                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center"><div style="width:40px;height:28px;background:#e2e8f0;border-radius:6px;margin:0 auto 8px;animation:pulse 1.5s infinite"></div><div style="width:60px;height:12px;background:#e2e8f0;border-radius:4px;margin:0 auto;animation:pulse 1.5s infinite"></div></div>
-                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center"><div style="width:40px;height:28px;background:#e2e8f0;border-radius:6px;margin:0 auto 8px;animation:pulse 1.5s infinite"></div><div style="width:60px;height:12px;background:#e2e8f0;border-radius:4px;margin:0 auto;animation:pulse 1.5s infinite"></div></div>
-                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center"><div style="width:40px;height:28px;background:#e2e8f0;border-radius:6px;margin:0 auto 8px;animation:pulse 1.5s infinite"></div><div style="width:60px;height:12px;background:#e2e8f0;border-radius:4px;margin:0 auto;animation:pulse 1.5s infinite"></div></div>
-                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center"><div style="width:40px;height:28px;background:#e2e8f0;border-radius:6px;margin:0 auto 8px;animation:pulse 1.5s infinite"></div><div style="width:60px;height:12px;background:#e2e8f0;border-radius:4px;margin:0 auto;animation:pulse 1.5s infinite"></div></div>
-                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center"><div style="width:40px;height:28px;background:#e2e8f0;border-radius:6px;margin:0 auto 8px;animation:pulse 1.5s infinite"></div><div style="width:60px;height:12px;background:#e2e8f0;border-radius:4px;margin:0 auto;animation:pulse 1.5s infinite"></div></div>
-                </div>
+                <div id="fintableSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px"></div>
 
-                <!-- Search + Legend row -->
-                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;align-items:center;justify-content:space-between">
-                    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#64748b">
-                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;margin-right:4px"></span> Synced within 24 hours</span>
-                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px"></span> 1–3 days since last sync</span>
-                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;margin-right:4px"></span> 3–7 days since last sync</span>
-                        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:4px"></span> 7+ days — reconnection likely needed</span>
-                    </div>
-                    <input id="fintableSearch" type="text" placeholder="Search accounts..." oninput="filterFintableTable()" style="padding:7px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;width:200px;outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+                <!-- Alert thresholds info -->
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;font-size:12px;color:#64748b">
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;margin-right:4px"></span> Synced within 24 hours</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px"></span> 1–3 days since last sync</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;margin-right:4px"></span> 3–7 days since last sync</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:4px"></span> 7+ days — reconnection likely needed</span>
                 </div>
 
                 <!-- Accounts table -->
-                <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+                <div style="overflow-x:auto">
                     <table id="fintableTable" style="width:100%;border-collapse:collapse;font-size:13px">
                         <thead>
                             <tr style="border-bottom:2px solid #e2e8f0;text-align:left">
-                                <th onclick="sortFintableBy('status')" style="padding:10px 12px;font-weight:600;color:#475569;cursor:pointer;user-select:none">Status <span id="fintableSort-status" style="font-size:10px;color:#94a3b8"></span></th>
-                                <th onclick="sortFintableBy('alias')" style="padding:10px 12px;font-weight:600;color:#475569;cursor:pointer;user-select:none">Account <span id="fintableSort-alias" style="font-size:10px;color:#94a3b8"></span></th>
-                                <th onclick="sortFintableBy('institution')" style="padding:10px 12px;font-weight:600;color:#475569;cursor:pointer;user-select:none">Institution <span id="fintableSort-institution" style="font-size:10px;color:#94a3b8"></span></th>
-                                <th onclick="sortFintableBy('hoursAgo')" style="padding:10px 12px;font-weight:600;color:#475569;cursor:pointer;user-select:none">Last Synced <span id="fintableSort-hoursAgo" style="font-size:10px;color:#94a3b8"></span></th>
+                                <th style="padding:10px 12px;font-weight:600;color:#475569">Status</th>
+                                <th style="padding:10px 12px;font-weight:600;color:#475569">Account</th>
+                                <th style="padding:10px 12px;font-weight:600;color:#475569">Institution</th>
+                                <th style="padding:10px 12px;font-weight:600;color:#475569">Last Synced</th>
                                 <th style="padding:10px 12px;font-weight:600;color:#475569">Time Ago</th>
-                                <th onclick="sortFintableBy('balance')" style="padding:10px 12px;font-weight:600;color:#475569;text-align:right;cursor:pointer;user-select:none">Balance (GBP) <span id="fintableSort-balance" style="font-size:10px;color:#94a3b8"></span></th>
+                                <th style="padding:10px 12px;font-weight:600;color:#475569;text-align:right">Balance (GBP)</th>
                             </tr>
                         </thead>
                         <tbody id="fintableBody">
@@ -1135,9 +1183,8 @@
         { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
         { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
         { id: 'comms',      name: 'Inbound Comms',         icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },
-        { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.1', sopFile: 'sop-compliance.html',         sopVer: '2.0', standalone: 'compliance.html' },
-        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.2', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
-        { id: 'fintable',  name: 'Fintable Sync Monitor', icon: '🔌', pageVer: '1.0', sopFile: 'sop-fintable.html', sopVer: '1.0', standalone: 'index.html#fintable' },
+        { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
+        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',  icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
         { id: 'os-bplan',  name: 'Business Plan Builder',  icon: '📋', pageVer: '1.0', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
@@ -1146,7 +1193,7 @@
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
     // and paste the URL here. Leave empty to use static fallback data.
-    let GMAIL_SCRIPT_URL = localStorage.getItem('_dlr_gmail_url') || '';
+    const GMAIL_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwzn-xAv2li7Qo8GrEEkELWzRNp0_4fcz9tiuxQdXiDDgwhCHpoRTTbDyF2K3Ks5wza/exec';
 
     // Table IDs
     const TABLES = {
@@ -1351,12 +1398,6 @@
         if (!input) return;
         PAT = input;
         localStorage.setItem('_dlr_pat', input);
-        const gmailUrl = document.getElementById('gmailUrlInput').value.trim();
-        if (gmailUrl) { GMAIL_SCRIPT_URL = gmailUrl; localStorage.setItem('_dlr_gmail_url', gmailUrl); }
-        [['cfvIdInPayment','_dlr_cfvId_inPayment','inPayment'],['cfvIdCfv','_dlr_cfvId_cfv','cfv'],['cfvIdActioned','_dlr_cfvId_cfvActioned','cfvActioned']].forEach(([inputId,key,prop]) => {
-            const val = document.getElementById(inputId)?.value.trim();
-            if (val) { CFV_STATUS_IDS[prop] = val; localStorage.setItem(key, val); }
-        });
         document.getElementById('authScreen').style.display = 'none';
         loadDashboard();
     }
@@ -1376,16 +1417,9 @@
             document.getElementById('authScreen').style.display = 'none';
             loadDashboard();
         }
-        const savedGmail = localStorage.getItem('_dlr_gmail_url');
-        if (savedGmail) { GMAIL_SCRIPT_URL = savedGmail; const el = document.getElementById('gmailUrlInput'); if (el) el.value = savedGmail; }
-        [['_dlr_cfvId_inPayment','cfvIdInPayment'],['_dlr_cfvId_cfv','cfvIdCfv'],['_dlr_cfvId_cfvActioned','cfvIdActioned']].forEach(([key,inputId]) => {
-            const val = localStorage.getItem(key); if (val) { const el = document.getElementById(inputId); if (el) el.value = val; }
-        });
         document.getElementById('patInput').addEventListener('keydown', e => {
             if (e.key === 'Enter') authenticate();
         });
-        // Show sitemap sync badge immediately (uses static PAGE_REGISTRY)
-        updateSitemapBadge();
     })();
 
     // ── Airtable API ──
@@ -1612,25 +1646,6 @@
                 }
             });
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
-
-            // Update CFV sidebar badges on initial load (apply same dismissal filter as renderCFVTab)
-            try {
-                const cfvList = detectCFVs().filter(entry => {
-                    if (entry.status === 'potential') {
-                        const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
-                        if (!dismissedAt) return true;
-                        if (Date.now() - new Date(dismissedAt).getTime() > 25 * 86400000) {
-                            localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
-                            return true;
-                        }
-                        return false;
-                    }
-                    return true;
-                });
-                const cfvCount = cfvList.filter(e => e.status === 'cfv' || e.status === 'potential').length;
-                const actionedCount = cfvList.filter(e => e.status === 'cfv actioned').length;
-                updateCFVSidebarBadges(cfvCount, actionedCount);
-            } catch (e) { console.warn('CFV badge update failed:', e); }
 
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('loadingOverlay').style.display = 'none';
@@ -2313,6 +2328,22 @@
         // Footer
         const lastSync = getField(santanderRec, F.accLastUpdate) || getField(zemplerRec, F.accLastUpdate) || 'Unknown';
         document.getElementById('footerSync').textContent = `Last bank sync: ${lastSync}`;
+
+        // Store computed state for AI context
+        if (typeof updateDashboardState === 'function') {
+            updateDashboardState({
+                openingBalance, santBal, zempBal,
+                monthlyIncome, inPaymentIncome, monthlyCosts,
+                grossProfitHigh, grossProfitLow, grossMarginHigh, grossMarginLow,
+                activeTenanciesCount: activeTenancies.length,
+                inPaymentCount: inPaymentTenancies.length,
+                cfvCount: cfvTenancies.length,
+                cfvActionedCount: cfvActionedTenancies.length,
+                cfvExposure, rentalInc30, maintSpend, wagesSpend,
+                occupancyRate,
+                unreconciledCount: unreconciledTx.length,
+            });
+        }
     }
 
     // ── Cash Flow Forecast ──
@@ -2973,19 +3004,6 @@
         requestedAt: 'fldp8IIF9YmmnplzS',
     };
 
-    function updateSitemapBadge() {
-        const badge = document.getElementById('sitemapBadge');
-        if (!badge) return;
-        const count = PAGE_REGISTRY.filter(p => p.pageVer !== p.sopVer).length;
-        if (count > 0) {
-            badge.textContent = count;
-            badge.style.display = 'inline-block';
-            badge.style.background = '#d97706';
-        } else {
-            badge.style.display = 'none';
-        }
-    }
-
     function renderSiteMap() {
         const tbody = document.getElementById('sitemapTableBody');
         const integrity = document.getElementById('sitemapIntegrity');
@@ -3044,7 +3062,6 @@
                 ${updateAllBtn}
             `;
         }
-        updateSitemapBadge();
     }
 
     async function requestSOPUpdate(pageId, sopFile, pageVer, pageName, btn) {
@@ -3140,6 +3157,8 @@
         // Close sidebar on mobile
         document.getElementById('sidebar').classList.remove('open');
         document.getElementById('sidebarOverlay').classList.remove('open');
+        // Update AI quick-action chips for current tab
+        if (typeof renderAIChips === 'function') renderAIChips();
     };
 
     // On load: check URL hash for deep-linking
@@ -4605,27 +4624,34 @@
 
         let successCount = 0;
         let failCount = 0;
+        const statusEl = document.getElementById('reconStatus');
         for (let i = 0; i < results.length; i++) {
             if (results[i].status !== 'suggestion') continue;
-            // Try up to 2 attempts per transaction (retry on rate limit)
-            for (let attempt = 0; attempt < 2; attempt++) {
+            if (statusEl) statusEl.textContent = `Processing ${successCount + failCount + 1} of ${toApprove.length}...`;
+
+            // Try up to 3 attempts per transaction
+            let succeeded = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
                 try {
                     await approveRecon(i);
                     successCount++;
+                    succeeded = true;
                     break;
                 } catch (e) {
-                    if (attempt === 0 && e.message && e.message.includes('429')) {
-                        // Rate limited — wait 2 seconds and retry
-                        await new Promise(r => setTimeout(r, 2000));
+                    const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('RATE_LIMIT'));
+                    const isServerError = e.message && (e.message.includes('500') || e.message.includes('502') || e.message.includes('503'));
+                    if ((isRateLimit || isServerError) && attempt < 2) {
+                        // Wait longer on each retry: 2s, then 5s
+                        await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 5000));
                     } else {
-                        console.error('Approve failed for row ' + i, e);
+                        console.error(`Row ${i} failed after ${attempt + 1} attempts:`, e.message);
                         failCount++;
                         break;
                     }
                 }
             }
-            // 350ms pause between requests to stay well within Airtable's 5/sec limit
-            await new Promise(r => setTimeout(r, 350));
+            // 500ms pause between requests — more conservative to avoid rate limits on large batches
+            await new Promise(r => setTimeout(r, 500));
         }
         document.getElementById('reconStatus').textContent = `Done: ${successCount} approved${failCount > 0 ? ', ' + failCount + ' failed' : ''} — refreshing...`;
         setTimeout(() => loadDashboard(), 2000);
@@ -4637,9 +4663,9 @@
 
     const CFV_TOLERANCE_DAYS = 2; // days after due date before flagging
     const CFV_STATUS_IDS = {
-        inPayment:   localStorage.getItem('_dlr_cfvId_inPayment') || 'sel4I99slfpd7Vc1t',
-        cfv:         localStorage.getItem('_dlr_cfvId_cfv') || 'sel2mWzsvOd8d8de0',
-        cfvActioned: localStorage.getItem('_dlr_cfvId_cfvActioned') || 'selmhFXah5Bodgg9x',
+        inPayment:   'sel4I99slfpd7Vc1t',
+        cfv:         'sel2mWzsvOd8d8de0',
+        cfvActioned: 'selmhFXah5Bodgg9x',
     };
     const CFV_CHASE_STAGES = [
         { day: 0, label: 'Stage 1', desc: 'Friendly reminder', cssClass: 'stage-1' },
@@ -4664,7 +4690,6 @@
 
     // Detect CFVs: active tenancies where rent is 2+ days overdue with no matching transaction
     function detectCFVs() {
-        try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tenantLookup = buildTenantLookup();
@@ -4765,10 +4790,6 @@
         });
 
         return cfvList;
-        } catch (err) {
-            console.error('CFV detection error:', err);
-            return [];
-        }
     }
 
     function buildCFVEntry(tenancy, tenant, status, today) {
@@ -4835,21 +4856,9 @@
         };
     }
 
-    // Update sidebar badge counts
-    function updateCFVSidebarBadges(cfvCount, actionedCount) {
-        const container = document.getElementById('cfvSidebarBadges');
-        if (!container) return;
-        let html = '';
-        if (cfvCount > 0) html += `<span class="cfv-sidebar-badge cfv-red">${cfvCount}</span>`;
-        if (actionedCount > 0) html += `<span class="cfv-sidebar-badge cfv-orange">${actionedCount}</span>`;
-        container.innerHTML = html;
-    }
-
     // Render the CFV tab
     async function renderCFVTab() {
         if (!allTenancies.length) return;
-
-        try {
 
         const cfvList = detectCFVs();
         const today = new Date();
@@ -4879,7 +4888,6 @@
         const cfvOnly = filteredList.filter(e => e.status === 'cfv' || e.status === 'potential');
         const confirmedCfvs = filteredList.filter(e => e.status === 'cfv');
         const cfvActioned = filteredList.filter(e => e.status === 'cfv actioned');
-        updateCFVSidebarBadges(confirmedCfvs.length + potentialCfvs.length, cfvActioned.length);
         const totalExposure = filteredList.reduce((s, e) => s + e.rent, 0);
         const oldestOverdue = cfvOnly.length ? Math.max(...cfvOnly.map(e => e.daysOverdue)) : 0;
 
@@ -4919,7 +4927,7 @@
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9"><div class="cfv-empty-state"><div class="cfv-empty-icon">&#10003;</div><div class="cfv-empty-title">No cash flow voids detected</div><div class="cfv-empty-sub">All tenancies are in payment. The system checks automatically on the 3rd of each month.</div></div></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
             return;
         }
 
@@ -4949,12 +4957,12 @@
 
         tbody.innerHTML = filteredList.map((entry, idx) => {
             const statusBadge = entry.reflagged
-                ? '<span class="cfv-status-badge potential" role="status" aria-label="Re-flagged for review">Re-flagged ⚠</span>'
+                ? '<span class="cfv-status-badge potential">Re-flagged ⚠</span>'
                 : entry.status === 'cfv actioned'
-                ? '<span class="cfv-status-badge cfv-actioned" role="status" aria-label="CFV actioned">CFV Actioned</span>'
+                ? '<span class="cfv-status-badge cfv-actioned">CFV Actioned</span>'
                 : entry.status === 'potential'
-                ? '<span class="cfv-status-badge potential" role="status" aria-label="Potential CFV">Potential CFV</span>'
-                : '<span class="cfv-status-badge cfv" role="status" aria-label="Confirmed CFV">CFV</span>';
+                ? '<span class="cfv-status-badge potential">Potential CFV</span>'
+                : '<span class="cfv-status-badge cfv">CFV</span>';
 
             const chase = CFV_CHASE_STAGES[entry.chaseStage];
             const chaseBadge = entry.status !== 'cfv actioned'
@@ -4983,28 +4991,28 @@
             if (entry.status === 'potential') {
                 // Awaiting user review — confirm as CFV or dismiss
                 actionsHtml = `
-                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" aria-label="Confirm ${escHtml(entry.surname)} as CFV" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
-                    <button class="cfv-action-btn success" aria-label="Dismiss ${escHtml(entry.surname)} as not a CFV" onclick="event.stopPropagation(); cfvDismissAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Not a CFV</button>
+                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvDismissAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Not a CFV</button>
                 `;
             } else if (entry.status === 'cfv') {
                 // Confirmed CFV — can mark actioned
                 actionsHtml = `
-                    <button class="cfv-action-btn primary" aria-label="Mark ${escHtml(entry.surname)} as actioned" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
-                    <button class="cfv-action-btn" aria-label="View comments for ${escHtml(entry.surname)}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else if (entry.reflagged) {
                 // CFV Actioned but re-flagged — confirm as CFV again or dismiss
                 actionsHtml = `
-                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" aria-label="Re-confirm ${escHtml(entry.surname)} as CFV" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
-                    <button class="cfv-action-btn" aria-label="Dismiss re-flag for ${escHtml(entry.surname)}" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
-                    <button class="cfv-action-btn" aria-label="View comments for ${escHtml(entry.surname)}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else {
                 // CFV Actioned — can return to In Payment or move back to CFV
                 actionsHtml = `
-                    <button class="cfv-action-btn success" aria-label="Return ${escHtml(entry.surname)} to In Payment" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
-                    <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" aria-label="Move ${escHtml(entry.surname)} back to CFV" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
-                    <button class="cfv-action-btn" aria-label="View comments for ${escHtml(entry.surname)}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
+                    <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
+                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
 
@@ -5017,8 +5025,8 @@
                             <span style="font-size:11px;font-weight:700;color:#16a34a">Payment detected this month</span>
                             <span style="font-size:12px;color:#1e293b">Return ${escHtml(entry.surname)} to In Payment?</span>
                             <div style="margin-left:auto;display:flex;gap:6px">
-                                <button class="cfv-action-btn success" aria-label="Approve return to In Payment for ${escHtml(entry.surname)}" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">✓ Approve</button>
-                                <button class="cfv-action-btn" aria-label="Dismiss payment detection for ${escHtml(entry.surname)}" onclick="event.stopPropagation(); cfvDismissReturn('${entry.tenancyId}',this)">✗ Dismiss</button>
+                                <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">✓ Approve</button>
+                                <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReturn('${entry.tenancyId}',this)">✗ Dismiss</button>
                             </div>
                         </div>
                     </td>
@@ -5037,20 +5045,9 @@
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
             </tr>${paymentBanner}`;
         }).join('');
-
-        } catch (err) {
-            console.error('CFV tab error:', err);
-            const tbody = document.getElementById('cfvTableBody');
-            if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:#dc2626;font-size:14px"><strong>Failed to load CFV data.</strong><br><span style="font-size:12px;color:#64748b">Error: ${escHtml(err.message)}. Try refreshing the page.</span></td></tr>`;
-            const summaryCards = document.getElementById('cfvSummaryCards');
-            if (summaryCards) summaryCards.innerHTML = '';
-        }
     }
 
     // ── CFV Actions ──
-
-    function cfvBtnLoading(btn) { btn.classList.add('cfv-loading'); btn.disabled = true; }
-    function cfvBtnDone(btn, label, bgColor, textColor) { btn.classList.remove('cfv-loading'); btn.textContent = label; btn.style.background = bgColor; btn.style.color = textColor; }
 
     async function updateTenancyStatus(tenancyId, statusSelectId) {
         if (!PAT) { alert('No Airtable token — cannot update status'); return false; }
@@ -5085,13 +5082,16 @@
     }
 
     async function cfvMoveToCFV(tenancyId, btn) {
-        cfvBtnLoading(btn);
+        btn.textContent = '...';
+        btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
-        if (!ok) { cfvBtnDone(btn, 'Failed', '', ''); btn.disabled = false; return; }
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
         await addTenancyComment(tenancyId, 'Moved back to CFV from CFV Actioned via Leadership Dashboard.');
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
-        cfvBtnDone(btn, 'Done \u2713', '#fee2e2', '#dc2626');
+        btn.textContent = 'Done ✓';
+        btn.style.background = '#fee2e2';
+        btn.style.color = '#dc2626';
         setTimeout(() => renderCFVTab(), 1500);
         setTimeout(() => loadDashboard(), 3000);
     }
@@ -5105,13 +5105,16 @@
     // Confirm a potential CFV — update Airtable status to CFV
     async function cfvConfirmAsCFV(tenancyId, surname, btn) {
         if (!confirm(`Confirm ${surname} as a Cash Flow Void? This will update the payment status to CFV in Airtable.`)) return;
-        cfvBtnLoading(btn);
+        btn.textContent = '...';
+        btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
-        if (!ok) { cfvBtnDone(btn, 'Failed', '', ''); btn.disabled = false; return; }
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
         await addTenancyComment(tenancyId, 'Confirmed as CFV from Leadership Dashboard.');
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
-        cfvBtnDone(btn, 'Confirmed \u2713', '#fee2e2', '#dc2626');
+        btn.textContent = 'Confirmed ✓';
+        btn.style.background = '#fee2e2';
+        btn.style.color = '#dc2626';
         setTimeout(() => renderCFVTab(), 1500);
         setTimeout(() => loadDashboard(), 3000);
     }
@@ -5119,14 +5122,16 @@
     // Dismiss a potential CFV — not a real CFV, return to In Payment
     async function cfvDismissAsCFV(tenancyId, surname, btn) {
         if (!confirm(`Dismiss ${surname} as not a CFV? This will keep the tenancy as In Payment.`)) return;
-        cfvBtnLoading(btn);
+        btn.textContent = '...';
+        btn.disabled = true;
         // Store dismissal so it doesn't reappear until next month
         localStorage.setItem('cfv_dismissed_' + tenancyId, new Date().toISOString());
         // Clear any chase data that was started
         localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
         localStorage.removeItem('cfv_' + tenancyId + '_startDate');
         await addTenancyComment(tenancyId, `Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.`);
-        cfvBtnDone(btn, 'Dismissed \u2713', '#dcfce7', '#16a34a');
+        btn.textContent = 'Dismissed ✓';
+        btn.style.background = '#dcfce7';
         btn.style.color = '#16a34a';
         setTimeout(() => renderCFVTab(), 1500);
     }
@@ -5134,14 +5139,15 @@
     // Re-flag: confirm CFV Actioned back to CFV
     async function cfvConfirmReflag(tenancyId, surname, btn) {
         if (!confirm(`Re-flag ${surname} as CFV? Payment still hasn't come through.`)) return;
-        cfvBtnLoading(btn);
+        btn.textContent = '...';
+        btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
-        if (!ok) { cfvBtnDone(btn, 'Failed', '', ''); btn.disabled = false; return; }
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
         await addTenancyComment(tenancyId, 'Re-flagged as CFV — payment not received on next due date.');
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
         localStorage.removeItem('cfv_reflag_dismissed_' + tenancyId);
-        cfvBtnDone(btn, 'Confirmed \u2713', '#fee2e2', '#dc2626');
+        btn.textContent = 'Confirmed ✓';
         setTimeout(() => renderCFVTab(), 1500);
         setTimeout(() => loadDashboard(), 3000);
     }
@@ -5154,11 +5160,14 @@
     }
 
     async function cfvMarkActioned(tenancyId, btn) {
-        cfvBtnLoading(btn);
+        btn.textContent = '...';
+        btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfvActioned);
-        if (!ok) { cfvBtnDone(btn, 'Failed', '', ''); btn.disabled = false; return; }
+        if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
         await addTenancyComment(tenancyId, 'Status changed to CFV Actioned from Leadership Dashboard.');
-        cfvBtnDone(btn, 'Done \u2713', '#dcfce7', '#16a34a');
+        btn.textContent = 'Done ✓';
+        btn.style.background = '#dcfce7';
+        btn.style.color = '#16a34a';
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned', color: 'yellowLight2' };
         setTimeout(() => renderCFVTab(), 1500);
@@ -5166,10 +5175,11 @@
     }
 
     async function cfvReturnToPayment(tenancyId, btn) {
-        cfvBtnLoading(btn);
+        btn.textContent = '...';
+        btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.inPayment);
         if (!ok) {
-            cfvBtnDone(btn, 'Failed', '', '');
+            btn.textContent = 'Failed';
             btn.disabled = false;
             // Remove any local flag since Airtable wasn't updated
             localStorage.removeItem('cfv_' + tenancyId + '_returned');
@@ -5185,7 +5195,7 @@
         // Mark locally so re-render doesn't re-show this tenancy before full data refresh
         localStorage.setItem('cfv_' + tenancyId + '_returned', '1');
         await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
-        cfvBtnDone(btn, 'Done \u2713', '#dcfce7', '#16a34a');
+        btn.textContent = 'Done ✓';
         btn.style.background = '#dcfce7';
         btn.style.color = '#16a34a';
         setTimeout(() => renderCFVTab(), 1000);
@@ -5259,13 +5269,13 @@
             <div class="cfv-comment-box">
                 <div class="cfv-comment-header">
                     <span class="cfv-comment-tenant">${escHtml(surname)} — ${escHtml(ref)}</span>
-                    <button class="cfv-action-btn" aria-label="Close comments panel" onclick="document.getElementById('cfvCommentsSection').style.display='none'">Close</button>
+                    <button class="cfv-action-btn" onclick="document.getElementById('cfvCommentsSection').style.display='none'">Close</button>
                 </div>
                 <div style="font-size:12px;font-weight:700;color:#1e293b;margin-bottom:6px;padding-top:8px">Tenancy Comments (${tenancyComments.length})</div>
                 <div class="cfv-comment-list" style="max-height:400px">${commentsHtml}</div>
                 <div style="margin-top:12px;padding-top:8px;border-top:1px solid #e2e8f0">
-                    <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..." aria-label="New comment for ${escHtml(surname)}"></textarea>
-                    <button class="cfv-action-btn primary cfv-comment-send" aria-label="Submit comment for ${escHtml(surname)}" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
+                    <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..."></textarea>
+                    <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
                 </div>
             </div>
         `;
@@ -5281,56 +5291,6 @@
         await addTenancyComment(tenancyId, text);
         // Reload comments
         await cfvShowComments(tenancyId, surname, ref);
-    }
-
-    // ─── CFV Export & Print ─────────────────────────────────────────
-
-    function cfvExportCSV() {
-        const cfvList = detectCFVs();
-        if (!cfvList.length) { alert('No CFV data to export.'); return; }
-        const headers = ['Tenant','Ref','Property','Unit','Rent','Due Day','Days Overdue','Status','Chase Stage','Phone','Email'];
-        const rows = cfvList.map(e => {
-            const chase = CFV_CHASE_STAGES[e.chaseStage];
-            return [e.surname, e.ref, e.propertyName, e.unitName, e.rent.toFixed(2), e.dueDay||'', e.daysOverdue,
-                e.status==='cfv actioned'?'CFV Actioned':e.status==='potential'?'Potential':'CFV',
-                chase ? chase.label+' — '+chase.desc : '', e.tenantPhone||'', e.tenantEmail||''];
-        });
-        const csv = [headers,...rows].map(r => r.map(c => '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
-        const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'CFV-Report-'+new Date().toISOString().slice(0,10)+'.csv';
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    }
-
-    function cfvPrintReport() {
-        const cfvList = detectCFVs();
-        if (!cfvList.length) { alert('No CFV data to print.'); return; }
-        const dateStr = new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
-        const totalExposure = cfvList.reduce((s,e)=>s+e.rent,0);
-        const confirmed = cfvList.filter(e=>e.status==='cfv').length;
-        const actioned = cfvList.filter(e=>e.status==='cfv actioned').length;
-        const potential = cfvList.filter(e=>e.status==='potential').length;
-        const oldest = Math.max(...cfvList.map(e=>e.daysOverdue),0);
-        const rows = cfvList.map(e => {
-            const chase = CFV_CHASE_STAGES[e.chaseStage];
-            const st = e.status==='cfv actioned'?'CFV Actioned':e.status==='potential'?'Potential':'CFV';
-            return `<tr><td>${escHtml(e.surname)}</td><td>${escHtml(e.propertyName)}</td><td style="text-align:right">${fmt(e.rent)}</td><td style="text-align:center">${e.dueDay||'—'}</td><td style="text-align:center;font-weight:700;color:${e.daysOverdue>7?'#dc2626':e.daysOverdue>3?'#d97706':'#1e293b'}">${e.daysOverdue}</td><td>${st}</td><td>${chase?chase.label:'—'}</td></tr>`;
-        }).join('');
-        const w = window.open('','_blank');
-        w.document.write(`<!DOCTYPE html><html><head><title>CFV Report — ${dateStr}</title>
-        <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1e293b;padding:32px;font-size:12px}.header{border-bottom:3px solid #1e40af;padding-bottom:16px;margin-bottom:24px}.header h1{font-size:20px;color:#1e40af}.header p{font-size:12px;color:#64748b;margin-top:4px}.summary{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}.sc{border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;min-width:120px}.sc .l{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#64748b;font-weight:600}.sc .v{font-size:22px;font-weight:700;margin-top:2px}table{width:100%;border-collapse:collapse}th{background:#1e40af;color:#fff;padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px}td{padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px}tr:nth-child(even) td{background:#f8fafc}.footer{margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center}@media print{body{padding:16px}}</style></head><body>
-        <div class="header"><h1>Cash Flow Voids Report</h1><p>Generated: ${dateStr} &bull; Operations Director — Leadership Dashboard</p></div>
-        <div class="summary">
-            <div class="sc"><div class="l">Confirmed CFVs</div><div class="v" style="color:#dc2626">${confirmed}</div></div>
-            <div class="sc"><div class="l">CFV Actioned</div><div class="v" style="color:#d97706">${actioned}</div></div>
-            ${potential>0?`<div class="sc"><div class="l">Potential</div><div class="v" style="color:#be185d">${potential}</div></div>`:''}
-            <div class="sc"><div class="l">Total Exposure</div><div class="v" style="color:#dc2626">${fmt(totalExposure)}</div></div>
-            <div class="sc"><div class="l">Oldest Overdue</div><div class="v">${oldest} days</div></div>
-        </div>
-        <table><thead><tr><th>Tenant</th><th>Property</th><th style="text-align:right">Rent</th><th>Due Day</th><th>Days Overdue</th><th>Status</th><th>Chase</th></tr></thead><tbody>${rows}</tbody></table>
-        <div class="footer">Confidential — for internal use only</div></body></html>`);
-        w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
     }
 
     // ─── Fintable Sync Monitor ───────────────────────────────────────
@@ -5373,26 +5333,13 @@
             offset = data.offset || null;
         } while (offset);
 
-        return allRecords.filter(r => {
-            const alias = r.fields['Account Alias'] || '';
-            const name = r.fields['*Name'] || '';
-            return !FINTABLE_EXCLUDED.includes(alias) && !FINTABLE_EXCLUDED.includes(name);
-        });
+        return allRecords.filter(r => !FINTABLE_EXCLUDED.includes(r.fields['Account Alias'] || ''));
     }
-
-    const FINTABLE_STATUS_MAP = {
-        ok:       { color: '#22c55e', label: 'OK',       bgCard: '#f0fdf4', borderCard: '#bbf7d0', textCard: '#16a34a', subCard: '#15803d', cardLabel: 'Healthy', priority: 0 },
-        warning:  { color: '#eab308', label: 'Warning',  bgCard: '#fefce8', borderCard: '#fef08a', textCard: '#ca8a04', subCard: '#a16207', cardLabel: '1–3 Days', priority: 1 },
-        alert:    { color: '#f97316', label: 'Alert',    bgCard: '#fff7ed', borderCard: '#fed7aa', textCard: '#ea580c', subCard: '#c2410c', cardLabel: '3–7 Days', priority: 2 },
-        critical: { color: '#ef4444', label: 'Critical', bgCard: '#fef2f2', borderCard: '#fecaca', textCard: '#dc2626', subCard: '#b91c1c', cardLabel: 'Needs Reconnect', priority: 3 }
-    };
 
     function classifyFintableAccount(record) {
         const f = record.fields;
         const alias = f['Account Alias'] || f['*Name'] || 'Unknown';
-        const institution = f['**Institution'] || '—';
         const lastSync = f['**Last Successful Update'] ? new Date(f['**Last Successful Update']) : null;
-        const balance = f['**GBP'];
         const hoursAgo = lastSync ? (new Date() - lastSync) / (1000 * 60 * 60) : Infinity;
 
         let status;
@@ -5401,8 +5348,7 @@
         else if (hoursAgo <= 168) status = 'alert';
         else status = 'critical';
 
-        const meta = FINTABLE_STATUS_MAP[status];
-        return { alias, institution, lastSync, balance, hoursAgo, status, statusColor: meta.color, statusLabel: meta.label, priority: meta.priority };
+        return { alias, status, hoursAgo };
     }
 
     function updateFintableAlerts(records) {
@@ -5457,17 +5403,13 @@
 
     async function loadFintableSyncMonitor() {
         if (!PAT) return;
-        try {
-            // Always fetch fresh data when tab is opened
+        // Use cached data if available, otherwise fetch fresh
+        if (!fintableAccountsCache) {
             fintableAccountsCache = await fetchFintableAccounts();
             updateFintableAlerts(fintableAccountsCache);
-            renderFintableMonitor(fintableAccountsCache);
-            fintableLoaded = true;
-        } catch (e) {
-            console.error('Fintable load failed:', e);
-            const tbody = document.getElementById('fintableBody');
-            if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:#ef4444">Failed to load accounts. Check your connection and try again.</td></tr>';
         }
+        renderFintableMonitor(fintableAccountsCache);
+        fintableLoaded = true;
     }
 
     // Background check — runs on dashboard load without rendering the full table
@@ -5480,82 +5422,66 @@
         }
     }
 
-    let fintableClassified = [];  // processed accounts for sort/filter
-    let fintableSortField = 'hoursAgo';
-    let fintableSortAsc = true;
-
     function renderFintableMonitor(records) {
-        // Classify using shared function
-        fintableClassified = records.map(classifyFintableAccount);
+        const now = new Date();
+
+        // Classify each account
+        const accounts = records.map(r => {
+            const f = r.fields;
+            const alias = f['Account Alias'] || f['*Name'] || 'Unknown';
+            const institution = f['**Institution'] || '—';
+            const lastSync = f['**Last Successful Update'] ? new Date(f['**Last Successful Update']) : null;
+            const balance = f['**GBP'];
+            const hoursAgo = lastSync ? (now - lastSync) / (1000 * 60 * 60) : Infinity;
+
+            let status, statusColor, statusLabel;
+            if (hoursAgo <= 24) {
+                status = 'ok'; statusColor = '#22c55e'; statusLabel = 'OK';
+            } else if (hoursAgo <= 72) {
+                status = 'warning'; statusColor = '#eab308'; statusLabel = 'Warning';
+            } else if (hoursAgo <= 168) {
+                status = 'alert'; statusColor = '#f97316'; statusLabel = 'Alert';
+            } else {
+                status = 'critical'; statusColor = '#ef4444'; statusLabel = 'Critical';
+            }
+
+            return { alias, institution, lastSync, balance, hoursAgo, status, statusColor, statusLabel };
+        });
 
         // Summary cards
-        const total = fintableClassified.length;
-        const counts = { ok: 0, warning: 0, alert: 0, critical: 0 };
-        fintableClassified.forEach(a => counts[a.status]++);
+        const total = accounts.length;
+        const ok = accounts.filter(a => a.status === 'ok').length;
+        const warning = accounts.filter(a => a.status === 'warning').length;
+        const alert = accounts.filter(a => a.status === 'alert').length;
+        const critical = accounts.filter(a => a.status === 'critical').length;
 
         const summaryEl = document.getElementById('fintableSummary');
-        summaryEl.innerHTML = ['ok', 'warning', 'alert', 'critical'].map(s => {
-            const m = FINTABLE_STATUS_MAP[s];
-            return `<div style="background:${m.bgCard};border:1px solid ${m.borderCard};border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:${m.textCard}">${counts[s]}</div>
-                <div style="font-size:12px;color:${m.subCard}">${m.cardLabel}</div>
-            </div>`;
-        }).join('') + `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center">
+        summaryEl.innerHTML = `
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:#16a34a">${ok}</div>
+                <div style="font-size:12px;color:#15803d">Healthy</div>
+            </div>
+            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:#ca8a04">${warning}</div>
+                <div style="font-size:12px;color:#a16207">1–3 Days</div>
+            </div>
+            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:#ea580c">${alert}</div>
+                <div style="font-size:12px;color:#c2410c">3–7 Days</div>
+            </div>
+            <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:#dc2626">${critical}</div>
+                <div style="font-size:12px;color:#b91c1c">Needs Reconnect</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center">
                 <div style="font-size:28px;font-weight:700;color:#334155">${total}</div>
                 <div style="font-size:12px;color:#64748b">Total Active</div>
-            </div>`;
+            </div>
+        `;
 
-        // Update last-checked timestamp
-        const checkedEl = document.getElementById('fintableLastChecked');
-        if (checkedEl) checkedEl.textContent = 'Last checked: ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
-        // Reset sort/search
-        fintableSortField = 'hoursAgo';
-        fintableSortAsc = true;
-        const searchEl = document.getElementById('fintableSearch');
-        if (searchEl) searchEl.value = '';
-
-        renderFintableRows();
-    }
-
-    function renderFintableRows() {
-        const searchTerm = (document.getElementById('fintableSearch')?.value || '').toLowerCase();
-        let filtered = fintableClassified;
-        if (searchTerm) {
-            filtered = filtered.filter(a =>
-                a.alias.toLowerCase().includes(searchTerm) ||
-                a.institution.toLowerCase().includes(searchTerm)
-            );
-        }
-
-        // Sort
-        const sorted = [...filtered].sort((a, b) => {
-            let va = a[fintableSortField], vb = b[fintableSortField];
-            // Handle string fields
-            if (typeof va === 'string') { va = va.toLowerCase(); vb = (vb || '').toLowerCase(); }
-            // Handle status sorting by priority
-            if (fintableSortField === 'status') { va = a.priority; vb = b.priority; }
-            // Handle null balances
-            if (fintableSortField === 'balance') { va = va ?? -Infinity; vb = vb ?? -Infinity; }
-            if (va < vb) return fintableSortAsc ? -1 : 1;
-            if (va > vb) return fintableSortAsc ? 1 : -1;
-            return 0;
-        });
-
-        // Update sort indicators
-        ['status', 'alias', 'institution', 'hoursAgo', 'balance'].forEach(f => {
-            const el = document.getElementById('fintableSort-' + f);
-            if (el) el.textContent = fintableSortField === f ? (fintableSortAsc ? '▲' : '▼') : '';
-        });
-
+        // Table rows — sort most recently synced first
+        const sorted = [...accounts].sort((a, b) => a.hoursAgo - b.hoursAgo);
         const tbody = document.getElementById('fintableBody');
-
-        // Empty state
-        if (sorted.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="padding:40px;text-align:center;color:#94a3b8">${searchTerm ? 'No accounts match your search.' : 'No accounts found.'}</td></tr>`;
-            return;
-        }
-
         tbody.innerHTML = sorted.map(a => {
             const syncStr = a.lastSync
                 ? a.lastSync.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + a.lastSync.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -5563,14 +5489,11 @@
             const agoStr = formatTimeAgo(a.hoursAgo);
             const balStr = a.balance != null ? '£' + a.balance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
             const rowBg = a.status === 'critical' ? 'rgba(239,68,68,0.06)' : a.status === 'alert' ? 'rgba(249,115,22,0.06)' : '';
-            const actionHtml = a.status === 'critical'
-                ? ' <span style="font-size:11px;color:#ef4444;cursor:pointer;text-decoration:underline" onclick="window.open(\'https://app.fintable.io\',\'_blank\')" title="Open Fintable to reconnect this account">Reconnect</span>'
-                : '';
 
             return `<tr style="border-bottom:1px solid #f1f5f9;${rowBg ? 'background:' + rowBg : ''}">
-                <td style="padding:10px 12px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${escHtml(a.statusLabel)}</td>
-                <td style="padding:10px 12px;font-weight:500">${escHtml(a.alias)}${actionHtml}</td>
-                <td style="padding:10px 12px;color:#64748b">${escHtml(a.institution)}</td>
+                <td style="padding:10px 12px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
+                <td style="padding:10px 12px;font-weight:500">${a.alias}</td>
+                <td style="padding:10px 12px;color:#64748b">${a.institution}</td>
                 <td style="padding:10px 12px">${syncStr}</td>
                 <td style="padding:10px 12px;font-weight:500;color:${a.statusColor}">${agoStr}</td>
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${balStr}</td>
@@ -5578,39 +5501,7 @@
         }).join('');
     }
 
-    function sortFintableBy(field) {
-        if (fintableSortField === field) {
-            fintableSortAsc = !fintableSortAsc;
-        } else {
-            fintableSortField = field;
-            fintableSortAsc = true;
-        }
-        renderFintableRows();
-    }
-
-    function filterFintableTable() {
-        renderFintableRows();
-    }
-
-    async function refreshFintable() {
-        const btn = document.getElementById('fintableRefreshBtn');
-        if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.innerHTML = '&#x21BB; Refreshing...'; }
-        try {
-            fintableAccountsCache = null;
-            fintableAccountsCache = await fetchFintableAccounts();
-            updateFintableAlerts(fintableAccountsCache);
-            renderFintableMonitor(fintableAccountsCache);
-        } catch (e) {
-            console.error('Fintable refresh failed:', e);
-            const tbody = document.getElementById('fintableBody');
-            if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:40px;text-align:center;color:#ef4444">Refresh failed. Check your connection and try again.</td></tr>';
-        } finally {
-            if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.innerHTML = '&#x21BB; Refresh'; }
-        }
-    }
-
     function formatTimeAgo(hours) {
-        if (!isFinite(hours)) return 'Never';
         if (hours < 1) return 'Just now';
         if (hours < 24) return Math.round(hours) + 'h ago';
         const days = Math.floor(hours / 24);
@@ -5619,6 +5510,297 @@
         const months = Math.floor(days / 30);
         return months + (months === 1 ? ' month ago' : ' months ago');
     }
+
+    // ══════════════════════════════════════════
+    // AI ASSISTANT
+    // ══════════════════════════════════════════
+
+    const AI_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
+
+    // Store computed dashboard state for AI context
+    let dashboardState = {};
+
+    function updateDashboardState(state) {
+        dashboardState = state;
+    }
+
+    // Quick actions — rotate based on active tab
+    const AI_ACTIONS = {
+        overview: [
+            { label: 'Summarise Financial Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Give me a concise summary of the current financial health based on the dashboard data. Include opening balance, income vs costs, gross profit, and any concerns.' },
+            { label: 'Cash Flow Report', model: 'claude-sonnet-4-20250514', maxTokens: 2000, prompt: 'Generate a detailed 31-day cash flow forecast report. Include the daily projections, highlight risk dates where the balance drops low, and suggest actions to maintain positive cash flow.' },
+            { label: 'Compare vs Budget', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Compare actual spending against budget targets for maintenance, wages, and CFV. Identify which are over/under budget and by how much. Suggest corrective actions.' },
+            { label: 'Weekly Briefing', model: 'claude-sonnet-4-20250514', maxTokens: 3000, prompt: 'Generate a professional weekly briefing I can share with stakeholders. Cover financial position, operational metrics, key risks, and recommended actions. Format with clear headers.' },
+        ],
+        cfv: [
+            { label: 'Analyse CFV Risk', model: 'claude-sonnet-4-20250514', maxTokens: 2000, prompt: 'Analyse all current cash flow voids. For each CFV tenancy, assess the risk level, days overdue, and recommended action. Prioritise by exposure amount.' },
+            { label: 'CFV Action Plan', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Create an action plan for resolving the current CFVs. Include chase sequence status, next steps for each, and estimated recovery timeline.' },
+        ],
+        invoices: [
+            { label: 'Overdue Summary', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'List all overdue invoices with amounts and how long overdue. Calculate total overdue amount.' },
+            { label: 'Payment Priority', model: 'claude-sonnet-4-20250514', maxTokens: 1000, prompt: 'Prioritise the pending invoices for payment based on due date, amount, and business importance. Suggest a payment schedule.' },
+        ],
+        _default: [
+            { label: 'Ask a Question', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: '' },
+        ],
+    };
+
+    function getActiveTab() {
+        const hash = window.location.hash.replace('#', '');
+        return hash || 'overview';
+    }
+
+    function renderAIChips() {
+        const container = document.getElementById('aiChips');
+        if (!container) return;
+        const tab = getActiveTab();
+        const actions = AI_ACTIONS[tab] || AI_ACTIONS._default;
+        container.innerHTML = actions.filter(a => a.prompt).map(a =>
+            `<div class="ai-chip" onclick="sendQuickAction('${escHtml(a.label)}')">${a.label}</div>`
+        ).join('');
+    }
+
+    // Toggle panel
+    function toggleAIPanel() {
+        const panel = document.getElementById('aiPanel');
+        const bubble = document.getElementById('aiBubble');
+        const isOpen = panel.classList.contains('open');
+        panel.classList.toggle('open');
+        if (isOpen) {
+            bubble.classList.remove('hidden');
+        } else {
+            bubble.classList.add('hidden');
+            renderAIChips();
+            document.getElementById('aiInput').focus();
+        }
+    }
+
+    // Gather dashboard context
+    function gatherDashboardContext() {
+        const tab = getActiveTab();
+        const ctx = {
+            currentTab: tab,
+            timestamp: new Date().toISOString(),
+            ...dashboardState,
+        };
+        if (tab === 'cfv' && typeof detectCFVs === 'function') {
+            try { ctx.cfvDetails = detectCFVs(); } catch(e) {}
+        }
+        return ctx;
+    }
+
+    // Build system prompt
+    function buildSystemPrompt() {
+        const ctx = gatherDashboardContext();
+        return `You are the AI analyst for the Operations Director dashboard \u2014 a property management leadership tool.
+
+RULES:
+- Always write in British English (UK spelling: analyse, colour, organise, centre, etc.).
+- Be concise and data-driven. Use \u00a3 with commas for monetary values.
+- When data is available, give the numbers \u2014 don't hedge.
+- Flag risks in plain language. Suggest specific actions.
+- Use markdown for formatting. Keep responses under 300 words unless generating a report.
+- For reports, use structured sections with headers.
+- When referencing tenancies, include the unit reference.
+
+CURRENT DASHBOARD STATE:
+\`\`\`json
+${JSON.stringify(ctx, null, 0)}
+\`\`\`
+
+The user is currently viewing the "${ctx.currentTab}" page.
+Today is ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.`;
+    }
+
+    // Conversation history
+    let aiConversation = [];
+    const AI_MAX_HISTORY = 10;
+
+    function addToConversation(role, content) {
+        aiConversation.push({ role, content });
+        if (aiConversation.length > AI_MAX_HISTORY) aiConversation.shift();
+    }
+
+    // Render a message in the chat
+    function appendAIMessage(role, content) {
+        const container = document.getElementById('aiMessages');
+        const div = document.createElement('div');
+        div.className = 'ai-msg ' + role;
+        div.innerHTML = renderMarkdown(content);
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        return div;
+    }
+
+    // Simple markdown renderer
+    function renderMarkdown(text) {
+        return text
+            .replace(/```([\s\S]*?)```/g, '<pre style="background:#f1f5f9;padding:8px;border-radius:6px;font-size:11px;overflow-x:auto"><code>$1</code></pre>')
+            .replace(/`([^`]+)`/g, '<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:13px;color:#1e293b">$1</h4>')
+            .replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 6px;font-size:14px;color:#1e293b">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;font-size:15px;color:#1e293b">$1</h2>')
+            .replace(/^- (.+)$/gm, '<div style="padding-left:12px">\u2022 $1</div>')
+            .replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px">$&</div>')
+            .replace(/\n/g, '<br>');
+    }
+
+    // Simulated streaming
+    async function streamText(element, text) {
+        element.innerHTML = '';
+        let i = 0;
+        return new Promise(resolve => {
+            function type() {
+                if (i < text.length) {
+                    const chunk = text.substring(i, Math.min(i + 3, text.length));
+                    i += chunk.length;
+                    element.innerHTML = renderMarkdown(text.substring(0, i));
+                    element.closest('.ai-messages').scrollTop = element.closest('.ai-messages').scrollHeight;
+                    requestAnimationFrame(type);
+                } else {
+                    element.innerHTML = renderMarkdown(text);
+                    resolve();
+                }
+            }
+            type();
+        });
+    }
+
+    // Show typing indicator
+    function showTyping() {
+        const container = document.getElementById('aiMessages');
+        const div = document.createElement('div');
+        div.className = 'ai-typing';
+        div.id = 'aiTyping';
+        div.innerHTML = '<div class="ai-typing-dot"></div><div class="ai-typing-dot"></div><div class="ai-typing-dot"></div>';
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+    function hideTyping() {
+        const el = document.getElementById('aiTyping');
+        if (el) el.remove();
+    }
+
+    // Send message to Claude
+    let aiCooldown = false;
+    async function sendAIMessage() {
+        const input = document.getElementById('aiInput');
+        const text = input.value.trim();
+        if (!text || aiCooldown) return;
+        input.value = '';
+
+        appendAIMessage('user', text);
+        addToConversation('user', text);
+
+        // Determine model
+        const isComplex = text.length > 80 || /report|analyse|analyze|compare|strategy|plan|briefing|export|trend|forecast/i.test(text);
+        const model = isComplex ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20251001';
+        const maxTokens = isComplex ? 2000 : 500;
+
+        showTyping();
+        aiCooldown = true;
+
+        try {
+            const systemPrompt = buildSystemPrompt();
+            const messages = aiConversation.map(m => ({ role: m.role, content: m.content }));
+
+            const response = await fetch(AI_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model, max_tokens: maxTokens, system: systemPrompt, messages })
+            });
+
+            hideTyping();
+
+            if (!response.ok) {
+                const errText = await response.text().catch(() => '');
+                appendAIMessage('assistant', `Sorry, I couldn't process that (${response.status}). ${errText ? errText.substring(0, 100) : 'Please try again.'}`);
+                return;
+            }
+
+            const data = await response.json();
+            const reply = data.content?.[0]?.text || 'No response received.';
+            addToConversation('assistant', reply);
+
+            const msgEl = appendAIMessage('assistant', '');
+            await streamText(msgEl, reply);
+
+            // Add export buttons for long responses
+            if (reply.length > 500) {
+                const exportBtn = document.createElement('div');
+                exportBtn.style.cssText = 'margin-top:6px;display:flex;gap:6px';
+                exportBtn.innerHTML = `<button onclick="copyAIResponse(this)" style="font-size:10px;padding:3px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;color:#64748b">Copy</button>
+                    <button onclick="printAIResponse(this)" style="font-size:10px;padding:3px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;color:#64748b">Print</button>`;
+                msgEl.appendChild(exportBtn);
+            }
+        } catch (e) {
+            hideTyping();
+            appendAIMessage('assistant', `Connection error: ${e.message}. The dashboard data is still available \u2014 try refreshing or rephrasing your question.`);
+        } finally {
+            setTimeout(() => { aiCooldown = false; }, 2000);
+        }
+    }
+
+    // Quick action
+    function sendQuickAction(label) {
+        const tab = getActiveTab();
+        const actions = AI_ACTIONS[tab] || AI_ACTIONS._default;
+        const action = [...(AI_ACTIONS.overview || []), ...(actions || [])].find(a => a.label === label);
+        if (!action) return;
+        document.getElementById('aiInput').value = action.prompt || label;
+        sendAIMessage();
+    }
+
+    // Export helpers
+    function copyAIResponse(btn) {
+        const msg = btn.closest('.ai-msg');
+        navigator.clipboard.writeText(msg.innerText).then(() => { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); });
+    }
+    function printAIResponse(btn) {
+        const msg = btn.closest('.ai-msg');
+        const w = window.open('', '_blank');
+        w.document.write(`<html><head><title>AI Report</title><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;color:#1e293b}h1,h2,h3,h4{color:#0f172a}code{background:#f1f5f9;padding:2px 4px;border-radius:3px}pre{background:#f1f5f9;padding:12px;border-radius:6px;overflow-x:auto}</style></head><body><h1>Operations Director \u2014 AI Report</h1><p style="color:#64748b">${new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}</p><hr>${msg.innerHTML}</body></html>`);
+        w.document.close();
+        w.print();
+    }
+
+    // Command palette
+    function openCmdPalette() {
+        document.getElementById('aiCmdOverlay').style.display = 'flex';
+        document.getElementById('aiCmdInput').value = '';
+        document.getElementById('aiCmdInput').focus();
+        populateCmdPalette('');
+    }
+    function closeCmdPalette() {
+        document.getElementById('aiCmdOverlay').style.display = 'none';
+    }
+    function populateCmdPalette(filter) {
+        const list = document.getElementById('aiCmdList');
+        const all = Object.values(AI_ACTIONS).flat().filter(a => a.prompt);
+        const filtered = filter ? all.filter(a => a.label.toLowerCase().includes(filter.toLowerCase())) : all;
+        list.innerHTML = filtered.map(a =>
+            `<div class="ai-cmd-item" onclick="closeCmdPalette();sendQuickAction('${escHtml(a.label)}')">${a.label}</div>`
+        ).join('') || '<div style="padding:12px;color:#94a3b8;text-align:center">No matching commands</div>';
+    }
+    function filterCmdPalette() {
+        populateCmdPalette(document.getElementById('aiCmdInput').value);
+    }
+
+    // Keyboard shortcut: Cmd+K / Ctrl+K
+    document.addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
+            const overlay = document.getElementById('aiCmdOverlay');
+            if (overlay.style.display === 'flex') closeCmdPalette();
+            else openCmdPalette();
+        }
+        if (e.key === 'Escape') closeCmdPalette();
+    });
+
+    // Initial chip render
+    setTimeout(renderAIChips, 1000);
 
     </script>
 </body>
