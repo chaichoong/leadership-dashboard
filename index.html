@@ -130,6 +130,9 @@
         .sidebar-item.active { color: #67e8f9; background: rgba(8,145,178,0.2); border-left-color: #0891b2; }
         .sidebar-item .sidebar-icon { font-size: 16px; width: 20px; text-align: center; }
         .sidebar-item .sidebar-label { flex: 1; }
+        .cfv-sidebar-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 10px; font-weight: 700; line-height: 1; }
+        .cfv-sidebar-badge.cfv-red { background: #dc2626; color: white; }
+        .cfv-sidebar-badge.cfv-orange { background: #d97706; color: white; }
         .main-content { margin-left: 220px; flex: 1; min-width: 0; }
         .sidebar-toggle {
             display: none; position: fixed; top: 10px; left: 10px; z-index: 200;
@@ -793,7 +796,7 @@
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
             <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List</span></div>
             <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span></div>
-            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span></div>
+            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
             <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
             <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
         </nav>
@@ -806,7 +809,7 @@
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
-            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span></div>
+            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span><span id="sitemapBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
         </div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Admin</div>
@@ -1654,6 +1657,26 @@
 
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('loadingOverlay').style.display = 'none';
+
+            // Update sidebar badges on load
+            updateSitemapBadge();
+            // CFV badges: quick count from tenancy data
+            try {
+                const todayForBadge = new Date(); todayForBadge.setHours(0,0,0,0);
+                let badgeCfv = 0, badgeActioned = 0;
+                tenancies.forEach(t => {
+                    const status = getPaymentStatusName(getField(t, F.tenPayStatus)).toLowerCase().trim();
+                    if (status === 'cfv') badgeCfv++;
+                    else if (status === 'cfv actioned') badgeActioned++;
+                    else if (status === 'in payment' && isTenantStatusActive(t)) {
+                        const dueDay = getNumVal(t, F.tenDueDay, 1);
+                        const dueDate = new Date(todayForBadge.getFullYear(), todayForBadge.getMonth(), dueDay);
+                        const overdue = todayForBadge >= dueDate ? Math.floor((todayForBadge - dueDate) / 86400000) : 0;
+                        if (overdue >= CFV_TOLERANCE_DAYS && !getField(t, F.tenPaidThisMonth) && !localStorage.getItem('cfv_dismissed_' + t.id)) badgeCfv++;
+                    }
+                });
+                updateCFVSidebarBadges(badgeCfv, badgeActioned);
+            } catch(e) { console.warn('Badge update failed:', e); }
 
             // Schedule smart refresh — defers if user is actively interacting
             if (refreshTimer) clearInterval(refreshTimer);
@@ -4866,6 +4889,30 @@
     }
 
     // Render the CFV tab
+    // Update sidebar badge counts for CFVs
+    function updateCFVSidebarBadges(cfvCount, actionedCount) {
+        const container = document.getElementById('cfvSidebarBadges');
+        if (!container) return;
+        let html = '';
+        if (cfvCount > 0) html += `<span class="cfv-sidebar-badge cfv-red">${cfvCount}</span>`;
+        if (actionedCount > 0) html += `<span class="cfv-sidebar-badge cfv-orange">${actionedCount}</span>`;
+        container.innerHTML = html;
+    }
+
+    // Update sitemap sync badge
+    function updateSitemapBadge() {
+        const badge = document.getElementById('sitemapBadge');
+        if (!badge) return;
+        const count = PAGE_REGISTRY.filter(p => p.pageVer !== p.sopVer).length;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = 'inline-block';
+            badge.style.background = '#d97706';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
     async function renderCFVTab() {
         if (!allTenancies.length) return;
 
@@ -4930,6 +4977,9 @@
                 </div>
             `;
         }
+
+        // Update sidebar badges
+        updateCFVSidebarBadges(confirmedCfvs.length + potentialCfvs.length, cfvActioned.length);
 
         // Table
         const tbody = document.getElementById('cfvTableBody');
