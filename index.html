@@ -1613,9 +1613,20 @@
             });
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
 
-            // Update CFV sidebar badges on initial load
+            // Update CFV sidebar badges on initial load (apply same dismissal filter as renderCFVTab)
             try {
-                const cfvList = detectCFVs();
+                const cfvList = detectCFVs().filter(entry => {
+                    if (entry.status === 'potential') {
+                        const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
+                        if (!dismissedAt) return true;
+                        if (Date.now() - new Date(dismissedAt).getTime() > 25 * 86400000) {
+                            localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
+                            return true;
+                        }
+                        return false;
+                    }
+                    return true;
+                });
                 const cfvCount = cfvList.filter(e => e.status === 'cfv' || e.status === 'potential').length;
                 const actionedCount = cfvList.filter(e => e.status === 'cfv actioned').length;
                 updateCFVSidebarBadges(cfvCount, actionedCount);
