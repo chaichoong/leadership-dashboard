@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations Director — Master Action Plan</title>
+<style>
+  :root {
+    --bg:#0f1117;--s1:#1a1d27;--s2:#242836;--border:#2e3347;--text:#e4e7ef;--muted:#8b90a5;
+    --accent:#6366f1;--al:#818cf8;--green:#22c55e;--gbg:rgba(34,197,94,0.1);
+    --amber:#f59e0b;--abg:rgba(245,158,11,0.1);--red:#ef4444;--rbg:rgba(239,68,68,0.1);
+    --blue:#3b82f6;--bbg:rgba(59,130,246,0.1);--purple:#a855f7;--pbg:rgba(168,85,247,0.1);
+    --pink:#ec4899;--pkbg:rgba(236,72,153,0.1);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+  .wrap{max-width:960px;margin:0 auto;padding:24px}
+
+  .hdr{text-align:center;padding:48px 0 36px;border-bottom:1px solid var(--border);margin-bottom:36px}
+  .hdr h1{font-size:2rem;font-weight:800;margin-bottom:8px}
+  .hdr .sub{color:var(--muted);font-size:1rem;max-width:640px;margin:0 auto}
+  .hdr .dates{color:var(--al);font-size:0.85rem;margin-top:12px;font-weight:600}
+
+  /* KPI row */
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+  .kpi{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center}
+  .kpi .v{font-size:1.8rem;font-weight:800;color:var(--al)}
+  .kpi .l{font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+
+  /* Nav */
+  .nav-wrap{position:sticky;top:0;background:var(--bg);z-index:10;border-bottom:1px solid var(--border);padding:10px 0}
+  .nav-group{margin-bottom:4px;display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+  .nav-group-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);text-align:center;margin-bottom:2px;width:100%}
+  .nav button{background:var(--s1);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.78rem;transition:all .2s;font-weight:500}
+  .nav button:hover,.nav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .nav button.strat{border-color:#4338ca}
+  .nav button.strat.active,.nav button.strat:hover{background:#4338ca}
+  .nav button.wk1{border-color:rgba(99,102,241,0.3)}
+  .nav button.wk2{border-color:rgba(34,197,94,0.3)}
+  .nav button.wk3{border-color:rgba(245,158,11,0.3)}
+  .nav button.wk4{border-color:rgba(59,130,246,0.3)}
+  .nav button.wk4.active,.nav button.wk4:hover{background:var(--blue)}
+  .nav button.wk5{border-color:rgba(236,72,153,0.3)}
+  .nav button.wk5.active,.nav button.wk5:hover{background:var(--pink)}
+  .nav button.ref{border-color:rgba(168,85,247,0.3)}
+  .nav button.ref.active,.nav button.ref:hover{background:var(--purple)}
+
+  .sec{display:none}.sec.active{display:block}
+  .sh{font-size:1.4rem;font-weight:800;margin-bottom:8px;color:var(--al)}
+  .sh-sub{color:var(--muted);font-size:0.9rem;margin-bottom:28px}
+
+  .card{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:16px}
+  .card h3{font-size:1.05rem;font-weight:700;margin-bottom:10px}
+  .card p{color:var(--muted);font-size:0.9rem}
+
+  /* Step blocks */
+  .step{background:var(--s1);border:1px solid var(--border);border-radius:12px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}
+  .step:hover{border-color:var(--accent)}
+  .step-hdr{display:flex;align-items:center;gap:14px;padding:20px 24px;cursor:pointer;user-select:none}
+  .step-num{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:800;flex-shrink:0;border:2px solid var(--border);color:var(--muted)}
+  .step.open .step-num{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,0.1)}
+  .step-title{flex:1;font-weight:700;font-size:0.95rem}
+  .step-meta{display:flex;gap:8px;align-items:center}
+  .step-arrow{color:var(--muted);transition:transform .2s;font-size:0.8rem}
+  .step.open .step-arrow{transform:rotate(90deg);color:var(--accent)}
+  .step-body{display:none;padding:0 24px 24px;border-top:1px solid var(--border)}
+  .step.open .step-body{display:block}
+
+  .tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;white-space:nowrap}
+  .tag-kevin{background:var(--pbg);color:var(--purple)}
+  .tag-s1{background:var(--bbg);color:var(--blue)}
+  .tag-s2{background:var(--gbg);color:var(--green)}
+  .tag-claude{background:var(--abg);color:var(--amber)}
+  .tag-all{background:rgba(99,102,241,0.1);color:var(--al)}
+  .tag-done{background:var(--gbg);color:var(--green);border:1px solid var(--green)}
+
+  .task{display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}
+  .task:last-child{border-bottom:none}
+  .task-who{min-width:90px;flex-shrink:0;padding-top:2px}
+  .task-what{flex:1;font-size:0.88rem}
+  .task-what strong{color:var(--text);font-weight:600}
+  .task-what .detail{color:var(--muted);font-size:0.82rem;margin-top:4px;line-height:1.6}
+  .task-how{margin-top:8px;background:var(--s2);border-radius:8px;padding:12px 14px;border-left:3px solid var(--accent)}
+  .task-how p{font-size:0.82rem;color:var(--al);line-height:1.6}
+  .task-how .lbl{font-size:0.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);font-weight:700;margin-bottom:4px}
+
+  .hl{background:var(--s2);border-radius:8px;padding:14px 16px;margin:12px 0}
+  .hl p{font-size:0.85rem;color:var(--muted)}
+  .hl strong{color:var(--text)}
+
+  .principle{border-left:3px solid var(--accent);padding:16px 20px;background:var(--s2);border-radius:0 8px 8px 0;margin-bottom:12px}
+  .principle h4{font-size:0.9rem;color:var(--al);margin-bottom:4px}
+  .principle p{font-size:0.85rem;color:var(--muted)}
+
+  .mod-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+  .mod-card{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:16px}
+  .mod-card h4{font-size:0.9rem;margin-bottom:4px}
+  .mod-card p{font-size:0.8rem;color:var(--muted)}
+  .mod-card .mid{font-size:0.68rem;color:var(--muted);font-family:monospace;margin-bottom:4px}
+
+  .tl-bar{display:flex;gap:0;margin:20px 0;border-radius:8px;overflow:hidden}
+  .tl-seg{padding:10px 16px;text-align:center;flex:1}
+  .tl-seg .tl-lbl{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+  .tl-seg .tl-date{font-size:0.75rem;margin-top:2px}
+
+  .decision{border:1px solid var(--amber);border-radius:10px;padding:16px 20px;margin:16px 0;background:rgba(245,158,11,0.05)}
+  .decision h4{color:var(--amber);font-size:0.85rem;margin-bottom:6px}
+  .decision p{font-size:0.85rem;color:var(--muted)}
+
+  .warn{border:1px solid var(--red);border-radius:10px;padding:16px 20px;margin:16px 0;background:rgba(239,68,68,0.05)}
+  .warn h4{color:var(--red);font-size:0.85rem;margin-bottom:6px}
+  .warn p{font-size:0.85rem;color:var(--muted)}
+
+  /* Pros/cons */
+  .pc{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}
+  .pc-col h4{font-size:0.85rem;margin-bottom:8px}
+  .pc-col ul{list-style:none;padding:0}
+  .pc-col li{font-size:0.82rem;color:var(--muted);padding:4px 0 4px 16px;position:relative}
+  .pc-col.pro li::before{content:"+";position:absolute;left:0;color:var(--green);font-weight:700}
+  .pc-col.con li::before{content:"\2212";position:absolute;left:0;color:var(--red);font-weight:700}
+
+  /* Journey */
+  .journey{display:flex;gap:0;overflow-x:auto;margin:20px 0;padding-bottom:8px}
+  .j-step{flex:1;min-width:90px;text-align:center;position:relative;padding:0 4px}
+  .j-step::after{content:'';position:absolute;top:18px;right:-1px;width:100%;height:2px;background:var(--border);z-index:0}
+  .j-step:last-child::after{display:none}
+  .j-dot{width:36px;height:36px;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;position:relative;z-index:1}
+  .j-lbl{font-size:0.72rem;font-weight:700}
+  .j-cnt{font-size:0.65rem;color:var(--muted);margin-top:1px}
+
+  /* Funnel */
+  .funnel-step{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .funnel-step:last-child{border-bottom:none}
+  .funnel-num{width:28px;height:28px;border-radius:50%;background:rgba(99,102,241,0.15);color:var(--al);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;flex-shrink:0}
+  .funnel-txt{font-size:0.85rem;color:var(--muted)}
+  .funnel-txt strong{color:var(--text)}
+
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  th{text-align:left;padding:10px 14px;font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+  td{padding:10px 14px;font-size:0.85rem;border-bottom:1px solid var(--border)}
+  tr:hover{background:rgba(99,102,241,0.03)}
+
+  /* Category headers */
+  .cat-hdr{display:flex;align-items:center;gap:12px;margin:24px 0 12px;padding-bottom:10px;border-bottom:2px solid var(--border)}
+  .cat-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+  .cat-title{font-size:1rem;font-weight:700}
+  .cat-sub{font-size:0.8rem;color:var(--muted)}
+  .cat-badge{margin-left:auto;font-size:0.68rem;padding:3px 10px;border-radius:99px;background:var(--s2);color:var(--muted);border:1px solid var(--border)}
+
+  .footer{text-align:center;padding:32px;color:var(--muted);font-size:0.78rem;border-top:1px solid var(--border);margin-top:40px}
+
+  @media(max-width:768px){.mod-grid,.pc,.kpi-row{grid-template-columns:1fr}.wrap{padding:16px}.step-hdr{padding:16px}.journey{flex-wrap:wrap}}
+  @media print{body{background:#fff;color:#222}.step-body{display:block!important}.card,.step{break-inside:avoid;border-color:#ddd}
+    .nav-wrap,.step-arrow{display:none}.tag{border:1px solid #999;background:transparent}
+    .step-num{border-color:#999}.task-how{border-left-color:#666}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hdr">
+  <h1>Operations Director — Master Action Plan</h1>
+  <div class="sub">Everything in one place. The strategy, the product, the modules, the day-by-day build plan, and the launch playbook. If it's not in this document, it doesn't exist.</div>
+  <div class="dates">Build: 14 April &rarr; Target Launch: 12 May &rarr; Hard Deadline: 14 May 2026</div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="v">30</div><div class="l">Days to Launch</div></div>
+  <div class="kpi"><div class="v">3</div><div class="l">Launch Modules</div></div>
+  <div class="kpi"><div class="v">36</div><div class="l">Total Modules Planned</div></div>
+  <div class="kpi"><div class="v">~&pound;6</div><div class="l">Monthly Fixed Cost</div></div>
+</div>
+
+<!-- NAVIGATION -->
+<div class="nav-wrap">
+  <div class="nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Strategy</div>
+      <button class="strat active" onclick="show('overview')">Overview</button>
+      <button class="strat" onclick="show('product')">Product</button>
+      <button class="strat" onclick="show('modules')">All Modules</button>
+      <button class="strat" onclick="show('pricing')">Pricing</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Week 1: Foundation (Apr 14-18)</div>
+      <button class="wk1" onclick="show('rules')">Ground Rules</button>
+      <button class="wk1" onclick="show('w1d1')">Mon 14</button>
+      <button class="wk1" onclick="show('w1d2')">Tue 15</button>
+      <button class="wk1" onclick="show('w1d3')">Wed 16</button>
+      <button class="wk1" onclick="show('w1d4')">Thu 17</button>
+      <button class="wk1" onclick="show('w1d5')">Fri 18</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Week 2: Modules (Apr 21-25)</div>
+      <button class="wk2" onclick="show('w2d1')">Mon 21</button>
+      <button class="wk2" onclick="show('w2d2')">Tue 22</button>
+      <button class="wk2" onclick="show('w2d3')">Wed 23</button>
+      <button class="wk2" onclick="show('w2d4')">Thu 24</button>
+      <button class="wk2" onclick="show('w2d5')">Fri 25</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Week 3: Polish (Apr 28 - May 2)</div>
+      <button class="wk3" onclick="show('w3d1')">Mon 28</button>
+      <button class="wk3" onclick="show('w3d2')">Tue 29</button>
+      <button class="wk3" onclick="show('w3d3')">Wed 30</button>
+      <button class="wk3" onclick="show('w3d4')">Thu 1</button>
+      <button class="wk3" onclick="show('w3d5')">Fri 2</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Week 4: Website & Marketing (May 5-9)</div>
+      <button class="wk4" onclick="show('w4d1')">Mon 5</button>
+      <button class="wk4" onclick="show('w4d2')">Tue 6</button>
+      <button class="wk4" onclick="show('w4d3')">Wed 7</button>
+      <button class="wk4" onclick="show('w4d4')">Thu 8</button>
+      <button class="wk4" onclick="show('w4d5')">Fri 9</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Week 5: Launch (May 12-14)</div>
+      <button class="wk5" onclick="show('w5d1')">Mon 12</button>
+      <button class="wk5" onclick="show('w5d2')">Tue 13</button>
+      <button class="wk5" onclick="show('w5d3')">Wed 14</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Reference</div>
+      <button class="ref" onclick="show('marketing')">Marketing</button>
+      <button class="ref" onclick="show('sales')">Sales Funnels</button>
+      <button class="ref" onclick="show('risks')">Risks</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- EXECUTIVE OVERVIEW -->
+<!-- ============================================ -->
+<div id="overview" class="sec active">
+  <div class="sh">Executive Overview</div>
+  <div class="sh-sub">What we're building, why it works, and where we sit in the market.</div>
+
+  <div class="card">
+    <h3>What We're Doing</h3>
+    <p>Launching Operations Director as a module marketplace selling self-contained HTML business operating system applications. Each module is a standalone web app built with Claude, covering a specific area of the business lifecycle. Customers purchase modules as one-off fees and receive a fully configured, hosted web application they can use immediately.</p>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--accent)">
+    <h3>The Shift</h3>
+    <p><strong style="color:var(--text)">From:</strong> Done-for-you 12-week implementations at &pound;15k + equity stakes. Founder-dependent. Unscalable.</p>
+    <p style="margin-top:10px"><strong style="color:var(--text)">To:</strong> Scalable module marketplace. One-off purchases. Self-serve onboarding. No founder dependency in delivery. Claude builds the product. Humans sell and support it.</p>
+  </div>
+
+  <div class="card">
+    <h3>Why This Works — The Numbers</h3>
+    <div class="hl" style="margin-top:8px">
+      <p><strong>82% of UK SMEs</strong> have cash flow problems. <strong>83%</strong> lack formal operational systems. <strong>13.7 hours per week</strong> lost to tool-hopping between disconnected apps. These are massive, quantified pain points — and there is no AI-first, integrated, affordable operating system on the market today.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Competitive Positioning</h3>
+    <p>Operations Director sits in a gap nobody is filling: <strong style="color:var(--text)">AI-first, fully integrated, one-off purchase business operating system modules</strong> for founder-dependent micro-businesses.</p>
+    <table style="margin-top:12px">
+      <thead><tr><th>Competitor</th><th>Model</th><th>Price</th><th>AI-First?</th><th>Gap</th></tr></thead>
+      <tbody>
+        <tr><td>EOS / Ninety.io</td><td>SaaS subscription</td><td>&pound;10-20/user/month</td><td>No</td><td>Framework only, not working software</td></tr>
+        <tr><td>Notion / Airtable templates</td><td>One-off templates</td><td>&pound;30-200</td><td>No</td><td>DIY frameworks, not applications</td></tr>
+        <tr><td>systemHUB</td><td>SaaS subscription</td><td>&pound;95/month</td><td>No</td><td>SOPs only, nothing else</td></tr>
+        <tr><td>ClickUp / Asana / Monday</td><td>SaaS subscription</td><td>&pound;10-30/user/month</td><td>Partially</td><td>Task management only, not whole business</td></tr>
+        <tr><td style="color:var(--al);font-weight:700">Operations Director</td><td style="color:var(--green)">One-off purchase</td><td style="color:var(--green)">&pound;197-997</td><td style="color:var(--green)">Yes</td><td style="color:var(--green)">Full lifecycle. Working apps. AI-built.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>The Customer Journey — Every Stage Covered</h3>
+    <p>36 modules across 8 categories mapped to the full business lifecycle:</p>
+    <div class="journey">
+      <div class="j-step"><div class="j-dot" style="background:rgba(99,102,241,0.2);color:var(--accent)">&#128203;</div><div class="j-lbl">PLAN</div><div class="j-cnt">3 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(59,130,246,0.2);color:var(--blue)">&#128295;</div><div class="j-lbl">BUILD</div><div class="j-cnt">5 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(16,185,129,0.2);color:var(--green)">&#128227;</div><div class="j-lbl">ATTRACT</div><div class="j-cnt">6 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(245,158,11,0.2);color:var(--amber)">&#129309;</div><div class="j-lbl">CONVERT</div><div class="j-cnt">4 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(236,72,153,0.2);color:var(--pink)">&#128183;</div><div class="j-lbl">COLLECT</div><div class="j-cnt">4 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(139,92,246,0.2);color:var(--purple)">&#128230;</div><div class="j-lbl">DELIVER</div><div class="j-cnt">5 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(16,185,129,0.2);color:var(--green)">&#128260;</div><div class="j-lbl">RETAIN</div><div class="j-cnt">4 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(99,102,241,0.2);color:var(--accent)">&#9881;</div><div class="j-lbl">BACK OFFICE</div><div class="j-cnt">5 modules</div></div>
+    </div>
+  </div>
+
+  <div class="tl-bar">
+    <div class="tl-seg" style="background:var(--accent);color:#fff"><div class="tl-lbl">Week 1: Foundation</div><div class="tl-date">14-18 Apr</div></div>
+    <div class="tl-seg" style="background:var(--green);color:#fff"><div class="tl-lbl">Week 2: Modules</div><div class="tl-date">21-25 Apr</div></div>
+    <div class="tl-seg" style="background:var(--amber);color:#fff"><div class="tl-lbl">Week 3: Polish</div><div class="tl-date">28 Apr-2 May</div></div>
+    <div class="tl-seg" style="background:var(--blue);color:#fff"><div class="tl-lbl">Week 4: Website</div><div class="tl-date">5-9 May</div></div>
+    <div class="tl-seg" style="background:var(--pink);color:#fff"><div class="tl-lbl">Week 5: Launch</div><div class="tl-date">12-14 May</div></div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- PRODUCT & DELIVERY -->
+<!-- ============================================ -->
+<div id="product" class="sec">
+  <div class="sh">Product Architecture &amp; Delivery Model</div>
+  <div class="sh-sub">What each module actually IS, how it's built, how it's delivered, and how customers access it.</div>
+
+  <div class="card">
+    <h3>What Each Module Is</h3>
+    <p>A self-contained HTML/JS/CSS web application — not a template, not a spreadsheet, not a SaaS login. Each module is a standalone business tool that works in a browser, stores data in the cloud via Supabase, and delivers real operational value from day one.</p>
+    <div class="hl" style="margin-top:12px">
+      <p><strong>Built with:</strong> Claude (HTML, JavaScript, CSS)</p>
+      <p><strong>Delivered as:</strong> Hosted web application with unique URL per customer</p>
+      <p><strong>Data storage:</strong> Supabase free tier (50,000 rows, unlimited API calls) — cloud-persistent, no data loss</p>
+      <p><strong>Access:</strong> Customer receives a URL. They open it. It works. No installation, no account setup, no learning curve.</p>
+    </div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--green)">
+    <h3><span class="tag" style="background:var(--gbg);color:var(--green)">CHOSEN</span> &nbsp;Delivery Model: Hosted on Free Infrastructure</h3>
+    <p>Each customer's module is deployed to Netlify (free tier). Customer gets a unique URL like <em>smithco-finance.operationsdirector.co.uk</em> that works instantly in any browser.</p>
+    <div class="pc" style="margin-top:12px">
+      <div class="pc-col pro">
+        <h4 style="color:var(--green)">Why This Works</h4>
+        <ul>
+          <li>Zero hosting cost — free tiers support 100+ sites</li>
+          <li>Instant deployment via Claude + script</li>
+          <li>Custom subdomain per client looks professional</li>
+          <li>HTTPS included automatically</li>
+          <li>No customer setup required — they just open a URL</li>
+          <li>Updates can be pushed without customer involvement</li>
+          <li>Scales to hundreds of customers at zero marginal cost</li>
+        </ul>
+      </div>
+      <div class="pc-col con">
+        <h4 style="color:var(--red)">Watch Out For</h4>
+        <ul>
+          <li>Need a deployment pipeline (built in Week 3)</li>
+          <li>Must use Supabase for data — NOT localStorage alone</li>
+          <li>Semi-manual at launch; fully automate later</li>
+        </ul>
+      </div>
+    </div>
+    <div class="hl">
+      <p><strong>Cost:</strong> &pound;0/month. Netlify free tier = 100GB bandwidth, unlimited sites. Supabase free tier = 50k rows, unlimited API calls.</p>
+      <p><strong>Deployment time per customer:</strong> Under 5 minutes once pipeline is built.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Future Delivery Option: Bespoke Build Per Customer</h3>
+    <p style="color:var(--muted)">Customer provides their business info, Claude generates a fully customised application, deployed to their subdomain. Justifies premium pricing (&pound;499-999+). <strong style="color:var(--text)">Add this as a premium tier once you have 10+ standard module sales</strong> and understand what customisation customers actually want. Not for launch.</p>
+  </div>
+
+  <div class="card">
+    <h3>Website Platform: WordPress + WooCommerce</h3>
+    <p>Cheapest viable option with the strongest SEO ecosystem. Total cost: ~&pound;5/month.</p>
+    <table style="margin-top:8px">
+      <thead><tr><th>Component</th><th>Choice</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td>Hosting</td><td>Hostinger</td><td>&pound;2.99/month</td></tr>
+        <tr><td>CMS</td><td>WordPress (free)</td><td>&pound;0</td></tr>
+        <tr><td>Theme</td><td>Astra or Kadence (free)</td><td>&pound;0</td></tr>
+        <tr><td>Shop</td><td>WooCommerce (free)</td><td>&pound;0</td></tr>
+        <tr><td>SEO</td><td>Yoast SEO (free)</td><td>&pound;0</td></tr>
+        <tr><td>Payments</td><td>Stripe for WooCommerce</td><td>2.5% + 20p per sale</td></tr>
+        <tr><td>Module hosting</td><td>Netlify (free)</td><td>&pound;0</td></tr>
+        <tr><td>Data persistence</td><td>Supabase (free)</td><td>&pound;0</td></tr>
+        <tr><td>Domain</td><td>operationsdirector.co.uk</td><td>~&pound;10/year</td></tr>
+        <tr><td><strong>Total</strong></td><td></td><td><strong>~&pound;6/month</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>AI Search Optimisation Strategy</h3>
+    <p>To get cited by ChatGPT, Perplexity, and Claude when people search for business operating systems:</p>
+    <div class="hl" style="margin-top:8px"><p><strong>Structured data:</strong> Product schema (JSON-LD) on every module page with name, description, price, availability, and reviews.</p></div>
+    <div class="hl"><p><strong>Content strategy:</strong> Long-form pillar pages answering "How to systemise a small business", "Business operating system for SMEs", "Cash flow management for small businesses" — these are the queries AI assistants pull from.</p></div>
+    <div class="hl"><p><strong>Authority signals:</strong> About page with Kevin's credentials, case studies with real numbers, published methodology (OPTIMISE framework).</p></div>
+    <div class="hl"><p><strong>Technical:</strong> Fast load times, mobile-responsive, clean HTML, robots.txt allowing all crawlers, sitemap with lastModified dates.</p></div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- FULL MODULE CATALOGUE -->
+<!-- ============================================ -->
+<div id="modules" class="sec">
+  <div class="sh">Full Module Catalogue — 36 Modules</div>
+  <div class="sh-sub">Every module mapped to the business lifecycle. Colour-coded by build phase: <span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span> <span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span> <span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+
+  <!-- Build Sequence -->
+  <div class="card" style="margin-bottom:24px">
+    <h3>Build Sequence</h3>
+    <div class="hl"><p><strong style="color:var(--green)">LAUNCH PRIORITY — Build by 12 May:</strong> 13 modules. These are what we need to launch OD + first sellable products.</p></div>
+    <div class="hl"><p><strong style="color:var(--amber)">PHASE 2 — May to June:</strong> 13 modules. Expand the catalogue, build recurring revenue tools.</p></div>
+    <div class="hl"><p><strong style="color:var(--blue)">PHASE 3 — July onwards:</strong> 6 modules. Advanced/niche modules, enterprise features.</p></div>
+  </div>
+
+  <!-- PLAN -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(99,102,241,0.15);color:var(--accent)">&#128203;</div>
+    <div><div class="cat-title">PLAN — Define the Business</div><div class="cat-sub">From idea to structured business plan. What you do, who you serve, how you make money.</div></div>
+    <div class="cat-badge">3 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">PLAN-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Business Plan &amp; Launch Plan Builder</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Built &#10003;</span></div>
+      <p>Guided 10-step wizard from rough idea to complete business plan + 30-day launch plan. AI coaches through every section. PDF output.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">PLAN-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Brand Identity Builder</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Name, positioning, tone of voice, colour palette, AI logo brief. Outputs a one-page brand guide.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">PLAN-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>Financial Forecast &amp; Startup Budget</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>12-month financial projection: revenue forecasts, cost modelling, break-even analysis, cash runway calculator.</p>
+    </div>
+  </div>
+
+  <!-- BUILD -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(59,130,246,0.15);color:var(--blue)">&#128295;</div>
+    <div><div class="cat-title">BUILD — Set Up the Infrastructure</div><div class="cat-sub">Everything needed to go from plan to operational business. Legal, tech, payments, comms.</div></div>
+    <div class="cat-badge">5 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">BUILD-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Website Setup Guide</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Step-by-step to get a site live in 48 hours. Domain, hosting, WooCommerce, SEO basics. AI writes all copy.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">BUILD-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Legal &amp; Compliance Launcher</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Company registration, insurance, GDPR, T&amp;Cs, privacy policy, cookie policy. AI generates all docs.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">BUILD-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>Payment &amp; Billing Setup</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Stripe setup, payment links, invoicing templates, billing workflows. Step-by-step with screenshots.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">BUILD-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Email &amp; Domain Setup Guide</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Professional email setup (Google Workspace), email signature generator, DNS config, initial templates.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">BUILD-05</div>
+      <div style="display:flex;justify-content:space-between"><h4>Tech Stack Selector</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Interactive tool to select the right software stack based on business type, budget, and team size.</p>
+    </div>
+  </div>
+
+  <!-- ATTRACT -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128227;</div>
+    <div><div class="cat-title">ATTRACT — Marketing &amp; Attention</div><div class="cat-sub">Finding your target market, grabbing attention, and building an audience.</div></div>
+    <div class="cat-badge">6 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">ATTRACT-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Marketing Strategy &amp; Channel Planner</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Identifies right channels for your business. AI analyses target market, recommends where to spend, with expected ROI per channel.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">ATTRACT-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>AI Content Creator &amp; Calendar</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>30-day content calendar with AI-written posts for every platform. User just reviews and posts.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">ATTRACT-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>SEO &amp; AI Search Optimiser</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Keyword research, on-page SEO, meta descriptions, structured data, AI search optimisation.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">ATTRACT-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Paid Advertising Manager</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Sets up Meta/Google campaigns. AI writes copy, sets targeting, tracks CPA. Includes spend vs return dashboard.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">ATTRACT-05</div>
+      <div style="display:flex;justify-content:space-between"><h4>Lead Magnet &amp; Funnel Builder</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Creates a lead magnet, landing page, and email nurture sequence. AI writes everything.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">ATTRACT-06</div>
+      <div style="display:flex;justify-content:space-between"><h4>Marketing ROI Dashboard</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Tracks spend across all channels, measures cost per lead, CPA, and ROAS. Visual dashboard.</p>
+    </div>
+  </div>
+
+  <!-- CONVERT -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(245,158,11,0.15);color:var(--amber)">&#129309;</div>
+    <div><div class="cat-title">CONVERT — Sales &amp; Closing</div><div class="cat-sub">Turning leads into paying customers. Pipeline, proposals, follow-ups, closing.</div></div>
+    <div class="cat-badge">4 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">CONVERT-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Sales Pipeline &amp; CRM</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Visual pipeline: Lead &rarr; Qualified &rarr; Proposal &rarr; Won/Lost. Tracks prospects, next actions, conversion rates.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">CONVERT-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Proposal &amp; Quote Generator</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>AI generates professional proposals from a few inputs. Branded templates, auto pricing, PDF export.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">CONVERT-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>Sales Script &amp; Objection Handler</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>AI-generated sales scripts tailored to your product. Top 10 objections with tested responses.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">CONVERT-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Follow-Up Sequence Builder</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Automated email/message follow-up sequences for leads at every stage. Includes "gone cold" re-engagement.</p>
+    </div>
+  </div>
+
+  <!-- COLLECT -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(236,72,153,0.15);color:var(--pink)">&#128183;</div>
+    <div><div class="cat-title">COLLECT — Finance &amp; Payments</div><div class="cat-sub">Getting paid, tracking money, managing cash flow, staying on top of tax.</div></div>
+    <div class="cat-badge">4 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">COLLECT-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Invoice &amp; Payment Tracker</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Creates/sends branded invoices, tracks status (sent/overdue/paid), auto-generates chaser emails.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">COLLECT-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Cash Flow Forecaster</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>30-day rolling forecast. Maps incoming vs outgoing, highlights danger dates, suggests payment timing.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">COLLECT-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>Expense &amp; Budget Monitor</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Tracks all expenses against budget categories. Flags overspend, identifies savings, monthly reports.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--blue)">
+      <div class="mid">COLLECT-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Tax &amp; VAT Planner</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <p>Quarterly tax estimates, VAT tracking, monthly provisions, year-end accountant summary.</p>
+    </div>
+  </div>
+
+  <!-- DELIVER -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(139,92,246,0.15);color:var(--purple)">&#128230;</div>
+    <div><div class="cat-title">DELIVER — Operations &amp; Fulfilment</div><div class="cat-sub">Onboarding clients, delivering products/services, managing projects, building repeatable processes.</div></div>
+    <div class="cat-badge">5 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--green)">
+      <div class="mid">DELIVER-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Client Onboarding System</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <p>Onboarding workflow from sale to first delivery. Welcome emails, intake forms, kickoff agenda, checklists.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">DELIVER-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Project &amp; Task Manager</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Kanban board: To Do &rarr; In Progress &rarr; Review &rarr; Done. Assign tasks, set deadlines, track time.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">DELIVER-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>SOP &amp; Process Builder</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>AI interviews you about how you do something, then writes the SOP with numbered steps and checklists.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--blue)">
+      <div class="mid">DELIVER-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Quality Control Checklist</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <p>QC checklists for products/services. AI generates based on your delivery process. Tracks pass/fail rates.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">DELIVER-05</div>
+      <div style="display:flex;justify-content:space-between"><h4>Client Communication Templates</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Pre-written templates for every client touchpoint. AI personalises each one.</p>
+    </div>
+  </div>
+
+  <!-- RETAIN -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128260;</div>
+    <div><div class="cat-title">RETAIN — Loyalty &amp; Growth</div><div class="cat-sub">Keeping customers, getting referrals, upselling, building recurring revenue.</div></div>
+    <div class="cat-badge">4 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">RETAIN-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Feedback &amp; Review Collector</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Automated feedback at key moments. NPS scores, Google/Trustpilot prompts, testimonials. AI drafts responses.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">RETAIN-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Referral &amp; Affiliate Programme</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Referral programme with tracking, reward tiers, automated link generation. AI designs incentive structure.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--blue)">
+      <div class="mid">RETAIN-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>Upsell &amp; Renewal Tracker</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <p>Identifies upsell opportunities, schedules renewal reminders, AI drafts personalised offers.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--blue)">
+      <div class="mid">RETAIN-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Client Health Score Dashboard</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <p>Scores each client on engagement, payment, tickets, satisfaction. Flags at-risk clients early.</p>
+    </div>
+  </div>
+
+  <!-- BACK OFFICE -->
+  <div class="cat-hdr">
+    <div class="cat-icon" style="background:rgba(99,102,241,0.15);color:var(--accent)">&#9881;</div>
+    <div><div class="cat-title">BACK OFFICE — Admin, HR &amp; Legal</div><div class="cat-sub">Team management, legal documents, compliance, and the master business scoreboard.</div></div>
+    <div class="cat-badge">5 modules</div>
+  </div>
+  <div class="mod-grid">
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">BACK-01</div>
+      <div style="display:flex;justify-content:space-between"><h4>Team Roles &amp; Onboarding Guide</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Defines roles, responsibilities, reporting lines. Job descriptions, onboarding checklists, first-week schedules.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--blue)">
+      <div class="mid">BACK-02</div>
+      <div style="display:flex;justify-content:space-between"><h4>Recruitment &amp; Hiring Process</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <p>AI writes job ads, scores CVs, generates interview questions, creates offer letter templates.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">BACK-03</div>
+      <div style="display:flex;justify-content:space-between"><h4>Contract &amp; Legal Document Generator</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Generates contracts, NDAs, freelancer agreements from simple inputs. AI fills legal language.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--blue)">
+      <div class="mid">BACK-04</div>
+      <div style="display:flex;justify-content:space-between"><h4>Meeting &amp; Decision Tracker</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <p>Meeting agendas, AI-generated minutes, action items, decision log, completion tracking.</p>
+    </div>
+    <div class="mod-card" style="border-left:3px solid var(--amber)">
+      <div class="mid">BACK-05</div>
+      <div style="display:flex;justify-content:space-between"><h4>Business Performance Scoreboard</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <p>Master dashboard pulling KPIs from every module. Revenue, costs, pipeline, satisfaction. AI writes commentary.</p>
+    </div>
+  </div>
+
+  <!-- Key principles -->
+  <div class="card" style="margin-top:24px">
+    <h3>Key Principles</h3>
+    <div class="principle" style="margin-top:12px"><h4>Build it, use it, sell it.</h4><p>Every module we build to launch OD becomes a product in the catalogue. We eat our own dog food first, then package it for sale.</p></div>
+    <div class="principle"><h4>AI leads, human follows.</h4><p>Every module treats AI as the operator and human as the executor. AI generates content, makes decisions, writes instructions. Human follows steps — written for a 13-year-old reading level.</p></div>
+    <div class="principle"><h4>SOP for every module.</h4><p>As each module is built, a standardised SOP is created alongside it. No module ships without documentation.</p></div>
+    <div class="principle"><h4>Progressive build order.</h4><p>Launch modules cover the minimum needed to sell. Phase 2 fills the catalogue. Phase 3 adds depth.</p></div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- PRICING -->
+<!-- ============================================ -->
+<div id="pricing" class="sec">
+  <div class="sh">Pricing &amp; Financial Projections</div>
+  <div class="sh-sub">One-off pricing that undercuts monthly SaaS within 3-6 months. Customer saves long-term, we get cash upfront.</div>
+
+  <div class="card">
+    <h3>Pricing Logic</h3>
+    <p>These are working HTML applications, not templates. The value comparison is against monthly SaaS subscriptions. A business paying &pound;20/user/month for ClickUp (3 users = &pound;720/year) gets significantly more value from a one-off purchase that does the same job permanently.</p>
+    <div class="hl" style="margin-top:8px"><p><strong>Benchmark:</strong> SaaS equivalents cost &pound;10-95/month. A one-off at 6-12 months' equivalent cost is the sweet spot — customer saves money long-term, you get cash upfront.</p></div>
+  </div>
+
+  <div class="card">
+    <h3>Pricing Tiers</h3>
+    <table>
+      <thead><tr><th>Tier</th><th>Price Range</th><th>SaaS Equivalent</th><th>Customer Payback</th><th>Examples</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag" style="background:var(--gbg);color:var(--green)">Standard</span></td><td><strong>&pound;197 - &pound;297</strong></td><td>&pound;15-25/month</td><td>8-12 months</td><td>Tasks, Strategy, Content Creator</td></tr>
+        <tr><td><span class="tag" style="background:var(--bbg);color:var(--blue)">Premium</span></td><td><strong>&pound;397 - &pound;597</strong></td><td>&pound;40-60/month</td><td>7-10 months</td><td>Finance, Scoreboards, CRM</td></tr>
+        <tr><td><span class="tag" style="background:var(--pbg);color:var(--purple)">Advanced</span></td><td><strong>&pound;697 - &pound;997</strong></td><td>&pound;80-100/month</td><td>7-10 months</td><td>AI &amp; Intelligence, Full Methods suite</td></tr>
+        <tr><td><span class="tag" style="background:var(--abg);color:var(--amber)">Bundle</span></td><td><strong>&pound;1,497 - &pound;1,997</strong></td><td>&pound;150-250/month</td><td>6-8 months</td><td>Full OPTIMISE system (all 8)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Launch Pricing (First 50 Customers)</h3>
+    <table>
+      <thead><tr><th>Product</th><th>Launch Price</th><th>Standard Price</th><th>Saving</th></tr></thead>
+      <tbody>
+        <tr><td>Finance &amp; Reporting</td><td style="color:var(--green);font-weight:700">&pound;297</td><td>&pound;497</td><td>40%</td></tr>
+        <tr><td>Tasks &amp; Routines</td><td style="color:var(--green);font-weight:700">&pound;197</td><td>&pound;297</td><td>34%</td></tr>
+        <tr><td>Business Plan Builder</td><td style="color:var(--green);font-weight:700">&pound;197</td><td>&pound;297</td><td>34%</td></tr>
+        <tr><td>Launch Bundle (all 3)</td><td style="color:var(--green);font-weight:700">&pound;397</td><td>&pound;697</td><td>43%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>12-Month Revenue Projections</h3>
+    <table>
+      <thead><tr><th>Scenario</th><th>Monthly Sales</th><th>Avg Price</th><th>Monthly Revenue</th><th>Annual</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag" style="background:var(--rbg);color:var(--red)">Conservative</span></td><td>5 modules</td><td>&pound;250</td><td>&pound;1,250</td><td><strong>&pound;15,000</strong></td></tr>
+        <tr><td><span class="tag" style="background:var(--abg);color:var(--amber)">Moderate</span></td><td>15 modules</td><td>&pound;350</td><td>&pound;5,250</td><td><strong>&pound;63,000</strong></td></tr>
+        <tr><td><span class="tag" style="background:var(--gbg);color:var(--green)">Optimistic</span></td><td>30 modules</td><td>&pound;400</td><td>&pound;12,000</td><td><strong>&pound;144,000</strong></td></tr>
+      </tbody>
+    </table>
+    <div class="hl" style="margin-top:12px">
+      <p><strong>Bundle upsell impact:</strong> If 30% of customers buy the full OPTIMISE bundle at &pound;1,497 instead of individual modules, the moderate scenario jumps to ~&pound;8,400/month (&pound;100,800/year).</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Cost Structure</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Monthly Cost</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>WordPress hosting (Hostinger)</td><td>&pound;5</td><td>Cheapest viable option</td></tr>
+        <tr><td>Module hosting (Netlify)</td><td>&pound;0</td><td>Free tier — unlimited sites</td></tr>
+        <tr><td>Data persistence (Supabase)</td><td>&pound;0</td><td>Free tier — 50k rows</td></tr>
+        <tr><td>Domain renewal</td><td>~&pound;1</td><td>&pound;10/year</td></tr>
+        <tr><td>Stripe fees</td><td>2.5% + 20p</td><td>~&pound;7-10 per &pound;300 sale</td></tr>
+        <tr><td>Claude (development)</td><td>Existing</td><td>Already subscribed</td></tr>
+        <tr><td><strong>Total fixed costs</strong></td><td><strong>~&pound;6/month</strong></td><td>Variable: Stripe fees on sales</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- GROUND RULES -->
+<!-- ============================================ -->
+<div id="rules" class="sec">
+  <div class="sh">Ground Rules — Read This Before Day 1</div>
+  <div class="sh-sub">These rules apply to every single day of the plan. If in doubt, come back here.</div>
+
+  <div class="card" style="margin-bottom:24px">
+    <h3>The Team</h3>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">
+      <div><span class="tag tag-kevin">Kevin</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Decisions, quality control, sign-offs. 1-2 hours/day max.</span></div>
+      <div><span class="tag tag-s1">Staff 1 (Tech)</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Infrastructure, deployments, technical setup.</span></div>
+      <div><span class="tag tag-s2">Staff 2 (Marketing)</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Content, copy, campaigns, social media.</span></div>
+      <div><span class="tag tag-claude">Claude</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Builds everything. Code, content, copy, strategy, modules. The engine.</span></div>
+    </div>
+    <div class="hl" style="margin-top:16px">
+      <p><strong>How this works:</strong> Claude does 90% of the actual work. Humans set Claude up, give it the information it needs, review what it produces, and handle tasks that require human access (logging into platforms, clicking buttons, making payments). Think of it as: Claude is the brain, you're the hands.</p>
+    </div>
+  </div>
+
+  <div class="principle"><h4>Rule 1: Claude Does the Work</h4><p>Every module, every piece of copy, every code file, every marketing post, every SEO tag — Claude builds it. Humans review, give feedback, and handle things requiring a real person (logins, payments, uploads). If you're writing code or drafting long content from scratch, stop. Ask Claude.</p></div>
+  <div class="principle"><h4>Rule 2: Claude Asks, You Answer</h4><p>Claude will ask questions to extract the information it needs. Answer clearly and completely. The better your answers, the better the output. Don't say "something useful" — say exactly what you want to see.</p></div>
+  <div class="principle"><h4>Rule 3: One Step at a Time</h4><p>Don't skip ahead. Each day builds on the previous day's output. If you finish early, improve what's built — don't start the next phase.</p></div>
+  <div class="principle"><h4>Rule 4: Ship Over Perfect</h4><p>Version 1 solves one core problem well. Everything else is version 2. If you're debating a feature, ask: "Does the customer need this on Day 1?" If no, it waits.</p></div>
+  <div class="principle"><h4>Rule 5: Daily 15-Minute Standup</h4><p>Every morning, 9am. Three questions per person: What did I finish? What am I doing today? Am I blocked? That's it. No discussions. If there's a blocker, Kevin decides immediately.</p></div>
+
+  <div class="tl-bar" style="margin-top:24px">
+    <div class="tl-seg" style="background:var(--accent);color:#fff"><div class="tl-lbl">Week 1: Foundation</div><div class="tl-date">14-18 Apr — Infrastructure + Start Modules</div></div>
+    <div class="tl-seg" style="background:var(--green);color:#fff"><div class="tl-lbl">Week 2: Modules</div><div class="tl-date">21-25 Apr — Build + Deploy Modules</div></div>
+    <div class="tl-seg" style="background:var(--amber);color:#fff"><div class="tl-lbl">Week 3: Polish</div><div class="tl-date">28 Apr-2 May — Polish + Content</div></div>
+    <div class="tl-seg" style="background:var(--blue);color:#fff"><div class="tl-lbl">Week 4: Website</div><div class="tl-date">5-9 May — Website + Marketing + QA</div></div>
+    <div class="tl-seg" style="background:var(--pink);color:#fff"><div class="tl-lbl">Week 5: Launch</div><div class="tl-date">12-14 May — Soft &rarr; Full Launch</div></div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- DAY-BY-DAY PLANS (W1-W5) -->
+<!-- 30-day plan: Apr 14 - May 14 -->
+<!-- ============================================ -->
+
+<!-- W1 MONDAY 14 APR -->
+<div id="w1d1" class="sec">
+  <div class="sh">Monday 14 April — Infrastructure Setup</div>
+  <div class="sh-sub">Yesterday's kickoff is done. Today we lay the technical foundations.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num" style="border-color:var(--green);color:var(--green);background:var(--gbg)">&#10003;</div><div class="step-title">Team Kickoff Meeting <span class="tag tag-done">&#10003; DONE</span></div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="tag tag-all">All</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Completed Sunday 13 April.</strong><div class="detail">Team briefed on this plan. Everyone read Ground Rules. Everyone understands: Claude builds, we guide. Target launch confirmed (12 May). Hard deadline (14 May). Daily 15-min standup set for 9am.</div></div></div>
+    </div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Set Up WordPress &amp; Hosting</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Get operationsdirector.co.uk live with a blank WordPress site.</strong><div class="task-how"><div class="lbl">Step-by-step</div><p>1. Go to Hostinger.co.uk. Buy cheapest plan (~&pound;2.99/month).<br>2. Point operationsdirector.co.uk domain to Hostinger nameservers.<br>3. One-click install WordPress.<br>4. Install free theme: Astra or Kadence.<br>5. Install plugins: WooCommerce, Yoast SEO, Stripe for WooCommerce.<br>6. Enable SSL (auto on Hostinger — verify padlock shows).<br>7. Test: open operationsdirector.co.uk. Blank site with SSL padlock = done.</p></div></div></div>
+      <div class="hl"><p><strong>Time:</strong> 3-4 hours (including DNS propagation).</p></div>
+    </div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Set Up Module Hosting (Netlify)</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Set up free hosting where customer modules will live.</strong><div class="task-how"><div class="lbl">Step-by-step</div><p>1. Create free Netlify account.<br>2. Create test site — upload simple HTML file.<br>3. Add wildcard DNS: *.operationsdirector.co.uk &rarr; Netlify.<br>4. Test: deploy demo page, access via demo.operationsdirector.co.uk.<br>5. Loads with SSL = done.</p></div></div></div>
+      <div class="hl"><p><strong>Time:</strong> 2-3 hours. Run in parallel with Step 1.</p></div>
+    </div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) WordPress installed, operationsdirector.co.uk loads with SSL. (2) Netlify account works, test subdomain loads. Anything not done = priority #1 tomorrow morning.</p></div>
+</div>
+
+<!-- W1 TUESDAY 15 APR -->
+<div id="w1d2" class="sec">
+  <div class="sh">Tuesday 15 April — Data Layer &amp; Social Presence</div>
+  <div class="sh-sub">Set up Supabase for cloud data. Get all social pages updated and ready.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Set Up Supabase for Data Persistence</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Set up Supabase so customer data persists in the cloud.</strong><div class="task-how"><div class="lbl">Step-by-step</div><p>1. Create free account at supabase.com.<br>2. New project: "operations-director".<br>3. Ask Claude: "Design Supabase database tables for a finance module (transactions, categories, forecasts) and tasks module (tasks, routines, team_members, decisions). Give me the SQL."<br>4. Run Claude's SQL in Supabase SQL editor.<br>5. Get Supabase URL + anon key from project settings.<br>6. Save credentials securely — needed for module builds.</p></div></div></div>
+      <div class="warn"><h4>Non-Negotiable</h4><p>Do NOT launch with localStorage only. Customer loses data = refund + bad review. Supabase is free. Set it up.</p></div>
+    </div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Audit &amp; Update Business Social Pages</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Update all OD business pages (LinkedIn, Facebook, Instagram, TikTok).</strong><div class="detail">Updated bios, branding, links to operationsdirector.co.uk. Ask Claude to write platform-specific bios.</div><div class="task-how"><div class="lbl">What to tell Claude</div><p>"Write social media bios for Operations Director across LinkedIn, Facebook, Instagram, and TikTok. Each platform has different character limits. OD sells AI-powered HTML business operating system modules for UK SMEs. One-off purchase, no subscription."</p></div></div></div>
+    </div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Supabase project created with tables for Finance + Tasks modules. (2) All social pages updated with new bios and links.</p></div>
+</div>
+
+<!-- W1 WEDNESDAY 16 APR -->
+<div id="w1d3" class="sec">
+  <div class="sh">Wednesday 16 April — Finance Module Build Starts</div>
+  <div class="sh-sub">Claude begins building the first sellable module.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Starts Building: Finance &amp; Reporting Module</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="tag tag-kevin">Kevin</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Open Claude. Give it the Finance module brief. Answer its questions. Let it build.</strong><div class="task-how"><div class="lbl">What to tell Claude</div><p>"Build me an HTML/JS/CSS web application for small business finance management. It needs: a transaction input form with auto-categorisation, a cash flow chart showing 30-day forecast, a simple P&amp;L view, a bank reconciliation tracker, and a monthly summary. Store data in browser localStorage for now. Dark theme matching Operations Director branding (indigo/purple accent on dark background). Mobile responsive. It should feel like a proper app, not a spreadsheet."</p></div></div></div>
+      <div class="decision"><h4>Decision needed from Kevin</h4><p>Include the Business Plan Builder as a launch module? It's already built. Gives us 3 launch modules. Recommend: yes — it demonstrates OD's approach and it's ready to sell.</p></div>
+    </div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Claude has produced a working first draft of the Finance module with core features. Kevin has reviewed the initial structure and given direction.</p></div>
+</div>
+
+<!-- W1 THURSDAY 17 APR -->
+<div id="w1d4" class="sec">
+  <div class="sh">Thursday 17 April — Finance Continues &amp; Website Copy</div>
+  <div class="sh-sub">Claude keeps building Finance. Staff 2 starts drafting all website copy.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Continues Finance Module Build</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Complete Finance module: bank reconciliation, monthly summary, forecast projections, CSV export, mobile responsive.</strong><div class="task-how"><div class="lbl">Prompt</div><p>"Continue building the Finance module. Add: bank reconciliation tracker, monthly summary view, forecast projections chart, data export to CSV. Make every screen work on mobile. It should look and feel like a premium SaaS app."</p></div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Draft All Website Copy</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Get Claude to write all website copy: Homepage, About, OPTIMISE Framework, Module descriptions, FAQ.</strong><div class="task-how"><div class="lbl">Prompt</div><p>"Write website copy for Operations Director. Sells AI-powered business OS modules for UK SMEs. Target: founder-dependent businesses, 1-50 employees, drowning in spreadsheets. Key stats: 82% cash flow problems, 83% no systems, 13.7 hrs/week tool-hopping. Tone: professional, human, no waffle. Pages: Homepage (hero, pain points, how it works, modules, CTA), About (Kevin's story), OPTIMISE Framework (8 pillars), FAQ (10+ questions on pricing, access, refunds, data safety, vs templates)."</p></div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Finance module v1 nearing completion. (2) Website copy drafted for all main pages.</p></div>
+</div>
+
+<!-- W1 FRIDAY 18 APR -->
+<div id="w1d5" class="sec">
+  <div class="sh">Friday 18 April — Kevin Reviews Finance v1</div>
+  <div class="sh-sub">Kevin tests the Finance module. Detailed feedback to Claude for fixes next week.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Kevin Reviews Finance Module v1</div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Spend 30-60 minutes using the Finance module as a real customer. Add transactions, check charts, try the forecast, export data. Note what's confusing, missing, or ugly. Send specific feedback to Claude.</strong><div class="task-how"><div class="lbl">Feedback format</div><p>Be specific. Not "charts look off." Say "cash flow chart doesn't show negative values clearly — can't tell when I'll run out of money." Specific = fast fix.</p></div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Staff Catch Up or Get Ahead</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>On track:</strong> Verify all infrastructure is solid. Test Supabase connections. <strong>Behind:</strong> Finish any infrastructure tasks from Mon-Tue.</div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>On track:</strong> Refine website copy, start planning social content. <strong>Behind:</strong> Finish copy drafts and social page updates.</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 1 Checkpoint</h3><p>By end of Friday: WordPress live, Netlify configured, Supabase set up, social pages updated, Finance module v1 built and reviewed by Kevin, all website copy drafted. If you have all this, you're on track for Week 2.</p></div>
+</div>
+
+<!-- ============================================ -->
+<!-- WEEK 2: MODULE BUILDING (Apr 21-25) -->
+<!-- ============================================ -->
+
+<!-- W2 MONDAY 21 APR -->
+<div id="w2d1" class="sec">
+  <div class="sh">Monday 21 April — Finance Fixes &amp; Supabase Connection</div>
+  <div class="sh-sub">Fix Kevin's feedback. Connect Finance module to real cloud storage.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Fixes Finance Module + Connects Supabase</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Fix Kevin's feedback. Replace localStorage with Supabase for all data.</strong><div class="task-how"><div class="lbl">Prompt</div><p>"Here's my feedback: [Kevin's notes]. Fix all of these. Also connect to Supabase for data persistence. Credentials: [URL and anon key]. Replace all localStorage with Supabase calls."</p></div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Finance module updated with Kevin's feedback implemented. (2) Finance module connected to Supabase — data persists across browser sessions.</p></div>
+</div>
+
+<!-- W2 TUESDAY 22 APR -->
+<div id="w2d2" class="sec">
+  <div class="sh">Tuesday 22 April — Tasks &amp; Routines Module Starts</div>
+  <div class="sh-sub">Claude begins building the second sellable module.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Starts Tasks &amp; Routines Module</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Build the Tasks module: Kanban board with drag-and-drop, daily/weekly/monthly routines, team assignment, decision log.</strong><div class="task-how"><div class="lbl">Prompt</div><p>"Build an HTML/JS/CSS task management and routines app. Kanban board (To Do, In Progress, Review, Done) with drag-and-drop, routines section with daily/weekly/monthly checklists that reset, team members section, decision log. Same dark theme as Finance module. localStorage for now. Mobile responsive."</p></div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Tasks module v1 started — at least Kanban board and routines working.</p></div>
+</div>
+
+<!-- W2 WEDNESDAY 23 APR -->
+<div id="w2d3" class="sec">
+  <div class="sh">Wednesday 23 April — Tasks v1 Done &amp; Deploy Demos</div>
+  <div class="sh-sub">Finish Tasks module. Deploy both modules to live demo URLs.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Finishes Tasks Module v1</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Complete: decision log, project tracker, accountability dashboard. Connect to Supabase.</strong></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Deploy Demo Versions to Live URLs</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Push both modules to Netlify. Test on live URLs and mobile.</strong><div class="task-how"><div class="lbl">Step-by-step</div><p>1. Take Claude's HTML/JS/CSS files.<br>2. Create new Netlify site. Drag-and-drop deploy.<br>3. Set custom subdomain: demo-finance.operationsdirector.co.uk and demo-tasks.operationsdirector.co.uk.<br>4. Test: open URL, add data, refresh page, check data persists via Supabase.<br>5. Test on mobile phone.<br>6. Note anything that breaks live vs local.</p></div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Tasks v1 complete with Supabase. (2) Both modules live on demo URLs and working on mobile.</p></div>
+</div>
+
+<!-- W2 THURSDAY 24 APR -->
+<div id="w2d4" class="sec">
+  <div class="sh">Thursday 24 April — Module Sales Copy &amp; Comparisons</div>
+  <div class="sh-sub">Write the copy that sells the modules. Competitor comparison tables.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Write Module Sales Copy &amp; Competitor Comparisons</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Get Claude to write product page copy + competitor comparison tables for each module.</strong><div class="detail">Each module needs: headline, pain point, solution description, feature list, pricing justification, competitor table showing OD vs alternatives. Use the live demo URLs as proof.</div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Sales copy complete for Finance, Tasks, and Business Plan Builder modules. (2) Competitor comparison tables done.</p></div>
+</div>
+
+<!-- W2 FRIDAY 25 APR -->
+<div id="w2d5" class="sec">
+  <div class="sh">Friday 25 April — Kevin Reviews Tasks + Live Demos</div>
+  <div class="sh-sub">Kevin tests both modules on live URLs. Go/no-go on module quality.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Kevin Reviews Tasks Module + Live Demos</div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Test both modules on live demo URLs. 30-60 minutes each. Flag issues. Send feedback to Claude.</strong><div class="detail">Four questions per module: (1) Does it work without errors? (2) Intuitive enough to use without help? (3) Data persists across sessions? (4) Looks professional?</div></div></div>
+      <div class="decision"><h4>Key Decision</h4><p>Launch with 1, 2, or 3 modules? If Tasks isn't ready, launch with Finance + Business Plan Builder only. Better one excellent module than two mediocre ones.</p></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 2 Checkpoint</h3><p>By end of Friday: Finance module fixed and on Supabase, Tasks module v1 complete and deployed, both live on demo URLs, all module sales copy and comparisons drafted, Kevin has reviewed both modules. If you have all this, Week 3 is about polish.</p></div>
+</div>
+
+<!-- ============================================ -->
+<!-- WEEK 3: MODULE POLISH & CONTENT (Apr 28 - May 2) -->
+<!-- ============================================ -->
+
+<!-- W3 MONDAY 28 APR -->
+<div id="w3d1" class="sec">
+  <div class="sh">Monday 28 April — Module Polish &amp; Onboarding</div>
+  <div class="sh-sub">Fix all remaining issues. Add in-app tutorials to both modules.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Polishes Both Modules + Adds Onboarding</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Fix all remaining issues from Kevin's review. Add in-app onboarding walkthrough to each module (4-5 step tutorial overlay, skippable). Final mobile check.</strong></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Both modules polished with all feedback addressed. (2) Onboarding tutorials added to both modules.</p></div>
+</div>
+
+<!-- W3 TUESDAY 29 APR -->
+<div id="w3d2" class="sec">
+  <div class="sh">Tuesday 29 April — Deployment Pipeline</div>
+  <div class="sh-sub">Build the system that deploys a module to a customer's unique URL.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Build the Deployment Pipeline</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Customer pays &rarr; module deployed to unique URL &rarr; access email sent. Semi-manual is fine for launch.</strong><div class="task-how"><div class="lbl">Ask Claude to build</div><p>"Build a Node.js deployment script that: (1) Takes customer name and email. (2) Copies module template files. (3) Creates new Netlify site via API with customer subdomain. (4) Deploys files. (5) Sends access email with URL. Manual trigger for now — automate later."</p></div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Deployment pipeline script working — can deploy a module to a unique URL in under 5 minutes.</p></div>
+</div>
+
+<!-- W3 WEDNESDAY 30 APR -->
+<div id="w3d3" class="sec">
+  <div class="sh">Wednesday 30 April — Screenshots &amp; Demo Videos</div>
+  <div class="sh-sub">Capture all visual assets needed for the website and marketing.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Capture Screenshots &amp; Record Demo Videos</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>5-6 screenshots per module + 60-second screen recording walkthrough of each.</strong><div class="detail">Add realistic sample data first. Clean browser. Use Loom or OBS (both free). Cut to 60s for Reels/TikTok, keep full version for website.</div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Screenshots captured for all modules. (2) Demo videos recorded — short and full versions.</p></div>
+</div>
+
+<!-- W3 THURSDAY 1 MAY -->
+<div id="w3d4" class="sec">
+  <div class="sh">Thursday 1 May — SEO Blog Posts &amp; Content</div>
+  <div class="sh-sub">Start building the content that drives organic traffic and AI search citations.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Claude Writes SEO Blog Posts</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Claude writes 3 SEO blog posts (2,000 words each).</strong><div class="detail">"Cash flow management for small businesses UK" — include 82% stat, practical steps, how OD solves it. "How to systemise a small business" — operational pain points, framework. "The hidden cost of tool-hopping" — 13.7 hrs/week stat, cost calculations. H2/H3 structure for SEO. CTA for free Health Check in each.</div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) 3 SEO blog posts drafted and reviewed by Staff 2.</p></div>
+</div>
+
+<!-- W3 FRIDAY 2 MAY -->
+<div id="w3d5" class="sec">
+  <div class="sh">Friday 2 May — Kevin Full Testing &amp; Go/No-Go</div>
+  <div class="sh-sub">Kevin tests everything end-to-end. Bug fixes only from here.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Kevin: Full Module Testing &amp; Go/No-Go</div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>1-2 hours testing both modules. Four questions per module:</strong><div class="detail">(1) Does it work without errors? (2) Intuitive enough to use without help? (3) Data persists across sessions? (4) Looks professional? All yes = go. Any no = list specific fixes for Claude.</div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Claude Fixes Remaining Issues</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Bugs and UX fixes only. No new features. Scope discipline.</strong></div></div></div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 3 Checkpoint</h3><p>By end of Friday: both modules polished with onboarding tutorials, deployment pipeline working, all screenshots and demo videos captured, 3 blog posts drafted, Kevin has done final module testing. Modules are now locked — bug fixes only. Week 4 builds the website and marketing around them.</p></div>
+</div>
+
+<!-- ============================================ -->
+<!-- WEEK 4: WEBSITE, MARKETING & QA (May 5-9) -->
+<!-- ============================================ -->
+
+<!-- W4 MONDAY 5 MAY -->
+<div id="w4d1" class="sec">
+  <div class="sh">Monday 5 May — Build All WordPress Pages</div>
+  <div class="sh-sub">Turn the blank WordPress site into the live sales site with all copy.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Build All WordPress Pages</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Build every page using Staff 2's copy.</strong><div class="detail">Homepage, Modules (shop), About, OPTIMISE Framework, Blog, Contact, FAQ, How It Works. Set brand colours, header nav, footer links. Test every page on mobile.</div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) All website pages built with content and looking professional on desktop + mobile.</p></div>
+</div>
+
+<!-- W4 TUESDAY 6 MAY -->
+<div id="w4d2" class="sec">
+  <div class="sh">Tuesday 6 May — WooCommerce &amp; Stripe Setup</div>
+  <div class="sh-sub">Set up payments. Test the full purchase flow end-to-end.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Configure WooCommerce &amp; Stripe</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Create products, connect Stripe, test purchase.</strong><div class="task-how"><div class="lbl">Step-by-step</div><p>1. Create WooCommerce products: Finance &pound;297, Tasks &pound;197, Business Plan Builder &pound;197, Launch Bundle &pound;397.<br>2. WooCommerce &rarr; Settings &rarr; Payments &rarr; Stripe. Connect account.<br>3. Test purchase (Stripe test mode: 4242 4242 4242 4242).<br>4. Set up post-purchase email: "Your module is being deployed. You'll receive your access URL within 1 hour."<br>5. Switch to live mode when ready.</p></div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) All products created in WooCommerce. (2) Stripe connected and test purchase successful. (3) Post-purchase email configured.</p></div>
+</div>
+
+<!-- W4 WEDNESDAY 7 MAY -->
+<div id="w4d3" class="sec">
+  <div class="sh">Wednesday 7 May — SEO, Analytics &amp; Blog Posts</div>
+  <div class="sh-sub">Make the site findable and measurable. Publish all content.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Implement SEO &amp; Analytics</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Add schema markup, submit sitemaps, set up GA4 + conversion tracking.</strong><div class="task-how"><div class="lbl">Checklist</div><p>1. Add JSON-LD schema to each page via Yoast.<br>2. Submit sitemap to Google Search Console + Bing Webmaster Tools.<br>3. Set up GA4: create property, add tracking code.<br>4. Set up conversions: "Purchase completed" + "Health Check completed".<br>5. Verify schema with Google Rich Results Test.</p></div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Publish Blog Posts</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Publish all 3 blog posts. Format with images, internal links, and CTAs.</strong><div class="detail">"Cash flow management for small businesses" + "How to systemise a small business" + "The hidden cost of tool-hopping". These are the pages AI search engines cite.</div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) SEO schema on all pages. (2) GA4 + conversion tracking live. (3) Sitemaps submitted. (4) All 3 blog posts published.</p></div>
+</div>
+
+<!-- W4 THURSDAY 8 MAY -->
+<div id="w4d4" class="sec">
+  <div class="sh">Thursday 8 May — Health Check &amp; Email Sequence</div>
+  <div class="sh-sub">Build the free lead magnet and launch email sequence.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Build Free "Business Health Check" Lead Magnet</div><div class="step-meta"><span class="tag tag-claude">Claude</span><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Claude builds a free mini-module scoring businesses on the OPTIMISE framework.</strong><div class="task-how"><div class="lbl">Prompt</div><p>"Build a free Business Health Check web app. 8 questions (one per OPTIMISE pillar). 4 answer options each, scored 1-4. After answering, user enters email + name, then sees: overall score /100, breakdown per pillar with traffic light rating, recommendation for which OD module helps their weakest area. Same OD branding."</p></div></div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Deploy to healthcheck.operationsdirector.co.uk. Link from website.</strong></div></div>
+    </div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Create Launch Email Sequence</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Claude writes 3-email launch sequence. Staff 2 loads into Mailchimp/GHL.</strong><div class="detail">Email 1 (Day 1): Launch announcement. Email 2 (Day 3): Cash flow pain + demo link. Email 3 (Day 5): Urgency + launch pricing ending.</div></div></div></div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Health Check deployed and working. (2) Launch email sequence written and loaded into email platform.</p></div>
+</div>
+
+<!-- W4 FRIDAY 9 MAY -->
+<div id="w4d5" class="sec">
+  <div class="sh">Friday 9 May — Launch Video, Social Calendar &amp; Kevin Reviews</div>
+  <div class="sh-sub">Record the launch video. Plan all social content. Kevin reviews everything.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Record Launch Video</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>60-second version (Reels/TikTok) + full 2-3 min version (website/LinkedIn).</strong><div class="task-how"><div class="lbl">Script structure</div><p>0-10s: Hook — "82% of small businesses can't see their cash flow. Here's how to fix that in 10 minutes."<br>10-40s: Demo — module in action.<br>40-55s: Value — "No subscription. No setup. One payment, yours forever."<br>55-60s: CTA — "Link in bio. First 50 get 40% off."</p></div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Create Social Content Calendar + Generate Posts</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="tag tag-claude">Claude</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Generate 2 weeks of posts across all platforms. 3-5 posts/week/platform. 15+ posts total.</strong><div class="detail">Mix: pain points, module demos, value tips, behind-the-scenes, CTAs. Each post: platform, text, visual suggestion, hashtags.</div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">3</div><div class="step-title">Kevin Reviews Full Website</div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Visit every page. Test full purchase flow end-to-end. Check on mobile. Approve all copy. Review Health Check. Go/no-go for launch week.</strong></div></div>
+      <div class="decision"><h4>Go/No-Go</h4><p>Everything works + looks professional = launch Monday 12 May. Significant issues = push to Wednesday 14 May. Hard deadline: 14 May regardless.</p></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 4 Checkpoint</h3><p>Full website live with payments working. Health Check deployed. All marketing scheduled. Emails loaded. Blog posts published. SEO in place. Launch video recorded. Social content ready. Kevin's sign-off. Ready to launch Monday.</p></div>
+</div>
+
+<!-- ============================================ -->
+<!-- WEEK 5: LAUNCH (May 12-14) -->
+<!-- ============================================ -->
+
+<!-- W5 MONDAY 12 MAY -->
+<div id="w5d1" class="sec">
+  <div class="sh">Monday 12 May — Final QA &amp; Pre-Launch</div>
+  <div class="sh-sub">Test everything. Schedule everything. Submit to directories. Kevin's final sign-off.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Full QA — Test Everything End-to-End</div><div class="step-meta"><span class="tag tag-s1">Staff 1</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Test every user journey.</strong><div class="task-how"><div class="lbl">Checklist</div><p>&#9744; Homepage loads fast on desktop + mobile<br>&#9744; Every nav link works<br>&#9744; Module product pages: screenshots, description, price correct<br>&#9744; Test purchase through Stripe succeeds<br>&#9744; Module deployment pipeline works (URL live within 15 mins)<br>&#9744; Modules load via customer URL, data persists, mobile works<br>&#9744; Business Health Check captures email, shows results<br>&#9744; Page speed under 3 seconds (PageSpeed Insights)<br>&#9744; SSL padlock on every page<br>&#9744; Blog posts published and formatted</p></div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Schedule All Launch Content</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Schedule all social posts for launch week across every platform.</strong><div class="detail">Use Buffer (free) or schedule natively. Queue everything.</div></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">3</div><div class="step-title">Submit to Directories &amp; Communities</div><div class="step-meta"><span class="tag tag-s2">Staff 2</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>ProductHunt listing (schedule for tomorrow). UK business directories. LinkedIn/Facebook SME groups.</strong></div></div></div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">4</div><div class="step-title">Kevin: Final Sign-Off</div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Review everything: modules, website, pricing, emails, social content. Final go for tomorrow's soft launch.</strong></div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Switch Stripe to live mode. Test real-money purchase (&pound;1 test product &rarr; verify pipeline &rarr; refund).</strong></div></div>
+    </div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Full QA passed. (2) All content scheduled. (3) Directories submitted. (4) Kevin has given final sign-off. (5) Stripe is in live mode. Ready for soft launch tomorrow.</p></div>
+</div>
+
+<!-- W5 TUESDAY 13 MAY -->
+<div id="w5d2" class="sec">
+  <div class="sh">Tuesday 13 May — Soft Launch</div>
+  <div class="sh-sub">Share with inner circle. Gather feedback. Fix anything that breaks.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Soft Launch to Inner Circle</div><div class="step-meta"><span class="tag tag-all">All</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Share with inner circle via direct messages.</strong> WhatsApp, email, DMs to trusted contacts. Gather honest feedback. Not public yet.</div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Send first launch email. First OD posts go live across all platforms.</strong></div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Monitor everything.</strong> If someone buys, verify deployment works. Fix anything that breaks immediately.</div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Collect feedback. Prioritise quick fixes for Claude to address overnight.</strong></div></div>
+    </div>
+  </div>
+
+  <div class="warn"><h4>End-of-Day Check</h4><p>(1) Inner circle contacted. (2) Launch email sent. (3) Social posts live. (4) Any purchases deployed successfully. (5) Feedback collected and prioritised.</p></div>
+</div>
+
+<!-- W5 WEDNESDAY 14 MAY -->
+<div id="w5d3" class="sec">
+  <div class="sh">Wednesday 14 May — Full Public Launch</div>
+  <div class="sh-sub">Go public. Full marketing push. This is launch day.</div>
+
+  <div class="step open" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">1</div><div class="step-title">Full Public Launch</div><div class="step-meta"><span class="tag tag-all">All</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span></div><div class="task-what"><strong>Implement soft launch feedback. Quick fixes only.</strong></div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Full launch push.</strong> All scheduled posts live. Email sequence triggers. ProductHunt launch. Actively engage in SME communities — reply to comments, DM engaged followers, join conversations.</div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Monitor deployments. Handle any technical issues immediately.</strong></div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Review early sales data. Schedule demo calls with interested prospects.</strong></div></div>
+    </div>
+  </div>
+
+  <div class="step" onclick="toggleStep(this)">
+    <div class="step-hdr"><div class="step-num">2</div><div class="step-title">Thursday 15 May — Post-Launch Review</div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="tag tag-all">All</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body">
+      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span></div><div class="task-what"><strong>Review launch results:</strong> Sales, traffic, conversion rate, feedback themes. Set priorities for Week 2 post-launch.</div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s2">Staff 2</span></div><div class="task-what"><strong>Analyse social performance.</strong> Double down on what's working. Drop what isn't.</div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s1">Staff 1</span></div><div class="task-what"><strong>Fix technical debt. Start Phase 2 module development.</strong></div></div>
+      <div class="decision"><h4>Key Decision: Paid Ads</h4><p>If organic reach isn't enough, start paid ads at &pound;5-10/day. Claude manages campaigns: writes copy, sets targeting, monitors, kills underperformers. See Marketing tab for full ad strategy.</p></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 5 / Launch Complete</h3><p>Operations Director is live. Modules selling. Marketing running. Now it's about iterating: fix what's broken, double down on what's working, start building Phase 2 modules. The hard part is done.</p></div>
+</div>
+
+<!-- ============================================ -->
+<!-- MARKETING -->
+<!-- ============================================ -->
+<div id="marketing" class="sec">
+  <div class="sh">Marketing &amp; Customer Acquisition</div>
+  <div class="sh-sub">All marketing runs through OD business pages. Organic builds brand. Paid ads drive sales. Claude manages campaigns.</div>
+
+  <div class="card">
+    <h3>Impact: Business Pages vs Personal Brand</h3>
+    <p>Kevin's personal profiles are tied to Runpreneur — all OD marketing runs through business pages. Here's the honest impact:</p>
+    <table style="margin-top:8px">
+      <thead><tr><th>Platform</th><th>Personal Reach</th><th>Business Page Reach</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>LinkedIn</td><td>10-30% of connections</td><td>2-5% of followers</td><td style="color:var(--red);font-weight:700">Significant</td></tr>
+        <tr><td>Facebook</td><td>5-10%</td><td>1-2%</td><td style="color:var(--red);font-weight:700">Major (pages nearly dead for organic)</td></tr>
+        <tr><td>Instagram</td><td>10-20%</td><td>8-15%</td><td style="color:var(--amber);font-weight:700">Moderate (Reels perform OK)</td></tr>
+        <tr><td>TikTok</td><td colspan="2">Algorithm-driven, not follower-based</td><td style="color:var(--green);font-weight:700">Minimal (rewards content quality)</td></tr>
+      </tbody>
+    </table>
+    <div class="hl" style="margin-top:12px"><p><strong>Bottom line:</strong> Organic reach will be 3-5x lower on business pages. This is exactly why <strong>paid ads are essential, not optional</strong>. TikTok and Instagram Reels are the best organic channels — algorithm-driven, not follower-dependent.</p></div>
+  </div>
+
+  <div class="card">
+    <h3>Channel Strategy</h3>
+    <table>
+      <thead><tr><th>Channel</th><th>What We Do</th><th>Expected Impact</th><th>Who</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Paid Ads (Primary)</strong></td><td>Meta + LinkedIn, &pound;5-10/day. Claude writes copy, targets, monitors, optimises.</td><td>Most reliable without personal brand. Directly targetable to SME founders.</td><td><span class="tag tag-claude">Claude</span> + <span class="tag tag-s2">S2</span></td></tr>
+        <tr><td><strong>TikTok / Reels</strong></td><td>30-60s videos: module demos, pain points, "day in the life"</td><td>Best organic opportunity. Algorithm-driven.</td><td><span class="tag tag-s2">S2</span></td></tr>
+        <tr><td><strong>LinkedIn</strong></td><td>3-5 posts/week: value content, demos, SME pain points</td><td>Slow organic build. Amplify top posts with paid.</td><td><span class="tag tag-s2">S2</span></td></tr>
+        <tr><td><strong>SEO / Content</strong></td><td>Pillar pages for key search terms</td><td>Long-term (3-6 months). Compounds. Essential for AI search.</td><td><span class="tag tag-claude">Claude</span> + <span class="tag tag-s2">S2</span></td></tr>
+        <tr><td><strong>Lead Magnet</strong></td><td>Free Business Health Check captures emails</td><td>Builds email list. Demonstrates product quality.</td><td><span class="tag tag-claude">Claude</span></td></tr>
+        <tr><td><strong>Email</strong></td><td>Launch sequence + nurture</td><td>Highest conversion once list is built.</td><td><span class="tag tag-s2">S2</span></td></tr>
+        <tr><td><strong>Facebook</strong></td><td>Mirror LinkedIn. Groups are the real play.</td><td>Low organic reach. Groups &gt; page posts.</td><td><span class="tag tag-s2">S2</span></td></tr>
+        <tr><td><strong>ProductHunt</strong></td><td>Launch day listing</td><td>One-time traffic spike + credibility.</td><td><span class="tag tag-s1">S1</span></td></tr>
+        <tr><td><strong>Referral</strong></td><td>20% commission per sale</td><td>Scales word-of-mouth. Pay on sale only.</td><td><span class="tag tag-kevin">Kevin</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Paid Ad Strategy — Claude-Managed, Iterative</h3>
+    <p>Claude builds, measures, monitors, tweaks, and iterates. Start micro, scale only what works.</p>
+    <div class="hl" style="margin-top:12px">
+      <p><strong style="color:var(--green)">Phase 1: Testing (Week 1-2 post-launch) — &pound;5-10/day = &pound;35-70/week</strong><br>
+      Find which message + audience + platform gets clicks. 3-4 ad variations per platform. Mix of pain point hooks, demo clips, health check offers, direct purchase CTAs. UK business owners, 1-50 employees. Claude sets up, monitors daily, kills underperformers after 48 hours.</p>
+    </div>
+    <div class="hl">
+      <p><strong style="color:var(--amber)">Phase 2: Optimisation (Week 3-4) — &pound;10-20/day = &pound;70-140/week</strong><br>
+      Double down on winners. Create lookalike audiences from visitors and health check completions. Retarget people who visited but didn't buy. A/B test landing pages.</p>
+    </div>
+    <div class="hl">
+      <p><strong style="color:var(--blue)">Phase 3: Scale (Month 2+) — Only if ROI proven</strong><br>
+      Scale rule: Only increase spend when CPA is below 30% of avg module price. At &pound;300 avg, CPA must be under &pound;90. Target: &pound;30-60 per sale. Scale to &pound;50-100/day if target met.</p>
+    </div>
+    <table style="margin-top:12px">
+      <thead><tr><th>Phase</th><th>Weekly</th><th>Monthly</th><th>Expected Outcome</th></tr></thead>
+      <tbody>
+        <tr><td>Testing</td><td>&pound;35-70</td><td>&pound;150-300</td><td>Data on what works. 50-200 visits. 5-20 leads.</td></tr>
+        <tr><td>Optimise</td><td>&pound;70-140</td><td>&pound;300-600</td><td>First paid sales. Retargeting converting.</td></tr>
+        <tr><td>Scale</td><td>&pound;350-700</td><td>&pound;1,500-3,000</td><td>Predictable acquisition. 5-15 sales/month from ads.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Content Strategy — First 30 Days</h3>
+    <p>All via OD business pages. Focus: short-form video (TikTok/Reels) + LinkedIn value posts.</p>
+    <div class="hl" style="margin-top:8px"><p><strong>Week 1:</strong> Launch announcement. Module demo video (60s Reel + full version). "Why 82% of SMEs struggle with cash flow" blog promoted via ads.</p></div>
+    <div class="hl"><p><strong>Week 2:</strong> "The real cost of tool-hopping: &pound;13k per employee per year" (carousel + blog). Free Health Check promotion. OPTIMISE framework explainer video.</p></div>
+    <div class="hl"><p><strong>Week 3:</strong> "How AI is replacing &pound;50k/year of operational work" (TikTok/Reel + LinkedIn). Behind-the-scenes: how we built the modules. FAQ content.</p></div>
+    <div class="hl"><p><strong>Week 4:</strong> "What a business operating system actually looks like" (blog + screenshots). Customer feedback. Phase 2 module teaser. Pricing justification post.</p></div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- SALES FUNNELS -->
+<!-- ============================================ -->
+<div id="sales" class="sec">
+  <div class="sh">Sales Process — Two Funnels</div>
+  <div class="sh-sub">Direct purchase for ready buyers. Lead magnet nurture for everyone else.</div>
+
+  <div class="card">
+    <h3>Funnel A: Direct Purchase</h3>
+    <p>For people who see the product, understand the value, and are ready to buy.</p>
+    <div style="margin-top:12px">
+      <div class="funnel-step"><div class="funnel-num">1</div><div class="funnel-txt"><strong>Discover:</strong> Prospect finds us via paid ad, SEO, social, or referral.</div></div>
+      <div class="funnel-step"><div class="funnel-num">2</div><div class="funnel-txt"><strong>Explore:</strong> Views module pages, watches demo video, reads case study.</div></div>
+      <div class="funnel-step"><div class="funnel-num">3</div><div class="funnel-txt"><strong>Purchase:</strong> Buys module via Stripe checkout on website.</div></div>
+      <div class="funnel-step"><div class="funnel-num">4</div><div class="funnel-txt"><strong>Deploy:</strong> Module automatically deployed to their unique subdomain within minutes.</div></div>
+      <div class="funnel-step"><div class="funnel-num">5</div><div class="funnel-txt"><strong>Onboard:</strong> In-app tutorial walks them through setup.</div></div>
+      <div class="funnel-step"><div class="funnel-num">6</div><div class="funnel-txt"><strong>Expand:</strong> 30-day email sequence promotes additional modules and full bundle.</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Funnel B: Lead Magnet &rarr; Nurture &rarr; Purchase</h3>
+    <p>For people who aren't ready to buy yet but have the pain points.</p>
+    <div style="margin-top:12px">
+      <div class="funnel-step"><div class="funnel-num">1</div><div class="funnel-txt"><strong>Ad / Content:</strong> Paid ad or organic post promotes free Business Health Check.</div></div>
+      <div class="funnel-step"><div class="funnel-num">2</div><div class="funnel-txt"><strong>Capture:</strong> Prospect completes health check, provides email.</div></div>
+      <div class="funnel-step"><div class="funnel-num">3</div><div class="funnel-txt"><strong>Score:</strong> Health check scores their business across OPTIMISE framework, highlights weakest areas.</div></div>
+      <div class="funnel-step"><div class="funnel-num">4</div><div class="funnel-txt"><strong>Recommend:</strong> Automated email recommends specific module based on weakest score.</div></div>
+      <div class="funnel-step"><div class="funnel-num">5</div><div class="funnel-txt"><strong>Nurture:</strong> 5-email sequence over 2 weeks: value, pain points, social proof, limited offer.</div></div>
+      <div class="funnel-step"><div class="funnel-num">6</div><div class="funnel-txt"><strong>Convert:</strong> Purchase module or book a call for bundle discussion.</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================ -->
+<!-- RISKS -->
+<!-- ============================================ -->
+<div id="risks" class="sec">
+  <div class="sh">Risks, Decisions &amp; Assumptions</div>
+  <div class="sh-sub">What could go wrong, what needs deciding, and what we're assuming (that might be wrong).</div>
+
+  <div class="card">
+    <h3>Critical Risks</h3>
+    <table>
+      <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td>Module quality not high enough</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--rbg);color:var(--red)">High</span></td><td>Soft launch to inner circle first. Iterate. Better to delay 2 days than ship something poor.</td></tr>
+        <tr><td>No sales in first 2 weeks</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td>Low fixed costs (&pound;6/month). Paid ads test messaging fast. No sales = positioning problem, not product problem.</td></tr>
+        <tr><td>Customer loses data</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--rbg);color:var(--red)">High</span></td><td>Supabase from Day 1. No localStorage-only launch. Non-negotiable.</td></tr>
+        <tr><td>Scope creep on features</td><td><span class="tag" style="background:var(--rbg);color:var(--red)">High</span></td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td>Define MVP features NOW. Don't expand before launch. V1 = one core problem. V2 = everything else.</td></tr>
+        <tr><td>Timeline slips past 12 May</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--gbg);color:var(--green)">Low</span></td><td>Buffer to 14 May built in. 30-day plan gives breathing room.</td></tr>
+        <tr><td>Piracy / module sharing</td><td><span class="tag" style="background:var(--gbg);color:var(--green)">Low</span></td><td><span class="tag" style="background:var(--gbg);color:var(--green)">Low</span></td><td>Hosted model = customer gets URL, not files. Future: licence key validation.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Assumptions to Challenge</h3>
+    <div class="hl">
+      <p><strong>Assumption:</strong> SME owners will pay &pound;200-500 for an HTML app they've never seen.</p>
+      <p><strong>Challenge:</strong> Trust is the bottleneck, not price. Mitigate with: live demo, free health check, money-back guarantee (first 50), Kevin's credibility.</p>
+    </div>
+    <div class="hl">
+      <p><strong>Assumption:</strong> Two staff + Claude can build, launch, and market in 30 days.</p>
+      <p><strong>Challenge:</strong> Achievable with controlled scope. 30 days gives realistic breathing room. Bottleneck is module quality, not website or marketing.</p>
+    </div>
+    <div class="hl">
+      <p><strong>Assumption:</strong> Business page organic reach is sufficient for launch traction.</p>
+      <p><strong>Challenge:</strong> It isn't. Business pages reach 2-5% of followers. This is why paid ads are essential, not optional. Budget &pound;150-300/month in Phase 1.</p>
+    </div>
+    <div class="hl">
+      <p><strong>Assumption:</strong> One-off pricing beats SaaS for this market.</p>
+      <p><strong>Challenge:</strong> One-off is easier to sell but harder to scale revenue. Consider adding optional &pound;29-49/month "support &amp; updates" tier after launch. Future decision, not a launch blocker.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Key Decisions &amp; Deadlines</h3>
+    <table>
+      <thead><tr><th>Decision</th><th>Deadline</th><th>Reversible?</th><th>Default if No Decision</th></tr></thead>
+      <tbody>
+        <tr><td>Delivery model (hosted vs download)</td><td>14 April</td><td>Yes</td><td>Hosted on Netlify (free)</td></tr>
+        <tr><td>Launch pricing</td><td>15 April</td><td>Yes — change anytime</td><td>Finance &pound;297, Tasks &pound;197, Bundle &pound;397</td></tr>
+        <tr><td>Data persistence approach</td><td>15 April</td><td>Costly to change later</td><td>Supabase free tier</td></tr>
+        <tr><td>Launch 1, 2, or 3 modules?</td><td>25 April</td><td>Yes</td><td>Finance + Tasks + Business Plan Builder</td></tr>
+        <tr><td>Go/no-go for public launch</td><td>9 May</td><td>Push to 14 May max</td><td>Launch 12 May</td></tr>
+        <tr><td>Start paid ads?</td><td>15 May</td><td>Yes — pause anytime</td><td>&pound;5/day Meta + LinkedIn</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<div class="footer">Operations Director — Master Action Plan v3.0 — Generated 13 April 2026<br>Claude does the work. You point it in the right direction.</div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.sec').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  // find and activate the right button
+  var btns=document.querySelectorAll('.nav button');
+  btns.forEach(function(b){if(b.getAttribute('onclick')==="show('"+id+"')")b.classList.add('active')});
+  window.scrollTo(0,0);
+}
+function toggleStep(el){el.classList.toggle('open')}
+</script>
+</body>
+</html>
