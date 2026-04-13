@@ -805,6 +805,7 @@
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Operating Systems</div>
             <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">All Operating Systems</span></div>
             <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Plan Builder</span></div>
+            <div class="sidebar-item" onclick="switchTab('os-launch')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Launch Plan</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
@@ -1100,6 +1101,9 @@
         <div class="tab-panel" id="tab-os-bplan">
             <iframe class="tab-panel-iframe" id="osBplanFrame" src="" data-src="os/business-plan-builder/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
+        <div class="tab-panel" id="tab-os-launch">
+            <iframe class="tab-panel-iframe" id="osLaunchFrame" src="" data-src="os/launch-plan.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
         <!-- /OS-INTEGRATION: Tab Panels -->
 
         <!-- Tab 7: Site Map -->
@@ -1191,6 +1195,7 @@
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',  icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
         { id: 'os-bplan',  name: 'Business Plan Builder',  icon: '📋', pageVer: '1.0', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
+        { id: 'os-launch', name: 'Launch Plan',            icon: '🚀', pageVer: '3.0', sopFile: 'os/launch-plan.html',               sopVer: '3.0', standalone: 'os/launch-plan.html' },
         // /OS-INTEGRATION: PAGE_REGISTRY
     ];
 
@@ -2957,7 +2962,7 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'All Operating', 'os-bplan': 'Business Plan' };
+        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'All Operating', 'os-bplan': 'Business Plan', 'os-launch': 'Launch Plan' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -3007,6 +3012,10 @@
         if (tabId === 'os-bplan') {
             const frame = document.getElementById('osBplanFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('business-plan')) frame.src = frame.dataset.src;
+        }
+        if (tabId === 'os-launch') {
+            const frame = document.getElementById('osLaunchFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('launch-plan')) frame.src = frame.dataset.src;
         }
         // /OS-INTEGRATION: Lazy-load
 
