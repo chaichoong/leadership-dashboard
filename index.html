@@ -805,7 +805,6 @@
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Operating Systems</div>
             <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">All Operating Systems</span></div>
             <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Plan Builder</span></div>
-            <div class="sidebar-item" onclick="switchTab('os-launch')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Launch Plan</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
@@ -1101,9 +1100,6 @@
         <div class="tab-panel" id="tab-os-bplan">
             <iframe class="tab-panel-iframe" id="osBplanFrame" src="" data-src="os/business-plan-builder/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
-        <div class="tab-panel" id="tab-os-launch">
-            <iframe class="tab-panel-iframe" id="osLaunchFrame" src="" data-src="os/launch-plan.html" loading="lazy" allowfullscreen style="border:none"></iframe>
-        </div>
         <!-- /OS-INTEGRATION: Tab Panels -->
 
         <!-- Tab 7: Site Map -->
@@ -1195,7 +1191,6 @@
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',  icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
         { id: 'os-bplan',  name: 'Business Plan Builder',  icon: '📋', pageVer: '1.0', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
-        { id: 'os-launch', name: 'Launch Plan',            icon: '🚀', pageVer: '3.0', sopFile: 'os/launch-plan.html',               sopVer: '3.0', standalone: 'os/launch-plan.html' },
         // /OS-INTEGRATION: PAGE_REGISTRY
     ];
 
@@ -2962,7 +2957,7 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'All Operating', 'os-bplan': 'Business Plan', 'os-launch': 'Launch Plan' };
+        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'All Operating', 'os-bplan': 'Business Plan' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -3012,10 +3007,6 @@
         if (tabId === 'os-bplan') {
             const frame = document.getElementById('osBplanFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('business-plan')) frame.src = frame.dataset.src;
-        }
-        if (tabId === 'os-launch') {
-            const frame = document.getElementById('osLaunchFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('launch-plan')) frame.src = frame.dataset.src;
         }
         // /OS-INTEGRATION: Lazy-load
 
@@ -5599,6 +5590,23 @@
             { label: 'Overdue Summary', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'List all overdue invoices with amounts and how long overdue. Calculate total overdue amount.' },
             { label: 'Payment Priority', model: 'claude-sonnet-4-20250514', maxTokens: 1000, prompt: 'Prioritise the pending invoices for payment based on due date, amount, and business importance. Suggest a payment schedule.' },
         ],
+        airtable: [
+            { label: 'Job List Overview', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the current contractor job list. How many active jobs are there? Are any overdue or stalled? What needs attention?' },
+        ],
+        comms: [
+            { label: 'Inbox Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the current inbound communications status. How many emails need responding to? Are there any urgent items?' },
+            { label: 'Follow-up Priorities', model: 'claude-sonnet-4-20250514', maxTokens: 1000, prompt: 'Review the pending follow-ups and suggest which ones to prioritise based on urgency and importance.' },
+        ],
+        compliance: [
+            { label: 'Compliance Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the property compliance status. Are any certificates expired or expiring soon? Which properties need attention?' },
+            { label: 'Expiry Report', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Generate a compliance expiry report. List all certificates by expiry date, flag any that are expired or expiring within 30 days, and suggest an action plan.' },
+        ],
+        sitemap: [
+            { label: 'Version Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Check the version sync status across all pages and SOPs. Which SOPs are out of date and need updating?' },
+        ],
+        fintable: [
+            { label: 'Sync Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Check the Fintable bank sync status. Are all accounts syncing correctly? Are any stale or disconnected?' },
+        ],
         _default: [
             { label: 'Ask a Question', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: '' },
         ],
@@ -5642,9 +5650,34 @@
             timestamp: new Date().toISOString(),
             ...dashboardState,
         };
-        if (tab === 'cfv' && typeof detectCFVs === 'function') {
-            try { ctx.cfvDetails = detectCFVs(); } catch(e) {}
-        }
+        // Add page-specific context
+        try {
+            if (tab === 'cfv' && typeof detectCFVs === 'function') {
+                ctx.cfvDetails = detectCFVs().map(e => ({ surname: e.surname, ref: e.ref, rent: e.rent, dueDay: e.dueDay, daysOverdue: e.daysOverdue, status: e.status, propertyName: e.propertyName }));
+            }
+            if (tab === 'invoices') {
+                const invoicePanel = document.getElementById('tab-invoices');
+                if (invoicePanel) {
+                    const rows = invoicePanel.querySelectorAll('tbody tr');
+                    ctx.invoiceCount = rows.length;
+                    ctx.invoiceSummary = document.getElementById('invoiceSummaryCards')?.innerText || '';
+                }
+            }
+            if (tab === 'compliance') {
+                const frame = document.getElementById('complianceFrame');
+                ctx.compliancePage = 'Property compliance tracking page (loaded as iframe)';
+            }
+            if (tab === 'comms') {
+                ctx.commsPage = 'Inbound communications tracker (loaded as iframe)';
+            }
+            if (tab === 'sitemap') {
+                ctx.pageRegistry = PAGE_REGISTRY.map(p => ({ name: p.name, pageVer: p.pageVer, sopVer: p.sopVer, inSync: p.pageVer === p.sopVer }));
+            }
+            if (tab === 'fintable') {
+                const summary = document.getElementById('fintableSummary');
+                ctx.fintableSummary = summary?.innerText || 'Fintable sync monitor page';
+            }
+        } catch(e) { console.warn('Context gathering error:', e); }
         return ctx;
     }
 
@@ -5661,6 +5694,18 @@ RULES:
 - Use markdown for formatting. Keep responses under 300 words unless generating a report.
 - For reports, use structured sections with headers.
 - When referencing tenancies, include the unit reference.
+
+PAGES IN THIS PLATFORM:
+- Leadership Dashboard: Financial overview, cash flow forecast, reconciliation, balance calculator, AI commentary
+- Contractor Job List: Active maintenance jobs (Airtable embed)
+- Invoices: Pending invoices from Gmail, AI matching, mark as paid
+- CFVs: Cash flow void detection, 3-stage chase, comments, status management
+- Inbound Comms: Email triage, AI label suggestions, follow-up tracking
+- Property Compliance: Certificate tracking, expiry monitoring
+- Site Map: Page registry, version tracking, SOP sync
+- Fintable Sync Monitor: Bank account sync status
+
+You are aware of ALL pages and can answer questions about any of them. Adapt your responses to whichever page the user is currently viewing.
 
 CURRENT DASHBOARD STATE:
 \`\`\`json
