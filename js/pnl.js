@@ -226,6 +226,76 @@
 
     // Cached P&L result so drill-down clicks don't have to re-aggregate
     let _pnlCache = null;
+    // Track whether any edits were made inside the drill modal so we know to
+    // re-render the P&L when it closes.
+    let _pnlEditsMade = false;
+
+    // Which businesses appear in the top-of-report dropdown. Amend dropdown inside
+    // drill-down rows uses the full allBusinesses list (includes Personal etc.).
+    const PNL_TOP_BUSINESSES = ['Real Estate', 'Operations Director'];
+
+    // Field primary IDs for name lookups
+    const PNL_NAME_FIELDS = {
+        category:    'fldii4oUzSfmplihO',
+        subCategory: 'fldO4BTJhFv5EsN6i',
+        business:    'fldbbRqVxLxUdHwIR',
+    };
+
+    // Build <option> list for a dropdown. records come from allCategories etc.
+    function pnlOptionList(records, nameFieldId, selectedId) {
+        const sorted = [...(records || [])].map(r => ({
+            id: r.id,
+            name: String(getField(r, nameFieldId) || '')
+        })).filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name));
+        const opts = ['<option value="">(none)</option>']
+            .concat(sorted.map(o =>
+                `<option value="${escHtml(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${escHtml(o.name)}</option>`
+            ));
+        return opts.join('');
+    }
+
+    // PATCH a single linked-record field on a transaction and update the local
+    // tx record so the UI stays in sync without a full refresh.
+    async function pnlEditTxField(txId, kind, recordId, selectEl) {
+        const fieldMap = {
+            category:    F.txCategory,
+            subCategory: F.txSubCategory,
+            business:    F.txBusiness,
+        };
+        const fieldId = fieldMap[kind];
+        if (!fieldId) return;
+
+        const status = selectEl?.parentElement?.querySelector('.pnl-edit-status');
+        if (status) { status.textContent = '…'; status.style.color = '#94a3b8'; }
+
+        const fields = {};
+        fields[fieldId] = recordId ? [recordId] : [];
+
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields, returnFieldsByFieldId: true })
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.error?.message || resp.status);
+            }
+            const updated = await resp.json();
+
+            // Mirror new field values onto the local tx record so future renders
+            // reflect the change. updated.fields is keyed by field ID.
+            const tx = (allTransactions || []).find(t => t.id === txId);
+            if (tx && updated.fields) {
+                Object.assign(tx.fields, updated.fields);
+            }
+            _pnlEditsMade = true;
+            if (status) { status.textContent = '✓'; status.style.color = '#16a34a'; }
+        } catch (e) {
+            console.error('pnlEditTxField failed', e);
+            if (status) { status.textContent = '✗ ' + (e.message || 'err'); status.style.color = '#dc2626'; }
+        }
+    }
 
     // Drill-down: show the transactions that make up a given slice.
     // scope = 'cell' | 'subTotal' | 'monthTotal' | 'sectionTotal'
@@ -256,12 +326,20 @@
         else if (scope === 'monthTotal') title = `${section} — ${pnlMonthLabel(monthKey)}`;
         else title = `${section} — ${pnlMonths} month total`;
 
-        const subCatNames = pnlBuildLookup(allSubCategories, 'fldO4BTJhFv5EsN6i');
-        const bizNames = pnlBuildLookup(allBusinesses, 'fldbbRqVxLxUdHwIR');
-        const resolve = (field, map) => {
-            const id = pnlLinkId(field);
-            return id ? (map[id] || '') : '';
-        };
+        // Builder for an editable linked-record select embedded in a drill row.
+        // onchange calls pnlEditTxField(txId, kind, value, this)
+        function editSelect(txId, kind, currentId, options) {
+            return `<div style="display:flex;align-items:center;gap:4px">
+                <select onchange="pnlEditTxField(${jsAttr(txId)}, ${jsAttr(kind)}, this.value, this)"
+                    style="font-size:11px;padding:2px 4px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;max-width:140px">
+                    ${options}
+                </select>
+                <span class="pnl-edit-status" style="font-size:11px;min-width:12px"></span>
+            </div>`;
+        }
+
+        // Local jsAttr so we can use the helper inside this function scope too.
+        const jsAttr = (v) => JSON.stringify(v == null ? null : v).replace(/"/g, '&quot;');
 
         let runningTotal = 0;
         const rowsHtml = txs.map(tx => {
@@ -269,19 +347,22 @@
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
             runningTotal += amt;
             const detail = txLabel(tx);
-            const biz = resolve(getField(tx, F.txBusiness), bizNames);
-            const bizOk = biz === 'Real Estate';
-            const sub = resolve(getField(tx, F.txSubCategory), subCatNames);
+            const catId = pnlLinkId(getField(tx, F.txCategory));
+            const subCatId = pnlLinkId(getField(tx, F.txSubCategory));
+            const bizId = pnlLinkId(getField(tx, F.txBusiness));
             const amtCls = amt < 0 ? 'color:#dc2626' : 'color:#065f46';
+
+            const catOpts    = pnlOptionList(allCategories,    PNL_NAME_FIELDS.category,    catId);
+            const subCatOpts = pnlOptionList(allSubCategories, PNL_NAME_FIELDS.subCategory, subCatId);
+            const bizOpts    = pnlOptionList(allBusinesses,    PNL_NAME_FIELDS.business,    bizId);
+
             return `<tr>
-                <td style="padding:8px 10px;white-space:nowrap">${escHtml(date)}</td>
-                <td style="padding:8px 10px">${escHtml(detail)}<div style="font-size:10px;color:#94a3b8;margin-top:2px">${escHtml(sub)}</div></td>
-                <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;${amtCls};font-weight:600">${amt < 0 ? '-' : ''}£${Math.abs(amt).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                <td style="padding:8px 10px">
-                    <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:10px;background:${bizOk ? '#dcfce7' : '#fee2e2'};color:${bizOk ? '#065f46' : '#991b1b'}">
-                        ${bizOk ? '✓' : '✗'} ${escHtml(biz || '(none)')}
-                    </span>
-                </td>
+                <td style="padding:8px 10px;white-space:nowrap;vertical-align:top">${escHtml(date)}</td>
+                <td style="padding:8px 10px;vertical-align:top;min-width:180px">${escHtml(detail)}</td>
+                <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;${amtCls};font-weight:600;vertical-align:top">${amt < 0 ? '-' : ''}£${Math.abs(amt).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editSelect(tx.id, 'category',    catId,    catOpts)}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editSelect(tx.id, 'subCategory', subCatId, subCatOpts)}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editSelect(tx.id, 'business',    bizId,    bizOpts)}</td>
             </tr>`;
         }).join('');
 
@@ -292,12 +373,12 @@
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
         overlay.onclick = (e) => { if (e.target === overlay) pnlCloseDrill(); };
         overlay.innerHTML = `
-            <div style="background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,0.3)">
+            <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,0.3)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0">
                     <div>
                         <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">${escHtml(section)}</div>
                         <div style="font-size:16px;font-weight:700;color:#0f172a">${escHtml(title)}</div>
-                        <div style="font-size:12px;color:#64748b;margin-top:2px">${txs.length} transaction${txs.length === 1 ? '' : 's'} &nbsp;·&nbsp; Sum of Report Amount: <strong>${sumFmt}</strong></div>
+                        <div style="font-size:12px;color:#64748b;margin-top:2px">${txs.length} transaction${txs.length === 1 ? '' : 's'} &nbsp;·&nbsp; Sum of Report Amount: <strong>${sumFmt}</strong> &nbsp;·&nbsp; <span style="color:#94a3b8">Changes save instantly; report refreshes when you close.</span></div>
                     </div>
                     <button onclick="pnlCloseDrill()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#64748b;padding:0 8px">&times;</button>
                 </div>
@@ -308,10 +389,12 @@
                                 <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Date</th>
                                 <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Transaction Detail</th>
                                 <th style="padding:8px 10px;text-align:right;font-weight:600;color:#475569">Report Amount</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Category</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Sub-Category</th>
                                 <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Business (For Reports)</th>
                             </tr>
                         </thead>
-                        <tbody>${rowsHtml || '<tr><td colspan="4" style="padding:40px;text-align:center;color:#94a3b8">No transactions for this slice.</td></tr>'}</tbody>
+                        <tbody>${rowsHtml || '<tr><td colspan="6" style="padding:40px;text-align:center;color:#94a3b8">No transactions for this slice.</td></tr>'}</tbody>
                     </table>
                 </div>
             </div>
@@ -325,6 +408,11 @@
         const o = document.getElementById('pnlDrillOverlay');
         if (o) o.remove();
         document.removeEventListener('keydown', pnlEscHandler);
+        // If any row-level edits happened, refresh the P&L to reflect re-classified amounts.
+        if (_pnlEditsMade) {
+            _pnlEditsMade = false;
+            if (typeof renderPnL === 'function') renderPnL();
+        }
     }
     function pnlEscHandler(e) { if (e.key === 'Escape') pnlCloseDrill(); }
 
@@ -338,9 +426,11 @@
             return;
         }
 
-        // P&L is locked to Real Estate for now
-        const businessNames = ['Real Estate'];
-        pnlBusinessName = 'Real Estate';
+        // Top-of-report Business filter: only the two business-level P&Ls.
+        // (The amend dropdown in drill rows uses the full allBusinesses list,
+        // which includes Personal etc., so mis-categorised txs can be corrected.)
+        const businessNames = PNL_TOP_BUSINESSES.slice();
+        if (!businessNames.includes(pnlBusinessName)) pnlBusinessName = businessNames[0];
 
         const keys = pnlMonthKeys(pnlMonths);
         const pnl = buildPnL(allTransactions, pnlBusinessName, keys);
