@@ -922,7 +922,7 @@
         </div>
 
         <!-- Utility Bar: Unreconciled Transactions -->
-        <div id="reconBar" style="margin-bottom:16px"></div>
+        <div id="reconBar" class="cards-grid" style="margin-bottom:16px"></div>
 
         <!-- Section 1: Financial Overview -->
         <div class="section">
@@ -1185,7 +1185,7 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.4', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.5', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
         { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },
@@ -1742,6 +1742,17 @@
         const costSorted = [...activeCosts].sort((a, b) => (getNumVal(a, F.costDueDay, 99)) - (getNumVal(b, F.costDueDay, 99)));
 
         // Unreconciled transactions bar (above Financial Overview, alongside Balance Calculator)
+        const accStats = getReconAccuracyStats();
+        const accCard = accStats ? `
+            <div class="kpi-card">
+                <div class="kpi-card-label">AI Reconciliation Accuracy</div>
+                <div class="kpi-card-value" style="color:${accStats.colour}">${accStats.pct}%</div>
+                <div class="kpi-card-sub">${accStats.accurate}/${accStats.total} correct — last ${accStats.total >= 100 ? '100' : '31 days'}</div>
+                <div style="margin-top:8px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
+                    <div style="height:100%;width:${accStats.pct}%;background:${accStats.colour};border-radius:3px;transition:width 0.3s"></div>
+                </div>
+                <div style="margin-top:6px;font-size:10px;color:#94a3b8">Target: ≥90% <span style="color:#16a34a">●</span> 75–89% <span style="color:#d97706">●</span> &lt;75% <span style="color:#ef4444">●</span></div>
+            </div>` : '';
         document.getElementById('reconBar').innerHTML = `
             ${expandableCard('Unreconciled Transactions', unreconciledTx.length, `Santander + TNT Mgt Zempler`,
                 (unreconciledTx.length === 0
@@ -1752,6 +1763,7 @@
                     <span style="font-size:11px;color:#94a3b8" id="reconStatus"></span>
                 </div>`
             )}
+            ${accCard}
         `;
 
         document.getElementById('financialCards').innerHTML = `
@@ -4452,6 +4464,13 @@
         </div>`;
         document.body.appendChild(panel);
         window._reconResults = results;
+        // Snapshot original AI suggestions for accuracy tracking
+        window._reconOriginals = results.map(r => ({
+            categoryId: r.categoryId, subCatId: r.subCatId,
+            businessId: r.businessId, tenancyId: r.tenancyId,
+            unitId: r.unitId, costId: r.costId,
+            status: r.status
+        }));
     }
 
     function reconRowHtml(r, i) {
@@ -4593,6 +4612,37 @@
         if (tbody) tbody.innerHTML = window._reconResults.map((r, i) => reconRowHtml(r, i)).join('');
     }
 
+    // ── AI Reconciliation Accuracy Tracking ──
+    function logReconAccuracy(txId, wasAccurate) {
+        const log = JSON.parse(localStorage.getItem('_recon_accuracy_log') || '[]');
+        // Prevent duplicate entries for same transaction
+        if (log.some(e => e.txId === txId)) return;
+        log.push({ date: new Date().toISOString().slice(0, 10), txId, wasAccurate });
+        // Keep max 200 entries to avoid unbounded growth
+        if (log.length > 200) log.splice(0, log.length - 200);
+        localStorage.setItem('_recon_accuracy_log', JSON.stringify(log));
+    }
+
+    function getReconAccuracyStats() {
+        const log = JSON.parse(localStorage.getItem('_recon_accuracy_log') || '[]');
+        if (log.length === 0) return null;
+        // Filter to last 31 days
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 31);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        let recent = log.filter(e => e.date >= cutoffStr);
+        // Use last 100 if more than 100 in the window
+        if (recent.length > 100) recent = recent.slice(-100);
+        // If fewer than 5 in last 31 days, use last 100 overall
+        if (recent.length < 5) recent = log.slice(-100);
+        const total = recent.length;
+        const accurate = recent.filter(e => e.wasAccurate).length;
+        const pct = Math.round((accurate / total) * 100);
+        const colour = pct >= 90 ? '#16a34a' : pct >= 75 ? '#d97706' : '#ef4444';
+        const label = pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red';
+        return { total, accurate, pct, colour, label };
+    }
+
     async function approveRecon(idx) {
         const r = window._reconResults[idx];
         if (r.status === 'approved') return; // already done
@@ -4629,6 +4679,15 @@
         }
 
         r.status = 'approved';
+
+        // Track AI reconciliation accuracy
+        const orig = (window._reconOriginals || [])[idx];
+        if (orig && orig.status === 'suggestion') {
+            const final = { categoryId: catId, subCatId, businessId, tenancyId, unitId, costId };
+            const wasAccurate = ['categoryId', 'subCatId', 'businessId', 'tenancyId', 'unitId', 'costId']
+                .every(f => (final[f] || '') === (orig[f] || ''));
+            logReconAccuracy(r.txId, wasAccurate);
+        }
 
         const getInputVal = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
         const vendorKey = r.txVendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
