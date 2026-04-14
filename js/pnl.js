@@ -24,24 +24,43 @@
         return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
     }
 
-    // Read linked-record name (first entry) from a field that could be [{id,name}] or [id]
-    function pnlLinkName(field) {
-        if (!field) return '';
+    // Build id→name lookup from a loaded table given its primary field id
+    function pnlBuildLookup(records, nameFieldId) {
+        const out = {};
+        (records || []).forEach(r => {
+            const n = getField(r, nameFieldId);
+            if (n) out[r.id] = String(n);
+        });
+        return out;
+    }
+
+    // Read linked-record id (first entry) from a linked field. Airtable REST with
+    // returnFieldsByFieldId=true returns an array of record ID strings; the MCP
+    // returns [{id, name}] — handle both.
+    function pnlLinkId(field) {
+        if (!field) return null;
         if (Array.isArray(field)) {
             const first = field[0];
-            if (!first) return '';
-            if (typeof first === 'object') return first.name || '';
-            // Fallback: resolve from allCategories/SubCategories/Businesses by id
-            return '';
+            if (!first) return null;
+            return typeof first === 'object' ? first.id : first;
         }
-        if (typeof field === 'object') return field.name || '';
-        return '';
+        if (typeof field === 'object') return field.id;
+        return null;
     }
 
     // Aggregate transactions into a P&L structure for the given business.
-    // Returns { months: [keys], sections: [{name, total, rows: [{subCat, monthly: {key:amt}, total}]}], totals }
     function buildPnL(transactions, businessName, monthKeys) {
         const monthSet = new Set(monthKeys);
+
+        // Resolve linked-record names via the loaded tables (REST returns just IDs)
+        const catNames = pnlBuildLookup(allCategories, 'fldii4oUzSfmplihO');        // Category Name
+        const subCatNames = pnlBuildLookup(allSubCategories, 'fldO4BTJhFv5EsN6i');   // Sub Category Name
+        const bizNames = pnlBuildLookup(allBusinesses, 'fldbbRqVxLxUdHwIR');          // Business Name
+        const resolve = (field, map) => {
+            const id = pnlLinkId(field);
+            if (!id) return '';
+            return map[id] || '';
+        };
 
         // section name -> subCatName -> { months: Map<key, amount> , total }
         const sections = {
@@ -51,7 +70,7 @@
         };
 
         transactions.forEach(tx => {
-            const biz = pnlLinkName(getField(tx, F.txBusiness));
+            const biz = resolve(getField(tx, F.txBusiness), bizNames);
             if (biz !== businessName) return;
 
             const dateStr = getField(tx, F.txDate);
@@ -61,10 +80,10 @@
             const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
             if (!monthSet.has(mKey)) return;
 
-            const catName = pnlLinkName(getField(tx, F.txCategory));
+            const catName = resolve(getField(tx, F.txCategory), catNames);
             if (!sections[catName]) return; // skip Capex, Transfer, Balance Sheet, Personal, Loan, etc.
 
-            const subCat = pnlLinkName(getField(tx, F.txSubCategory)) || '(uncategorised)';
+            const subCat = resolve(getField(tx, F.txSubCategory), subCatNames) || '(uncategorised)';
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
             // Revenue stored as positive, expenses as negative. Use absolute for expenses.
             const signed = catName === 'Revenue' ? amt : -amt; // makes expenses positive magnitudes
