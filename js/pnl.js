@@ -349,19 +349,25 @@
         const headCells = keys.map(k => `<th style="text-align:right;min-width:88px">${pnlMonthLabel(k)}</th>`).join('') +
             `<th style="text-align:right;min-width:100px;background:#f1f5f9">Total</th>`;
 
+        // JSON-stringify a value for safe embedding inside a double-quoted HTML attribute.
+        // JSON strings contain " which would close the attribute — escape them as &quot;.
+        function jsAttr(v) {
+            return JSON.stringify(v == null ? null : v).replace(/"/g, '&quot;');
+        }
+
         // Clickable data cell — drills down to the transactions backing the value.
         // Only wires up click if there are transactions behind the number.
         function cellTd(section, subCat, monthKey, value, extraStyle = '') {
             const hasTx = !!(pnl.txIndex[section]?.[subCat]?.[monthKey]?.length);
             if (!hasTx) return `<td style="text-align:right;${extraStyle}">${pnlFmt(value)}</td>`;
-            return `<td style="text-align:right;cursor:pointer;${extraStyle}" onclick="pnlDrill('cell', ${JSON.stringify(section)}, ${JSON.stringify(subCat)}, ${JSON.stringify(monthKey)})" title="Show transactions">${pnlFmt(value)}</td>`;
+            return `<td style="text-align:right;cursor:pointer;${extraStyle}" onclick="pnlDrill('cell', ${jsAttr(section)}, ${jsAttr(subCat)}, ${jsAttr(monthKey)})" title="Show transactions">${pnlFmt(value)}</td>`;
         }
 
         function subTotalTd(section, subCat, value) {
             const hasTx = Object.values(pnl.txIndex[section]?.[subCat] || {}).some(arr => arr.length);
             const base = 'text-align:right;background:#f8fafc;font-weight:600';
             if (!hasTx) return `<td style="${base}">${pnlFmt(value)}</td>`;
-            return `<td style="${base};cursor:pointer" onclick="pnlDrill('subTotal', ${JSON.stringify(section)}, ${JSON.stringify(subCat)}, null)" title="Show all transactions for this line">${pnlFmt(value)}</td>`;
+            return `<td style="${base};cursor:pointer" onclick="pnlDrill('subTotal', ${jsAttr(section)}, ${jsAttr(subCat)}, null)" title="Show all transactions for this line">${pnlFmt(value)}</td>`;
         }
 
         function rowsFor(section, indent = 14) {
@@ -377,11 +383,11 @@
 
         // Section totals (Total Revenue / Total COGS / Total OpEx) — clickable, scoped to that section.
         function sectionTotalRow(label, sectionName, perMonth, grand, { bg = '#e2e8f0', color = '#0f172a' } = {}) {
-            const cells = keys.map(k => `<td style="text-align:right;cursor:pointer" onclick="pnlDrill('monthTotal', ${JSON.stringify(sectionName)}, null, ${JSON.stringify(k)})" title="Show ${escHtml(sectionName)} transactions for ${escHtml(pnlMonthLabel(k))}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
+            const cells = keys.map(k => `<td style="text-align:right;cursor:pointer" onclick="pnlDrill('monthTotal', ${jsAttr(sectionName)}, null, ${jsAttr(k)})" title="Show ${escHtml(sectionName)} transactions for ${escHtml(pnlMonthLabel(k))}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
             return `<tr style="background:${bg};color:${color};font-weight:700">
                 <td style="padding:8px 10px">${escHtml(label)}</td>
                 ${cells}
-                <td style="text-align:right;cursor:pointer" onclick="pnlDrill('sectionTotal', ${JSON.stringify(sectionName)}, null, null)" title="Show all ${escHtml(sectionName)} transactions">${pnlFmt(grand)}</td>
+                <td style="text-align:right;cursor:pointer" onclick="pnlDrill('sectionTotal', ${jsAttr(sectionName)}, null, null)" title="Show all ${escHtml(sectionName)} transactions">${pnlFmt(grand)}</td>
             </tr>`;
         }
 
