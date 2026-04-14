@@ -41,24 +41,25 @@
             <p>Kevin Brittain &bull; Founder &nbsp;<a href="#" onclick="event.preventDefault();logout()" style="color:#94a3b8;font-size:10px;text-decoration:underline">Logout</a></p>
         </div>
         <nav class="sidebar-nav">
-            <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
-            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
-            <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span></div>
-            <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
-            <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
-            <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List</span></div>
-            <div class="sidebar-item" onclick="switchTab('launch-plan')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Operations Director Launch Plan</span></div>
+            <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids OS</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
+            <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('pnl')" style="padding-left:36px"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span></div>
+            <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('launch-plan')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Operations Director Launch Plan OS</span></div>
         </nav>
         <!-- OS-INTEGRATION: Sidebar — DO NOT REMOVE (see MEMORY.md) -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Operating Systems</div>
             <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Operating Systems Hub</span></div>
-            <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Launch Plan Builder</span></div>
+            <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Launch Plan Builder OS</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Admin</div>
-            <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync Monitor</span><span id="fintableBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+            <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync Monitor OS</span><span id="fintableBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
             <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span><span id="sitemapBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
         </div>
     </div>
@@ -105,17 +106,17 @@
 
         <!-- Tabs Navigation (hidden — replaced by sidebar) -->
         <div class="tabs-nav">
-            <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard</button>
-            <button class="tab-btn" onclick="switchTab('airtable')">Contractor Job List</button>
-            <button class="tab-btn" onclick="switchTab('invoices')">Invoices</button>
-            <button class="tab-btn" onclick="switchTab('cfv')">CFVs</button>
+            <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard OS</button>
+            <button class="tab-btn" onclick="switchTab('airtable')">Contractor Job List OS</button>
+            <button class="tab-btn" onclick="switchTab('invoices')">Invoices OS</button>
+            <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids OS</button>
         </div>
 
         <!-- Tab 1: Leadership Dashboard -->
         <div class="tab-panel active" id="tab-overview">
 
         <div class="header">
-            <h1>Leadership Dashboard</h1>
+            <h1>Leadership Dashboard OS</h1>
             <p id="headerDate"></p>
             <div class="refresh-info">
                 <div class="refresh-dot"></div>
@@ -243,7 +244,7 @@
         <div class="tab-panel" id="tab-invoices">
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-                    <h2 class="section-title" style="margin-bottom:0">Invoices to Pay</h2>
+                    <h2 class="section-title" style="margin-bottom:0">Invoices OS — Invoices to Pay</h2>
                     <span style="font-size:12px;color:#94a3b8">Gmail label: <strong style="color:#64748b">3. to pay</strong> &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">28 Mar 2026</strong> &nbsp;·&nbsp; Ask Claude to refresh</span>
                 </div>
                 <div class="cards-grid" id="invoiceSummaryCards"></div>
@@ -284,11 +285,14 @@
             </div>
         </div>
 
+        <!-- Tab: Profit & Loss -->
+        <div class="tab-panel" id="tab-pnl"></div>
+
         <!-- Tab 4: CFVs -->
         <div class="tab-panel" id="tab-cfv">
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-                    <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids</h2>
+                    <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids OS</h2>
                     <span style="font-size:12px;color:#94a3b8">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
                 </div>
                 <div class="cards-grid" id="cfvSummaryCards"></div>
@@ -383,7 +387,7 @@
         <!-- Tab 8: Fintable Sync Monitor (Admin) -->
         <div class="tab-panel" id="tab-fintable">
             <div class="section">
-                <h2 class="section-title">Fintable Sync Monitor</h2>
+                <h2 class="section-title">Fintable Sync Monitor OS</h2>
                 <p style="color:#64748b;font-size:13px;margin-bottom:16px">Monitors active bank account syncs from Fintable. Accounts that haven't synced recently are flagged so you can reconnect them.</p>
 
                 <!-- Summary cards -->
@@ -430,15 +434,16 @@
 
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
-    <script src="js/config.js?v=4"></script>
-    <script src="js/shared.js?v=4"></script>
-    <script src="js/dashboard.js?v=4"></script>
-    <script src="js/cashflow.js?v=4"></script>
-    <script src="js/sitemap.js?v=4"></script>
-    <script src="js/invoices.js?v=4"></script>
-    <script src="js/reconciliation.js?v=4"></script>
-    <script src="js/cfv.js?v=4"></script>
-    <script src="js/fintable.js?v=4"></script>
-    <script src="js/ai-assistant.js?v=4"></script>
+    <script src="js/config.js?v=5"></script>
+    <script src="js/shared.js?v=5"></script>
+    <script src="js/dashboard.js?v=5"></script>
+    <script src="js/cashflow.js?v=5"></script>
+    <script src="js/sitemap.js?v=5"></script>
+    <script src="js/invoices.js?v=5"></script>
+    <script src="js/pnl.js?v=5"></script>
+    <script src="js/reconciliation.js?v=5"></script>
+    <script src="js/cfv.js?v=5"></script>
+    <script src="js/fintable.js?v=5"></script>
+    <script src="js/ai-assistant.js?v=5"></script>
 </body>
 </html>

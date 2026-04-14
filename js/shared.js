@@ -296,7 +296,7 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'launch-plan': 'Director Launch Plan' };
+        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'launch-plan': 'Director Launch Plan' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -305,7 +305,7 @@
             if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
                 (tabId === 'airtable' && b.textContent.includes('Contractor')) ||
                 (tabId === 'invoices' && b.textContent.includes('Invoices')) ||
-                (tabId === 'cfv' && b.textContent.includes('CFV'))) {
+                (tabId === 'cfv' && b.textContent.includes('Cash Flow Voids'))) {
                 b.classList.add('active');
             }
         });
@@ -325,6 +325,10 @@
         // Render invoices tab on switch
         if (tabId === 'invoices') {
             renderInvoiceTab();
+        }
+        // Render Profit & Loss on switch
+        if (tabId === 'pnl') {
+            if (typeof renderPnL === 'function') renderPnL();
         }
         // Render CFV tab on switch
         if (tabId === 'cfv') {
