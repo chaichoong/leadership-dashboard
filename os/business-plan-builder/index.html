@@ -250,20 +250,51 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .tl-week:nth-child(3){background:rgba(245,158,11,.2);color:var(--amber)}
 .tl-week:nth-child(4){background:rgba(34,197,94,.2);color:var(--green)}
 
-/* Accordion steps */
-.step-acc{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:.75rem;overflow:hidden}
-.step-hdr{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;background:var(--surface);transition:background .15s;user-select:none}
-.step-hdr:hover{background:var(--surface2)}
-.step-num{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0;color:#fff}
-.step-1 .step-num{background:var(--accent)}
-.step-2 .step-num{background:var(--blue)}
-.step-3 .step-num{background:var(--amber);color:#111}
-.step-4 .step-num{background:var(--green)}
-.step-title{font-weight:600;font-size:.9rem;flex:1}
+/* Dashboard section headers */
+.sh{font-size:1.4rem;font-weight:800;margin-bottom:8px;color:var(--accent2)}
+.sh-sub{color:var(--text2);font-size:0.9rem;margin-bottom:28px}
+
+/* Dashboard collapsible step blocks */
+.step{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden;transition:border-color .2s}
+.step:hover{border-color:var(--accent)}
+.step-hdr{display:flex;align-items:center;gap:14px;padding:18px 22px;cursor:pointer;user-select:none}
+.step-num{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:800;flex-shrink:0;border:2px solid var(--border);color:var(--text2);background:transparent}
+.step.open .step-num{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,0.1)}
+.step-title{flex:1;font-weight:700;font-size:.95rem;color:var(--text)}
+.step-meta{display:flex;gap:8px;align-items:center}
 .step-arrow{color:var(--text2);transition:transform .2s;font-size:.8rem}
+.step.open .step-arrow{transform:rotate(90deg);color:var(--accent)}
+.step-body{display:none;padding:0 22px 22px;border-top:1px solid var(--border);font-size:.88rem;line-height:1.7;color:var(--text)}
+.step.open .step-body{display:block}
+.step-body > p:first-child{padding-top:14px}
+
+/* Role-coloured step-num variants */
+.step.step-accent .step-num{border-color:rgba(99,102,241,.5);color:var(--accent2);background:rgba(99,102,241,0.08)}
+.step.step-blue .step-num{border-color:rgba(59,130,246,.5);color:var(--blue);background:rgba(59,130,246,0.08)}
+.step.step-amber .step-num{border-color:rgba(245,158,11,.5);color:var(--amber);background:rgba(245,158,11,0.08)}
+.step.step-green .step-num{border-color:rgba(34,197,94,.5);color:var(--green);background:rgba(34,197,94,0.08)}
+.step.step-pink .step-num{border-color:rgba(236,72,153,.5);color:var(--pink);background:rgba(236,72,153,0.08)}
+
+/* Timeline flex bar */
+.tl{display:flex;gap:0;margin:20px 0;border-radius:10px;overflow:hidden}
+.tl-seg{padding:12px 16px;text-align:center;flex:1;color:#fff}
+.tl-seg .tl-lbl{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px}
+.tl-seg .tl-date{font-size:.78rem;margin-top:3px;opacity:.92}
+
+/* Decision callout */
+.decision{border:1px solid var(--amber);border-radius:10px;padding:14px 18px;margin:16px 0;background:rgba(245,158,11,0.07)}
+.decision h4{color:var(--amber);font-size:.85rem;margin-bottom:6px;font-weight:700}
+.decision p{font-size:.88rem;color:var(--text);line-height:1.6}
+
+/* Accent highlight box variant */
+.hl-accent{border-left:4px solid var(--accent);background:var(--surface2);border-radius:0 10px 10px 0;padding:14px 18px;margin:12px 0}
+.hl-accent .hl-label{font-size:.72rem;color:var(--accent2);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px}
+.hl-accent .hl-value{font-size:1rem;font-weight:600;color:var(--text);line-height:1.55}
+
+/* Legacy accordion compat (kept for safety) */
+.step-acc{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:.75rem;overflow:hidden}
+.step-acc .step-hdr{background:var(--surface)}
 .step-acc.open .step-arrow{transform:rotate(180deg)}
-.step-body{display:none;padding:0 16px 14px 60px;font-size:.88rem;line-height:1.7;color:var(--text)}
-.step-acc.open .step-body{display:block}
 
 /* Checklist */
 .checklist{list-style:none;padding:0}
@@ -341,7 +372,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   .plan-wrap{padding:0!important;max-width:100%!important}
   .plan-hdr h1{-webkit-text-fill-color:#6366f1!important;color:#6366f1!important}
   .sec{display:block!important;page-break-inside:avoid;margin-bottom:2rem}
-  .card,.hl,.kpi-card,.metric-card,.step-acc,.ms-card{background:#fff!important;border:1px solid #ddd!important}
+  .card,.hl,.hl-accent,.kpi-card,.metric-card,.step,.step-acc,.ms-card,.decision{background:#fff!important;border:1px solid #ddd!important;color:#222!important}
+  .step .step-body{display:block!important}
+  .sh{color:#111!important}
+  .tl-seg{color:#fff!important}
   .plan-table th{background:#f5f5f5!important}
   .plan-table td,.plan-table th{border-color:#ddd!important}
   .card-label,.hl-label,.kpi-label,.mc-label,.sec-subtitle{color:#666!important}
@@ -1245,7 +1279,7 @@ function secStart(id, idx) {
     metrics:'How you will measure and manage success'
   };
   var h = '<div class="sec' + activeCls + '" id="sec-' + id + '">';
-  h += '<div class="sec-hdr"><div class="sec-icon">' + s.icon + '</div><div class="sec-hdr-text"><h2>' + escapeHtml(s.title) + '</h2><div class="sec-subtitle">' + (subtitles[id] || '') + '</div></div></div>';
+  h += '<div class="sec-hdr"><div class="sec-icon">' + s.icon + '</div><div class="sec-hdr-text"><div class="sh">' + escapeHtml(s.title) + '</div><div class="sh-sub">' + (subtitles[id] || '') + '</div></div></div>';
 
   // Action buttons — View Discussion + Edit Section
   h += '<div class="sec-actions">';
@@ -1293,23 +1327,50 @@ function emptySection(id, idx) {
   return secStart(id, idx) + '<div class="plan-empty">Not yet discussed — continue your conversation to fill this section.</div></div>';
 }
 
+// Dashboard-style collapsible step helper
+function stepBlock(num, title, bodyHtml, opts) {
+  opts = opts || {};
+  var cls = 'step' + (opts.color ? ' step-' + opts.color : '') + (opts.open ? ' open' : '');
+  var meta = opts.meta ? '<div class="step-meta">' + opts.meta + '</div>' : '';
+  var h = '<div class="' + cls + '">';
+  h += '<div class="step-hdr" onclick="toggleStep(this.parentElement)">';
+  h += '<div class="step-num">' + num + '</div>';
+  h += '<div class="step-title">' + escapeHtml(title) + '</div>';
+  h += meta;
+  h += '<div class="step-arrow">\u25b6</div>';
+  h += '</div>';
+  h += '<div class="step-body">' + bodyHtml + '</div>';
+  h += '</div>';
+  return h;
+}
+
+// Highlight helper with accent left-border (launch-plan hl style)
+function hlAccent(label, value) {
+  return '<div class="hl-accent"><div class="hl-label">' + escapeHtml(label) + '</div><div class="hl-value">' + escapeHtml(value || '\u2014') + '</div></div>';
+}
+
+function decisionBox(title, body) {
+  return '<div class="decision"><h4>' + escapeHtml(title) + '</h4><p>' + escapeHtml(body) + '</p></div>';
+}
+
 function renderOverviewSection(d) {
   var idx = 0;
   if (!d) return emptySection('overview', idx);
   var h = secStart('overview', idx);
-  // Business name prominent
+  // Business name prominent + elevator pitch as hl-accent
   h += '<div class="card card-accent"><div class="card-label">Business Name</div><h3 style="font-size:1.3rem;color:var(--accent2)">' + escapeHtml(d.businessName || '\u2014') + '</h3>';
   if (d.description) h += '<p style="margin-top:.5rem">' + escapeHtml(d.description) + '</p>';
   h += '</div>';
-  // Problem / Solution side-by-side
-  h += '<div class="card-grid">';
-  h += '<div class="hl"><div class="hl-label">Problem</div><div class="hl-value">' + escapeHtml(d.problem || '\u2014') + '</div></div>';
-  h += '<div class="hl"><div class="hl-label">Solution</div><div class="hl-value">' + escapeHtml(d.solution || '\u2014') + '</div></div>';
+  if (d.description) h += hlAccent('Elevator Pitch', d.description);
+  // Quick stats row
+  h += '<div class="kpi-row" style="grid-template-columns:repeat(2,1fr);margin-top:1rem">';
+  h += '<div class="kpi-card"><div class="kpi-num">' + escapeHtml(d.industry || '\u2014') + '</div><div class="kpi-label">Industry</div></div>';
+  h += '<div class="kpi-card"><div class="kpi-num">' + escapeHtml(d.stage || '\u2014') + '</div><div class="kpi-label">Stage</div></div>';
   h += '</div>';
-  // Tags for industry and stage
-  h += '<div style="margin-top:1rem">';
-  if (d.industry) h += '<span class="tag tag-accent">' + escapeHtml(d.industry) + '</span>';
-  if (d.stage) h += '<span class="tag tag-blue">' + escapeHtml(d.stage) + '</span>';
+  // Problem / Solution side-by-side using hl-accent
+  h += '<div class="card-grid" style="margin-top:1rem">';
+  h += hlAccent('Problem', d.problem);
+  h += hlAccent('Solution', d.solution);
   h += '</div>';
   h += '</div>';
   return h;
@@ -1319,24 +1380,23 @@ function renderMarketSection(d) {
   var idx = 1;
   if (!d) return emptySection('market', idx);
   var h = secStart('market', idx);
-  // Ideal customer card
-  h += '<div class="card card-accent"><div class="card-label">Ideal Customer</div><p>' + escapeHtml(d.idealCustomer || '\u2014') + '</p></div>';
-  // Pain points
+  // Step 1: Ideal Customer
+  h += stepBlock(1, 'Ideal Customer', '<p>' + escapeHtml(d.idealCustomer || '\u2014') + '</p>' + (d.currentAlternative ? '<div class="hl-accent" style="margin-top:12px"><div class="hl-label">Currently They Use</div><div class="hl-value">' + escapeHtml(d.currentAlternative) + '</div></div>' : ''), { color:'accent', open:true });
+  // Step 2: Pain Points
+  var ppBody = '';
   if (d.painPoints && d.painPoints.length > 0) {
-    h += '<div class="card"><div class="card-label">Pain Points</div><ul class="styled-list list-amber">';
+    ppBody = '<ul class="styled-list list-amber">';
     for (var i = 0; i < d.painPoints.length; i++) {
-      if (d.painPoints[i]) h += '<li>' + escapeHtml(d.painPoints[i]) + '</li>';
+      if (d.painPoints[i]) ppBody += '<li>' + escapeHtml(d.painPoints[i]) + '</li>';
     }
-    h += '</ul></div>';
+    ppBody += '</ul>';
+  } else {
+    ppBody = '<p>\u2014</p>';
   }
-  // Market size + geographic focus as highlight metrics
-  h += '<div class="card-grid">';
-  h += '<div class="hl"><div class="hl-label">Market Size</div><div class="hl-big">' + escapeHtml(d.marketSize || '\u2014') + '</div></div>';
-  h += '<div class="hl"><div class="hl-label">Geographic Focus</div><div class="hl-big">' + escapeHtml(d.geographicFocus || '\u2014') + '</div></div>';
-  h += '</div>';
-  if (d.currentAlternative) {
-    h += '<div class="card" style="margin-top:1rem"><div class="card-label">Current Alternatives</div><p>' + escapeHtml(d.currentAlternative) + '</p></div>';
-  }
+  h += stepBlock(2, 'Pain Points', ppBody, { color:'amber' });
+  // Step 3: Market Size & Geography
+  var msBody = '<div class="card-grid">' + hlAccent('Market Size', d.marketSize) + hlAccent('Geographic Focus', d.geographicFocus) + '</div>';
+  h += stepBlock(3, 'Market Size & Geography', msBody, { color:'blue' });
   h += '</div>';
   return h;
 }
@@ -1345,20 +1405,20 @@ function renderValueSection(d) {
   var idx = 2;
   if (!d) return emptySection('value', idx);
   var h = secStart('value', idx);
-  // Value proposition large card
-  h += '<div class="card card-accent" style="border-left-width:5px"><div class="card-label">Value Proposition</div><p style="font-size:1.1rem;font-weight:600;line-height:1.6">' + escapeHtml(d.valueProposition || '\u2014') + '</p></div>';
+  // USP as accent highlight
+  h += hlAccent('Value Proposition', d.valueProposition);
   // USPs as grid of feature cards
   if (d.usps && d.usps.length > 0) {
-    h += '<div class="card-label" style="margin-bottom:.5rem;margin-top:.5rem">Unique Selling Points</div>';
+    h += '<div class="card-label" style="margin:1rem 0 .5rem">Unique Selling Points</div>';
     h += '<div class="card-grid' + (d.usps.length >= 3 ? '-3' : '') + '">';
     for (var i = 0; i < d.usps.length; i++) {
       if (d.usps[i]) h += '<div class="card"><p>' + escapeHtml(d.usps[i]) + '</p></div>';
     }
     h += '</div>';
   }
-  // Competitive advantage highlight
+  // Competitive advantage inside step
   if (d.competitiveAdvantage) {
-    h += '<div class="hl" style="margin-top:1rem"><div class="hl-label">Competitive Advantage</div><div class="hl-value">' + escapeHtml(d.competitiveAdvantage) + '</div></div>';
+    h += stepBlock(1, 'Competitive Advantage', '<p>' + escapeHtml(d.competitiveAdvantage) + '</p>', { color:'accent', open:true });
   }
   h += '</div>';
   return h;
@@ -1368,20 +1428,24 @@ function renderProductsSection(d) {
   var idx = 3;
   if (!d) return emptySection('products', idx);
   var h = secStart('products', idx);
-  // Products table
+  // Products table inside step
+  var prodBody = '';
   if (d.products && d.products.length > 0) {
-    h += '<table class="plan-table"><tr><th>Product</th><th>Description</th><th>Price</th></tr>';
+    prodBody += '<table class="plan-table"><tr><th>Product</th><th>Description</th><th>Price</th></tr>';
     for (var i = 0; i < d.products.length; i++) {
       var p = d.products[i];
       var price = p.price || '\u2014';
-      h += '<tr><td><strong>' + escapeHtml(p.name || '\u2014') + '</strong></td><td>' + escapeHtml(p.description || '\u2014') + '</td><td>' + escapeHtml(String(price)) + '</td></tr>';
+      prodBody += '<tr><td><strong>' + escapeHtml(p.name || '\u2014') + '</strong></td><td>' + escapeHtml(p.description || '\u2014') + '</td><td>' + escapeHtml(String(price)) + '</td></tr>';
     }
-    h += '</table>';
+    prodBody += '</table>';
+  } else {
+    prodBody = '<p>\u2014</p>';
   }
-  // Revenue model + pricing strategy highlights
-  h += '<div class="card-grid">';
-  h += '<div class="hl"><div class="hl-label">Revenue Model</div><div class="hl-value">' + escapeHtml(d.revenueModel || '\u2014') + '</div></div>';
-  h += '<div class="hl"><div class="hl-label">Pricing Strategy</div><div class="hl-value">' + escapeHtml(d.pricingStrategy || '\u2014') + '</div></div>';
+  h += stepBlock(1, 'Product Lineup', prodBody, { color:'accent', open:true });
+  // Revenue model + pricing strategy as hl-accent
+  h += '<div class="card-grid" style="margin-top:1rem">';
+  h += hlAccent('Revenue Model', d.revenueModel);
+  h += hlAccent('Pricing Strategy', d.pricingStrategy);
   h += '</div>';
   h += '</div>';
   return h;
@@ -1400,7 +1464,7 @@ function renderRevenueSection(d) {
   h += '</div>';
   // Assumptions highlight
   if (d.assumptions) {
-    h += '<div class="hl"><div class="hl-label">Key Assumptions</div><div class="hl-value">' + escapeHtml(d.assumptions) + '</div></div>';
+    h += hlAccent('Key Assumptions', d.assumptions);
   }
   h += '</div>';
   return h;
@@ -1436,10 +1500,10 @@ function renderCostsSection(d) {
     }
     h += '</table>';
   }
-  // Funding + Break-even
-  h += '<div class="card-grid">';
-  h += '<div class="hl"><div class="hl-label">Funding Source</div><div class="hl-value">' + escapeHtml(d.fundingSource || '\u2014') + '</div></div>';
-  h += '<div class="hl"><div class="hl-label">Break-Even Estimate</div><div class="hl-value">' + escapeHtml(d.breakEven || '\u2014') + '</div></div>';
+  // Funding + Break-even callouts
+  h += '<div class="card-grid" style="margin-top:1rem">';
+  h += hlAccent('Funding Source', d.fundingSource);
+  h += hlAccent('Break-Even Estimate', d.breakEven);
   h += '</div>';
   h += '</div>';
   return h;
@@ -1449,28 +1513,30 @@ function renderTeamSection(d) {
   var idx = 6;
   if (!d) return emptySection('team', idx);
   var h = secStart('team', idx);
-  // Founder role
-  h += '<div class="card card-accent"><div class="card-label">Founder Role</div><p>' + escapeHtml(d.founderRole || '\u2014') + '</p></div>';
-  // Key hires as tag chips
+  // Step per role: Founder
+  h += stepBlock(1, 'Founder Role', '<p>' + escapeHtml(d.founderRole || '\u2014') + '</p>', { color:'accent', open:true });
+  // Step: Key Hires
   if (d.keyHires && d.keyHires.length > 0) {
-    h += '<div class="card"><div class="card-label">Key Hires Needed</div><div class="tags-wrap">';
     var tagColors = ['tag-accent','tag-blue','tag-purple','tag-pink','tag-green','tag-amber'];
+    var hireBody = '<div class="tags-wrap">';
     for (var i = 0; i < d.keyHires.length; i++) {
-      if (d.keyHires[i]) h += '<span class="tag ' + tagColors[i % tagColors.length] + '">' + escapeHtml(d.keyHires[i]) + '</span>';
+      if (d.keyHires[i]) hireBody += '<span class="tag ' + tagColors[i % tagColors.length] + '">' + escapeHtml(d.keyHires[i]) + '</span>';
     }
-    h += '</div></div>';
+    hireBody += '</div>';
+    h += stepBlock(2, 'Key Hires Needed', hireBody, { color:'blue' });
   }
-  // Tools as tag chips
+  // Step: Tools
   if (d.tools && d.tools.length > 0) {
-    h += '<div class="card"><div class="card-label">Tools &amp; Software</div><div class="tags-wrap">';
+    var toolBody = '<div class="tags-wrap">';
     for (var i = 0; i < d.tools.length; i++) {
-      if (d.tools[i]) h += '<span class="tag tag-green">' + escapeHtml(d.tools[i]) + '</span>';
+      if (d.tools[i]) toolBody += '<span class="tag tag-green">' + escapeHtml(d.tools[i]) + '</span>';
     }
-    h += '</div></div>';
+    toolBody += '</div>';
+    h += stepBlock(3, 'Tools & Software', toolBody, { color:'green' });
   }
-  // Skills gaps as warning box
+  // Skills gaps as decision callout
   if (d.skillsGaps) {
-    h += '<div class="warn-box"><div class="warn-title">\u26a0 Skills Gaps</div><p>' + escapeHtml(d.skillsGaps) + '</p></div>';
+    h += decisionBox('Skills Gaps to Address', d.skillsGaps);
   }
   h += '</div>';
   return h;
@@ -1480,14 +1546,14 @@ function renderMarketingSection(d) {
   var idx = 7;
   if (!d) return emptySection('marketing', idx);
   var h = secStart('marketing', idx);
-  // Channels as colored tags
+  // Step per channel
   if (d.channels && d.channels.length > 0) {
-    h += '<div class="card"><div class="card-label">Marketing Channels</div><div class="tags-wrap">';
-    var tagColors = ['tag-accent','tag-green','tag-blue','tag-amber','tag-purple','tag-pink'];
+    var channelColors = ['accent','green','blue','amber','pink'];
     for (var i = 0; i < d.channels.length; i++) {
-      if (d.channels[i]) h += '<span class="tag ' + tagColors[i % tagColors.length] + '">' + escapeHtml(d.channels[i]) + '</span>';
+      if (d.channels[i]) {
+        h += stepBlock(i + 1, 'Channel: ' + d.channels[i], '<p>Plan activity, cadence, and measurement for <strong>' + escapeHtml(d.channels[i]) + '</strong>.</p>', { color: channelColors[i % channelColors.length], open: i === 0 });
+      }
     }
-    h += '</div></div>';
   }
   // Sales process as funnel
   if (d.salesProcess) {
@@ -1519,35 +1585,29 @@ function renderLaunchSection(d) {
   var h = secStart('launch', idx);
   // Launch date
   if (d.launchDate) {
-    h += '<div class="hl" style="margin-bottom:1.5rem;text-align:center"><div class="hl-label">Target Launch Date</div><div class="hl-big">' + escapeHtml(d.launchDate) + '</div></div>';
+    h += '<div class="hl" style="margin-bottom:1rem;text-align:center"><div class="hl-label">Target Launch Date</div><div class="hl-big">' + escapeHtml(d.launchDate) + '</div></div>';
   }
-  // Timeline bar
-  h += '<div class="timeline-bar">';
-  h += '<div class="tl-week">Week 1</div>';
-  h += '<div class="tl-week">Week 2</div>';
-  h += '<div class="tl-week">Week 3</div>';
-  h += '<div class="tl-week">Week 4</div>';
+  // Coloured timeline segments (launch-plan style)
+  h += '<div class="tl">';
+  h += '<div class="tl-seg" style="background:var(--pink)"><div class="tl-lbl">Week 1</div><div class="tl-date">Foundation</div></div>';
+  h += '<div class="tl-seg" style="background:var(--blue)"><div class="tl-lbl">Week 2</div><div class="tl-date">Build</div></div>';
+  h += '<div class="tl-seg" style="background:var(--amber)"><div class="tl-lbl">Week 3</div><div class="tl-date">Soft Launch</div></div>';
+  h += '<div class="tl-seg" style="background:var(--green)"><div class="tl-lbl">Week 4</div><div class="tl-date">Go Live</div></div>';
   h += '</div>';
-  // Week-by-week accordion steps
+  // Week-by-week collapsible steps
   var weeks = [
-    { key:'week1', title:'Week 1 \u2014 Foundation', cls:'step-1' },
-    { key:'week2', title:'Week 2 \u2014 Build', cls:'step-2' },
-    { key:'week3', title:'Week 3 \u2014 Soft Launch', cls:'step-3' },
-    { key:'week4', title:'Week 4 \u2014 Go Live', cls:'step-4' }
+    { key:'week1', title:'Week 1 \u2014 Foundation', color:'pink' },
+    { key:'week2', title:'Week 2 \u2014 Build', color:'blue' },
+    { key:'week3', title:'Week 3 \u2014 Soft Launch', color:'amber' },
+    { key:'week4', title:'Week 4 \u2014 Go Live', color:'green' }
   ];
   for (var i = 0; i < weeks.length; i++) {
     var w = weeks[i];
-    var content = d[w.key] || '\u2014';
-    var openCls = i === 0 ? ' open' : '';
-    h += '<div class="step-acc ' + w.cls + openCls + '">';
-    h += '<div class="step-hdr" onclick="togglePlanStep(this)">';
-    h += '<div class="step-num">' + (i + 1) + '</div>';
-    h += '<div class="step-title">' + escapeHtml(w.title) + '</div>';
-    h += '<div class="step-arrow">\u25bc</div>';
-    h += '</div>';
-    h += '<div class="step-body">' + escapeHtml(content) + '</div>';
-    h += '</div>';
+    var content = '<p>' + escapeHtml(d[w.key] || '\u2014') + '</p>';
+    h += stepBlock(i + 1, w.title, content, { color: w.color, open: i === 0 });
   }
+  // Go/no-go decision callout
+  h += decisionBox('Go / No-Go Checkpoint', 'Before flipping the switch on launch day, confirm the pre-launch checklist below is complete and all week-4 deliverables are signed off.');
   // Pre-launch checklist
   if (d.checklist && d.checklist.length > 0) {
     h += '<div class="card" style="margin-top:1rem"><div class="card-label">Pre-Launch Checklist</div><ul class="checklist">';
@@ -1564,25 +1624,24 @@ function renderMetricsSection(d) {
   var idx = 9;
   if (!d) return emptySection('metrics', idx);
   var h = secStart('metrics', idx);
-  // Milestones timeline
-  h += '<div class="milestones">';
-  h += '<div class="ms-card"><div class="ms-days">30</div><div class="ms-label">Days</div><div class="ms-text">' + escapeHtml(d.milestone30 || '\u2014') + '</div></div>';
-  h += '<div class="ms-card"><div class="ms-days">90</div><div class="ms-label">Days</div><div class="ms-text">' + escapeHtml(d.milestone90 || '\u2014') + '</div></div>';
-  h += '<div class="ms-card"><div class="ms-days">365</div><div class="ms-label">Days</div><div class="ms-text">' + escapeHtml(d.milestone12 || '\u2014') + '</div></div>';
+  // Milestones as KPI row (30/90/365 day)
+  h += '<div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">';
+  h += '<div class="kpi-card" style="border-top:3px solid var(--accent)"><div class="kpi-num">30d</div><div class="kpi-label" style="margin-bottom:.5rem">First Month</div><div style="font-size:.85rem;color:var(--text)">' + escapeHtml(d.milestone30 || '\u2014') + '</div></div>';
+  h += '<div class="kpi-card" style="border-top:3px solid var(--blue)"><div class="kpi-num">90d</div><div class="kpi-label" style="margin-bottom:.5rem">First Quarter</div><div style="font-size:.85rem;color:var(--text)">' + escapeHtml(d.milestone90 || '\u2014') + '</div></div>';
+  h += '<div class="kpi-card" style="border-top:3px solid var(--green)"><div class="kpi-num">365d</div><div class="kpi-label" style="margin-bottom:.5rem">First Year</div><div style="font-size:.85rem;color:var(--text)">' + escapeHtml(d.milestone12 || '\u2014') + '</div></div>';
   h += '</div>';
-  // KPIs as metric cards
+  // KPIs
   if (d.kpis && d.kpis.length > 0) {
-    h += '<div class="card"><div class="card-label">Key Performance Indicators</div><div class="tags-wrap" style="margin-top:.5rem">';
+    h += '<div class="card" style="margin-top:1rem"><div class="card-label">Key Performance Indicators</div><div class="tags-wrap" style="margin-top:.5rem">';
     for (var i = 0; i < d.kpis.length; i++) {
       if (d.kpis[i]) h += '<span class="tag tag-accent">' + escapeHtml(d.kpis[i]) + '</span>';
     }
     h += '</div></div>';
   }
-  // Risk warning card
+  // Risk as decision callout
   if (d.biggestRisk) {
-    h += '<div class="warn-box" style="margin-top:1rem"><div class="warn-title">\u26a0 Biggest Risk</div><p>' + escapeHtml(d.biggestRisk) + '</p>';
-    if (d.riskMitigation) h += '<div style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid rgba(239,68,68,.2)"><div class="card-label" style="color:var(--green);margin-bottom:.25rem">Mitigation Plan</div><p>' + escapeHtml(d.riskMitigation) + '</p></div>';
-    h += '</div>';
+    var riskBody = d.biggestRisk + (d.riskMitigation ? '  \u2014  Mitigation: ' + d.riskMitigation : '');
+    h += decisionBox('Biggest Risk & Mitigation', riskBody);
   }
   h += '</div>';
   return h;
@@ -1610,6 +1669,10 @@ function showPlanTab(id, tabEl) {
 function togglePlanStep(el) {
   var acc = el.parentElement;
   acc.classList.toggle('open');
+}
+
+function toggleStep(el) {
+  if (el) el.classList.toggle('open');
 }
 
 // ══════════════════════════════════════════════════════════════
