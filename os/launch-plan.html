@@ -168,6 +168,70 @@
   }
   .owner-switch:hover { border-color: var(--accent); }
   .owner-switch:focus { outline: none; border-color: var(--accent); }
+
+  /* === PROGRESS TRACKING === */
+
+  /* Task status toggle */
+  .task-status{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .2s;font-size:0.8rem;margin-top:2px;user-select:none}
+  .task-status:hover{border-color:var(--accent);transform:scale(1.1)}
+  .task-status.inprogress{border-color:var(--amber);background:var(--abg);color:var(--amber);animation:pulse-amber 2s ease-in-out infinite}
+  .task-status.done{border-color:var(--green);background:var(--gbg);color:var(--green)}
+  .task-status-info{font-size:0.68rem;color:var(--muted);margin-top:2px}
+  .task-status-info strong{color:var(--amber)}
+  .task-status-info.done-info strong{color:var(--green)}
+  .task.inprogress{border-left:3px solid var(--amber);padding-left:11px}
+  .task.done .task-what strong{color:var(--muted);text-decoration:line-through}
+  .task.done .task-what .detail{opacity:0.5}
+  .task.done{border-left:3px solid var(--green);padding-left:11px}
+
+  @keyframes pulse-amber{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0)}}
+
+  /* Step-num status overrides */
+  .step-num.has-inprogress{border-color:var(--amber)!important;color:var(--amber)!important;background:var(--abg)!important;animation:pulse-amber 2s ease-in-out infinite}
+  .step-num.all-done{border-color:var(--green)!important;color:var(--green)!important;background:var(--gbg)!important}
+
+  /* Filter bar */
+  .filter-bar{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;padding:8px 0;margin-bottom:16px}
+  .filter-btn{background:var(--s2);border:1px solid var(--border);color:var(--muted);padding:5px 14px;border-radius:20px;cursor:pointer;font-size:0.75rem;font-weight:600;transition:all .2s}
+  .filter-btn:hover{border-color:var(--accent);color:var(--text)}
+  .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .filter-btn.f-kevin.active{background:var(--purple);border-color:var(--purple)}
+  .filter-btn.f-mica.active{background:var(--blue);border-color:var(--blue)}
+  .filter-btn.f-erica.active{background:var(--green);border-color:var(--green)}
+  .filter-btn.f-inprog.active{background:var(--amber);border-color:var(--amber)}
+  .task.dimmed{opacity:0.25;pointer-events:none}
+
+  /* Progress bar */
+  .prog-bar{height:6px;background:var(--s2);border-radius:3px;overflow:hidden;margin-top:4px}
+  .prog-fill{height:100%;border-radius:3px;transition:width .4s ease}
+  .prog-fill.green{background:var(--green)}
+  .prog-fill.amber{background:var(--amber)}
+  .prog-fill.red{background:var(--red)}
+
+  /* Week progress */
+  .week-progress{text-align:center;font-size:0.68rem;color:var(--muted);margin-top:2px}
+  .week-progress .prog-bar{height:4px;max-width:200px;margin:2px auto 0}
+
+  /* Day badge */
+  .day-badge{display:inline-block;font-size:0.65rem;background:var(--s2);color:var(--muted);padding:1px 8px;border-radius:10px;margin-left:8px;vertical-align:middle}
+  .day-badge.all-done{background:var(--gbg);color:var(--green)}
+
+  /* KPI dynamic */
+  .kpi .mini-bar{height:4px;background:var(--s2);border-radius:2px;margin-top:8px;overflow:hidden}
+  .kpi .mini-fill{height:100%;border-radius:2px;transition:width .4s}
+  .kpi .status-label{font-size:0.75rem;font-weight:700;margin-top:4px}
+  .kpi .status-label.on-track{color:var(--green)}
+  .kpi .status-label.at-risk{color:var(--amber)}
+  .kpi .status-label.behind{color:var(--red)}
+
+  /* Activity log */
+  .activity-log{background:var(--s2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem}
+  .activity-log .al-title{font-size:0.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);font-weight:700;margin-bottom:6px}
+  .activity-log .al-item{color:var(--muted);padding:2px 0}
+  .activity-log .al-item .al-name{font-weight:600;color:var(--text)}
+  .activity-log .al-item .al-time{font-size:0.68rem;color:var(--muted);margin-left:6px}
+
+  @media print{.filter-bar,.task-status,.week-progress,.activity-log{display:none}}
 </style>
 </head>
 <body>
@@ -179,11 +243,25 @@
   <div class="dates">Build: 14 April &rarr; Target Launch: 11 May &rarr; Hard Deadline: 13 May 2026</div>
 </div>
 
-<div class="kpi-row">
-  <div class="kpi"><div class="v">30</div><div class="l">Days to Launch</div></div>
-  <div class="kpi"><div class="v">3</div><div class="l">Launch Modules</div></div>
-  <div class="kpi"><div class="v">36</div><div class="l">Total Modules Planned</div></div>
-  <div class="kpi"><div class="v">~&pound;6</div><div class="l">Monthly Fixed Cost</div></div>
+<div class="kpi-row" id="kpiRow">
+  <div class="kpi">
+    <div class="v" id="kpiDone">0 / 49</div>
+    <div class="l">Tasks Complete</div>
+    <div class="mini-bar"><div class="mini-fill green" id="kpiDoneBar" style="width:0%"></div></div>
+  </div>
+  <div class="kpi">
+    <div class="v" id="kpiDays">--</div>
+    <div class="l">Days Remaining</div>
+  </div>
+  <div class="kpi">
+    <div class="v" id="kpiTrackIcon">--</div>
+    <div class="l">Project Status</div>
+    <div class="status-label" id="kpiTrack"></div>
+  </div>
+  <div class="kpi">
+    <div class="v" id="kpiInProg">0</div>
+    <div class="l">In Progress</div>
+  </div>
 </div>
 
 <!-- NAVIGATION -->
@@ -203,6 +281,7 @@
       <button class="wk1" onclick="show('w1d2')">Wed 15</button>
       <button class="wk1" onclick="show('w1d3')">Thu 16</button>
       <button class="wk1" onclick="show('w1d4')">Fri 17</button>
+      <div class="week-progress" id="wp1"></div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Week 2: Modules (Apr 20-24)</div>
@@ -211,6 +290,7 @@
       <button class="wk2" onclick="show('w2d3')">Wed 22</button>
       <button class="wk2" onclick="show('w2d4')">Thu 23</button>
       <button class="wk2" onclick="show('w2d5')">Fri 24</button>
+      <div class="week-progress" id="wp2"></div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Week 3: Polish (Apr 27 - May 1)</div>
@@ -219,6 +299,7 @@
       <button class="wk3" onclick="show('w3d3')">Wed 29</button>
       <button class="wk3" onclick="show('w3d4')">Thu 30</button>
       <button class="wk3" onclick="show('w3d5')">Fri 1</button>
+      <div class="week-progress" id="wp3"></div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Week 4: Website & Marketing (May 5-8)</div>
@@ -226,12 +307,14 @@
       <button class="wk4" onclick="show('w4d2')">Wed 6</button>
       <button class="wk4" onclick="show('w4d3')">Thu 7</button>
       <button class="wk4" onclick="show('w4d4')">Fri 8</button>
+      <div class="week-progress" id="wp4"></div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Week 5: Launch (May 11-13)</div>
       <button class="wk5" onclick="show('w5d1')">Mon 11</button>
       <button class="wk5" onclick="show('w5d2')">Tue 12</button>
       <button class="wk5" onclick="show('w5d3')">Wed 13</button>
+      <div class="week-progress" id="wp5"></div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Reference</div>
@@ -240,6 +323,15 @@
       <button class="ref" onclick="show('risks')">Risks</button>
     </div>
   </div>
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar" id="filterBar">
+  <button class="filter-btn active" onclick="filterBy('all')">All Tasks</button>
+  <button class="filter-btn f-kevin" onclick="filterBy('kevin')">Kevin</button>
+  <button class="filter-btn f-mica" onclick="filterBy('mica')">Mica</button>
+  <button class="filter-btn f-erica" onclick="filterBy('erica')">Ericamae</button>
+  <button class="filter-btn f-inprog" onclick="filterBy('inprogress')">In Progress</button>
 </div>
 
 <!-- ============================================ -->
@@ -1370,34 +1462,339 @@
 <div class="footer">Operations Director — Master Action Plan v3.0 — Generated 13 April 2026<br>Claude does the work. You point it in the right direction.</div>
 
 <script>
+/* ── Task-to-day/week mapping ── */
+var TASK_MAP = {
+  w1: {days:['w1d1','w1d2','w1d3','w1d4'], deadlines:['2026-04-14','2026-04-15','2026-04-16','2026-04-17']},
+  w2: {days:['w2d1','w2d2','w2d3','w2d4','w2d5'], deadlines:['2026-04-20','2026-04-21','2026-04-22','2026-04-23','2026-04-24']},
+  w3: {days:['w3d1','w3d2','w3d3','w3d4','w3d5'], deadlines:['2026-04-27','2026-04-28','2026-04-29','2026-04-30','2026-05-01']},
+  w4: {days:['w4d1','w4d2','w4d3','w4d4'], deadlines:['2026-05-05','2026-05-06','2026-05-07','2026-05-08']},
+  w5: {days:['w5d1','w5d2','w5d3'], deadlines:['2026-05-11','2026-05-12','2026-05-13']}
+};
+var LAUNCH_DATE = new Date('2026-05-13');
+var BUILD_START = new Date('2026-04-14');
+var ownerLabels = {kevin:'Kevin',mica:'Mica',erica:'Ericamae',claude:'Claude',all:'All'};
+var activeFilter = 'all';
+
+/* ── Navigation ── */
 function show(id){
-  document.querySelectorAll('.sec').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.sec').forEach(function(s){s.classList.remove('active')});
+  document.querySelectorAll('.nav button').forEach(function(b){b.classList.remove('active')});
   var el = document.getElementById(id); if(el) el.classList.add('active');
-  // find and activate the right button
   var btns=document.querySelectorAll('.nav button');
   btns.forEach(function(b){if(b.getAttribute('onclick')==="show('"+id+"')")b.classList.add('active')});
   window.scrollTo(0,0);
 }
 function toggleStep(el){el.classList.toggle('open')}
 
+/* ── Owner switching ── */
 function switchOwner(sel) {
   var tag = sel.previousElementSibling;
   var map = {kevin:'tag-kevin',mica:'tag-s1',erica:'tag-s2',claude:'tag-claude',all:'tag-all'};
-  var labels = {kevin:'Kevin',mica:'Mica',erica:'Ericamae',claude:'Claude',all:'All'};
   tag.className = 'tag ' + map[sel.value];
-  tag.textContent = labels[sel.value];
+  tag.textContent = ownerLabels[sel.value];
   var owners = JSON.parse(localStorage.getItem('launch-plan-owners')||'{}');
   owners[sel.dataset.taskId] = sel.value;
   localStorage.setItem('launch-plan-owners', JSON.stringify(owners));
 }
-(function(){
+
+/* ── Status tracking ── */
+function getStatuses(){ return JSON.parse(localStorage.getItem('launch-plan-status')||'{}'); }
+function saveStatuses(s){ localStorage.setItem('launch-plan-status', JSON.stringify(s)); }
+
+function getTaskOwnerLabel(taskId){
+  var sel = document.querySelector('[data-task-id="'+taskId+'"]');
+  if(!sel) return 'Unknown';
+  return ownerLabels[sel.value] || sel.value;
+}
+
+function cycleStatus(taskId){
+  var statuses = getStatuses();
+  var current = statuses[taskId] ? statuses[taskId].status : 'todo';
+  var next, by, at;
+  if(current === 'todo'){ next = 'inprogress'; }
+  else if(current === 'inprogress'){ next = 'done'; }
+  else { next = 'todo'; }
+
+  by = getTaskOwnerLabel(taskId);
+  at = new Date().toISOString();
+
+  if(next === 'todo'){
+    delete statuses[taskId];
+  } else {
+    statuses[taskId] = {status: next, by: by, at: at};
+  }
+  saveStatuses(statuses);
+  applyTaskStatus(taskId, next, by, at);
+  updateDashboard();
+  if(activeFilter !== 'all') filterBy(activeFilter);
+}
+
+function applyTaskStatus(taskId, status, by, at){
+  var taskEl = document.querySelector('[data-task-id="'+taskId+'"]');
+  if(!taskEl) return;
+  var taskDiv = taskEl.closest('.task');
+  if(!taskDiv) return;
+
+  // Find or create the status toggle
+  var toggle = taskDiv.querySelector('.task-status');
+  if(!toggle){
+    toggle = document.createElement('div');
+    toggle.className = 'task-status';
+    toggle.setAttribute('onclick', "cycleStatus('"+taskId+"')");
+    toggle.title = 'Click to change status: To Do → In Progress → Done';
+    taskDiv.insertBefore(toggle, taskDiv.firstChild);
+  }
+
+  // Remove old classes
+  taskDiv.classList.remove('inprogress','done');
+  toggle.classList.remove('inprogress','done');
+
+  // Remove old info badge
+  var oldInfo = taskDiv.querySelector('.task-status-info');
+  if(oldInfo) oldInfo.remove();
+
+  if(status === 'inprogress'){
+    toggle.innerHTML = '&#9679;'; // filled circle
+    toggle.classList.add('inprogress');
+    taskDiv.classList.add('inprogress');
+    var info = document.createElement('div');
+    info.className = 'task-status-info';
+    info.innerHTML = '<strong>In Progress</strong> — ' + (by||'') + (at ? ' · ' + formatTime(at) : '');
+    toggle.after(info);
+  } else if(status === 'done'){
+    toggle.innerHTML = '&#10003;'; // checkmark
+    toggle.classList.add('done');
+    taskDiv.classList.add('done');
+    var info = document.createElement('div');
+    info.className = 'task-status-info done-info';
+    info.innerHTML = '<strong>Done</strong> — ' + (by||'') + (at ? ' · ' + formatTime(at) : '');
+    toggle.after(info);
+  } else {
+    toggle.innerHTML = ''; // empty circle
+  }
+
+  // Update parent step-num
+  updateStepNum(taskDiv.closest('.step'));
+}
+
+function updateStepNum(stepEl){
+  if(!stepEl) return;
+  var num = stepEl.querySelector('.step-num');
+  if(!num) return;
+  // Don't override the already-done kickoff meeting step
+  if(num.innerHTML.indexOf('10003') > -1 && stepEl.querySelector('.tag-done')) return;
+
+  var tasks = stepEl.querySelectorAll('.task');
+  var doneCount = 0, ipCount = 0;
+  tasks.forEach(function(t){
+    if(t.classList.contains('done')) doneCount++;
+    else if(t.classList.contains('inprogress')) ipCount++;
+  });
+
+  num.classList.remove('has-inprogress','all-done');
+  if(doneCount === tasks.length && tasks.length > 0){
+    num.classList.add('all-done');
+    num.innerHTML = '&#10003;';
+  } else if(ipCount > 0){
+    num.classList.add('has-inprogress');
+  }
+}
+
+function formatTime(isoStr){
+  var d = new Date(isoStr);
+  var day = d.getDate();
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h = d.getHours(), m = d.getMinutes();
+  return day + ' ' + months[d.getMonth()] + ' ' + (h<10?'0'+h:h) + ':' + (m<10?'0'+m:m);
+}
+
+/* ── Progress calculations ── */
+function calcProgress(){
+  var statuses = getStatuses();
+  var allTasks = document.querySelectorAll('[data-task-id]');
+  var total = allTasks.length;
+  var done = 0, inprog = 0;
+  var byWeek = {w1:{total:0,done:0},w2:{total:0,done:0},w3:{total:0,done:0},w4:{total:0,done:0},w5:{total:0,done:0}};
+  var byDay = {};
+
+  allTasks.forEach(function(sel){
+    var tid = sel.dataset.taskId;
+    var taskDiv = sel.closest('.task');
+    var secEl = sel.closest('.sec');
+    if(!secEl) return;
+    var secId = secEl.id;
+
+    // Determine which week
+    var week = null;
+    Object.keys(TASK_MAP).forEach(function(wk){
+      if(TASK_MAP[wk].days.indexOf(secId) > -1) week = wk;
+    });
+
+    if(week){
+      byWeek[week].total++;
+      if(!byDay[secId]) byDay[secId] = {total:0,done:0};
+      byDay[secId].total++;
+    }
+
+    var s = statuses[tid];
+    if(s && s.status === 'done'){
+      done++;
+      if(week){ byWeek[week].done++; byDay[secId].done++; }
+    } else if(s && s.status === 'inprogress'){
+      inprog++;
+    }
+  });
+
+  // Days remaining
+  var today = new Date(); today.setHours(0,0,0,0);
+  var daysLeft = Math.max(0, Math.ceil((LAUNCH_DATE - today) / 86400000));
+
+  // Expected progress (how many working days have passed / total working days)
+  var totalWorkDays = 0, passedWorkDays = 0;
+  Object.keys(TASK_MAP).forEach(function(wk){
+    TASK_MAP[wk].deadlines.forEach(function(d){
+      totalWorkDays++;
+      if(new Date(d) <= today) passedWorkDays++;
+    });
+  });
+  var expectedPct = totalWorkDays > 0 ? (passedWorkDays / totalWorkDays) * 100 : 0;
+  var actualPct = total > 0 ? (done / total) * 100 : 0;
+
+  var trackStatus = 'on-track';
+  if(actualPct < expectedPct - 10) trackStatus = 'behind';
+  else if(actualPct < expectedPct) trackStatus = 'at-risk';
+
+  return {total:total, done:done, inprog:inprog, pct:actualPct, daysLeft:daysLeft,
+          expectedPct:expectedPct, trackStatus:trackStatus, byWeek:byWeek, byDay:byDay};
+}
+
+function updateDashboard(){
+  var p = calcProgress();
+
+  // KPI cards
+  var el;
+  el = document.getElementById('kpiDone'); if(el) el.textContent = p.done + ' / ' + p.total;
+  el = document.getElementById('kpiDoneBar'); if(el) el.style.width = p.pct.toFixed(1) + '%';
+  el = document.getElementById('kpiDays'); if(el) el.textContent = p.daysLeft;
+  el = document.getElementById('kpiInProg'); if(el) el.textContent = p.inprog;
+
+  el = document.getElementById('kpiTrackIcon');
+  var el2 = document.getElementById('kpiTrack');
+  if(el && el2){
+    if(p.trackStatus === 'on-track'){
+      el.textContent = '●'; el.style.color = 'var(--green)';
+      el2.className = 'status-label on-track'; el2.textContent = 'On Track';
+    } else if(p.trackStatus === 'at-risk'){
+      el.textContent = '●'; el.style.color = 'var(--amber)';
+      el2.className = 'status-label at-risk'; el2.textContent = 'At Risk';
+    } else {
+      el.textContent = '●'; el.style.color = 'var(--red)';
+      el2.className = 'status-label behind'; el2.textContent = 'Behind Schedule';
+    }
+  }
+
+  // Week progress bars
+  ['w1','w2','w3','w4','w5'].forEach(function(wk, i){
+    var wp = document.getElementById('wp'+(i+1));
+    if(!wp) return;
+    var d = p.byWeek[wk];
+    var pct = d.total > 0 ? (d.done / d.total * 100) : 0;
+    var color = pct >= 100 ? 'green' : (pct > 0 ? 'amber' : 'green');
+    wp.innerHTML = d.done + '/' + d.total + ' done<div class="prog-bar"><div class="prog-fill '+color+'" style="width:'+pct.toFixed(1)+'%"></div></div>';
+  });
+
+  // Day badges on section headers
+  Object.keys(p.byDay).forEach(function(dayId){
+    var secEl = document.getElementById(dayId);
+    if(!secEl) return;
+    var sh = secEl.querySelector('.sh');
+    if(!sh) return;
+    // Remove old badge
+    var old = sh.querySelector('.day-badge');
+    if(old) old.remove();
+    var d = p.byDay[dayId];
+    var badge = document.createElement('span');
+    badge.className = 'day-badge' + (d.done === d.total && d.total > 0 ? ' all-done' : '');
+    badge.textContent = d.done + '/' + d.total + (d.done === d.total && d.total > 0 ? ' ✓' : '');
+    sh.appendChild(badge);
+  });
+
+  // Nav button badges — add ✓ to day buttons when all tasks done
+  Object.keys(p.byDay).forEach(function(dayId){
+    var d = p.byDay[dayId];
+    if(d.done === d.total && d.total > 0){
+      var btn = document.querySelector('button[onclick="show(\''+dayId+'\')"]');
+      if(btn && btn.textContent.indexOf('✓') === -1){
+        btn.textContent = btn.textContent + ' ✓';
+      }
+    }
+  });
+}
+
+/* ── Filtering ── */
+function filterBy(filter){
+  activeFilter = filter;
+  // Update filter buttons
+  document.querySelectorAll('.filter-btn').forEach(function(b){ b.classList.remove('active'); });
+  var filterBtns = document.querySelectorAll('.filter-btn');
+  filterBtns.forEach(function(b){
+    if(b.textContent === 'All Tasks' && filter === 'all') b.classList.add('active');
+    if(b.textContent === 'Kevin' && filter === 'kevin') b.classList.add('active');
+    if(b.textContent === 'Mica' && filter === 'mica') b.classList.add('active');
+    if(b.textContent === 'Ericamae' && filter === 'erica') b.classList.add('active');
+    if(b.textContent === 'In Progress' && filter === 'inprogress') b.classList.add('active');
+  });
+
+  var statuses = getStatuses();
+  document.querySelectorAll('.task').forEach(function(taskDiv){
+    taskDiv.classList.remove('dimmed');
+    if(filter === 'all') return;
+
+    var sel = taskDiv.querySelector('.owner-switch');
+    if(!sel) return;
+    var tid = sel.dataset.taskId;
+
+    if(filter === 'inprogress'){
+      var s = statuses[tid];
+      if(!s || s.status !== 'inprogress') taskDiv.classList.add('dimmed');
+    } else {
+      if(sel.value !== filter) taskDiv.classList.add('dimmed');
+    }
+  });
+}
+
+/* ── Initialisation ── */
+function initTracking(){
+  // Inject status toggles into every task
+  document.querySelectorAll('[data-task-id]').forEach(function(sel){
+    var taskDiv = sel.closest('.task');
+    if(!taskDiv || taskDiv.querySelector('.task-status')) return;
+    var toggle = document.createElement('div');
+    toggle.className = 'task-status';
+    var tid = sel.dataset.taskId;
+    toggle.setAttribute('onclick', "cycleStatus('"+tid+"')");
+    toggle.title = 'Click to change status: To Do → In Progress → Done';
+    taskDiv.insertBefore(toggle, taskDiv.firstChild);
+  });
+
+  // Restore saved statuses
+  var statuses = getStatuses();
+  Object.keys(statuses).forEach(function(tid){
+    var s = statuses[tid];
+    applyTaskStatus(tid, s.status, s.by, s.at);
+  });
+
+  // Restore saved owners
   var owners = JSON.parse(localStorage.getItem('launch-plan-owners')||'{}');
   Object.keys(owners).forEach(function(id){
     var sel = document.querySelector('[data-task-id="'+id+'"]');
     if(sel){sel.value=owners[id];switchOwner(sel);}
   });
-})();
+
+  updateDashboard();
+}
+
+initTracking();
 </script>
 </body>
 </html>
