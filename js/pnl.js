@@ -8,6 +8,45 @@
     // How many trailing months to show (including current)
     let pnlMonths = 12;
 
+    // Explicit sub-category allow-lists per section (order preserved in output).
+    // Anything outside these lists is intentionally excluded from the P&L — e.g.
+    // Capex, Transfers, Loan Receipts, Balance Sheet moves, Personal categories.
+    const PNL_SECTIONS = [
+        { name: 'Revenue', subs: [
+            'Fixed Income',
+            'Variable Income',
+            'Rental Income',
+        ]},
+        { name: 'Cost of Goods Sold', subs: [
+            'COGS Labour',
+            'COGS Sales Fees',
+            'COGS Product Costs',
+            'COGS Delivery Costs',
+            'COGS Commission',
+            'COGS Property Council Tax',
+            'COGS Property Utilities',
+            'COGS Property Reactive Maintenance',
+            'COGS Property Compliance',
+        ]},
+        { name: 'Operating Expenses', subs: [
+            'Opex Labour',
+            'Marketing',
+            'Premises / Overheads',
+            'Insurance',
+            'Software & Subscriptions',
+            'Professional Fees',
+            'Travel & Training',
+            'Operational Supplies',
+            'Subsistence',
+            'Director Discretionary Expenses',
+            'Charity',
+            'Mortgage Interest',
+            'Loan Interest',
+            'Bank Transaction Fees',
+            'Tax',
+        ]},
+    ];
+
     // Return array of YYYY-MM keys for the last N months, oldest → newest
     function pnlMonthKeys(n) {
         const out = [];
@@ -53,7 +92,6 @@
         const monthSet = new Set(monthKeys);
 
         // Resolve linked-record names via the loaded tables (REST returns just IDs)
-        const catNames = pnlBuildLookup(allCategories, 'fldii4oUzSfmplihO');        // Category Name
         const subCatNames = pnlBuildLookup(allSubCategories, 'fldO4BTJhFv5EsN6i');   // Sub Category Name
         const bizNames = pnlBuildLookup(allBusinesses, 'fldbbRqVxLxUdHwIR');          // Business Name
         const resolve = (field, map) => {
@@ -62,12 +100,18 @@
             return map[id] || '';
         };
 
-        // section name -> subCatName -> { months: Map<key, amount> , total }
-        const sections = {
-            'Revenue': {},
-            'Cost of Goods Sold': {},
-            'Operating Expenses': {},
-        };
+        // Build a sub-category → section map from the explicit allow-lists.
+        // This is the *authoritative* classifier — the COA category link on the
+        // transaction is only used for sign convention, not for inclusion.
+        const subToSection = {};
+        PNL_SECTIONS.forEach(sec => sec.subs.forEach(s => { subToSection[s] = sec.name; }));
+
+        // section name -> subCatName -> { monthKey: amount }
+        const sections = {};
+        PNL_SECTIONS.forEach(sec => {
+            sections[sec.name] = {};
+            sec.subs.forEach(s => { sections[sec.name][s] = {}; });
+        });
 
         transactions.forEach(tx => {
             const biz = resolve(getField(tx, F.txBusiness), bizNames);
@@ -80,28 +124,27 @@
             const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
             if (!monthSet.has(mKey)) return;
 
-            const catName = resolve(getField(tx, F.txCategory), catNames);
-            if (!sections[catName]) return; // skip Capex, Transfer, Balance Sheet, Personal, Loan, etc.
+            const subCat = resolve(getField(tx, F.txSubCategory), subCatNames);
+            const sectionName = subToSection[subCat];
+            if (!sectionName) return; // sub-cat not in our P&L allow-list → skip
 
-            const subCat = resolve(getField(tx, F.txSubCategory), subCatNames) || '(uncategorised)';
             const amt = Number(getField(tx, F.txReportAmount)) || 0;
-            // Revenue stored as positive, expenses as negative. Use absolute for expenses.
-            const signed = catName === 'Revenue' ? amt : -amt; // makes expenses positive magnitudes
+            // Revenue stays as-is; expense magnitudes flipped to positive so
+            // GP = Revenue - COGS and NP = GP - OpEx work arithmetically.
+            const signed = sectionName === 'Revenue' ? amt : -amt;
 
-            if (!sections[catName][subCat]) sections[catName][subCat] = {};
-            sections[catName][subCat][mKey] = (sections[catName][subCat][mKey] || 0) + signed;
+            sections[sectionName][subCat][mKey] = (sections[sectionName][subCat][mKey] || 0) + signed;
         });
 
-        // Convert to ordered structure
-        function sectionRows(secName) {
-            const bySub = sections[secName];
-            const rows = Object.keys(bySub).map(subCat => {
-                const monthly = bySub[subCat];
+        // Convert to ordered structure, preserving the user's defined sub-cat order.
+        function sectionRows(secDef) {
+            const bySub = sections[secDef.name];
+            const rows = secDef.subs.map(subCat => {
+                const monthly = bySub[subCat] || {};
                 let total = 0;
                 monthKeys.forEach(k => { total += monthly[k] || 0; });
                 return { subCat, monthly, total };
             });
-            rows.sort((a, b) => b.total - a.total);
             const totals = {};
             let grand = 0;
             monthKeys.forEach(k => {
@@ -110,12 +153,12 @@
                 totals[k] = t;
                 grand += t;
             });
-            return { name: secName, rows, totals, total: grand };
+            return { name: secDef.name, rows, totals, total: grand };
         }
 
-        const revenue = sectionRows('Revenue');
-        const cogs = sectionRows('Cost of Goods Sold');
-        const opex = sectionRows('Operating Expenses');
+        const revenue = sectionRows(PNL_SECTIONS[0]);
+        const cogs    = sectionRows(PNL_SECTIONS[1]);
+        const opex    = sectionRows(PNL_SECTIONS[2]);
 
         // Derived rows
         const grossProfit = {};
