@@ -5,6 +5,41 @@
     let airtableInvoices = [];
     let invoiceRefreshedAt = null;
 
+    // ── New-invoice tracking (based on Airtable createdTime vs localStorage lastSeen) ──
+    function getLastSeenInvoiceTime() {
+        return localStorage.getItem('lastSeenInvoiceTime') || '1970-01-01T00:00:00.000Z';
+    }
+    function markInvoicesAsSeen() {
+        localStorage.setItem('lastSeenInvoiceTime', new Date().toISOString());
+    }
+    function updateInvoicesSidebarBadge() {
+        const unpaid = airtableInvoices.filter(inv => inv.status !== 'Paid');
+        const lastSeen = new Date(getLastSeenInvoiceTime());
+        const newCount = unpaid.filter(inv => inv.createdTime && new Date(inv.createdTime) > lastSeen).length;
+        const sidebarItem = document.querySelector('.sidebar-item[onclick*="invoices"]');
+        if (!sidebarItem) return;
+        const label = sidebarItem.querySelector('.sidebar-label');
+        if (!label) return;
+        let badge = sidebarItem.querySelector('.sidebar-invoice-badge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'sidebar-invoice-badge';
+            badge.style.cssText = 'margin-left:6px;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;';
+            label.appendChild(badge);
+        }
+        if (newCount > 0) {
+            badge.style.background = '#dc2626';
+            badge.style.color = 'white';
+            badge.textContent = `${unpaid.length} • ${newCount} new`;
+        } else if (unpaid.length > 0) {
+            badge.style.background = '#e2e8f0';
+            badge.style.color = '#475569';
+            badge.textContent = `${unpaid.length}`;
+        } else {
+            badge.textContent = '';
+        }
+    }
+
     async function fetchInvoicesFromAirtable() {
         if (!PAT) return;
         try {
@@ -22,6 +57,7 @@
                 const f = r.fields;
                 return {
                     recordId:      r.id,
+                    createdTime:   r.createdTime || null,
                     id:            f[INV.msgId] || f[INV.threadId] || '',
                     threadId:      f[INV.threadId] || '',
                     payee:         f[INV.payee] || '',
@@ -40,6 +76,7 @@
             });
             invoiceRefreshedAt = new Date();
             invoiceTabRendered = false;
+            updateInvoicesSidebarBadge();
             if (document.getElementById('tab-invoices').classList.contains('active')) {
                 renderInvoiceTab();
             }
@@ -103,6 +140,8 @@
         invoiceTabRendered = true;
         const today = new Date();
         today.setHours(0,0,0,0);
+        // Capture "last seen" BEFORE marking as seen, so NEW badges still show this render
+        const lastSeenBeforeRender = new Date(getLastSeenInvoiceTime());
 
         // Source data comes directly from Airtable — no localStorage merging needed
         const sourceData = airtableInvoices.filter(inv => inv.status !== 'Paid');
@@ -201,6 +240,10 @@
             } else {
                 badge = '<span class="inv-badge upcoming">Upcoming</span>';
             }
+            const isNew = inv.createdTime && new Date(inv.createdTime) > lastSeenBeforeRender;
+            if (isNew) {
+                badge += ' <span class="inv-badge" style="background:#dcfce7;color:#15803d;border:1px solid #16a34a">NEW</span>';
+            }
 
             const displayAmt = inv.amount;
             const displayPayee = (inv.payee || '').trim();
@@ -257,6 +300,10 @@
                 <td style="width:110px;text-align:center" onclick="event.stopPropagation()">${actionHtml}</td>
             </tr>${matchRow}`;
         }).join('');
+
+        // Tab is being viewed — mark invoices as seen so sidebar badge clears next refresh
+        markInvoicesAsSeen();
+        updateInvoicesSidebarBadge();
     }
 
     // ── Match invoices to Airtable transactions ──
@@ -459,6 +506,7 @@
 
             // Remove from local array and re-render
             airtableInvoices = airtableInvoices.filter(i => i.recordId !== recordId);
+            updateInvoicesSidebarBadge();
             setTimeout(() => {
                 invoiceTabRendered = false;
                 renderInvoiceTab();
