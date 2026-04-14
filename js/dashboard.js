@@ -521,17 +521,17 @@
         const gpOnTrack = grossProfitHigh >= requiredGrossProfit;
 
         document.getElementById('operationalCards').innerHTML = `
-            ${expandableCard('Rental Income (30d)', fmt(rentalInc30), 'Actual from transactions',
+            ${expandableCard('Rental Income (31d)', fmt(rentalInc30), 'Actual from transactions',
                 txDetailList(rentalIncTx) + `<div class="detail-total"><span>Total</span><span>${fmt(rentalInc30)}</span></div>`,
                 'text-green'
             )}
-            ${expandableCard('Maintenance Spend (30d)', fmt(maintSpend),
+            ${expandableCard('Maintenance Spend (31d)', fmt(maintSpend),
                 `${maintPct}% of rent | Budget: ${fmt(MAINT_TARGET_GBP)} | ${maintSpend <= MAINT_TARGET_GBP ? '<span class="text-green">Under budget</span>' : maintSpend <= MAINT_TARGET_GBP * 1.1 ? '<span class="text-amber">On budget</span>' : '<span class="text-red">Over budget</span>'}`,
                 txDetailList(maintTx) + `<div class="detail-total"><span>Total</span><span>${fmt(maintSpend)}</span></div>`,
                 trafficLightClass(maintNum, MAINT_TARGET_GBP),
                 targetProgressBarGBP(maintNum, MAINT_TARGET_GBP)
             )}
-            ${expandableCard('Wages Spend (30d)', fmt(wagesSpend),
+            ${expandableCard('Wages Spend (31d)', fmt(wagesSpend),
                 `${wagesPct}% of rent | Budget: ${fmt(WAGES_TARGET_GBP)} | ${wagesSpend <= WAGES_TARGET_GBP ? '<span class="text-green">Under budget</span>' : wagesSpend <= WAGES_TARGET_GBP * 1.1 ? '<span class="text-amber">On budget</span>' : '<span class="text-red">Over budget</span>'}`,
                 txDetailList(wagesTx, true) + `<div class="detail-total"><span>Total</span><span>${fmt(wagesSpend)}</span></div>`,
                 trafficLightClass(wagesNum, WAGES_TARGET_GBP),
