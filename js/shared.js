@@ -66,8 +66,9 @@
         document.getElementById('dashboard').style.display = 'none';
     }
 
-    // Check session on load
-    (function init() {
+    // Check session on load — deferred to DOMContentLoaded so all JS modules are parsed
+    // and loadDashboard (defined in dashboard.js) is available before we call it.
+    function _opsDirectorInit() {
         const saved = localStorage.getItem('_dlr_pat');
         if (saved) {
             PAT = saved;
@@ -77,7 +78,12 @@
         document.getElementById('patInput').addEventListener('keydown', e => {
             if (e.key === 'Enter') authenticate();
         });
-    })();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _opsDirectorInit);
+    } else {
+        _opsDirectorInit();
+    }
 
     // ── Airtable API ──
     async function airtableFetch(tableId, params = {}) {

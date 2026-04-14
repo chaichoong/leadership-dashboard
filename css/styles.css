@@ -60,19 +60,28 @@
         /* Loading */
         .loading-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255,255,255,0.9);
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
             display: flex; align-items: center; justify-content: center;
             flex-direction: column;
             z-index: 1000;
         }
         .spinner {
-            width: 40px; height: 40px;
-            border: 3px solid #e2e8f0;
-            border-top: 3px solid #2563eb;
+            width: 64px; height: 64px;
+            border: 5px solid #c7d2fe;
+            border-top: 5px solid #2563eb;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
         }
+        .loading-overlay #loadingText { color:#1e40af !important; font-size:18px !important; font-weight:600; }
+        .loading-retry-btn {
+            margin-top: 20px; padding: 10px 24px;
+            background: #2563eb; color: white; border: none; border-radius: 6px;
+            font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+        .loading-retry-btn:hover { background: #1d4ed8; }
+        .loading-retry-btn.secondary { background: #fff; color: #475569; border: 1px solid #cbd5e1; margin-left: 8px; }
+        .loading-retry-btn.secondary:hover { background: #f1f5f9; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Header */

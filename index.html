@@ -22,8 +22,12 @@
 
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay" style="display:none;">
-        <div class="spinner"></div>
-        <div id="loadingText" style="color:#64748b; font-size:14px;">Loading data from Airtable...</div>
+        <div class="spinner" id="loadingSpinner"></div>
+        <div id="loadingText">Loading your dashboard...</div>
+        <div id="loadingActions" style="display:none;margin-top:20px">
+            <button class="loading-retry-btn" onclick="loadDashboard()">Retry</button>
+            <button class="loading-retry-btn secondary" onclick="logout()">Re-enter PAT</button>
+        </div>
     </div>
 
     <!-- Sidebar Toggle (mobile) -->
@@ -424,15 +428,16 @@
 
 
     <!-- JavaScript: split into modules for concurrent development -->
-    <script src="js/config.js"></script>
-    <script src="js/shared.js"></script>
-    <script src="js/dashboard.js"></script>
-    <script src="js/cashflow.js"></script>
-    <script src="js/sitemap.js"></script>
-    <script src="js/invoices.js"></script>
-    <script src="js/reconciliation.js"></script>
-    <script src="js/cfv.js"></script>
-    <script src="js/fintable.js"></script>
-    <script src="js/ai-assistant.js"></script>
+    <!-- v=cb versions bust stale caches when modules change -->
+    <script src="js/config.js?v=2"></script>
+    <script src="js/shared.js?v=2"></script>
+    <script src="js/dashboard.js?v=2"></script>
+    <script src="js/cashflow.js?v=2"></script>
+    <script src="js/sitemap.js?v=2"></script>
+    <script src="js/invoices.js?v=2"></script>
+    <script src="js/reconciliation.js?v=2"></script>
+    <script src="js/cfv.js?v=2"></script>
+    <script src="js/fintable.js?v=2"></script>
+    <script src="js/ai-assistant.js?v=2"></script>
 </body>
 </html>

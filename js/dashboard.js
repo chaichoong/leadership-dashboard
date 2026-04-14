@@ -4,6 +4,9 @@
     // ── Dashboard Load ──
     async function loadDashboard() {
         document.getElementById('loadingOverlay').style.display = 'flex';
+        document.getElementById('loadingSpinner').style.display = '';
+        document.getElementById('loadingText').textContent = 'Loading your dashboard...';
+        document.getElementById('loadingActions').style.display = 'none';
         try {
             // Fetch Airtable data and Gmail invoices in parallel
             const [accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories, businesses] = await Promise.all([
@@ -68,8 +71,13 @@
             refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
         } catch (e) {
             if (e.message === 'Auth failed') return;
-            document.getElementById('loadingText').textContent = 'Error: ' + e.message;
             console.error(e);
+            document.getElementById('loadingSpinner').style.display = 'none';
+            document.getElementById('loadingText').innerHTML =
+                '<div style="font-size:20px;color:#dc2626;margin-bottom:8px">Couldn\u2019t load your dashboard</div>' +
+                '<div style="font-size:14px;color:#475569;max-width:480px;text-align:center">' +
+                (e.message || 'Unknown error') + '</div>';
+            document.getElementById('loadingActions').style.display = 'block';
         }
     }
 
