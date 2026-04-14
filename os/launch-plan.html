@@ -171,12 +171,15 @@
 
   /* === PROGRESS TRACKING === */
 
-  /* Task status toggle */
-  .task-status{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:all .2s;font-size:0.8rem;margin-top:2px;user-select:none}
-  .task-status:hover{border-color:var(--accent);transform:scale(1.1)}
-  .task-status.inprogress{border-color:var(--amber);background:var(--abg);color:var(--amber);animation:pulse-amber 2s ease-in-out infinite}
-  .task-status.done{border-color:var(--green);background:var(--gbg);color:var(--green)}
-  .task-status-info{font-size:0.68rem;color:var(--muted);margin-top:2px}
+  /* Task status button */
+  .task-status-btn{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;cursor:pointer;flex-shrink:0;transition:all .2s;font-size:0.72rem;font-weight:700;user-select:none;border:2px solid var(--border);background:var(--s2);color:var(--muted);white-space:nowrap}
+  .task-status-btn:hover{border-color:var(--accent);transform:scale(1.03)}
+  .task-status-btn .status-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--muted);background:transparent;flex-shrink:0}
+  .task-status-btn.inprogress{border-color:var(--amber);background:var(--abg);color:var(--amber)}
+  .task-status-btn.inprogress .status-dot{border-color:var(--amber);background:var(--amber);animation:pulse-amber 2s ease-in-out infinite}
+  .task-status-btn.done{border-color:var(--green);background:var(--gbg);color:var(--green)}
+  .task-status-btn.done .status-dot{border-color:var(--green);background:var(--green)}
+  .task-status-info{font-size:0.68rem;color:var(--muted);margin-top:2px;margin-left:4px}
   .task-status-info strong{color:var(--amber)}
   .task-status-info.done-info strong{color:var(--green)}
   .task.inprogress{border-left:3px solid var(--amber);padding-left:11px}
@@ -185,6 +188,15 @@
   .task.done{border-left:3px solid var(--green);padding-left:11px}
 
   @keyframes pulse-amber{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0)}}
+
+  /* Workload summary bar */
+  .workload-bar{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;padding:6px 0;margin-bottom:8px;font-size:0.72rem}
+  .workload-item{display:flex;align-items:center;gap:6px;background:var(--s1);border:1px solid var(--border);border-radius:20px;padding:4px 12px}
+  .workload-item .wl-name{font-weight:700}
+  .workload-item .wl-counts{color:var(--muted)}
+  .workload-item .wl-todo{color:var(--muted)}
+  .workload-item .wl-ip{color:var(--amber)}
+  .workload-item .wl-done{color:var(--green)}
 
   /* Step-num status overrides */
   .step-num.has-inprogress{border-color:var(--amber)!important;color:var(--amber)!important;background:var(--abg)!important;animation:pulse-amber 2s ease-in-out infinite}
@@ -231,7 +243,7 @@
   .activity-log .al-item .al-name{font-weight:600;color:var(--text)}
   .activity-log .al-item .al-time{font-size:0.68rem;color:var(--muted);margin-left:6px}
 
-  @media print{.filter-bar,.task-status,.week-progress,.activity-log{display:none}}
+  @media print{.filter-bar,.task-status-btn,.week-progress,.activity-log,.workload-bar{display:none}}
 </style>
 </head>
 <body>
@@ -333,6 +345,9 @@
   <button class="filter-btn f-erica" onclick="filterBy('erica')">Ericamae</button>
   <button class="filter-btn f-inprog" onclick="filterBy('inprogress')">In Progress</button>
 </div>
+
+<!-- Workload summary -->
+<div class="workload-bar" id="workloadBar"></div>
 
 <!-- ============================================ -->
 <!-- EXECUTIVE OVERVIEW -->
@@ -1487,14 +1502,40 @@ function show(id){
 function toggleStep(el){el.classList.toggle('open')}
 
 /* ── Owner switching ── */
+var ownerTagMap = {kevin:'tag-kevin',mica:'tag-s1',erica:'tag-s2',claude:'tag-claude',all:'tag-all'};
+
 function switchOwner(sel) {
   var tag = sel.previousElementSibling;
-  var map = {kevin:'tag-kevin',mica:'tag-s1',erica:'tag-s2',claude:'tag-claude',all:'tag-all'};
-  tag.className = 'tag ' + map[sel.value];
+  tag.className = 'tag ' + ownerTagMap[sel.value];
   tag.textContent = ownerLabels[sel.value];
   var owners = JSON.parse(localStorage.getItem('launch-plan-owners')||'{}');
   owners[sel.dataset.taskId] = sel.value;
   localStorage.setItem('launch-plan-owners', JSON.stringify(owners));
+
+  // Sync: update the step header meta tag to match the first task's owner
+  syncStepHeaderOwner(sel);
+  // Recalculate workload
+  updateWorkload();
+}
+
+function syncStepHeaderOwner(sel){
+  var stepEl = sel.closest('.step');
+  if(!stepEl) return;
+  var hdrMeta = stepEl.querySelector('.step-meta');
+  if(!hdrMeta) return;
+  // Collect all unique owners from tasks inside this step
+  var taskSels = stepEl.querySelectorAll('.owner-switch');
+  var seen = {};
+  var ownerTags = [];
+  taskSels.forEach(function(s){
+    if(!seen[s.value]){
+      seen[s.value] = true;
+      ownerTags.push('<span class="tag '+ownerTagMap[s.value]+'">'+ownerLabels[s.value]+'</span>');
+    }
+  });
+  // Replace all tags in meta (keep the arrow)
+  var arrow = hdrMeta.querySelector('.step-arrow');
+  hdrMeta.innerHTML = ownerTags.join('') + (arrow ? arrow.outerHTML : '<span class="step-arrow">&#9654;</span>');
 }
 
 /* ── Status tracking ── */
@@ -1535,42 +1576,44 @@ function applyTaskStatus(taskId, status, by, at){
   var taskDiv = taskEl.closest('.task');
   if(!taskDiv) return;
 
-  // Find or create the status toggle
-  var toggle = taskDiv.querySelector('.task-status');
-  if(!toggle){
-    toggle = document.createElement('div');
-    toggle.className = 'task-status';
-    toggle.setAttribute('onclick', "cycleStatus('"+taskId+"')");
-    toggle.title = 'Click to change status: To Do → In Progress → Done';
-    taskDiv.insertBefore(toggle, taskDiv.firstChild);
+  // Find or create the status button
+  var btn = taskDiv.querySelector('.task-status-btn');
+  if(!btn){
+    btn = document.createElement('div');
+    btn.className = 'task-status-btn';
+    btn.setAttribute('onclick', "cycleStatus('"+taskId+"')");
+    taskDiv.insertBefore(btn, taskDiv.firstChild);
   }
 
   // Remove old classes
   taskDiv.classList.remove('inprogress','done');
-  toggle.classList.remove('inprogress','done');
+  btn.classList.remove('inprogress','done');
 
   // Remove old info badge
   var oldInfo = taskDiv.querySelector('.task-status-info');
   if(oldInfo) oldInfo.remove();
 
   if(status === 'inprogress'){
-    toggle.innerHTML = '&#9679;'; // filled circle
-    toggle.classList.add('inprogress');
+    btn.innerHTML = '<span class="status-dot"></span> In Progress';
+    btn.title = 'Click to mark as Done';
+    btn.classList.add('inprogress');
     taskDiv.classList.add('inprogress');
     var info = document.createElement('div');
     info.className = 'task-status-info';
-    info.innerHTML = '<strong>In Progress</strong> — ' + (by||'') + (at ? ' · ' + formatTime(at) : '');
-    toggle.after(info);
+    info.innerHTML = '<strong>' + (by||'') + '</strong>' + (at ? ' · ' + formatTime(at) : '');
+    btn.after(info);
   } else if(status === 'done'){
-    toggle.innerHTML = '&#10003;'; // checkmark
-    toggle.classList.add('done');
+    btn.innerHTML = '<span class="status-dot"></span> Done';
+    btn.title = 'Click to reset to To Do';
+    btn.classList.add('done');
     taskDiv.classList.add('done');
     var info = document.createElement('div');
     info.className = 'task-status-info done-info';
-    info.innerHTML = '<strong>Done</strong> — ' + (by||'') + (at ? ' · ' + formatTime(at) : '');
-    toggle.after(info);
+    info.innerHTML = '<strong>' + (by||'') + '</strong>' + (at ? ' · ' + formatTime(at) : '');
+    btn.after(info);
   } else {
-    toggle.innerHTML = ''; // empty circle
+    btn.innerHTML = '<span class="status-dot"></span> To Do';
+    btn.title = 'Click to start this task';
   }
 
   // Update parent step-num
@@ -1722,13 +1765,51 @@ function updateDashboard(){
   // Nav button badges — add ✓ to day buttons when all tasks done
   Object.keys(p.byDay).forEach(function(dayId){
     var d = p.byDay[dayId];
+    var btn = document.querySelector('button[onclick="show(\''+dayId+'\')"]');
+    if(!btn) return;
+    // Strip old ✓ first
+    btn.textContent = btn.textContent.replace(' ✓','');
     if(d.done === d.total && d.total > 0){
-      var btn = document.querySelector('button[onclick="show(\''+dayId+'\')"]');
-      if(btn && btn.textContent.indexOf('✓') === -1){
-        btn.textContent = btn.textContent + ' ✓';
-      }
+      btn.textContent = btn.textContent + ' ✓';
     }
   });
+
+  updateWorkload();
+}
+
+/* ── Workload summary ── */
+function updateWorkload(){
+  var statuses = getStatuses();
+  var people = {kevin:{todo:0,ip:0,done:0,label:'Kevin',cls:'tag-kevin'},
+                mica:{todo:0,ip:0,done:0,label:'Mica',cls:'tag-s1'},
+                erica:{todo:0,ip:0,done:0,label:'Ericamae',cls:'tag-s2'}};
+
+  document.querySelectorAll('.owner-switch').forEach(function(sel){
+    var owner = sel.value;
+    if(!people[owner]) return;
+    var tid = sel.dataset.taskId;
+    var s = statuses[tid];
+    if(s && s.status === 'done') people[owner].done++;
+    else if(s && s.status === 'inprogress') people[owner].ip++;
+    else people[owner].todo++;
+  });
+
+  var bar = document.getElementById('workloadBar');
+  if(!bar) return;
+  var html = '';
+  ['kevin','mica','erica'].forEach(function(key){
+    var p = people[key];
+    var total = p.todo + p.ip + p.done;
+    html += '<div class="workload-item">';
+    html += '<span class="tag '+p.cls+'" style="margin:0;font-size:0.7rem">'+p.label+'</span>';
+    html += '<span class="wl-counts">';
+    html += '<span class="wl-todo">'+p.todo+' to do</span>';
+    if(p.ip > 0) html += ' · <span class="wl-ip">'+p.ip+' in progress</span>';
+    html += ' · <span class="wl-done">'+p.done+' done</span>';
+    html += '</span>';
+    html += '</div>';
+  });
+  bar.innerHTML = html;
 }
 
 /* ── Filtering ── */
@@ -1765,26 +1846,34 @@ function filterBy(filter){
 
 /* ── Initialisation ── */
 function initTracking(){
-  // Inject status toggles into every task
+  // Inject status buttons into every task
   document.querySelectorAll('[data-task-id]').forEach(function(sel){
     var taskDiv = sel.closest('.task');
-    if(!taskDiv || taskDiv.querySelector('.task-status')) return;
-    var toggle = document.createElement('div');
-    toggle.className = 'task-status';
+    if(!taskDiv || taskDiv.querySelector('.task-status-btn')) return;
+    var btn = document.createElement('div');
+    btn.className = 'task-status-btn';
     var tid = sel.dataset.taskId;
-    toggle.setAttribute('onclick', "cycleStatus('"+tid+"')");
-    toggle.title = 'Click to change status: To Do → In Progress → Done';
-    taskDiv.insertBefore(toggle, taskDiv.firstChild);
+    btn.setAttribute('onclick', "cycleStatus('"+tid+"')");
+    btn.innerHTML = '<span class="status-dot"></span> To Do';
+    btn.title = 'Click to start this task';
+    taskDiv.insertBefore(btn, taskDiv.firstChild);
   });
 
-  // Restore saved statuses
+  // Auto-mark kickoff meeting (task-1) as done if not already tracked
   var statuses = getStatuses();
+  if(!statuses['task-1']){
+    statuses['task-1'] = {status:'done', by:'Kevin', at:'2026-04-13T09:00:00.000Z'};
+    saveStatuses(statuses);
+  }
+
+  // Restore saved statuses
+  statuses = getStatuses();
   Object.keys(statuses).forEach(function(tid){
     var s = statuses[tid];
     applyTaskStatus(tid, s.status, s.by, s.at);
   });
 
-  // Restore saved owners
+  // Restore saved owners and sync step headers
   var owners = JSON.parse(localStorage.getItem('launch-plan-owners')||'{}');
   Object.keys(owners).forEach(function(id){
     var sel = document.querySelector('[data-task-id="'+id+'"]');
