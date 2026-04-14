@@ -160,8 +160,9 @@
             return;
         }
 
-        const businessNames = (allBusinesses || []).map(b => getField(b, 'fldbbRqVxLxUdHwIR')).filter(Boolean);
-        if (!businessNames.length) businessNames.push('Real Estate');
+        // P&L is locked to Real Estate for now
+        const businessNames = ['Real Estate'];
+        pnlBusinessName = 'Real Estate';
 
         const keys = pnlMonthKeys(pnlMonths);
         const pnl = buildPnL(allTransactions, pnlBusinessName, keys);
@@ -209,15 +210,15 @@
             `<option value="${escHtml(n)}" ${n === pnlBusinessName ? 'selected' : ''}>${escHtml(n)}</option>`
         ).join('');
 
-        const monthOptions = [6, 12, 18, 24, 36].map(m =>
-            `<option value="${m}" ${m === pnlMonths ? 'selected' : ''}>${m} months</option>`
+        const monthOptions = [1, 3, 6, 12].map(m =>
+            `<option value="${m}" ${m === pnlMonths ? 'selected' : ''}>${m} month${m === 1 ? '' : 's'}</option>`
         ).join('');
 
         host.innerHTML = `
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:12px">
                     <div>
-                        <h2 class="section-title" style="margin-bottom:4px">Profit &amp; Loss OS — ${escHtml(pnlBusinessName)}</h2>
+                        <h2 class="section-title" style="margin-bottom:4px">Profit &amp; Loss OS</h2>
                         <span style="font-size:12px;color:#94a3b8">Derived from reconciled transactions &nbsp;·&nbsp; Grouped by Chart of Accounts category</span>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
