@@ -113,6 +113,14 @@
             sec.subs.forEach(s => { sections[sec.name][s] = {}; });
         });
 
+        // Parallel index of the tx records backing each (section, subCat, monthKey) bucket.
+        // Used by drill-down clicks — same shape as sections{}.
+        const txIndex = {};
+        PNL_SECTIONS.forEach(sec => {
+            txIndex[sec.name] = {};
+            sec.subs.forEach(s => { txIndex[sec.name][s] = {}; });
+        });
+
         transactions.forEach(tx => {
             const biz = resolve(getField(tx, F.txBusiness), bizNames);
             if (biz !== businessName) return;
@@ -134,6 +142,9 @@
             const signed = sectionName === 'Revenue' ? amt : -amt;
 
             sections[sectionName][subCat][mKey] = (sections[sectionName][subCat][mKey] || 0) + signed;
+
+            if (!txIndex[sectionName][subCat][mKey]) txIndex[sectionName][subCat][mKey] = [];
+            txIndex[sectionName][subCat][mKey].push(tx);
         });
 
         // Convert to ordered structure, preserving the user's defined sub-cat order.
@@ -186,6 +197,7 @@
         return {
             monthKeys,
             revenue, cogs, opex,
+            txIndex,
             grossProfit, grossMargin,
             netProfit, netMargin,
             grand: {
@@ -212,6 +224,110 @@
         return `<span class="${cls}">${n.toFixed(1)}%</span>`;
     }
 
+    // Cached P&L result so drill-down clicks don't have to re-aggregate
+    let _pnlCache = null;
+
+    // Drill-down: show the transactions that make up a given slice.
+    // scope = 'cell' | 'subTotal' | 'monthTotal' | 'sectionTotal'
+    function pnlDrill(scope, section, subCat, monthKey) {
+        if (!_pnlCache) return;
+        const idx = _pnlCache.txIndex;
+        let txs = [];
+        if (scope === 'cell') {
+            txs = (idx[section]?.[subCat]?.[monthKey]) || [];
+        } else if (scope === 'subTotal') {
+            Object.values(idx[section]?.[subCat] || {}).forEach(arr => txs.push(...arr));
+        } else if (scope === 'monthTotal') {
+            Object.values(idx[section] || {}).forEach(bySub => {
+                (bySub[monthKey] || []).forEach(tx => txs.push(tx));
+            });
+        } else if (scope === 'sectionTotal') {
+            Object.values(idx[section] || {}).forEach(bySub => {
+                Object.values(bySub).forEach(arr => txs.push(...arr));
+            });
+        }
+
+        // Sort newest first
+        txs.sort((a, b) => new Date(getField(b, F.txDate)) - new Date(getField(a, F.txDate)));
+
+        let title;
+        if (scope === 'cell') title = `${subCat} — ${pnlMonthLabel(monthKey)}`;
+        else if (scope === 'subTotal') title = `${subCat} — ${pnlMonths} month total`;
+        else if (scope === 'monthTotal') title = `${section} — ${pnlMonthLabel(monthKey)}`;
+        else title = `${section} — ${pnlMonths} month total`;
+
+        const subCatNames = pnlBuildLookup(allSubCategories, 'fldO4BTJhFv5EsN6i');
+        const bizNames = pnlBuildLookup(allBusinesses, 'fldbbRqVxLxUdHwIR');
+        const resolve = (field, map) => {
+            const id = pnlLinkId(field);
+            return id ? (map[id] || '') : '';
+        };
+
+        let runningTotal = 0;
+        const rowsHtml = txs.map(tx => {
+            const date = getField(tx, F.txDate) || '';
+            const amt = Number(getField(tx, F.txReportAmount)) || 0;
+            runningTotal += amt;
+            const detail = txLabel(tx);
+            const biz = resolve(getField(tx, F.txBusiness), bizNames);
+            const bizOk = biz === 'Real Estate';
+            const sub = resolve(getField(tx, F.txSubCategory), subCatNames);
+            const amtCls = amt < 0 ? 'color:#dc2626' : 'color:#065f46';
+            return `<tr>
+                <td style="padding:8px 10px;white-space:nowrap">${escHtml(date)}</td>
+                <td style="padding:8px 10px">${escHtml(detail)}<div style="font-size:10px;color:#94a3b8;margin-top:2px">${escHtml(sub)}</div></td>
+                <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;${amtCls};font-weight:600">${amt < 0 ? '-' : ''}£${Math.abs(amt).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style="padding:8px 10px">
+                    <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:10px;background:${bizOk ? '#dcfce7' : '#fee2e2'};color:${bizOk ? '#065f46' : '#991b1b'}">
+                        ${bizOk ? '✓' : '✗'} ${escHtml(biz || '(none)')}
+                    </span>
+                </td>
+            </tr>`;
+        }).join('');
+
+        const sumFmt = `${runningTotal < 0 ? '-' : ''}£${Math.abs(runningTotal).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'pnlDrillOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+        overlay.onclick = (e) => { if (e.target === overlay) pnlCloseDrill(); };
+        overlay.innerHTML = `
+            <div style="background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,0.3)">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0">
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">${escHtml(section)}</div>
+                        <div style="font-size:16px;font-weight:700;color:#0f172a">${escHtml(title)}</div>
+                        <div style="font-size:12px;color:#64748b;margin-top:2px">${txs.length} transaction${txs.length === 1 ? '' : 's'} &nbsp;·&nbsp; Sum of Report Amount: <strong>${sumFmt}</strong></div>
+                    </div>
+                    <button onclick="pnlCloseDrill()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#64748b;padding:0 8px">&times;</button>
+                </div>
+                <div style="overflow:auto;flex:1">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                        <thead style="background:#f8fafc;position:sticky;top:0">
+                            <tr style="border-bottom:1px solid #e2e8f0">
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Date</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Transaction Detail</th>
+                                <th style="padding:8px 10px;text-align:right;font-weight:600;color:#475569">Report Amount</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Business (For Reports)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml || '<tr><td colspan="4" style="padding:40px;text-align:center;color:#94a3b8">No transactions for this slice.</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        // Remove any stale overlay
+        pnlCloseDrill();
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', pnlEscHandler);
+    }
+    function pnlCloseDrill() {
+        const o = document.getElementById('pnlDrillOverlay');
+        if (o) o.remove();
+        document.removeEventListener('keydown', pnlEscHandler);
+    }
+    function pnlEscHandler(e) { if (e.key === 'Escape') pnlCloseDrill(); }
+
     function renderPnL() {
         const host = document.getElementById('tab-pnl');
         if (!host) return;
@@ -228,21 +344,48 @@
 
         const keys = pnlMonthKeys(pnlMonths);
         const pnl = buildPnL(allTransactions, pnlBusinessName, keys);
+        _pnlCache = pnl;
 
         const headCells = keys.map(k => `<th style="text-align:right;min-width:88px">${pnlMonthLabel(k)}</th>`).join('') +
             `<th style="text-align:right;min-width:100px;background:#f1f5f9">Total</th>`;
 
+        // Clickable data cell — drills down to the transactions backing the value.
+        // Only wires up click if there are transactions behind the number.
+        function cellTd(section, subCat, monthKey, value, extraStyle = '') {
+            const hasTx = !!(pnl.txIndex[section]?.[subCat]?.[monthKey]?.length);
+            if (!hasTx) return `<td style="text-align:right;${extraStyle}">${pnlFmt(value)}</td>`;
+            return `<td style="text-align:right;cursor:pointer;${extraStyle}" onclick="pnlDrill('cell', ${JSON.stringify(section)}, ${JSON.stringify(subCat)}, ${JSON.stringify(monthKey)})" title="Show transactions">${pnlFmt(value)}</td>`;
+        }
+
+        function subTotalTd(section, subCat, value) {
+            const hasTx = Object.values(pnl.txIndex[section]?.[subCat] || {}).some(arr => arr.length);
+            const base = 'text-align:right;background:#f8fafc;font-weight:600';
+            if (!hasTx) return `<td style="${base}">${pnlFmt(value)}</td>`;
+            return `<td style="${base};cursor:pointer" onclick="pnlDrill('subTotal', ${JSON.stringify(section)}, ${JSON.stringify(subCat)}, null)" title="Show all transactions for this line">${pnlFmt(value)}</td>`;
+        }
+
         function rowsFor(section, indent = 14) {
             return section.rows.map(r => {
-                const cells = keys.map(k => `<td style="text-align:right">${pnlFmt(r.monthly[k] || 0)}</td>`).join('');
+                const cells = keys.map(k => cellTd(section.name, r.subCat, k, r.monthly[k] || 0)).join('');
                 return `<tr>
                     <td style="padding-left:${indent}px;color:#475569">${escHtml(r.subCat)}</td>
                     ${cells}
-                    <td style="text-align:right;background:#f8fafc;font-weight:600">${pnlFmt(r.total)}</td>
+                    ${subTotalTd(section.name, r.subCat, r.total)}
                 </tr>`;
             }).join('');
         }
 
+        // Section totals (Total Revenue / Total COGS / Total OpEx) — clickable, scoped to that section.
+        function sectionTotalRow(label, sectionName, perMonth, grand, { bg = '#e2e8f0', color = '#0f172a' } = {}) {
+            const cells = keys.map(k => `<td style="text-align:right;cursor:pointer" onclick="pnlDrill('monthTotal', ${JSON.stringify(sectionName)}, null, ${JSON.stringify(k)})" title="Show ${escHtml(sectionName)} transactions for ${escHtml(pnlMonthLabel(k))}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
+            return `<tr style="background:${bg};color:${color};font-weight:700">
+                <td style="padding:8px 10px">${escHtml(label)}</td>
+                ${cells}
+                <td style="text-align:right;cursor:pointer" onclick="pnlDrill('sectionTotal', ${JSON.stringify(sectionName)}, null, null)" title="Show all ${escHtml(sectionName)} transactions">${pnlFmt(grand)}</td>
+            </tr>`;
+        }
+
+        // Derived totals (GP, NP) — not clickable since they combine sections.
         function totalRow(label, perMonth, grand, { bold = true, bg = '#e2e8f0', color = '#0f172a' } = {}) {
             const cells = keys.map(k => `<td style="text-align:right">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
             return `<tr style="background:${bg};color:${color};${bold ? 'font-weight:700' : ''}">
@@ -320,18 +463,18 @@
                         <tbody>
                             ${sectionHeader('Revenue')}
                             ${rowsFor(pnl.revenue)}
-                            ${totalRow('Total Revenue', pnl.revenue.totals, pnl.grand.revenue, { bg: '#dcfce7', color: '#065f46' })}
+                            ${sectionTotalRow('Total Revenue', 'Revenue', pnl.revenue.totals, pnl.grand.revenue, { bg: '#dcfce7', color: '#065f46' })}
 
                             ${sectionHeader('Cost of Goods Sold')}
                             ${rowsFor(pnl.cogs)}
-                            ${totalRow('Total COGS', pnl.cogs.totals, pnl.grand.cogs, { bg: '#fee2e2', color: '#991b1b' })}
+                            ${sectionTotalRow('Total COGS', 'Cost of Goods Sold', pnl.cogs.totals, pnl.grand.cogs, { bg: '#fee2e2', color: '#991b1b' })}
 
                             ${totalRow('Gross Profit', pnl.grossProfit, pnl.grand.grossProfit, { bg: '#e0f2fe', color: '#075985' })}
                             ${marginRow('Gross Profit Margin', pnl.grossMargin, pnl.grand.grossMargin)}
 
                             ${sectionHeader('Operating Expenses')}
                             ${rowsFor(pnl.opex)}
-                            ${totalRow('Total Operating Expenses', pnl.opex.totals, pnl.grand.opex, { bg: '#fee2e2', color: '#991b1b' })}
+                            ${sectionTotalRow('Total Operating Expenses', 'Operating Expenses', pnl.opex.totals, pnl.grand.opex, { bg: '#fee2e2', color: '#991b1b' })}
 
                             ${totalRow('Net Profit', pnl.netProfit, pnl.grand.netProfit, { bg: '#d1fae5', color: '#065f46' })}
                             ${marginRow('Net Profit Margin', pnl.netMargin, pnl.grand.netMargin)}
