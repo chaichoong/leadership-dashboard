@@ -1,12 +1,94 @@
 // ══════════════════════════════════════════
 // LEADERSHIP DASHBOARD — Load Data & Render KPIs
 // ══════════════════════════════════════════
+
+    // ── Stale-while-revalidate cache for instant reloads ──
+    const DASH_CACHE_KEY = '_dlr_dashcache_v1';
+    const DASH_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h — older than this, don't show stale
+
+    function loadDashCache() {
+        try {
+            const raw = localStorage.getItem(DASH_CACHE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.savedAt || !parsed.data) return null;
+            const ageMs = Date.now() - parsed.savedAt;
+            if (ageMs > DASH_CACHE_MAX_AGE_MS) return null;
+            return { data: parsed.data, ageMs };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function saveDashCache(data) {
+        try {
+            localStorage.setItem(DASH_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }));
+        } catch (e) {
+            // Quota exceeded or storage disabled — clear and ignore
+            try { localStorage.removeItem(DASH_CACHE_KEY); } catch (_) {}
+        }
+    }
+
+    function clearDashCache() {
+        try { localStorage.removeItem(DASH_CACHE_KEY); } catch (_) {}
+    }
+
+    function setRefreshingIndicator(on, ageMs) {
+        const el = document.getElementById('refreshingBadge');
+        if (!el) return;
+        if (on) {
+            const ageLabel = ageMs != null ? formatAge(ageMs) : '';
+            el.innerHTML = '<span class="refresh-dot" style="background:#2563eb"></span>Refreshing\u2026' +
+                (ageLabel ? ' <span style="opacity:0.7">(showing data from ' + ageLabel + ')</span>' : '');
+            el.style.display = 'inline-flex';
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    function formatAge(ms) {
+        const mins = Math.round(ms / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return mins + ' min ago';
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        return Math.round(hrs / 24) + 'd ago';
+    }
+
     // ── Dashboard Load ──
     async function loadDashboard() {
-        document.getElementById('loadingOverlay').style.display = 'flex';
-        document.getElementById('loadingSpinner').style.display = '';
-        document.getElementById('loadingText').textContent = 'Loading your dashboard...';
-        document.getElementById('loadingActions').style.display = 'none';
+        // Try instant render from cache first
+        const cached = loadDashCache();
+        let renderedFromCache = false;
+        if (cached) {
+            try {
+                const d = cached.data;
+                allTransactions = d.transactions;
+                allTenancies   = d.tenancies;
+                allTenants     = d.tenants;
+                allCosts       = d.costs;
+                allCategories  = d.categories;
+                allSubCategories = d.subCategories;
+                allBusinesses  = d.businesses;
+                renderDashboard(d.accounts, d.costs, d.tenancies, d.transactions, d.rentalUnits, d.tenants);
+                document.getElementById('dashboard').style.display = 'block';
+                document.getElementById('loadingOverlay').style.display = 'none';
+                setRefreshingIndicator(true, cached.ageMs);
+                renderedFromCache = true;
+            } catch (e) {
+                console.warn('Cache render failed, falling back to full load:', e);
+                clearDashCache();
+                renderedFromCache = false;
+            }
+        }
+
+        if (!renderedFromCache) {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            document.getElementById('loadingSpinner').style.display = '';
+            document.getElementById('loadingText').textContent = 'Loading your dashboard...';
+            document.getElementById('loadingActions').style.display = 'none';
+        }
+
         try {
             // Fetch Airtable data and Gmail invoices in parallel
             const [accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories, businesses] = await Promise.all([
@@ -43,8 +125,12 @@
             });
             renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants);
 
+            // Save fresh data to cache for next instant reload
+            saveDashCache({ accounts, costs, tenancies, transactions, rentalUnits, tenants, categories, subCategories, businesses });
+
             document.getElementById('dashboard').style.display = 'block';
             document.getElementById('loadingOverlay').style.display = 'none';
+            setRefreshingIndicator(false);
 
             // Update sidebar badges on load
             updateSitemapBadge();
@@ -70,8 +156,18 @@
             if (refreshTimer) clearInterval(refreshTimer);
             refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
         } catch (e) {
-            if (e.message === 'Auth failed') return;
+            if (e.message === 'Auth failed') { clearDashCache(); return; }
             console.error(e);
+            // If we're already showing cached data, keep it visible and just flag the refresh failure
+            if (renderedFromCache) {
+                const el = document.getElementById('refreshingBadge');
+                if (el) {
+                    el.innerHTML = '<span class="refresh-dot" style="background:#dc2626"></span>' +
+                        'Couldn\u2019t refresh \u2014 showing saved data';
+                    el.style.display = 'inline-flex';
+                }
+                return;
+            }
             document.getElementById('loadingSpinner').style.display = 'none';
             document.getElementById('loadingText').innerHTML =
                 '<div style="font-size:20px;color:#dc2626;margin-bottom:8px">Couldn\u2019t load your dashboard</div>' +

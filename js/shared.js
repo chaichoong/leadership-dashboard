@@ -62,6 +62,7 @@
     function logout() {
         PAT = '';
         localStorage.removeItem('_dlr_pat');
+        if (typeof clearDashCache === 'function') clearDashCache();
         document.getElementById('authScreen').style.display = 'flex';
         document.getElementById('dashboard').style.display = 'none';
     }
