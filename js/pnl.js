@@ -242,16 +242,57 @@
     };
 
     // Build <option> list for a dropdown. records come from allCategories etc.
-    function pnlOptionList(records, nameFieldId, selectedId) {
-        const sorted = [...(records || [])].map(r => ({
+    // Return sorted [{id,name}] for a given table
+    function pnlNameList(records, nameFieldId) {
+        return [...(records || [])].map(r => ({
             id: r.id,
             name: String(getField(r, nameFieldId) || '')
         })).filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name));
-        const opts = ['<option value="">(none)</option>']
+    }
+
+    // Build <option> nodes for a <datalist> — the input filters as you type.
+    function pnlDatalistOptions(list) {
+        return list.map(o => `<option value="${escHtml(o.name)}"></option>`).join('');
+    }
+
+    // Kept for backwards-compat if anything still calls it
+    function pnlOptionList(records, nameFieldId, selectedId) {
+        const sorted = pnlNameList(records, nameFieldId);
+        return ['<option value="">(none)</option>']
             .concat(sorted.map(o =>
                 `<option value="${escHtml(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${escHtml(o.name)}</option>`
-            ));
-        return opts.join('');
+            )).join('');
+    }
+
+    // Resolve a typed name to a record ID using a kind (category/subCategory/business)
+    function pnlResolveNameToId(kind, name) {
+        const src = kind === 'category' ? allCategories
+                  : kind === 'subCategory' ? allSubCategories
+                  : kind === 'business' ? allBusinesses : [];
+        const fieldId = PNL_NAME_FIELDS[kind];
+        if (!fieldId || !name) return '';
+        const needle = String(name).trim().toLowerCase();
+        if (!needle) return '';
+        // Exact match first, fall back to case-insensitive exact
+        const rec = (src || []).find(r => String(getField(r, fieldId) || '').toLowerCase() === needle);
+        return rec ? rec.id : null; // null means "typed value didn't match any record"
+    }
+
+    // Called from a datalist-backed input onchange. Validates the typed name
+    // resolves to a known record before PATCHing.
+    function pnlEditTxByName(txId, kind, typedName, inputEl) {
+        if (typedName === '' || typedName == null) {
+            // Clear the link
+            return pnlEditTxField(txId, kind, '', inputEl);
+        }
+        const id = pnlResolveNameToId(kind, typedName);
+        const status = inputEl?.parentElement?.querySelector('.pnl-edit-status');
+        if (id === null) {
+            // Typed something that doesn't match any record
+            if (status) { status.textContent = '✗ no match'; status.style.color = '#dc2626'; }
+            return;
+        }
+        return pnlEditTxField(txId, kind, id, inputEl);
     }
 
     // PATCH a single linked-record field on a transaction and update the local
@@ -326,20 +367,36 @@
         else if (scope === 'monthTotal') title = `${section} — ${pnlMonthLabel(monthKey)}`;
         else title = `${section} — ${pnlMonths} month total`;
 
-        // Builder for an editable linked-record select embedded in a drill row.
-        // onchange calls pnlEditTxField(txId, kind, value, this)
-        function editSelect(txId, kind, currentId, options) {
+        // Local jsAttr for embedding values in HTML attributes
+        const jsAttr = (v) => JSON.stringify(v == null ? null : v).replace(/"/g, '&quot;');
+
+        // Build searchable input (type-to-filter via <datalist>).
+        // Single datalist per kind is shared across all rows.
+        function editInput(txId, kind, currentName, datalistId) {
             return `<div style="display:flex;align-items:center;gap:4px">
-                <select onchange="pnlEditTxField(${jsAttr(txId)}, ${jsAttr(kind)}, this.value, this)"
-                    style="font-size:11px;padding:2px 4px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;max-width:140px">
-                    ${options}
-                </select>
+                <input list="${datalistId}" value="${escHtml(currentName)}"
+                    onchange="pnlEditTxByName(${jsAttr(txId)}, ${jsAttr(kind)}, this.value, this)"
+                    placeholder="Type to search…"
+                    style="font-size:11px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;width:150px">
                 <span class="pnl-edit-status" style="font-size:11px;min-width:12px"></span>
             </div>`;
         }
 
-        // Local jsAttr so we can use the helper inside this function scope too.
-        const jsAttr = (v) => JSON.stringify(v == null ? null : v).replace(/"/g, '&quot;');
+        // Build the three shared datalists once
+        const catList = pnlNameList(allCategories, PNL_NAME_FIELDS.category);
+        const subList = pnlNameList(allSubCategories, PNL_NAME_FIELDS.subCategory);
+        const bizList = pnlNameList(allBusinesses, PNL_NAME_FIELDS.business);
+        const datalistHtml = `
+            <datalist id="pnl-dl-category">${pnlDatalistOptions(catList)}</datalist>
+            <datalist id="pnl-dl-subCategory">${pnlDatalistOptions(subList)}</datalist>
+            <datalist id="pnl-dl-business">${pnlDatalistOptions(bizList)}</datalist>
+        `;
+        // Lookup id -> name for the currently-linked record (for pre-filling inputs)
+        const nameById = (list, id) => {
+            if (!id) return '';
+            const hit = list.find(o => o.id === id);
+            return hit ? hit.name : '';
+        };
 
         let runningTotal = 0;
         const rowsHtml = txs.map(tx => {
@@ -352,17 +409,17 @@
             const bizId = pnlLinkId(getField(tx, F.txBusiness));
             const amtCls = amt < 0 ? 'color:#dc2626' : 'color:#065f46';
 
-            const catOpts    = pnlOptionList(allCategories,    PNL_NAME_FIELDS.category,    catId);
-            const subCatOpts = pnlOptionList(allSubCategories, PNL_NAME_FIELDS.subCategory, subCatId);
-            const bizOpts    = pnlOptionList(allBusinesses,    PNL_NAME_FIELDS.business,    bizId);
+            const catName = nameById(catList, catId);
+            const subName = nameById(subList, subCatId);
+            const bizName = nameById(bizList, bizId);
 
             return `<tr>
                 <td style="padding:8px 10px;white-space:nowrap;vertical-align:top">${escHtml(date)}</td>
                 <td style="padding:8px 10px;vertical-align:top;min-width:180px">${escHtml(detail)}</td>
                 <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;${amtCls};font-weight:600;vertical-align:top">${amt < 0 ? '-' : ''}£${Math.abs(amt).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                <td style="padding:6px 8px;vertical-align:top">${editSelect(tx.id, 'category',    catId,    catOpts)}</td>
-                <td style="padding:6px 8px;vertical-align:top">${editSelect(tx.id, 'subCategory', subCatId, subCatOpts)}</td>
-                <td style="padding:6px 8px;vertical-align:top">${editSelect(tx.id, 'business',    bizId,    bizOpts)}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'category',    catName, 'pnl-dl-category')}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'subCategory', subName, 'pnl-dl-subCategory')}</td>
+                <td style="padding:6px 8px;vertical-align:top">${editInput(tx.id, 'business',    bizName, 'pnl-dl-business')}</td>
             </tr>`;
         }).join('');
 
@@ -373,6 +430,7 @@
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
         overlay.onclick = (e) => { if (e.target === overlay) pnlCloseDrill(); };
         overlay.innerHTML = `
+            ${datalistHtml}
             <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,0.3)">
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0">
                     <div>
