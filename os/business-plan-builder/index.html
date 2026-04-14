@@ -399,6 +399,110 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   .milestones{grid-template-columns:1fr}
   .timeline-bar{grid-template-columns:1fr 1fr}
 }
+
+/* === LAUNCH PM DASHBOARD === */
+.lp-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.lp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.lp-kpi .v{font-size:1.7rem;font-weight:800;color:var(--accent2);line-height:1.2}
+.lp-kpi .l{font-size:0.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-top:4px;font-weight:600}
+.lp-kpi .mini-bar{height:4px;background:var(--surface2);border-radius:2px;margin-top:8px;overflow:hidden}
+.lp-kpi .mini-fill{height:100%;border-radius:2px;transition:width .4s;background:var(--green)}
+.lp-kpi .status-label{font-size:0.72rem;font-weight:700;margin-top:4px}
+.lp-kpi .status-label.on-track{color:var(--green)}
+.lp-kpi .status-label.at-risk{color:var(--amber)}
+.lp-kpi .status-label.behind{color:var(--red)}
+
+.lp-filter-bar{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;padding:8px 0;margin-bottom:14px}
+.lp-filter-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:5px 14px;border-radius:20px;cursor:pointer;font-size:0.75rem;font-weight:600;transition:all .2s}
+.lp-filter-btn:hover{border-color:var(--accent);color:var(--text)}
+.lp-filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+.lp-workload-bar{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;padding:6px 0;margin-bottom:18px;font-size:0.72rem}
+.lp-workload-item{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 12px}
+.lp-workload-item .wl-counts{color:var(--text2)}
+.lp-workload-item .wl-todo{color:var(--text2)}
+.lp-workload-item .wl-ip{color:var(--amber)}
+.lp-workload-item .wl-done{color:var(--green)}
+.lp-workload-item.wl-idle{border-color:var(--red);background:rgba(239,68,68,.08)}
+.lp-wl-idle-badge{font-size:0.62rem;color:var(--red);font-weight:700;margin-left:4px}
+.lp-wl-spec-badge{font-size:0.6rem;color:var(--text2);font-style:italic;margin-left:4px}
+
+.lp-week-nav{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:18px}
+.lp-week-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:8px;cursor:pointer;font-size:0.78rem;font-weight:600;text-align:center}
+.lp-week-btn:hover{border-color:var(--accent)}
+.lp-week-btn .wb-prog{font-size:0.65rem;color:var(--text2);margin-top:2px}
+
+.lp-day{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:14px;padding:16px 18px}
+.lp-day-hdr{display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.lp-day-hdr .lp-day-title{font-size:.95rem;font-weight:700;color:var(--accent2);flex:1}
+.lp-day-hdr .lp-day-date{font-size:.72rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.lp-day-badge{display:inline-block;font-size:0.65rem;background:var(--surface2);color:var(--text2);padding:2px 9px;border-radius:10px;margin-left:6px}
+.lp-day-badge.all-done{background:rgba(34,197,94,.15);color:var(--green)}
+
+.lp-task{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.lp-task:last-child{border-bottom:none}
+.lp-task-who{min-width:120px;flex-shrink:0;display:flex;flex-direction:column;gap:4px}
+.lp-task-what{flex:1;font-size:0.86rem}
+.lp-task-what strong{color:var(--text);font-weight:600}
+.lp-task-what .detail{color:var(--text2);font-size:0.78rem;margin-top:4px;line-height:1.55}
+.lp-owner-switch{font-size:0.7rem;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--text);cursor:pointer;appearance:none;-webkit-appearance:none}
+.lp-owner-switch:hover,.lp-owner-switch:focus{border-color:var(--accent);outline:none}
+
+.lp-status-btn{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;cursor:pointer;flex-shrink:0;transition:all .2s;font-size:0.7rem;font-weight:700;user-select:none;border:2px solid var(--border);background:var(--surface2);color:var(--text2);white-space:nowrap;align-self:flex-start}
+.lp-status-btn:hover{border-color:var(--accent);transform:scale(1.03)}
+.lp-status-btn .status-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--text2);background:transparent;flex-shrink:0}
+.lp-status-btn.inprogress{border-color:var(--amber);background:rgba(245,158,11,.1);color:var(--amber)}
+.lp-status-btn.inprogress .status-dot{border-color:var(--amber);background:var(--amber);animation:lp-pulse 2s ease-in-out infinite}
+.lp-status-btn.done{border-color:var(--green);background:rgba(34,197,94,.1);color:var(--green)}
+.lp-status-btn.done .status-dot{border-color:var(--green);background:var(--green)}
+.lp-task.inprogress{border-left:3px solid var(--amber);padding-left:10px}
+.lp-task.done{border-left:3px solid var(--green);padding-left:10px}
+.lp-task.done .lp-task-what strong{color:var(--text2);text-decoration:line-through}
+.lp-task.done .lp-task-what .detail{opacity:0.55}
+.lp-task.dimmed{opacity:0.25}
+.lp-task-status-info{font-size:0.66rem;color:var(--text2);margin-top:3px}
+.lp-task-status-info strong{color:var(--amber)}
+.lp-task-status-info.done-info strong{color:var(--green)}
+
+@keyframes lp-pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0)}}
+
+.lp-balance-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--amber);color:#000;padding:12px 24px;border-radius:12px;font-size:0.82rem;font-weight:600;z-index:1000;box-shadow:0 4px 20px rgba(0,0,0,0.4);max-width:520px;text-align:center;animation:lp-toast-in .3s ease}
+.lp-balance-toast .toast-close{margin-left:12px;cursor:pointer;font-weight:800;opacity:0.7}
+@keyframes lp-toast-in{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+.lp-tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.68rem;font-weight:700;white-space:nowrap}
+.lp-tag-c0{background:rgba(99,102,241,.15);color:var(--accent2)}
+.lp-tag-c1{background:rgba(34,197,94,.15);color:var(--green)}
+.lp-tag-c2{background:rgba(245,158,11,.15);color:var(--amber)}
+.lp-tag-c3{background:rgba(59,130,246,.15);color:var(--blue)}
+.lp-tag-c4{background:rgba(236,72,153,.15);color:var(--pink)}
+.lp-tag-c5{background:rgba(168,85,247,.15);color:var(--purple)}
+
+.lp-cat-badge{display:inline-block;padding:2px 7px;border-radius:8px;font-size:0.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-left:6px;background:var(--surface2);color:var(--text2)}
+.lp-cat-badge.cat-marketing{background:rgba(236,72,153,.12);color:var(--pink)}
+.lp-cat-badge.cat-systems{background:rgba(59,130,246,.12);color:var(--blue)}
+.lp-cat-badge.cat-product{background:rgba(168,85,247,.12);color:var(--purple)}
+
+.lp-gen-wrap{text-align:center;padding:36px 18px;background:var(--surface);border:1px dashed var(--border);border-radius:12px;margin-bottom:18px}
+.lp-gen-wrap h3{font-size:1.05rem;margin-bottom:.5rem;color:var(--text)}
+.lp-gen-wrap p{font-size:.85rem;color:var(--text2);margin-bottom:1rem;max-width:480px;margin-left:auto;margin-right:auto}
+.lp-gen-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:12px 22px;font-size:.92rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.lp-gen-btn:hover{background:var(--accent2)}
+.lp-gen-btn:disabled{opacity:.6;cursor:wait}
+.lp-gen-spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:lp-spin .8s linear infinite;display:none}
+.lp-gen-btn.loading .lp-gen-spinner{display:inline-block}
+@keyframes lp-spin{to{transform:rotate(360deg)}}
+.lp-gen-error{color:var(--red);font-size:.82rem;margin-top:.75rem}
+
+.lp-prog-bar{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden;margin-top:4px}
+.lp-prog-fill{height:100%;border-radius:2px;background:var(--green);transition:width .4s}
+
+@media(max-width:768px){
+  .lp-kpi-row{grid-template-columns:1fr 1fr}
+  .lp-task{flex-wrap:wrap}
+  .lp-task-who{min-width:0;flex-direction:row;align-items:center}
+}
+@media print{.lp-filter-bar,.lp-status-btn,.lp-workload-bar,.lp-balance-toast,.lp-gen-wrap{display:none}}
 </style>
 </head>
 <body>
@@ -555,7 +659,7 @@ function buildSystemPrompt(userName) {
 'Phase 4 - THE OFFER: What specific products or services? What pricing? What is the revenue model?\n' +
 'Phase 5 - THE NUMBERS: Revenue targets for Year 1 and Year 3? How many customers needed monthly? Average transaction value?\n' +
 'Phase 6 - THE INVESTMENT: Startup costs? Monthly fixed costs? How are they funding it? When do they break even?\n' +
-'Phase 7 - THE TEAM: What is the founder doing day-to-day? Who else is needed? What tools and software? What skills gaps?\n' +
+'Phase 7 - THE TEAM: What is the founder doing day-to-day? Who else is on the team RIGHT NOW (names + what they\'re good at)? Who else is needed? What tools and software? What skills gaps? Always ask for actual team member names and their specialization (marketing / systems / product) so tasks can be assigned to real people.\n' +
 'Phase 8 - THE GROWTH: Which marketing channels? What is the sales process end to end? How will they generate leads?\n' +
 'Phase 9 - THE LAUNCH: Target launch date? Week-by-week plan for first 30 days? What must be done before go-live? Include specific AI tools and prompts they can use for each task.\n' +
 'Phase 10 - THE MEASURES: What does success look like at 30, 90, 365 days? Which KPIs matter most? What is the biggest risk and how will they handle it?\n\n' +
@@ -583,9 +687,10 @@ function buildSystemPrompt(userName) {
 '- products: {"products":[{"name":"","description":"","price":""}],"revenueModel":"","pricingStrategy":""}\n' +
 '- revenue: {"revenueTargetY1":"","revenueTargetY3":"","customersPerMonth":"","avgTransactionValue":"","assumptions":""}\n' +
 '- costs: {"startupCosts":[{"item":"","cost":""}],"monthlyCosts":[{"item":"","cost":""}],"fundingSource":"","breakEven":""}\n' +
-'- team: {"founderRole":"","keyHires":[""],"tools":[""],"skillsGaps":""}\n' +
+'- team: {"founderRole":"","teamMembers":[{"name":"","role":"","specialization":"marketing|systems|product"}],"keyHires":[""],"tools":[""],"skillsGaps":""}\n' +
 '- marketing: {"channels":[""],"salesProcess":"","leadGenStrategy":"","marketingBudget":""}\n' +
-'- launch: {"launchDate":"","week1":"","week2":"","week3":"","week4":"","checklist":[""]}\n' +
+'- launch: {"launchDate":"YYYY-MM-DD","week1":"","week2":"","week3":"","week4":"","checklist":[""],"weeks":[{"id":"w1","label":"Week 1 \u2014 Foundation","theme":"accent","days":[{"id":"w1d1","date":"YYYY-MM-DD","label":"Mon 15 Apr","title":"Short title","tasks":[{"id":"task-1","title":"Concrete task","detail":"How to do it / what success looks like","category":"marketing|systems|product","suggestedOwner":0}]}]}]}\n' +
+'  IMPORTANT for launch: produce a full weeks[] array of FOUR weeks. Each week has 4-5 working days. Each day has 2-3 tightly scoped tasks. Total ~30-40 tasks across the 30 days. Tailor every task to THIS specific business (e.g. "Write WooCommerce product pages" for e-comm, "Record 3 demo videos" for SaaS, "Set up call booking page" for services). Each task MUST have a category (marketing/systems/product) and a suggestedOwner that is a 0-based index into team.teamMembers picked by matching the task category to the member\'s specialization. Use sequential ids task-1, task-2 ... and day ids w1d1, w1d2, w2d1 etc. Themes per week should be: w1=accent, w2=blue, w3=amber, w4=green.\n' +
 '- metrics: {"milestone30":"","milestone90":"","milestone12":"","kpis":["","",""],"biggestRisk":"","riskMitigation":""}\n\n' +
 'START YOUR FIRST MESSAGE:\n' +
 'Welcome ' + (name !== 'there' ? name : 'them') + ' warmly. Tell them you are going to help them build a complete business plan and 30-day launch action plan through a simple conversation. Make them feel excited about the journey. Then ask your first question: what is their business idea? Keep it to 3-4 sentences total.';
@@ -1579,45 +1684,554 @@ function renderMarketingSection(d) {
   return h;
 }
 
+// ── LAUNCH DASHBOARD STATE ──
+var lpActiveFilter = 'all';
+
+function getPlanId() {
+  var bn = (planData.overview && planData.overview.businessName) || 'plan';
+  return bn.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40) || 'plan';
+}
+function lpStatusKey(){ return 'bpb-launch-status-' + getPlanId(); }
+function lpOwnersKey(){ return 'bpb-launch-owners-' + getPlanId(); }
+function lpGetStatuses(){ try{return JSON.parse(localStorage.getItem(lpStatusKey())||'{}');}catch(e){return {};} }
+function lpSaveStatuses(s){ try{localStorage.setItem(lpStatusKey(), JSON.stringify(s));}catch(e){} }
+function lpGetOwners(){ try{return JSON.parse(localStorage.getItem(lpOwnersKey())||'{}');}catch(e){return {};} }
+function lpSaveOwners(o){ try{localStorage.setItem(lpOwnersKey(), JSON.stringify(o));}catch(e){} }
+
+function lpGetTeamMembers() {
+  var tm = (planData.team && planData.team.teamMembers) || [];
+  if (!tm.length) {
+    // Fallback: synthesise from founderRole
+    var fr = (planData.team && planData.team.founderRole) || (config.userName || 'Founder');
+    tm = [{ name: (config.userName || fr.split(/[-:\u2014,]/)[0].trim() || 'Founder'), role: fr, specialization:'product' }];
+  }
+  return tm;
+}
+
+function lpResolveOwnerIdx(taskId, suggested) {
+  var owners = lpGetOwners();
+  if (owners[taskId] !== undefined) return owners[taskId];
+  return (typeof suggested === 'number') ? suggested : 0;
+}
+
+function lpFlattenTasks(d) {
+  var all = [];
+  if (!d || !d.weeks) return all;
+  d.weeks.forEach(function(w){
+    (w.days||[]).forEach(function(day){
+      (day.tasks||[]).forEach(function(t){
+        all.push({ task:t, day:day, week:w });
+      });
+    });
+  });
+  return all;
+}
+
 function renderLaunchSection(d) {
   var idx = 8;
+  // No data at all
   if (!d) return emptySection('launch', idx);
+
   var h = secStart('launch', idx);
-  // Launch date
+
+  // Launch date headline
   if (d.launchDate) {
     h += '<div class="hl" style="margin-bottom:1rem;text-align:center"><div class="hl-label">Target Launch Date</div><div class="hl-big">' + escapeHtml(d.launchDate) + '</div></div>';
   }
-  // Coloured timeline segments (launch-plan style)
-  h += '<div class="tl">';
-  h += '<div class="tl-seg" style="background:var(--pink)"><div class="tl-lbl">Week 1</div><div class="tl-date">Foundation</div></div>';
-  h += '<div class="tl-seg" style="background:var(--blue)"><div class="tl-lbl">Week 2</div><div class="tl-date">Build</div></div>';
-  h += '<div class="tl-seg" style="background:var(--amber)"><div class="tl-lbl">Week 3</div><div class="tl-date">Soft Launch</div></div>';
-  h += '<div class="tl-seg" style="background:var(--green)"><div class="tl-lbl">Week 4</div><div class="tl-date">Go Live</div></div>';
-  h += '</div>';
-  // Week-by-week collapsible steps
-  var weeks = [
-    { key:'week1', title:'Week 1 \u2014 Foundation', color:'pink' },
-    { key:'week2', title:'Week 2 \u2014 Build', color:'blue' },
-    { key:'week3', title:'Week 3 \u2014 Soft Launch', color:'amber' },
-    { key:'week4', title:'Week 4 \u2014 Go Live', color:'green' }
-  ];
-  for (var i = 0; i < weeks.length; i++) {
-    var w = weeks[i];
-    var content = '<p>' + escapeHtml(d[w.key] || '\u2014') + '</p>';
-    h += stepBlock(i + 1, w.title, content, { color: w.color, open: i === 0 });
+
+  var hasStructured = d.weeks && d.weeks.length > 0;
+
+  if (!hasStructured) {
+    // Show thin view + Generate button
+    h += '<div class="lp-gen-wrap">';
+    h += '<h3>\u2728 Build your interactive 30-day plan</h3>';
+    h += '<p>Turn your week-by-week summary into a fully tracked project: day-by-day tasks, owners assigned to your real team, status tracking, workload balance, and progress KPIs \u2014 all generated by AI based on your business plan.</p>';
+    h += '<button class="lp-gen-btn" id="lpGenBtn" onclick="generateLaunchPlan()"><span class="lp-gen-spinner"></span><span class="lp-gen-label">\u2728 Generate detailed 30-day plan</span></button>';
+    h += '<div class="lp-gen-error" id="lpGenError" style="display:none"></div>';
+    h += '</div>';
+    // Existing thin week summary
+    h += '<div class="tl">';
+    h += '<div class="tl-seg" style="background:var(--pink)"><div class="tl-lbl">Week 1</div><div class="tl-date">Foundation</div></div>';
+    h += '<div class="tl-seg" style="background:var(--blue)"><div class="tl-lbl">Week 2</div><div class="tl-date">Build</div></div>';
+    h += '<div class="tl-seg" style="background:var(--amber)"><div class="tl-lbl">Week 3</div><div class="tl-date">Soft Launch</div></div>';
+    h += '<div class="tl-seg" style="background:var(--green)"><div class="tl-lbl">Week 4</div><div class="tl-date">Go Live</div></div>';
+    h += '</div>';
+    var weeks = [
+      { key:'week1', title:'Week 1 \u2014 Foundation', color:'pink' },
+      { key:'week2', title:'Week 2 \u2014 Build', color:'blue' },
+      { key:'week3', title:'Week 3 \u2014 Soft Launch', color:'amber' },
+      { key:'week4', title:'Week 4 \u2014 Go Live', color:'green' }
+    ];
+    for (var i = 0; i < weeks.length; i++) {
+      var w = weeks[i];
+      var content = '<p>' + escapeHtml(d[w.key] || '\u2014') + '</p>';
+      h += stepBlock(i + 1, w.title, content, { color: w.color, open: i === 0 });
+    }
+    if (d.checklist && d.checklist.length > 0) {
+      h += '<div class="card" style="margin-top:1rem"><div class="card-label">Pre-Launch Checklist</div><ul class="checklist">';
+      for (var ci = 0; ci < d.checklist.length; ci++) {
+        if (d.checklist[ci]) h += '<li>' + escapeHtml(d.checklist[ci]) + '</li>';
+      }
+      h += '</ul></div>';
+    }
+    h += '</div>';
+    return h;
   }
-  // Go/no-go decision callout
-  h += decisionBox('Go / No-Go Checkpoint', 'Before flipping the switch on launch day, confirm the pre-launch checklist below is complete and all week-4 deliverables are signed off.');
-  // Pre-launch checklist
+
+  // ── INTERACTIVE PM DASHBOARD ──
+  var team = lpGetTeamMembers();
+  var allTasks = lpFlattenTasks(d);
+  var totalTasks = allTasks.length;
+
+  // KPI row
+  h += '<div class="lp-kpi-row" id="lpKpiRow">';
+  h += '<div class="lp-kpi"><div class="v" id="lpKpiDone">0 / ' + totalTasks + '</div><div class="l">Tasks Complete</div><div class="mini-bar"><div class="mini-fill" id="lpKpiDoneBar" style="width:0%"></div></div></div>';
+  h += '<div class="lp-kpi"><div class="v" id="lpKpiDays">\u2014</div><div class="l">Days to Launch</div></div>';
+  h += '<div class="lp-kpi"><div class="v" id="lpKpiTrackIcon" style="color:var(--green)">\u25cf</div><div class="l">Project Status</div><div class="status-label" id="lpKpiTrack"></div></div>';
+  h += '<div class="lp-kpi"><div class="v" id="lpKpiInProg">0</div><div class="l">In Progress</div></div>';
+  h += '</div>';
+
+  // Filter bar
+  h += '<div class="lp-filter-bar" id="lpFilterBar">';
+  h += '<button class="lp-filter-btn active" data-filter="all" onclick="lpFilterBy(\'all\')">All Tasks</button>';
+  for (var ti = 0; ti < team.length; ti++) {
+    h += '<button class="lp-filter-btn" data-filter="m' + ti + '" onclick="lpFilterBy(\'m' + ti + '\')">' + escapeHtml(team[ti].name) + '</button>';
+  }
+  h += '<button class="lp-filter-btn" data-filter="inprogress" onclick="lpFilterBy(\'inprogress\')">In Progress</button>';
+  h += '</div>';
+
+  // Workload summary
+  h += '<div class="lp-workload-bar" id="lpWorkloadBar"></div>';
+
+  // Week nav buttons
+  h += '<div class="lp-week-nav">';
+  for (var wi = 0; wi < d.weeks.length; wi++) {
+    var wk = d.weeks[wi];
+    h += '<button class="lp-week-btn" onclick="lpScrollToWeek(\'' + wk.id + '\')">' + escapeHtml(wk.label) + '<div class="wb-prog" id="lpWp-' + wk.id + '">0/0</div></button>';
+  }
+  h += '</div>';
+
+  // Day sections
+  for (var wi2 = 0; wi2 < d.weeks.length; wi2++) {
+    var wk2 = d.weeks[wi2];
+    h += '<div id="lpWeek-' + wk2.id + '">';
+    for (var di = 0; di < (wk2.days||[]).length; di++) {
+      var day = wk2.days[di];
+      h += '<div class="lp-day" id="lpDay-' + day.id + '">';
+      h += '<div class="lp-day-hdr">';
+      h += '<div class="lp-day-title">' + escapeHtml(day.title || day.label || day.id) + '<span class="lp-day-badge" id="lpDayBadge-' + day.id + '">0/' + (day.tasks||[]).length + '</span></div>';
+      h += '<div class="lp-day-date">' + escapeHtml(day.label || day.date || '') + '</div>';
+      h += '</div>';
+      // Tasks
+      for (var pi = 0; pi < (day.tasks||[]).length; pi++) {
+        var t = day.tasks[pi];
+        var ownerIdx = lpResolveOwnerIdx(t.id, t.suggestedOwner);
+        var member = team[ownerIdx] || team[0] || { name:'?', specialization:'product' };
+        var tagCls = 'lp-tag-c' + (ownerIdx % 6);
+        h += '<div class="lp-task" data-task-id="' + escapeHtml(t.id) + '" data-day-id="' + escapeHtml(day.id) + '" data-week-id="' + escapeHtml(wk2.id) + '" data-cat="' + escapeHtml(t.category||'') + '">';
+        h += '<div class="lp-status-btn" onclick="lpCycleStatus(\'' + escapeHtml(t.id) + '\')" title="Click to update status"><span class="status-dot"></span> To Do</div>';
+        h += '<div class="lp-task-who">';
+        h += '<span class="lp-tag ' + tagCls + '" data-owner-tag="' + escapeHtml(t.id) + '">' + escapeHtml(member.name) + '</span>';
+        h += '<select class="lp-owner-switch" data-owner-sel="' + escapeHtml(t.id) + '" onchange="lpSwitchOwner(this,\'' + escapeHtml(t.id) + '\')">';
+        for (var oi = 0; oi < team.length; oi++) {
+          h += '<option value="' + oi + '"' + (oi === ownerIdx ? ' selected' : '') + '>' + escapeHtml(team[oi].name) + '</option>';
+        }
+        h += '</select>';
+        h += '</div>';
+        h += '<div class="lp-task-what"><strong>' + escapeHtml(t.title || '') + '</strong>';
+        if (t.category) h += '<span class="lp-cat-badge cat-' + escapeHtml(t.category) + '">' + escapeHtml(t.category) + '</span>';
+        if (t.detail) h += '<div class="detail">' + escapeHtml(t.detail) + '</div>';
+        h += '</div>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
+  }
+
+  // Checklist
   if (d.checklist && d.checklist.length > 0) {
     h += '<div class="card" style="margin-top:1rem"><div class="card-label">Pre-Launch Checklist</div><ul class="checklist">';
-    for (var i = 0; i < d.checklist.length; i++) {
-      if (d.checklist[i]) h += '<li>' + escapeHtml(d.checklist[i]) + '</li>';
+    for (var cli = 0; cli < d.checklist.length; cli++) {
+      if (d.checklist[cli]) h += '<li>' + escapeHtml(d.checklist[cli]) + '</li>';
     }
     h += '</ul></div>';
   }
+
+  // Regenerate option
+  h += '<div style="text-align:center;margin-top:18px"><button class="lp-gen-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)" id="lpGenBtn" onclick="generateLaunchPlan()"><span class="lp-gen-spinner"></span><span class="lp-gen-label">\u21bb Regenerate plan</span></button><div class="lp-gen-error" id="lpGenError" style="display:none"></div></div>';
+
   h += '</div>';
+
+  // Schedule init after DOM is in
+  setTimeout(lpInitDashboard, 30);
   return h;
+}
+
+// ── DASHBOARD RUNTIME ──
+function lpInitDashboard() {
+  if (!planData.launch || !planData.launch.weeks) return;
+  // Apply saved statuses to DOM
+  var statuses = lpGetStatuses();
+  Object.keys(statuses).forEach(function(tid){
+    var s = statuses[tid];
+    lpApplyTaskStatus(tid, s.status, s.by, s.at);
+  });
+  lpUpdateDashboard();
+}
+
+function lpFormatTime(iso) {
+  var d = new Date(iso);
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h = d.getHours(), m = d.getMinutes();
+  return d.getDate() + ' ' + months[d.getMonth()] + ' ' + (h<10?'0'+h:h) + ':' + (m<10?'0'+m:m);
+}
+
+function lpGetTaskOwnerName(taskId) {
+  var sel = document.querySelector('[data-owner-sel="' + taskId + '"]');
+  var team = lpGetTeamMembers();
+  if (!sel) return 'Unknown';
+  var i = parseInt(sel.value, 10) || 0;
+  return (team[i] && team[i].name) || 'Unknown';
+}
+
+function lpCycleStatus(taskId) {
+  var statuses = lpGetStatuses();
+  var current = statuses[taskId] ? statuses[taskId].status : 'todo';
+  var next;
+  if (current === 'todo') next = 'inprogress';
+  else if (current === 'inprogress') next = 'done';
+  else next = 'todo';
+  var by = lpGetTaskOwnerName(taskId);
+  var at = new Date().toISOString();
+  if (next === 'todo') delete statuses[taskId];
+  else statuses[taskId] = { status: next, by: by, at: at };
+  lpSaveStatuses(statuses);
+  lpApplyTaskStatus(taskId, next, by, at);
+  lpUpdateDashboard();
+  if (lpActiveFilter !== 'all') lpFilterBy(lpActiveFilter);
+}
+
+function lpApplyTaskStatus(taskId, status, by, at) {
+  var taskEl = document.querySelector('.lp-task[data-task-id="' + taskId + '"]');
+  if (!taskEl) return;
+  var btn = taskEl.querySelector('.lp-status-btn');
+  taskEl.classList.remove('inprogress','done');
+  if (btn) btn.classList.remove('inprogress','done');
+  var oldInfo = taskEl.querySelector('.lp-task-status-info');
+  if (oldInfo) oldInfo.remove();
+  if (status === 'inprogress') {
+    if (btn) { btn.innerHTML = '<span class="status-dot"></span> In Progress'; btn.classList.add('inprogress'); }
+    taskEl.classList.add('inprogress');
+    var info = document.createElement('div');
+    info.className = 'lp-task-status-info';
+    info.innerHTML = '<strong>' + escapeHtml(by||'') + '</strong>' + (at ? ' \u00b7 ' + lpFormatTime(at) : '');
+    if (btn) btn.after(info);
+  } else if (status === 'done') {
+    if (btn) { btn.innerHTML = '<span class="status-dot"></span> Done'; btn.classList.add('done'); }
+    taskEl.classList.add('done');
+    var info2 = document.createElement('div');
+    info2.className = 'lp-task-status-info done-info';
+    info2.innerHTML = '<strong>' + escapeHtml(by||'') + '</strong>' + (at ? ' \u00b7 ' + lpFormatTime(at) : '');
+    if (btn) btn.after(info2);
+  } else {
+    if (btn) btn.innerHTML = '<span class="status-dot"></span> To Do';
+  }
+}
+
+function lpSwitchOwner(sel, taskId) {
+  var idx = parseInt(sel.value, 10) || 0;
+  var team = lpGetTeamMembers();
+  var member = team[idx] || team[0];
+  // Update tag
+  var tag = document.querySelector('[data-owner-tag="' + taskId + '"]');
+  if (tag) {
+    tag.className = 'lp-tag lp-tag-c' + (idx % 6);
+    tag.textContent = member.name;
+  }
+  // Save
+  var owners = lpGetOwners();
+  owners[taskId] = idx;
+  lpSaveOwners(owners);
+  lpUpdateDashboard();
+  lpCheckBalance(taskId);
+}
+
+function lpCalcProgress() {
+  var d = planData.launch;
+  var statuses = lpGetStatuses();
+  var all = lpFlattenTasks(d);
+  var total = all.length, done = 0, inprog = 0;
+  var byWeek = {}, byDay = {};
+  d.weeks.forEach(function(w){ byWeek[w.id] = {total:0,done:0}; });
+  all.forEach(function(rec){
+    byWeek[rec.week.id].total++;
+    if (!byDay[rec.day.id]) byDay[rec.day.id] = {total:0, done:0};
+    byDay[rec.day.id].total++;
+    var s = statuses[rec.task.id];
+    if (s && s.status === 'done') { done++; byWeek[rec.week.id].done++; byDay[rec.day.id].done++; }
+    else if (s && s.status === 'inprogress') inprog++;
+  });
+  // Days remaining
+  var daysLeft = '\u2014';
+  if (d.launchDate) {
+    var ld = new Date(d.launchDate + 'T12:00:00');
+    var today = new Date(); today.setHours(0,0,0,0);
+    daysLeft = Math.max(0, Math.ceil((ld - today) / 86400000));
+  }
+  // Expected progress
+  var totalDays = 0, passedDays = 0;
+  var today2 = new Date(); today2.setHours(0,0,0,0);
+  d.weeks.forEach(function(w){
+    (w.days||[]).forEach(function(day){
+      totalDays++;
+      if (day.date && new Date(day.date + 'T12:00:00') <= today2) passedDays++;
+    });
+  });
+  var expectedPct = totalDays > 0 ? (passedDays / totalDays) * 100 : 0;
+  var actualPct = total > 0 ? (done / total) * 100 : 0;
+  var trackStatus = 'on-track';
+  if (actualPct < expectedPct - 15) trackStatus = 'behind';
+  else if (actualPct < expectedPct - 5) trackStatus = 'at-risk';
+  return { total:total, done:done, inprog:inprog, pct:actualPct, daysLeft:daysLeft, expectedPct:expectedPct, trackStatus:trackStatus, byWeek:byWeek, byDay:byDay };
+}
+
+function lpUpdateDashboard() {
+  if (!planData.launch || !planData.launch.weeks) return;
+  var p = lpCalcProgress();
+  var el;
+  el = document.getElementById('lpKpiDone'); if (el) el.textContent = p.done + ' / ' + p.total;
+  el = document.getElementById('lpKpiDoneBar'); if (el) el.style.width = p.pct.toFixed(1) + '%';
+  el = document.getElementById('lpKpiDays'); if (el) el.textContent = p.daysLeft;
+  el = document.getElementById('lpKpiInProg'); if (el) el.textContent = p.inprog;
+  var ti = document.getElementById('lpKpiTrackIcon');
+  var tl = document.getElementById('lpKpiTrack');
+  if (ti && tl) {
+    if (p.trackStatus === 'on-track') { ti.style.color = 'var(--green)'; tl.className = 'status-label on-track'; tl.textContent = 'On Track'; }
+    else if (p.trackStatus === 'at-risk') { ti.style.color = 'var(--amber)'; tl.className = 'status-label at-risk'; tl.textContent = 'At Risk'; }
+    else { ti.style.color = 'var(--red)'; tl.className = 'status-label behind'; tl.textContent = 'Behind'; }
+  }
+  // Week progress badges
+  Object.keys(p.byWeek).forEach(function(wid){
+    var wp = document.getElementById('lpWp-' + wid);
+    if (!wp) return;
+    var b = p.byWeek[wid];
+    wp.textContent = b.done + '/' + b.total + ' done';
+  });
+  // Day badges
+  Object.keys(p.byDay).forEach(function(did){
+    var b = document.getElementById('lpDayBadge-' + did);
+    if (!b) return;
+    var v = p.byDay[did];
+    b.textContent = v.done + '/' + v.total + (v.done === v.total && v.total > 0 ? ' \u2713' : '');
+    b.className = 'lp-day-badge' + (v.done === v.total && v.total > 0 ? ' all-done' : '');
+  });
+  lpUpdateWorkload();
+}
+
+function lpGetDayPersonCounts() {
+  var team = lpGetTeamMembers();
+  var counts = {};
+  if (!planData.launch || !planData.launch.weeks) return counts;
+  planData.launch.weeks.forEach(function(w){
+    (w.days||[]).forEach(function(day){
+      counts[day.id] = {};
+      for (var i = 0; i < team.length; i++) counts[day.id][i] = 0;
+      (day.tasks||[]).forEach(function(t){
+        var idx = lpResolveOwnerIdx(t.id, t.suggestedOwner);
+        if (counts[day.id][idx] !== undefined) counts[day.id][idx]++;
+      });
+    });
+  });
+  return counts;
+}
+
+function lpGetIdleDays() {
+  var team = lpGetTeamMembers();
+  var counts = lpGetDayPersonCounts();
+  var today = new Date(); today.setHours(0,0,0,0);
+  var idle = {};
+  for (var i = 0; i < team.length; i++) idle[i] = [];
+  if (!planData.launch || !planData.launch.weeks) return idle;
+  planData.launch.weeks.forEach(function(w){
+    (w.days||[]).forEach(function(day){
+      if (day.date) {
+        var dd = new Date(day.date + 'T12:00:00');
+        if (dd < today) return;
+      }
+      for (var i = 0; i < team.length; i++) {
+        if ((counts[day.id]||{})[i] === 0) idle[i].push(day.label || day.id);
+      }
+    });
+  });
+  return idle;
+}
+
+function lpUpdateWorkload() {
+  var team = lpGetTeamMembers();
+  var statuses = lpGetStatuses();
+  var people = team.map(function(m){ return { todo:0, ip:0, done:0, name:m.name, spec:m.specialization||'' }; });
+  if (planData.launch && planData.launch.weeks) {
+    planData.launch.weeks.forEach(function(w){
+      (w.days||[]).forEach(function(day){
+        (day.tasks||[]).forEach(function(t){
+          var idx = lpResolveOwnerIdx(t.id, t.suggestedOwner);
+          if (!people[idx]) return;
+          var s = statuses[t.id];
+          if (s && s.status === 'done') people[idx].done++;
+          else if (s && s.status === 'inprogress') people[idx].ip++;
+          else people[idx].todo++;
+        });
+      });
+    });
+  }
+  var idle = lpGetIdleDays();
+  var bar = document.getElementById('lpWorkloadBar');
+  if (!bar) return;
+  var html = '';
+  people.forEach(function(p, i){
+    var idleDays = idle[i] || [];
+    var warnCls = (idleDays.length > 0 && (p.todo + p.ip) > 0) ? '' : (idleDays.length > 0 ? ' wl-idle' : '');
+    html += '<div class="lp-workload-item' + warnCls + '">';
+    html += '<span class="lp-tag lp-tag-c' + (i % 6) + '">' + escapeHtml(p.name) + '</span>';
+    if (p.spec) html += '<span class="lp-wl-spec-badge">' + escapeHtml(p.spec) + '</span>';
+    html += '<span class="wl-counts">';
+    html += '<span class="wl-todo">' + p.todo + ' to do</span>';
+    if (p.ip > 0) html += ' \u00b7 <span class="wl-ip">' + p.ip + ' in progress</span>';
+    html += ' \u00b7 <span class="wl-done">' + p.done + ' done</span>';
+    if (idleDays.length > 0) {
+      var first = idleDays.slice(0,2).join(', ');
+      if (idleDays.length > 2) first += ' +' + (idleDays.length - 2);
+      html += '<span class="lp-wl-idle-badge"> \u2014 idle: ' + escapeHtml(first) + '</span>';
+    }
+    html += '</span></div>';
+  });
+  bar.innerHTML = html;
+}
+
+function lpCheckBalance(taskId) {
+  var team = lpGetTeamMembers();
+  var sel = document.querySelector('[data-owner-sel="' + taskId + '"]');
+  if (!sel) return;
+  var idx = parseInt(sel.value, 10) || 0;
+  var taskEl = document.querySelector('.lp-task[data-task-id="' + taskId + '"]');
+  var cat = taskEl ? taskEl.getAttribute('data-cat') : '';
+  var msg = '';
+  if (cat && team[idx] && team[idx].specialization && team[idx].specialization !== cat) {
+    var ideal = null;
+    for (var i = 0; i < team.length; i++) {
+      if (team[i].specialization === cat) { ideal = team[i].name; break; }
+    }
+    if (ideal) msg += 'This is a ' + cat + ' task \u2014 usually best for ' + ideal + '. ';
+  }
+  var idle = lpGetIdleDays();
+  var idleWarns = [];
+  for (var k = 0; k < team.length; k++) {
+    var days = idle[k] || [];
+    if (days.length > 0) idleWarns.push(team[k].name + ' has no tasks on ' + days.slice(0,2).join(', '));
+  }
+  if (idleWarns.length > 0) msg += idleWarns.join('. ') + '.';
+  var old = document.querySelector('.lp-balance-toast');
+  if (old) old.remove();
+  if (!msg) return;
+  var toast = document.createElement('div');
+  toast.className = 'lp-balance-toast';
+  toast.innerHTML = '\u26a0\ufe0f ' + escapeHtml(msg) + ' <span class="toast-close" onclick="this.parentElement.remove()">\u2715</span>';
+  document.body.appendChild(toast);
+  setTimeout(function(){ if (toast.parentElement) toast.remove(); }, 8000);
+}
+
+function lpFilterBy(filter) {
+  lpActiveFilter = filter;
+  document.querySelectorAll('.lp-filter-btn').forEach(function(b){
+    b.classList.toggle('active', b.getAttribute('data-filter') === filter);
+  });
+  var statuses = lpGetStatuses();
+  document.querySelectorAll('.lp-task').forEach(function(taskDiv){
+    taskDiv.classList.remove('dimmed');
+    if (filter === 'all') return;
+    var tid = taskDiv.getAttribute('data-task-id');
+    if (filter === 'inprogress') {
+      var s = statuses[tid];
+      if (!s || s.status !== 'inprogress') taskDiv.classList.add('dimmed');
+    } else if (filter.charAt(0) === 'm') {
+      var idx = parseInt(filter.substring(1), 10);
+      var sel = taskDiv.querySelector('.lp-owner-switch');
+      if (!sel || parseInt(sel.value,10) !== idx) taskDiv.classList.add('dimmed');
+    }
+  });
+}
+
+function lpScrollToWeek(wid) {
+  var el = document.getElementById('lpWeek-' + wid);
+  if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// ── GENERATE LAUNCH PLAN VIA AI ──
+function generateLaunchPlan() {
+  var btn = document.getElementById('lpGenBtn');
+  var errEl = document.getElementById('lpGenError');
+  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+  if (btn) { btn.classList.add('loading'); btn.disabled = true; var lbl = btn.querySelector('.lp-gen-label'); if (lbl) lbl.textContent = ' Generating...'; }
+
+  var team = lpGetTeamMembers();
+  var bn = (planData.overview && planData.overview.businessName) || 'the business';
+  var teamSummary = team.map(function(m,i){ return '  ' + i + ': ' + m.name + ' (' + (m.role||'') + ', spec=' + (m.specialization||'product') + ')'; }).join('\n');
+  var launchDate = (planData.launch && planData.launch.launchDate) || '';
+  var sysPrompt = 'You are a launch project planner. Produce a detailed structured 30-day launch plan for the user\'s business.\n\n' +
+    'BUSINESS CONTEXT (full plan data):\n' + JSON.stringify(planData, null, 2) + '\n\n' +
+    'TEAM MEMBERS (use 0-based indexes for suggestedOwner):\n' + teamSummary + '\n\n' +
+    'OUTPUT REQUIREMENTS:\n' +
+    '1. Output ONLY a single [PLANDATA:launch]{...}[/PLANDATA] block. No prose before or after.\n' +
+    '2. The JSON MUST contain: launchDate, week1, week2, week3, week4, checklist, AND a "weeks" array with EXACTLY 4 weeks.\n' +
+    '3. Each week object: {id:"w1"|"w2"|"w3"|"w4", label:"Week N \u2014 Theme", theme:"accent"|"blue"|"amber"|"green", days:[...]}.\n' +
+    '4. Each week has 4-5 working day objects: {id:"w1d1", date:"YYYY-MM-DD", label:"Mon 15 Apr", title:"Theme of the day", tasks:[...]}.\n' +
+    '5. Each day has 2-3 task objects: {id:"task-N", title:"Concrete action", detail:"How / what success looks like", category:"marketing"|"systems"|"product", suggestedOwner:<index into team>}.\n' +
+    '6. Total ~30-40 tasks. Every task tailored to ' + bn + ' \u2014 NO generic filler.\n' +
+    '7. suggestedOwner must match the task category to the team member\'s specialization where possible.\n' +
+    '8. Sequential ids: task-1, task-2, ... Day ids: w1d1..w1d5, w2d1..w2d5 etc.\n' +
+    '9. Themes per week: w1=accent, w2=blue, w3=amber, w4=green.\n' +
+    (launchDate ? '10. Anchor schedule so launch lands on or near ' + launchDate + '.\n' : '10. Pick a launch date 30 days from today (today is ' + new Date().toISOString().slice(0,10) + ').\n') +
+    '11. Keep week1/week2/week3/week4 strings as one-sentence summaries. Keep checklist as 5-10 short pre-launch items.\n';
+
+  var proxyUrl = PROXY_ENDPOINT || '/api/chat';
+  fetch(proxyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model,
+      system: sysPrompt,
+      messages: [{ role:'user', content:'Generate the detailed 30-day launch plan now. Output the [PLANDATA:launch] block only.' }],
+      endpoint: config.endpoint
+    })
+  }).then(function(resp){
+    if (!resp.ok) return resp.text().then(function(t){ throw new Error('Server ' + resp.status + ': ' + t.slice(0,180)); });
+    return resp.json();
+  }).then(function(data){
+    if (data.error) throw new Error(data.error);
+    var fullText = data.text || '';
+    var result = extractPlanDataFromText(fullText);
+    if (!result.extractedData || !result.extractedData.launch) throw new Error('AI did not return a valid launch plan. Try again.');
+    var newLaunch = result.extractedData.launch;
+    // Merge: preserve existing top-level fields if AI omitted
+    planData.launch = Object.assign({}, planData.launch || {}, newLaunch);
+    saveState();
+    // Re-render the plan view, then jump back to launch tab
+    showPlan();
+    setTimeout(function(){
+      var tabs = document.querySelectorAll('.plan-tab');
+      for (var i = 0; i < tabs.length; i++) {
+        if (tabs[i].textContent.indexOf('30-Day Launch') > -1) { showPlanTab('launch', tabs[i]); break; }
+      }
+    }, 30);
+  }).catch(function(err){
+    var errEl2 = document.getElementById('lpGenError');
+    if (errEl2) { errEl2.textContent = 'Error: ' + err.message; errEl2.style.display = 'block'; }
+    var btn2 = document.getElementById('lpGenBtn');
+    if (btn2) { btn2.classList.remove('loading'); btn2.disabled = false; var lbl2 = btn2.querySelector('.lp-gen-label'); if (lbl2) lbl2.textContent = '\u2728 Generate detailed 30-day plan'; }
+  });
 }
 
 function renderMetricsSection(d) {
