@@ -243,7 +243,19 @@
   .activity-log .al-item .al-name{font-weight:600;color:var(--text)}
   .activity-log .al-item .al-time{font-size:0.68rem;color:var(--muted);margin-left:6px}
 
-  @media print{.filter-bar,.task-status-btn,.week-progress,.activity-log,.workload-bar{display:none}}
+  /* Balance warning toast */
+  .balance-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--amber);color:#000;padding:12px 24px;border-radius:12px;font-size:0.82rem;font-weight:600;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.4);max-width:500px;text-align:center;animation:toast-in .3s ease}
+  .balance-toast .toast-close{margin-left:12px;cursor:pointer;font-weight:800;opacity:0.7}
+  .balance-toast .toast-close:hover{opacity:1}
+  @keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+  /* Workload item warning state */
+  .workload-item.wl-warn{border-color:var(--amber);background:var(--abg)}
+  .workload-item.wl-idle{border-color:var(--red);background:var(--rbg)}
+  .wl-idle-badge{font-size:0.65rem;color:var(--red);font-weight:700;margin-left:4px}
+  .wl-spec-badge{font-size:0.6rem;color:var(--muted);font-style:italic;margin-left:4px}
+
+  @media print{.filter-bar,.task-status-btn,.week-progress,.activity-log,.workload-bar,.balance-toast{display:none}}
 </style>
 </head>
 <body>
@@ -1186,8 +1198,8 @@
   <div class="sh-sub">Mon 4 May is a bank holiday. Turn the blank WordPress site into the live sales site with all copy.</div>
 
   <div class="step open">
-    <div class="step-hdr" onclick="toggleStep(this.parentElement)"><div class="step-num">1</div><div class="step-title">Build All WordPress Pages</div><div class="step-meta"><span class="tag tag-s1">Mica</span><span class="step-arrow">&#9654;</span></div></div>
-    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s1">Mica</span><select class="owner-switch" data-task-id="task-24" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica" selected>Mica</option><option value="erica">Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Build every page using Ericamae's copy.</strong><div class="detail">Homepage, Modules (shop), About, OPTIMISE Framework, Blog, Contact, FAQ, How It Works. Set brand colours, header nav, footer links. Test every page on mobile.</div></div></div></div>
+    <div class="step-hdr" onclick="toggleStep(this.parentElement)"><div class="step-num">1</div><div class="step-title">Build All WordPress Pages</div><div class="step-meta"><span class="tag tag-s2">Ericamae</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-s2">Ericamae</span><select class="owner-switch" data-task-id="task-24" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica">Mica</option><option value="erica" selected>Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Build every page using Ericamae's copy.</strong><div class="detail">Homepage, Modules (shop), About, OPTIMISE Framework, Blog, Contact, FAQ, How It Works. Set brand colours, header nav, footer links. Test every page on mobile.</div></div></div></div>
   </div>
 
   <div class="warn"><h4>End-of-Day Check</h4><p>(1) All website pages built with content and looking professional on desktop + mobile.</p></div>
@@ -1324,7 +1336,7 @@
       <div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span><select class="owner-switch" data-task-id="task-43" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica">Mica</option><option value="erica">Ericamae</option><option value="claude" selected>Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Implement soft launch feedback. Quick fixes only.</strong></div></div>
       <div class="task"><div class="task-who"><span class="tag tag-s2">Ericamae</span><select class="owner-switch" data-task-id="task-44" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica">Mica</option><option value="erica" selected>Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Full launch push.</strong> All scheduled posts live. Email sequence triggers. ProductHunt launch. Actively engage in SME communities — reply to comments, DM engaged followers, join conversations.</div></div>
       <div class="task"><div class="task-who"><span class="tag tag-s1">Mica</span><select class="owner-switch" data-task-id="task-45" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica" selected>Mica</option><option value="erica">Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Monitor deployments. Handle any technical issues immediately.</strong></div></div>
-      <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span><select class="owner-switch" data-task-id="task-46" onchange="switchOwner(this)"><option value="kevin" selected>Kevin</option><option value="mica">Mica</option><option value="erica">Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Review early sales data. Schedule demo calls with interested prospects.</strong></div></div>
+      <div class="task"><div class="task-who"><span class="tag tag-s2">Ericamae</span><select class="owner-switch" data-task-id="task-46" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica">Mica</option><option value="erica" selected>Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Review early sales data. Schedule demo calls with interested prospects.</strong></div></div>
     </div>
   </div>
 
@@ -1526,6 +1538,38 @@ var BUILD_START = new Date('2026-04-14');
 var ownerLabels = {kevin:'Kevin',mica:'Mica',erica:'Ericamae',claude:'Claude',all:'All'};
 var activeFilter = 'all';
 
+/* ── Role specialisation & task categories ── */
+// Who should ideally own what type of task
+var ROLE_SPEC = {kevin:'product', mica:'systems', erica:'marketing'};
+
+// Category for every task (marketing, systems, product)
+var TASK_CATEGORY = {
+  'task-1':'product','task-2':'systems','task-3':'systems','task-4':'systems','task-5':'marketing',
+  'task-6':'product','task-7':'product','task-8':'marketing','task-9':'product','task-10':'systems',
+  'task-11':'systems','task-12':'marketing','task-13':'product','task-14':'systems','task-15':'systems',
+  'task-16':'marketing','task-17':'product','task-18':'product','task-19':'systems','task-20':'marketing',
+  'task-21':'marketing','task-22':'product','task-23':'product','task-24':'marketing','task-25':'systems',
+  'task-26':'systems','task-27':'marketing','task-28':'product','task-29':'systems','task-30':'marketing',
+  'task-31':'marketing','task-32':'marketing','task-33':'product','task-34':'systems','task-35':'marketing',
+  'task-36':'marketing','task-37':'product','task-38':'systems','task-39':'marketing','task-40':'marketing',
+  'task-41':'systems','task-42':'product','task-43':'product','task-44':'marketing','task-45':'systems',
+  'task-46':'marketing','task-47':'product','task-48':'marketing','task-49':'systems'
+};
+
+// Which day each task belongs to
+var TASK_DAY = {
+  'task-1':'w1d1','task-2':'w1d1','task-3':'w1d1','task-4':'w1d2','task-5':'w1d2',
+  'task-6':'w1d3','task-7':'w1d4','task-8':'w1d4','task-9':'w2d1','task-10':'w2d1',
+  'task-11':'w2d1','task-12':'w2d1','task-13':'w2d2','task-14':'w2d3','task-15':'w2d3',
+  'task-16':'w2d4','task-17':'w2d5','task-18':'w3d1','task-19':'w3d2','task-20':'w3d3',
+  'task-21':'w3d4','task-22':'w3d5','task-23':'w3d5','task-24':'w4d1','task-25':'w4d2',
+  'task-26':'w4d3','task-27':'w4d3','task-28':'w4d3','task-29':'w4d3','task-30':'w4d4',
+  'task-31':'w4d4','task-32':'w4d4','task-33':'w4d4','task-34':'w5d1','task-35':'w5d1',
+  'task-36':'w5d1','task-37':'w5d1','task-38':'w5d1','task-39':'w5d2','task-40':'w5d2',
+  'task-41':'w5d2','task-42':'w5d2','task-43':'w5d3','task-44':'w5d3','task-45':'w5d3',
+  'task-46':'w5d3','task-47':'w5d3','task-48':'w5d3','task-49':'w5d3'
+};
+
 /* ── Navigation ── */
 function show(id){
   document.querySelectorAll('.sec').forEach(function(s){s.classList.remove('active')});
@@ -1550,8 +1594,9 @@ function switchOwner(sel) {
 
   // Sync: update the step header meta tag to match the first task's owner
   syncStepHeaderOwner(sel);
-  // Recalculate workload
+  // Recalculate workload and check balance
   updateWorkload();
+  checkBalance(sel.dataset.taskId);
 }
 
 function syncStepHeaderOwner(sel){
@@ -1813,7 +1858,63 @@ function updateDashboard(){
   updateWorkload();
 }
 
-/* ── Workload summary ── */
+/* ── Day label lookup for toast messages ── */
+var DAY_LABELS = {};
+(function(){
+  var weeks = Object.keys(TASK_MAP);
+  var dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  weeks.forEach(function(wk){
+    var info = TASK_MAP[wk];
+    info.days.forEach(function(dayId, i){
+      var d = new Date(info.deadlines[i] + 'T12:00:00');
+      DAY_LABELS[dayId] = dayNames[d.getDay()] + ' ' + d.getDate() + ' ' + monthNames[d.getMonth()];
+    });
+  });
+})();
+
+/* ── Build per-day per-person task counts ── */
+function getDayPersonCounts(){
+  var counts = {}; // { 'w1d1': {kevin:0, mica:0, erica:0}, ... }
+  var allDays = [];
+  Object.keys(TASK_MAP).forEach(function(wk){
+    TASK_MAP[wk].days.forEach(function(d){ allDays.push(d); });
+  });
+  allDays.forEach(function(d){
+    counts[d] = {kevin:0, mica:0, erica:0};
+  });
+  document.querySelectorAll('.owner-switch').forEach(function(sel){
+    var tid = sel.dataset.taskId;
+    var owner = sel.value;
+    var day = TASK_DAY[tid];
+    if(day && counts[day] && counts[day][owner] !== undefined){
+      counts[day][owner]++;
+    }
+  });
+  return counts;
+}
+
+/* ── Find idle days (future days where a person has zero tasks) ── */
+function getIdleDays(){
+  var counts = getDayPersonCounts();
+  var today = new Date(); today.setHours(0,0,0,0);
+  var idle = {kevin:[], mica:[], erica:[]};
+  Object.keys(TASK_MAP).forEach(function(wk){
+    var info = TASK_MAP[wk];
+    info.days.forEach(function(dayId, i){
+      var deadline = new Date(info.deadlines[i] + 'T12:00:00');
+      if(deadline < today) return; // skip past days
+      ['kevin','mica','erica'].forEach(function(person){
+        if(counts[dayId][person] === 0){
+          idle[person].push(dayId);
+        }
+      });
+    });
+  });
+  return idle;
+}
+
+/* ── Workload summary (with role badges + idle warnings) ── */
 function updateWorkload(){
   var statuses = getStatuses();
   var people = {kevin:{todo:0,ip:0,done:0,label:'Kevin',cls:'tag-kevin'},
@@ -1830,22 +1931,81 @@ function updateWorkload(){
     else people[owner].todo++;
   });
 
+  var idle = getIdleDays();
+  var specLabels = {product:'Product & OS Builds', systems:'Systems & Processes', marketing:'Sales & Marketing'};
+
   var bar = document.getElementById('workloadBar');
   if(!bar) return;
   var html = '';
   ['kevin','mica','erica'].forEach(function(key){
     var p = people[key];
-    var total = p.todo + p.ip + p.done;
-    html += '<div class="workload-item">';
+    var idleDays = idle[key] || [];
+    var warnCls = idleDays.length > 0 ? ' wl-idle' : '';
+    html += '<div class="workload-item' + warnCls + '">';
     html += '<span class="tag '+p.cls+'" style="margin:0;font-size:0.7rem">'+p.label+'</span>';
+    html += '<span class="wl-spec-badge">' + specLabels[ROLE_SPEC[key]] + '</span>';
     html += '<span class="wl-counts">';
     html += '<span class="wl-todo">'+p.todo+' to do</span>';
     if(p.ip > 0) html += ' · <span class="wl-ip">'+p.ip+' in progress</span>';
     html += ' · <span class="wl-done">'+p.done+' done</span>';
+    if(idleDays.length > 0){
+      var dayNames = idleDays.slice(0,3).map(function(d){ return DAY_LABELS[d] || d; }).join(', ');
+      if(idleDays.length > 3) dayNames += ' +' + (idleDays.length - 3) + ' more';
+      html += '<span class="wl-idle-badge"> — idle on ' + dayNames + '</span>';
+    }
     html += '</span>';
     html += '</div>';
   });
   bar.innerHTML = html;
+}
+
+/* ── Balance check after reassignment ── */
+function checkBalance(taskId){
+  var idle = getIdleDays();
+  var owner = null;
+  var sel = document.querySelector('.owner-switch[data-task-id="'+taskId+'"]');
+  if(sel) owner = sel.value;
+
+  // Check if the task was moved away from its ideal owner
+  var cat = TASK_CATEGORY[taskId];
+  var specWarn = '';
+  if(cat && owner && ROLE_SPEC[owner] && ROLE_SPEC[owner] !== cat){
+    var idealPerson = null;
+    Object.keys(ROLE_SPEC).forEach(function(p){
+      if(ROLE_SPEC[p] === cat) idealPerson = ownerLabels[p];
+    });
+    if(idealPerson){
+      specWarn = 'This is a ' + cat + ' task — usually best for ' + idealPerson + '. ';
+    }
+  }
+
+  // Check if anyone now has idle future days
+  var idleWarns = [];
+  ['kevin','mica','erica'].forEach(function(person){
+    var days = idle[person] || [];
+    if(days.length > 0){
+      var first3 = days.slice(0,2).map(function(d){ return DAY_LABELS[d] || d; }).join(', ');
+      idleWarns.push(ownerLabels[person] + ' has no tasks on ' + first3);
+    }
+  });
+
+  var msg = specWarn;
+  if(idleWarns.length > 0){
+    msg += idleWarns.join('. ') + '.';
+  }
+
+  // Remove any existing toast
+  var old = document.querySelector('.balance-toast');
+  if(old) old.remove();
+
+  if(!msg) return;
+
+  var toast = document.createElement('div');
+  toast.className = 'balance-toast';
+  toast.innerHTML = '&#9888;&#65039; ' + msg + ' <span class="toast-close" onclick="this.parentElement.remove()">&#10005;</span>';
+  document.body.appendChild(toast);
+  // Auto-dismiss after 8 seconds
+  setTimeout(function(){ if(toast.parentElement) toast.remove(); }, 8000);
 }
 
 /* ── Filtering ── */
