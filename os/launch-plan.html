@@ -349,6 +349,42 @@
 <!-- Workload summary -->
 <div class="workload-bar" id="workloadBar"></div>
 
+<!-- How to use this -->
+<div id="helpGuide" class="card" style="border-color:var(--accent);margin-bottom:20px;position:relative">
+  <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="document.getElementById('helpBody').style.display=document.getElementById('helpBody').style.display==='none'?'block':'none';this.querySelector('.help-arrow').textContent=document.getElementById('helpBody').style.display==='none'?'Show':'Hide'">
+    <h3 style="margin:0;font-size:0.95rem;color:var(--al)">How To Use This Page (read this first!)</h3>
+    <span class="help-arrow" style="font-size:0.75rem;color:var(--accent);font-weight:700;background:rgba(99,102,241,0.15);padding:3px 10px;border-radius:12px;cursor:pointer">Hide</span>
+  </div>
+  <div id="helpBody" style="margin-top:14px;font-size:0.85rem;color:var(--muted);line-height:1.8">
+    <p style="margin-bottom:12px;color:var(--text);font-weight:600">There are only 4 things you need to know:</p>
+
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">1</div>
+      <div><strong style="color:var(--text)">Mark your tasks.</strong> Every task has a button on the left that says <span style="color:var(--muted);background:var(--s2);padding:2px 8px;border-radius:10px;font-size:0.75rem;border:1px solid var(--border)">To Do</span>. Click it once and it turns <span style="color:var(--amber);font-weight:700">In Progress</span> (so everyone knows you're working on it). Click it again and it turns <span style="color:var(--green);font-weight:700">Done</span>. That's it. If you made a mistake, click it one more time to reset it back to To Do.</div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">2</div>
+      <div><strong style="color:var(--text)">Change who's doing a task.</strong> Next to each task's name tag there's a small dropdown box. Click it and pick a different person. The task will move to their workload. The header above the task updates too — everything stays in sync.</div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">3</div>
+      <div><strong style="color:var(--text)">See only your tasks.</strong> The filter buttons above (<span style="color:var(--purple);font-weight:600">Kevin</span> / <span style="color:var(--blue);font-weight:600">Mica</span> / <span style="color:var(--green);font-weight:600">Ericamae</span>) will highlight just your tasks and dim everyone else's. Click <span style="font-weight:600">All Tasks</span> to see everything again.</div>
+    </div>
+
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">4</div>
+      <div><strong style="color:var(--text)">Check progress.</strong> The numbers at the very top tell you how the project is going. The coloured bar under each week shows how much of that week is done. The workload bar (just above this box) shows how many tasks each person has left.</div>
+    </div>
+
+    <div style="background:var(--s2);border-radius:8px;padding:10px 14px;margin-top:8px;border-left:3px solid var(--amber)">
+      <p style="font-size:0.8rem;color:var(--amber);font-weight:700;margin-bottom:4px">Important</p>
+      <p style="font-size:0.8rem;margin:0">Your changes save automatically in your browser. If someone else is using a different computer, they won't see your changes — each person tracks their own progress. If you clear your browser data, your progress will reset.</p>
+    </div>
+  </div>
+</div>
+
 <!-- ============================================ -->
 <!-- EXECUTIVE OVERVIEW -->
 <!-- ============================================ -->
