@@ -1094,10 +1094,7 @@
 
         <!-- Tab: Operations Director Launch Plan -->
         <div class="tab-panel" id="tab-launch-plan">
-            <div class="section">
-                <h2 class="section-title">Operations Director Launch Plan</h2>
-                <p style="color:#64748b;margin-bottom:16px">Launch plan content coming soon. This page will contain the full Operations Director product launch roadmap.</p>
-            </div>
+            <iframe class="tab-panel-iframe" id="launchPlanFrame" src="" data-src="os/launch-plan.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
         <!-- OS-INTEGRATION: Tab Panels — DO NOT REMOVE (see MEMORY.md) -->
@@ -3007,6 +3004,11 @@
         // Load Fintable Sync Monitor on switch
         if (tabId === 'fintable') {
             loadFintableSyncMonitor();
+        }
+        // Launch Plan lazy-load
+        if (tabId === 'launch-plan') {
+            const frame = document.getElementById('launchPlanFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('launch-plan')) frame.src = frame.dataset.src;
         }
         // OS-INTEGRATION: Lazy-load iframes — DO NOT REMOVE (see MEMORY.md)
         if (tabId === 'os-hub') {
