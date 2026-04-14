@@ -365,7 +365,7 @@
                 </div>
                 <div style="display:flex;gap:6px">
                     <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Matches</button>
-                    <button onclick="document.getElementById('reconPanel').remove()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
+                    <button onclick="closeReconPanel()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
                 </div>
             </div>
             <div style="overflow:auto;padding:8px 12px">
@@ -638,6 +638,10 @@
         if (btn) { btn.textContent = '✓'; btn.style.background = '#dcfce7'; btn.style.color = '#16a34a'; }
         const row = document.getElementById('recon-row-' + idx);
         if (row) row.style.opacity = '0.5';
+
+        // Mark that recon state has changed so the panel close / next load skips the stale cache
+        window._reconChanged = true;
+        if (typeof clearDashCache === 'function') clearDashCache();
     }
 
     async function approveAllRecon() {
@@ -678,6 +682,20 @@
             await new Promise(r => setTimeout(r, 500));
         }
         document.getElementById('reconStatus').textContent = `Done: ${successCount} approved${failCount > 0 ? ', ' + failCount + ' failed' : ''} — refreshing...`;
+        // Bust the stale-while-revalidate cache so the refresh shows fresh numbers, not the pre-approval ones
+        if (typeof clearDashCache === 'function') clearDashCache();
+        window._reconChanged = false; // consumed by this refresh
         setTimeout(() => loadDashboard(), 2000);
+    }
+
+    // Close the recon panel; if any rows were approved while it was open, trigger a dashboard refresh
+    function closeReconPanel() {
+        const panel = document.getElementById('reconPanel');
+        if (panel) panel.remove();
+        if (window._reconChanged) {
+            window._reconChanged = false;
+            if (typeof clearDashCache === 'function') clearDashCache();
+            loadDashboard();
+        }
     }
 
