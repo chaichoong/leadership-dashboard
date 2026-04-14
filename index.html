@@ -794,26 +794,24 @@
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span></div>
-            <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List</span></div>
-            <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span></div>
             <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">CFVs</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
+            <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span></div>
             <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span></div>
             <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span></div>
+            <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List</span></div>
+            <div class="sidebar-item" onclick="switchTab('launch-plan')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Operations Director Launch Plan</span></div>
         </nav>
         <!-- OS-INTEGRATION: Sidebar — DO NOT REMOVE (see MEMORY.md) -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Operating Systems</div>
-            <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">All Operating Systems</span></div>
-            <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Plan Builder</span></div>
-            <div class="sidebar-item" onclick="switchTab('os-launch')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Launch Plan</span></div>
+            <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Operating Systems Hub</span></div>
+            <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Launch Plan Builder</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
-            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span><span id="sitemapBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
-        </div>
-        <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Admin</div>
             <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync Monitor</span><span id="fintableBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+            <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span><span id="sitemapBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
         </div>
     </div>
 
@@ -1094,15 +1092,20 @@
             </iframe>
         </div>
 
+        <!-- Tab: Operations Director Launch Plan -->
+        <div class="tab-panel" id="tab-launch-plan">
+            <div class="section">
+                <h2 class="section-title">Operations Director Launch Plan</h2>
+                <p style="color:#64748b;margin-bottom:16px">Launch plan content coming soon. This page will contain the full Operations Director product launch roadmap.</p>
+            </div>
+        </div>
+
         <!-- OS-INTEGRATION: Tab Panels — DO NOT REMOVE (see MEMORY.md) -->
         <div class="tab-panel" id="tab-os-hub">
             <iframe class="tab-panel-iframe" id="osHubFrame" src="" data-src="os/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
         <div class="tab-panel" id="tab-os-bplan">
             <iframe class="tab-panel-iframe" id="osBplanFrame" src="" data-src="os/business-plan-builder/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
-        </div>
-        <div class="tab-panel" id="tab-os-launch">
-            <iframe class="tab-panel-iframe" id="osLaunchFrame" src="" data-src="os/launch-plan.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
         <!-- /OS-INTEGRATION: Tab Panels -->
 
@@ -1185,19 +1188,19 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',  icon: '📊', pageVer: '2.3', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
-        { id: 'airtable',   name: 'Contractor Job List',   icon: '🔧', pageVer: '1.0', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.0', standalone: 'index.html#airtable' },
-        { id: 'invoices',   name: 'Invoices',              icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
-        { id: 'cfv',        name: 'CFVs',                  icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
-        { id: 'comms',      name: 'Inbound Comms',         icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },
-        { id: 'compliance', name: 'Property Compliance',   icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
-        { id: 'sitemap',    name: 'Site Map & Links',      icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
-        { id: 'fintable',  name: 'Fintable Sync Monitor', icon: '🔌', pageVer: '1.0', sopFile: 'sop-fintable.html',            sopVer: '1.0', standalone: 'index.html#fintable' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.4', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
+        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
+        { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },
+        { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
+        { id: 'airtable',   name: 'Contractor Job List',           icon: '🔧', pageVer: '1.0', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.0', standalone: 'index.html#airtable' },
+        { id: 'launch-plan', name: 'Operations Director Launch Plan', icon: '🚀', pageVer: '1.0', sopFile: '',                         sopVer: '1.0', standalone: 'index.html#launch-plan' },
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
-        { id: 'os-hub',    name: 'Operating Systems Hub',  icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
-        { id: 'os-bplan',  name: 'Business Plan Builder',  icon: '📋', pageVer: '1.0', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
-        { id: 'os-launch', name: 'Launch Plan',            icon: '🚀', pageVer: '3.0', sopFile: 'os/launch-plan.html',               sopVer: '3.0', standalone: 'os/launch-plan.html' },
+        { id: 'os-hub',    name: 'Operating Systems Hub',          icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
+        { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.0', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
         // /OS-INTEGRATION: PAGE_REGISTRY
+        { id: 'fintable',  name: 'Fintable Sync Monitor',          icon: '🔌', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
+        { id: 'sitemap',    name: 'Site Map & Links',              icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
@@ -2963,7 +2966,7 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'All Operating', 'os-bplan': 'Business Plan', 'os-launch': 'Launch Plan' };
+        const tabLabelMap = { overview: 'Leadership', airtable: 'Contractor', invoices: 'Invoices', cfv: 'CFV', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch', 'launch-plan': 'Launch Plan' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -3013,10 +3016,6 @@
         if (tabId === 'os-bplan') {
             const frame = document.getElementById('osBplanFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('business-plan')) frame.src = frame.dataset.src;
-        }
-        if (tabId === 'os-launch') {
-            const frame = document.getElementById('osLaunchFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('launch-plan')) frame.src = frame.dataset.src;
         }
         // /OS-INTEGRATION: Lazy-load
 

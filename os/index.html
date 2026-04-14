@@ -4,12 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations Director — Operating Systems</title>
-<meta name="description" content="AI-powered business tools that work. Browse our catalogue of operating systems — self-contained web applications covering every stage of your business lifecycle.">
-<meta property="og:title" content="Operations Director — Operating Systems">
-<meta property="og:description" content="AI-powered business tools that work. One-off purchase. No subscriptions. No setup. Just results.">
-<meta property="og:type" content="website">
-<meta property="og:url" content="https://chaichoong.github.io/leadership-dashboard/os/">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
 <style>
 :root {
   --bg:#0f1117; --surface:#1a1d27; --surface2:#242836; --border:#2e3347;
@@ -131,12 +125,10 @@ a:hover { text-decoration: underline; }
 /* Footer */
 .footer {
   text-align: center; padding: 3rem 0 2rem; border-top: 1px solid var(--border);
-  margin-top: 2rem; color: #b0b5c9; font-size: 0.85rem;
+  margin-top: 2rem; color: var(--text2); font-size: 0.85rem;
 }
 .footer strong { color: var(--accent2); }
 .footer p { margin: 0.3rem 0; }
-.footer a { color: var(--accent2); }
-.footer a:hover { text-decoration: underline; }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -167,12 +159,12 @@ a:hover { text-decoration: underline; }
 <body>
 
 <!-- Top Bar -->
-<header class="topbar" role="banner">
-  <nav class="topbar-left" aria-label="Main navigation">
-    <a href="./" class="topbar-brand" style="text-decoration:none;">Operations Director</a>
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-brand">Operations Director</div>
     <div class="topbar-subtitle">Operating Systems</div>
-  </nav>
-  <div class="topbar-stats" aria-label="Catalogue summary">
+  </div>
+  <div class="topbar-stats">
     <span><strong>13</strong> Operating Systems</span>
     <span><strong>1</strong> Built</span>
   </div>
@@ -194,16 +186,16 @@ a:hover { text-decoration: underline; }
   <!-- Business Lifecycle Journey -->
   <section class="journey-section">
     <h2>Business Lifecycle</h2>
-    <div class="journey" id="journey" role="list" aria-label="Business lifecycle stages"></div>
+    <div class="journey" id="journey"></div>
   </section>
 
   <!-- Operating Systems Grid -->
-  <main id="grid-container" aria-label="Operating systems catalogue"></main>
+  <main id="grid-container"></main>
 
   <!-- Footer -->
   <footer class="footer">
     <p>Powered by <strong>Operations Director</strong></p>
-    <p><a href="https://operationsdirector.co.uk" target="_blank" rel="noopener">operationsdirector.co.uk</a></p>
+    <p>operationsdirector.co.uk</p>
     <p style="margin-top:0.6rem; font-size:0.78rem;">Built with AI. Delivered as working applications.</p>
   </footer>
 
@@ -241,16 +233,15 @@ const CATEGORIES = [
   { key: 'BACK OFFICE', label: 'Back Office', icon: '\uD83D\uDCC2', css: 'cat-backoffice' },
 ];
 
-// Build journey (only show categories that have at least one OS)
+// Build journey
 const journeyEl = document.getElementById('journey');
-const activeCats = CATEGORIES.filter(c => OS_DATA.some(o => o.category === c.key));
-activeCats.forEach((cat, i) => {
+CATEGORIES.forEach((cat, i) => {
   const count = OS_DATA.filter(o => o.category === cat.key).length;
   const stage = document.createElement('div');
   stage.className = 'journey-stage';
   stage.innerHTML = `<span class="icon">${cat.icon}</span><span class="label ${cat.css}">${cat.label}</span><span class="count">${count} OS${count !== 1 ? '' : ''}</span>`;
   journeyEl.appendChild(stage);
-  if (i < activeCats.length - 1) {
+  if (i < CATEGORIES.length - 1) {
     const arrow = document.createElement('span');
     arrow.className = 'journey-arrow';
     arrow.textContent = '\u2192';
