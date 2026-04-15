@@ -3,147 +3,556 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Profit &amp; Loss — Standard Operating Procedure</title>
+<title>Profit &amp; Loss OS &mdash; Standard Operating Procedure</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; background: #f1f5f9; padding: 40px 20px; }
-.container { max-width: 820px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 40px; }
-h1 { font-size: 28px; color: #0f172a; margin-bottom: 6px; }
-.subtitle { font-size: 14px; color: #64748b; margin-bottom: 32px; }
-h2 { font-size: 20px; color: #1e40af; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 2px solid #dbeafe; }
-h3 { font-size: 16px; color: #1e293b; margin: 20px 0 8px; }
-p, li { font-size: 14px; color: #334155; margin-bottom: 8px; }
-ul, ol { padding-left: 24px; margin-bottom: 16px; }
-code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #7c3aed; }
-.callout { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 13px; }
-.callout-warn { background: #fffbeb; border-left-color: #f59e0b; }
-.callout-green { background: #f0fdf4; border-left-color: #22c55e; }
-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
-th, td { padding: 8px 12px; border: 1px solid #e2e8f0; text-align: left; }
-th { background: #f8fafc; font-weight: 600; color: #475569; }
-.ver { font-size: 11px; color: #94a3b8; float: right; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6; color: #1e293b; background: #f1f5f9;
+}
+:root {
+  --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-200:#bfdbfe;--blue-500:#3b82f6;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-800:#1e40af;--blue-900:#1e3a5f;
+  --indigo-50:#eef2ff;--indigo-100:#e0e7ff;--indigo-500:#6366f1;--indigo-600:#4f46e5;--indigo-700:#4338ca;
+  --green-50:#f0fdf4;--green-100:#dcfce7;--green-500:#22c55e;--green-600:#16a34a;--green-700:#15803d;
+  --amber-50:#fffbeb;--amber-100:#fef3c7;--amber-500:#f59e0b;--amber-600:#d97706;
+  --red-50:#fef2f2;--red-100:#fee2e2;--red-500:#ef4444;--red-600:#dc2626;
+  --purple-50:#faf5ff;--purple-500:#a855f7;--purple-600:#9333ea;
+  --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;--slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;
+  --shadow:0 1px 3px rgba(0,0,0,0.1),0 1px 2px rgba(0,0,0,0.06);--shadow-md:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius:12px;--radius-sm:8px;
+}
+.header { background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%); color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+.header::after { content:''; position:absolute; top:-50%; right:-10%; width:500px; height:500px; background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%); border-radius:50%; }
+.header-inner { max-width:1100px; margin:0 auto; position:relative; z-index:1; }
+.header-back { display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; opacity:0.7; text-decoration:none; color:white; margin-bottom:1rem; transition:opacity 0.15s; }
+.header-back:hover { opacity:1; }
+.header h1 { font-size:2.2rem; font-weight:700; margin-bottom:0.3rem; letter-spacing:-0.5px; }
+.header .subtitle { font-size:1.05rem; opacity:0.85; }
+.header .version { font-size:0.85rem; opacity:0.6; margin-top:0.5rem; }
+.container { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+.section { margin-top:2.5rem; }
+.section-title { font-size:1.5rem; font-weight:700; color:var(--blue-800); padding-bottom:0.5rem; border-bottom:3px solid var(--blue-200); margin-bottom:1.25rem; display:flex; align-items:center; gap:0.5rem; }
+.section-title .icon { font-size:1.4rem; }
+.card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:1.5rem; margin-bottom:1.25rem; border:1px solid var(--slate-200); }
+.card-header { font-size:1.1rem; font-weight:600; color:var(--slate-800); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+.quick-ref { background:linear-gradient(135deg,var(--blue-50) 0%,var(--indigo-50) 100%); border:2px solid var(--blue-200); border-radius:var(--radius); padding:1.5rem; margin-top:-1rem; position:relative; z-index:2; box-shadow:var(--shadow-lg); }
+.quick-ref h2 { font-size:1.2rem; color:var(--blue-800); margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.qr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0.75rem; }
+.qr-item { background:white; border-radius:var(--radius-sm); padding:0.75rem 1rem; border-left:4px solid var(--blue-500); font-size:0.88rem; }
+.qr-item .qr-label { font-weight:600; color:var(--slate-600); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; }
+.qr-item .qr-value { color:var(--slate-800); margin-top:0.15rem; word-break:break-all; }
+.qr-item .qr-value a { color:var(--blue-600); text-decoration:none; }
+.qr-item .qr-value a:hover { text-decoration:underline; }
+.toc { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:1.5rem; border:1px solid var(--slate-200); }
+.toc h2 { font-size:1.15rem; color:var(--blue-800); margin-bottom:1rem; }
+.toc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0.35rem 1.5rem; }
+.toc a { display:flex; align-items:center; gap:0.5rem; color:var(--slate-700); text-decoration:none; padding:0.35rem 0.5rem; border-radius:6px; font-size:0.9rem; transition:background 0.15s; }
+.toc a:hover { background:var(--blue-50); color:var(--blue-700); }
+.toc a .toc-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--blue-100); color:var(--blue-700); font-size:0.7rem; font-weight:700; flex-shrink:0; }
+.flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:0; padding:1.5rem 0; }
+.flow-step { background:white; border:2px solid var(--blue-200); border-radius:var(--radius-sm); padding:0.75rem 1.1rem; text-align:center; font-size:0.85rem; font-weight:600; color:var(--slate-700); min-width:110px; }
+.flow-step.primary { background:var(--blue-600); color:white; border-color:var(--blue-700); }
+.flow-step.success { background:var(--green-600); color:white; border-color:var(--green-700); }
+.flow-step.warning { background:var(--amber-500); color:white; border-color:var(--amber-600); }
+.flow-step.purple { background:var(--purple-600); color:white; border-color:var(--purple-600); }
+.flow-step .flow-icon { font-size:1.3rem; display:block; margin-bottom:0.25rem; }
+.flow-step .flow-sub { font-weight:400; font-size:0.75rem; opacity:0.85; margin-top:0.15rem; }
+.flow-arrow { font-size:1.4rem; color:var(--slate-400); padding:0 0.3rem; flex-shrink:0; }
+.label-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.88rem; }
+.label-table th { background:var(--blue-700); color:white; padding:0.75rem 1rem; text-align:left; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+.label-table th:first-child { border-radius:var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius:0 var(--radius-sm) 0 0; }
+.label-table td { padding:0.65rem 1rem; border-bottom:1px solid var(--slate-200); vertical-align:top; }
+.label-table tr:last-child td { border-bottom:none; }
+.label-table tr:nth-child(even) td { background:var(--slate-50); }
+.label-table tr:hover td { background:var(--blue-50); }
+.label-badge { display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; font-weight:600; font-size:0.78rem; white-space:nowrap; }
+.lb-blue { background:#dbeafe; color:#1d4ed8; } .lb-amber { background:#fef3c7; color:#92400e; }
+.lb-red { background:#fee2e2; color:#991b1b; } .lb-green { background:#dcfce7; color:#166534; }
+.lb-purple { background:#e0e7ff; color:#3730a3; }
+.wf-card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--slate-200); overflow:hidden; margin-bottom:1.5rem; }
+.wf-header { padding:1rem 1.5rem; display:flex; align-items:center; gap:0.75rem; border-bottom:1px solid var(--slate-200); }
+.wf-num { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; font-weight:700; font-size:1rem; flex-shrink:0; color:white; background:var(--blue-600); }
+.wf-header h3 { font-size:1.1rem; font-weight:700; color:var(--slate-800); }
+.wf-header .wf-tag { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--slate-100); color:var(--slate-600); font-weight:500; }
+.wf-body { padding:1.25rem 1.5rem; }
+.wf-body h4 { font-size:0.9rem; font-weight:600; color:var(--slate-700); margin-bottom:0.5rem; margin-top:1rem; }
+.wf-body h4:first-child { margin-top:0; }
+.steps { counter-reset:step; list-style:none; padding:0; }
+.steps li { position:relative; padding:0.5rem 0 0.5rem 2.5rem; font-size:0.9rem; line-height:1.5; }
+.steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0.45rem; width:24px; height:24px; border-radius:50%; background:var(--blue-100); color:var(--blue-700); font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.steps li + li { border-top:1px solid var(--slate-100); }
+.info-box { padding:0.85rem 1rem; border-radius:var(--radius-sm); font-size:0.88rem; margin:0.75rem 0; display:flex; align-items:flex-start; gap:0.6rem; }
+.info-box.info { background:var(--blue-50); border-left:4px solid var(--blue-500); color:var(--blue-800); }
+.info-box.warn { background:var(--amber-50); border-left:4px solid var(--amber-500); color:#92400e; }
+.info-box.danger { background:var(--red-50); border-left:4px solid var(--red-500); color:#991b1b; }
+.info-box.tip { background:var(--green-50); border-left:4px solid var(--green-500); color:var(--green-700); }
+.info-box .ib-icon { font-size:1.1rem; flex-shrink:0; margin-top:0.05rem; }
+code { background:var(--slate-100); padding:0.15rem 0.4rem; border-radius:4px; font-size:0.82rem; font-family:'SF Mono',Monaco,Consolas,monospace; color:var(--indigo-600); }
+.ts-item { margin-bottom:0.75rem; }
+.ts-problem { font-weight:600; color:var(--red-600); font-size:0.9rem; }
+.ts-solution { font-size:0.88rem; color:var(--slate-700); margin-top:0.2rem; padding-left:1rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+strong { color:var(--slate-800); } a { color:var(--blue-600); }
+p { margin-bottom:0.5rem; } ul,ol { margin-left:1.25rem; margin-bottom:0.5rem; }
+li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px solid var(--slate-200); margin:1.5rem 0; }
+@media (max-width:768px) {
+  .header h1 { font-size:1.6rem; } .qr-grid { grid-template-columns:1fr; }
+  .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
+  .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
+  .container { padding:0 1rem 3rem; }
+}
 </style>
 </head>
 <body>
+
+<div class="header">
+  <div class="header-inner">
+    <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
+    <h1>&#x1F4B0; Profit &amp; Loss OS</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Real-time P&amp;L reporting with AI analysis, charts, and drill-down editing</div>
+    <div class="version">Version 2.0 &bull; 15 Apr 2026 &bull; Owner: Kevin Brittain</div>
+  </div>
+</div>
+
 <div class="container">
 
-<h1>Profit &amp; Loss OS <span class="ver">SOP v1.0</span></h1>
-<p class="subtitle">Standard Operating Procedure — Operations Director Platform</p>
-
-<h2>1. Purpose</h2>
-<p>The Profit &amp; Loss (P&amp;L) report provides a real-time view of business financial performance, derived directly from reconciled transactions in Airtable. It enables the business owner to:</p>
-<ul>
-    <li>Monitor revenue, cost of goods sold (COGS), and operating expenses by month</li>
-    <li>Track gross and net profit margins against a <strong>15% net margin target</strong></li>
-    <li>Identify trends, cost drivers, and opportunities via AI-powered analysis</li>
-    <li>Correct mis-categorised transactions without leaving the report</li>
-</ul>
-
-<h2>2. Data Source</h2>
-<p>All figures are computed from the <code>Transactions</code> table in the Operations Director Airtable base, filtered by:</p>
-<ul>
-    <li><strong>Business (For Reports)</strong> — selectable between Real Estate and Operations Director</li>
-    <li><strong>Date</strong> — grouped into calendar months for the selected period (1, 3, 6, or 12 months)</li>
-    <li><strong>Chart of Accounts Sub-Category</strong> — classified into Revenue, COGS, or Operating Expenses using an explicit allow-list</li>
-</ul>
-
-<div class="callout">
-    <strong>Key field:</strong> The report uses <code>Report Amount</code> (not raw GBP Amount) so that multi-currency transactions are normalised.
+<!-- QUICK REFERENCE -->
+<div class="quick-ref">
+  <h2>&#x26A1; Quick Reference</h2>
+  <div class="qr-grid">
+    <div class="qr-item">
+      <div class="qr-label">Access</div>
+      <div class="qr-value"><a href="index.html#pnl">index.html#pnl</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Source File</div>
+      <div class="qr-value"><code>js/pnl.js</code></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Data Source</div>
+      <div class="qr-value">Airtable &mdash; Transactions table</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Airtable Base</div>
+      <div class="qr-value">Operations Director (<code>appnqjDpqDniH3IRl</code>)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Key Field</div>
+      <div class="qr-value">Report Amount (<code>fldot7iisZeL3WrdR</code>)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Business Filter</div>
+      <div class="qr-value">Real Estate &middot; Operations Director</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Category</div>
+      <div class="qr-value">Finance</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Dependencies</div>
+      <div class="qr-value">Chart.js &middot; Claude AI Proxy</div>
+    </div>
+  </div>
 </div>
 
-<h2>3. Report Structure</h2>
-
-<h3>3.1 AI Financial Analysis</h3>
-<p>Click <strong>Generate Analysis</strong> to get AI-powered insights. The AI reviews all P&amp;L data and provides:</p>
-<ul>
-    <li>Performance summary with key metrics</li>
-    <li>Trend identification (revenue growth, cost creep, margin changes)</li>
-    <li>Areas of concern with specific figures</li>
-    <li>Opportunities to increase revenue or reduce costs</li>
-    <li>Specific actions to reach the 15% net margin target</li>
-</ul>
-
-<h3>3.2 KPI Cards</h3>
-<p>Nine cards across three rows with target comparisons:</p>
-<table>
-    <tr><th>Row</th><th>Card</th><th>What It Shows</th><th>Target</th></tr>
-    <tr><td rowspan="3">1</td><td>Revenue</td><td>Period total + avg/mo</td><td>£35,000/month</td></tr>
-    <tr><td>Cost of Goods Sold</td><td>Period total + avg/mo + % of revenue</td><td>—</td></tr>
-    <tr><td>Operating Expenses</td><td>Period total + avg/mo + % of revenue</td><td>—</td></tr>
-    <tr><td rowspan="4">2</td><td>Gross Profit</td><td>Period total + avg/mo</td><td>—</td></tr>
-    <tr><td>Gross Margin</td><td>GP ÷ Revenue × 100</td><td>80%</td></tr>
-    <tr><td>Net Profit</td><td>Period total + avg/mo</td><td>£5,000/month</td></tr>
-    <tr><td>Net Margin</td><td>NP ÷ Revenue × 100</td><td>15%</td></tr>
-    <tr><td rowspan="2">3</td><td>Avg Monthly Maintenance</td><td>COGS Property Reactive Maintenance + % of revenue</td><td>£3,000/month</td></tr>
-    <tr><td>Avg Monthly Wages</td><td>COGS Labour + Opex Labour + % of revenue</td><td>£1,500/month</td></tr>
-</table>
-
-<div class="callout-green callout">
-    <strong>Green ▲</strong> means above target (good for profit metrics) or below budget (good for cost metrics). <strong>Red ▼</strong> means the opposite.
+<!-- TABLE OF CONTENTS -->
+<div class="section">
+  <div class="toc">
+    <h2>&#x1F4D1; Contents</h2>
+    <div class="toc-grid">
+      <a href="#purpose"><span class="toc-num">1</span> Purpose &amp; Scope</a>
+      <a href="#targets"><span class="toc-num">2</span> Financial Targets</a>
+      <a href="#data"><span class="toc-num">3</span> Data Source &amp; Filters</a>
+      <a href="#workflow"><span class="toc-num">4</span> Report Structure</a>
+      <a href="#drill"><span class="toc-num">5</span> Drill-Down &amp; Editing</a>
+      <a href="#subcats"><span class="toc-num">6</span> Sub-Category Classification</a>
+      <a href="#best"><span class="toc-num">7</span> Best Practices</a>
+      <a href="#troubleshooting"><span class="toc-num">8</span> Troubleshooting</a>
+      <a href="#changelog"><span class="toc-num">9</span> Changelog</a>
+    </div>
+  </div>
 </div>
 
-<h3>3.3 Charts</h3>
-<p>Four visual charts update automatically with the selected business and period:</p>
-<ul>
-    <li><strong>Revenue vs Expenses</strong> — bar chart showing revenue (green), COGS (red), OpEx (orange) by month</li>
-    <li><strong>Profit Trend</strong> — line chart with gross profit, net profit, and the £10k/mo target line</li>
-    <li><strong>Profit Margin Trend</strong> — line chart with GP% and NP% plus the 15% target line</li>
-    <li><strong>Expense Breakdown</strong> — doughnut chart showing where money goes across all COGS + OpEx sub-categories</li>
-</ul>
-
-<h3>3.4 P&amp;L Grid</h3>
-<p>The detailed grid shows every sub-category by month with frozen headers (scroll vertically to keep month labels visible, scroll horizontally to keep line items visible).</p>
-<ul>
-    <li><strong>Click any value</strong> to drill down into the underlying transactions</li>
-    <li>Section headers: Revenue → COGS → Gross Profit → OpEx → Net Profit</li>
-    <li>Margin rows show percentages in italic</li>
-</ul>
-
-<h2>4. Drill-Down &amp; Editing</h2>
-<p>Clicking any non-zero value in the grid opens a transaction list showing:</p>
-<ul>
-    <li><strong>Date</strong> and <strong>Transaction Detail</strong></li>
-    <li><strong>Report Amount</strong> (colour-coded: green positive, red negative)</li>
-    <li>Three editable fields (type-to-search): <strong>Category</strong>, <strong>Sub-Category</strong>, <strong>Business (For Reports)</strong></li>
-</ul>
-
-<div class="callout-warn callout">
-    <strong>Editing saves immediately to Airtable.</strong> You'll see a ✓ when saved successfully or ✗ if there's an error. When you close the drill-down modal, the P&amp;L re-renders with the updated data.
+<!-- 1. PURPOSE -->
+<div class="section" id="purpose">
+  <h2 class="section-title"><span class="icon">&#x1F3AF;</span> 1. Purpose &amp; Scope</h2>
+  <div class="card">
+    <p>The Profit &amp; Loss OS provides a real-time view of business financial performance, derived directly from reconciled transactions in Airtable. It enables the business owner to monitor revenue, costs, and margins by month, identify trends via AI-powered analysis, and correct mis-categorised transactions without leaving the report.</p>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Scope:</strong> Covers Revenue, Cost of Goods Sold, and Operating Expenses for the Real Estate and Operations Director businesses. Capital expenditure, loans, transfers, balance-sheet, and personal transactions are explicitly excluded.</div>
+    </div>
+  </div>
 </div>
 
-<h2>5. Sub-Category Classification</h2>
-<p>The P&amp;L uses an explicit allow-list of 27 sub-categories. Transactions whose sub-category is not in this list (e.g. Capex, Transfers, Loans, Personal) are excluded from the report.</p>
+<!-- 2. TARGETS -->
+<div class="section" id="targets">
+  <h2 class="section-title"><span class="icon">&#x1F3AF;</span> 2. Financial Targets</h2>
+  <div class="card">
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Monthly Target</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Revenue</strong></td>
+          <td><span class="label-badge lb-blue">&pound;35,000/mo</span></td>
+          <td>Total income across all revenue sub-categories</td>
+        </tr>
+        <tr>
+          <td><strong>Gross Profit Margin</strong></td>
+          <td><span class="label-badge lb-blue">80%</span></td>
+          <td>Gross Profit &divide; Revenue &times; 100</td>
+        </tr>
+        <tr>
+          <td><strong>Net Profit</strong></td>
+          <td><span class="label-badge lb-green">&pound;5,000/mo</span></td>
+          <td>Gross Profit minus all Operating Expenses</td>
+        </tr>
+        <tr>
+          <td><strong>Net Profit Margin</strong></td>
+          <td><span class="label-badge lb-green">15%</span></td>
+          <td>Baseline target &mdash; the primary margin KPI</td>
+        </tr>
+        <tr>
+          <td><strong>Maintenance Budget</strong></td>
+          <td><span class="label-badge lb-amber">&pound;3,000/mo</span></td>
+          <td>COGS Property Reactive Maintenance</td>
+        </tr>
+        <tr>
+          <td><strong>Wages Budget</strong></td>
+          <td><span class="label-badge lb-amber">&pound;1,500/mo</span></td>
+          <td>COGS Labour + Opex Labour combined</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div>KPI cards show <strong style="color:#16a34a">green &#x25B2;</strong> when above target (profit metrics) or below budget (cost metrics), and <strong style="color:#dc2626">red &#x25BC;</strong> when the opposite. Maintenance and wages also display their percentage of revenue.</div>
+    </div>
+  </div>
+</div>
 
-<h3>Revenue (3 sub-categories)</h3>
-<p>Fixed Income · Variable Income · Rental Income</p>
+<!-- 3. DATA SOURCE -->
+<div class="section" id="data">
+  <h2 class="section-title"><span class="icon">&#x1F4E5;</span> 3. Data Source &amp; Filters</h2>
+  <div class="card">
+    <p>All figures are computed from the <code>Transactions</code> table in the Operations Director Airtable base, filtered by:</p>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Filter</th>
+          <th>Field</th>
+          <th>Values</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Business</strong></td>
+          <td><code>Business (For Reports)</code></td>
+          <td>Real Estate <em>or</em> Operations Director (dropdown at top of report)</td>
+        </tr>
+        <tr>
+          <td><strong>Period</strong></td>
+          <td><code>Date</code></td>
+          <td>1, 3, 6, or 12 trailing months (dropdown at top of report)</td>
+        </tr>
+        <tr>
+          <td><strong>Classification</strong></td>
+          <td><code>Chart of Accounts Sub-Category</code></td>
+          <td>27 sub-categories in the allow-list (see Section 6)</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Key field:</strong> The report uses <code>Report Amount</code> (not raw GBP Amount) so that multi-currency transactions are normalised.</div>
+    </div>
+  </div>
+</div>
 
-<h3>Cost of Goods Sold (9 sub-categories)</h3>
-<p>COGS Labour · COGS Sales Fees · COGS Product Costs · COGS Delivery Costs · COGS Commission · COGS Property Council Tax · COGS Property Utilities · COGS Property Reactive Maintenance · COGS Property Compliance</p>
+<!-- 4. REPORT STRUCTURE -->
+<div class="section" id="workflow">
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 4. Report Structure</h2>
 
-<h3>Operating Expenses (15 sub-categories)</h3>
-<p>Opex Labour · Marketing · Premises / Overheads · Insurance · Software &amp; Subscriptions · Professional Fees · Travel &amp; Training · Operational Supplies · Subsistence · Director Discretionary Expenses · Charity · Mortgage Interest · Loan Interest · Bank Transaction Fees · Tax</p>
+  <div class="card">
+    <div class="card-header">&#x1F5FA; Page Layout (Top to Bottom)</div>
+    <div class="flow">
+      <div class="flow-step purple">
+        <span class="flow-icon">&#x1F916;</span>
+        AI Analysis
+        <div class="flow-sub">Claude Sonnet</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F4CA;</span>
+        KPI Cards
+        <div class="flow-sub">3 rows, 9 cards</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step warning">
+        <span class="flow-icon">&#x1F4C8;</span>
+        Charts
+        <div class="flow-sub">4 charts, 2&times;2</div>
+      </div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F4CB;</span>
+        P&amp;L Grid
+        <div class="flow-sub">Frozen headers</div>
+      </div>
+    </div>
+  </div>
 
-<h2>6. Best Practices</h2>
-<ol>
-    <li><strong>Reconcile transactions first</strong> — the P&amp;L only includes transactions with a sub-category and business link. Use the Leadership Dashboard reconciliation tab to categorise new transactions.</li>
-    <li><strong>Check the Business filter</strong> — ensure transactions are assigned to the correct business (Real Estate vs Operations Director). Use the drill-down to correct any that are wrong.</li>
-    <li><strong>Use AI Analysis regularly</strong> — generate an analysis at least monthly to catch trends early.</li>
-    <li><strong>Focus on margin, not just revenue</strong> — the 15% net margin target is more important than raw revenue growth.</li>
-    <li><strong>Compare periods</strong> — switch between 3-month and 12-month views to distinguish seasonal patterns from genuine trends.</li>
-</ol>
+  <div class="wf-card">
+    <div class="wf-header">
+      <div class="wf-num">1</div>
+      <h3>AI Financial Analysis</h3>
+      <span class="wf-tag">manual trigger</span>
+    </div>
+    <div class="wf-body">
+      <ol class="steps">
+        <li>Click <strong>Generate Analysis</strong> to send P&amp;L data to Claude Sonnet via the AI proxy</li>
+        <li>AI returns: Performance Summary, Key Trends, Areas of Concern, Opportunities, and Path to 15% Net Margin</li>
+        <li>Click <strong>&#x21BB; Refresh Analysis</strong> to regenerate with updated data at any time</li>
+      </ol>
+    </div>
+  </div>
 
-<h2>7. Troubleshooting</h2>
-<table>
-    <tr><th>Issue</th><th>Solution</th></tr>
-    <tr><td>P&amp;L shows "Loading transactions…"</td><td>Open the Leadership Dashboard tab first to load transaction data, then switch back to P&amp;L</td></tr>
-    <tr><td>A transaction is in the wrong category</td><td>Click the value to drill down, then use the type-to-search dropdowns to correct Category, Sub-Category, or Business</td></tr>
-    <tr><td>Revenue/expense is missing</td><td>Check that the transaction has both a Sub-Category and Business (For Reports) link in Airtable</td></tr>
-    <tr><td>AI Analysis fails</td><td>Check internet connection; click Retry. The AI proxy may be temporarily unavailable.</td></tr>
-    <tr><td>Charts not rendering</td><td>Hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R) to reload Chart.js</td></tr>
-</table>
+  <div class="wf-card">
+    <div class="wf-header">
+      <div class="wf-num">2</div>
+      <h3>KPI Cards (3 Rows)</h3>
+      <span class="wf-tag">automated</span>
+    </div>
+    <div class="wf-body">
+      <h4>Row 1 &mdash; Top-Line</h4>
+      <p>Revenue &middot; Cost of Goods Sold &middot; Operating Expenses &mdash; each showing period total, average per month, and percentage of revenue.</p>
+      <h4>Row 2 &mdash; Profitability</h4>
+      <p>Gross Profit (total + avg/mo) &middot; Gross Margin (vs 80% target) &middot; Net Profit (vs &pound;5k/mo target + avg/mo) &middot; Net Margin (vs 15% target)</p>
+      <h4>Row 3 &mdash; Budget Tracking</h4>
+      <p>Avg Monthly Maintenance (vs &pound;3k budget + % of revenue) &middot; Avg Monthly Wages (vs &pound;1.5k budget + % of revenue)</p>
+    </div>
+  </div>
 
-<p style="color:#94a3b8;font-size:11px;margin-top:32px;text-align:center">Operations Director Platform · P&amp;L SOP v1.0 · April 2026</p>
+  <div class="wf-card">
+    <div class="wf-header">
+      <div class="wf-num">3</div>
+      <h3>Charts (2&times;2 Grid)</h3>
+      <span class="wf-tag">automated</span>
+    </div>
+    <div class="wf-body">
+      <ol class="steps">
+        <li><strong>Revenue vs Expenses</strong> &mdash; grouped bar chart: revenue (green), COGS (red), OpEx (orange) by month</li>
+        <li><strong>Profit Trend</strong> &mdash; line chart with gross profit and net profit lines, plus dashed &pound;5k/mo target</li>
+        <li><strong>Profit Margin Trend</strong> &mdash; line chart with GP% and NP%, plus dashed 80% GP target and 15% NP target lines</li>
+        <li><strong>Expense Breakdown</strong> &mdash; doughnut chart showing period-total spend by sub-category with percentages in tooltips</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <div class="wf-num">4</div>
+      <h3>P&amp;L Grid</h3>
+      <span class="wf-tag">automated</span>
+    </div>
+    <div class="wf-body">
+      <ol class="steps">
+        <li>Header row (month labels) freezes when scrolling vertically</li>
+        <li>Line Item column freezes when scrolling horizontally</li>
+        <li>Sections: Revenue &rarr; Total Revenue &rarr; COGS &rarr; Total COGS &rarr; Gross Profit &amp; Margin &rarr; OpEx &rarr; Total OpEx &rarr; Net Profit &amp; Margin</li>
+        <li>Click any non-zero value to drill down into underlying transactions</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- 5. DRILL-DOWN -->
+<div class="section" id="drill">
+  <h2 class="section-title"><span class="icon">&#x1F50D;</span> 5. Drill-Down &amp; Editing</h2>
+  <div class="card">
+    <p>Clicking any non-zero value in the P&amp;L grid opens a modal showing all matching transactions:</p>
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Editable</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Date</strong></td>
+          <td>No</td>
+          <td>Transaction date from Airtable</td>
+        </tr>
+        <tr>
+          <td><strong>Transaction Detail</strong></td>
+          <td>No</td>
+          <td>Vendor / description</td>
+        </tr>
+        <tr>
+          <td><strong>Report Amount</strong></td>
+          <td>No</td>
+          <td>Colour-coded: green positive, red negative</td>
+        </tr>
+        <tr>
+          <td><strong>Category</strong></td>
+          <td><span class="label-badge lb-green">Yes</span></td>
+          <td>Type-to-search &mdash; Chart of Accounts Category</td>
+        </tr>
+        <tr>
+          <td><strong>Sub-Category</strong></td>
+          <td><span class="label-badge lb-green">Yes</span></td>
+          <td>Type-to-search &mdash; Chart of Accounts Sub-Category</td>
+        </tr>
+        <tr>
+          <td><strong>Business (For Reports)</strong></td>
+          <td><span class="label-badge lb-green">Yes</span></td>
+          <td>Type-to-search &mdash; includes Personal for corrections</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Changes save immediately to Airtable.</strong> You&rsquo;ll see &#x2713; when saved or &#x2717; on error. When you close the modal, the P&amp;L re-renders with updated data.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 6. SUB-CATEGORIES -->
+<div class="section" id="subcats">
+  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 6. Sub-Category Classification</h2>
+  <div class="card">
+    <p>The P&amp;L uses an explicit allow-list of <strong>27 sub-categories</strong>. Transactions whose sub-category is not in this list are excluded.</p>
+
+    <div class="grid-2">
+      <div>
+        <h4 style="margin-top:0.5rem">Revenue (3)</h4>
+        <ul>
+          <li>Fixed Income</li>
+          <li>Variable Income</li>
+          <li>Rental Income</li>
+        </ul>
+
+        <h4>Cost of Goods Sold (9)</h4>
+        <ul>
+          <li>COGS Labour</li>
+          <li>COGS Sales Fees</li>
+          <li>COGS Product Costs</li>
+          <li>COGS Delivery Costs</li>
+          <li>COGS Commission</li>
+          <li>COGS Property Council Tax</li>
+          <li>COGS Property Utilities</li>
+          <li>COGS Property Reactive Maintenance</li>
+          <li>COGS Property Compliance</li>
+        </ul>
+      </div>
+      <div>
+        <h4 style="margin-top:0.5rem">Operating Expenses (15)</h4>
+        <ul>
+          <li>Opex Labour</li>
+          <li>Marketing</li>
+          <li>Premises / Overheads</li>
+          <li>Insurance</li>
+          <li>Software &amp; Subscriptions</li>
+          <li>Professional Fees</li>
+          <li>Travel &amp; Training</li>
+          <li>Operational Supplies</li>
+          <li>Subsistence</li>
+          <li>Director Discretionary Expenses</li>
+          <li>Charity</li>
+          <li>Mortgage Interest</li>
+          <li>Loan Interest</li>
+          <li>Bank Transaction Fees</li>
+          <li>Tax</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 7. BEST PRACTICES -->
+<div class="section" id="best">
+  <h2 class="section-title"><span class="icon">&#x2705;</span> 7. Best Practices</h2>
+  <div class="card">
+    <ol class="steps">
+      <li><strong>Reconcile transactions first</strong> &mdash; the P&amp;L only includes transactions with a sub-category and business link. Use the Leadership Dashboard reconciliation tab to categorise new transactions.</li>
+      <li><strong>Check the Business filter</strong> &mdash; ensure transactions are assigned to the correct business (Real Estate vs Operations Director). Use the drill-down to correct any that are wrong.</li>
+      <li><strong>Use AI Analysis regularly</strong> &mdash; generate an analysis at least monthly to catch trends early and track progress toward the 15% net margin target.</li>
+      <li><strong>Focus on margin, not just revenue</strong> &mdash; the 80% gross margin and 15% net margin targets are more important than raw revenue growth.</li>
+      <li><strong>Compare periods</strong> &mdash; switch between 3-month and 12-month views to distinguish seasonal patterns from genuine trends.</li>
+      <li><strong>Monitor maintenance and wages</strong> &mdash; these are the two budget-tracked line items. Check their percentage of revenue to spot cost creep.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- 8. TROUBLESHOOTING -->
+<div class="section" id="troubleshooting">
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 8. Troubleshooting</h2>
+  <div class="card">
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; P&amp;L shows &ldquo;Loading transactions&hellip;&rdquo;</div>
+      <div class="ts-solution">&#x2705; Open the Leadership Dashboard tab first to load transaction data, then switch back to P&amp;L.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; A transaction is in the wrong category</div>
+      <div class="ts-solution">&#x2705; Click the value to drill down, then use the type-to-search inputs to correct Category, Sub-Category, or Business. Changes save to Airtable immediately.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; Revenue or expense is missing from the report</div>
+      <div class="ts-solution">&#x2705; Check that the transaction in Airtable has both a Sub-Category and Business (For Reports) link. Unlinked transactions are skipped.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; AI Analysis fails or shows an error</div>
+      <div class="ts-solution">&#x2705; Check internet connection and click Retry. The Claude AI proxy may be temporarily unavailable.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; Charts not rendering or showing blank</div>
+      <div class="ts-solution">&#x2705; Hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R) to reload Chart.js from CDN.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; Drill-down edit shows &ldquo;&#x2717; no match&rdquo;</div>
+      <div class="ts-solution">&#x2705; The typed name didn&rsquo;t match any record. Check spelling or pick from the dropdown suggestions.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 9. CHANGELOG -->
+<div class="section" id="changelog">
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 9. Changelog</h2>
+  <div class="card">
+    <table class="label-table">
+      <thead>
+        <tr>
+          <th>Version</th>
+          <th>Date</th>
+          <th>Changes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="label-badge lb-blue">2.0</span></td>
+          <td>15 Apr 2026</td>
+          <td>Charts, AI analysis, target tracking, 9 KPI cards, SOP reformatted to standard template</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-blue">1.0</span></td>
+          <td>14 Apr 2026</td>
+          <td>Initial release &mdash; P&amp;L grid with drill-down editing</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 </div>
 </body>
 </html>

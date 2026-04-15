@@ -8,13 +8,13 @@
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.5', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
+        { id: 'tasks',       name: 'Task Manager',                   icon: '✅', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
         { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.0', sopFile: 'sop-pnl.html',                sopVer: '1.0', standalone: 'index.html#pnl' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.0', sopFile: 'sop-compliance.html',         sopVer: '1.0', standalone: 'compliance.html' },
         { id: 'airtable',   name: 'Contractor Job List',           icon: '🔧', pageVer: '1.0', sopFile: 'sop-contractor-jobs.html',    sopVer: '1.0', standalone: 'index.html#airtable' },
-        { id: 'tasks',       name: 'Task Manager',                   icon: '✅', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/tasks/index.html' },
         { id: 'launch-plan', name: 'Operations Director Launch Plan', icon: '🚀', pageVer: '1.0', sopFile: '',                         sopVer: '1.0', standalone: 'index.html#launch-plan' },
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',          icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
