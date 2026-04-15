@@ -494,8 +494,8 @@
         const pnl = buildPnL(allTransactions, pnlBusinessName, keys);
         _pnlCache = pnl;
 
-        const headCells = keys.map(k => `<th style="text-align:right;min-width:88px">${pnlMonthLabel(k)}</th>`).join('') +
-            `<th style="text-align:right;min-width:100px;background:#f1f5f9">Total</th>`;
+        const headCells = keys.map(k => `<th style="text-align:right;min-width:88px;background:#f8fafc">${pnlMonthLabel(k)}</th>`).join('') +
+            `<th class="pnl-total-col" style="text-align:right;min-width:100px;background:#f1f5f9">Total</th>`;
 
         // JSON-stringify a value for safe embedding inside a double-quoted HTML attribute.
         // JSON strings contain " which would close the attribute — escape them as &quot;.
@@ -522,7 +522,7 @@
             return section.rows.map(r => {
                 const cells = keys.map(k => cellTd(section.name, r.subCat, k, r.monthly[k] || 0)).join('');
                 return `<tr>
-                    <td style="padding-left:${indent}px;color:#475569">${escHtml(r.subCat)}</td>
+                    <td class="pnl-first" style="padding-left:${indent}px;color:#475569;background:#fff">${escHtml(r.subCat)}</td>
                     ${cells}
                     ${subTotalTd(section.name, r.subCat, r.total)}
                 </tr>`;
@@ -531,37 +531,37 @@
 
         // Section totals (Total Revenue / Total COGS / Total OpEx) — clickable, scoped to that section.
         function sectionTotalRow(label, sectionName, perMonth, grand, { bg = '#e2e8f0', color = '#0f172a' } = {}) {
-            const cells = keys.map(k => `<td style="text-align:right;cursor:pointer" onclick="pnlDrill('monthTotal', ${jsAttr(sectionName)}, null, ${jsAttr(k)})" title="Show ${escHtml(sectionName)} transactions for ${escHtml(pnlMonthLabel(k))}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
-            return `<tr style="background:${bg};color:${color};font-weight:700">
-                <td style="padding:8px 10px">${escHtml(label)}</td>
+            const cells = keys.map(k => `<td style="text-align:right;cursor:pointer;background:${bg};color:${color}" onclick="pnlDrill('monthTotal', ${jsAttr(sectionName)}, null, ${jsAttr(k)})" title="Show ${escHtml(sectionName)} transactions for ${escHtml(pnlMonthLabel(k))}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
+            return `<tr style="font-weight:700">
+                <td class="pnl-first" style="padding:8px 10px;background:${bg};color:${color}">${escHtml(label)}</td>
                 ${cells}
-                <td style="text-align:right;cursor:pointer" onclick="pnlDrill('sectionTotal', ${jsAttr(sectionName)}, null, null)" title="Show all ${escHtml(sectionName)} transactions">${pnlFmt(grand)}</td>
+                <td style="text-align:right;cursor:pointer;background:${bg};color:${color}" onclick="pnlDrill('sectionTotal', ${jsAttr(sectionName)}, null, null)" title="Show all ${escHtml(sectionName)} transactions">${pnlFmt(grand)}</td>
             </tr>`;
         }
 
         // Derived totals (GP, NP) — not clickable since they combine sections.
         function totalRow(label, perMonth, grand, { bold = true, bg = '#e2e8f0', color = '#0f172a' } = {}) {
-            const cells = keys.map(k => `<td style="text-align:right">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
-            return `<tr style="background:${bg};color:${color};${bold ? 'font-weight:700' : ''}">
-                <td style="padding:8px 10px">${escHtml(label)}</td>
+            const cells = keys.map(k => `<td style="text-align:right;background:${bg};color:${color}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
+            return `<tr style="${bold ? 'font-weight:700' : ''}">
+                <td class="pnl-first" style="padding:8px 10px;background:${bg};color:${color}">${escHtml(label)}</td>
                 ${cells}
-                <td style="text-align:right">${pnlFmt(grand)}</td>
+                <td style="text-align:right;background:${bg};color:${color}">${pnlFmt(grand)}</td>
             </tr>`;
         }
 
         function marginRow(label, perMonth, grand) {
-            const cells = keys.map(k => `<td style="text-align:right">${pnlPct(perMonth[k] || 0)}</td>`).join('');
-            return `<tr style="background:#fafafa;font-style:italic;color:#475569">
-                <td style="padding:6px 10px">${escHtml(label)}</td>
+            const cells = keys.map(k => `<td style="text-align:right;background:#fafafa">${pnlPct(perMonth[k] || 0)}</td>`).join('');
+            return `<tr style="font-style:italic;color:#475569">
+                <td class="pnl-first" style="padding:6px 10px;background:#fafafa">${escHtml(label)}</td>
                 ${cells}
-                <td style="text-align:right">${pnlPct(grand)}</td>
+                <td style="text-align:right;background:#fafafa">${pnlPct(grand)}</td>
             </tr>`;
         }
 
         function sectionHeader(name) {
-            return `<tr style="background:#0f172a;color:#fff">
-                <td style="padding:8px 10px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:1px">${escHtml(name)}</td>
-                <td colspan="${keys.length + 1}"></td>
+            return `<tr style="color:#fff">
+                <td class="pnl-first" style="padding:8px 10px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:1px;background:#0f172a">${escHtml(name)}</td>
+                <td colspan="${keys.length + 1}" style="background:#0f172a"></td>
             </tr>`;
         }
 
@@ -606,11 +606,24 @@
                         <div class="kpi-card-sub">Margin ${pnl.grand.netMargin.toFixed(1)}%</div></div>
                 </div>
 
-                <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px">
-                    <table class="invoice-table" style="min-width:${160 + keys.length * 100}px;font-size:12px">
+                <style>
+                    /* Sticky header + first column inside the P&L grid scroll area */
+                    .pnl-grid-wrap { position:relative; overflow:auto; max-height:70vh; border:1px solid #e2e8f0; border-radius:8px; }
+                    .pnl-grid { border-collapse:separate; border-spacing:0; }
+                    .pnl-grid thead th { position:sticky; top:0; z-index:2; }
+                    .pnl-grid tbody td.pnl-first,
+                    .pnl-grid thead th.pnl-first { position:sticky; left:0; z-index:1; }
+                    /* Top-left corner must win over both axes */
+                    .pnl-grid thead th.pnl-first { z-index:3; }
+                    /* Subtle shadow on the edges of the frozen rows/col so they stand out */
+                    .pnl-grid thead th { box-shadow: inset 0 -1px 0 #e2e8f0; }
+                    .pnl-grid tbody td.pnl-first { box-shadow: inset -1px 0 0 #e2e8f0; }
+                </style>
+                <div class="pnl-grid-wrap">
+                    <table class="invoice-table pnl-grid" style="min-width:${160 + keys.length * 100}px;font-size:12px">
                         <thead>
-                            <tr style="background:#f8fafc">
-                                <th style="min-width:220px;text-align:left">Line Item</th>
+                            <tr>
+                                <th class="pnl-first" style="min-width:220px;text-align:left;background:#f8fafc">Line Item</th>
                                 ${headCells}
                             </tr>
                         </thead>
