@@ -342,6 +342,11 @@
         if (tabId === 'fintable') {
             loadFintableSyncMonitor();
         }
+        // Task Manager lazy-load
+        if (tabId === 'tasks') {
+            const frame = document.getElementById('tasksFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('tasks')) frame.src = frame.dataset.src;
+        }
         // Launch Plan lazy-load
         if (tabId === 'launch-plan') {
             const frame = document.getElementById('launchPlanFrame');
