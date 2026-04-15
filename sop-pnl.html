@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profit &amp; Loss — Standard Operating Procedure</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1e293b; background: #f1f5f9; padding: 40px 20px; }
+.container { max-width: 820px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 40px; }
+h1 { font-size: 28px; color: #0f172a; margin-bottom: 6px; }
+.subtitle { font-size: 14px; color: #64748b; margin-bottom: 32px; }
+h2 { font-size: 20px; color: #1e40af; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 2px solid #dbeafe; }
+h3 { font-size: 16px; color: #1e293b; margin: 20px 0 8px; }
+p, li { font-size: 14px; color: #334155; margin-bottom: 8px; }
+ul, ol { padding-left: 24px; margin-bottom: 16px; }
+code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #7c3aed; }
+.callout { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 13px; }
+.callout-warn { background: #fffbeb; border-left-color: #f59e0b; }
+.callout-green { background: #f0fdf4; border-left-color: #22c55e; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+th, td { padding: 8px 12px; border: 1px solid #e2e8f0; text-align: left; }
+th { background: #f8fafc; font-weight: 600; color: #475569; }
+.ver { font-size: 11px; color: #94a3b8; float: right; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Profit &amp; Loss OS <span class="ver">SOP v1.0</span></h1>
+<p class="subtitle">Standard Operating Procedure — Operations Director Platform</p>
+
+<h2>1. Purpose</h2>
+<p>The Profit &amp; Loss (P&amp;L) report provides a real-time view of business financial performance, derived directly from reconciled transactions in Airtable. It enables the business owner to:</p>
+<ul>
+    <li>Monitor revenue, cost of goods sold (COGS), and operating expenses by month</li>
+    <li>Track gross and net profit margins against a <strong>15% net margin target</strong></li>
+    <li>Identify trends, cost drivers, and opportunities via AI-powered analysis</li>
+    <li>Correct mis-categorised transactions without leaving the report</li>
+</ul>
+
+<h2>2. Data Source</h2>
+<p>All figures are computed from the <code>Transactions</code> table in the Operations Director Airtable base, filtered by:</p>
+<ul>
+    <li><strong>Business (For Reports)</strong> — selectable between Real Estate and Operations Director</li>
+    <li><strong>Date</strong> — grouped into calendar months for the selected period (1, 3, 6, or 12 months)</li>
+    <li><strong>Chart of Accounts Sub-Category</strong> — classified into Revenue, COGS, or Operating Expenses using an explicit allow-list</li>
+</ul>
+
+<div class="callout">
+    <strong>Key field:</strong> The report uses <code>Report Amount</code> (not raw GBP Amount) so that multi-currency transactions are normalised.
+</div>
+
+<h2>3. Report Structure</h2>
+
+<h3>3.1 AI Financial Analysis</h3>
+<p>Click <strong>Generate Analysis</strong> to get AI-powered insights. The AI reviews all P&amp;L data and provides:</p>
+<ul>
+    <li>Performance summary with key metrics</li>
+    <li>Trend identification (revenue growth, cost creep, margin changes)</li>
+    <li>Areas of concern with specific figures</li>
+    <li>Opportunities to increase revenue or reduce costs</li>
+    <li>Specific actions to reach the 15% net margin target</li>
+</ul>
+
+<h3>3.2 KPI Cards</h3>
+<p>Eight summary cards showing period totals with target comparisons:</p>
+<table>
+    <tr><th>Card</th><th>What It Shows</th><th>Target</th></tr>
+    <tr><td>Revenue</td><td>Total income for the period</td><td>—</td></tr>
+    <tr><td>Gross Profit</td><td>Revenue minus COGS</td><td>—</td></tr>
+    <tr><td>Net Profit</td><td>Gross Profit minus OpEx</td><td>£10,000/month</td></tr>
+    <tr><td>Net Margin</td><td>Net Profit ÷ Revenue × 100</td><td>15%</td></tr>
+    <tr><td>Avg Monthly Maintenance</td><td>COGS Property Reactive Maintenance</td><td>£3,000/month</td></tr>
+    <tr><td>Avg Monthly Wages</td><td>COGS Labour + Opex Labour combined</td><td>£1,500/month</td></tr>
+    <tr><td>Total COGS</td><td>All cost of goods sold</td><td>—</td></tr>
+    <tr><td>Total OpEx</td><td>All operating expenses</td><td>—</td></tr>
+</table>
+
+<div class="callout-green callout">
+    <strong>Green ▲</strong> means above target (good for profit metrics) or below budget (good for cost metrics). <strong>Red ▼</strong> means the opposite.
+</div>
+
+<h3>3.3 Charts</h3>
+<p>Four visual charts update automatically with the selected business and period:</p>
+<ul>
+    <li><strong>Revenue vs Expenses</strong> — bar chart showing revenue (green), COGS (red), OpEx (orange) by month</li>
+    <li><strong>Profit Trend</strong> — line chart with gross profit, net profit, and the £10k/mo target line</li>
+    <li><strong>Profit Margin Trend</strong> — line chart with GP% and NP% plus the 15% target line</li>
+    <li><strong>Expense Breakdown</strong> — doughnut chart showing where money goes across all COGS + OpEx sub-categories</li>
+</ul>
+
+<h3>3.4 P&amp;L Grid</h3>
+<p>The detailed grid shows every sub-category by month with frozen headers (scroll vertically to keep month labels visible, scroll horizontally to keep line items visible).</p>
+<ul>
+    <li><strong>Click any value</strong> to drill down into the underlying transactions</li>
+    <li>Section headers: Revenue → COGS → Gross Profit → OpEx → Net Profit</li>
+    <li>Margin rows show percentages in italic</li>
+</ul>
+
+<h2>4. Drill-Down &amp; Editing</h2>
+<p>Clicking any non-zero value in the grid opens a transaction list showing:</p>
+<ul>
+    <li><strong>Date</strong> and <strong>Transaction Detail</strong></li>
+    <li><strong>Report Amount</strong> (colour-coded: green positive, red negative)</li>
+    <li>Three editable fields (type-to-search): <strong>Category</strong>, <strong>Sub-Category</strong>, <strong>Business (For Reports)</strong></li>
+</ul>
+
+<div class="callout-warn callout">
+    <strong>Editing saves immediately to Airtable.</strong> You'll see a ✓ when saved successfully or ✗ if there's an error. When you close the drill-down modal, the P&amp;L re-renders with the updated data.
+</div>
+
+<h2>5. Sub-Category Classification</h2>
+<p>The P&amp;L uses an explicit allow-list of 27 sub-categories. Transactions whose sub-category is not in this list (e.g. Capex, Transfers, Loans, Personal) are excluded from the report.</p>
+
+<h3>Revenue (3 sub-categories)</h3>
+<p>Fixed Income · Variable Income · Rental Income</p>
+
+<h3>Cost of Goods Sold (9 sub-categories)</h3>
+<p>COGS Labour · COGS Sales Fees · COGS Product Costs · COGS Delivery Costs · COGS Commission · COGS Property Council Tax · COGS Property Utilities · COGS Property Reactive Maintenance · COGS Property Compliance</p>
+
+<h3>Operating Expenses (15 sub-categories)</h3>
+<p>Opex Labour · Marketing · Premises / Overheads · Insurance · Software &amp; Subscriptions · Professional Fees · Travel &amp; Training · Operational Supplies · Subsistence · Director Discretionary Expenses · Charity · Mortgage Interest · Loan Interest · Bank Transaction Fees · Tax</p>
+
+<h2>6. Best Practices</h2>
+<ol>
+    <li><strong>Reconcile transactions first</strong> — the P&amp;L only includes transactions with a sub-category and business link. Use the Leadership Dashboard reconciliation tab to categorise new transactions.</li>
+    <li><strong>Check the Business filter</strong> — ensure transactions are assigned to the correct business (Real Estate vs Operations Director). Use the drill-down to correct any that are wrong.</li>
+    <li><strong>Use AI Analysis regularly</strong> — generate an analysis at least monthly to catch trends early.</li>
+    <li><strong>Focus on margin, not just revenue</strong> — the 15% net margin target is more important than raw revenue growth.</li>
+    <li><strong>Compare periods</strong> — switch between 3-month and 12-month views to distinguish seasonal patterns from genuine trends.</li>
+</ol>
+
+<h2>7. Troubleshooting</h2>
+<table>
+    <tr><th>Issue</th><th>Solution</th></tr>
+    <tr><td>P&amp;L shows "Loading transactions…"</td><td>Open the Leadership Dashboard tab first to load transaction data, then switch back to P&amp;L</td></tr>
+    <tr><td>A transaction is in the wrong category</td><td>Click the value to drill down, then use the type-to-search dropdowns to correct Category, Sub-Category, or Business</td></tr>
+    <tr><td>Revenue/expense is missing</td><td>Check that the transaction has both a Sub-Category and Business (For Reports) link in Airtable</td></tr>
+    <tr><td>AI Analysis fails</td><td>Check internet connection; click Retry. The AI proxy may be temporarily unavailable.</td></tr>
+    <tr><td>Charts not rendering</td><td>Hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R) to reload Chart.js</td></tr>
+</table>
+
+<p style="color:#94a3b8;font-size:11px;margin-top:32px;text-align:center">Operations Director Platform · P&amp;L SOP v1.0 · April 2026</p>
+</div>
+</body>
+</html>
