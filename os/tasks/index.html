@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Manager OS</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3348;
+  --text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--accent2:#818cf8;
+  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;--cyan:#06b6d4;
+  --pink:#ec4899;--purple:#a855f7;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}
+a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
+
+/* Auth */
+.auth-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:12px}
+.auth-bar input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:13px;width:280px}
+.auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}
+.auth-bar button:hover{background:var(--accent2)}
+
+/* Layout */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.topbar h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
+.topbar .subtitle{font-size:12px;color:var(--muted)}
+.main{padding:20px 24px;max-width:1400px;margin:0 auto}
+
+/* Team Switcher */
+.team-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
+.team-btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;font-size:13px;font-weight:600;transition:all .15s}
+.team-btn:hover{border-color:var(--accent);color:var(--text)}
+.team-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.team-btn .count{background:rgba(255,255,255,.15);padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px}
+.team-btn.active .count{background:rgba(255,255,255,.25)}
+
+/* KPI Cards */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
+.kpi .value{font-size:28px;font-weight:700;margin-bottom:2px}
+.kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.kpi.red .value{color:var(--red)}.kpi.green .value{color:var(--green)}
+.kpi.amber .value{color:var(--amber)}.kpi.cyan .value{color:var(--cyan)}
+.kpi.purple .value{color:var(--purple)}.kpi.accent .value{color:var(--accent2)}
+
+/* Tabs */
+.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0}
+.view-tab{padding:8px 16px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.view-tab:hover{color:var(--text)}
+.view-tab.active{color:var(--accent2);border-bottom-color:var(--accent2)}
+
+/* Controls Bar */
+.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.search-box{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:13px;width:260px}
+.search-box:focus{outline:none;border-color:var(--accent)}
+.filter-select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;cursor:pointer}
+.filter-select:focus{outline:none;border-color:var(--accent)}
+
+/* Task Table */
+.task-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+.task-table{width:100%;border-collapse:collapse;font-size:13px}
+.task-table th{background:var(--surface2);padding:10px 12px;text-align:left;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1}
+.task-table td{padding:10px 12px;border-top:1px solid var(--border);vertical-align:middle}
+.task-table tr{cursor:pointer;transition:background .1s}
+.task-table tbody tr:hover{background:var(--surface2)}
+.task-table tr.expanded{background:var(--surface2)}
+.task-name{font-weight:600;color:var(--text);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Badges */
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge-today{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge-overdue{background:rgba(239,68,68,.15);color:#f87171}
+.badge-upcoming{background:rgba(99,102,241,.1);color:var(--accent2)}
+.badge-todo{background:rgba(6,182,212,.1);color:var(--cyan)}
+.badge-completed{background:rgba(34,197,94,.1);color:var(--green)}
+.badge-approval{background:rgba(168,85,247,.1);color:var(--purple)}
+.badge-urgent{background:rgba(239,68,68,.15);color:#f87171}
+.badge-high{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge-project{background:rgba(236,72,153,.1);color:var(--pink)}
+.badge-not-urgent{background:rgba(34,197,94,.1);color:var(--green)}
+.badge-recurring{background:rgba(168,85,247,.08);color:var(--purple);font-size:10px}
+
+/* Avatars */
+.avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.avatar-kevin{background:#6366f1}.avatar-mica{background:#ec4899}
+.avatar-erica{background:#f59e0b}.avatar-may{background:#22c55e}
+.avatar-other{background:#64748b}
+.assignee-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
+
+/* Detail Panel (slide-down) */
+.detail-row{display:none}
+.detail-row.open{display:table-row}
+.detail-content{background:var(--surface2);padding:16px 20px;border-radius:0 0 8px 8px}
+.detail-content h4{font-size:13px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.detail-desc{font-size:13px;line-height:1.6;color:var(--text);max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-bottom:12px}
+.detail-meta{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.detail-meta span{display:flex;align-items:center;gap:4px}
+.detail-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.detail-actions button{padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
+.detail-actions button:hover{border-color:var(--accent);color:var(--accent2)}
+.detail-actions button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.detail-actions button.primary:hover{background:var(--accent2)}
+
+/* Capacity Section */
+.capacity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:24px}
+.capacity-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.capacity-card h3{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.cap-bar-wrap{height:8px;background:var(--surface2);border-radius:4px;margin:6px 0 4px;overflow:hidden}
+.cap-bar{height:100%;border-radius:4px;transition:width .4s}
+.cap-stat{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:8px}
+.cap-breakdown{font-size:12px;color:var(--muted);margin-top:8px}
+.cap-breakdown div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)}
+
+/* Recurring Section */
+.recurring-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.recurring-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.recurring-card h4{font-size:13px;font-weight:600;margin-bottom:4px}
+.recurring-card .meta{font-size:12px;color:var(--muted)}
+
+/* Status update dropdown */
+.status-dd{position:relative;display:inline-block}
+.status-dd-menu{display:none;position:absolute;top:100%;left:0;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px;z-index:100;min-width:120px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.status-dd-menu.open{display:block}
+.status-dd-item{padding:6px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap}
+.status-dd-item:hover{background:var(--surface2)}
+
+/* Loading */
+.loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);font-size:14px;gap:10px}
+.spin{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:768px){
+  .main{padding:12px}
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .task-name{max-width:180px}
+  .search-box{width:100%}
+  .topbar{padding:12px 16px}
+}
+@media print{
+  .auth-bar,.topbar,.team-bar,.view-tabs,.controls,.detail-actions{display:none!important}
+  body{background:#fff;color:#000}
+  .task-table th{background:#f1f5f9;color:#334155}
+  .task-table td{border-color:#e2e8f0}
+  .kpi{border-color:#e2e8f0;background:#fff}
+  .kpi .value{color:#1e293b!important}
+}
+</style>
+</head>
+<body>
+
+<!-- Auth (reads from parent or own PAT) -->
+<div class="auth-bar" id="authBar" style="display:none">
+  <span style="font-size:13px;color:var(--muted)">Airtable PAT:</span>
+  <input type="password" id="patInput" placeholder="pat_xxxxxxxxxxxx...">
+  <button onclick="doAuth()">Connect</button>
+</div>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div>
+    <h1>&#x2705; Task Manager OS</h1>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="lastSync" style="font-size:11px;color:var(--muted)"></span>
+    <button onclick="loadTasks()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px">&#x21BB; Refresh</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- Team Switcher -->
+  <div class="team-bar" id="teamBar"></div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <!-- View Tabs -->
+  <div class="view-tabs">
+    <button class="view-tab active" data-view="list" onclick="switchView('list')">&#x1F4CB; Task List</button>
+    <button class="view-tab" data-view="capacity" onclick="switchView('capacity')">&#x1F4CA; Capacity</button>
+    <button class="view-tab" data-view="recurring" onclick="switchView('recurring')">&#x1F504; Recurring</button>
+  </div>
+
+  <!-- View: Task List -->
+  <div id="view-list">
+    <div class="controls">
+      <input class="search-box" id="searchBox" type="text" placeholder="Search tasks..." oninput="renderTasks()">
+      <select class="filter-select" id="filterStatus" onchange="renderTasks()">
+        <option value="">All Statuses</option>
+        <option value="Today">Today</option>
+        <option value="Overdue">Overdue</option>
+        <option value="Upcoming">Upcoming</option>
+        <option value="To do">To do</option>
+        <option value="Approval">Approval</option>
+        <!-- Completed tasks are excluded from the API pull -->
+      </select>
+      <select class="filter-select" id="filterPriority" onchange="renderTasks()">
+        <option value="">All Priorities</option>
+        <option value="Urgent">Urgent</option>
+        <option value="High">High</option>
+        <option value="Project">Project</option>
+        <option value="Not Urgent">Not Urgent</option>
+      </select>
+      <select class="filter-select" id="sortBy" onchange="renderTasks()">
+        <option value="due-asc">Due Date (soonest)</option>
+        <option value="due-desc">Due Date (latest)</option>
+        <option value="priority">Priority</option>
+        <option value="status">Status</option>
+        <option value="name">Name (A-Z)</option>
+        <option value="time-desc">Time Estimate (high-low)</option>
+      </select>
+    </div>
+
+    <div class="task-table-wrap">
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th>Task</th>
+            <th>Due Date</th>
+            <th>Status</th>
+            <th>Assignee</th>
+            <th>Priority</th>
+            <th>Time Est.</th>
+            <th>Recurring</th>
+          </tr>
+        </thead>
+        <tbody id="taskBody"></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--muted)">
+      <span id="showingCount"></span>
+      <div style="display:flex;gap:6px">
+        <button id="prevPage" onclick="changePage(-1)" style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:12px">&laquo; Prev</button>
+        <span id="pageInfo" style="padding:4px 8px"></span>
+        <button id="nextPage" onclick="changePage(1)" style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:12px">Next &raquo;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- View: Capacity -->
+  <div id="view-capacity" style="display:none">
+    <div class="capacity-grid" id="capacityGrid"></div>
+  </div>
+
+  <!-- View: Recurring -->
+  <div id="view-recurring" style="display:none">
+    <div style="margin-bottom:16px">
+      <p style="font-size:13px;color:var(--muted)">Recurring tasks identified for potential AI agent automation. Tasks marked with a recurring frequency or the &ldquo;Recurring?&rdquo; flag are shown below.</p>
+    </div>
+    <div class="recurring-grid" id="recurringGrid"></div>
+  </div>
+
+</div>
+
+<!-- Loading overlay -->
+<div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
+
+<script>
+// ═══════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const TABLE_ID = 'tblqB8b22hKBL4PF1';
+const FIELDS = {
+  name:        'fldgFjGBw6bTKJFCD',
+  dueDate:     'fld7XP8w8kbxfETV4',
+  status:      'fldx4qCw17UfrKpaN',
+  assignee:    'fldELMncVJYPDRJNc',
+  priority:    'fldS21RwmwOqt71LI',
+  timeEst:     'fld10VzzbiNNgRmIi',
+  timeDur:     'flduPjY0p7MmQzDvH',
+  description: 'fldRGhBQViKZKtkQ6',
+  attachments: 'fldEbs9cscRr8elcw',
+  recurring:   'fldNhDWBX5gQm2p6b',
+  recurFlag:   'fldW4ym7haKK0BZzt',
+  someDay:     'fldmhkeRaDkiL3Ga4',
+  notes:       'fldR7apBzSp3oxFxz',
+  category:    'fldVDvfhfOUBNvAxe',
+  completion:  'fldFOi1SwEKuJRmdN',
+  created:     'fldywB2EXESbXB7it',
+  onHold:      'fldWib3IHh3jY9vBZ',
+};
+const FIELD_IDS = Object.values(FIELDS);
+
+const TEAM = [
+  { key: 'kevin', name: 'Kevin Brittain',   email: 'kevin@runpreneur.org.uk' },
+  { key: 'mica',  name: 'Mica Albovias',    email: 'micaa.work@gmail.com'    },
+  { key: 'erica', name: 'Ericamae Atenta',  email: 'atentaerica@gmail.com'   },
+];
+
+const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, 'To do':3, Upcoming:4, Completed:5 };
+const PRIORITY_ORDER = { Urgent:0, High:1, Project:2, 'Not Urgent':3 };
+const TIME_MINUTES = { '15 min':15, '30 min':30, '45 min':45, '1 hr':60, '2 hr':120, '3 hr':180, '4 hr':240, '8 hr':480 };
+
+// Weekly capacity per person in hours (assume 40hr week)
+const WEEKLY_CAPACITY_HRS = 40;
+
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+let PAT = '';
+let allTasks = [];
+let activeTeam = 'all';
+let currentView = 'list';
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let expandedTask = null;
+
+// ═══════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════
+function initAuth() {
+  // Try parent window PAT first (when loaded in iframe)
+  try { if (window.parent && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e) {}
+  // Try localStorage
+  const stored = localStorage.getItem('_dlr_pat');
+  if (stored) { PAT = stored; return true; }
+  document.getElementById('authBar').style.display = 'flex';
+  document.getElementById('loader').style.display = 'none';
+  return false;
+}
+
+function doAuth() {
+  const v = document.getElementById('patInput').value.trim();
+  if (!v) return;
+  PAT = v;
+  localStorage.setItem('_dlr_pat', v);
+  document.getElementById('authBar').style.display = 'none';
+  document.getElementById('loader').style.display = 'flex';
+  loadTasks();
+}
+
+// ═══════════════════════════════════════
+// AIRTABLE FETCH
+// ═══════════════════════════════════════
+async function fetchRecords() {
+  let all = [], offset = null;
+  const params = new URLSearchParams({
+    returnFieldsByFieldId: 'true',
+    pageSize: '100',
+    filterByFormula: `AND({Status}!="Completed",{Some Day}=FALSE())`,
+  });
+  FIELD_IDS.forEach(f => params.append('fields[]', f));
+  do {
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}?${params}${offset ? '&offset='+offset : ''}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        PAT = '';
+        localStorage.removeItem('_dlr_pat');
+        document.getElementById('authBar').style.display = 'flex';
+        document.getElementById('loader').innerHTML = '<span style="color:var(--red)">Invalid token. Please re-enter your PAT.</span>';
+        throw new Error('Auth failed');
+      }
+      throw new Error(`API error ${res.status}`);
+    }
+    const data = await res.json();
+    all = all.concat(data.records);
+    offset = data.offset || null;
+  } while (offset);
+  return all;
+}
+
+// ═══════════════════════════════════════
+// DATA PROCESSING
+// ═══════════════════════════════════════
+function gf(rec, fid) {
+  return rec.cellValuesByFieldId ? rec.cellValuesByFieldId[fid] : (rec.fields ? rec.fields[fid] : undefined);
+}
+
+function parseTask(rec) {
+  const statusObj = gf(rec, FIELDS.status);
+  const priorityObj = gf(rec, FIELDS.priority);
+  const assigneeObj = gf(rec, FIELDS.assignee);
+  const timeEstObj = gf(rec, FIELDS.timeEst);
+  const recurObj = gf(rec, FIELDS.recurring);
+  const catObj = gf(rec, FIELDS.category);
+
+  const status = statusObj ? statusObj.name : '';
+  const dueDate = gf(rec, FIELDS.dueDate) || '';
+  const timeDur = gf(rec, FIELDS.timeDur) || 0; // seconds
+
+  // Derive minutes from duration or time estimate label
+  let minutes = 0;
+  if (timeDur > 0) {
+    minutes = timeDur / 60;
+  } else if (timeEstObj) {
+    minutes = TIME_MINUTES[timeEstObj.name] || 0;
+  }
+
+  return {
+    id: rec.id,
+    name: gf(rec, FIELDS.name) || '(Untitled)',
+    dueDate,
+    status,
+    statusColor: statusObj ? statusObj.color : '',
+    assignee: assigneeObj ? assigneeObj.name : '',
+    assigneeEmail: assigneeObj ? assigneeObj.email : '',
+    priority: priorityObj ? priorityObj.name : '',
+    timeEst: timeEstObj ? timeEstObj.name : '',
+    minutes,
+    recurring: recurObj ? recurObj.name : '',
+    recurFlag: !!gf(rec, FIELDS.recurFlag),
+    someDay: !!gf(rec, FIELDS.someDay),
+    description: gf(rec, FIELDS.description) || '',
+    notes: gf(rec, FIELDS.notes) || '',
+    attachments: gf(rec, FIELDS.attachments) || [],
+    category: catObj ? catObj.name : '',
+    completion: gf(rec, FIELDS.completion) || '',
+    created: gf(rec, FIELDS.created) || '',
+    onHold: !!gf(rec, FIELDS.onHold),
+  };
+}
+
+function isOverdue(t) {
+  if (!t.dueDate || t.status === 'Completed') return false;
+  return t.dueDate < todayStr();
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function teamKey(email) {
+  const m = TEAM.find(t => t.email === email);
+  return m ? m.key : 'other';
+}
+
+function getFilteredTasks() {
+  let tasks = allTasks.filter(t => !t.someDay);
+
+  // Team filter
+  if (activeTeam !== 'all') {
+    const member = TEAM.find(m => m.key === activeTeam);
+    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
+  }
+
+  // Status filter
+  const sf = document.getElementById('filterStatus').value;
+  if (sf) {
+    if (sf === 'Overdue') {
+      tasks = tasks.filter(t => t.status === 'Overdue' || isOverdue(t));
+    } else {
+      tasks = tasks.filter(t => t.status === sf);
+    }
+  }
+
+  // Priority filter
+  const pf = document.getElementById('filterPriority').value;
+  if (pf) tasks = tasks.filter(t => t.priority === pf);
+
+  // Search
+  const q = document.getElementById('searchBox').value.toLowerCase().trim();
+  if (q) tasks = tasks.filter(t =>
+    t.name.toLowerCase().includes(q) ||
+    t.assignee.toLowerCase().includes(q) ||
+    t.description.toLowerCase().includes(q)
+  );
+
+  // Sort
+  const sortKey = document.getElementById('sortBy').value;
+  tasks.sort((a, b) => {
+    switch (sortKey) {
+      case 'due-asc':
+        if (!a.dueDate && !b.dueDate) return 0;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return a.dueDate.localeCompare(b.dueDate);
+      case 'due-desc':
+        if (!a.dueDate && !b.dueDate) return 0;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return b.dueDate.localeCompare(a.dueDate);
+      case 'priority':
+        return (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
+      case 'status':
+        return (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+      case 'name':
+        return a.name.localeCompare(b.name);
+      case 'time-desc':
+        return b.minutes - a.minutes;
+      default:
+        return 0;
+    }
+  });
+
+  return tasks;
+}
+
+// ═══════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function renderTeamBar() {
+  const counts = { all: 0 };
+  TEAM.forEach(m => counts[m.key] = 0);
+  const active = allTasks.filter(t => t.status !== 'Completed' && !t.someDay);
+  active.forEach(t => {
+    counts.all++;
+    const k = teamKey(t.assigneeEmail);
+    if (counts[k] !== undefined) counts[k]++;
+  });
+
+  let html = `<button class="team-btn ${activeTeam === 'all' ? 'active' : ''}" onclick="setTeam('all')">All<span class="count">${counts.all}</span></button>`;
+  TEAM.forEach(m => {
+    const firstName = m.name.split(' ')[0];
+    html += `<button class="team-btn ${activeTeam === m.key ? 'active' : ''}" onclick="setTeam('${m.key}')">
+      <span class="avatar avatar-${m.key}">${firstName[0]}</span> ${firstName}<span class="count">${counts[m.key]}</span>
+    </button>`;
+  });
+  document.getElementById('teamBar').innerHTML = html;
+}
+
+function renderKPIs() {
+  let tasks = allTasks.filter(t => !t.someDay);
+  if (activeTeam !== 'all') {
+    const member = TEAM.find(m => m.key === activeTeam);
+    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
+  }
+
+  const today = todayStr();
+  const active = tasks.filter(t => t.status !== 'Completed');
+  const overdue = active.filter(t => t.status === 'Overdue' || isOverdue(t));
+  const dueToday = active.filter(t => t.dueDate === today || t.status === 'Today');
+  const upcoming = active.filter(t => t.status === 'Upcoming');
+  const totalHrs = active.reduce((s, t) => s + t.minutes, 0) / 60;
+
+  // To do count
+  const todoCount = active.filter(t => t.status === 'To do').length;
+
+  // Recurring count
+  const recurringCount = active.filter(t => t.recurring || t.recurFlag).length;
+
+  const kpis = [
+    { label: 'Due Today', value: dueToday.length, cls: dueToday.length > 0 ? 'amber' : 'green' },
+    { label: 'Overdue', value: overdue.length, cls: overdue.length > 0 ? 'red' : 'green' },
+    { label: 'Upcoming', value: upcoming.length, cls: 'accent' },
+    { label: 'To Do', value: todoCount, cls: 'cyan' },
+    { label: 'Hours Allocated', value: totalHrs.toFixed(1), cls: 'purple' },
+    { label: 'Active Tasks', value: active.length, cls: 'green' },
+    { label: 'Recurring Tasks', value: recurringCount, cls: 'accent' },
+  ];
+
+  document.getElementById('kpiGrid').innerHTML = kpis.map(k =>
+    `<div class="kpi ${k.cls}"><div class="value">${k.value}</div><div class="label">${k.label}</div></div>`
+  ).join('');
+}
+
+function statusBadge(status) {
+  const cls = {
+    Today: 'badge-today', Overdue: 'badge-overdue', Upcoming: 'badge-upcoming',
+    'To do': 'badge-todo', Completed: 'badge-completed', Approval: 'badge-approval'
+  }[status] || 'badge-todo';
+  return `<span class="badge ${cls}">${escHtml(status)}</span>`;
+}
+
+function priorityBadge(p) {
+  if (!p) return '<span style="color:var(--muted)">-</span>';
+  const cls = { Urgent: 'badge-urgent', High: 'badge-high', Project: 'badge-project', 'Not Urgent': 'badge-not-urgent' }[p] || '';
+  return `<span class="badge ${cls}">${escHtml(p)}</span>`;
+}
+
+function avatarHtml(t) {
+  if (!t.assignee) return '<span style="color:var(--muted)">-</span>';
+  const k = teamKey(t.assigneeEmail);
+  const initial = t.assignee.split(' ').map(w => w[0]).join('').slice(0, 2);
+  return `<div class="assignee-cell"><span class="avatar avatar-${k}">${initial}</span>${escHtml(t.assignee.split(' ')[0])}</div>`;
+}
+
+function formatDueDate(d) {
+  if (!d) return '<span style="color:var(--muted)">No date</span>';
+  const today = todayStr();
+  const dt = new Date(d + 'T00:00:00');
+  const diff = Math.round((dt - new Date(today + 'T00:00:00')) / 86400000);
+  const formatted = dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+
+  if (d < today) return `<span style="color:var(--red);font-weight:600">${formatted}</span> <span style="font-size:10px;color:var(--red)">(${Math.abs(diff)}d ago)</span>`;
+  if (d === today) return `<span style="color:var(--amber);font-weight:600">Today</span>`;
+  if (diff <= 7) return `<span style="color:var(--amber)">${formatted}</span> <span style="font-size:10px;color:var(--muted)">(${diff}d)</span>`;
+  return `<span>${formatted}</span>`;
+}
+
+function renderTasks() {
+  const tasks = getFilteredTasks();
+  const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+  if (currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const page = tasks.slice(start, start + PAGE_SIZE);
+
+  let html = '';
+  page.forEach((t, i) => {
+    const idx = start + i + 1;
+    const isExp = expandedTask === t.id;
+    const overdueFlag = isOverdue(t);
+    const rowStyle = overdueFlag && t.status !== 'Overdue' ? ' style="border-left:3px solid var(--red)"' : '';
+
+    html += `<tr class="${isExp ? 'expanded' : ''}" onclick="toggleDetail('${t.id}')"${rowStyle}>
+      <td style="color:var(--muted)">${idx}</td>
+      <td><div class="task-name">${escHtml(t.name)}</div>${t.recurring ? `<span class="badge badge-recurring">${escHtml(t.recurring)}</span>` : ''}</td>
+      <td>${formatDueDate(t.dueDate)}</td>
+      <td>${statusBadge(overdueFlag && t.status !== 'Overdue' && t.status !== 'Completed' ? 'Overdue' : t.status)}</td>
+      <td>${avatarHtml(t)}</td>
+      <td>${priorityBadge(t.priority)}</td>
+      <td>${t.timeEst || (t.minutes ? Math.round(t.minutes) + 'm' : '<span style="color:var(--muted)">-</span>')}</td>
+      <td>${t.recurring ? `<span style="color:var(--purple)">${escHtml(t.recurring)}</span>` : (t.recurFlag ? '<span style="color:var(--purple)">Yes</span>' : '<span style="color:var(--muted)">-</span>')}</td>
+    </tr>`;
+
+    // Detail row
+    html += `<tr class="detail-row ${isExp ? 'open' : ''}" id="detail-${t.id}"><td colspan="8"><div class="detail-content">`;
+    if (t.description || t.notes) {
+      html += `<h4>Description</h4><div class="detail-desc">${escHtml(t.description || t.notes)}</div>`;
+    }
+    html += `<div class="detail-meta">`;
+    if (t.category) html += `<span>Category: <strong>${escHtml(t.category)}</strong></span>`;
+    if (t.created) html += `<span>Created: ${new Date(t.created).toLocaleDateString('en-GB')}</span>`;
+    if (t.completion) html += `<span>Completed: ${new Date(t.completion).toLocaleDateString('en-GB')}</span>`;
+    if (t.attachments.length) html += `<span>${t.attachments.length} attachment(s)</span>`;
+    if (t.onHold) html += `<span style="color:var(--amber)">On Hold</span>`;
+    html += `</div>`;
+
+    // Attachments
+    if (t.attachments.length) {
+      html += `<div style="margin-top:8px">`;
+      t.attachments.forEach(a => {
+        html += `<a href="${escHtml(a.url)}" target="_blank" style="font-size:12px;margin-right:12px">&#x1F4CE; ${escHtml(a.filename)}</a>`;
+      });
+      html += `</div>`;
+    }
+
+    // Quick actions
+    html += `<div class="detail-actions">`;
+    html += `<div class="status-dd"><button onclick="event.stopPropagation();toggleStatusMenu('${t.id}')">Change Status &#x25BE;</button>
+      <div class="status-dd-menu" id="sm-${t.id}">
+        ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s => `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`).join('')}
+      </div></div>`;
+    html += `<a href="https://airtable.com/${BASE_ID}/${TABLE_ID}/${t.id}" target="_blank"><button onclick="event.stopPropagation()">Open in Airtable &#x2197;</button></a>`;
+    html += `</div>`;
+
+    html += `</div></td></tr>`;
+  });
+
+  if (!page.length) {
+    html = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">No tasks found matching your filters.</td></tr>`;
+  }
+
+  document.getElementById('taskBody').innerHTML = html;
+  document.getElementById('showingCount').textContent = `Showing ${page.length} of ${tasks.length} tasks`;
+  document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages}`;
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= totalPages;
+}
+
+function toggleDetail(id) {
+  expandedTask = expandedTask === id ? null : id;
+  renderTasks();
+}
+
+function changePage(dir) {
+  currentPage += dir;
+  renderTasks();
+  document.querySelector('.task-table-wrap').scrollTop = 0;
+}
+
+function toggleStatusMenu(id) {
+  const menu = document.getElementById('sm-' + id);
+  document.querySelectorAll('.status-dd-menu.open').forEach(m => { if (m !== menu) m.classList.remove('open'); });
+  menu.classList.toggle('open');
+}
+
+// Close menus on click outside
+document.addEventListener('click', () => {
+  document.querySelectorAll('.status-dd-menu.open').forEach(m => m.classList.remove('open'));
+});
+
+async function updateStatus(taskId, newStatus) {
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${taskId}`;
+  try {
+    const resp = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: { [FIELDS.status]: { name: newStatus } }, typecast: true })
+    });
+    if (resp.ok) {
+      // Update local state
+      const task = allTasks.find(t => t.id === taskId);
+      if (task) {
+        task.status = newStatus;
+        if (newStatus === 'Completed') task.completion = new Date().toISOString();
+      }
+      renderAll();
+    }
+  } catch (e) {
+    console.error('Failed to update status:', e);
+  }
+}
+
+// ═══════════════════════════════════════
+// CAPACITY VIEW
+// ═══════════════════════════════════════
+function renderCapacity() {
+  const members = activeTeam === 'all' ? TEAM : TEAM.filter(m => m.key === activeTeam);
+  let html = '';
+
+  members.forEach(member => {
+    const tasks = allTasks.filter(t =>
+      t.assigneeEmail === member.email && t.status !== 'Completed' && !t.someDay
+    );
+    const totalMins = tasks.reduce((s, t) => s + t.minutes, 0);
+    const totalHrs = totalMins / 60;
+    const pct = Math.min(100, (totalHrs / WEEKLY_CAPACITY_HRS) * 100);
+
+    let barColor = 'var(--green)';
+    if (pct > 90) barColor = 'var(--red)';
+    else if (pct > 70) barColor = 'var(--amber)';
+
+    // Breakdown by status
+    const statusBreak = {};
+    tasks.forEach(t => {
+      const s = t.status || 'Unset';
+      statusBreak[s] = (statusBreak[s] || 0) + t.minutes;
+    });
+
+    // Breakdown by priority
+    const priorityBreak = {};
+    tasks.forEach(t => {
+      const p = t.priority || 'Unset';
+      priorityBreak[p] = (priorityBreak[p] || 0) + t.minutes;
+    });
+
+    // Overdue tasks
+    const overdue = tasks.filter(t => isOverdue(t));
+
+    html += `<div class="capacity-card">
+      <h3><span class="avatar avatar-${member.key}">${member.name[0]}</span> ${member.name}</h3>
+      <div class="cap-stat"><span>${totalHrs.toFixed(1)} hrs allocated</span><span>${WEEKLY_CAPACITY_HRS} hrs capacity</span></div>
+      <div class="cap-bar-wrap"><div class="cap-bar" style="width:${pct}%;background:${barColor}"></div></div>
+      <div style="font-size:12px;color:${pct > 90 ? 'var(--red)' : 'var(--muted)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} active tasks${overdue.length ? ` &middot; <span style="color:var(--red)">${overdue.length} overdue</span>` : ''}</div>
+      <h4 style="font-size:11px;color:var(--muted);margin-bottom:4px">By Status</h4>
+      <div class="cap-breakdown">
+        ${Object.entries(statusBreak).sort((a,b) => b[1]-a[1]).map(([s,m]) => `<div><span>${s}</span><span>${(m/60).toFixed(1)} hrs (${Math.round(m/totalMins*100)||0}%)</span></div>`).join('')}
+      </div>
+      <h4 style="font-size:11px;color:var(--muted);margin:8px 0 4px">By Priority</h4>
+      <div class="cap-breakdown">
+        ${Object.entries(priorityBreak).sort((a,b) => b[1]-a[1]).map(([p,m]) => `<div><span>${p}</span><span>${(m/60).toFixed(1)} hrs</span></div>`).join('')}
+      </div>
+    </div>`;
+  });
+
+  // Team summary card (when showing all)
+  if (activeTeam === 'all') {
+    const allActive = allTasks.filter(t => t.status !== 'Completed' && !t.someDay);
+    const totalTeamMins = allActive.reduce((s, t) => s + t.minutes, 0);
+    const totalTeamHrs = totalTeamMins / 60;
+    const teamCapacity = TEAM.length * WEEKLY_CAPACITY_HRS;
+    const teamPct = Math.min(100, (totalTeamHrs / teamCapacity) * 100);
+
+    html = `<div class="capacity-card" style="grid-column:1/-1;border-color:var(--accent)">
+      <h3>&#x1F4CA; Team Overview</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-bottom:12px">
+        <div class="kpi green" style="padding:12px"><div class="value" style="font-size:22px">${allActive.length}</div><div class="label">Active Tasks</div></div>
+        <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${totalTeamHrs.toFixed(1)}</div><div class="label">Hours Allocated</div></div>
+        <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${teamCapacity}</div><div class="label">Team Capacity (hrs)</div></div>
+        <div class="kpi ${teamPct > 90 ? 'red' : teamPct > 70 ? 'amber' : 'green'}" style="padding:12px"><div class="value" style="font-size:22px">${teamPct.toFixed(0)}%</div><div class="label">Utilisation</div></div>
+      </div>
+      <div class="cap-bar-wrap" style="height:12px"><div class="cap-bar" style="width:${teamPct}%;background:${teamPct > 90 ? 'var(--red)' : teamPct > 70 ? 'var(--amber)' : 'var(--green)'}"></div></div>
+    </div>` + html;
+  }
+
+  document.getElementById('capacityGrid').innerHTML = html;
+}
+
+// ═══════════════════════════════════════
+// RECURRING VIEW
+// ═══════════════════════════════════════
+function renderRecurring() {
+  const recurring = allTasks.filter(t => (t.recurring || t.recurFlag) && !t.someDay);
+
+  // Group by frequency
+  const groups = {};
+  recurring.forEach(t => {
+    const freq = t.recurring || 'Flagged';
+    if (!groups[freq]) groups[freq] = [];
+    groups[freq].push(t);
+  });
+
+  const freqOrder = ['Daily', 'Weekly', 'Fortnightly', 'Monthly', 'Quarterly', 'Bi-Annually', 'Annually', 'Flagged'];
+  let html = '';
+
+  // Summary
+  const totalMins = recurring.filter(t => t.status !== 'Completed').reduce((s, t) => s + t.minutes, 0);
+  html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+    <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${recurring.length}</div><div class="label">Total Recurring</div></div>
+    <div class="kpi accent" style="padding:12px"><div class="value" style="font-size:22px">${(totalMins/60).toFixed(1)}</div><div class="label">Hours / Cycle</div></div>
+    <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t => t.status === 'Completed').length}</div><div class="label">Completed</div></div>
+    <div class="kpi amber" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t => isOverdue(t)).length}</div><div class="label">Overdue</div></div>
+  </div>`;
+
+  freqOrder.forEach(freq => {
+    const tasks = groups[freq];
+    if (!tasks || !tasks.length) return;
+    html += `<h3 style="font-size:14px;margin:16px 0 8px;color:var(--purple)">${freq} <span style="color:var(--muted);font-weight:400">(${tasks.length})</span></h3>`;
+    html += `<div class="recurring-grid" style="margin-bottom:12px">`;
+    tasks.forEach(t => {
+      const od = isOverdue(t);
+      html += `<div class="recurring-card" style="${od ? 'border-color:var(--red)' : ''}">
+        <h4>${escHtml(t.name)}</h4>
+        <div class="meta">
+          ${avatarHtml(t)} &middot; ${statusBadge(t.status)} &middot; ${t.timeEst || '-'}
+          ${od ? '<span style="color:var(--red);margin-left:8px">OVERDUE</span>' : ''}
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+
+  if (!recurring.length) {
+    html = `<div style="text-align:center;padding:40px;color:var(--muted)">No recurring tasks found.</div>`;
+  }
+
+  document.getElementById('recurringGrid').innerHTML = html;
+}
+
+// ═══════════════════════════════════════
+// VIEW SWITCHING
+// ═══════════════════════════════════════
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.view-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.getElementById('view-list').style.display = view === 'list' ? '' : 'none';
+  document.getElementById('view-capacity').style.display = view === 'capacity' ? '' : 'none';
+  document.getElementById('view-recurring').style.display = view === 'recurring' ? '' : 'none';
+
+  if (view === 'capacity') renderCapacity();
+  if (view === 'recurring') renderRecurring();
+}
+
+function setTeam(key) {
+  activeTeam = key;
+  currentPage = 1;
+  expandedTask = null;
+  renderAll();
+}
+
+function renderAll() {
+  renderTeamBar();
+  renderKPIs();
+  renderTasks();
+  if (currentView === 'capacity') renderCapacity();
+  if (currentView === 'recurring') renderRecurring();
+}
+
+// ═══════════════════════════════════════
+// LOAD
+// ═══════════════════════════════════════
+async function loadTasks() {
+  document.getElementById('loader').style.display = 'flex';
+  try {
+    const raw = await fetchRecords();
+    allTasks = raw.map(parseTask);
+    document.getElementById('taskCount').textContent = `${allTasks.length} total tasks`;
+    document.getElementById('lastSync').textContent = `Synced ${new Date().toLocaleTimeString('en-GB')}`;
+    document.getElementById('loader').style.display = 'none';
+    renderAll();
+  } catch (e) {
+    console.error(e);
+    document.getElementById('loader').innerHTML = `<span style="color:var(--red)">Failed to load tasks. ${escHtml(e.message)}</span>`;
+  }
+}
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+if (initAuth()) loadTasks();
+</script>
+</body>
+</html>
