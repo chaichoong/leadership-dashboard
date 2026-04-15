@@ -42,6 +42,7 @@
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('tasks')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Task Manager OS</span></div>
             <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids OS</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
             <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices OS</span></div>
             <div class="sidebar-item" onclick="switchTab('pnl')"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss OS</span></div>
@@ -229,6 +230,11 @@
         </div>
 
         </div><!-- end tab-overview -->
+
+        <!-- Tab: Task Manager OS -->
+        <div class="tab-panel" id="tab-tasks">
+            <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
 
         <!-- Tab 2: Airtable View -->
         <div class="tab-panel" id="tab-airtable">
@@ -440,7 +446,7 @@
     <script src="js/cashflow.js?v=11"></script>
     <script src="js/sitemap.js?v=11"></script>
     <script src="js/invoices.js?v=11"></script>
-    <script src="js/pnl.js?v=16"></script>
+    <script src="js/pnl.js?v=17"></script>
     <script src="js/reconciliation.js?v=11"></script>
     <script src="js/cfv.js?v=11"></script>
     <script src="js/fintable.js?v=11"></script>

@@ -47,8 +47,10 @@
     ];
 
     // ── Targets ──
+    const PNL_REVENUE_TARGET = 35000;        // £35,000/month revenue target
+    const PNL_GROSS_MARGIN_TARGET = 80;      // 80% gross profit margin target
     const PNL_NET_MARGIN_TARGET = 15;        // 15% net profit margin target
-    const PNL_CLEAR_PROFIT_TARGET = typeof CLEAR_PROFIT_TARGET !== 'undefined' ? CLEAR_PROFIT_TARGET : 10000;
+    const PNL_CLEAR_PROFIT_TARGET = 5000;    // £5,000/month net profit target
     const PNL_MAINT_TARGET = typeof MAINT_TARGET_GBP !== 'undefined' ? MAINT_TARGET_GBP : 3000;
     const PNL_WAGES_TARGET = typeof WAGES_TARGET_GBP !== 'undefined' ? WAGES_TARGET_GBP : 1500;
 
@@ -418,7 +420,7 @@
                     datasets: [
                         { label: 'Gross Profit', data: gpData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
                         { label: 'Net Profit', data: npData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
-                        { label: `Target (£${(PNL_CLEAR_PROFIT_TARGET/1000).toFixed(0)}k/mo)`, data: keys.map(() => PNL_CLEAR_PROFIT_TARGET), borderColor: '#94a3b8', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+                        { label: `NP Target (£${(PNL_CLEAR_PROFIT_TARGET/1000).toFixed(0)}k/mo)`, data: keys.map(() => PNL_CLEAR_PROFIT_TARGET), borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
                     ]
                 },
                 options: {
@@ -446,7 +448,8 @@
                     datasets: [
                         { label: 'Gross Margin %', data: gpMData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
                         { label: 'Net Margin %', data: npMData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
-                        { label: `Target (${PNL_NET_MARGIN_TARGET}%)`, data: keys.map(() => PNL_NET_MARGIN_TARGET), borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+                        { label: `GP Target (${PNL_GROSS_MARGIN_TARGET}%)`, data: keys.map(() => PNL_GROSS_MARGIN_TARGET), borderColor: '#3b82f6', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+                        { label: `NP Target (${PNL_NET_MARGIN_TARGET}%)`, data: keys.map(() => PNL_NET_MARGIN_TARGET), borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
                     ]
                 },
                 options: {
@@ -479,6 +482,7 @@
             });
             slices.sort((a, b) => b.value - a.value);
 
+            const totalExp = slices.reduce((s, o) => s + o.value, 0);
             _pnlCharts.breakdown = new Chart(ctx4, {
                 type: 'doughnut',
                 data: {
@@ -487,10 +491,11 @@
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 10 } },
                     plugins: {
-                        legend: { position: 'right', labels: { font: { size: 10, family: fontFamily }, padding: 6, usePointStyle: true, pointStyle: 'circle', boxWidth: 8 } },
-                        title: { display: true, text: 'Expense Breakdown (Period Total)', font: { size: 13, weight: '600', family: fontFamily }, color: '#0f172a', padding: { bottom: 8 } },
-                        tooltip: { callbacks: { label: (c) => `${c.label}: £${c.raw.toLocaleString('en-GB', { maximumFractionDigits: 0 })}` } }
+                        legend: { position: 'bottom', maxHeight: 120, labels: { font: { size: 10, family: fontFamily }, padding: 6, usePointStyle: true, pointStyle: 'circle', boxWidth: 8 } },
+                        title: { display: true, text: 'Expense Breakdown (Period Total)', font: { size: 13, weight: '600', family: fontFamily }, color: '#0f172a', padding: { bottom: 4 } },
+                        tooltip: { callbacks: { label: (c) => { const pct = totalExp ? ((c.raw / totalExp) * 100).toFixed(1) : 0; return `${c.label}: £${c.raw.toLocaleString('en-GB', { maximumFractionDigits: 0 })} (${pct}%)`; } } }
                     },
                     cutout: '55%'
                 }
@@ -508,7 +513,7 @@
         const data = {
             business: pnlBusinessName,
             period: `${pnlMonths} months (${monthLabels[0]} – ${monthLabels[monthLabels.length - 1]})`,
-            targets: { netMargin: `${PNL_NET_MARGIN_TARGET}%`, monthlyNetProfit: `£${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}`, monthlyMaintenance: `£${PNL_MAINT_TARGET.toLocaleString()}`, monthlyWages: `£${PNL_WAGES_TARGET.toLocaleString()}` },
+            targets: { monthlyRevenue: `£${PNL_REVENUE_TARGET.toLocaleString()}`, grossMargin: `${PNL_GROSS_MARGIN_TARGET}%`, netMargin: `${PNL_NET_MARGIN_TARGET}%`, monthlyNetProfit: `£${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}`, monthlyMaintenance: `£${PNL_MAINT_TARGET.toLocaleString()}`, monthlyWages: `£${PNL_WAGES_TARGET.toLocaleString()}` },
             grandTotals: {
                 revenue: pnl.grand.revenue, cogs: pnl.grand.cogs, opex: pnl.grand.opex,
                 grossProfit: pnl.grand.grossProfit, grossMargin: pnl.grand.grossMargin.toFixed(1) + '%',
@@ -549,7 +554,7 @@ RULES:
 - British English always (analyse, colour, organise, etc.)
 - Use £ with commas. Be concise, data-driven, specific.
 - Structure response as: **Performance Summary** (2-3 sentences), **Key Trends** (3-4 bullet points), **Areas of Concern** (2-3 bullets), **Opportunities** (2-3 bullets), **Path to ${PNL_NET_MARGIN_TARGET}% Net Margin** (specific actions with £ amounts).
-- Compare against targets: net profit target £${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}/mo, maintenance budget £${PNL_MAINT_TARGET.toLocaleString()}/mo, wages budget £${PNL_WAGES_TARGET.toLocaleString()}/mo, net margin target ${PNL_NET_MARGIN_TARGET}%.
+- Compare against targets: revenue £${PNL_REVENUE_TARGET.toLocaleString()}/mo, gross margin ${PNL_GROSS_MARGIN_TARGET}%, net profit £${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}/mo, net margin ${PNL_NET_MARGIN_TARGET}%, maintenance budget £${PNL_MAINT_TARGET.toLocaleString()}/mo, wages budget £${PNL_WAGES_TARGET.toLocaleString()}/mo.
 - Identify the biggest cost drivers and where savings would have the most impact.
 - Flag any months where net profit was negative or margin dropped sharply.
 - Keep total response under 350 words. No preamble.`;
@@ -599,7 +604,7 @@ RULES:
         return `<div class="kpi-card">
             <div class="kpi-card-label">${escHtml(label)}</div>
             <div class="kpi-card-value ${valCls}">${valFmt}</div>
-            <div class="kpi-card-sub">${escHtml(sub)}</div>
+            <div class="kpi-card-sub">${sub}</div>
             ${indicatorHtml}
         </div>`;
     }
@@ -700,41 +705,46 @@ RULES:
                     <div id="pnlAiPanel" style="color:#64748b;font-size:12px">Click <strong>Generate Analysis</strong> to get AI-powered insights into your P&amp;L trends, cost drivers, and path to ${PNL_NET_MARGIN_TARGET}% net margin.</div>
                 </div>
 
-                <!-- KPI Cards with targets -->
-                <div class="cards-grid" style="margin-bottom:16px">
-                    ${pnlKpiCard('Revenue', pnl.grand.revenue, `${pnlMonths}-month total · Avg £${Math.round(avgRev).toLocaleString()}/mo`)}
-                    ${pnlKpiCard('Gross Profit', pnl.grand.grossProfit, `Margin ${pnl.grand.grossMargin.toFixed(1)}%`)}
-                    ${pnlKpiCard('Net Profit', pnl.grand.netProfit, `Avg £${Math.round(avgNP).toLocaleString()}/mo`, { target: PNL_CLEAR_PROFIT_TARGET * pnlMonths, targetLabel: `£${(PNL_CLEAR_PROFIT_TARGET/1000).toFixed(0)}k/mo × ${pnlMonths}` })}
+                <!-- Row 1: Revenue · COGS · OpEx — same format: period total + avg/mo -->
+                <div class="cards-grid" style="margin-bottom:12px">
+                    ${pnlKpiCard('Revenue', pnl.grand.revenue, `${pnlMonths}-month total · Avg £${Math.round(avgRev).toLocaleString()}/mo`, { target: PNL_REVENUE_TARGET * pnlMonths, targetLabel: `£${(PNL_REVENUE_TARGET/1000).toFixed(0)}k/mo` })}
+                    ${pnlKpiCard('Cost of Goods Sold', pnl.grand.cogs, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.cogs / pnlMonths).toLocaleString()}/mo · ${((pnl.grand.cogs / pnl.grand.revenue) * 100 || 0).toFixed(1)}% of revenue`, { invertComparison: true })}
+                    ${pnlKpiCard('Operating Expenses', pnl.grand.opex, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.opex / pnlMonths).toLocaleString()}/mo · ${((pnl.grand.opex / pnl.grand.revenue) * 100 || 0).toFixed(1)}% of revenue`, { invertComparison: true })}
+                </div>
+
+                <!-- Row 2: Gross Profit · Gross Margin · Net Profit · Net Margin -->
+                <div class="cards-grid" style="margin-bottom:12px">
+                    ${pnlKpiCard('Gross Profit', pnl.grand.grossProfit, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.grossProfit / pnlMonths).toLocaleString()}/mo`)}
+                    ${pnlKpiCard('Gross Margin', pnl.grand.grossMargin, `Target ${PNL_GROSS_MARGIN_TARGET}%`, { target: PNL_GROSS_MARGIN_TARGET, targetLabel: `${PNL_GROSS_MARGIN_TARGET}%`, isMargin: true })}
+                    ${pnlKpiCard('Net Profit', pnl.grand.netProfit, `${pnlMonths}-month total · Avg £${Math.round(avgNP).toLocaleString()}/mo`, { target: PNL_CLEAR_PROFIT_TARGET * pnlMonths, targetLabel: `£${(PNL_CLEAR_PROFIT_TARGET/1000).toFixed(0)}k/mo` })}
                     ${pnlKpiCard('Net Margin', pnl.grand.netMargin, `Target ${PNL_NET_MARGIN_TARGET}%`, { target: PNL_NET_MARGIN_TARGET, targetLabel: `${PNL_NET_MARGIN_TARGET}%`, isMargin: true })}
                 </div>
 
-                <!-- Target tracker cards -->
+                <!-- Row 3: Maintenance · Wages (both with % of revenue) -->
                 <div class="cards-grid" style="margin-bottom:20px">
-                    ${pnlKpiCard('Avg Monthly Maintenance', avgMaint, `Budget £${PNL_MAINT_TARGET.toLocaleString()}/mo`, { target: PNL_MAINT_TARGET, targetLabel: 'budget', invertComparison: true })}
-                    ${pnlKpiCard('Avg Monthly Wages', avgWages, `Budget £${PNL_WAGES_TARGET.toLocaleString()}/mo`, { target: PNL_WAGES_TARGET, targetLabel: 'budget', invertComparison: true })}
-                    ${pnlKpiCard('Total COGS', pnl.grand.cogs, `${((pnl.grand.cogs / pnl.grand.revenue) * 100 || 0).toFixed(1)}% of revenue`)}
-                    ${pnlKpiCard('Total OpEx', pnl.grand.opex, `${((pnl.grand.opex / pnl.grand.revenue) * 100 || 0).toFixed(1)}% of revenue`)}
+                    ${pnlKpiCard('Avg Monthly Maintenance', avgMaint, `Budget £${PNL_MAINT_TARGET.toLocaleString()}/mo · ${avgRev ? (avgMaint / avgRev * 100).toFixed(1) : 0}% of revenue`, { target: PNL_MAINT_TARGET, targetLabel: 'budget', invertComparison: true })}
+                    ${pnlKpiCard('Avg Monthly Wages', avgWages, `Budget £${PNL_WAGES_TARGET.toLocaleString()}/mo · ${avgRev ? (avgWages / avgRev * 100).toFixed(1) : 0}% of revenue`, { target: PNL_WAGES_TARGET, targetLabel: 'budget', invertComparison: true })}
                 </div>
 
-                <!-- Charts 2×2 -->
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;margin-bottom:20px">
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:300px">
+                <!-- Charts — 2 per row, taller for clarity -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartRevExp"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:300px">
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartProfit"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:300px">
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartMargin"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:300px">
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:420px">
                         <canvas id="pnlChartBreakdown"></canvas>
                     </div>
                 </div>
 
                 <!-- P&L Grid -->
                 <style>
-                    .pnl-grid-wrap { position:relative; overflow:auto; max-height:70vh; border:1px solid #e2e8f0; border-radius:8px; }
+                    .pnl-grid-wrap { position:relative; overflow:auto; max-height:85vh; border:1px solid #e2e8f0; border-radius:8px; }
                     .pnl-grid { border-collapse:separate; border-spacing:0; }
                     .pnl-grid thead th { position:sticky; top:0; z-index:2; }
                     .pnl-grid tbody td.pnl-first, .pnl-grid thead th.pnl-first { position:sticky; left:0; z-index:1; }
@@ -775,7 +785,7 @@ RULES:
                 <p style="color:#94a3b8;font-size:11px;margin-top:12px">
                     Revenue = transactions categorised <em>Revenue</em>. COGS = <em>Cost of Goods Sold</em>. OpEx = <em>Operating Expenses</em>.
                     Capital expenditure, loans, transfers, balance-sheet and personal transactions are excluded.
-                    Target net profit margin: <strong>${PNL_NET_MARGIN_TARGET}%</strong> · Monthly net profit target: <strong>£${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}</strong>.
+                    Targets: Revenue <strong>£${PNL_REVENUE_TARGET.toLocaleString()}/mo</strong> · Gross Margin <strong>${PNL_GROSS_MARGIN_TARGET}%</strong> · Net Profit <strong>£${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}/mo</strong> · Net Margin <strong>${PNL_NET_MARGIN_TARGET}%</strong>.
                 </p>
             </div>
         `;
