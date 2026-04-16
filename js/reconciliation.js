@@ -158,55 +158,95 @@
         return typeof field === 'object' ? field.id : field;
     }
 
-    function buildHistoricalPatterns() {
-        const patterns = {}; // key → { catId, subCatId, bizId, costId, tenancyId, unitId, count }
+    // Normalise text → lowercase, strip non-alphanumeric, collapse whitespace
+    function reconNorm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim(); }
 
-        function addPattern(key, data) {
+    // Extract meaningful description tokens (skip very short or purely numeric fragments)
+    function reconDescTokens(desc) {
+        return reconNorm(desc).split(/\s+/).filter(w => w.length >= 2 && !/^\d{1,2}$/.test(w));
+    }
+
+    function buildHistoricalPatterns() {
+        // Two separate indexes:
+        //   composite  — vendor+description → all fields (tenancy, unit, property, etc.)
+        //   vendorOnly — vendor alone       → stable fields only (cat, subcat, biz, cost)
+        const composite = {};   // key → { ...allFields, count }
+        const vendorOnly = {};  // key → { catId, subCatId, bizId, costId, count }
+
+        function addComposite(key, data) {
+            if (!key || key.length < 4) return;
+            if (!composite[key]) { composite[key] = { count: 0, ...data }; }
+            composite[key].count++;
+            if (data.subCatId)  composite[key].subCatId  = data.subCatId;
+            if (data.catId)     composite[key].catId     = data.catId;
+            if (data.bizId)     composite[key].bizId     = data.bizId;
+            if (data.costId)    composite[key].costId    = data.costId;
+            if (data.tenancyId) composite[key].tenancyId = data.tenancyId;
+            if (data.unitId)    composite[key].unitId    = data.unitId;
+        }
+
+        function addVendorOnly(key, data) {
             if (!key || key.length < 2) return;
-            if (!patterns[key]) {
-                patterns[key] = { count: 0, ...data };
-            }
-            patterns[key].count++;
-            // Most recent wins
-            if (data.subCatId) patterns[key].subCatId = data.subCatId;
-            if (data.catId) patterns[key].catId = data.catId;
-            if (data.bizId) patterns[key].bizId = data.bizId;
-            if (data.costId) patterns[key].costId = data.costId;
-            if (data.tenancyId) patterns[key].tenancyId = data.tenancyId;
-            if (data.unitId) patterns[key].unitId = data.unitId;
+            if (!vendorOnly[key]) { vendorOnly[key] = { count: 0 }; }
+            vendorOnly[key].count++;
+            // Stable fields only — no tenancy/unit
+            if (data.subCatId) vendorOnly[key].subCatId = data.subCatId;
+            if (data.catId)    vendorOnly[key].catId    = data.catId;
+            if (data.bizId)    vendorOnly[key].bizId    = data.bizId;
+            if (data.costId)   vendorOnly[key].costId   = data.costId;
         }
 
         allTransactions.forEach(tx => {
             if (!getField(tx, F.txReconciled)) return;
 
             const data = {
-                subCatId: extractLinkedId(getField(tx, F.txSubCategory)),
-                catId: extractLinkedId(getField(tx, F.txCategory)),
-                bizId: extractLinkedId(getField(tx, F.txBusiness)),
-                costId: extractLinkedId(getField(tx, F.txCost)),
+                subCatId:  extractLinkedId(getField(tx, F.txSubCategory)),
+                catId:     extractLinkedId(getField(tx, F.txCategory)),
+                bizId:     extractLinkedId(getField(tx, F.txBusiness)),
+                costId:    extractLinkedId(getField(tx, F.txCost)),
                 tenancyId: extractLinkedId(getField(tx, F.txTenancy)),
-                unitId: extractLinkedId(getField(tx, F.txUnit)),
+                unitId:    extractLinkedId(getField(tx, F.txUnit)),
             };
 
             if (!data.subCatId && !data.catId && !data.costId && !data.tenancyId) return;
 
-            const vendor = String(getField(tx, F.txVendor) || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-            const desc = String(getField(tx, F.txDescription) || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-            const words = vendor.split(/\s+/).filter(w => w.length >= 2);
+            const vendor = reconNorm(getField(tx, F.txVendor));
+            const vWords = vendor.split(/\s+/).filter(w => w.length >= 2);
+            const dTokens = reconDescTokens(getField(tx, F.txDescription));
 
-            // Index under multiple key lengths for flexible matching
-            if (words.length >= 1) addPattern(words[0], data);                          // 1 word: "screwfix"
-            if (words.length >= 2) addPattern(words.slice(0, 2).join(' '), data);       // 2 words: "screwfix dir"
-            if (words.length >= 3) addPattern(words.slice(0, 3).join(' '), data);       // 3 words: "screwfix dir ltd"
+            // ── Vendor-only keys (stable fields) ──
+            if (vWords.length >= 1) addVendorOnly(vWords[0], data);
+            if (vWords.length >= 2) addVendorOnly(vWords.slice(0, 2).join(' '), data);
+            if (vWords.length >= 3) addVendorOnly(vWords.slice(0, 3).join(' '), data);
 
-            // Also index by description first 3 words (for transactions with no vendor)
-            if (!vendor && desc) {
-                const dWords = desc.split(/\s+/).filter(w => w.length >= 2);
-                if (dWords.length >= 2) addPattern(dWords.slice(0, 2).join(' '), data);
-                if (dWords.length >= 3) addPattern(dWords.slice(0, 3).join(' '), data);
+            // ── Composite keys: vendor + description (all fields inc. tenancy/unit) ──
+            // Combine vendor prefix with description tokens at multiple granularities
+            // This is what differentiates "British Gas | 123 High St" from "British Gas | 456 Park Lane"
+            const vPrefix = vWords.slice(0, 2).join(' ') || (vWords[0] || '');
+            if (vPrefix && dTokens.length >= 2) {
+                addComposite(vPrefix + '|' + dTokens.slice(0, 2).join(' '), data);
+            }
+            if (vPrefix && dTokens.length >= 3) {
+                addComposite(vPrefix + '|' + dTokens.slice(0, 3).join(' '), data);
+            }
+            if (vPrefix && dTokens.length >= 4) {
+                addComposite(vPrefix + '|' + dTokens.slice(0, 4).join(' '), data);
+            }
+            // Full description fingerprint (most specific — catches identical recurring transactions)
+            if (vPrefix && dTokens.length >= 2) {
+                addComposite(vPrefix + '|' + dTokens.join(' '), data);
+            }
+
+            // Description-only keys (for transactions with no vendor)
+            if (!vendor && dTokens.length >= 2) {
+                addVendorOnly(dTokens.slice(0, 2).join(' '), data);
+                addVendorOnly(dTokens.slice(0, 3).join(' '), data);
+                // Also composite from description alone
+                if (dTokens.length >= 4) addComposite('|' + dTokens.slice(0, 4).join(' '), data);
+                if (dTokens.length >= 2) addComposite('|' + dTokens.join(' '), data);
             }
         });
-        return patterns;
+        return { composite, vendorOnly };
     }
 
     function runReconciliationMatching() {
@@ -215,7 +255,7 @@
         const unrec = allTransactions.filter(r => !getField(r, F.txReconciled));
 
         // 1. Build historical patterns from ALL reconciled transactions
-        const historicalPatterns = buildHistoricalPatterns();
+        const { composite: compositePatterns, vendorOnly: vendorOnlyPatterns } = buildHistoricalPatterns();
 
         // 2. Build tenancy lookup for enrichment
         const tenantLookup = buildTenantLookup();
@@ -231,7 +271,6 @@
             const desc = String(getField(tx, F.txDescription) || '');
             const txDate = getField(tx, F.txDate) || '';
             const txId = tx.id;
-            const vendorKey = vendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
 
             const result = {
                 txId, txDate, txVendor: vendor, txDesc: desc,
@@ -245,21 +284,37 @@
                 matchType: '', score: 0, status: 'unmatched',
             };
 
-            // Build candidate keys: 3 words, 2 words, 1 word — from vendor and description
-            const vWords = vendor.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(w => w.length >= 2);
-            const dWords = desc.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(w => w.length >= 2);
-            const candidateKeys = [];
-            // Vendor keys (most specific first)
-            if (vWords.length >= 3) candidateKeys.push(vWords.slice(0, 3).join(' '));
-            if (vWords.length >= 2) candidateKeys.push(vWords.slice(0, 2).join(' '));
-            if (vWords.length >= 1) candidateKeys.push(vWords[0]);
-            // Description keys (fallback)
-            if (dWords.length >= 3) candidateKeys.push(dWords.slice(0, 3).join(' '));
-            if (dWords.length >= 2) candidateKeys.push(dWords.slice(0, 2).join(' '));
+            // Build candidate keys
+            const vWords = reconNorm(vendor).split(/\s+/).filter(w => w.length >= 2);
+            const dTokens = reconDescTokens(desc);
+            const vPrefix = vWords.slice(0, 2).join(' ') || (vWords[0] || '');
 
-            // Priority 1: Knowledge base (user corrections — highest priority)
+            // Vendor-only keys (most specific first)
+            const vendorKeys = [];
+            if (vWords.length >= 3) vendorKeys.push(vWords.slice(0, 3).join(' '));
+            if (vWords.length >= 2) vendorKeys.push(vWords.slice(0, 2).join(' '));
+            if (vWords.length >= 1) vendorKeys.push(vWords[0]);
+            // Description-only fallback keys
+            if (!vPrefix && dTokens.length >= 3) vendorKeys.push(dTokens.slice(0, 3).join(' '));
+            if (!vPrefix && dTokens.length >= 2) vendorKeys.push(dTokens.slice(0, 2).join(' '));
+
+            // Composite keys: vendor+description (most specific first)
+            const compositeKeys = [];
+            const vp = vPrefix || '';
+            if (vp && dTokens.length >= 2) {
+                compositeKeys.push(vp + '|' + dTokens.join(' '));                       // full desc
+                if (dTokens.length >= 4) compositeKeys.push(vp + '|' + dTokens.slice(0, 4).join(' '));
+                if (dTokens.length >= 3) compositeKeys.push(vp + '|' + dTokens.slice(0, 3).join(' '));
+                compositeKeys.push(vp + '|' + dTokens.slice(0, 2).join(' '));
+            }
+            if (!vp && dTokens.length >= 2) {
+                compositeKeys.push('|' + dTokens.join(' '));
+                if (dTokens.length >= 4) compositeKeys.push('|' + dTokens.slice(0, 4).join(' '));
+            }
+
+            // ── Priority 1: Knowledge base (user corrections — highest priority) ──
             let matched = false;
-            for (const key of candidateKeys) {
+            for (const key of vendorKeys) {
                 const rule = findReconRule(key);
                 if (rule && (rule.subCatId || rule.costId || rule.tenancyId)) {
                     applyRuleToResult(result, rule, 'Knowledge Base', rule.confidence || 5);
@@ -268,12 +323,24 @@
                 }
             }
 
-            // Priority 2: Historical transaction patterns (try each key)
+            // ── Priority 2: Composite match (vendor+description → all fields inc. tenancy/unit/property) ──
             if (!matched) {
-                for (const key of candidateKeys) {
-                    const histMatch = historicalPatterns[key];
-                    if (histMatch && histMatch.count >= 1) {
-                        applyHistoricalToResult(result, histMatch, tenancyLookup, tenantLookup, costLookup, histMatch.count);
+                for (const key of compositeKeys) {
+                    const hit = compositePatterns[key];
+                    if (hit && hit.count >= 1) {
+                        applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, true);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            // ── Priority 3: Vendor-only match (stable fields only — cat/subcat/biz/cost) ──
+            if (!matched) {
+                for (const key of vendorKeys) {
+                    const hit = vendorOnlyPatterns[key];
+                    if (hit && hit.count >= 1) {
+                        applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, false);
                         matched = true;
                         break;
                     }
@@ -311,37 +378,46 @@
         result.status = 'suggestion';
     }
 
-    function applyHistoricalToResult(result, hist, tenancyLookup, tenantLookup, costLookup, count) {
+    // includeVariableFields: true = composite match (apply tenancy/unit/property)
+    //                        false = vendor-only match (stable fields only — leave variable fields blank)
+    function applyHistoricalToResult(result, hist, tenancyLookup, tenantLookup, costLookup, count, includeVariableFields) {
+        // Stable fields — always applied
         result.subCatId = hist.subCatId || '';
         result.subCatName = getSubCatName(hist.subCatId);
         result.categoryId = hist.catId || '';
         result.categoryName = getCatName(hist.catId);
         result.businessId = hist.bizId || '';
-        result.unitId = hist.unitId || '';
 
-        // Enrich from tenancy record if available
-        if (hist.tenancyId && tenancyLookup[hist.tenancyId]) {
-            const ten = tenancyLookup[hist.tenancyId];
-            result.tenancyId = hist.tenancyId;
-            result.tenancyLabel = String(getField(ten, F.tenRef) || '');
-            const tenant = getTenantForTenancy(ten, tenantLookup);
-            result.tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : '';
-            result.tenantId = tenant ? tenant.id : '';
-            const unitRef = getField(ten, F.tenUnitRef);
-            result.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
-            const prop = getField(ten, F.tenProperty);
-            result.propertyName = Array.isArray(prop) ? prop[0] : (prop || '');
-        }
-
-        // Enrich from cost record if available
+        // Cost — stable per vendor, always applied
         if (hist.costId && costLookup[hist.costId]) {
             const cost = costLookup[hist.costId];
             result.costId = hist.costId;
             result.costLabel = String(getField(cost, F.costName) || '');
         }
 
-        result.matchType = `Historical (${count}x)`;
-        result.score = Math.min(count + 2, 10);
+        // Variable fields — only applied from composite (vendor+description) matches
+        if (includeVariableFields) {
+            result.unitId = hist.unitId || '';
+
+            if (hist.tenancyId && tenancyLookup[hist.tenancyId]) {
+                const ten = tenancyLookup[hist.tenancyId];
+                result.tenancyId = hist.tenancyId;
+                result.tenancyLabel = String(getField(ten, F.tenRef) || '');
+                const tenant = getTenantForTenancy(ten, tenantLookup);
+                result.tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : '';
+                result.tenantId = tenant ? tenant.id : '';
+                const unitRef = getField(ten, F.tenUnitRef);
+                result.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+                const prop = getField(ten, F.tenProperty);
+                result.propertyName = Array.isArray(prop) ? prop[0] : (prop || '');
+            }
+        }
+        // When includeVariableFields is false, tenancy/tenant/unit/property stay blank
+        // — better to leave empty than guess wrong
+
+        const matchLabel = includeVariableFields ? `Composite (${count}x)` : `Vendor (${count}x)`;
+        result.matchType = matchLabel;
+        result.score = includeVariableFields ? Math.min(count + 4, 10) : Math.min(count + 2, 8);
         result.status = 'suggestion';
     }
 
