@@ -687,6 +687,28 @@
 
         r.status = 'approved';
 
+        // Sync local allTransactions so CFV detection sees the reconciled status immediately
+        const localTx = allTransactions.find(t => t.id === r.txId);
+        if (localTx) {
+            if (!localTx.fields) localTx.fields = {};
+            localTx.fields[F.txReconciled] = true;
+            if (catId) localTx.fields[F.txCategory] = [catId];
+            if (tenancyId) localTx.fields[F.txTenancy] = [tenancyId];
+        }
+        // Re-run CFV sidebar badge count so cleared CFVs disappear immediately
+        if (typeof updateCFVSidebarBadges === 'function' && typeof detectCFVs === 'function') {
+            try {
+                const cfvList = detectCFVs();
+                const visible = cfvList.filter(e => {
+                    if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
+                    return true;
+                });
+                const cfvCount = visible.filter(e => e.status === 'cfv' || e.status === 'potential').length;
+                const actionedCount = visible.filter(e => e.status === 'cfv actioned').length;
+                updateCFVSidebarBadges(cfvCount, actionedCount);
+            } catch (e) { /* non-critical */ }
+        }
+
         // Track AI reconciliation accuracy
         const orig = (window._reconOriginals || [])[idx];
         if (orig && orig.status === 'suggestion') {

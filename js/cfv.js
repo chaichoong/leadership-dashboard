@@ -112,7 +112,29 @@
             if (rent <= 0) return;
 
             const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-            const paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
+            let paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
+
+            // Secondary check: scan reconciled transactions if Airtable formula hasn't caught up
+            if (!paidThisMonth && allTransactions.length > 0) {
+                const surname = String(getField(tenancy, F.tenSurname) || '').toLowerCase();
+                const ref = String(getField(tenancy, F.tenRef) || '').toLowerCase();
+                const rent = Number(getField(tenancy, F.tenRent)) || 0;
+                const thisMonth = today.getMonth();
+                const thisYear = today.getFullYear();
+                const keywords = [surname, ...ref.split(/[\s–\-]+/)].filter(w => w.length >= 3);
+
+                paidThisMonth = allTransactions.some(tx => {
+                    if (!getField(tx, F.txReconciled)) return false;
+                    const txDateStr = getField(tx, F.txDate);
+                    if (!txDateStr) return false;
+                    const txDate = new Date(txDateStr);
+                    if (txDate.getMonth() !== thisMonth || txDate.getFullYear() !== thisYear) return false;
+                    const txAmt = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
+                    if (rent > 0 && Math.abs(txAmt - rent) > rent * 0.33) return false;
+                    const txText = (String(getField(tx, F.txVendor) || '') + ' ' + String(getField(tx, F.txDescription) || '')).toLowerCase();
+                    return keywords.some(kw => txText.includes(kw));
+                });
+            }
 
             // Calculate days overdue directly — don't rely on Airtable formula
             // which may not be populated for all tenancies
@@ -121,8 +143,6 @@
             if (today >= dueThisMonth) {
                 daysOverdue = Math.floor((today - dueThisMonth) / 86400000);
             }
-            // If we're early in the month and due day hasn't passed yet, check last month
-            // (in case they didn't pay last month either — but that would already be flagged)
 
             // Flag as potential CFV if: 2+ days overdue AND not paid this month
             if (daysOverdue >= CFV_TOLERANCE_DAYS && !paidThisMonth) {
