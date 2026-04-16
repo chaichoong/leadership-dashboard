@@ -4,32 +4,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Business Plan Builder - Standard Operating Procedure</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
 <style>
 /* ====== RESET & BASE ====== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
-  color: #1e293b;
-  background: #f1f5f9;
+  color: var(--text-primary);
+  background: var(--bg-app);
 }
 
 /* ====== COLOUR VARIABLES ====== */
 :root {
-  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
-  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
-  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
-  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
-  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
-  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
-  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
-  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
-  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  /* Remapped to Sage Executive palette; variable names kept for backwards compat */
+  --blue-50: #EEF3EF; --blue-100: #DDE8DF; --blue-200: #C4D6C8;
+  --blue-500: #4DA574; --blue-600: #368859; --blue-700: #2C6E49; --blue-800: #1B4A30; --blue-900: #133524;
+  --indigo-50: #EEF3EF; --indigo-100: #DDE8DF; --indigo-500: #4DA574; --indigo-600: #368859; --indigo-700: #2C6E49;
+  --green-50: #EEF3EF; --green-100: #DDE8DF; --green-500: #4DA574; --green-600: #368859; --green-700: #2C6E49;
+  --amber-50: #F7EFD9; --amber-100: #EFE3CA; --amber-500: #C6A15B; --amber-600: #8A6B2D;
+  --red-50: #F7EAEA; --red-100: #EED9D9; --red-500: #C25353; --red-600: #A33B3B;
+  --purple-50: #EEF3EF; --purple-500: #4DA574; --purple-600: #368859;
+  --slate-50: #FAFBF8; --slate-100: #F4F6F1; --slate-200: #E5E8E1; --slate-300: #DDE1D9;
+  --slate-400: #8A928C; --slate-500: #5A6660; --slate-600: #3B4A46; --slate-700: #2F3D39; --slate-800: #1C2422;
+  --shadow-sm: 0 1px 2px rgba(28,36,34,0.04);
+  --shadow: 0 1px 3px rgba(28,36,34,0.06), 0 1px 2px rgba(28,36,34,0.04);
+  --shadow-md: 0 4px 6px -1px rgba(28,36,34,0.08), 0 2px 4px -1px rgba(28,36,34,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(28,36,34,0.08), 0 4px 6px -2px rgba(28,36,34,0.04);
   --radius: 12px;
   --radius-sm: 8px;
 }
@@ -165,12 +166,12 @@ body {
   display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
   font-weight: 600; font-size: 0.78rem; white-space: nowrap;
 }
-.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
-.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
-.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
-.label-badge.lb-4 { background: #dcfce7; color: #166534; }
-.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
-.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
+.label-badge.lb-1 { background: var(--blue-100); color: var(--blue-700); }
+.label-badge.lb-2 { background: var(--amber-100); color: var(--amber-600); }
+.label-badge.lb-3 { background: var(--red-100); color: var(--red-600); }
+.label-badge.lb-4 { background: var(--green-100); color: var(--green-700); }
+.label-badge.lb-5 { background: var(--indigo-100); color: var(--indigo-700); }
+.label-badge.lb-6 { background: var(--purple-50); color: var(--purple-600); }
 
 /* ====== WORKFLOW CARDS ====== */
 .wf-card {
@@ -196,9 +197,9 @@ body {
 .wf-body h4:first-child { margin-top: 0; }
 
 /* Colour coding for workflow numbers */
-.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
-.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
-.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
+.wf-num.wf-1 { background: var(--blue-600); } .wf-num.wf-2 { background: var(--amber-600); }
+.wf-num.wf-3 { background: var(--red-600); } .wf-num.wf-4 { background: var(--green-600); }
+.wf-num.wf-5 { background: var(--indigo-600); } .wf-num.wf-6 { background: var(--purple-600); }
 
 /* ====== STEP LISTS ====== */
 .steps { counter-reset: step; list-style: none; padding: 0; }
@@ -221,8 +222,8 @@ body {
   margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
 }
 .info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
-.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
-.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
+.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: var(--amber-600); }
+.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: var(--red-600); }
 .info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
 .info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
 

@@ -1,0 +1,195 @@
+/* ============================================================
+ * Operations Director — Design Tokens
+ * --------------------------------------------------------------
+ * Single source of truth for colour, typography, spacing, radii.
+ * Every page (main shell + iframe pages + OS pages) imports this
+ * file. Change a value here, and the whole platform updates.
+ *
+ * Theme: "Sage Executive" (light only)
+ * Font: Inter throughout
+ * ========================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ── PALETTE — raw colours ─────────────────────────────── */
+  --sage-25:  #FAFBF8;   /* lightest paper */
+  --sage-50:  #F4F6F1;
+  --sage-100: #F1F3EF;   /* app background */
+  --sage-200: #E5E8E1;
+  --sage-300: #DDE1D9;   /* standard border */
+  --sage-400: #C9CDC3;   /* strong border / divider */
+
+  --forest-900: #1C2422; /* darkest text */
+  --forest-800: #263330; /* sidebar bg */
+  --forest-700: #2F3D39;
+  --forest-600: #3B4A46;
+
+  --stone-500: #5A6660;  /* secondary text */
+  --stone-400: #8A928C;  /* muted text */
+  --stone-300: #B0B5AE;
+  --stone-200: #D5D8D2;
+
+  --green-900: #1B4A30;
+  --green-700: #2C6E49;  /* primary accent */
+  --green-600: #368859;
+  --green-500: #4DA574;
+  --green-100: #DDE8DF;  /* success badge bg */
+  --green-50:  #EEF3EF;
+
+  --gold-700: #8A6B2D;   /* dark gold text on light bg */
+  --gold-500: #C6A15B;   /* gold highlight */
+  --gold-200: #EFE3CA;   /* warning badge bg */
+  --gold-100: #F7EFD9;
+
+  --red-900:  #7A2929;
+  --red-700:  #A33B3B;   /* danger */
+  --red-500:  #C25353;
+  --red-100:  #EED9D9;   /* danger badge bg */
+  --red-50:   #F7EAEA;
+
+  --blue-700: #3560A8;   /* info / links */
+  --blue-500: #5A86CF;
+  --blue-100: #DCE5F2;
+  --blue-50:  #EEF2F9;
+
+  /* Tonal accent family — muted, same-saturation earth tones.
+     Use for categorical differentiation (week navigation, tags,
+     category swatches) where you want distinct colours that still
+     read as part of the sage-executive family. */
+  --tone-sage:  #2C6E49;   /* same as --accent, primary */
+  --tone-olive: #5F7A3A;
+  --tone-gold:  #B8933A;   /* slightly deeper than --gold-500 for contrast against white text */
+  --tone-blue:  #5A86CF;
+  --tone-plum:  #8B6FAE;
+
+  /* ── SEMANTIC TOKENS — use these in stylesheets ────────── */
+
+  /* Surfaces */
+  --bg-app:       var(--sage-100);  /* outermost page bg */
+  --bg-surface:   #FBFBF9;           /* cards, panels */
+  --bg-surface-2: var(--sage-50);    /* hover, secondary panel */
+  --bg-subtle:    var(--sage-200);   /* table header, striped rows */
+  --bg-sidebar:   var(--forest-800);
+  --bg-inverse:   var(--forest-900); /* dark tooltips, toasts */
+
+  /* Borders */
+  --border-subtle:  var(--sage-200);
+  --border-default: var(--sage-300);
+  --border-strong:  var(--sage-400);
+  --border-focus:   var(--green-700);
+
+  /* Text */
+  --text-primary:   var(--forest-900);
+  --text-secondary: var(--stone-500);
+  --text-muted:     var(--stone-400);
+  --text-inverse:   #FBFBF9;           /* text on dark sidebar/toasts */
+  --text-inverse-dim: #BFC3BD;         /* secondary text on sidebar */
+  --text-link:      var(--green-700);
+  --text-link-hover: var(--green-900);
+
+  /* Accent (brand) */
+  --accent:         var(--green-700);
+  --accent-hover:   var(--green-900);
+  --accent-soft:    var(--green-100);
+  --accent-on:      #FFFFFF;           /* text ON accent bg */
+  --accent-gold:    var(--gold-500);
+  --accent-gold-soft: var(--gold-200);
+
+  /* Status */
+  --success:        var(--green-700);
+  --success-bg:     var(--green-100);
+  --success-border: #C4D6C8;
+
+  --warning:        var(--gold-700);
+  --warning-bg:     var(--gold-200);
+  --warning-border: #E0CDA4;
+
+  --danger:         var(--red-700);
+  --danger-bg:      var(--red-100);
+  --danger-border:  #D9B8B8;
+
+  --info:           var(--blue-700);
+  --info-bg:        var(--blue-100);
+  --info-border:    #C0CFE3;
+
+  /* Typography */
+  --font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-num:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --fs-xs:   11px;
+  --fs-sm:   12px;
+  --fs-base: 13px;
+  --fs-md:   14px;
+  --fs-lg:   16px;
+  --fs-xl:   18px;
+  --fs-2xl:  22px;
+  --fs-3xl:  28px;
+
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+
+  --lh-tight:  1.2;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.65;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(28, 36, 34, 0.04);
+  --shadow-md: 0 1px 3px rgba(28, 36, 34, 0.06), 0 4px 10px rgba(28, 36, 34, 0.04);
+  --shadow-lg: 0 4px 16px rgba(28, 36, 34, 0.08), 0 12px 32px rgba(28, 36, 34, 0.06);
+
+  /* Motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+}
+
+/* ── Base reset + defaults ────────────────────────────────── */
+html {
+  font-family: var(--font-family-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-family-base);
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+}
+
+/* Numbers — tabular figures + no italic */
+.num, .mono, .tabular,
+.kpi-card-value,
+.cashflow-table td,
+.cashflow-table th:not(:first-child),
+.invoice-table .inv-amount,
+.calc-summary-value,
+.calc-tx-amount,
+.calc-input {
+  font-family: var(--font-family-num);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}

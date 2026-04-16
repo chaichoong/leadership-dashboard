@@ -4,107 +4,102 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Task &amp; Project Management OS</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3348;
-  --text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--accent2:#818cf8;
-  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;--cyan:#06b6d4;
-  --pink:#ec4899;--purple:#a855f7;
-}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh}
-a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
+body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Auth */
-.auth-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:12px}
-.auth-bar input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:13px;width:280px}
+.auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;gap:12px}
+.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:13px;width:280px}
 .auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}
-.auth-bar button:hover{background:var(--accent2)}
+.auth-bar button:hover{background:var(--accent)}
 
 /* Identity Overlay */
-.identity-overlay{position:fixed;inset:0;background:rgba(15,17,23,.95);display:flex;align-items:center;justify-content:center;z-index:9999}
-.identity-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;text-align:center;max-width:420px;width:90%}
+.identity-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.5);display:flex;align-items:center;justify-content:center;z-index:9999}
+.identity-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:16px;padding:40px;text-align:center;max-width:420px;width:90%}
 .identity-card h2{font-size:22px;margin-bottom:8px}
-.identity-card p{font-size:14px;color:var(--muted);margin-bottom:28px}
+.identity-card p{font-size:14px;color:var(--text-secondary);margin-bottom:28px}
 .identity-btns{display:flex;flex-direction:column;gap:10px}
-.identity-btn{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:15px;font-weight:600;transition:all .15s}
+.identity-btn{display:flex;align-items:center;gap:12px;padding:14px 20px;border-radius:10px;border:1px solid var(--border-default);background:var(--bg-surface-2);color:var(--text-primary);cursor:pointer;font-size:15px;font-weight:600;transition:all .15s}
 .identity-btn:hover{border-color:var(--accent);background:var(--accent);color:#fff}
 .identity-btn .avatar{width:36px;height:36px;font-size:14px}
 
 /* Layout */
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .topbar h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
-.topbar .subtitle{font-size:12px;color:var(--muted)}
+.topbar .subtitle{font-size:12px;color:var(--text-secondary)}
 .topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.user-badge{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);background:var(--surface2);padding:4px 12px 4px 4px;border-radius:20px}
+.user-badge{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-primary);background:var(--bg-surface-2);padding:4px 12px 4px 4px;border-radius:20px}
 .user-badge .avatar{width:24px;height:24px;font-size:10px}
-.switch-user{font-size:11px;color:var(--muted);cursor:pointer;text-decoration:underline}
-.switch-user:hover{color:var(--accent2)}
+.switch-user{font-size:11px;color:var(--text-secondary);cursor:pointer;text-decoration:underline}
+.switch-user:hover{color:var(--accent)}
 .main{padding:20px 24px;max-width:1400px;margin:0 auto}
 
 /* Team Switcher */
 .team-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
-.team-btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;font-size:13px;font-weight:600;transition:all .15s}
-.team-btn:hover{border-color:var(--accent);color:var(--text)}
+.team-btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;transition:all .15s}
+.team-btn:hover{border-color:var(--accent);color:var(--text-primary)}
 .team-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-.team-btn .count{background:rgba(255,255,255,.15);padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px}
-.team-btn.active .count{background:rgba(255,255,255,.25)}
+.team-btn .count{background:rgba(255,255,255,0.25);padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px}
+.team-btn.active .count{background:rgba(255,255,255,0.25)}
 
 /* KPI Cards */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
+.kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;text-align:center}
 .kpi .value{font-size:28px;font-weight:700;margin-bottom:2px}
-.kpi .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.kpi.red .value{color:var(--red)}.kpi.green .value{color:var(--green)}
-.kpi.amber .value{color:var(--amber)}.kpi.cyan .value{color:var(--cyan)}
-.kpi.purple .value{color:var(--purple)}.kpi.accent .value{color:var(--accent2)}
+.kpi .label{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px}
+.kpi.red .value{color:var(--danger)}.kpi.green .value{color:var(--success)}
+.kpi.amber .value{color:var(--warning)}.kpi.cyan .value{color:var(--info)}
+.kpi.purple .value{color:var(--accent)}.kpi.accent .value{color:var(--accent)}
 
 /* Tabs */
-.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:0;overflow-x:auto}
-.view-tab{padding:8px 16px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s;white-space:nowrap}
-.view-tab:hover{color:var(--text)}
-.view-tab.active{color:var(--accent2);border-bottom-color:var(--accent2)}
+.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border-default);padding-bottom:0;overflow-x:auto}
+.view-tab{padding:8px 16px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s;white-space:nowrap}
+.view-tab:hover{color:var(--text-primary)}
+.view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 
 /* Controls Bar */
 .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
-.search-box{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:13px;width:260px}
+.search-box{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:13px;width:260px}
 .search-box:focus{outline:none;border-color:var(--accent)}
-.filter-select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;cursor:pointer}
+.filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 10px;border-radius:6px;font-size:13px;cursor:pointer}
 .filter-select:focus{outline:none;border-color:var(--accent)}
-.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
-.btn:hover{border-color:var(--accent);color:var(--accent2)}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent2)}
-.btn-danger{background:var(--red);border-color:var(--red);color:#fff}
+.btn-primary:hover{background:var(--accent)}
+.btn-danger{background:var(--danger);border-color:var(--danger);color:#fff}
 .btn-danger:hover{opacity:.85}
 .btn-sm{padding:4px 10px;font-size:11px}
 
 /* Task Table */
-.task-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+.task-table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
 .task-table{width:100%;border-collapse:collapse;font-size:13px}
-.task-table th{background:var(--surface2);padding:10px 12px;text-align:left;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1}
-.task-table td{padding:10px 12px;border-top:1px solid var(--border);vertical-align:middle}
+.task-table th{background:var(--bg-surface-2);padding:10px 12px;text-align:left;font-weight:600;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1}
+.task-table td{padding:10px 12px;border-top:1px solid var(--border-default);vertical-align:middle}
 .task-table tr{cursor:pointer;transition:background .1s}
-.task-table tbody tr:hover{background:var(--surface2)}
-.task-table tr.expanded{background:var(--surface2)}
-.task-name{font-weight:600;color:var(--text);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-table tbody tr:hover{background:var(--bg-surface-2)}
+.task-table tr.expanded{background:var(--bg-surface-2)}
+.task-name{font-weight:600;color:var(--text-primary);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-table .cb-cell{width:36px;text-align:center}
 .task-table .cb-cell input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--accent)}
 
 /* Badges */
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
-.badge-today{background:rgba(245,158,11,.15);color:#fbbf24}
-.badge-overdue{background:rgba(239,68,68,.15);color:#f87171}
-.badge-upcoming{background:rgba(99,102,241,.1);color:var(--accent2)}
-.badge-todo{background:rgba(6,182,212,.1);color:var(--cyan)}
-.badge-completed{background:rgba(34,197,94,.1);color:var(--green)}
-.badge-approval{background:rgba(168,85,247,.1);color:var(--purple)}
-.badge-urgent{background:rgba(239,68,68,.15);color:#f87171}
-.badge-high{background:rgba(59,130,246,.15);color:#60a5fa}
-.badge-project{background:rgba(236,72,153,.1);color:var(--pink)}
-.badge-not-urgent{background:rgba(34,197,94,.1);color:var(--green)}
-.badge-recurring{background:rgba(168,85,247,.08);color:var(--purple);font-size:10px}
-.badge-business{background:rgba(99,102,241,.08);color:var(--accent2);font-size:10px;margin-left:4px}
+.badge-today{background:var(--warning-bg);color:var(--warning)}
+.badge-overdue{background:var(--danger-bg);color:var(--danger)}
+.badge-upcoming{background:var(--accent-soft);color:var(--accent)}
+.badge-todo{background:var(--info-bg);color:var(--info)}
+.badge-completed{background:var(--success-bg);color:var(--success)}
+.badge-approval{background:var(--accent-soft);color:var(--accent)}
+.badge-urgent{background:var(--danger-bg);color:var(--danger)}
+.badge-high{background:var(--info-bg);color:var(--info)}
+.badge-project{background:var(--accent-soft);color:var(--accent)}
+.badge-not-urgent{background:var(--success-bg);color:var(--success)}
+.badge-recurring{background:var(--accent-soft);color:var(--accent);font-size:10px}
+.badge-business{background:var(--accent-soft);color:var(--accent);font-size:10px;margin-left:4px}
 
 /* Avatars */
 .avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
@@ -116,73 +111,73 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
 /* Detail Panel (slide-down) */
 .detail-row{display:none}
 .detail-row.open{display:table-row}
-.detail-content{background:var(--surface2);padding:16px 20px;border-radius:0 0 8px 8px}
-.detail-content h4{font-size:13px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-.detail-desc{font-size:13px;line-height:1.6;color:var(--text);max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-bottom:12px}
-.detail-meta{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.detail-content{background:var(--bg-surface-2);padding:16px 20px;border-radius:0 0 8px 8px}
+.detail-content h4{font-size:13px;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.detail-desc{font-size:13px;line-height:1.6;color:var(--text-primary);max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-bottom:12px}
+.detail-meta{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)}
 .detail-meta span{display:flex;align-items:center;gap:4px}
 .detail-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.detail-actions button{padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
-.detail-actions button:hover{border-color:var(--accent);color:var(--accent2)}
+.detail-actions button{padding:5px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
+.detail-actions button:hover{border-color:var(--accent);color:var(--accent)}
 .detail-actions button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.detail-actions button.primary:hover{background:var(--accent2)}
+.detail-actions button.primary:hover{background:var(--accent)}
 
 /* My Day */
 .myday-header{text-align:center;margin-bottom:24px}
 .myday-header h2{font-size:24px;font-weight:700;margin-bottom:4px}
-.myday-header .date-sub{font-size:14px;color:var(--muted)}
+.myday-header .date-sub{font-size:14px;color:var(--text-secondary)}
 .myday-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
-.myday-capacity{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:24px}
+.myday-capacity{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;margin-bottom:24px}
 .myday-capacity h3{font-size:14px;margin-bottom:8px}
-.cap-bar-outer{height:10px;background:var(--surface2);border-radius:5px;overflow:hidden}
+.cap-bar-outer{height:10px;background:var(--bg-surface-2);border-radius:5px;overflow:hidden}
 .cap-bar-inner{height:100%;border-radius:5px;transition:width .4s}
 .myday-tasks{display:flex;flex-direction:column;gap:8px}
-.myday-task{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
+.myday-task{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
 .myday-task:hover{border-color:var(--accent)}
-.myday-task .task-time{font-size:12px;color:var(--muted);min-width:50px;text-align:center;font-weight:600}
+.myday-task .task-time{font-size:12px;color:var(--text-secondary);min-width:50px;text-align:center;font-weight:600}
 .myday-task .task-info{flex:1;min-width:0}
 .myday-task .task-info h4{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.myday-task .task-info .meta{font-size:12px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
+.myday-task .task-info .meta{font-size:12px;color:var(--text-secondary);display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
 .myday-section{margin-bottom:24px}
-.myday-section h3{font-size:14px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.overdue-notice{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:12px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--red)}
-.routine-block{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
-.routine-block .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.myday-section h3{font-size:14px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.overdue-notice{background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:10px;padding:12px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--danger)}
+.routine-block{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-secondary)}
+.routine-block .dot{width:8px;height:8px;border-radius:50%;background:var(--text-secondary)}
 
 /* Timeline */
 .timeline{display:flex;flex-direction:column;gap:2px;margin-bottom:24px;position:relative}
-.timeline::before{content:'';position:absolute;left:54px;top:0;bottom:0;width:2px;background:var(--border);z-index:0}
+.timeline::before{content:'';position:absolute;left:54px;top:0;bottom:0;width:2px;background:var(--border-default);z-index:0}
 .tl-slot{display:flex;align-items:stretch;gap:12px;min-height:44px;position:relative;z-index:1}
-.tl-time{width:50px;text-align:right;font-size:12px;font-weight:600;color:var(--muted);padding-top:10px;flex-shrink:0}
+.tl-time{width:50px;text-align:right;font-size:12px;font-weight:600;color:var(--text-secondary);padding-top:10px;flex-shrink:0}
 .tl-dot{width:10px;height:10px;border-radius:50%;margin-top:14px;flex-shrink:0;z-index:2}
-.tl-dot.event{background:var(--cyan)}.tl-dot.task{background:var(--accent)}.tl-dot.routine{background:var(--amber)}.tl-dot.buffer{background:var(--border)}
+.tl-dot.event{background:var(--info)}.tl-dot.task{background:var(--accent)}.tl-dot.routine{background:var(--warning)}.tl-dot.buffer{background:var(--border-default)}
 .tl-card{flex:1;border-radius:8px;padding:10px 14px;font-size:13px;min-width:0}
-.tl-card.event{background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.2)}
-.tl-card.task{background:var(--surface);border:1px solid var(--border)}
-.tl-card.routine{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15)}
-.tl-card.buffer{background:transparent;border:1px dashed var(--border);color:var(--muted);font-style:italic}
+.tl-card.event{background:var(--info-bg);border:1px solid var(--info-border)}
+.tl-card.task{background:var(--bg-surface);border:1px solid var(--border-default)}
+.tl-card.routine{background:var(--warning-bg);border:1px solid var(--warning-bg)}
+.tl-card.buffer{background:transparent;border:1px dashed var(--border-default);color:var(--text-secondary);font-style:italic}
 .tl-card h4{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px}
-.tl-card .tl-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.tl-card .tl-meta{font-size:11px;color:var(--text-secondary);display:flex;gap:8px;flex-wrap:wrap}
 .tl-card .tl-actions{display:flex;gap:6px;margin-top:6px}
 
 /* Calendar event badge */
-.cal-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:rgba(6,182,212,.12);color:var(--cyan)}
+.cal-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:var(--info-bg);color:var(--info)}
 
 /* Planner modal */
-.planner-overlay{position:fixed;inset:0;background:rgba(15,17,23,.9);display:flex;align-items:center;justify-content:center;z-index:9998}
-.planner-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:560px;width:95%;max-height:85vh;overflow-y:auto}
+.planner-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);display:flex;align-items:center;justify-content:center;z-index:9998}
+.planner-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:16px;padding:28px;max-width:560px;width:95%;max-height:85vh;overflow-y:auto}
 .planner-card h2{font-size:18px;margin-bottom:4px}
-.planner-card p{font-size:13px;color:var(--muted);margin-bottom:16px}
-.planner-suggestion{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;font-size:13px}
-.planner-suggestion .reason{font-size:11px;color:var(--muted);margin-top:4px}
+.planner-card p{font-size:13px;color:var(--text-secondary);margin-bottom:16px}
+.planner-suggestion{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:12px;margin-bottom:8px;font-size:13px}
+.planner-suggestion .reason{font-size:11px;color:var(--text-secondary);margin-top:4px}
 .planner-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
 
 /* Routine config */
-.routine-config{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:20px}
+.routine-config{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;margin-bottom:20px}
 .routine-config h3{font-size:14px;margin-bottom:12px}
-.routine-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap}
+.routine-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-default);font-size:13px;flex-wrap:wrap}
 .routine-row:last-child{border-bottom:none}
-.routine-row input,.routine-row select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px}
+.routine-row input,.routine-row select{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px}
 .routine-row input[type=number]{width:60px}
 
 /* Kanban */
@@ -192,79 +187,79 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
 .kanban-board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;min-height:400px}
 @media(max-width:900px){.kanban-board{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.kanban-board{grid-template-columns:1fr}}
-.kanban-col{background:var(--surface);border:1px solid var(--border);border-radius:10px;min-height:300px;display:flex;flex-direction:column}
-.kanban-col-header{padding:12px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.kanban-col-header .week-range{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:2px}
-.kanban-col-header .week-hours{display:block;font-size:11px;color:var(--accent2);margin-top:4px}
+.kanban-col{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;min-height:300px;display:flex;flex-direction:column}
+.kanban-col-header{padding:12px 14px;border-bottom:1px solid var(--border-default);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary)}
+.kanban-col-header .week-range{display:block;font-size:11px;font-weight:400;color:var(--text-secondary);margin-top:2px}
+.kanban-col-header .week-hours{display:block;font-size:11px;color:var(--accent);margin-top:4px}
 .kanban-col-body{padding:8px;flex:1;display:flex;flex-direction:column;gap:6px;min-height:100px}
-.kanban-col-body.drag-over{background:rgba(99,102,241,.06);border-radius:0 0 10px 10px}
-.kanban-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:grab;transition:all .15s;font-size:12px}
+.kanban-col-body.drag-over{background:var(--accent-soft);border-radius:0 0 10px 10px}
+.kanban-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px;cursor:grab;transition:all .15s;font-size:12px}
 .kanban-card:active{cursor:grabbing}
 .kanban-card.dragging{opacity:.4}
 .kanban-card:hover{border-color:var(--accent)}
 .kanban-card h4{font-size:13px;font-weight:600;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kanban-card .card-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--muted);margin-top:4px}
+.kanban-card .card-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--text-secondary);margin-top:4px}
 .kanban-card .card-meta .avatar{width:20px;height:20px;font-size:9px}
 .kanban-card .card-project{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:600;display:inline-block;margin-top:4px}
 
 /* Projects */
 .projects-filter{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
 .projects-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
-.project-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;transition:border-color .15s;cursor:pointer}
+.project-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;padding:20px;transition:border-color .15s;cursor:pointer}
 .project-card:hover{border-color:var(--accent)}
 .project-card h3{font-size:16px;font-weight:700;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .project-status{display:inline-block;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:700}
-.project-status.on-track,.project-status.on-target{background:rgba(34,197,94,.12);color:var(--green)}
-.project-status.off-track{background:rgba(239,68,68,.12);color:var(--red)}
-.project-status.not-started{background:rgba(148,163,184,.12);color:var(--muted)}
-.project-status.completed{background:rgba(99,102,241,.1);color:var(--accent2)}
+.project-status.on-track,.project-status.on-target{background:var(--success-bg);color:var(--success)}
+.project-status.off-track{background:var(--danger-bg);color:var(--danger)}
+.project-status.not-started{background:var(--bg-surface-2);color:var(--text-secondary)}
+.project-status.completed{background:var(--accent-soft);color:var(--accent)}
 .project-progress{margin:12px 0}
-.project-progress .bar-outer{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden}
-.project-progress .bar-inner{height:100%;border-radius:4px;background:var(--green);transition:width .4s}
-.project-progress .progress-text{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px}
-.project-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+.project-progress .bar-outer{height:8px;background:var(--bg-surface-2);border-radius:4px;overflow:hidden}
+.project-progress .bar-inner{height:100%;border-radius:4px;background:var(--success);transition:width .4s}
+.project-progress .progress-text{display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-top:4px}
+.project-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:8px}
 .project-meta span{display:flex;align-items:center;gap:4px}
-.project-expanded{margin-top:16px;border-top:1px solid var(--border);padding-top:12px}
-.project-expanded h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.project-expanded{margin-top:16px;border-top:1px solid var(--border-default);padding-top:12px}
+.project-expanded h4{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
 .project-task-list{font-size:12px}
-.project-task-item{padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.project-task-item{padding:6px 0;border-bottom:1px solid var(--border-default);display:flex;align-items:center;gap:8px}
 
 /* Capacity Section */
 .capacity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:24px}
-.capacity-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.capacity-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:20px}
 .capacity-card h3{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.cap-bar-wrap{height:8px;background:var(--surface2);border-radius:4px;margin:6px 0 4px;overflow:hidden}
+.cap-bar-wrap{height:8px;background:var(--bg-surface-2);border-radius:4px;margin:6px 0 4px;overflow:hidden}
 .cap-bar{height:100%;border-radius:4px;transition:width .4s}
-.cap-stat{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:8px}
-.cap-breakdown{font-size:12px;color:var(--muted);margin-top:8px}
-.cap-breakdown div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)}
+.cap-stat{display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:8px}
+.cap-breakdown{font-size:12px;color:var(--text-secondary);margin-top:8px}
+.cap-breakdown div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border-default)}
 
 /* Recurring Section */
 .recurring-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-.recurring-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.recurring-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px}
 .recurring-card h4{font-size:13px;font-weight:600;margin-bottom:4px}
-.recurring-card .meta{font-size:12px;color:var(--muted)}
+.recurring-card .meta{font-size:12px;color:var(--text-secondary)}
 
 /* Status update dropdown */
 .status-dd{position:relative;display:inline-block}
-.status-dd-menu{display:none;position:absolute;top:100%;left:0;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px;z-index:100;min-width:120px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.status-dd-menu{display:none;position:absolute;top:100%;left:0;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;padding:4px;z-index:100;min-width:120px;box-shadow:var(--shadow-lg)}
 .status-dd-menu.open{display:block}
 .status-dd-item{padding:6px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap}
-.status-dd-item:hover{background:var(--surface2)}
+.status-dd-item:hover{background:var(--bg-surface-2)}
 
 /* Loading */
-.loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);font-size:14px;gap:10px}
-.spin{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+.loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text-secondary);font-size:14px;gap:10px}
+.spin{width:20px;height:20px;border:2px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* Empty state */
-.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
 .empty-state .icon{font-size:36px;margin-bottom:12px}
 .empty-state p{font-size:14px}
 
 /* Bulk actions bar */
-.bulk-bar{background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:13px}
-.bulk-bar .selected-count{font-weight:700;color:var(--accent2)}
+.bulk-bar{background:var(--bg-surface);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:13px}
+.bulk-bar .selected-count{font-weight:700;color:var(--accent)}
 
 /* Responsive */
 @media(max-width:768px){
@@ -290,7 +285,7 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
 
 <!-- Auth (reads from parent or own PAT) -->
 <div class="auth-bar" id="authBar" style="display:none">
-  <span style="font-size:13px;color:var(--muted)">Airtable PAT:</span>
+  <span style="font-size:13px;color:var(--text-secondary)">Airtable PAT:</span>
   <input type="password" id="patInput" placeholder="pat_xxxxxxxxxxxx...">
   <button onclick="doAuth()">Connect</button>
 </div>
@@ -312,7 +307,7 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
-    <span id="lastSync" style="font-size:11px;color:var(--muted)"></span>
+    <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
     <button class="btn" onclick="loadAllData()">Refresh</button>
   </div>
 </div>
@@ -397,7 +392,7 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
         <tbody id="taskBody"></tbody>
       </table>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--muted)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--text-secondary)">
       <span id="showingCount"></span>
       <div style="display:flex;gap:6px">
         <button id="prevPage" onclick="changePage(-1)" class="btn btn-sm">&laquo; Prev</button>
@@ -421,7 +416,7 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
   <!-- View: Recurring -->
   <div id="view-recurring" style="display:none">
     <div style="margin-bottom:16px">
-      <p style="font-size:13px;color:var(--muted)">Recurring tasks identified for potential AI agent automation. Tasks marked with a recurring frequency or the &ldquo;Recurring?&rdquo; flag are shown below.</p>
+      <p style="font-size:13px;color:var(--text-secondary)">Recurring tasks identified for potential AI agent automation. Tasks marked with a recurring frequency or the &ldquo;Recurring?&rdquo; flag are shown below.</p>
     </div>
     <div id="recurringContent"></div>
   </div>
@@ -944,7 +939,7 @@ async function fetchTable(tableId, fieldIds, filter) {
         PAT = '';
         localStorage.removeItem('_dlr_pat');
         document.getElementById('authBar').style.display = 'flex';
-        document.getElementById('loader').innerHTML = '<span style="color:var(--red)">Invalid token. Please re-enter your PAT.</span>';
+        document.getElementById('loader').innerHTML = '<span style="color:var(--danger)">Invalid token. Please re-enter your PAT.</span>';
         throw new Error('Auth failed');
       }
       throw new Error(`API error ${res.status}`);
@@ -1099,13 +1094,13 @@ function statusBadge(status) {
 }
 
 function priorityBadge(p) {
-  if (!p) return '<span style="color:var(--muted)">-</span>';
+  if (!p) return '<span style="color:var(--text-secondary)">-</span>';
   const cls = { Urgent: 'badge-urgent', High: 'badge-high', Project: 'badge-project', 'Not Urgent': 'badge-not-urgent' }[p] || '';
   return `<span class="badge ${cls}">${escHtml(p)}</span>`;
 }
 
 function avatarHtml(t) {
-  if (!t.assignee) return '<span style="color:var(--muted)">-</span>';
+  if (!t.assignee) return '<span style="color:var(--text-secondary)">-</span>';
   const k = teamKey(t.assigneeEmail);
   const initial = t.assignee.split(' ').map(w => w[0]).join('').slice(0, 2);
   return `<div class="assignee-cell"><span class="avatar avatar-${k}">${initial}</span>${escHtml(t.assignee.split(' ')[0])}</div>`;
@@ -1119,14 +1114,14 @@ function avatarSmall(t) {
 }
 
 function formatDueDate(d) {
-  if (!d) return '<span style="color:var(--muted)">No date</span>';
+  if (!d) return '<span style="color:var(--text-secondary)">No date</span>';
   const today = todayStr();
   const dt = new Date(d + 'T00:00:00');
   const diff = Math.round((dt - new Date(today + 'T00:00:00')) / 86400000);
   const formatted = dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
-  if (d < today) return `<span style="color:var(--red);font-weight:600">${formatted}</span> <span style="font-size:10px;color:var(--red)">(${Math.abs(diff)}d ago)</span>`;
-  if (d === today) return `<span style="color:var(--amber);font-weight:600">Today</span>`;
-  if (diff <= 7) return `<span style="color:var(--amber)">${formatted}</span> <span style="font-size:10px;color:var(--muted)">(${diff}d)</span>`;
+  if (d < today) return `<span style="color:var(--danger);font-weight:600">${formatted}</span> <span style="font-size:10px;color:var(--danger)">(${Math.abs(diff)}d ago)</span>`;
+  if (d === today) return `<span style="color:var(--warning);font-weight:600">Today</span>`;
+  if (diff <= 7) return `<span style="color:var(--warning)">${formatted}</span> <span style="font-size:10px;color:var(--text-secondary)">(${diff}d)</span>`;
   return `<span>${formatted}</span>`;
 }
 
@@ -1227,7 +1222,7 @@ function renderMyDay() {
   const totalHrs = todayHrs + overdueHrs;
   const availHrs = config.maxTaskHours;
   const capPct = Math.min(150, (totalHrs / availHrs) * 100);
-  const capColor = capPct > 100 ? 'var(--red)' : capPct > 80 ? 'var(--amber)' : 'var(--green)';
+  const capColor = capPct > 100 ? 'var(--danger)' : capPct > 80 ? 'var(--warning)' : 'var(--success)';
 
   // Build timeline
   const plan = buildDayTimeline(todayTasks, overdueTasks, calendarEvents, routineBlocks);
@@ -1251,9 +1246,9 @@ function renderMyDay() {
 
   // Capacity bar
   html += `<div class="myday-capacity">
-    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">${totalHrs.toFixed(1)} hrs tasks + ${(routineMins/60).toFixed(1)} hrs routine of ${config.endHour - config.startHour} hrs day</span></h3>
+    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px">${totalHrs.toFixed(1)} hrs tasks + ${(routineMins/60).toFixed(1)} hrs routine of ${config.endHour - config.startHour} hrs day</span></h3>
     <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100, capPct)}%;background:${capColor}"></div></div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-top:4px">
       <span>${capPct.toFixed(0)}% utilised</span>
       <span>${capPct > 100 ? 'OVERCOMMITTED - consider deferring tasks' : capPct > 80 ? 'Tight day' : 'Capacity available'}</span>
     </div>
@@ -1269,7 +1264,7 @@ function renderMyDay() {
 
   // Deferred tasks warning
   if (plan.deferredTasks.length > 0) {
-    html += `<div class="overdue-notice" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06);color:var(--amber)">
+    html += `<div class="overdue-notice" style="border-color:rgba(245,158,11,.3);background:var(--warning-bg);color:var(--warning)">
       <span style="font-size:18px;font-weight:700">!</span>
       <span>${plan.deferredTasks.length} task${plan.deferredTasks.length !== 1 ? 's' : ''} won't fit today (${(plan.deferredTasks.reduce((s,t) => s + (t.minutes||30), 0)/60).toFixed(1)} hrs) - consider rescheduling</span>
     </div>`;
@@ -1279,7 +1274,7 @@ function renderMyDay() {
   html += `<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
     <button class="btn btn-primary" onclick="openPlanner()">Plan My Day</button>
     <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
-    ${!GCAL_SCRIPT_URL ? '<span style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px">Calendar: not connected (set GCAL_SCRIPT_URL)</span>' : ''}
+    ${!GCAL_SCRIPT_URL ? '<span style="font-size:11px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">Calendar: not connected (set GCAL_SCRIPT_URL)</span>' : ''}
   </div>`;
 
   // Routine config panel (collapsible)
@@ -1293,14 +1288,14 @@ function renderMyDay() {
     html += `<div class="myday-section">
       <h3>All-Day Events</h3>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${allDayEvents.map(ev => `<div class="routine-block" style="border-color:rgba(6,182,212,.2)"><span class="cal-badge">ALL DAY</span> ${escHtml(ev.summary)}</div>`).join('')}
+        ${allDayEvents.map(ev => `<div class="routine-block" style="border-color:var(--info-border)"><span class="cal-badge">ALL DAY</span> ${escHtml(ev.summary)}</div>`).join('')}
       </div>
     </div>`;
   }
 
   // Timeline view
   html += `<div class="myday-section">
-    <h3>Daily Timeline <span style="font-size:12px;font-weight:400;color:var(--muted)">${config.startHour}:00 - ${config.endHour}:00</span></h3>`;
+    <h3>Daily Timeline <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">${config.startHour}:00 - ${config.endHour}:00</span></h3>`;
 
   if (plan.timeline.length > 0) {
     html += `<div class="timeline">`;
@@ -1340,7 +1335,7 @@ function renderMyDay() {
               ${priorityBadge(t.priority)}
               ${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
               ${avatarSmall(t)}
-              ${block.isOverdue ? '<span style="color:var(--red);font-weight:600">OVERDUE</span>' : ''}
+              ${block.isOverdue ? '<span style="color:var(--danger);font-weight:600">OVERDUE</span>' : ''}
             </div>
             <div class="tl-actions">
               <div class="status-dd">
@@ -1351,7 +1346,7 @@ function renderMyDay() {
                   ).join('')}
                 </div>
               </div>
-              <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--green)">Complete</button>
+              <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--success)">Complete</button>
             </div>
           </div>
         </div>`;
@@ -1366,7 +1361,7 @@ function renderMyDay() {
   // Deferred tasks section
   if (plan.deferredTasks.length > 0) {
     html += `<div class="myday-section">
-      <h3><span style="color:var(--amber)">Won't Fit Today</span> <span style="font-size:12px;font-weight:400;color:var(--muted)">${plan.deferredTasks.length} tasks</span></h3>
+      <h3><span style="color:var(--warning)">Won't Fit Today</span> <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">${plan.deferredTasks.length} tasks</span></h3>
       <div class="myday-tasks">
         ${plan.deferredTasks.map(t => mydayTaskCard(t, false)).join('')}
       </div>
@@ -1377,7 +1372,7 @@ function renderMyDay() {
   const unscheduledToday = todayTasks.filter(t => !plan.scheduledTasks.some(st => st.task && st.task.id === t.id) && !plan.deferredTasks.includes(t));
   if (unscheduledToday.length > 0) {
     html += `<div class="myday-section">
-      <h3>Also Today <span style="font-size:12px;font-weight:400;color:var(--muted)">${unscheduledToday.length} tasks</span></h3>
+      <h3>Also Today <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">${unscheduledToday.length} tasks</span></h3>
       <div class="myday-tasks">
         ${unscheduledToday.map(t => mydayTaskCard(t, false)).join('')}
       </div>
@@ -1388,7 +1383,7 @@ function renderMyDay() {
 }
 
 function mydayTaskCard(t, isOverdue) {
-  const borderColor = isOverdue ? 'border-color:var(--red)' : '';
+  const borderColor = isOverdue ? 'border-color:var(--danger)' : '';
   return `<div class="myday-task" style="${borderColor}">
     <div class="task-time">${t.timeEst || formatMins(t.minutes) || '-'}</div>
     <div class="task-info">
@@ -1397,7 +1392,7 @@ function mydayTaskCard(t, isOverdue) {
         ${priorityBadge(t.priority)}
         ${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
         ${avatarSmall(t)}
-        ${isOverdue && t.dueDate ? `<span style="color:var(--red)">${formatDueDate(t.dueDate)}</span>` : ''}
+        ${isOverdue && t.dueDate ? `<span style="color:var(--danger)">${formatDueDate(t.dueDate)}</span>` : ''}
         ${statusBadge(t.status)}
       </div>
     </div>
@@ -1410,7 +1405,7 @@ function mydayTaskCard(t, isOverdue) {
           ).join('')}
         </div>
       </div>
-      <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--green)">Done</button>
+      <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--success)">Done</button>
     </div>
   </div>`;
 }
@@ -1421,7 +1416,7 @@ function mydayTaskCard(t, isOverdue) {
 function renderRoutineConfigPanel(routineBlocks, config) {
   let html = `<div class="routine-config" id="routineConfigPanel">
     <h3>Routine Configuration <button class="btn btn-sm" onclick="toggleRoutineConfig()" style="float:right">Close</button></h3>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Set once, the planner respects these as hard blocks every day.</p>
+    <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Set once, the planner respects these as hard blocks every day.</p>
 
     <div style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:600;margin-bottom:6px">Working Hours</div>
@@ -1587,7 +1582,7 @@ function openPlanner() {
       });
     }
   } else {
-    html += `<div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--green)">
+    html += `<div style="background:var(--success-bg);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--success)">
       Your day looks good! All ${todayTasks.length + overdueTasks.length} tasks fit within available time.
     </div>`;
   }
@@ -1597,9 +1592,9 @@ function openPlanner() {
   plan.scheduledTasks.forEach(block => {
     html += `<div class="planner-suggestion" style="padding:8px 12px">
       <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:11px;color:var(--accent2);min-width:90px">${minutesToTime(block.start)} - ${minutesToTime(block.end)}</span>
+        <span style="font-size:11px;color:var(--accent);min-width:90px">${minutesToTime(block.start)} - ${minutesToTime(block.end)}</span>
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(block.name)}</span>
-        <span style="font-size:11px;color:var(--muted)">${formatMins(block.duration)}</span>
+        <span style="font-size:11px;color:var(--text-secondary)">${formatMins(block.duration)}</span>
       </div>
     </div>`;
   });
@@ -1709,20 +1704,20 @@ function renderTasks() {
     const idx = start + i + 1;
     const isExp = expandedTask === t.id;
     const overdueFlag = isOverdue(t);
-    const rowStyle = overdueFlag && t.status !== 'Overdue' ? ' style="border-left:3px solid var(--red)"' : '';
+    const rowStyle = overdueFlag && t.status !== 'Overdue' ? ' style="border-left:3px solid var(--danger)"' : '';
     const isChecked = selectedTasks.has(t.id);
 
     html += `<tr class="${isExp ? 'expanded' : ''}"${rowStyle}>
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
-      <td style="color:var(--muted)" onclick="toggleDetail('${t.id}')">${idx}</td>
+      <td style="color:var(--text-secondary)" onclick="toggleDetail('${t.id}')">${idx}</td>
       <td onclick="toggleDetail('${t.id}')"><div class="task-name">${escHtml(t.name)}</div>${t.recurring ? `<span class="badge badge-recurring">${escHtml(t.recurring)}</span>` : ''}</td>
       <td onclick="toggleDetail('${t.id}')">${formatDueDate(t.dueDate)}</td>
       <td onclick="toggleDetail('${t.id}')">${statusBadge(overdueFlag && t.status !== 'Overdue' && t.status !== 'Completed' ? 'Overdue' : t.status)}</td>
       <td onclick="toggleDetail('${t.id}')">${avatarHtml(t)}</td>
       <td onclick="toggleDetail('${t.id}')">${priorityBadge(t.priority)}</td>
-      <td onclick="toggleDetail('${t.id}')">${t.timeEst || (t.minutes ? Math.round(t.minutes) + 'm' : '<span style="color:var(--muted)">-</span>')}</td>
-      <td onclick="toggleDetail('${t.id}')">${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : '<span style="color:var(--muted)">-</span>'}</td>
-      <td onclick="toggleDetail('${t.id}')">${t.recurring ? `<span style="color:var(--purple)">${escHtml(t.recurring)}</span>` : (t.recurFlag ? '<span style="color:var(--purple)">Yes</span>' : '<span style="color:var(--muted)">-</span>')}</td>
+      <td onclick="toggleDetail('${t.id}')">${t.timeEst || (t.minutes ? Math.round(t.minutes) + 'm' : '<span style="color:var(--text-secondary)">-</span>')}</td>
+      <td onclick="toggleDetail('${t.id}')">${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : '<span style="color:var(--text-secondary)">-</span>'}</td>
+      <td onclick="toggleDetail('${t.id}')">${t.recurring ? `<span style="color:var(--accent)">${escHtml(t.recurring)}</span>` : (t.recurFlag ? '<span style="color:var(--accent)">Yes</span>' : '<span style="color:var(--text-secondary)">-</span>')}</td>
     </tr>`;
 
     // Detail row
@@ -1737,7 +1732,7 @@ function renderTasks() {
     if (t.created) html += `<span>Created: ${new Date(t.created).toLocaleDateString('en-GB')}</span>`;
     if (t.completion) html += `<span>Completed: ${new Date(t.completion).toLocaleDateString('en-GB')}</span>`;
     if (t.attachments.length) html += `<span>${t.attachments.length} attachment(s)</span>`;
-    if (t.onHold) html += `<span style="color:var(--amber)">On Hold</span>`;
+    if (t.onHold) html += `<span style="color:var(--warning)">On Hold</span>`;
     html += `</div>`;
 
     if (t.attachments.length) {
@@ -1759,7 +1754,7 @@ function renderTasks() {
   });
 
   if (!page.length) {
-    html = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--muted)">No tasks found matching your filters.</td></tr>`;
+    html = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found matching your filters.</td></tr>`;
   }
 
   document.getElementById('taskBody').innerHTML = html;
@@ -1962,7 +1957,7 @@ function renderKanban() {
       <option value="">All Projects</option>
       ${projectOptions.map(p => `<option value="${escHtml(p)}" ${kanbanProjectFilter === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
     </select>
-    <span style="font-size:12px;color:var(--muted)">${tasks.length} project tasks</span>
+    <span style="font-size:12px;color:var(--text-secondary)">${tasks.length} project tasks</span>
   </div>`;
 
   // Board
@@ -1988,7 +1983,7 @@ function renderKanban() {
 
     weekTasks.forEach(t => {
       const projName = t.projectNames[0] || '';
-      const projColor = projName ? strColor(projName) : 'var(--muted)';
+      const projColor = projName ? strColor(projName) : 'var(--text-secondary)';
       const projBg = projName ? strColorBg(projName) : 'transparent';
       html += `<div class="kanban-card" draggable="true"
         ondragstart="dragKanbanCard(event,'${t.id}')"
@@ -2005,7 +2000,7 @@ function renderKanban() {
     });
 
     if (weekTasks.length === 0) {
-      html += `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">No tasks</div>`;
+      html += `<div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:12px">No tasks</div>`;
     }
 
     html += `</div></div>`;
@@ -2071,7 +2066,7 @@ function renderProjects() {
     <button class="btn ${projectFilter === 'active' ? 'btn-primary' : ''}" onclick="projectFilter='active';renderProjects()">Active</button>
     <button class="btn ${projectFilter === 'completed' ? 'btn-primary' : ''}" onclick="projectFilter='completed';renderProjects()">Completed</button>
     <button class="btn ${projectFilter === 'all' ? 'btn-primary' : ''}" onclick="projectFilter='all';renderProjects()">All</button>
-    <span style="font-size:12px;color:var(--muted);margin-left:8px">${projects.length} projects</span>
+    <span style="font-size:12px;color:var(--text-secondary);margin-left:8px">${projects.length} projects</span>
   </div>`;
 
   if (projects.length === 0) {
@@ -2106,7 +2101,7 @@ function renderProjects() {
       </div>
 
       <div class="project-meta">
-        ${p.overdue ? `<span style="color:var(--red)">${p.overdue} overdue</span>` : ''}
+        ${p.overdue ? `<span style="color:var(--danger)">${p.overdue} overdue</span>` : ''}
         ${p.start && p.end ? `<span>${new Date(p.start+'T00:00:00').toLocaleDateString('en-GB',{month:'short',year:'2-digit'})} - ${new Date(p.end+'T00:00:00').toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}</span>` : ''}
       </div>`;
 
@@ -2114,10 +2109,10 @@ function renderProjects() {
     if (isExpanded) {
       html += `<div class="project-expanded">`;
       if (p.deliverable) {
-        html += `<h4>Deliverable</h4><div style="font-size:13px;color:var(--text);margin-bottom:12px;white-space:pre-wrap">${escHtml(p.deliverable)}</div>`;
+        html += `<h4>Deliverable</h4><div style="font-size:13px;color:var(--text-primary);margin-bottom:12px;white-space:pre-wrap">${escHtml(p.deliverable)}</div>`;
       }
       if (p.defOfDone) {
-        html += `<h4>Definition of Done</h4><div style="font-size:13px;color:var(--text);margin-bottom:12px;white-space:pre-wrap">${escHtml(p.defOfDone)}</div>`;
+        html += `<h4>Definition of Done</h4><div style="font-size:13px;color:var(--text-primary);margin-bottom:12px;white-space:pre-wrap">${escHtml(p.defOfDone)}</div>`;
       }
       html += `<h4>Linked Tasks (${linkedTasks.length})</h4>`;
       if (linkedTasks.length > 0) {
@@ -2127,15 +2122,15 @@ function renderProjects() {
             ${statusBadge(isOverdue(t) && t.status !== 'Overdue' ? 'Overdue' : t.status)}
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>
             ${avatarSmall(t)}
-            <span style="color:var(--muted)">${t.timeEst || '-'}</span>
+            <span style="color:var(--text-secondary)">${t.timeEst || '-'}</span>
           </div>`;
         });
         if (linkedTasks.length > 20) {
-          html += `<div style="padding:6px 0;color:var(--muted);font-size:11px">... and ${linkedTasks.length - 20} more</div>`;
+          html += `<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... and ${linkedTasks.length - 20} more</div>`;
         }
         html += `</div>`;
       } else {
-        html += `<div style="font-size:12px;color:var(--muted);padding:8px 0">No linked tasks found.</div>`;
+        html += `<div style="font-size:12px;color:var(--text-secondary);padding:8px 0">No linked tasks found.</div>`;
       }
       html += `</div>`;
     }
@@ -2166,9 +2161,9 @@ function renderCapacity() {
     const totalMins = tasks.reduce((s, t) => s + t.minutes, 0);
     const totalHrs = totalMins / 60;
     const pct = Math.min(100, (totalHrs / WEEKLY_CAPACITY_HRS) * 100);
-    let barColor = 'var(--green)';
-    if (pct > 90) barColor = 'var(--red)';
-    else if (pct > 70) barColor = 'var(--amber)';
+    let barColor = 'var(--success)';
+    if (pct > 90) barColor = 'var(--danger)';
+    else if (pct > 70) barColor = 'var(--warning)';
 
     const statusBreak = {};
     tasks.forEach(t => { const s = t.status || 'Unset'; statusBreak[s] = (statusBreak[s] || 0) + t.minutes; });
@@ -2180,12 +2175,12 @@ function renderCapacity() {
       <h3><span class="avatar avatar-${member.key}">${member.name[0]}</span> ${member.name}</h3>
       <div class="cap-stat"><span>${totalHrs.toFixed(1)} hrs allocated</span><span>${WEEKLY_CAPACITY_HRS} hrs capacity</span></div>
       <div class="cap-bar-wrap"><div class="cap-bar" style="width:${pct}%;background:${barColor}"></div></div>
-      <div style="font-size:12px;color:${pct > 90 ? 'var(--red)' : 'var(--muted)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} active tasks${overdue.length ? ` &middot; <span style="color:var(--red)">${overdue.length} overdue</span>` : ''}</div>
-      <h4 style="font-size:11px;color:var(--muted);margin-bottom:4px">By Status</h4>
+      <div style="font-size:12px;color:${pct > 90 ? 'var(--danger)' : 'var(--text-secondary)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} active tasks${overdue.length ? ` &middot; <span style="color:var(--danger)">${overdue.length} overdue</span>` : ''}</div>
+      <h4 style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">By Status</h4>
       <div class="cap-breakdown">
         ${Object.entries(statusBreak).sort((a,b) => b[1]-a[1]).map(([s,m]) => `<div><span>${s}</span><span>${(m/60).toFixed(1)} hrs (${totalMins > 0 ? Math.round(m/totalMins*100) : 0}%)</span></div>`).join('')}
       </div>
-      <h4 style="font-size:11px;color:var(--muted);margin:8px 0 4px">By Priority</h4>
+      <h4 style="font-size:11px;color:var(--text-secondary);margin:8px 0 4px">By Priority</h4>
       <div class="cap-breakdown">
         ${Object.entries(priorityBreak).sort((a,b) => b[1]-a[1]).map(([p,m]) => `<div><span>${p}</span><span>${(m/60).toFixed(1)} hrs</span></div>`).join('')}
       </div>
@@ -2208,7 +2203,7 @@ function renderCapacity() {
         <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${teamCapacity}</div><div class="label">Team Capacity (hrs)</div></div>
         <div class="kpi ${teamPct > 90 ? 'red' : teamPct > 70 ? 'amber' : 'green'}" style="padding:12px"><div class="value" style="font-size:22px">${teamPct.toFixed(0)}%</div><div class="label">Utilisation</div></div>
       </div>
-      <div class="cap-bar-wrap" style="height:12px"><div class="cap-bar" style="width:${teamPct}%;background:${teamPct > 90 ? 'var(--red)' : teamPct > 70 ? 'var(--amber)' : 'var(--green)'}"></div></div>
+      <div class="cap-bar-wrap" style="height:12px"><div class="cap-bar" style="width:${teamPct}%;background:${teamPct > 90 ? 'var(--danger)' : teamPct > 70 ? 'var(--warning)' : 'var(--success)'}"></div></div>
     </div>` + html;
   }
 
@@ -2250,16 +2245,16 @@ function renderRecurring() {
   freqOrder.forEach(freq => {
     const tasks = groups[freq];
     if (!tasks || !tasks.length) return;
-    html += `<h3 style="font-size:14px;margin:16px 0 8px;color:var(--purple)">${freq} <span style="color:var(--muted);font-weight:400">(${tasks.length})</span></h3>`;
+    html += `<h3 style="font-size:14px;margin:16px 0 8px;color:var(--accent)">${freq} <span style="color:var(--text-secondary);font-weight:400">(${tasks.length})</span></h3>`;
     html += `<div class="recurring-grid" style="margin-bottom:12px">`;
     tasks.forEach(t => {
       const od = isOverdue(t);
-      html += `<div class="recurring-card" style="${od ? 'border-color:var(--red)' : ''}">
+      html += `<div class="recurring-card" style="${od ? 'border-color:var(--danger)' : ''}">
         <h4>${escHtml(t.name)}</h4>
         <div class="meta">
           ${avatarHtml(t)} &middot; ${statusBadge(t.status)} &middot; ${t.timeEst || '-'}
           ${t.business ? ` &middot; <span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
-          ${od ? '<span style="color:var(--red);margin-left:8px">OVERDUE</span>' : ''}
+          ${od ? '<span style="color:var(--danger);margin-left:8px">OVERDUE</span>' : ''}
         </div>
       </div>`;
     });
@@ -2350,7 +2345,7 @@ async function loadAllData() {
     renderAll();
   } catch (e) {
     console.error(e);
-    document.getElementById('loader').innerHTML = `<span style="color:var(--red)">Failed to load data. ${escHtml(e.message)}</span>`;
+    document.getElementById('loader').innerHTML = `<span style="color:var(--danger)">Failed to load data. ${escHtml(e.message)}</span>`;
   }
 }
 

@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Operations Director</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="css/styles.css?v=11">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="css/tokens.css?v=1">
+    <link rel="stylesheet" href="css/styles.css?v=12">
 </head>
 <body>
     <!-- Auth Screen -->
@@ -38,7 +41,7 @@
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <h1>&#x2699;&#xFE0F; Operations Director</h1>
-            <p>Kevin Brittain &bull; Founder &nbsp;<a href="#" onclick="event.preventDefault();logout()" style="color:#94a3b8;font-size:10px;text-decoration:underline">Logout</a></p>
+            <p>Kevin Brittain &bull; Founder &nbsp;<a href="#" onclick="event.preventDefault();logout()" style="color:var(--text-inverse-dim);font-size:10px;text-decoration:underline">Logout</a></p>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard OS</span></div>
@@ -53,13 +56,13 @@
         </nav>
         <!-- OS-INTEGRATION: Sidebar — DO NOT REMOVE (see MEMORY.md) -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
-            <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Operating Systems</div>
+            <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.45)">Operating Systems</div>
             <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Operating Systems Hub</span></div>
             <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Launch Plan Builder OS</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
-            <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.35)">Admin</div>
+            <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.45)">Admin</div>
             <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync Monitor OS</span><span id="fintableBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
             <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map & Links</span><span id="sitemapBadge" style="display:none;margin-left:auto;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
             <div class="sidebar-item" onclick="shareCurrentPage()" title="Copy link to this page"><span class="sidebar-icon">&#x1F4CE;</span><span class="sidebar-label">Share Current Page</span></div>
@@ -138,7 +141,7 @@
                 <div class="calc-header">
                     <h3>Balance Calculator</h3>
                     <div>
-                        <label style="font-size:12px;color:#64748b;margin-right:8px">Opening Balance:</label>
+                        <label style="font-size:12px;color:var(--text-secondary);margin-right:8px">Opening Balance:</label>
                         <input type="number" class="calc-input" id="calcOpeningBal" step="0.01" oninput="this.dataset.userEdited='1'; updateCalcTotals()">
                     </div>
                 </div>
@@ -167,7 +170,7 @@
                     <button class="calc-btn" onclick="calcSelectOutflows()">Outflows Only</button>
                 </div>
                 <div class="calc-tx-list" id="calcTxList">
-                    <div style="color:#94a3b8;font-size:13px;padding:20px;text-align:center">Loading transactions...</div>
+                    <div style="color:var(--text-muted);font-size:13px;padding:20px;text-align:center">Loading transactions...</div>
                 </div>
             </div>
         </div>
@@ -251,15 +254,15 @@
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Invoices OS — Invoices to Pay</h2>
-                    <span style="font-size:12px;color:#94a3b8">Gmail label: <strong style="color:#64748b">3. to pay</strong> &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">28 Mar 2026</strong> &nbsp;·&nbsp; Ask Claude to refresh</span>
+                    <span style="font-size:12px;color:var(--text-muted)">Gmail label: <strong style="color:var(--text-secondary)">3. to pay</strong> &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">28 Mar 2026</strong> &nbsp;·&nbsp; Ask Claude to refresh</span>
                 </div>
                 <div class="cards-grid" id="invoiceSummaryCards"></div>
             </div>
             <div class="section">
                 <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap">
-                    <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px">
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
                         Sort by:
-                        <select id="invSortBy" onchange="renderInvoiceTab()" style="font-size:12px;padding:2px 6px;border:1px solid #e2e8f0;border-radius:4px;background:#fff">
+                        <select id="invSortBy" onchange="renderInvoiceTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
                             <option value="date">Date (oldest first)</option>
                             <option value="date-desc">Date (newest first)</option>
                             <option value="amount">Amount (high→low)</option>
@@ -267,9 +270,9 @@
                             <option value="payee">Payee (A→Z)</option>
                         </select>
                     </label>
-                    <label style="font-size:12px;color:#64748b;display:flex;align-items:center;gap:4px">
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
                         Filter:
-                        <input id="invFilterText" type="text" placeholder="Search payee, description, ref…" oninput="renderInvoiceTab()" style="font-size:12px;padding:2px 8px;border:1px solid #e2e8f0;border-radius:4px;width:220px">
+                        <input id="invFilterText" type="text" placeholder="Search payee, description, ref…" oninput="renderInvoiceTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;width:220px;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
                 </div>
                 <div class="invoice-table-wrapper">
@@ -299,7 +302,7 @@
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids OS</h2>
-                    <span style="font-size:12px;color:#94a3b8">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
+                    <span style="font-size:12px;color:var(--text-muted)">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
                 </div>
                 <div class="cards-grid" id="cfvSummaryCards"></div>
             </div>
@@ -394,39 +397,39 @@
         <div class="tab-panel" id="tab-fintable">
             <div class="section">
                 <h2 class="section-title">Fintable Sync Monitor OS</h2>
-                <p style="color:#64748b;font-size:13px;margin-bottom:16px">Monitors active bank account syncs from Fintable. Accounts that haven't synced recently are flagged so you can reconnect them.</p>
+                <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">Monitors active bank account syncs from Fintable. Accounts that haven't synced recently are flagged so you can reconnect them.</p>
 
                 <!-- Summary cards -->
                 <div id="fintableSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px"></div>
 
                 <!-- Alert thresholds info -->
-                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;font-size:12px;color:#64748b">
-                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;margin-right:4px"></span> Synced within 24 hours</span>
-                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;margin-right:4px"></span> 1–3 days since last sync</span>
-                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;margin-right:4px"></span> 3–7 days since last sync</span>
-                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;margin-right:4px"></span> 7+ days — reconnection likely needed</span>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;font-size:12px;color:var(--text-secondary)">
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success);margin-right:4px"></span> Synced within 24 hours</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warning);margin-right:4px"></span> 1–3 days since last sync</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent-gold);margin-right:4px"></span> 3–7 days since last sync</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--danger);margin-right:4px"></span> 7+ days — reconnection likely needed</span>
                 </div>
 
                 <!-- Accounts table -->
                 <div style="overflow-x:auto">
                     <table id="fintableTable" style="width:100%;border-collapse:collapse;font-size:13px">
                         <thead>
-                            <tr style="border-bottom:2px solid #e2e8f0;text-align:left">
-                                <th style="padding:10px 12px;font-weight:600;color:#475569">Status</th>
-                                <th style="padding:10px 12px;font-weight:600;color:#475569">Account</th>
-                                <th style="padding:10px 12px;font-weight:600;color:#475569">Institution</th>
-                                <th style="padding:10px 12px;font-weight:600;color:#475569">Last Synced</th>
-                                <th style="padding:10px 12px;font-weight:600;color:#475569">Time Ago</th>
-                                <th style="padding:10px 12px;font-weight:600;color:#475569;text-align:right">Balance (GBP)</th>
+                            <tr style="border-bottom:2px solid var(--border-default);text-align:left;background:var(--bg-subtle)">
+                                <th style="padding:10px 12px;font-weight:600;color:var(--text-secondary)">Status</th>
+                                <th style="padding:10px 12px;font-weight:600;color:var(--text-secondary)">Account</th>
+                                <th style="padding:10px 12px;font-weight:600;color:var(--text-secondary)">Institution</th>
+                                <th style="padding:10px 12px;font-weight:600;color:var(--text-secondary)">Last Synced</th>
+                                <th style="padding:10px 12px;font-weight:600;color:var(--text-secondary)">Time Ago</th>
+                                <th style="padding:10px 12px;font-weight:600;color:var(--text-secondary);text-align:right">Balance (GBP)</th>
                             </tr>
                         </thead>
                         <tbody id="fintableBody">
-                            <tr><td colspan="6" style="padding:40px;text-align:center;color:#94a3b8">Loading accounts...</td></tr>
+                            <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">Loading accounts...</td></tr>
                         </tbody>
                     </table>
                 </div>
 
-                <p style="color:#94a3b8;font-size:11px;margin-top:16px">Showing accounts synced within the last 6 months. Data refreshes each time you open this tab.</p>
+                <p style="color:var(--text-muted);font-size:11px;margin-top:16px">Showing accounts synced within the last 6 months. Data refreshes each time you open this tab.</p>
             </div>
         </div>
 

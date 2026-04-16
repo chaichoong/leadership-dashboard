@@ -4,150 +4,147 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations Director Launch Plan OS</title>
+<link rel="stylesheet" href="../css/tokens.css?v=1">
 <style>
-  :root {
-    --bg:#0f1117;--s1:#1a1d27;--s2:#242836;--border:#2e3347;--text:#e4e7ef;--muted:#8b90a5;
-    --accent:#6366f1;--al:#818cf8;--green:#22c55e;--gbg:rgba(34,197,94,0.1);
-    --amber:#f59e0b;--abg:rgba(245,158,11,0.1);--red:#ef4444;--rbg:rgba(239,68,68,0.1);
-    --blue:#3b82f6;--bbg:rgba(59,130,246,0.1);--purple:#a855f7;--pbg:rgba(168,85,247,0.1);
-    --pink:#ec4899;--pkbg:rgba(236,72,153,0.1);
-  }
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+  body{background:var(--bg-app);color:var(--text-primary);line-height:1.7}
   .wrap{max-width:960px;margin:0 auto;padding:24px}
 
-  .hdr{text-align:center;padding:48px 0 36px;border-bottom:1px solid var(--border);margin-bottom:36px}
+  .hdr{text-align:center;padding:48px 0 36px;border-bottom:1px solid var(--border-default);margin-bottom:36px}
   .hdr h1{font-size:2rem;font-weight:800;margin-bottom:8px}
-  .hdr .sub{color:var(--muted);font-size:1rem;max-width:640px;margin:0 auto}
-  .hdr .dates{color:var(--al);font-size:0.85rem;margin-top:12px;font-weight:600}
+  .hdr .sub{color:var(--text-secondary);font-size:1rem;max-width:640px;margin:0 auto}
+  .hdr .dates{color:var(--accent);font-size:0.85rem;margin-top:12px;font-weight:600}
 
   /* KPI row */
   .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
-  .kpi{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center}
-  .kpi .v{font-size:1.8rem;font-weight:800;color:var(--al)}
-  .kpi .l{font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+  .kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;padding:18px;text-align:center}
+  .kpi .v{font-size:1.8rem;font-weight:800;color:var(--accent)}
+  .kpi .l{font-size:0.72rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
 
   /* Nav */
-  .nav-wrap{position:sticky;top:0;background:var(--bg);z-index:10;border-bottom:1px solid var(--border);padding:10px 0}
+  .nav-wrap{position:sticky;top:0;background:var(--bg-app);z-index:10;border-bottom:1px solid var(--border-default);padding:10px 0}
   .nav-group{margin-bottom:4px;display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
-  .nav-group-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);text-align:center;margin-bottom:2px;width:100%}
-  .nav button{background:var(--s1);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.78rem;transition:all .2s;font-weight:500}
+  .nav-group-label{font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);text-align:center;margin-bottom:2px;width:100%}
+  .nav button{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-secondary);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.78rem;transition:all .2s;font-weight:500}
   .nav button:hover,.nav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .nav button.strat{border-color:#4338ca}
-  .nav button.strat.active,.nav button.strat:hover{background:#4338ca}
-  .nav button.wk1{border-color:rgba(99,102,241,0.3)}
-  .nav button.wk2{border-color:rgba(34,197,94,0.3)}
-  .nav button.wk3{border-color:rgba(245,158,11,0.3)}
-  .nav button.wk4{border-color:rgba(59,130,246,0.3)}
-  .nav button.wk4.active,.nav button.wk4:hover{background:var(--blue)}
-  .nav button.wk5{border-color:rgba(236,72,153,0.3)}
-  .nav button.wk5.active,.nav button.wk5:hover{background:var(--pink)}
-  .nav button.ref{border-color:rgba(168,85,247,0.3)}
-  .nav button.ref.active,.nav button.ref:hover{background:var(--purple)}
+  .nav button.strat{border-color:var(--text-muted)}
+  .nav button.strat.active,.nav button.strat:hover{background:var(--text-secondary);color:#fff;border-color:var(--text-secondary)}
+  .nav button.wk1{border-color:var(--tone-sage)}
+  .nav button.wk1.active,.nav button.wk1:hover{background:var(--tone-sage);color:#fff;border-color:var(--tone-sage)}
+  .nav button.wk2{border-color:var(--tone-olive)}
+  .nav button.wk2.active,.nav button.wk2:hover{background:var(--tone-olive);color:#fff;border-color:var(--tone-olive)}
+  .nav button.wk3{border-color:var(--tone-gold)}
+  .nav button.wk3.active,.nav button.wk3:hover{background:var(--tone-gold);color:#fff;border-color:var(--tone-gold)}
+  .nav button.wk4{border-color:var(--tone-blue)}
+  .nav button.wk4.active,.nav button.wk4:hover{background:var(--tone-blue);color:#fff;border-color:var(--tone-blue)}
+  .nav button.wk5{border-color:var(--tone-plum)}
+  .nav button.wk5.active,.nav button.wk5:hover{background:var(--tone-plum);color:#fff;border-color:var(--tone-plum)}
+  .nav button.ref{border-color:var(--text-muted)}
+  .nav button.ref.active,.nav button.ref:hover{background:var(--text-secondary);color:#fff;border-color:var(--text-secondary)}
 
   .sec{display:none}.sec.active{display:block}
-  .sh{font-size:1.4rem;font-weight:800;margin-bottom:8px;color:var(--al)}
-  .sh-sub{color:var(--muted);font-size:0.9rem;margin-bottom:28px}
+  .sh{font-size:1.4rem;font-weight:800;margin-bottom:8px;color:var(--accent)}
+  .sh-sub{color:var(--text-secondary);font-size:0.9rem;margin-bottom:28px}
 
-  .card{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:16px}
+  .card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;padding:24px;margin-bottom:16px}
   .card h3{font-size:1.05rem;font-weight:700;margin-bottom:10px}
-  .card p{color:var(--muted);font-size:0.9rem}
+  .card p{color:var(--text-secondary);font-size:0.9rem}
 
   /* Step blocks */
-  .step{background:var(--s1);border:1px solid var(--border);border-radius:12px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}
+  .step{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}
   .step:hover{border-color:var(--accent)}
   .step-hdr{display:flex;align-items:center;gap:14px;padding:20px 24px;cursor:pointer;user-select:none}
-  .step-num{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:800;flex-shrink:0;border:2px solid var(--border);color:var(--muted)}
-  .step.open .step-num{border-color:var(--accent);color:var(--accent);background:rgba(99,102,241,0.1)}
+  .step-num{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:800;flex-shrink:0;border:2px solid var(--border-default);color:var(--text-secondary)}
+  .step.open .step-num{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
   .step-title{flex:1;font-weight:700;font-size:0.95rem}
   .step-meta{display:flex;gap:8px;align-items:center}
-  .step-arrow{color:var(--muted);transition:transform .2s;font-size:0.8rem}
+  .step-arrow{color:var(--text-secondary);transition:transform .2s;font-size:0.8rem}
   .step.open .step-arrow{transform:rotate(90deg);color:var(--accent)}
-  .step-body{display:none;padding:0 24px 24px;border-top:1px solid var(--border)}
+  .step-body{display:none;padding:0 24px 24px;border-top:1px solid var(--border-default)}
   .step.open .step-body{display:block}
 
   .tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;white-space:nowrap}
-  .tag-kevin{background:var(--pbg);color:var(--purple)}
-  .tag-s1{background:var(--bbg);color:var(--blue)}
-  .tag-s2{background:var(--gbg);color:var(--green)}
-  .tag-claude{background:var(--abg);color:var(--amber)}
-  .tag-all{background:rgba(99,102,241,0.1);color:var(--al)}
-  .tag-done{background:var(--gbg);color:var(--green);border:1px solid var(--green)}
+  .tag-kevin{background:var(--accent-soft);color:var(--accent)}
+  .tag-s1{background:var(--info-bg);color:var(--info)}
+  .tag-s2{background:var(--success-bg);color:var(--success)}
+  .tag-claude{background:var(--warning-bg);color:var(--warning)}
+  .tag-all{background:var(--accent-soft);color:var(--accent)}
+  .tag-done{background:var(--success-bg);color:var(--success);border:1px solid var(--success)}
 
-  .task{display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}
+  .task{display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid var(--border-default)}
   .task:last-child{border-bottom:none}
   .task-who{min-width:90px;flex-shrink:0;padding-top:2px}
   .task-what{flex:1;font-size:0.88rem}
-  .task-what strong{color:var(--text);font-weight:600}
-  .task-what .detail{color:var(--muted);font-size:0.82rem;margin-top:4px;line-height:1.6}
-  .task-how{margin-top:8px;background:var(--s2);border-radius:8px;padding:12px 14px;border-left:3px solid var(--accent)}
-  .task-how p{font-size:0.82rem;color:var(--al);line-height:1.6}
+  .task-what strong{color:var(--text-primary);font-weight:600}
+  .task-what .detail{color:var(--text-secondary);font-size:0.82rem;margin-top:4px;line-height:1.6}
+  .task-how{margin-top:8px;background:var(--bg-surface-2);border-radius:8px;padding:12px 14px;border-left:3px solid var(--accent)}
+  .task-how p{font-size:0.82rem;color:var(--accent);line-height:1.6}
   .task-how .lbl{font-size:0.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);font-weight:700;margin-bottom:4px}
 
-  .hl{background:var(--s2);border-radius:8px;padding:14px 16px;margin:12px 0}
-  .hl p{font-size:0.85rem;color:var(--muted)}
-  .hl strong{color:var(--text)}
+  .hl{background:var(--bg-surface-2);border-radius:8px;padding:14px 16px;margin:12px 0}
+  .hl p{font-size:0.85rem;color:var(--text-secondary)}
+  .hl strong{color:var(--text-primary)}
 
-  .principle{border-left:3px solid var(--accent);padding:16px 20px;background:var(--s2);border-radius:0 8px 8px 0;margin-bottom:12px}
-  .principle h4{font-size:0.9rem;color:var(--al);margin-bottom:4px}
-  .principle p{font-size:0.85rem;color:var(--muted)}
+  .principle{border-left:3px solid var(--accent);padding:16px 20px;background:var(--bg-surface-2);border-radius:0 8px 8px 0;margin-bottom:12px}
+  .principle h4{font-size:0.9rem;color:var(--accent);margin-bottom:4px}
+  .principle p{font-size:0.85rem;color:var(--text-secondary)}
 
   .mod-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
-  .mod-card{background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:16px}
+  .mod-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:10px;padding:16px}
   .mod-card h4{font-size:0.9rem;margin-bottom:4px}
-  .mod-card p{font-size:0.8rem;color:var(--muted)}
-  .mod-card .mid{font-size:0.68rem;color:var(--muted);font-family:monospace;margin-bottom:4px}
+  .mod-card p{font-size:0.8rem;color:var(--text-secondary)}
+  .mod-card .mid{font-size:0.68rem;color:var(--text-secondary);font-family:monospace;margin-bottom:4px}
 
   .tl-bar{display:flex;gap:0;margin:20px 0;border-radius:8px;overflow:hidden}
   .tl-seg{padding:10px 16px;text-align:center;flex:1}
   .tl-seg .tl-lbl{font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
   .tl-seg .tl-date{font-size:0.75rem;margin-top:2px}
 
-  .decision{border:1px solid var(--amber);border-radius:10px;padding:16px 20px;margin:16px 0;background:rgba(245,158,11,0.05)}
-  .decision h4{color:var(--amber);font-size:0.85rem;margin-bottom:6px}
-  .decision p{font-size:0.85rem;color:var(--muted)}
+  .decision{border:1px solid var(--warning);border-radius:10px;padding:16px 20px;margin:16px 0;background:var(--warning-bg)}
+  .decision h4{color:var(--warning);font-size:0.85rem;margin-bottom:6px}
+  .decision p{font-size:0.85rem;color:var(--text-secondary)}
 
-  .warn{border:1px solid var(--red);border-radius:10px;padding:16px 20px;margin:16px 0;background:rgba(239,68,68,0.05)}
-  .warn h4{color:var(--red);font-size:0.85rem;margin-bottom:6px}
-  .warn p{font-size:0.85rem;color:var(--muted)}
+  .warn{border:1px solid var(--danger);border-radius:10px;padding:16px 20px;margin:16px 0;background:var(--danger-bg)}
+  .warn h4{color:var(--danger);font-size:0.85rem;margin-bottom:6px}
+  .warn p{font-size:0.85rem;color:var(--text-secondary)}
 
   /* Pros/cons */
   .pc{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}
   .pc-col h4{font-size:0.85rem;margin-bottom:8px}
   .pc-col ul{list-style:none;padding:0}
-  .pc-col li{font-size:0.82rem;color:var(--muted);padding:4px 0 4px 16px;position:relative}
-  .pc-col.pro li::before{content:"+";position:absolute;left:0;color:var(--green);font-weight:700}
-  .pc-col.con li::before{content:"\2212";position:absolute;left:0;color:var(--red);font-weight:700}
+  .pc-col li{font-size:0.82rem;color:var(--text-secondary);padding:4px 0 4px 16px;position:relative}
+  .pc-col.pro li::before{content:"+";position:absolute;left:0;color:var(--success);font-weight:700}
+  .pc-col.con li::before{content:"\2212";position:absolute;left:0;color:var(--danger);font-weight:700}
 
   /* Journey */
   .journey{display:flex;gap:0;overflow-x:auto;margin:20px 0;padding-bottom:8px}
   .j-step{flex:1;min-width:90px;text-align:center;position:relative;padding:0 4px}
-  .j-step::after{content:'';position:absolute;top:18px;right:-1px;width:100%;height:2px;background:var(--border);z-index:0}
+  .j-step::after{content:'';position:absolute;top:18px;right:-1px;width:100%;height:2px;background:var(--border-default);z-index:0}
   .j-step:last-child::after{display:none}
   .j-dot{width:36px;height:36px;border-radius:50%;margin:0 auto 6px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;position:relative;z-index:1}
   .j-lbl{font-size:0.72rem;font-weight:700}
-  .j-cnt{font-size:0.65rem;color:var(--muted);margin-top:1px}
+  .j-cnt{font-size:0.65rem;color:var(--text-secondary);margin-top:1px}
 
   /* Funnel */
-  .funnel-step{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+  .funnel-step{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-default)}
   .funnel-step:last-child{border-bottom:none}
-  .funnel-num{width:28px;height:28px;border-radius:50%;background:rgba(99,102,241,0.15);color:var(--al);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;flex-shrink:0}
-  .funnel-txt{font-size:0.85rem;color:var(--muted)}
-  .funnel-txt strong{color:var(--text)}
+  .funnel-num{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;flex-shrink:0}
+  .funnel-txt{font-size:0.85rem;color:var(--text-secondary)}
+  .funnel-txt strong{color:var(--text-primary)}
 
   table{width:100%;border-collapse:collapse;margin:12px 0}
-  th{text-align:left;padding:10px 14px;font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
-  td{padding:10px 14px;font-size:0.85rem;border-bottom:1px solid var(--border)}
-  tr:hover{background:rgba(99,102,241,0.03)}
+  th{text-align:left;padding:10px 14px;font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border-default)}
+  td{padding:10px 14px;font-size:0.85rem;border-bottom:1px solid var(--border-default)}
+  tr:hover{background:var(--accent-soft)}
 
   /* Category headers */
-  .cat-hdr{display:flex;align-items:center;gap:12px;margin:24px 0 12px;padding-bottom:10px;border-bottom:2px solid var(--border)}
+  .cat-hdr{display:flex;align-items:center;gap:12px;margin:24px 0 12px;padding-bottom:10px;border-bottom:2px solid var(--border-default)}
   .cat-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
   .cat-title{font-size:1rem;font-weight:700}
-  .cat-sub{font-size:0.8rem;color:var(--muted)}
-  .cat-badge{margin-left:auto;font-size:0.68rem;padding:3px 10px;border-radius:99px;background:var(--s2);color:var(--muted);border:1px solid var(--border)}
+  .cat-sub{font-size:0.8rem;color:var(--text-secondary)}
+  .cat-badge{margin-left:auto;font-size:0.68rem;padding:3px 10px;border-radius:99px;background:var(--bg-surface-2);color:var(--text-secondary);border:1px solid var(--border-default)}
 
-  .footer{text-align:center;padding:32px;color:var(--muted);font-size:0.78rem;border-top:1px solid var(--border);margin-top:40px}
+  .footer{text-align:center;padding:32px;color:var(--text-secondary);font-size:0.78rem;border-top:1px solid var(--border-default);margin-top:40px}
 
   @media(max-width:768px){.mod-grid,.pc,.kpi-row{grid-template-columns:1fr}.wrap{padding:16px}.step-hdr{padding:16px}.journey{flex-wrap:wrap}}
   @media print{body{background:#fff;color:#222}.step-body{display:block!important}.card,.step{break-inside:avoid;border-color:#ddd}
@@ -157,10 +154,10 @@
   .owner-switch {
     font-size: 0.72rem;
     padding: 2px 6px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-default);
     border-radius: 6px;
-    background: var(--s2);
-    color: var(--text);
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
     cursor: pointer;
     margin-left: 8px;
     appearance: none;
@@ -172,88 +169,88 @@
   /* === PROGRESS TRACKING === */
 
   /* Task status button */
-  .task-status-btn{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;cursor:pointer;flex-shrink:0;transition:all .2s;font-size:0.72rem;font-weight:700;user-select:none;border:2px solid var(--border);background:var(--s2);color:var(--muted);white-space:nowrap}
+  .task-status-btn{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;cursor:pointer;flex-shrink:0;transition:all .2s;font-size:0.72rem;font-weight:700;user-select:none;border:2px solid var(--border-default);background:var(--bg-surface-2);color:var(--text-secondary);white-space:nowrap}
   .task-status-btn:hover{border-color:var(--accent);transform:scale(1.03)}
-  .task-status-btn .status-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--muted);background:transparent;flex-shrink:0}
-  .task-status-btn.inprogress{border-color:var(--amber);background:var(--abg);color:var(--amber)}
-  .task-status-btn.inprogress .status-dot{border-color:var(--amber);background:var(--amber);animation:pulse-amber 2s ease-in-out infinite}
-  .task-status-btn.done{border-color:var(--green);background:var(--gbg);color:var(--green)}
-  .task-status-btn.done .status-dot{border-color:var(--green);background:var(--green)}
-  .task-status-info{font-size:0.68rem;color:var(--muted);margin-top:2px;margin-left:4px}
-  .task-status-info strong{color:var(--amber)}
-  .task-status-info.done-info strong{color:var(--green)}
-  .task.inprogress{border-left:3px solid var(--amber);padding-left:11px}
-  .task.done .task-what strong{color:var(--muted);text-decoration:line-through}
+  .task-status-btn .status-dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--text-secondary);background:transparent;flex-shrink:0}
+  .task-status-btn.inprogress{border-color:var(--warning);background:var(--warning-bg);color:var(--warning)}
+  .task-status-btn.inprogress .status-dot{border-color:var(--warning);background:var(--warning);animation:pulse-amber 2s ease-in-out infinite}
+  .task-status-btn.done{border-color:var(--success);background:var(--success-bg);color:var(--success)}
+  .task-status-btn.done .status-dot{border-color:var(--success);background:var(--success)}
+  .task-status-info{font-size:0.68rem;color:var(--text-secondary);margin-top:2px;margin-left:4px}
+  .task-status-info strong{color:var(--warning)}
+  .task-status-info.done-info strong{color:var(--success)}
+  .task.inprogress{border-left:3px solid var(--warning);padding-left:11px}
+  .task.done .task-what strong{color:var(--text-secondary);text-decoration:line-through}
   .task.done .task-what .detail{opacity:0.5}
-  .task.done{border-left:3px solid var(--green);padding-left:11px}
+  .task.done{border-left:3px solid var(--success);padding-left:11px}
 
-  @keyframes pulse-amber{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0)}}
+  @keyframes pulse-amber{0%,100%{box-shadow:0 0 0 0 var(--warning)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0)}}
 
   /* Workload summary bar */
   .workload-bar{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;padding:6px 0;margin-bottom:8px;font-size:0.72rem}
-  .workload-item{display:flex;align-items:center;gap:6px;background:var(--s1);border:1px solid var(--border);border-radius:20px;padding:4px 12px}
+  .workload-item{display:flex;align-items:center;gap:6px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:20px;padding:4px 12px}
   .workload-item .wl-name{font-weight:700}
-  .workload-item .wl-counts{color:var(--muted)}
-  .workload-item .wl-todo{color:var(--muted)}
-  .workload-item .wl-ip{color:var(--amber)}
-  .workload-item .wl-done{color:var(--green)}
+  .workload-item .wl-counts{color:var(--text-secondary)}
+  .workload-item .wl-todo{color:var(--text-secondary)}
+  .workload-item .wl-ip{color:var(--warning)}
+  .workload-item .wl-done{color:var(--success)}
 
   /* Step-num status overrides */
-  .step-num.has-inprogress{border-color:var(--amber)!important;color:var(--amber)!important;background:var(--abg)!important;animation:pulse-amber 2s ease-in-out infinite}
-  .step-num.all-done{border-color:var(--green)!important;color:var(--green)!important;background:var(--gbg)!important}
+  .step-num.has-inprogress{border-color:var(--warning)!important;color:var(--warning)!important;background:var(--warning-bg)!important;animation:pulse-amber 2s ease-in-out infinite}
+  .step-num.all-done{border-color:var(--success)!important;color:var(--success)!important;background:var(--success-bg)!important}
 
   /* Filter bar */
   .filter-bar{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;padding:8px 0;margin-bottom:16px}
-  .filter-btn{background:var(--s2);border:1px solid var(--border);color:var(--muted);padding:5px 14px;border-radius:20px;cursor:pointer;font-size:0.75rem;font-weight:600;transition:all .2s}
-  .filter-btn:hover{border-color:var(--accent);color:var(--text)}
+  .filter-btn{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-secondary);padding:5px 14px;border-radius:20px;cursor:pointer;font-size:0.75rem;font-weight:600;transition:all .2s}
+  .filter-btn:hover{border-color:var(--accent);color:var(--text-primary)}
   .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .filter-btn.f-kevin.active{background:var(--purple);border-color:var(--purple)}
-  .filter-btn.f-mica.active{background:var(--blue);border-color:var(--blue)}
-  .filter-btn.f-erica.active{background:var(--green);border-color:var(--green)}
-  .filter-btn.f-inprog.active{background:var(--amber);border-color:var(--amber)}
+  .filter-btn.f-kevin.active{background:var(--accent);border-color:var(--accent)}
+  .filter-btn.f-mica.active{background:var(--info);border-color:var(--info)}
+  .filter-btn.f-erica.active{background:var(--success);border-color:var(--success)}
+  .filter-btn.f-inprog.active{background:var(--warning);border-color:var(--warning)}
   .task.dimmed{opacity:0.25;pointer-events:none}
 
   /* Progress bar */
-  .prog-bar{height:6px;background:var(--s2);border-radius:3px;overflow:hidden;margin-top:4px}
+  .prog-bar{height:6px;background:var(--bg-surface-2);border-radius:3px;overflow:hidden;margin-top:4px}
   .prog-fill{height:100%;border-radius:3px;transition:width .4s ease}
-  .prog-fill.green{background:var(--green)}
-  .prog-fill.amber{background:var(--amber)}
-  .prog-fill.red{background:var(--red)}
+  .prog-fill.green{background:var(--success)}
+  .prog-fill.amber{background:var(--warning)}
+  .prog-fill.red{background:var(--danger)}
 
   /* Week progress */
-  .week-progress{text-align:center;font-size:0.68rem;color:var(--muted);margin-top:2px}
+  .week-progress{text-align:center;font-size:0.68rem;color:var(--text-secondary);margin-top:2px}
   .week-progress .prog-bar{height:4px;max-width:200px;margin:2px auto 0}
 
   /* Day badge */
-  .day-badge{display:inline-block;font-size:0.65rem;background:var(--s2);color:var(--muted);padding:1px 8px;border-radius:10px;margin-left:8px;vertical-align:middle}
-  .day-badge.all-done{background:var(--gbg);color:var(--green)}
+  .day-badge{display:inline-block;font-size:0.65rem;background:var(--bg-surface-2);color:var(--text-secondary);padding:1px 8px;border-radius:10px;margin-left:8px;vertical-align:middle}
+  .day-badge.all-done{background:var(--success-bg);color:var(--success)}
 
   /* KPI dynamic */
-  .kpi .mini-bar{height:4px;background:var(--s2);border-radius:2px;margin-top:8px;overflow:hidden}
+  .kpi .mini-bar{height:4px;background:var(--bg-surface-2);border-radius:2px;margin-top:8px;overflow:hidden}
   .kpi .mini-fill{height:100%;border-radius:2px;transition:width .4s}
   .kpi .status-label{font-size:0.75rem;font-weight:700;margin-top:4px}
-  .kpi .status-label.on-track{color:var(--green)}
-  .kpi .status-label.at-risk{color:var(--amber)}
-  .kpi .status-label.behind{color:var(--red)}
+  .kpi .status-label.on-track{color:var(--success)}
+  .kpi .status-label.at-risk{color:var(--warning)}
+  .kpi .status-label.behind{color:var(--danger)}
 
   /* Activity log */
-  .activity-log{background:var(--s2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem}
+  .activity-log{background:var(--bg-surface-2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem}
   .activity-log .al-title{font-size:0.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);font-weight:700;margin-bottom:6px}
-  .activity-log .al-item{color:var(--muted);padding:2px 0}
-  .activity-log .al-item .al-name{font-weight:600;color:var(--text)}
-  .activity-log .al-item .al-time{font-size:0.68rem;color:var(--muted);margin-left:6px}
+  .activity-log .al-item{color:var(--text-secondary);padding:2px 0}
+  .activity-log .al-item .al-name{font-weight:600;color:var(--text-primary)}
+  .activity-log .al-item .al-time{font-size:0.68rem;color:var(--text-secondary);margin-left:6px}
 
   /* Balance warning toast */
-  .balance-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--amber);color:#000;padding:12px 24px;border-radius:12px;font-size:0.82rem;font-weight:600;z-index:100;box-shadow:0 4px 20px rgba(0,0,0,0.4);max-width:500px;text-align:center;animation:toast-in .3s ease}
+  .balance-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--warning);color:#000;padding:12px 24px;border-radius:12px;font-size:0.82rem;font-weight:600;z-index:100;box-shadow:var(--shadow-lg);max-width:500px;text-align:center;animation:toast-in .3s ease}
   .balance-toast .toast-close{margin-left:12px;cursor:pointer;font-weight:800;opacity:0.7}
   .balance-toast .toast-close:hover{opacity:1}
   @keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
   /* Workload item warning state */
-  .workload-item.wl-warn{border-color:var(--amber);background:var(--abg)}
-  .workload-item.wl-idle{border-color:var(--red);background:var(--rbg)}
-  .wl-idle-badge{font-size:0.65rem;color:var(--red);font-weight:700;margin-left:4px}
-  .wl-spec-badge{font-size:0.6rem;color:var(--muted);font-style:italic;margin-left:4px}
+  .workload-item.wl-warn{border-color:var(--warning);background:var(--warning-bg)}
+  .workload-item.wl-idle{border-color:var(--danger);background:var(--danger-bg)}
+  .wl-idle-badge{font-size:0.65rem;color:var(--danger);font-weight:700;margin-left:4px}
+  .wl-spec-badge{font-size:0.6rem;color:var(--text-secondary);font-style:italic;margin-left:4px}
 
   @media print{.filter-bar,.task-status-btn,.week-progress,.activity-log,.workload-bar,.balance-toast{display:none}}
 </style>
@@ -364,34 +361,34 @@
 <!-- How to use this -->
 <div id="helpGuide" class="card" style="border-color:var(--accent);margin-bottom:20px;position:relative">
   <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="document.getElementById('helpBody').style.display=document.getElementById('helpBody').style.display==='none'?'block':'none';this.querySelector('.help-arrow').textContent=document.getElementById('helpBody').style.display==='none'?'Show':'Hide'">
-    <h3 style="margin:0;font-size:0.95rem;color:var(--al)">How To Use This Page (read this first!)</h3>
-    <span class="help-arrow" style="font-size:0.75rem;color:var(--accent);font-weight:700;background:rgba(99,102,241,0.15);padding:3px 10px;border-radius:12px;cursor:pointer">Hide</span>
+    <h3 style="margin:0;font-size:0.95rem;color:var(--accent)">How To Use This Page (read this first!)</h3>
+    <span class="help-arrow" style="font-size:0.75rem;color:var(--accent);font-weight:700;background:var(--accent-soft);padding:3px 10px;border-radius:12px;cursor:pointer">Hide</span>
   </div>
-  <div id="helpBody" style="margin-top:14px;font-size:0.85rem;color:var(--muted);line-height:1.8">
-    <p style="margin-bottom:12px;color:var(--text);font-weight:600">There are only 4 things you need to know:</p>
+  <div id="helpBody" style="margin-top:14px;font-size:0.85rem;color:var(--text-secondary);line-height:1.8">
+    <p style="margin-bottom:12px;color:var(--text-primary);font-weight:600">There are only 4 things you need to know:</p>
 
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
-      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">1</div>
-      <div><strong style="color:var(--text)">Mark your tasks.</strong> Every task has a button on the left that says <span style="color:var(--muted);background:var(--s2);padding:2px 8px;border-radius:10px;font-size:0.75rem;border:1px solid var(--border)">To Do</span>. Click it once and it turns <span style="color:var(--amber);font-weight:700">In Progress</span> (so everyone knows you're working on it). Click it again and it turns <span style="color:var(--green);font-weight:700">Done</span>. That's it. If you made a mistake, click it one more time to reset it back to To Do.</div>
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--bg-surface-2);border:2px solid var(--border-default);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">1</div>
+      <div><strong style="color:var(--text-primary)">Mark your tasks.</strong> Every task has a button on the left that says <span style="color:var(--text-secondary);background:var(--bg-surface-2);padding:2px 8px;border-radius:10px;font-size:0.75rem;border:1px solid var(--border-default)">To Do</span>. Click it once and it turns <span style="color:var(--warning);font-weight:700">In Progress</span> (so everyone knows you're working on it). Click it again and it turns <span style="color:var(--success);font-weight:700">Done</span>. That's it. If you made a mistake, click it one more time to reset it back to To Do.</div>
     </div>
 
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
-      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">2</div>
-      <div><strong style="color:var(--text)">Change who's doing a task.</strong> Next to each task's name tag there's a small dropdown box. Click it and pick a different person. The task will move to their workload. The header above the task updates too — everything stays in sync.</div>
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--bg-surface-2);border:2px solid var(--border-default);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">2</div>
+      <div><strong style="color:var(--text-primary)">Change who's doing a task.</strong> Next to each task's name tag there's a small dropdown box. Click it and pick a different person. The task will move to their workload. The header above the task updates too — everything stays in sync.</div>
     </div>
 
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
-      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">3</div>
-      <div><strong style="color:var(--text)">See only your tasks.</strong> The filter buttons above (<span style="color:var(--purple);font-weight:600">Kevin</span> / <span style="color:var(--blue);font-weight:600">Mica</span> / <span style="color:var(--green);font-weight:600">Ericamae</span>) will highlight just your tasks and dim everyone else's. Click <span style="font-weight:600">All Tasks</span> to see everything again.</div>
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--bg-surface-2);border:2px solid var(--border-default);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">3</div>
+      <div><strong style="color:var(--text-primary)">See only your tasks.</strong> The filter buttons above (<span style="color:var(--accent);font-weight:600">Kevin</span> / <span style="color:var(--info);font-weight:600">Mica</span> / <span style="color:var(--success);font-weight:600">Ericamae</span>) will highlight just your tasks and dim everyone else's. Click <span style="font-weight:600">All Tasks</span> to see everything again.</div>
     </div>
 
     <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px">
-      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--s2);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">4</div>
-      <div><strong style="color:var(--text)">Check progress.</strong> The numbers at the very top tell you how the project is going. The coloured bar under each week shows how much of that week is done. The workload bar (just above this box) shows how many tasks each person has left.</div>
+      <div style="min-width:28px;height:28px;border-radius:50%;background:var(--bg-surface-2);border:2px solid var(--border-default);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;color:var(--accent);flex-shrink:0">4</div>
+      <div><strong style="color:var(--text-primary)">Check progress.</strong> The numbers at the very top tell you how the project is going. The coloured bar under each week shows how much of that week is done. The workload bar (just above this box) shows how many tasks each person has left.</div>
     </div>
 
-    <div style="background:var(--s2);border-radius:8px;padding:10px 14px;margin-top:8px;border-left:3px solid var(--amber)">
-      <p style="font-size:0.8rem;color:var(--amber);font-weight:700;margin-bottom:4px">Important</p>
+    <div style="background:var(--bg-surface-2);border-radius:8px;padding:10px 14px;margin-top:8px;border-left:3px solid var(--warning)">
+      <p style="font-size:0.8rem;color:var(--warning);font-weight:700;margin-bottom:4px">Important</p>
       <p style="font-size:0.8rem;margin:0">Your changes save automatically in your browser. If someone else is using a different computer, they won't see your changes — each person tracks their own progress. If you clear your browser data, your progress will reset.</p>
     </div>
   </div>
@@ -411,8 +408,8 @@
 
   <div class="card" style="border-left:4px solid var(--accent)">
     <h3>The Shift</h3>
-    <p><strong style="color:var(--text)">From:</strong> Done-for-you 12-week implementations at &pound;15k + equity stakes. Founder-dependent. Unscalable.</p>
-    <p style="margin-top:10px"><strong style="color:var(--text)">To:</strong> Scalable module marketplace. One-off purchases. Self-serve onboarding. No founder dependency in delivery. Claude builds the product. Humans sell and support it.</p>
+    <p><strong style="color:var(--text-primary)">From:</strong> Done-for-you 12-week implementations at &pound;15k + equity stakes. Founder-dependent. Unscalable.</p>
+    <p style="margin-top:10px"><strong style="color:var(--text-primary)">To:</strong> Scalable module marketplace. One-off purchases. Self-serve onboarding. No founder dependency in delivery. Claude builds the product. Humans sell and support it.</p>
   </div>
 
   <div class="card">
@@ -424,7 +421,7 @@
 
   <div class="card">
     <h3>Competitive Positioning</h3>
-    <p>Operations Director sits in a gap nobody is filling: <strong style="color:var(--text)">AI-first, fully integrated, one-off purchase business operating system modules</strong> for founder-dependent micro-businesses.</p>
+    <p>Operations Director sits in a gap nobody is filling: <strong style="color:var(--text-primary)">AI-first, fully integrated, one-off purchase business operating system modules</strong> for founder-dependent micro-businesses.</p>
     <table style="margin-top:12px">
       <thead><tr><th>Competitor</th><th>Model</th><th>Price</th><th>AI-First?</th><th>Gap</th></tr></thead>
       <tbody>
@@ -432,7 +429,7 @@
         <tr><td>Notion / Airtable templates</td><td>One-off templates</td><td>&pound;30-200</td><td>No</td><td>DIY frameworks, not applications</td></tr>
         <tr><td>systemHUB</td><td>SaaS subscription</td><td>&pound;95/month</td><td>No</td><td>SOPs only, nothing else</td></tr>
         <tr><td>ClickUp / Asana / Monday</td><td>SaaS subscription</td><td>&pound;10-30/user/month</td><td>Partially</td><td>Task management only, not whole business</td></tr>
-        <tr><td style="color:var(--al);font-weight:700">Operations Director</td><td style="color:var(--green)">One-off purchase</td><td style="color:var(--green)">&pound;197-997</td><td style="color:var(--green)">Yes</td><td style="color:var(--green)">Full lifecycle. Working apps. AI-built.</td></tr>
+        <tr><td style="color:var(--accent);font-weight:700">Operations Director</td><td style="color:var(--success)">One-off purchase</td><td style="color:var(--success)">&pound;197-997</td><td style="color:var(--success)">Yes</td><td style="color:var(--success)">Full lifecycle. Working apps. AI-built.</td></tr>
       </tbody>
     </table>
   </div>
@@ -442,22 +439,22 @@
     <p>36 modules across 8 categories mapped to the full business lifecycle:</p>
     <div class="journey">
       <div class="j-step"><div class="j-dot" style="background:rgba(99,102,241,0.2);color:var(--accent)">&#128203;</div><div class="j-lbl">PLAN</div><div class="j-cnt">3 modules</div></div>
-      <div class="j-step"><div class="j-dot" style="background:rgba(59,130,246,0.2);color:var(--blue)">&#128295;</div><div class="j-lbl">BUILD</div><div class="j-cnt">5 modules</div></div>
-      <div class="j-step"><div class="j-dot" style="background:rgba(16,185,129,0.2);color:var(--green)">&#128227;</div><div class="j-lbl">ATTRACT</div><div class="j-cnt">6 modules</div></div>
-      <div class="j-step"><div class="j-dot" style="background:rgba(245,158,11,0.2);color:var(--amber)">&#129309;</div><div class="j-lbl">CONVERT</div><div class="j-cnt">4 modules</div></div>
-      <div class="j-step"><div class="j-dot" style="background:rgba(236,72,153,0.2);color:var(--pink)">&#128183;</div><div class="j-lbl">COLLECT</div><div class="j-cnt">4 modules</div></div>
-      <div class="j-step"><div class="j-dot" style="background:rgba(139,92,246,0.2);color:var(--purple)">&#128230;</div><div class="j-lbl">DELIVER</div><div class="j-cnt">5 modules</div></div>
-      <div class="j-step"><div class="j-dot" style="background:rgba(16,185,129,0.2);color:var(--green)">&#128260;</div><div class="j-lbl">RETAIN</div><div class="j-cnt">4 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(59,130,246,0.2);color:var(--info)">&#128295;</div><div class="j-lbl">BUILD</div><div class="j-cnt">5 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(16,185,129,0.2);color:var(--success)">&#128227;</div><div class="j-lbl">ATTRACT</div><div class="j-cnt">6 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(245,158,11,0.2);color:var(--warning)">&#129309;</div><div class="j-lbl">CONVERT</div><div class="j-cnt">4 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(236,72,153,0.2);color:var(--accent)">&#128183;</div><div class="j-lbl">COLLECT</div><div class="j-cnt">4 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(139,92,246,0.2);color:var(--accent)">&#128230;</div><div class="j-lbl">DELIVER</div><div class="j-cnt">5 modules</div></div>
+      <div class="j-step"><div class="j-dot" style="background:rgba(16,185,129,0.2);color:var(--success)">&#128260;</div><div class="j-lbl">RETAIN</div><div class="j-cnt">4 modules</div></div>
       <div class="j-step"><div class="j-dot" style="background:rgba(99,102,241,0.2);color:var(--accent)">&#9881;</div><div class="j-lbl">BACK OFFICE</div><div class="j-cnt">5 modules</div></div>
     </div>
   </div>
 
   <div class="tl-bar">
     <div class="tl-seg" style="background:var(--accent);color:#fff"><div class="tl-lbl">Week 1: Foundation</div><div class="tl-date">15-20 Apr</div></div>
-    <div class="tl-seg" style="background:var(--green);color:#fff"><div class="tl-lbl">Week 2: Modules</div><div class="tl-date">21-27 Apr</div></div>
-    <div class="tl-seg" style="background:var(--amber);color:#fff"><div class="tl-lbl">Week 3: Polish</div><div class="tl-date">28 Apr-5 May</div></div>
-    <div class="tl-seg" style="background:var(--blue);color:#fff"><div class="tl-lbl">Week 4: Website</div><div class="tl-date">6-11 May</div></div>
-    <div class="tl-seg" style="background:var(--pink);color:#fff"><div class="tl-lbl">Week 5: Launch</div><div class="tl-date">12-14 May</div></div>
+    <div class="tl-seg" style="background:var(--success);color:#fff"><div class="tl-lbl">Week 2: Modules</div><div class="tl-date">21-27 Apr</div></div>
+    <div class="tl-seg" style="background:var(--warning);color:#fff"><div class="tl-lbl">Week 3: Polish</div><div class="tl-date">28 Apr-5 May</div></div>
+    <div class="tl-seg" style="background:var(--info);color:#fff"><div class="tl-lbl">Week 4: Website</div><div class="tl-date">6-11 May</div></div>
+    <div class="tl-seg" style="background:var(--accent);color:#fff"><div class="tl-lbl">Week 5: Launch</div><div class="tl-date">12-14 May</div></div>
   </div>
 </div>
 
@@ -479,12 +476,12 @@
     </div>
   </div>
 
-  <div class="card" style="border-left:4px solid var(--green)">
-    <h3><span class="tag" style="background:var(--gbg);color:var(--green)">CHOSEN</span> &nbsp;Delivery Model: Hosted on Free Infrastructure</h3>
+  <div class="card" style="border-left:4px solid var(--success)">
+    <h3><span class="tag" style="background:var(--success-bg);color:var(--success)">CHOSEN</span> &nbsp;Delivery Model: Hosted on Free Infrastructure</h3>
     <p>Each customer's module is deployed to Netlify (free tier). Customer gets a unique URL like <em>smithco-finance.operationsdirector.co.uk</em> that works instantly in any browser.</p>
     <div class="pc" style="margin-top:12px">
       <div class="pc-col pro">
-        <h4 style="color:var(--green)">Why This Works</h4>
+        <h4 style="color:var(--success)">Why This Works</h4>
         <ul>
           <li>Zero hosting cost — free tiers support 100+ sites</li>
           <li>Instant deployment via Claude + script</li>
@@ -496,7 +493,7 @@
         </ul>
       </div>
       <div class="pc-col con">
-        <h4 style="color:var(--red)">Watch Out For</h4>
+        <h4 style="color:var(--danger)">Watch Out For</h4>
         <ul>
           <li>Need a deployment pipeline (built in Week 3)</li>
           <li>Must use Supabase for data — NOT localStorage alone</li>
@@ -512,7 +509,7 @@
 
   <div class="card">
     <h3>Future Delivery Option: Bespoke Build Per Customer</h3>
-    <p style="color:var(--muted)">Customer provides their business info, Claude generates a fully customised application, deployed to their subdomain. Justifies premium pricing (&pound;499-999+). <strong style="color:var(--text)">Add this as a premium tier once you have 10+ standard module sales</strong> and understand what customisation customers actually want. Not for launch.</p>
+    <p style="color:var(--text-secondary)">Customer provides their business info, Claude generates a fully customised application, deployed to their subdomain. Justifies premium pricing (&pound;499-999+). <strong style="color:var(--text-primary)">Add this as a premium tier once you have 10+ standard module sales</strong> and understand what customisation customers actually want. Not for launch.</p>
   </div>
 
   <div class="card">
@@ -550,264 +547,264 @@
 <!-- ============================================ -->
 <div id="modules" class="sec">
   <div class="sh">Full Module Catalogue — 36 Modules</div>
-  <div class="sh-sub">Every module mapped to the business lifecycle. Colour-coded by build phase: <span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span> <span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span> <span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+  <div class="sh-sub">Every module mapped to the business lifecycle. Colour-coded by build phase: <span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span> <span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span> <span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
 
   <!-- Build Sequence -->
   <div class="card" style="margin-bottom:24px">
     <h3>Build Sequence</h3>
-    <div class="hl"><p><strong style="color:var(--green)">LAUNCH PRIORITY — Build by 12 May:</strong> 13 modules. These are what we need to launch OD + first sellable products.</p></div>
-    <div class="hl"><p><strong style="color:var(--amber)">PHASE 2 — May to June:</strong> 13 modules. Expand the catalogue, build recurring revenue tools.</p></div>
-    <div class="hl"><p><strong style="color:var(--blue)">PHASE 3 — July onwards:</strong> 6 modules. Advanced/niche modules, enterprise features.</p></div>
+    <div class="hl"><p><strong style="color:var(--success)">LAUNCH PRIORITY — Build by 12 May:</strong> 13 modules. These are what we need to launch OD + first sellable products.</p></div>
+    <div class="hl"><p><strong style="color:var(--warning)">PHASE 2 — May to June:</strong> 13 modules. Expand the catalogue, build recurring revenue tools.</p></div>
+    <div class="hl"><p><strong style="color:var(--info)">PHASE 3 — July onwards:</strong> 6 modules. Advanced/niche modules, enterprise features.</p></div>
   </div>
 
   <!-- PLAN -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(99,102,241,0.15);color:var(--accent)">&#128203;</div>
+    <div class="cat-icon" style="background:var(--accent-soft);color:var(--accent)">&#128203;</div>
     <div><div class="cat-title">PLAN — Define the Business</div><div class="cat-sub">From idea to structured business plan. What you do, who you serve, how you make money.</div></div>
     <div class="cat-badge">3 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">PLAN-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Business Plan &amp; Launch Plan Builder</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Built &#10003;</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Business Plan &amp; Launch Plan Builder</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Built &#10003;</span></div>
       <p>Guided 10-step wizard from rough idea to complete business plan + 30-day launch plan. AI coaches through every section. PDF output.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">PLAN-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Brand Identity Builder</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Brand Identity Builder</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Name, positioning, tone of voice, colour palette, AI logo brief. Outputs a one-page brand guide.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">PLAN-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>Financial Forecast &amp; Startup Budget</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Financial Forecast &amp; Startup Budget</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>12-month financial projection: revenue forecasts, cost modelling, break-even analysis, cash runway calculator.</p>
     </div>
   </div>
 
   <!-- BUILD -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(59,130,246,0.15);color:var(--blue)">&#128295;</div>
+    <div class="cat-icon" style="background:rgba(59,130,246,0.15);color:var(--info)">&#128295;</div>
     <div><div class="cat-title">BUILD — Set Up the Infrastructure</div><div class="cat-sub">Everything needed to go from plan to operational business. Legal, tech, payments, comms.</div></div>
     <div class="cat-badge">5 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">BUILD-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Website Setup Guide</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Website Setup Guide</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Step-by-step to get a site live in 48 hours. Domain, hosting, WooCommerce, SEO basics. AI writes all copy.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">BUILD-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Legal &amp; Compliance Launcher</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Legal &amp; Compliance Launcher</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Company registration, insurance, GDPR, T&amp;Cs, privacy policy, cookie policy. AI generates all docs.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">BUILD-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>Payment &amp; Billing Setup</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Payment &amp; Billing Setup</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Stripe setup, payment links, invoicing templates, billing workflows. Step-by-step with screenshots.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">BUILD-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Email &amp; Domain Setup Guide</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Email &amp; Domain Setup Guide</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Professional email setup (Google Workspace), email signature generator, DNS config, initial templates.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">BUILD-05</div>
-      <div style="display:flex;justify-content:space-between"><h4>Tech Stack Selector</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Tech Stack Selector</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Interactive tool to select the right software stack based on business type, budget, and team size.</p>
     </div>
   </div>
 
   <!-- ATTRACT -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128227;</div>
+    <div class="cat-icon" style="background:rgba(16,185,129,0.15);color:var(--success)">&#128227;</div>
     <div><div class="cat-title">ATTRACT — Marketing &amp; Attention</div><div class="cat-sub">Finding your target market, grabbing attention, and building an audience.</div></div>
     <div class="cat-badge">6 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">ATTRACT-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Marketing Strategy &amp; Channel Planner</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Marketing Strategy &amp; Channel Planner</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Identifies right channels for your business. AI analyses target market, recommends where to spend, with expected ROI per channel.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">ATTRACT-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>AI Content Creator &amp; Calendar</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>AI Content Creator &amp; Calendar</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>30-day content calendar with AI-written posts for every platform. User just reviews and posts.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">ATTRACT-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>SEO &amp; AI Search Optimiser</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>SEO &amp; AI Search Optimiser</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Keyword research, on-page SEO, meta descriptions, structured data, AI search optimisation.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">ATTRACT-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Paid Advertising Manager</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Paid Advertising Manager</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Sets up Meta/Google campaigns. AI writes copy, sets targeting, tracks CPA. Includes spend vs return dashboard.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">ATTRACT-05</div>
-      <div style="display:flex;justify-content:space-between"><h4>Lead Magnet &amp; Funnel Builder</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Lead Magnet &amp; Funnel Builder</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Creates a lead magnet, landing page, and email nurture sequence. AI writes everything.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">ATTRACT-06</div>
-      <div style="display:flex;justify-content:space-between"><h4>Marketing ROI Dashboard</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Marketing ROI Dashboard</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Tracks spend across all channels, measures cost per lead, CPA, and ROAS. Visual dashboard.</p>
     </div>
   </div>
 
   <!-- CONVERT -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(245,158,11,0.15);color:var(--amber)">&#129309;</div>
+    <div class="cat-icon" style="background:rgba(245,158,11,0.15);color:var(--warning)">&#129309;</div>
     <div><div class="cat-title">CONVERT — Sales &amp; Closing</div><div class="cat-sub">Turning leads into paying customers. Pipeline, proposals, follow-ups, closing.</div></div>
     <div class="cat-badge">4 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">CONVERT-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Sales Pipeline &amp; CRM</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Sales Pipeline &amp; CRM</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Visual pipeline: Lead &rarr; Qualified &rarr; Proposal &rarr; Won/Lost. Tracks prospects, next actions, conversion rates.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">CONVERT-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Proposal &amp; Quote Generator</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Proposal &amp; Quote Generator</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>AI generates professional proposals from a few inputs. Branded templates, auto pricing, PDF export.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">CONVERT-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>Sales Script &amp; Objection Handler</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Sales Script &amp; Objection Handler</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>AI-generated sales scripts tailored to your product. Top 10 objections with tested responses.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">CONVERT-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Follow-Up Sequence Builder</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Follow-Up Sequence Builder</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Automated email/message follow-up sequences for leads at every stage. Includes "gone cold" re-engagement.</p>
     </div>
   </div>
 
   <!-- COLLECT -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(236,72,153,0.15);color:var(--pink)">&#128183;</div>
+    <div class="cat-icon" style="background:rgba(236,72,153,0.15);color:var(--accent)">&#128183;</div>
     <div><div class="cat-title">COLLECT — Finance &amp; Payments</div><div class="cat-sub">Getting paid, tracking money, managing cash flow, staying on top of tax.</div></div>
     <div class="cat-badge">4 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">COLLECT-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Invoice &amp; Payment Tracker</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Invoice &amp; Payment Tracker</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Creates/sends branded invoices, tracks status (sent/overdue/paid), auto-generates chaser emails.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">COLLECT-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Cash Flow Forecaster</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Cash Flow Forecaster</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>30-day rolling forecast. Maps incoming vs outgoing, highlights danger dates, suggests payment timing.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">COLLECT-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>Expense &amp; Budget Monitor</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Expense &amp; Budget Monitor</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Tracks all expenses against budget categories. Flags overspend, identifies savings, monthly reports.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--blue)">
+    <div class="mod-card" style="border-left:3px solid var(--info)">
       <div class="mid">COLLECT-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Tax &amp; VAT Planner</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Tax &amp; VAT Planner</h4><span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
       <p>Quarterly tax estimates, VAT tracking, monthly provisions, year-end accountant summary.</p>
     </div>
   </div>
 
   <!-- DELIVER -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(139,92,246,0.15);color:var(--purple)">&#128230;</div>
+    <div class="cat-icon" style="background:rgba(139,92,246,0.15);color:var(--accent)">&#128230;</div>
     <div><div class="cat-title">DELIVER — Operations &amp; Fulfilment</div><div class="cat-sub">Onboarding clients, delivering products/services, managing projects, building repeatable processes.</div></div>
     <div class="cat-badge">5 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--green)">
+    <div class="mod-card" style="border-left:3px solid var(--success)">
       <div class="mid">DELIVER-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Client Onboarding System</h4><span class="tag" style="background:var(--gbg);color:var(--green)">Launch</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Client Onboarding System</h4><span class="tag" style="background:var(--success-bg);color:var(--success)">Launch</span></div>
       <p>Onboarding workflow from sale to first delivery. Welcome emails, intake forms, kickoff agenda, checklists.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">DELIVER-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Project &amp; Task Manager</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Project &amp; Task Manager</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Kanban board: To Do &rarr; In Progress &rarr; Review &rarr; Done. Assign tasks, set deadlines, track time.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">DELIVER-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>SOP &amp; Process Builder</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>SOP &amp; Process Builder</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>AI interviews you about how you do something, then writes the SOP with numbered steps and checklists.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--blue)">
+    <div class="mod-card" style="border-left:3px solid var(--info)">
       <div class="mid">DELIVER-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Quality Control Checklist</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Quality Control Checklist</h4><span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
       <p>QC checklists for products/services. AI generates based on your delivery process. Tracks pass/fail rates.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">DELIVER-05</div>
-      <div style="display:flex;justify-content:space-between"><h4>Client Communication Templates</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Client Communication Templates</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Pre-written templates for every client touchpoint. AI personalises each one.</p>
     </div>
   </div>
 
   <!-- RETAIN -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(16,185,129,0.15);color:var(--green)">&#128260;</div>
+    <div class="cat-icon" style="background:rgba(16,185,129,0.15);color:var(--success)">&#128260;</div>
     <div><div class="cat-title">RETAIN — Loyalty &amp; Growth</div><div class="cat-sub">Keeping customers, getting referrals, upselling, building recurring revenue.</div></div>
     <div class="cat-badge">4 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">RETAIN-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Feedback &amp; Review Collector</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Feedback &amp; Review Collector</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Automated feedback at key moments. NPS scores, Google/Trustpilot prompts, testimonials. AI drafts responses.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">RETAIN-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Referral &amp; Affiliate Programme</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Referral &amp; Affiliate Programme</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Referral programme with tracking, reward tiers, automated link generation. AI designs incentive structure.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--blue)">
+    <div class="mod-card" style="border-left:3px solid var(--info)">
       <div class="mid">RETAIN-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>Upsell &amp; Renewal Tracker</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Upsell &amp; Renewal Tracker</h4><span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
       <p>Identifies upsell opportunities, schedules renewal reminders, AI drafts personalised offers.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--blue)">
+    <div class="mod-card" style="border-left:3px solid var(--info)">
       <div class="mid">RETAIN-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Client Health Score Dashboard</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Client Health Score Dashboard</h4><span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
       <p>Scores each client on engagement, payment, tickets, satisfaction. Flags at-risk clients early.</p>
     </div>
   </div>
 
   <!-- BACK OFFICE -->
   <div class="cat-hdr">
-    <div class="cat-icon" style="background:rgba(99,102,241,0.15);color:var(--accent)">&#9881;</div>
+    <div class="cat-icon" style="background:var(--accent-soft);color:var(--accent)">&#9881;</div>
     <div><div class="cat-title">BACK OFFICE — Admin, HR &amp; Legal</div><div class="cat-sub">Team management, legal documents, compliance, and the master business scoreboard.</div></div>
     <div class="cat-badge">5 modules</div>
   </div>
   <div class="mod-grid">
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">BACK-01</div>
-      <div style="display:flex;justify-content:space-between"><h4>Team Roles &amp; Onboarding Guide</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Team Roles &amp; Onboarding Guide</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Defines roles, responsibilities, reporting lines. Job descriptions, onboarding checklists, first-week schedules.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--blue)">
+    <div class="mod-card" style="border-left:3px solid var(--info)">
       <div class="mid">BACK-02</div>
-      <div style="display:flex;justify-content:space-between"><h4>Recruitment &amp; Hiring Process</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Recruitment &amp; Hiring Process</h4><span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
       <p>AI writes job ads, scores CVs, generates interview questions, creates offer letter templates.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">BACK-03</div>
-      <div style="display:flex;justify-content:space-between"><h4>Contract &amp; Legal Document Generator</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Contract &amp; Legal Document Generator</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Generates contracts, NDAs, freelancer agreements from simple inputs. AI fills legal language.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--blue)">
+    <div class="mod-card" style="border-left:3px solid var(--info)">
       <div class="mid">BACK-04</div>
-      <div style="display:flex;justify-content:space-between"><h4>Meeting &amp; Decision Tracker</h4><span class="tag" style="background:var(--bbg);color:var(--blue)">Phase 3</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Meeting &amp; Decision Tracker</h4><span class="tag" style="background:var(--info-bg);color:var(--info)">Phase 3</span></div>
       <p>Meeting agendas, AI-generated minutes, action items, decision log, completion tracking.</p>
     </div>
-    <div class="mod-card" style="border-left:3px solid var(--amber)">
+    <div class="mod-card" style="border-left:3px solid var(--warning)">
       <div class="mid">BACK-05</div>
-      <div style="display:flex;justify-content:space-between"><h4>Business Performance Scoreboard</h4><span class="tag" style="background:var(--abg);color:var(--amber)">Phase 2</span></div>
+      <div style="display:flex;justify-content:space-between"><h4>Business Performance Scoreboard</h4><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Phase 2</span></div>
       <p>Master dashboard pulling KPIs from every module. Revenue, costs, pipeline, satisfaction. AI writes commentary.</p>
     </div>
   </div>
@@ -840,10 +837,10 @@
     <table>
       <thead><tr><th>Tier</th><th>Price Range</th><th>SaaS Equivalent</th><th>Customer Payback</th><th>Examples</th></tr></thead>
       <tbody>
-        <tr><td><span class="tag" style="background:var(--gbg);color:var(--green)">Standard</span></td><td><strong>&pound;197 - &pound;297</strong></td><td>&pound;15-25/month</td><td>8-12 months</td><td>Tasks, Strategy, Content Creator</td></tr>
-        <tr><td><span class="tag" style="background:var(--bbg);color:var(--blue)">Premium</span></td><td><strong>&pound;397 - &pound;597</strong></td><td>&pound;40-60/month</td><td>7-10 months</td><td>Finance, Scoreboards, CRM</td></tr>
-        <tr><td><span class="tag" style="background:var(--pbg);color:var(--purple)">Advanced</span></td><td><strong>&pound;697 - &pound;997</strong></td><td>&pound;80-100/month</td><td>7-10 months</td><td>AI &amp; Intelligence, Full Methods suite</td></tr>
-        <tr><td><span class="tag" style="background:var(--abg);color:var(--amber)">Bundle</span></td><td><strong>&pound;1,497 - &pound;1,997</strong></td><td>&pound;150-250/month</td><td>6-8 months</td><td>Full OPTIMISE system (all 8)</td></tr>
+        <tr><td><span class="tag" style="background:var(--success-bg);color:var(--success)">Standard</span></td><td><strong>&pound;197 - &pound;297</strong></td><td>&pound;15-25/month</td><td>8-12 months</td><td>Tasks, Strategy, Content Creator</td></tr>
+        <tr><td><span class="tag" style="background:var(--info-bg);color:var(--info)">Premium</span></td><td><strong>&pound;397 - &pound;597</strong></td><td>&pound;40-60/month</td><td>7-10 months</td><td>Finance, Scoreboards, CRM</td></tr>
+        <tr><td><span class="tag" style="background:var(--accent-soft);color:var(--accent)">Advanced</span></td><td><strong>&pound;697 - &pound;997</strong></td><td>&pound;80-100/month</td><td>7-10 months</td><td>AI &amp; Intelligence, Full Methods suite</td></tr>
+        <tr><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Bundle</span></td><td><strong>&pound;1,497 - &pound;1,997</strong></td><td>&pound;150-250/month</td><td>6-8 months</td><td>Full OPTIMISE system (all 8)</td></tr>
       </tbody>
     </table>
   </div>
@@ -853,10 +850,10 @@
     <table>
       <thead><tr><th>Product</th><th>Launch Price</th><th>Standard Price</th><th>Saving</th></tr></thead>
       <tbody>
-        <tr><td>Finance &amp; Reporting</td><td style="color:var(--green);font-weight:700">&pound;297</td><td>&pound;497</td><td>40%</td></tr>
-        <tr><td>Tasks &amp; Routines</td><td style="color:var(--green);font-weight:700">&pound;197</td><td>&pound;297</td><td>34%</td></tr>
-        <tr><td>Business Plan Builder</td><td style="color:var(--green);font-weight:700">&pound;197</td><td>&pound;297</td><td>34%</td></tr>
-        <tr><td>Launch Bundle (all 3)</td><td style="color:var(--green);font-weight:700">&pound;397</td><td>&pound;697</td><td>43%</td></tr>
+        <tr><td>Finance &amp; Reporting</td><td style="color:var(--success);font-weight:700">&pound;297</td><td>&pound;497</td><td>40%</td></tr>
+        <tr><td>Tasks &amp; Routines</td><td style="color:var(--success);font-weight:700">&pound;197</td><td>&pound;297</td><td>34%</td></tr>
+        <tr><td>Business Plan Builder</td><td style="color:var(--success);font-weight:700">&pound;197</td><td>&pound;297</td><td>34%</td></tr>
+        <tr><td>Launch Bundle (all 3)</td><td style="color:var(--success);font-weight:700">&pound;397</td><td>&pound;697</td><td>43%</td></tr>
       </tbody>
     </table>
   </div>
@@ -866,9 +863,9 @@
     <table>
       <thead><tr><th>Scenario</th><th>Monthly Sales</th><th>Avg Price</th><th>Monthly Revenue</th><th>Annual</th></tr></thead>
       <tbody>
-        <tr><td><span class="tag" style="background:var(--rbg);color:var(--red)">Conservative</span></td><td>5 modules</td><td>&pound;250</td><td>&pound;1,250</td><td><strong>&pound;15,000</strong></td></tr>
-        <tr><td><span class="tag" style="background:var(--abg);color:var(--amber)">Moderate</span></td><td>15 modules</td><td>&pound;350</td><td>&pound;5,250</td><td><strong>&pound;63,000</strong></td></tr>
-        <tr><td><span class="tag" style="background:var(--gbg);color:var(--green)">Optimistic</span></td><td>30 modules</td><td>&pound;400</td><td>&pound;12,000</td><td><strong>&pound;144,000</strong></td></tr>
+        <tr><td><span class="tag" style="background:var(--danger-bg);color:var(--danger)">Conservative</span></td><td>5 modules</td><td>&pound;250</td><td>&pound;1,250</td><td><strong>&pound;15,000</strong></td></tr>
+        <tr><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Moderate</span></td><td>15 modules</td><td>&pound;350</td><td>&pound;5,250</td><td><strong>&pound;63,000</strong></td></tr>
+        <tr><td><span class="tag" style="background:var(--success-bg);color:var(--success)">Optimistic</span></td><td>30 modules</td><td>&pound;400</td><td>&pound;12,000</td><td><strong>&pound;144,000</strong></td></tr>
       </tbody>
     </table>
     <div class="hl" style="margin-top:12px">
@@ -903,10 +900,10 @@
   <div class="card" style="margin-bottom:24px">
     <h3>The Team</h3>
     <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">
-      <div><span class="tag tag-kevin">Kevin</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Decisions, quality control, sign-offs. 1-2 hours/day max.</span></div>
-      <div><span class="tag tag-s1">Mica (Tech)</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Infrastructure, deployments, technical setup.</span></div>
-      <div><span class="tag tag-s2">Ericamae (Marketing)</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Content, copy, campaigns, social media.</span></div>
-      <div><span class="tag tag-claude">Claude</span> <span style="font-size:0.82rem;color:var(--muted);margin-left:6px">Builds everything. Code, content, copy, strategy, modules. The engine.</span></div>
+      <div><span class="tag tag-kevin">Kevin</span> <span style="font-size:0.82rem;color:var(--text-secondary);margin-left:6px">Decisions, quality control, sign-offs. 1-2 hours/day max.</span></div>
+      <div><span class="tag tag-s1">Mica (Tech)</span> <span style="font-size:0.82rem;color:var(--text-secondary);margin-left:6px">Infrastructure, deployments, technical setup.</span></div>
+      <div><span class="tag tag-s2">Ericamae (Marketing)</span> <span style="font-size:0.82rem;color:var(--text-secondary);margin-left:6px">Content, copy, campaigns, social media.</span></div>
+      <div><span class="tag tag-claude">Claude</span> <span style="font-size:0.82rem;color:var(--text-secondary);margin-left:6px">Builds everything. Code, content, copy, strategy, modules. The engine.</span></div>
     </div>
     <div class="hl" style="margin-top:16px">
       <p><strong>How this works:</strong> Claude does 90% of the actual work. Humans set Claude up, give it the information it needs, review what it produces, and handle tasks that require human access (logging into platforms, clicking buttons, making payments). Think of it as: Claude is the brain, you're the hands.</p>
@@ -921,10 +918,10 @@
 
   <div class="tl-bar" style="margin-top:24px">
     <div class="tl-seg" style="background:var(--accent);color:#fff"><div class="tl-lbl">Week 1: Foundation</div><div class="tl-date">15-20 Apr — Infrastructure + Start Modules</div></div>
-    <div class="tl-seg" style="background:var(--green);color:#fff"><div class="tl-lbl">Week 2: Modules</div><div class="tl-date">21-27 Apr — Build + Deploy Modules</div></div>
-    <div class="tl-seg" style="background:var(--amber);color:#fff"><div class="tl-lbl">Week 3: Polish</div><div class="tl-date">28 Apr-5 May — Polish + Content</div></div>
-    <div class="tl-seg" style="background:var(--blue);color:#fff"><div class="tl-lbl">Week 4: Website</div><div class="tl-date">6-11 May — Website + Marketing + QA</div></div>
-    <div class="tl-seg" style="background:var(--pink);color:#fff"><div class="tl-lbl">Week 5: Launch</div><div class="tl-date">12-14 May — Soft &rarr; Full Launch</div></div>
+    <div class="tl-seg" style="background:var(--success);color:#fff"><div class="tl-lbl">Week 2: Modules</div><div class="tl-date">21-27 Apr — Build + Deploy Modules</div></div>
+    <div class="tl-seg" style="background:var(--warning);color:#fff"><div class="tl-lbl">Week 3: Polish</div><div class="tl-date">28 Apr-5 May — Polish + Content</div></div>
+    <div class="tl-seg" style="background:var(--info);color:#fff"><div class="tl-lbl">Week 4: Website</div><div class="tl-date">6-11 May — Website + Marketing + QA</div></div>
+    <div class="tl-seg" style="background:var(--accent);color:#fff"><div class="tl-lbl">Week 5: Launch</div><div class="tl-date">12-14 May — Soft &rarr; Full Launch</div></div>
   </div>
 </div>
 
@@ -939,7 +936,7 @@
   <div class="sh-sub">Tuesday's kickoff is done. Today we lay the technical foundations.</div>
 
   <div class="step open">
-    <div class="step-hdr" onclick="toggleStep(this.parentElement)"><div class="step-num" style="border-color:var(--green);color:var(--green);background:var(--gbg)">&#10003;</div><div class="step-title">Team Kickoff Meeting <span class="tag tag-done">&#10003; DONE</span></div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="tag tag-all">All</span><span class="step-arrow">&#9654;</span></div></div>
+    <div class="step-hdr" onclick="toggleStep(this.parentElement)"><div class="step-num" style="border-color:var(--success);color:var(--success);background:var(--success-bg)">&#10003;</div><div class="step-title">Team Kickoff Meeting <span class="tag tag-done">&#10003; DONE</span></div><div class="step-meta"><span class="tag tag-kevin">Kevin</span><span class="tag tag-all">All</span><span class="step-arrow">&#9654;</span></div></div>
     <div class="step-body">
       <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span><select class="owner-switch" data-task-id="task-1" onchange="switchOwner(this)"><option value="kevin" selected>Kevin</option><option value="mica">Mica</option><option value="erica">Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Completed Tuesday 14 April.</strong><div class="detail">Team briefed on this plan. Everyone read Ground Rules. Everyone understands: Claude builds, we guide. Target launch confirmed (12 May). Hard deadline (14 May). Daily 15-min standup set for 9am.</div></div></div>
     </div>
@@ -1049,7 +1046,7 @@
     </div>
   </div>
 
-  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 1 Checkpoint</h3><p>By end of last week: WordPress live, Netlify configured, Supabase set up, social pages updated, Finance module v1 built and reviewed by Kevin, all website copy drafted. If you have all this, you're on track.</p></div>
+  <div class="card" style="border-left:4px solid var(--success)"><h3 style="color:var(--success)">Week 1 Checkpoint</h3><p>By end of last week: WordPress live, Netlify configured, Supabase set up, social pages updated, Finance module v1 built and reviewed by Kevin, all website copy drafted. If you have all this, you're on track.</p></div>
 
   <div class="warn"><h4>End-of-Day Check</h4><p>(1) Kevin has reviewed Finance v1 and sent feedback. (2) Finance module updated with feedback. (3) Finance module connected to Supabase — data persists across browser sessions.</p></div>
 </div>
@@ -1110,7 +1107,7 @@
     </div>
   </div>
 
-  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 2 Checkpoint</h3><p>By end of Friday: Finance module fixed and on Supabase, Tasks module v1 complete and deployed, both live on demo URLs, all module sales copy and comparisons drafted, Kevin has reviewed both modules. If you have all this, Week 3 is about polish.</p></div>
+  <div class="card" style="border-left:4px solid var(--success)"><h3 style="color:var(--success)">Week 2 Checkpoint</h3><p>By end of Friday: Finance module fixed and on Supabase, Tasks module v1 complete and deployed, both live on demo URLs, all module sales copy and comparisons drafted, Kevin has reviewed both modules. If you have all this, Week 3 is about polish.</p></div>
 </div>
 
 <!-- ============================================ -->
@@ -1184,7 +1181,7 @@
     <div class="step-body"><div class="task"><div class="task-who"><span class="tag tag-claude">Claude</span><select class="owner-switch" data-task-id="task-23" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica">Mica</option><option value="erica">Ericamae</option><option value="claude" selected>Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Bugs and UX fixes only. No new features. Scope discipline.</strong></div></div></div>
   </div>
 
-  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 3 Checkpoint</h3><p>By end of Friday: both modules polished with onboarding tutorials, deployment pipeline working, all screenshots and demo videos captured, 3 blog posts drafted, Kevin has done final module testing. Modules are now locked — bug fixes only. Week 4 builds the website and marketing around them.</p></div>
+  <div class="card" style="border-left:4px solid var(--success)"><h3 style="color:var(--success)">Week 3 Checkpoint</h3><p>By end of Friday: both modules polished with onboarding tutorials, deployment pipeline working, all screenshots and demo videos captured, 3 blog posts drafted, Kevin has done final module testing. Modules are now locked — bug fixes only. Week 4 builds the website and marketing around them.</p></div>
 </div>
 
 <!-- ============================================ -->
@@ -1270,7 +1267,7 @@
     </div>
   </div>
 
-  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 4 Checkpoint</h3><p>Full website live with payments working. Health Check deployed. All marketing scheduled. Emails loaded. Blog posts published. SEO in place. Launch video recorded. Social content ready. Kevin's sign-off. Ready to launch Monday.</p></div>
+  <div class="card" style="border-left:4px solid var(--success)"><h3 style="color:var(--success)">Week 4 Checkpoint</h3><p>Full website live with payments working. Health Check deployed. All marketing scheduled. Emails loaded. Blog posts published. SEO in place. Launch video recorded. Social content ready. Kevin's sign-off. Ready to launch Monday.</p></div>
 </div>
 
 <!-- ============================================ -->
@@ -1346,11 +1343,11 @@
       <div class="task"><div class="task-who"><span class="tag tag-kevin">Kevin</span><select class="owner-switch" data-task-id="task-47" onchange="switchOwner(this)"><option value="kevin" selected>Kevin</option><option value="mica">Mica</option><option value="erica">Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Review launch results:</strong> Sales, traffic, conversion rate, feedback themes. Set priorities for Week 2 post-launch.</div></div>
       <div class="task"><div class="task-who"><span class="tag tag-s2">Ericamae</span><select class="owner-switch" data-task-id="task-48" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica">Mica</option><option value="erica" selected>Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Analyse social performance.</strong> Double down on what's working. Drop what isn't.</div></div>
       <div class="task"><div class="task-who"><span class="tag tag-s1">Mica</span><select class="owner-switch" data-task-id="task-49" onchange="switchOwner(this)"><option value="kevin">Kevin</option><option value="mica" selected>Mica</option><option value="erica">Ericamae</option><option value="claude">Claude</option><option value="all">All</option></select></div><div class="task-what"><strong>Fix technical debt. Start Phase 2 module development.</strong></div></div>
-      <div class="decision"><h4>Key Decision: Paid Ads</h4><p>If organic reach isn't enough, start paid ads at &pound;5-10/day. Claude manages campaigns: writes copy, sets targeting, monitors, kills underperformers. <a href="#" onclick="show('marketing');return false" style="color:var(--al);text-decoration:underline;cursor:pointer">See Marketing tab</a> for full ad strategy.</p></div>
+      <div class="decision"><h4>Key Decision: Paid Ads</h4><p>If organic reach isn't enough, start paid ads at &pound;5-10/day. Claude manages campaigns: writes copy, sets targeting, monitors, kills underperformers. <a href="#" onclick="show('marketing');return false" style="color:var(--accent);text-decoration:underline;cursor:pointer">See Marketing tab</a> for full ad strategy.</p></div>
     </div>
   </div>
 
-  <div class="card" style="border-left:4px solid var(--green)"><h3 style="color:var(--green)">Week 5 / Launch Complete</h3><p>Operations Director is live. Modules selling. Marketing running. Now it's about iterating: fix what's broken, double down on what's working, start building Phase 2 modules. The hard part is done.</p></div>
+  <div class="card" style="border-left:4px solid var(--success)"><h3 style="color:var(--success)">Week 5 / Launch Complete</h3><p>Operations Director is live. Modules selling. Marketing running. Now it's about iterating: fix what's broken, double down on what's working, start building Phase 2 modules. The hard part is done.</p></div>
 </div>
 
 <!-- ============================================ -->
@@ -1366,10 +1363,10 @@
     <table style="margin-top:8px">
       <thead><tr><th>Platform</th><th>Personal Reach</th><th>Business Page Reach</th><th>Impact</th></tr></thead>
       <tbody>
-        <tr><td>LinkedIn</td><td>10-30% of connections</td><td>2-5% of followers</td><td style="color:var(--red);font-weight:700">Significant</td></tr>
-        <tr><td>Facebook</td><td>5-10%</td><td>1-2%</td><td style="color:var(--red);font-weight:700">Major (pages nearly dead for organic)</td></tr>
-        <tr><td>Instagram</td><td>10-20%</td><td>8-15%</td><td style="color:var(--amber);font-weight:700">Moderate (Reels perform OK)</td></tr>
-        <tr><td>TikTok</td><td colspan="2">Algorithm-driven, not follower-based</td><td style="color:var(--green);font-weight:700">Minimal (rewards content quality)</td></tr>
+        <tr><td>LinkedIn</td><td>10-30% of connections</td><td>2-5% of followers</td><td style="color:var(--danger);font-weight:700">Significant</td></tr>
+        <tr><td>Facebook</td><td>5-10%</td><td>1-2%</td><td style="color:var(--danger);font-weight:700">Major (pages nearly dead for organic)</td></tr>
+        <tr><td>Instagram</td><td>10-20%</td><td>8-15%</td><td style="color:var(--warning);font-weight:700">Moderate (Reels perform OK)</td></tr>
+        <tr><td>TikTok</td><td colspan="2">Algorithm-driven, not follower-based</td><td style="color:var(--success);font-weight:700">Minimal (rewards content quality)</td></tr>
       </tbody>
     </table>
     <div class="hl" style="margin-top:12px"><p><strong>Bottom line:</strong> Organic reach will be 3-5x lower on business pages. This is exactly why <strong>paid ads are essential, not optional</strong>. TikTok and Instagram Reels are the best organic channels — algorithm-driven, not follower-dependent.</p></div>
@@ -1397,15 +1394,15 @@
     <h3>Paid Ad Strategy — Claude-Managed, Iterative</h3>
     <p>Claude builds, measures, monitors, tweaks, and iterates. Start micro, scale only what works.</p>
     <div class="hl" style="margin-top:12px">
-      <p><strong style="color:var(--green)">Phase 1: Testing (Week 1-2 post-launch) — &pound;5-10/day = &pound;35-70/week</strong><br>
+      <p><strong style="color:var(--success)">Phase 1: Testing (Week 1-2 post-launch) — &pound;5-10/day = &pound;35-70/week</strong><br>
       Find which message + audience + platform gets clicks. 3-4 ad variations per platform. Mix of pain point hooks, demo clips, health check offers, direct purchase CTAs. UK business owners, 1-50 employees. Claude sets up, monitors daily, kills underperformers after 48 hours.</p>
     </div>
     <div class="hl">
-      <p><strong style="color:var(--amber)">Phase 2: Optimisation (Week 3-4) — &pound;10-20/day = &pound;70-140/week</strong><br>
+      <p><strong style="color:var(--warning)">Phase 2: Optimisation (Week 3-4) — &pound;10-20/day = &pound;70-140/week</strong><br>
       Double down on winners. Create lookalike audiences from visitors and health check completions. Retarget people who visited but didn't buy. A/B test landing pages.</p>
     </div>
     <div class="hl">
-      <p><strong style="color:var(--blue)">Phase 3: Scale (Month 2+) — Only if ROI proven</strong><br>
+      <p><strong style="color:var(--info)">Phase 3: Scale (Month 2+) — Only if ROI proven</strong><br>
       Scale rule: Only increase spend when CPA is below 30% of avg module price. At &pound;300 avg, CPA must be under &pound;90. Target: &pound;30-60 per sale. Scale to &pound;50-100/day if target met.</p>
     </div>
     <table style="margin-top:12px">
@@ -1474,12 +1471,12 @@
     <table>
       <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
       <tbody>
-        <tr><td>Module quality not high enough</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--rbg);color:var(--red)">High</span></td><td>Soft launch to inner circle first. Iterate. Better to delay 2 days than ship something poor.</td></tr>
-        <tr><td>No sales in first 2 weeks</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td>Low fixed costs (&pound;6/month). Paid ads test messaging fast. No sales = positioning problem, not product problem.</td></tr>
-        <tr><td>Customer loses data</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--rbg);color:var(--red)">High</span></td><td>Supabase from Day 1. No localStorage-only launch. Non-negotiable.</td></tr>
-        <tr><td>Scope creep on features</td><td><span class="tag" style="background:var(--rbg);color:var(--red)">High</span></td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td>Define MVP features NOW. Don't expand before launch. V1 = one core problem. V2 = everything else.</td></tr>
-        <tr><td>Timeline slips past 12 May</td><td><span class="tag" style="background:var(--abg);color:var(--amber)">Medium</span></td><td><span class="tag" style="background:var(--gbg);color:var(--green)">Low</span></td><td>Buffer to 14 May built in. 30-day plan gives breathing room.</td></tr>
-        <tr><td>Piracy / module sharing</td><td><span class="tag" style="background:var(--gbg);color:var(--green)">Low</span></td><td><span class="tag" style="background:var(--gbg);color:var(--green)">Low</span></td><td>Hosted model = customer gets URL, not files. Future: licence key validation.</td></tr>
+        <tr><td>Module quality not high enough</td><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Medium</span></td><td><span class="tag" style="background:var(--danger-bg);color:var(--danger)">High</span></td><td>Soft launch to inner circle first. Iterate. Better to delay 2 days than ship something poor.</td></tr>
+        <tr><td>No sales in first 2 weeks</td><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Medium</span></td><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Medium</span></td><td>Low fixed costs (&pound;6/month). Paid ads test messaging fast. No sales = positioning problem, not product problem.</td></tr>
+        <tr><td>Customer loses data</td><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Medium</span></td><td><span class="tag" style="background:var(--danger-bg);color:var(--danger)">High</span></td><td>Supabase from Day 1. No localStorage-only launch. Non-negotiable.</td></tr>
+        <tr><td>Scope creep on features</td><td><span class="tag" style="background:var(--danger-bg);color:var(--danger)">High</span></td><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Medium</span></td><td>Define MVP features NOW. Don't expand before launch. V1 = one core problem. V2 = everything else.</td></tr>
+        <tr><td>Timeline slips past 12 May</td><td><span class="tag" style="background:var(--warning-bg);color:var(--warning)">Medium</span></td><td><span class="tag" style="background:var(--success-bg);color:var(--success)">Low</span></td><td>Buffer to 14 May built in. 30-day plan gives breathing room.</td></tr>
+        <tr><td>Piracy / module sharing</td><td><span class="tag" style="background:var(--success-bg);color:var(--success)">Low</span></td><td><span class="tag" style="background:var(--success-bg);color:var(--success)">Low</span></td><td>Hosted model = customer gets URL, not files. Future: licence key validation.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1806,13 +1803,13 @@ function updateDashboard(){
   var el2 = document.getElementById('kpiTrack');
   if(el && el2){
     if(p.trackStatus === 'on-track'){
-      el.textContent = '●'; el.style.color = 'var(--green)';
+      el.textContent = '●'; el.style.color = 'var(--success)';
       el2.className = 'status-label on-track'; el2.textContent = 'On Track';
     } else if(p.trackStatus === 'at-risk'){
-      el.textContent = '●'; el.style.color = 'var(--amber)';
+      el.textContent = '●'; el.style.color = 'var(--warning)';
       el2.className = 'status-label at-risk'; el2.textContent = 'At Risk';
     } else {
-      el.textContent = '●'; el.style.color = 'var(--red)';
+      el.textContent = '●'; el.style.color = 'var(--danger)';
       el2.className = 'status-label behind'; el2.textContent = 'Behind Schedule';
     }
   }
