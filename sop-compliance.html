@@ -3,711 +3,601 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Property Compliance — Standard Operating Procedure</title>
+<title>Property Compliance OS &mdash; Standard Operating Procedure</title>
 <style>
-/* ====== RESET & BASE ====== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  line-height: 1.6;
-  color: #1e293b;
-  background: #f1f5f9;
+  line-height: 1.6; color: #1e293b; background: #f1f5f9;
 }
-
-/* ====== COLOUR VARIABLES ====== */
 :root {
-  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
-  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
-  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
-  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
-  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
-  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
-  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
-  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
-  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
-  --radius: 12px;
-  --radius-sm: 8px;
+  --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-200:#bfdbfe;--blue-500:#3b82f6;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-800:#1e40af;--blue-900:#1e3a5f;
+  --indigo-50:#eef2ff;--indigo-100:#e0e7ff;--indigo-500:#6366f1;--indigo-600:#4f46e5;--indigo-700:#4338ca;
+  --green-50:#f0fdf4;--green-100:#dcfce7;--green-500:#22c55e;--green-600:#16a34a;--green-700:#15803d;
+  --amber-50:#fffbeb;--amber-100:#fef3c7;--amber-500:#f59e0b;--amber-600:#d97706;
+  --red-50:#fef2f2;--red-100:#fee2e2;--red-500:#ef4444;--red-600:#dc2626;
+  --purple-50:#faf5ff;--purple-500:#a855f7;--purple-600:#9333ea;
+  --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;--slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;
+  --shadow:0 1px 3px rgba(0,0,0,0.1),0 1px 2px rgba(0,0,0,0.06);--shadow-md:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius:12px;--radius-sm:8px;
 }
-
-/* ====== HEADER ====== */
-.header {
-  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
-  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+.header { background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%); color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+.header::after { content:''; position:absolute; top:-50%; right:-10%; width:500px; height:500px; background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%); border-radius:50%; }
+.header-inner { max-width:1100px; margin:0 auto; position:relative; z-index:1; }
+.header-back { display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; opacity:0.7; text-decoration:none; color:white; margin-bottom:1rem; transition:opacity 0.15s; }
+.header-back:hover { opacity:1; }
+.header h1 { font-size:2.2rem; font-weight:700; margin-bottom:0.3rem; letter-spacing:-0.5px; }
+.header .subtitle { font-size:1.05rem; opacity:0.85; }
+.header .version { font-size:0.85rem; opacity:0.6; margin-top:0.5rem; }
+.container { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+.section { margin-top:2.5rem; }
+.section-title { font-size:1.5rem; font-weight:700; color:var(--blue-800); padding-bottom:0.5rem; border-bottom:3px solid var(--blue-200); margin-bottom:1.25rem; display:flex; align-items:center; gap:0.5rem; }
+.section-title .icon { font-size:1.4rem; }
+.card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:1.5rem; margin-bottom:1.25rem; border:1px solid var(--slate-200); }
+.card-header { font-size:1.1rem; font-weight:600; color:var(--slate-800); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+.quick-ref { background:linear-gradient(135deg,var(--blue-50) 0%,var(--indigo-50) 100%); border:2px solid var(--blue-200); border-radius:var(--radius); padding:1.5rem; margin-top:-1rem; position:relative; z-index:2; box-shadow:var(--shadow-lg); }
+.quick-ref h2 { font-size:1.2rem; color:var(--blue-800); margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.qr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0.75rem; }
+.qr-item { background:white; border-radius:var(--radius-sm); padding:0.75rem 1rem; border-left:4px solid var(--blue-500); font-size:0.88rem; }
+.qr-item .qr-label { font-weight:600; color:var(--slate-600); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; }
+.qr-item .qr-value { color:var(--slate-800); margin-top:0.15rem; word-break:break-all; }
+.qr-item .qr-value a { color:var(--blue-600); text-decoration:none; }
+.qr-item .qr-value a:hover { text-decoration:underline; }
+.toc { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:1.5rem; border:1px solid var(--slate-200); }
+.toc h2 { font-size:1.15rem; color:var(--blue-800); margin-bottom:1rem; }
+.toc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0.35rem 1.5rem; }
+.toc a { display:flex; align-items:center; gap:0.5rem; color:var(--slate-700); text-decoration:none; padding:0.35rem 0.5rem; border-radius:6px; font-size:0.9rem; transition:background 0.15s; }
+.toc a:hover { background:var(--blue-50); color:var(--blue-700); }
+.toc a .toc-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--blue-100); color:var(--blue-700); font-size:0.7rem; font-weight:700; flex-shrink:0; }
+.flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:0; padding:1.5rem 0; }
+.flow-step { background:white; border:2px solid var(--blue-200); border-radius:var(--radius-sm); padding:0.75rem 1.1rem; text-align:center; font-size:0.85rem; font-weight:600; color:var(--slate-700); min-width:110px; }
+.flow-step.primary { background:var(--blue-600); color:white; border-color:var(--blue-700); }
+.flow-step.success { background:var(--green-600); color:white; border-color:var(--green-700); }
+.flow-step.warning { background:var(--amber-500); color:white; border-color:var(--amber-600); }
+.flow-step.purple { background:var(--purple-600); color:white; border-color:var(--purple-600); }
+.flow-step .flow-icon { font-size:1.3rem; display:block; margin-bottom:0.25rem; }
+.flow-step .flow-sub { font-weight:400; font-size:0.75rem; opacity:0.85; margin-top:0.15rem; }
+.flow-arrow { font-size:1.4rem; color:var(--slate-400); padding:0 0.3rem; flex-shrink:0; }
+.label-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.88rem; }
+.label-table th { background:var(--blue-700); color:white; padding:0.75rem 1rem; text-align:left; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+.label-table th:first-child { border-radius:var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius:0 var(--radius-sm) 0 0; }
+.label-table td { padding:0.65rem 1rem; border-bottom:1px solid var(--slate-200); vertical-align:top; }
+.label-table tr:last-child td { border-bottom:none; }
+.label-table tr:nth-child(even) td { background:var(--slate-50); }
+.label-table tr:hover td { background:var(--blue-50); }
+.label-badge { display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; font-weight:600; font-size:0.78rem; white-space:nowrap; }
+.lb-blue { background:#dbeafe; color:#1d4ed8; } .lb-amber { background:#fef3c7; color:#92400e; }
+.lb-red { background:#fee2e2; color:#991b1b; } .lb-green { background:#dcfce7; color:#166534; }
+.lb-grey { background:#f1f5f9; color:#64748b; }
+.wf-card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--slate-200); overflow:hidden; margin-bottom:1.5rem; }
+.wf-header { padding:1rem 1.5rem; display:flex; align-items:center; gap:0.75rem; border-bottom:1px solid var(--slate-200); }
+.wf-num { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; font-weight:700; font-size:1rem; flex-shrink:0; color:white; background:var(--blue-600); }
+.wf-header h3 { font-size:1.1rem; font-weight:700; color:var(--slate-800); }
+.wf-header .wf-tag { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--slate-100); color:var(--slate-600); font-weight:500; }
+.wf-body { padding:1.25rem 1.5rem; }
+.wf-body h4 { font-size:0.9rem; font-weight:600; color:var(--slate-700); margin-bottom:0.5rem; margin-top:1rem; }
+.wf-body h4:first-child { margin-top:0; }
+.steps { counter-reset:step; list-style:none; padding:0; }
+.steps li { position:relative; padding:0.5rem 0 0.5rem 2.5rem; font-size:0.9rem; line-height:1.5; }
+.steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0.45rem; width:24px; height:24px; border-radius:50%; background:var(--blue-100); color:var(--blue-700); font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.steps li + li { border-top:1px solid var(--slate-100); }
+.info-box { padding:0.85rem 1rem; border-radius:var(--radius-sm); font-size:0.88rem; margin:0.75rem 0; display:flex; align-items:flex-start; gap:0.6rem; }
+.info-box.info { background:var(--blue-50); border-left:4px solid var(--blue-500); color:var(--blue-800); }
+.info-box.warn { background:var(--amber-50); border-left:4px solid var(--amber-500); color:#92400e; }
+.info-box.danger { background:var(--red-50); border-left:4px solid var(--red-500); color:#991b1b; }
+.info-box.tip { background:var(--green-50); border-left:4px solid var(--green-500); color:var(--green-700); }
+.info-box .ib-icon { font-size:1.1rem; flex-shrink:0; margin-top:0.05rem; }
+code { background:var(--slate-100); padding:0.15rem 0.4rem; border-radius:4px; font-size:0.82rem; font-family:'SF Mono',Monaco,Consolas,monospace; color:var(--indigo-600); }
+.ts-item { margin-bottom:0.75rem; }
+.ts-problem { font-weight:600; color:var(--red-600); font-size:0.9rem; }
+.ts-solution { font-size:0.88rem; color:var(--slate-700); margin-top:0.2rem; padding-left:1rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+.dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:0.35rem; vertical-align:middle; }
+.dot.green { background:var(--green-500); } .dot.amber { background:var(--amber-500); } .dot.red { background:var(--red-500); } .dot.blue { background:var(--blue-500); }
+.metrics-bar { display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:0.5rem; }
+.metric-chip { display:inline-flex; align-items:center; gap:0.35rem; padding:0.3rem 0.7rem; border-radius:999px; font-size:0.78rem; font-weight:600; }
+.metric-chip.mc-green { background:var(--green-100); color:var(--green-700); }
+.metric-chip.mc-amber { background:var(--amber-100); color:var(--amber-600); }
+.metric-chip.mc-red { background:var(--red-100); color:var(--red-600); }
+.metric-chip.mc-grey { background:var(--slate-100); color:var(--slate-600); }
+strong { color:var(--slate-800); } a { color:var(--blue-600); }
+p { margin-bottom:0.5rem; } ul,ol { margin-left:1.25rem; margin-bottom:0.5rem; }
+li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px solid var(--slate-200); margin:1.5rem 0; }
+@media (max-width:768px) {
+  .header h1 { font-size:1.6rem; } .qr-grid { grid-template-columns:1fr; }
+  .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
+  .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
+  .container { padding:0 1rem 3rem; }
 }
-.header::after {
-  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
-  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
-  border-radius: 50%;
-}
-.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
-.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
-.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
-.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
-
-/* ====== LAYOUT ====== */
-.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
-.section { margin-top: 2.5rem; }
-.section-title {
-  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
-  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
-  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
-}
-.section-title .icon { font-size: 1.4rem; }
-
-/* ====== CARDS ====== */
-.card {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
-}
-.card-header {
-  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
-  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
-}
-
-/* ====== QUICK REFERENCE ====== */
-.quick-ref {
-  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
-  border: 2px solid var(--blue-200); border-radius: var(--radius);
-  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
-  box-shadow: var(--shadow-lg);
-}
-.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
-.qr-item {
-  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
-  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
-}
-.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
-.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
-.qr-item .qr-value a:hover { text-decoration: underline; }
-
-/* ====== TABLE OF CONTENTS ====== */
-.toc {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.5rem; border: 1px solid var(--slate-200);
-}
-.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
-.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
-.toc a {
-  display: flex; align-items: center; gap: 0.5rem;
-  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
-  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
-}
-.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
-.toc a .toc-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--blue-100); color: var(--blue-700);
-  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
-}
-
-/* ====== FLOW DIAGRAMS ====== */
-.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
-.flow-step {
-  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
-  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
-  color: var(--slate-700); min-width: 110px; position: relative;
-}
-.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
-.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
-.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
-.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
-.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
-.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
-.flow-arrow {
-  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
-}
-.flow-arrow-down {
-  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
-  font-size: 1.4rem; color: var(--slate-400);
-}
-
-/* Vertical flow */
-.flow-vertical { flex-direction: column; align-items: center; }
-.flow-vertical .flow-step { min-width: 200px; }
-
-/* ====== ARCHITECTURE DIAGRAM ====== */
-.arch-diagram {
-  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
-  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
-}
-.arch-box {
-  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
-  padding: 1.25rem; text-align: center; min-height: 120px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-}
-.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
-.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
-.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
-.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
-.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
-
-/* ====== LABEL TABLE ====== */
-.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
-.label-table th {
-  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
-  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
-}
-.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
-.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
-.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
-.label-table tr:last-child td { border-bottom: none; }
-.label-table tr:nth-child(even) td { background: var(--slate-50); }
-.label-table tr:hover td { background: var(--blue-50); }
-.label-badge {
-  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
-  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
-}
-.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
-.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
-.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
-.label-badge.lb-4 { background: #dcfce7; color: #166534; }
-.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
-.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
-.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
-.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
-.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
-
-/* ====== WORKFLOW CARDS ====== */
-.wf-card {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
-}
-.wf-header {
-  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
-  border-bottom: 1px solid var(--slate-200);
-}
-.wf-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
-  flex-shrink: 0; color: white;
-}
-.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
-.wf-header .wf-tag {
-  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
-  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
-}
-.wf-body { padding: 1.25rem 1.5rem; }
-.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
-.wf-body h4:first-child { margin-top: 0; }
-
-/* Colour coding for workflow numbers */
-.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
-.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
-.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
-.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
-.wf-num.wf-9 { background: #059669; }
-
-/* ====== STEP LISTS ====== */
-.steps { counter-reset: step; list-style: none; padding: 0; }
-.steps li {
-  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
-}
-.steps li::before {
-  counter-increment: step; content: counter(step);
-  position: absolute; left: 0; top: 0.45rem;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--blue-100); color: var(--blue-700);
-  font-size: 0.75rem; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.steps li + li { border-top: 1px solid var(--slate-100); }
-
-/* ====== METRIC DOTS ====== */
-.dot {
-  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  margin-right: 0.35rem; vertical-align: middle;
-}
-.dot.green { background: var(--green-500); }
-.dot.amber { background: var(--amber-500); }
-.dot.red { background: var(--red-500); }
-.dot.blue { background: var(--blue-500); }
-
-/* ====== METRICS BAR ====== */
-.metrics-bar {
-  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
-}
-.metric-chip {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
-}
-.metric-chip.mc-green { background: var(--green-100); color: var(--green-700); }
-.metric-chip.mc-amber { background: var(--amber-100); color: var(--amber-600); }
-.metric-chip.mc-red { background: var(--red-100); color: var(--red-600); }
-.metric-chip.mc-blue { background: var(--blue-100); color: var(--blue-700); }
-
-/* ====== INFO BOXES ====== */
-.info-box {
-  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
-  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
-}
-.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
-.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
-.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
-.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
-.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
-
-/* ====== CODE / MONO ====== */
-code {
-  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
-  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
-}
-
-/* ====== TROUBLESHOOTING ====== */
-.ts-item { margin-bottom: 0.75rem; }
-.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
-.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
-
-/* ====== TWO-COL GRID ====== */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-
-/* ====== AIRTABLE FLOW ====== */
-.at-flow {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
-  align-items: center; padding: 1rem 0;
-}
-.at-flow .flow-step { min-width: auto; }
-
-/* ====== PRINT ====== */
-@media print {
-  body { background: white; font-size: 10pt; }
-  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
-  .section { break-inside: avoid; }
-  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
-
-/* ====== RESPONSIVE ====== */
-@media (max-width: 768px) {
-  .header h1 { font-size: 1.6rem; }
-  .qr-grid { grid-template-columns: 1fr; }
-  .toc-grid { grid-template-columns: 1fr; }
-  .arch-diagram { grid-template-columns: 1fr; }
-  .arch-connector { transform: rotate(90deg); }
-  .grid-2 { grid-template-columns: 1fr; }
-  .flow { flex-direction: column; }
-  .flow-arrow { transform: rotate(90deg); }
-  .at-flow { grid-template-columns: 1fr; }
-  .container { padding: 0 1rem 3rem; }
-}
-
-/* ====== MISC ====== */
-strong { color: var(--slate-800); }
-a { color: var(--blue-600); }
-p { margin-bottom: 0.5rem; }
-ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
-li { margin-bottom: 0.2rem; font-size: 0.9rem; }
-hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 </style>
 </head>
 <body>
 
-<!-- ====== HEADER ====== -->
 <div class="header">
   <div class="header-inner">
-    <h1>Property Compliance &mdash; Standard Operating Procedure</h1>
-    <div class="subtitle">Tracking gas, electrical, and insurance compliance across all properties</div>
-    <div class="version">Version 2.0 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
+    <a class="header-back" href="index.html#sitemap">&#8592; Back to Site Map</a>
+    <h1>&#x2705; Property Compliance OS</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Compliance Certificate Tracking Dashboard</div>
+    <div class="version">Version 1.1 &bull; 16 Apr 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
-<!-- ====== CONTAINER ====== -->
 <div class="container">
 
-  <!-- Quick Reference -->
-  <div class="quick-ref">
-    <h2><span class="icon">&#9889;</span> Quick Reference</h2>
-    <div class="qr-grid">
-      <div class="qr-item">
-        <div class="qr-label">Dashboard</div>
-        <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/" target="_blank">Leadership Dashboard</a> &rarr; Compliance tab</div>
-      </div>
-      <div class="qr-item">
-        <div class="qr-label">Gmail Integration</div>
-        <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/" target="_blank">Inbound Comms Tracker</a> &rarr; Label <code>10: property compliance</code></div>
-      </div>
-      <div class="qr-item">
-        <div class="qr-label">Data Source</div>
-        <div class="qr-value">Airtable &mdash; Properties, Units &amp; Certs tables</div>
-      </div>
-      <div class="qr-item">
-        <div class="qr-label">Alert Thresholds</div>
-        <div class="qr-value">&#128994; Active &middot; &#128992; Expiring within 30 days &middot; &#128308; Expired / overdue</div>
-      </div>
+<!-- ============ QUICK REFERENCE ============ -->
+<div class="quick-ref">
+  <h2>&#x26A1; Quick Reference</h2>
+  <div class="qr-grid">
+    <div class="qr-item">
+      <div class="qr-label">Access URL</div>
+      <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/compliance.html" target="_blank">chaichoong.github.io/leadership-dashboard/compliance.html</a></div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Data Source</div>
+      <div class="qr-value">Airtable &mdash; 3 tables<br>Certs, Properties, Rental Units</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Key Tables</div>
+      <div class="qr-value"><code>tbl35rf9qtmq0P87r</code> Certs<br><code>tbl6f0OkAmTC2jbuG</code> Properties<br><code>tblM3mZCR5kiEdWMj</code> Rental Units</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Alert Thresholds</div>
+      <div class="qr-value">&#128308; Expired (&lt;0 days) &bull; &#128992; Expiring (&le;30 days) &bull; &#128994; Active (&gt;30 days)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Authentication</div>
+      <div class="qr-value">Airtable PAT &mdash; stored in <code>localStorage</code> key <code>airtable_pat</code>, shared with Inbound Comms</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Owner</div>
+      <div class="qr-value">Kevin Brittain</div>
     </div>
   </div>
-
-  <!-- Table of Contents -->
-  <div class="section">
-    <div class="toc">
-      <h2>Table of Contents</h2>
-      <div class="toc-grid">
-        <a href="#overview"><span class="toc-num">1</span> Overview</a>
-        <a href="#access"><span class="toc-num">2</span> How to Access</a>
-        <a href="#cert-types"><span class="toc-num">3</span> Certificate Types</a>
-        <a href="#dashboard"><span class="toc-num">4</span> Dashboard Features</a>
-        <a href="#gmail"><span class="toc-num">5</span> Gmail Integration</a>
-        <a href="#audit-trail"><span class="toc-num">6</span> Audit Trail</a>
-        <a href="#blocks"><span class="toc-num">7</span> Blocks &amp; Apartments</a>
-        <a href="#agents"><span class="toc-num">8</span> Agent-Managed Properties</a>
-        <a href="#datasource"><span class="toc-num">9</span> Data Source &amp; Airtable</a>
-        <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- 1. Overview -->
-  <div class="section" id="overview">
-    <h2 class="section-title"><span class="icon">&#128203;</span> 1. Overview</h2>
-    <div class="card">
-      <p>The Property Compliance system monitors mandatory safety certifications across the full property portfolio. It has two integrated components:</p>
-      <ul>
-        <li><strong>Compliance Dashboard</strong> (compliance.html) &mdash; a read-only matrix showing current cert status for every property, with colour-coded expiry warnings.</li>
-        <li><strong>Gmail Integration</strong> (via the Inbound Comms Tracker, follow-up.html) &mdash; when compliance emails arrive in Gmail, labelling them as <code>10: property compliance</code> triggers AI extraction of certificate details, which are automatically written to Airtable.</li>
-      </ul>
-      <p>Together they create a hands-off pipeline: emails arrive, get labelled, AI extracts the details, Airtable is updated, and the dashboard reflects the latest status.</p>
-
-      <!-- Architecture diagram -->
-      <div class="arch-diagram">
-        <div class="arch-box">
-          <div class="arch-icon">&#128231;</div>
-          <div class="arch-title">Gmail</div>
-          <div class="arch-desc">Compliance emails arrive in inbox</div>
-        </div>
-        <div class="arch-connector">&#10230;</div>
-        <div class="arch-box highlight">
-          <div class="arch-icon">&#129302;</div>
-          <div class="arch-title">AI Processing</div>
-          <div class="arch-desc">Claude Haiku extracts cert type, property, renewal date</div>
-        </div>
-        <div class="arch-connector">&#10230;</div>
-        <div class="arch-box">
-          <div class="arch-icon">&#128451;</div>
-          <div class="arch-title">Airtable</div>
-          <div class="arch-desc">Cert records created with full audit trail</div>
-        </div>
-      </div>
-
-      <div class="info-box danger">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>Operating without a valid gas safety certificate is a criminal offence. The dashboard flags any property where the GSC has expired in red with highest priority.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 2. How to Access -->
-  <div class="section" id="access">
-    <h2 class="section-title"><span class="icon">&#128279;</span> 2. How to Access</h2>
-    <div class="card">
-      <div class="card-header">Compliance Dashboard</div>
-      <ol class="steps">
-        <li>Open the <a href="https://chaichoong.github.io/leadership-dashboard/" target="_blank">Leadership Dashboard</a> in your browser.</li>
-        <li>Click the <strong>Compliance</strong> tab in the top navigation bar.</li>
-        <li>If prompted, enter your Airtable Personal Access Token (PAT). This is saved in your browser and shared with the Inbound Comms Tracker automatically.</li>
-        <li>The compliance matrix loads, showing all properties with their certification statuses colour-coded.</li>
-        <li>Click <strong>Refresh</strong> in the top-right corner to reload data at any time.</li>
-      </ol>
-    </div>
-    <div class="card">
-      <div class="card-header">Inbound Comms Tracker (Email Processing)</div>
-      <ol class="steps">
-        <li>Open the Leadership Dashboard and click the <strong>Inbound Comms</strong> tab.</li>
-        <li>Connect your Gmail account and configure your Airtable PAT in Settings (if not already done).</li>
-        <li>Select the <code>10: property compliance</code> label from the label dropdown to view compliance emails.</li>
-      </ol>
-      <div class="info-box tip">
-        <span class="ib-icon">&#128161;</span>
-        <span>The Airtable PAT is shared between the Compliance Dashboard and Inbound Comms Tracker. Enter it once in either page and it works in both.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 3. Certificate Types -->
-  <div class="section" id="cert-types">
-    <h2 class="section-title"><span class="icon">&#128220;</span> 3. Certificate Types</h2>
-    <div class="card">
-      <p>The system tracks three main certificate types, displayed as columns on the dashboard:</p>
-      <div class="grid-2">
-        <div class="card" style="border-left: 4px solid var(--blue-500);">
-          <div class="card-header"><span class="dot blue"></span> Gas Safety Certificate (GSC)</div>
-          <p><strong>Renewal:</strong> Annual (every 12 months)</p>
-          <p>Required for all properties with gas appliances. Blocks of apartments: N/A at unit level if the building has no individual gas supply (shown as N/A on dashboard).</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--amber-500);">
-          <div class="card-header"><span class="dot amber"></span> Electrical Installation (EICR)</div>
-          <p><strong>Renewal:</strong> Every 5 years</p>
-          <p>Mandatory for all rental properties. In blocks, each apartment has its own EICR.</p>
-        </div>
-      </div>
-      <div class="grid-2">
-        <div class="card" style="border-left: 4px solid var(--green-500);">
-          <div class="card-header"><span class="dot green"></span> Landlord Insurance</div>
-          <p><strong>Renewal:</strong> Annual</p>
-          <p>Building-level cover. In blocks, shown at the property level rather than per-apartment.</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--purple-500);">
-          <div class="card-header"><span class="dot blue"></span> Fire Alarm</div>
-          <p><strong>Tracked in Airtable</strong> but does not have a dedicated dashboard column. Emails mentioning fire alarm certificates are still processed and stored.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 4. Dashboard Features -->
-  <div class="section" id="dashboard">
-    <h2 class="section-title"><span class="icon">&#128296;</span> 4. Dashboard Features</h2>
-    <div class="card">
-      <div class="card-header">What You See</div>
-      <ul>
-        <li><strong>Summary Bar</strong> &mdash; Four KPI cards at the top: Expired (red), Expiring within 30 days (amber), Active (green), and No Cert (grey).</li>
-        <li><strong>Self-Managed Properties</strong> &mdash; The main table showing each property as a row with three cert columns (GSC, EICR, Insurance). Each cell is colour-coded and shows the renewal date.</li>
-        <li><strong>Agent-Managed Properties</strong> &mdash; A separate section below, grouped by managing agent (e.g. Roc Immo, Intus, Cheffins). These are shown for visibility but managed by the agent.</li>
-        <li><strong>Blocks &amp; Apartments</strong> &mdash; Properties marked as &ldquo;Block&rdquo; in Airtable expand into their individual units, each with its own cert row.</li>
-        <li><strong>Airtable Links</strong> &mdash; Click any cert cell to open that record directly in Airtable for editing.</li>
-        <li><strong>Refresh Button</strong> &mdash; Top-right corner, reloads all data from Airtable without a full page refresh.</li>
-        <li><strong>Back to Dashboard</strong> &mdash; Returns to the main Leadership Dashboard overview tab.</li>
-      </ul>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>The dashboard always shows the <strong>latest</strong> (most recent renewal date) certificate per property and type. Older certs are preserved in Airtable as an audit trail but do not appear on the dashboard.</span>
-      </div>
-
-      <!-- Status legend -->
-      <h4 style="margin-top: 1rem;">Status Colour Codes</h4>
-      <div class="metrics-bar">
-        <div class="metric-chip mc-green"><span class="dot green"></span> Active &mdash; valid, more than 30 days remaining</div>
-        <div class="metric-chip mc-amber"><span class="dot amber"></span> Expiring &mdash; 30 days or fewer remaining</div>
-        <div class="metric-chip mc-red"><span class="dot red"></span> Expired &mdash; renewal date has passed</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 5. Gmail Integration -->
-  <div class="section" id="gmail">
-    <h2 class="section-title"><span class="icon">&#128231;</span> 5. Gmail Integration</h2>
-    <div class="card">
-      <div class="card-header">How It Works</div>
-      <p>The Inbound Comms Tracker processes compliance emails automatically when they are labelled in Gmail.</p>
-
-      <!-- Flow diagram -->
-      <div class="flow">
-        <div class="flow-step primary">
-          <span class="flow-icon">&#128231;</span>
-          Email arrives
-          <span class="flow-sub">Gas cert, EICR, insurance</span>
-        </div>
-        <span class="flow-arrow">&#10230;</span>
-        <div class="flow-step warning">
-          <span class="flow-icon">&#127991;</span>
-          Label applied
-          <span class="flow-sub">10: property compliance</span>
-        </div>
-        <span class="flow-arrow">&#10230;</span>
-        <div class="flow-step purple">
-          <span class="flow-icon">&#129302;</span>
-          AI extraction
-          <span class="flow-sub">Claude Haiku via proxy</span>
-        </div>
-        <span class="flow-arrow">&#10230;</span>
-        <div class="flow-step success">
-          <span class="flow-icon">&#9989;</span>
-          Airtable updated
-          <span class="flow-sub">New cert created</span>
-        </div>
-      </div>
-
-      <h4>Step-by-Step</h4>
-      <ol class="steps">
-        <li>A compliance email arrives in Gmail (e.g. gas safety certificate from an engineer, EICR report, insurance renewal confirmation).</li>
-        <li>In the Inbound Comms Tracker, use the label dropdown or AI suggestion to apply the <code>10: property compliance</code> label. This triggers processing automatically.</li>
-        <li>The system sends the email subject and body to Claude Haiku, which extracts: <strong>cert_type</strong> (GSC, EICR, Landlord Insurance, or Fire Alarm), <strong>property_name</strong>, <strong>renewal_date</strong>, and a brief <strong>summary</strong>.</li>
-        <li>The extracted data is matched against your Airtable Properties table. If a match is found, a new cert record is created in the Certs table with a link back to the original Gmail message.</li>
-        <li>Any older certs of the same type for the same property are automatically marked as &ldquo;Expired&rdquo; (see Audit Trail below).</li>
-        <li>The compliance dashboard immediately reflects the new cert on the next Refresh.</li>
-      </ol>
-
-      <h4>Bulk Processing</h4>
-      <p>When viewing the <code>10: property compliance</code> label, a compliance banner appears showing how many emails have been processed vs pending. Click <strong>Process All Pending</strong> to batch-process all unprocessed emails in one go.</p>
-
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>The AI can only extract details that are present in the email text. If an email just says &ldquo;certificate attached&rdquo; with no property name or date, it will show as &ldquo;No Match&rdquo; and need manual entry in Airtable.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 6. Audit Trail -->
-  <div class="section" id="audit-trail">
-    <h2 class="section-title"><span class="icon">&#128218;</span> 6. Audit Trail</h2>
-    <div class="card">
-      <p>The system maintains a <strong>full audit trail</strong> of every certificate ever received. Old records are never deleted.</p>
-
-      <h4>How It Works</h4>
-      <ul>
-        <li>When a new compliance email is processed, a <strong>new cert record</strong> is always created in Airtable (never overwritten).</li>
-        <li>After creation, any <strong>older certs</strong> of the same property and type are automatically set to &ldquo;Expired&rdquo; status.</li>
-        <li>The compliance dashboard only shows certs with the <strong>latest renewal date</strong> per property and type &mdash; expired records are filtered out.</li>
-        <li>All historical records remain in Airtable, searchable and traceable, each with a link to the original Gmail message.</li>
-      </ul>
-
-      <div class="info-box tip">
-        <span class="ib-icon">&#128161;</span>
-        <span>To view the full certificate history for a property, open the property record in Airtable and look at all linked cert records. Each one includes the Gmail link and processing date.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 7. Blocks & Apartments -->
-  <div class="section" id="blocks">
-    <h2 class="section-title"><span class="icon">&#127970;</span> 7. Blocks &amp; Apartments</h2>
-    <div class="card">
-      <p>Properties with a &ldquo;Block&rdquo; type in Airtable are handled differently from standard houses or flats:</p>
-
-      <table class="label-table">
-        <thead>
-          <tr>
-            <th>Cert Type</th>
-            <th>Block-Level or Per-Unit?</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>GSC</strong></td>
-            <td>N/A for most blocks</td>
-            <td>Unless individual apartments have their own gas supply, GSC shows as N/A for block units</td>
-          </tr>
-          <tr>
-            <td><strong>EICR</strong></td>
-            <td>Per unit</td>
-            <td>Each apartment within a block has its own EICR record and expiry date</td>
-          </tr>
-          <tr>
-            <td><strong>Insurance</strong></td>
-            <td>Building-level</td>
-            <td>One policy covers the whole block. Applied at the property level and inherited by all units</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>On the dashboard, blocks expand into rows for each apartment. Units are listed alphabetically beneath the block name.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 8. Agent-Managed Properties -->
-  <div class="section" id="agents">
-    <h2 class="section-title"><span class="icon">&#128101;</span> 8. Agent-Managed Properties</h2>
-    <div class="card">
-      <p>Properties with a managing agent recorded in Airtable appear in a separate &ldquo;Agent-Managed&rdquo; section at the bottom of the dashboard. They are grouped by agent name and sorted alphabetically.</p>
-      <p>Agent-managed properties are <strong>excluded from the summary KPI counts</strong> at the top of the dashboard, since compliance responsibility sits with the agent. However, they are still shown so you can monitor overall portfolio status.</p>
-
-      <h4>Adding or Updating Agent Info</h4>
-      <p>To mark a property as agent-managed, set the <strong>Agent</strong> field in the Airtable Properties table. The dashboard recognises the following agents and automatically groups them:</p>
-      <ul>
-        <li>Roc Immo</li>
-        <li>Intus</li>
-        <li>Mears</li>
-        <li>Cheffins</li>
-        <li>Sequence</li>
-        <li>Simon Collins</li>
-      </ul>
-    </div>
-  </div>
-
-  <!-- 9. Data Source -->
-  <div class="section" id="datasource">
-    <h2 class="section-title"><span class="icon">&#128451;</span> 9. Data Source &amp; Airtable</h2>
-    <div class="card">
-      <div class="card-header">Airtable Structure</div>
-      <p>The system reads from three tables in the <strong>Operations Director</strong> base:</p>
-      <table class="label-table">
-        <thead>
-          <tr>
-            <th>Table</th>
-            <th>Purpose</th>
-            <th>Key Fields</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>Properties</strong></td>
-            <td>All properties in the portfolio</td>
-            <td>Property Name, Short Name, Property Type (Standard/Block), Agent, linked Units</td>
-          </tr>
-          <tr>
-            <td><strong>Units</strong></td>
-            <td>Individual apartments within blocks</td>
-            <td>Unit Name, linked Property</td>
-          </tr>
-          <tr>
-            <td><strong>Certs</strong></td>
-            <td>Certificate records (one per cert received)</td>
-            <td>Type (select: GSC, EICR, Landlord Insurance, Fire Alarm), linked Property, linked Unit, Status (Active/Expired), Renewal Date, Notes (contains Gmail link)</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h4>Adding a Certificate Manually</h4>
-      <ol class="steps">
-        <li>Open the Certs table in Airtable.</li>
-        <li>Create a new record.</li>
-        <li>Set the <strong>Type</strong> (GSC, EICR, or Landlord Insurance).</li>
-        <li>Link it to the correct <strong>Property</strong> (and <strong>Unit</strong> if applicable for blocks).</li>
-        <li>Set the <strong>Renewal Date</strong> (the date the cert expires or is next due).</li>
-        <li>Set <strong>Status</strong> to Active. The dashboard will pick it up on next refresh.</li>
-      </ol>
-
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>You only need to add certs manually for situations not covered by email (e.g. certificates received by post). Email-based certs are created automatically via the Gmail integration.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 10. Troubleshooting -->
-  <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 10. Troubleshooting</h2>
-    <div class="card">
-      <div class="ts-item">
-        <div class="ts-problem">Dashboard shows &ldquo;No Cert&rdquo; despite having a valid certificate</div>
-        <div class="ts-solution">Check the Certs table in Airtable. Ensure the cert record has the correct Property linked, the correct Type selected, and a Renewal Date set. Also check that Status is &ldquo;Active&rdquo; (not &ldquo;Expired&rdquo;). Click Refresh on the dashboard.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Email processed but shows &ldquo;No Match&rdquo;</div>
-        <div class="ts-solution">The AI could not match the property name in the email to any property in Airtable. Check that the property name or short name in Airtable matches what appears in the email. You may need to add a short name alias.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Email processing failed</div>
-        <div class="ts-solution">This usually means the AI could not extract valid JSON from the email content, or the Airtable API returned an error. Try the &ldquo;Process All Pending&rdquo; button to retry. If it persists, check the browser console for detailed error messages.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">PAT authentication prompt keeps appearing</div>
-        <div class="ts-solution">Your Airtable Personal Access Token may have expired or been revoked. Generate a new one from <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a> with read/write access to the Operations Director base, then enter it in Settings.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Property missing from the dashboard entirely</div>
-        <div class="ts-solution">The property must exist in the Airtable Properties table. Add it there first, then create cert records linked to it. Properties appear on the dashboard regardless of whether they have certs (they just show blank cells).</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Old expired certificate still showing on the dashboard</div>
-        <div class="ts-solution">The dashboard filters out certs with &ldquo;Expired&rdquo; status and shows only the latest renewal date. If an old cert is still showing, check that its Status in Airtable is correctly set to &ldquo;Expired&rdquo;, or that a newer Active cert exists.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem">Compliance label not appearing in the Inbound Comms Tracker dropdown</div>
-        <div class="ts-solution">Ensure the Gmail label is named exactly <code>10: property compliance</code> (with the number prefix). The dropdown shows labels matching the pattern <code>N: label name</code> where N is a number. Refresh the page after creating the label in Gmail.</div>
-      </div>
-    </div>
-  </div>
-
 </div>
+
+<!-- ============ TABLE OF CONTENTS ============ -->
+<div class="section">
+  <div class="toc">
+    <h2>&#x1F4D1; Table of Contents</h2>
+    <div class="toc-grid">
+      <a href="#overview"><span class="toc-num">1</span> Overview &amp; Purpose</a>
+      <a href="#access"><span class="toc-num">2</span> How to Access</a>
+      <a href="#cert-types"><span class="toc-num">3</span> Certificate Types</a>
+      <a href="#dashboard-features"><span class="toc-num">4</span> Dashboard Features</a>
+      <a href="#status-tags"><span class="toc-num">5</span> Status Tags &amp; Row Colours</a>
+      <a href="#blocks"><span class="toc-num">6</span> Blocks &amp; Apartments</a>
+      <a href="#agents"><span class="toc-num">7</span> Agent-Managed Properties</a>
+      <a href="#data-source"><span class="toc-num">8</span> Airtable Data Structure</a>
+      <a href="#manual-entry"><span class="toc-num">9</span> Manual Certificate Entry</a>
+      <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
+      <a href="#changelog"><span class="toc-num">11</span> Changelog</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 1. OVERVIEW ============ -->
+<div class="section" id="overview">
+  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 1. Overview &amp; Purpose</h2>
+  <div class="card">
+    <p>The Property Compliance OS (<code>compliance.html</code>) is a read-only dashboard that displays the current status of mandatory safety certificates across your entire rental portfolio. It connects directly to Airtable and renders live data on load.</p>
+    <p>The dashboard answers one question at a glance: <strong>which properties have expired, expiring, or missing certificates?</strong></p>
+    <ul>
+      <li>Three certificate types are tracked per property: <strong>Gas Safety (GSC)</strong>, <strong>EICR</strong>, and <strong>Landlord Insurance</strong>.</li>
+      <li>Properties are split into <strong>self-managed</strong> (your action list) and <strong>agent-managed</strong> (monitoring only).</li>
+      <li>Block properties expand into per-unit rows with individual EICR tracking.</li>
+    </ul>
+    <div class="info-box danger">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div><strong>Legal obligation:</strong> Operating a rental property without a valid gas safety certificate is a criminal offence. The dashboard flags expired GSCs in red with highest priority.</div>
+    </div>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Read-only:</strong> This dashboard only reads from Airtable. To update certificate records, edit them directly in Airtable or use the manual entry process (section 9). There is no write functionality in <code>compliance.html</code>.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 2. HOW TO ACCESS ============ -->
+<div class="section" id="access">
+  <h2 class="section-title"><span class="icon">&#x1F511;</span> 2. How to Access</h2>
+  <div class="card">
+    <div class="card-header">&#x1F6AA; Opening the Dashboard</div>
+    <ol class="steps">
+      <li>Open <a href="https://chaichoong.github.io/leadership-dashboard/compliance.html" target="_blank">compliance.html</a> directly, or navigate via the Leadership Dashboard sidebar &rarr; <strong>Compliance</strong>.</li>
+      <li>If not already authenticated, an auth screen appears. Enter your <strong>Airtable Personal Access Token</strong> (PAT) and click <strong>Connect</strong>.</li>
+      <li>The PAT is stored in two places: <code>sessionStorage</code> key <code>_dlr_pat</code> (for this tab) and <code>localStorage</code> key <code>airtable_pat</code> (shared with the Inbound Comms Tracker). This means if you have already authenticated in the Inbound Comms Tracker, Compliance will pick up the same token automatically.</li>
+      <li>Data loads immediately &mdash; a full-screen spinner is shown while fetching.</li>
+      <li>To refresh data at any time, click <strong>Refresh</strong> in the top-right header.</li>
+      <li>To return to the main Leadership Dashboard, click <strong>Back to Dashboard</strong> in the top-right header (calls <code>goToDashboard()</code>, which uses <code>window.parent.switchTab('overview')</code> if loaded in an iframe, or redirects to <code>index.html</code>).</li>
+    </ol>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4BE;</span>
+      <div><strong>Shared authentication:</strong> The PAT is shared between compliance.html and follow-up.html (Inbound Comms) via <code>localStorage</code> key <code>airtable_pat</code>. Enter it once in either page and both pages will use it.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 3. CERTIFICATE TYPES ============ -->
+<div class="section" id="cert-types">
+  <h2 class="section-title"><span class="icon">&#x1F4DC;</span> 3. Certificate Types</h2>
+  <div class="card">
+    <p>The dashboard recognises three certificate types. These must match exactly in the <code>Type</code> field of the Airtable Certs table:</p>
+    <table class="label-table">
+      <thead><tr><th>Type (exact value in Airtable)</th><th>Typical Renewal</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>GSC</strong> (Gas Safety Certificate)</td>
+          <td>Annual</td>
+          <td>Required for all properties with gas appliances. Block apartments without individual gas supply show <span class="label-badge lb-grey">N/A</span> on the dashboard.</td>
+        </tr>
+        <tr>
+          <td><strong>EICR</strong> (Electrical Installation Condition Report)</td>
+          <td>Every 5 years</td>
+          <td>Required for all rental properties. Block apartments each have their own EICR record.</td>
+        </tr>
+        <tr>
+          <td><strong>Landlord Insurance</strong></td>
+          <td>Annual</td>
+          <td>Building-level cover. For blocks, insurance is recorded at the property level and applied across all units (units show <span class="label-badge lb-grey">See building</span>).</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div>Any cert record with a <code>Type</code> value other than <strong>GSC</strong>, <strong>EICR</strong>, or <strong>Landlord Insurance</strong> is silently ignored by the dashboard. Other types (e.g. Fire Alarm) may exist in Airtable but do not appear here.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 4. DASHBOARD FEATURES ============ -->
+<div class="section" id="dashboard-features">
+  <h2 class="section-title"><span class="icon">&#x1F4CA;</span> 4. Dashboard Features</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CA; Summary Bar</div>
+    <p>Four KPI cards shown at the top of the dashboard. <strong>These counts include only self-managed properties</strong> &mdash; agent-managed properties are excluded from the totals.</p>
+    <div class="metrics-bar" style="margin-top:0.75rem">
+      <div class="metric-chip" style="background:#fef2f2;color:#dc2626"><span class="dot red"></span> <strong>Expired</strong> &mdash; cert has expired (renewal date in the past)</div>
+      <div class="metric-chip mc-amber"><span class="dot amber"></span> <strong>Expiring (30d)</strong> &mdash; expires within 30 days</div>
+      <div class="metric-chip mc-green"><span class="dot green"></span> <strong>Active</strong> &mdash; valid, more than 30 days remaining</div>
+      <div class="metric-chip mc-grey"><span class="dot"></span> <strong>No Cert</strong> &mdash; no cert record found for this property/type</div>
+    </div>
+    <p style="margin-top:0.75rem">Each property&rsquo;s GSC, EICR, and Insurance cert contributes one count to the summary bar. For block properties, only the EICR count is included (per unit).</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4CB; Self-Managed Properties Table</div>
+    <p>The main table lists every self-managed property as a row with three cert columns. Standard (non-block) properties show one row per property. Block properties show a section header row followed by one row per apartment unit.</p>
+    <ul>
+      <li>Each cert cell shows the status tag and renewal date (e.g. <span class="label-badge lb-green">Active</span> &nbsp; 12 Mar 2027).</li>
+      <li>Clicking any cert cell <strong>opens the Airtable record directly</strong> in a new tab (link to <code>https://airtable.com/[baseId]/[certsTableId]/[recId]</code>). Only cells with a known <code>recId</code> are linked.</li>
+      <li>Dates within 30 days show in <span style="color:#d97706;font-weight:600">amber</span>; expired dates show in <span style="color:#dc2626;font-weight:600">red</span> with a &ldquo;(Xd overdue)&rdquo; note.</li>
+    </ul>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div><strong>Only current certs are shown.</strong> The dashboard skips any cert record whose <code>Status</code> field in Airtable equals &ldquo;Expired&rdquo; (<code>if (c.s === 'Expired') continue</code>). Expired records remain in Airtable for audit purposes but are not rendered. If multiple active certs exist for the same property and type, the one with the <strong>latest renewal date</strong> is shown.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F91D; Agent-Managed Section</div>
+    <p>Agent-managed properties appear in a <strong>collapsible section</strong> below the main table (using an HTML <code>&lt;details&gt;</code> element). Click the summary row to expand or collapse it.</p>
+    <p>Within the section, properties are grouped by agent name with a purple header row for each agent, showing the count of properties. Within each agent group, properties follow the same standard/block rendering as self-managed.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; Buttons</div>
+    <table class="label-table">
+      <thead><tr><th>Button / Link</th><th>Location</th><th>What It Does</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Connect</strong></td>
+          <td>Auth screen</td>
+          <td>Calls <code>authenticate()</code>: saves PAT to sessionStorage and localStorage, hides auth screen, calls <code>loadData()</code></td>
+        </tr>
+        <tr>
+          <td><strong>Refresh</strong></td>
+          <td>Top-right header</td>
+          <td>Calls <code>loadData()</code> directly &mdash; re-fetches all three Airtable tables and re-renders the dashboard</td>
+        </tr>
+        <tr>
+          <td><strong>Back to Dashboard</strong></td>
+          <td>Top-right header</td>
+          <td>Calls <code>goToDashboard()</code>: if loaded in an iframe, calls <code>window.parent.switchTab('overview')</code>; otherwise redirects to <code>index.html</code></td>
+        </tr>
+        <tr>
+          <td><strong>Cert cell link</strong></td>
+          <td>Each cert cell (if linked)</td>
+          <td>Opens the specific Airtable cert record in a new tab. Only available when <code>recId</code> is known.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ 5. STATUS TAGS & ROW COLOURS ============ -->
+<div class="section" id="status-tags">
+  <h2 class="section-title"><span class="icon">&#x1F3A8;</span> 5. Status Tags &amp; Row Colours</h2>
+  <div class="card">
+    <div class="card-header">&#x1F3F7; Status Tags (in each cert cell)</div>
+    <p>The <code>cell()</code> function in <code>compliance.html</code> renders each cert cell with one of four tags, determined by the cert&rsquo;s <code>renewalDate</code> and <code>status</code> fields:</p>
+    <table class="label-table">
+      <thead><tr><th>Tag</th><th>Condition</th><th>Date Colour</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="label-badge lb-red">Expired</span></td>
+          <td><code>status === 'Expired'</code> OR renewal date is in the past (days &lt; 0)</td>
+          <td>Red, bold. Shows &ldquo;(Xd overdue)&rdquo; in red below the date.</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-amber">Expiring</span></td>
+          <td>Renewal date is within 30 days (days &ge; 0 and days &le; 30)</td>
+          <td>Amber, bold. Shows &ldquo;(Xd left)&rdquo; in amber below the date.</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-green">Active</span></td>
+          <td>Renewal date is more than 30 days in the future</td>
+          <td>Normal (dark grey), no extra label</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge" style="background:#f1f5f9;color:#cbd5e1">&mdash;</span></td>
+          <td>No cert record found for this property and type</td>
+          <td>N/A (grey dash)</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-grey">N/A</span></td>
+          <td>Not applicable (e.g. GSC for block apartments, Insurance for block unit rows)</td>
+          <td>N/A (transparent/grey)</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge lb-grey">See building</span></td>
+          <td>Insurance for block apartment units (covered at property level)</td>
+          <td>Shown as &ldquo;See building&rdquo;</td>
+        </tr>
+        <tr>
+          <td><span class="label-badge">No date</span></td>
+          <td>Cert record exists with Active status but no renewal date set</td>
+          <td>Grey, no date displayed</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F3A8; Row Background Colours</div>
+    <p>Entire table rows are highlighted based on the <code>rowClass()</code> function:</p>
+    <table class="label-table">
+      <thead><tr><th>Class</th><th>Trigger</th><th>Background</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>row-expired</code></td>
+          <td>Any of the three cert cells is Expired (status = Expired or days &lt; 0)</td>
+          <td>Light red background (<code>#fff5f5</code>), red hover (<code>#fff0f0</code>)</td>
+        </tr>
+        <tr>
+          <td><code>row-expiring</code></td>
+          <td>No expired certs, but any cert expires within 30 days</td>
+          <td>Light amber background (<code>#fffdf5</code>), amber hover (<code>#fffbeb</code>)</td>
+        </tr>
+        <tr>
+          <td>(no class)</td>
+          <td>All certs are Active or not applicable</td>
+          <td>Standard white background</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div>Row colours are evaluated left-to-right: <code>row-expired</code> takes priority over <code>row-expiring</code>. Only the first matching condition is applied.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 6. BLOCKS & APARTMENTS ============ -->
+<div class="section" id="blocks">
+  <h2 class="section-title"><span class="icon">&#x1F3D7;</span> 6. Blocks &amp; Apartments</h2>
+  <div class="card">
+    <p>Properties with <code>propType = 'Block'</code> in the Airtable Properties table are handled differently from standard properties.</p>
+
+    <div class="flow">
+      <div class="flow-step primary"><span class="flow-icon">&#x1F3E2;</span>Block Property<span class="flow-sub">propType = Block</span></div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step warning"><span class="flow-icon">&#x1F3E0;</span>Per-Unit Rows<span class="flow-sub">One row per apartment</span></div>
+      <div class="flow-arrow">&#x27A1;&#xFE0F;</div>
+      <div class="flow-step success"><span class="flow-icon">&#x1F4CB;</span>EICR per unit<span class="flow-sub">GSC N/A, Insurance: See building</span></div>
+    </div>
+
+    <table class="label-table">
+      <thead><tr><th>Cert Type</th><th>Standard Property</th><th>Block Apartment Unit</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>GSC</strong></td>
+          <td>Property-level cert record</td>
+          <td><span class="label-badge lb-grey">N/A</span> &mdash; block apartments have no individual gas supply</td>
+        </tr>
+        <tr>
+          <td><strong>EICR</strong></td>
+          <td>Property-level cert record</td>
+          <td>Unit-level cert record (linked to the specific unit record in the Units table)</td>
+        </tr>
+        <tr>
+          <td><strong>Landlord Insurance</strong></td>
+          <td>Property-level cert record</td>
+          <td><span class="label-badge lb-grey">See building</span> &mdash; insurance covers the whole block</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F4A1;</span>
+      <div><strong>Cert propagation:</strong> If an EICR record is linked to the block property rather than a specific unit, the dashboard propagates it to <em>all</em> units of that block. This means a single property-level EICR can pre-fill all unit rows until individual unit-level certs are added.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 7. AGENT-MANAGED PROPERTIES ============ -->
+<div class="section" id="agents">
+  <h2 class="section-title"><span class="icon">&#x1F91D;</span> 7. Agent-Managed Properties</h2>
+  <div class="card">
+    <p>A property is considered agent-managed if the <strong>Agent</strong> field (<code>FP.agent</code>) in the Airtable Properties table contains one of the following strings (case-insensitive):</p>
+    <ul>
+      <li>roc immo</li>
+      <li>intus</li>
+      <li>mears</li>
+      <li>cheffins</li>
+      <li>sequence</li>
+      <li>simon collins</li>
+    </ul>
+    <p>This check is performed by the <code>isAgentManaged(agentStr)</code> function in <code>compliance.html</code>.</p>
+    <p>Agent-managed properties are:</p>
+    <ul>
+      <li><strong>Excluded</strong> from the summary bar KPI counts (self-managed only).</li>
+      <li><strong>Shown separately</strong> in the collapsible &ldquo;Agent-managed&rdquo; section, grouped by agent name with an indigo group header.</li>
+      <li>Rendered using the same table structure as self-managed properties.</li>
+    </ul>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div>To add a new recognised agent, update the <code>AGENT_NAMES</code> array in <code>compliance.html</code> and the corresponding Airtable Property record.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 8. AIRTABLE DATA STRUCTURE ============ -->
+<div class="section" id="data-source">
+  <h2 class="section-title"><span class="icon">&#x1F5C3;</span> 8. Airtable Data Structure</h2>
+  <div class="card">
+    <p>The dashboard fetches three tables in parallel from base <code>appnqjDpqDniH3IRl</code>:</p>
+    <table class="label-table">
+      <thead><tr><th>Table</th><th>Table ID</th><th>Key Fields Used</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Certs</strong></td>
+          <td><code>tbl35rf9qtmq0P87r</code></td>
+          <td>
+            <code>fld2v8Yul7bKKEjL2</code> Name<br>
+            <code>fld00ZuxT8uKagM0b</code> Type (GSC / EICR / Landlord Insurance)<br>
+            <code>fldXdDStBL7xrytgT</code> linked Property<br>
+            <code>fldAa2aZINAPgmR79</code> linked Unit<br>
+            <code>fldcSmrEQxoqpEQYF</code> Status<br>
+            <code>fldhZw8IrmgLt1hLY</code> Renewal Date
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Properties</strong></td>
+          <td><code>tbl6f0OkAmTC2jbuG</code></td>
+          <td>
+            <code>fldy2t735TV5e1DIL</code> Property Name<br>
+            <code>fldqMbR329TNY974G</code> Short Name<br>
+            <code>fldOySSrZBYkOLLTX</code> Property Type (Standard / Block)<br>
+            <code>fldLoWcv40Ag5sHRF</code> linked Units<br>
+            <code>fldEUrWVhSp3NY8Hh</code> Agent
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Rental Units</strong></td>
+          <td><code>tblM3mZCR5kiEdWMj</code></td>
+          <td>
+            <code>fldr8sliyu8h2jw9t</code> Unit Name (primary/formula field)<br>
+            <code>fldUJNRGgzgyAwwjt</code> linked Property
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div>All fields are fetched using <code>returnFieldsByFieldId=true</code>. The dashboard processes all records returned by Airtable (no server-side filtering — all pages are fetched via offset pagination).</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 9. MANUAL CERTIFICATE ENTRY ============ -->
+<div class="section" id="manual-entry">
+  <h2 class="section-title"><span class="icon">&#x270F;&#xFE0F;</span> 9. Manual Certificate Entry</h2>
+  <div class="card">
+    <p>Certificates received by post or any channel other than email must be entered manually in Airtable. The dashboard will pick them up on the next Refresh.</p>
+    <ol class="steps">
+      <li>Open the <strong>Certs</strong> table in Airtable (base: Operations Director).</li>
+      <li>Create a new record.</li>
+      <li>Set <strong>Type</strong> to exactly one of: <code>GSC</code>, <code>EICR</code>, or <code>Landlord Insurance</code> (must match exactly).</li>
+      <li>Link to the correct <strong>Property</strong>. For block apartments, also link to the specific <strong>Unit</strong>.</li>
+      <li>Set <strong>Renewal Date</strong> to the certificate&rsquo;s expiry or next-due date.</li>
+      <li>Set <strong>Status</strong> to <code>Active</code>.</li>
+      <li>Return to the compliance dashboard and click <strong>Refresh</strong>.</li>
+    </ol>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div>Do NOT set the Status to &ldquo;Expired&rdquo; for a newly entered certificate — that will cause the dashboard to skip it entirely. Only set Status to &ldquo;Expired&rdquo; when replacing a certificate with a newer one, to preserve the audit trail.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 10. TROUBLESHOOTING ============ -->
+<div class="section" id="troubleshooting">
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 10. Troubleshooting</h2>
+  <div class="card">
+
+    <div class="ts-item">
+      <div class="ts-problem">Dashboard shows auth screen even after entering PAT</div>
+      <div class="ts-solution">Ensure the PAT has read access to the Operations Director Airtable base and covers the Certs, Properties, and Rental Units tables. Generate a new one at airtable.com/create/tokens if needed. The error message &ldquo;Invalid token&rdquo; appears if the API returns 401 or 403.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Property shows all blank cells (no cert data)</div>
+      <div class="ts-solution">The property exists in Airtable but has no cert records linked to it, or all its cert records have Status = &ldquo;Expired&rdquo;. Add cert records manually (section 9) or check that existing records link to the correct property ID.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Certificate shows as &ldquo;Expired&rdquo; despite being valid</div>
+      <div class="ts-solution">The cert record in Airtable may have Status = &ldquo;Expired&rdquo;. The dashboard skips these records. Check the Certs table in Airtable and set Status to &ldquo;Active&rdquo; if the certificate is still valid.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">A property is missing from the dashboard entirely</div>
+      <div class="ts-solution">The property must exist in the Airtable Properties table. Add it there, then add cert records linked to it. The dashboard shows all properties regardless of whether they have certs.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Block property shows as a single row instead of per-unit rows</div>
+      <div class="ts-solution">Check that the <code>Property Type</code> field in Airtable is set to &ldquo;Block&rdquo; (not &ldquo;Standard&rdquo;) and that the block property has units linked in its <code>Units</code> field.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Agent-managed property appears in the self-managed section</div>
+      <div class="ts-solution">The <code>Agent</code> field in Airtable must contain one of the recognised agent names: roc immo, intus, mears, cheffins, sequence, or simon collins (case-insensitive partial match). If the agent name uses a different spelling, update it in Airtable to match.</div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">Cert cell is not a clickable link</div>
+      <div class="ts-solution">The cell only shows a link if a cert record was found (<code>recId</code> is known). Cells showing &ldquo;N/A&rdquo;, &ldquo;See building&rdquo;, or the grey dash have no associated record and therefore no link.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============ 11. CHANGELOG ============ -->
+<div class="section" id="changelog">
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 11. Changelog</h2>
+  <div class="card">
+    <table class="label-table">
+      <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>1.1</strong></td>
+          <td>16 Apr 2026</td>
+          <td>Rewritten to accurately reflect compliance.html code only. Removed incorrect Gmail/AI sections (those apply to follow-up.html, not this page). Added: accurate cert display logic, rowClass behaviour, block cert propagation, full Airtable field ID table, AGENT_NAMES list, status tag detail, No Cert vs N/A distinction, auth localStorage/sessionStorage mechanics.</td>
+        </tr>
+        <tr>
+          <td><strong>1.0</strong></td>
+          <td>12 Apr 2026</td>
+          <td>Initial SOP. Covered overview, access, cert types, dashboard features, blocks &amp; apartments, agent-managed, data source, troubleshooting.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- end .container -->
 </body>
 </html>
