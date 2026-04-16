@@ -9,7 +9,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.5', sopFile: 'sop.html',                   sopVer: '2.3', standalone: 'index.html#overview' },
         { id: 'tasks',       name: 'Task Manager',                   icon: '✅', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/tasks/index.html' },
-        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.4', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
+        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.5', sopFile: 'sop-cfvs.html',               sopVer: '1.4', standalone: 'index.html#cfv' },
         { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.0', sopFile: 'sop-invoices.html',           sopVer: '2.0', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.0', sopFile: 'sop-pnl.html',                sopVer: '1.0', standalone: 'index.html#pnl' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.2', sopFile: 'inbound-comms-sop.html',      sopVer: '2.2', standalone: 'follow-up.html' },

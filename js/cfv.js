@@ -5,7 +5,7 @@
     // CFV TAB — Cash Flow Void Detection & Management
     // ══════════════════════════════════════════
 
-    const CFV_TOLERANCE_DAYS = 2; // days after due date before flagging
+    const CFV_TOLERANCE_DAYS = 2; // days after due date before flagging (v1.5)
     const CFV_STATUS_IDS = {
         inPayment:   'sel4I99slfpd7Vc1t',
         cfv:         'sel2mWzsvOd8d8de0',
