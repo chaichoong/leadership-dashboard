@@ -41,13 +41,20 @@
         if (integrity) {
             const total = PAGE_REGISTRY.length;
             const allGood = matched === total;
-            const sopRequested = localStorage.getItem('_sop_update_requested');
-            // Clear the requested flag if everything is now in sync
-            if (outOfSync.length === 0 && sopRequested) localStorage.removeItem('_sop_update_requested');
+            let sopRequested = localStorage.getItem('_sop_update_requested');
+            // Clear the requested flag if everything is now in sync OR if it's older than 24 hours
+            if (sopRequested) {
+                const elapsed = Date.now() - new Date(sopRequested).getTime();
+                if (outOfSync.length === 0 || elapsed > 24 * 60 * 60 * 1000) {
+                    localStorage.removeItem('_sop_update_requested');
+                    sopRequested = null;
+                }
+            }
             let updateAllBtn = '';
             if (outOfSync.length > 0) {
                 if (sopRequested) {
-                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${outOfSync.length} SOPs)</button>`;
+                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${outOfSync.length} SOPs)</button>`
+                        + ` <button class="cfv-action-btn" onclick="resetSOPRequestFlag()" style="font-size:11px;padding:8px 16px;margin-top:8px">Reset &amp; Re-enable</button>`;
                 } else {
                     updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${outOfSync.length})</button>`;
                 }
@@ -128,6 +135,11 @@
         toast.textContent = 'All SOP updates queued — will be processed automatically';
         toast.style.display = 'block';
         setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+
+    function resetSOPRequestFlag() {
+        localStorage.removeItem('_sop_update_requested');
+        renderSiteMap();
     }
 
     // Share current page — copies the deep link to clipboard
