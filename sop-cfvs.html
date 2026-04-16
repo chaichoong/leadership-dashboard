@@ -3,307 +3,106 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cash Flow Voids (CFVs) — Standard Operating Procedure</title>
+<title>Cash Flow Voids (CFVs) OS &mdash; Standard Operating Procedure</title>
 <style>
-/* ====== RESET & BASE ====== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  line-height: 1.6;
-  color: #1e293b;
-  background: #f1f5f9;
+  line-height: 1.6; color: #1e293b; background: #f1f5f9;
 }
-
-/* ====== COLOUR VARIABLES ====== */
 :root {
-  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
-  --blue-500: #3b82f6; --blue-600: #2563eb; --blue-700: #1d4ed8; --blue-800: #1e40af; --blue-900: #1e3a5f;
-  --indigo-50: #eef2ff; --indigo-100: #e0e7ff; --indigo-500: #6366f1; --indigo-600: #4f46e5; --indigo-700: #4338ca;
-  --green-50: #f0fdf4; --green-100: #dcfce7; --green-500: #22c55e; --green-600: #16a34a; --green-700: #15803d;
-  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-500: #f59e0b; --amber-600: #d97706;
-  --red-50: #fef2f2; --red-100: #fee2e2; --red-500: #ef4444; --red-600: #dc2626;
-  --purple-50: #faf5ff; --purple-500: #a855f7; --purple-600: #9333ea;
-  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
-  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
-  --radius: 12px;
-  --radius-sm: 8px;
+  --blue-50:#eff6ff;--blue-100:#dbeafe;--blue-200:#bfdbfe;--blue-500:#3b82f6;--blue-600:#2563eb;--blue-700:#1d4ed8;--blue-800:#1e40af;--blue-900:#1e3a5f;
+  --indigo-50:#eef2ff;--indigo-100:#e0e7ff;--indigo-500:#6366f1;--indigo-600:#4f46e5;--indigo-700:#4338ca;
+  --green-50:#f0fdf4;--green-100:#dcfce7;--green-500:#22c55e;--green-600:#16a34a;--green-700:#15803d;
+  --amber-50:#fffbeb;--amber-100:#fef3c7;--amber-500:#f59e0b;--amber-600:#d97706;
+  --red-50:#fef2f2;--red-100:#fee2e2;--red-500:#ef4444;--red-600:#dc2626;
+  --purple-50:#faf5ff;--purple-500:#a855f7;--purple-600:#9333ea;
+  --slate-50:#f8fafc;--slate-100:#f1f5f9;--slate-200:#e2e8f0;--slate-300:#cbd5e1;--slate-400:#94a3b8;--slate-500:#64748b;--slate-600:#475569;--slate-700:#334155;--slate-800:#1e293b;
+  --shadow:0 1px 3px rgba(0,0,0,0.1),0 1px 2px rgba(0,0,0,0.06);--shadow-md:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -1px rgba(0,0,0,0.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);
+  --radius:12px;--radius-sm:8px;
 }
-
-/* ====== HEADER ====== */
-.header {
-  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
-  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+.header { background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%); color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+.header::after { content:''; position:absolute; top:-50%; right:-10%; width:500px; height:500px; background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%); border-radius:50%; }
+.header-inner { max-width:1100px; margin:0 auto; position:relative; z-index:1; }
+.header-back { display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; opacity:0.7; text-decoration:none; color:white; margin-bottom:1rem; transition:opacity 0.15s; }
+.header-back:hover { opacity:1; }
+.header h1 { font-size:2.2rem; font-weight:700; margin-bottom:0.3rem; letter-spacing:-0.5px; }
+.header .subtitle { font-size:1.05rem; opacity:0.85; }
+.header .version { font-size:0.85rem; opacity:0.6; margin-top:0.5rem; }
+.container { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+.section { margin-top:2.5rem; }
+.section-title { font-size:1.5rem; font-weight:700; color:var(--blue-800); padding-bottom:0.5rem; border-bottom:3px solid var(--blue-200); margin-bottom:1.25rem; display:flex; align-items:center; gap:0.5rem; }
+.section-title .icon { font-size:1.4rem; }
+.card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:1.5rem; margin-bottom:1.25rem; border:1px solid var(--slate-200); }
+.card-header { font-size:1.1rem; font-weight:600; color:var(--slate-800); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+.quick-ref { background:linear-gradient(135deg,var(--blue-50) 0%,var(--indigo-50) 100%); border:2px solid var(--blue-200); border-radius:var(--radius); padding:1.5rem; margin-top:-1rem; position:relative; z-index:2; box-shadow:var(--shadow-lg); }
+.quick-ref h2 { font-size:1.2rem; color:var(--blue-800); margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.qr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0.75rem; }
+.qr-item { background:white; border-radius:var(--radius-sm); padding:0.75rem 1rem; border-left:4px solid var(--blue-500); font-size:0.88rem; }
+.qr-item .qr-label { font-weight:600; color:var(--slate-600); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; }
+.qr-item .qr-value { color:var(--slate-800); margin-top:0.15rem; word-break:break-all; }
+.qr-item .qr-value a { color:var(--blue-600); text-decoration:none; }
+.qr-item .qr-value a:hover { text-decoration:underline; }
+.toc { background:white; border-radius:var(--radius); box-shadow:var(--shadow); padding:1.5rem; border:1px solid var(--slate-200); }
+.toc h2 { font-size:1.15rem; color:var(--blue-800); margin-bottom:1rem; }
+.toc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0.35rem 1.5rem; }
+.toc a { display:flex; align-items:center; gap:0.5rem; color:var(--slate-700); text-decoration:none; padding:0.35rem 0.5rem; border-radius:6px; font-size:0.9rem; transition:background 0.15s; }
+.toc a:hover { background:var(--blue-50); color:var(--blue-700); }
+.toc a .toc-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--blue-100); color:var(--blue-700); font-size:0.7rem; font-weight:700; flex-shrink:0; }
+.flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:0; padding:1.5rem 0; }
+.flow-step { background:white; border:2px solid var(--blue-200); border-radius:var(--radius-sm); padding:0.75rem 1.1rem; text-align:center; font-size:0.85rem; font-weight:600; color:var(--slate-700); min-width:110px; }
+.flow-step.primary { background:var(--blue-600); color:white; border-color:var(--blue-700); }
+.flow-step.success { background:var(--green-600); color:white; border-color:var(--green-700); }
+.flow-step.warning { background:var(--amber-500); color:white; border-color:var(--amber-600); }
+.flow-step.purple { background:var(--purple-600); color:white; border-color:var(--purple-600); }
+.flow-step .flow-icon { font-size:1.3rem; display:block; margin-bottom:0.25rem; }
+.flow-step .flow-sub { font-weight:400; font-size:0.75rem; opacity:0.85; margin-top:0.15rem; }
+.flow-arrow { font-size:1.4rem; color:var(--slate-400); padding:0 0.3rem; flex-shrink:0; }
+.label-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.88rem; }
+.label-table th { background:var(--blue-700); color:white; padding:0.75rem 1rem; text-align:left; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+.label-table th:first-child { border-radius:var(--radius-sm) 0 0 0; }
+.label-table th:last-child { border-radius:0 var(--radius-sm) 0 0; }
+.label-table td { padding:0.65rem 1rem; border-bottom:1px solid var(--slate-200); vertical-align:top; }
+.label-table tr:last-child td { border-bottom:none; }
+.label-table tr:nth-child(even) td { background:var(--slate-50); }
+.label-table tr:hover td { background:var(--blue-50); }
+.label-badge { display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; font-weight:600; font-size:0.78rem; white-space:nowrap; }
+.lb-blue { background:#dbeafe; color:#1d4ed8; } .lb-amber { background:#fef3c7; color:#92400e; }
+.lb-red { background:#fee2e2; color:#991b1b; } .lb-green { background:#dcfce7; color:#166534; }
+.lb-purple { background:#e0e7ff; color:#3730a3; }
+.wf-card { background:white; border-radius:var(--radius); box-shadow:var(--shadow); border:1px solid var(--slate-200); overflow:hidden; margin-bottom:1.5rem; }
+.wf-header { padding:1rem 1.5rem; display:flex; align-items:center; gap:0.75rem; border-bottom:1px solid var(--slate-200); }
+.wf-num { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; font-weight:700; font-size:1rem; flex-shrink:0; color:white; background:var(--blue-600); }
+.wf-header h3 { font-size:1.1rem; font-weight:700; color:var(--slate-800); }
+.wf-header .wf-tag { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--slate-100); color:var(--slate-600); font-weight:500; }
+.wf-body { padding:1.25rem 1.5rem; }
+.wf-body h4 { font-size:0.9rem; font-weight:600; color:var(--slate-700); margin-bottom:0.5rem; margin-top:1rem; }
+.wf-body h4:first-child { margin-top:0; }
+.steps { counter-reset:step; list-style:none; padding:0; }
+.steps li { position:relative; padding:0.5rem 0 0.5rem 2.5rem; font-size:0.9rem; line-height:1.5; }
+.steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0.45rem; width:24px; height:24px; border-radius:50%; background:var(--blue-100); color:var(--blue-700); font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.steps li + li { border-top:1px solid var(--slate-100); }
+.info-box { padding:0.85rem 1rem; border-radius:var(--radius-sm); font-size:0.88rem; margin:0.75rem 0; display:flex; align-items:flex-start; gap:0.6rem; }
+.info-box.info { background:var(--blue-50); border-left:4px solid var(--blue-500); color:var(--blue-800); }
+.info-box.warn { background:var(--amber-50); border-left:4px solid var(--amber-500); color:#92400e; }
+.info-box.danger { background:var(--red-50); border-left:4px solid var(--red-500); color:#991b1b; }
+.info-box.tip { background:var(--green-50); border-left:4px solid var(--green-500); color:var(--green-700); }
+.info-box .ib-icon { font-size:1.1rem; flex-shrink:0; margin-top:0.05rem; }
+code { background:var(--slate-100); padding:0.15rem 0.4rem; border-radius:4px; font-size:0.82rem; font-family:'SF Mono',Monaco,Consolas,monospace; color:var(--indigo-600); }
+.ts-item { margin-bottom:0.75rem; }
+.ts-problem { font-weight:600; color:var(--red-600); font-size:0.9rem; }
+.ts-solution { font-size:0.88rem; color:var(--slate-700); margin-top:0.2rem; padding-left:1rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+strong { color:var(--slate-800); } a { color:var(--blue-600); }
+p { margin-bottom:0.5rem; } ul,ol { margin-left:1.25rem; margin-bottom:0.5rem; }
+li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px solid var(--slate-200); margin:1.5rem 0; }
+@media (max-width:768px) {
+  .header h1 { font-size:1.6rem; } .qr-grid { grid-template-columns:1fr; }
+  .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
+  .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
+  .container { padding:0 1rem 3rem; }
 }
-.header::after {
-  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
-  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
-  border-radius: 50%;
-}
-.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
-.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
-.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
-.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
-
-/* ====== LAYOUT ====== */
-.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
-.section { margin-top: 2.5rem; }
-.section-title {
-  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
-  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
-  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
-}
-.section-title .icon { font-size: 1.4rem; }
-
-/* ====== CARDS ====== */
-.card {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
-}
-.card-header {
-  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
-  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
-}
-
-/* ====== QUICK REFERENCE ====== */
-.quick-ref {
-  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
-  border: 2px solid var(--blue-200); border-radius: var(--radius);
-  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
-  box-shadow: var(--shadow-lg);
-}
-.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
-.qr-item {
-  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
-  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
-}
-.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
-.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
-.qr-item .qr-value a:hover { text-decoration: underline; }
-
-/* ====== TABLE OF CONTENTS ====== */
-.toc {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.5rem; border: 1px solid var(--slate-200);
-}
-.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
-.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
-.toc a {
-  display: flex; align-items: center; gap: 0.5rem;
-  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
-  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
-}
-.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
-.toc a .toc-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--blue-100); color: var(--blue-700);
-  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
-}
-
-/* ====== FLOW DIAGRAMS ====== */
-.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
-.flow-step {
-  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
-  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
-  color: var(--slate-700); min-width: 110px; position: relative;
-}
-.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
-.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
-.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
-.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
-.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
-.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
-.flow-arrow {
-  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
-}
-.flow-arrow-down {
-  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
-  font-size: 1.4rem; color: var(--slate-400);
-}
-
-/* Vertical flow */
-.flow-vertical { flex-direction: column; align-items: center; }
-.flow-vertical .flow-step { min-width: 200px; }
-
-/* ====== ARCHITECTURE DIAGRAM ====== */
-.arch-diagram {
-  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
-  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
-}
-.arch-box {
-  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
-  padding: 1.25rem; text-align: center; min-height: 120px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-}
-.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
-.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
-.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
-.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
-.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
-
-/* ====== LABEL TABLE ====== */
-.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
-.label-table th {
-  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
-  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
-}
-.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
-.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
-.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
-.label-table tr:last-child td { border-bottom: none; }
-.label-table tr:nth-child(even) td { background: var(--slate-50); }
-.label-table tr:hover td { background: var(--blue-50); }
-.label-badge {
-  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
-  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
-}
-.label-badge.lb-1 { background: #dbeafe; color: #1d4ed8; }
-.label-badge.lb-2 { background: #fef3c7; color: #92400e; }
-.label-badge.lb-3 { background: #fee2e2; color: #991b1b; }
-.label-badge.lb-4 { background: #dcfce7; color: #166534; }
-.label-badge.lb-5 { background: #e0e7ff; color: #3730a3; }
-.label-badge.lb-6 { background: #f3e8ff; color: #6b21a8; }
-.label-badge.lb-7 { background: #fecaca; color: #991b1b; }
-.label-badge.lb-8 { background: #fed7aa; color: #9a3412; }
-.label-badge.lb-9 { background: #d1fae5; color: #065f46; }
-
-/* ====== WORKFLOW CARDS ====== */
-.wf-card {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
-}
-.wf-header {
-  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
-  border-bottom: 1px solid var(--slate-200);
-}
-.wf-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
-  flex-shrink: 0; color: white;
-}
-.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
-.wf-header .wf-tag {
-  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
-  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
-}
-.wf-body { padding: 1.25rem 1.5rem; }
-.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
-.wf-body h4:first-child { margin-top: 0; }
-
-/* Colour coding for workflow numbers */
-.wf-num.wf-1 { background: #2563eb; } .wf-num.wf-2 { background: #d97706; }
-.wf-num.wf-3 { background: #dc2626; } .wf-num.wf-4 { background: #16a34a; }
-.wf-num.wf-5 { background: #4f46e5; } .wf-num.wf-6 { background: #9333ea; }
-.wf-num.wf-7 { background: #dc2626; } .wf-num.wf-8 { background: #ea580c; }
-.wf-num.wf-9 { background: #059669; }
-
-/* ====== STEP LISTS ====== */
-.steps { counter-reset: step; list-style: none; padding: 0; }
-.steps li {
-  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
-}
-.steps li::before {
-  counter-increment: step; content: counter(step);
-  position: absolute; left: 0; top: 0.45rem;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--blue-100); color: var(--blue-700);
-  font-size: 0.75rem; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.steps li + li { border-top: 1px solid var(--slate-100); }
-
-/* ====== METRIC DOTS ====== */
-.dot {
-  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  margin-right: 0.35rem; vertical-align: middle;
-}
-.dot.green { background: var(--green-500); }
-.dot.amber { background: var(--amber-500); }
-.dot.red { background: var(--red-500); }
-.dot.blue { background: var(--blue-500); }
-
-/* ====== METRICS BAR ====== */
-.metrics-bar {
-  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
-}
-.metric-chip {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
-}
-.metric-chip.mc-green { background: var(--green-100); color: var(--green-700); }
-.metric-chip.mc-amber { background: var(--amber-100); color: var(--amber-600); }
-.metric-chip.mc-red { background: var(--red-100); color: var(--red-600); }
-.metric-chip.mc-blue { background: var(--blue-100); color: var(--blue-700); }
-
-/* ====== INFO BOXES ====== */
-.info-box {
-  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
-  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
-}
-.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
-.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: #92400e; }
-.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: #991b1b; }
-.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
-.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
-
-/* ====== CODE / MONO ====== */
-code {
-  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
-  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
-}
-
-/* ====== TROUBLESHOOTING ====== */
-.ts-item { margin-bottom: 0.75rem; }
-.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
-.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
-
-/* ====== TWO-COL GRID ====== */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-
-/* ====== AIRTABLE FLOW ====== */
-.at-flow {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
-  align-items: center; padding: 1rem 0;
-}
-.at-flow .flow-step { min-width: auto; }
-
-/* ====== PRINT ====== */
-@media print {
-  body { background: white; font-size: 10pt; }
-  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
-  .section { break-inside: avoid; }
-  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
-
-/* ====== RESPONSIVE ====== */
-@media (max-width: 768px) {
-  .header h1 { font-size: 1.6rem; }
-  .qr-grid { grid-template-columns: 1fr; }
-  .toc-grid { grid-template-columns: 1fr; }
-  .arch-diagram { grid-template-columns: 1fr; }
-  .arch-connector { transform: rotate(90deg); }
-  .grid-2 { grid-template-columns: 1fr; }
-  .flow { flex-direction: column; }
-  .flow-arrow { transform: rotate(90deg); }
-  .at-flow { grid-template-columns: 1fr; }
-  .container { padding: 0 1rem 3rem; }
-}
-
-/* ====== MISC ====== */
-strong { color: var(--slate-800); }
-a { color: var(--blue-600); }
-p { margin-bottom: 0.5rem; }
-ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
-li { margin-bottom: 0.2rem; font-size: 0.9rem; }
-hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 </style>
 </head>
 <body>
@@ -311,9 +110,10 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 <!-- ====== HEADER ====== -->
 <div class="header">
   <div class="header-inner">
-    <h1>Cash Flow Voids (CFVs) &mdash; Standard Operating Procedure</h1>
-    <div class="subtitle">Detection, chase sequences, payment tracking and resolution of missing rent payments</div>
-    <div class="version">Version 1.4 &middot; 12 April 2026 &middot; Owner: Kevin Brittain</div>
+    <a href="index.html#sitemap" class="header-back">&larr; Back to Site Map</a>
+    <h1>Cash Flow Voids (CFVs) OS &mdash; Standard Operating Procedure</h1>
+    <div class="subtitle">Detection, management, chase tracking, auto-return and resolution of missing rent payments</div>
+    <div class="version">Version 1.6 &middot; 16 Apr 2026 &middot; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -325,20 +125,28 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <h2><span class="icon">&#9889;</span> Quick Reference</h2>
     <div class="qr-grid">
       <div class="qr-item">
+        <div class="qr-label">Access URL</div>
+        <div class="qr-value"><a href="https://chaichoong.github.io/leadership-dashboard/#cfv">chaichoong.github.io/leadership-dashboard/#cfv</a></div>
+      </div>
+      <div class="qr-item">
         <div class="qr-label">Data Source</div>
-        <div class="qr-value">Airtable &mdash; CFV Table</div>
+        <div class="qr-value">Airtable &mdash; Tenancies table + Transactions table</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Detection</div>
-        <div class="qr-value">Automated comparison: expected vs received rent</div>
+        <div class="qr-label">Key Tables</div>
+        <div class="qr-value">Tenancies (<code>tblN51a88qTDB6iMH</code>), Transactions (<code>tbln0gzhCAorFc3zB</code>), Tenants (<code>tblX4elTuu01gwBYh</code>)</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Chase Engine</div>
-        <div class="qr-value">3-stage sequence (Friendly &rarr; Formal &rarr; Legal)</div>
+        <div class="qr-label">Detection Tolerance</div>
+        <div class="qr-value">2 days after rent due date (<code>CFV_TOLERANCE_DAYS = 2</code>)</div>
       </div>
       <div class="qr-item">
-        <div class="qr-label">Dashboard</div>
-        <div class="qr-value">Leadership Dashboard &mdash; CFVs tab</div>
+        <div class="qr-label">Owner</div>
+        <div class="qr-value">Kevin Brittain</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Version</div>
+        <div class="qr-value">1.6</div>
       </div>
     </div>
   </div>
@@ -348,312 +156,531 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <div class="toc">
       <h2>Table of Contents</h2>
       <div class="toc-grid">
-        <a href="#overview"><span class="toc-num">1</span> Overview &amp; Detection Logic</a>
-        <a href="#columns"><span class="toc-num">2</span> CFV Table Columns</a>
-        <a href="#lifecycle"><span class="toc-num">3</span> CFV Lifecycle Flow</a>
-        <a href="#potential"><span class="toc-num">4</span> Potential CFVs</a>
-        <a href="#overdue"><span class="toc-num">5</span> Days Overdue Calculation</a>
-        <a href="#chase"><span class="toc-num">6</span> 3-Stage Chase Sequence</a>
-        <a href="#payment"><span class="toc-num">7</span> Payment Detection</a>
-        <a href="#uccheck"><span class="toc-num">8</span> UC Check</a>
-        <a href="#actions"><span class="toc-num">9</span> Action Buttons</a>
-        <a href="#comments"><span class="toc-num">10</span> Comments System</a>
-        <a href="#status-ids"><span class="toc-num">11</span> Airtable Status IDs</a>
-        <a href="#troubleshooting"><span class="toc-num">12</span> Troubleshooting</a>
+        <a href="#overview"><span class="toc-num">1</span> Overview &amp; Purpose</a>
+        <a href="#access"><span class="toc-num">2</span> How to Access</a>
+        <a href="#summary-cards"><span class="toc-num">3</span> Summary Cards</a>
+        <a href="#detection"><span class="toc-num">4</span> CFV Detection Logic</a>
+        <a href="#lifecycle"><span class="toc-num">5</span> Status Lifecycle &amp; Transitions</a>
+        <a href="#auto-return"><span class="toc-num">6</span> Auto-Return to In Payment</a>
+        <a href="#table-columns"><span class="toc-num">7</span> CFV Table &amp; Columns</a>
+        <a href="#actions"><span class="toc-num">8</span> Action Buttons Reference</a>
+        <a href="#chase"><span class="toc-num">9</span> Chase Stage Tracking</a>
+        <a href="#reflag"><span class="toc-num">10</span> Re-Flagging Logic</a>
+        <a href="#comments"><span class="toc-num">11</span> Comments &amp; Audit Trail</a>
+        <a href="#sidebar-badges"><span class="toc-num">12</span> Sidebar Badges</a>
+        <a href="#data-fields"><span class="toc-num">13</span> Data Fields &amp; Airtable Reference</a>
+        <a href="#localStorage"><span class="toc-num">14</span> Local Storage Keys</a>
+        <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
+        <a href="#changelog"><span class="toc-num">16</span> Changelog</a>
       </div>
     </div>
   </div>
 
-  <!-- 1. Overview & Detection Logic -->
+  <!-- 1. Overview & Purpose -->
   <div class="section" id="overview">
-    <h2 class="section-title"><span class="icon">&#128269;</span> 1. Overview &amp; Detection Logic</h2>
+    <h2 class="section-title"><span class="icon">&#128269;</span> 1. Overview &amp; Purpose</h2>
     <div class="card">
-      <p>A Cash Flow Void (CFV) is created whenever expected rental income is not received by the due date. The system compares the <strong>expected monthly rent</strong> from the Tenancies table against <strong>actual bank transactions</strong> reconciled in Airtable. Any shortfall generates a CFV record automatically.</p>
+      <p>The Cash Flow Voids (CFVs) OS automatically detects tenancies where expected rent has not been received. It compares each tenancy's <strong>rent due day</strong> against <strong>reconciled bank transactions</strong> that are directly linked to that tenancy in Airtable.</p>
+      <p>There is no separate CFV table in Airtable. CFVs are derived in real time from the <strong>Tenancies</strong> table and <strong>Transactions</strong> table every time the tab loads or the dashboard refreshes.</p>
       <div class="info-box info">
         <span class="ib-icon">&#8505;&#65039;</span>
-        <span>CFVs are generated on the 3rd of each month for the prior month's rent. This allows a 2-day grace period for bank processing delays.</span>
+        <span>CFVs are detected only for tenancies where the tenant status is <strong>Active</strong> (not Former), the tenancy is <strong>In Payment</strong>, and the monthly rent is greater than zero.</span>
       </div>
-    </div>
-    <div class="card">
-      <div class="card-header">Detection Flow</div>
-      <div class="flow">
-        <div class="flow-step primary"><span class="flow-icon">&#128197;</span>Rent Due Date<span class="flow-sub">1st of month</span></div>
-        <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step warning"><span class="flow-icon">&#128270;</span>Bank Scan<span class="flow-sub">3rd of month</span></div>
-        <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step"><span class="flow-icon">&#9878;</span>Compare<span class="flow-sub">Expected vs received</span></div>
-        <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step" style="background: var(--red-500); color: white; border-color: var(--red-600);"><span class="flow-icon">&#9888;</span>CFV Created<span class="flow-sub">Shortfall detected</span></div>
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>When a reconciled transaction linked to a CFV tenancy is detected, the system <strong>automatically</strong> returns that tenancy to In Payment and adds an audit comment &mdash; no manual intervention needed.</span>
       </div>
     </div>
   </div>
 
-  <!-- 2. CFV Table Columns -->
-  <div class="section" id="columns">
-    <h2 class="section-title"><span class="icon">&#128203;</span> 2. CFV Table Columns</h2>
+  <!-- 2. How to Access -->
+  <div class="section" id="access">
+    <h2 class="section-title"><span class="icon">&#128279;</span> 2. How to Access</h2>
     <div class="card">
+      <ol class="steps">
+        <li>Open the Leadership Dashboard at <a href="https://chaichoong.github.io/leadership-dashboard/">chaichoong.github.io/leadership-dashboard/</a></li>
+        <li>Enter your Airtable Personal Access Token (PAT) if prompted. Your PAT must have scopes: <code>data.records:read</code>, <code>data.records:write</code>, and <code>data.recordComments:read</code>.</li>
+        <li>Click <strong>Cash Flow Voids OS</strong> in the sidebar (marked with the &#x1F6A8; icon).</li>
+        <li>The CFV tab loads automatically &mdash; detection runs each time you switch to this tab or when the dashboard refreshes.</li>
+      </ol>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>Direct link: <a href="https://chaichoong.github.io/leadership-dashboard/#cfv">chaichoong.github.io/leadership-dashboard/#cfv</a></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Summary Cards -->
+  <div class="section" id="summary-cards">
+    <h2 class="section-title"><span class="icon">&#128202;</span> 3. Summary Cards</h2>
+    <div class="card">
+      <p>Five KPI cards appear at the top of the CFV tab, providing an at-a-glance summary:</p>
       <table class="label-table">
         <thead>
-          <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+          <tr><th>Card</th><th>What It Shows</th><th>Colour</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>CFV ID</strong></td><td>Auto-number</td><td>Unique identifier for each void record</td></tr>
-          <tr><td><strong>Tenant</strong></td><td>Linked record</td><td>Linked to the Tenants table</td></tr>
-          <tr><td><strong>Property</strong></td><td>Lookup</td><td>Property address derived from tenant's tenancy</td></tr>
-          <tr><td><strong>Amount Owed</strong></td><td>Currency</td><td>The shortfall amount (expected minus received)</td></tr>
-          <tr><td><strong>Due Date</strong></td><td>Date</td><td>Original rent due date</td></tr>
-          <tr><td><strong>Days Overdue</strong></td><td>Formula</td><td>Calculated as <code>TODAY() - Due Date</code></td></tr>
-          <tr><td><strong>Status</strong></td><td>Single select</td><td>Open / Chasing / Promised / Paid / Written Off</td></tr>
-          <tr><td><strong>Chase Stage</strong></td><td>Single select</td><td>Stage 1 (Friendly) / Stage 2 (Formal) / Stage 3 (Legal)</td></tr>
-          <tr><td><strong>Last Chased</strong></td><td>Date</td><td>Date the most recent chase communication was sent</td></tr>
-          <tr><td><strong>Comments</strong></td><td>Long text</td><td>Running log of all communications and notes</td></tr>
+          <tr><td><strong>Potential CFVs</strong></td><td>Number of tenancies auto-detected as likely missed payments, awaiting your review. Only appears if count is greater than zero.</td><td><span class="label-badge lb-amber">Amber border</span></td></tr>
+          <tr><td><strong>Confirmed CFVs</strong></td><td>Number of tenancies with Airtable status set to CFV (confirmed voids with active chase).</td><td><span class="label-badge lb-red">Red text</span></td></tr>
+          <tr><td><strong>Total Exposure</strong></td><td>Combined monthly rent (in &pound;) across all CFVs and potential CFVs on the list.</td><td><span class="label-badge lb-red">Red text</span></td></tr>
+          <tr><td><strong>Oldest Overdue</strong></td><td>The highest number of days overdue across all CFVs. Shows &ldquo;Escalation may be required&rdquo; if over 14 days.</td><td>Default</td></tr>
+          <tr><td><strong>CFV Actioned</strong></td><td>Number of tenancies marked as CFV Actioned (acknowledged, action taken, awaiting payment confirmation).</td><td><span class="label-badge lb-amber">Amber text</span></td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- 3. CFV Lifecycle Flow -->
+  <!-- 4. CFV Detection Logic -->
+  <div class="section" id="detection">
+    <h2 class="section-title"><span class="icon">&#9881;</span> 4. CFV Detection Logic</h2>
+    <div class="card">
+      <div class="card-header">How Detection Works</div>
+      <p>The <code>detectCFVs()</code> function runs each time the CFV tab renders. It processes every tenancy record and follows two paths:</p>
+
+      <h4 style="margin-top:1rem;font-weight:700;color:var(--slate-800)">Path A &mdash; Existing CFV / CFV Actioned Tenancies</h4>
+      <ol class="steps">
+        <li>Check if the tenancy has a <strong>reconciled transaction linked via the Tenancy field</strong> (<code>txTenancy</code>) dated in the current calendar month.</li>
+        <li>If a linked payment exists: add the tenancy to the <strong>auto-return queue</strong> (see Section 6). It will be returned to In Payment automatically.</li>
+        <li>If no linked payment: display the tenancy in the CFV table with its current status.</li>
+        <li>For <strong>CFV Actioned</strong> tenancies: check if the due day has passed again (with 2-day tolerance). If so, mark as <strong>re-flagged</strong> (see Section 10).</li>
+      </ol>
+
+      <h4 style="margin-top:1rem;font-weight:700;color:var(--slate-800)">Path B &mdash; &ldquo;In Payment&rdquo; Tenancies (New CFV Detection)</h4>
+      <ol class="steps">
+        <li>Skip if tenant status is not <strong>Active</strong> or monthly rent is zero or less.</li>
+        <li>Calculate how many days have passed since the rent due day this month.</li>
+        <li>If fewer than <strong>2 days</strong> (<code>CFV_TOLERANCE_DAYS</code>) have passed since the due date, skip &mdash; the payment may still be processing.</li>
+        <li>Check for a <strong>reconciled transaction linked to this tenancy</strong> in the current month.</li>
+        <li>If a linked payment exists: not a CFV &mdash; skip.</li>
+        <li>If no linked payment: flag as a <strong>Potential CFV</strong> for your review.</li>
+      </ol>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span><strong>Important:</strong> Payment detection uses the <code>txTenancy</code> linked record field on transactions &mdash; not keyword matching or surname matching. A transaction must be <strong>reconciled</strong> and <strong>linked to the tenancy record</strong> in Airtable for the system to recognise it as payment.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Detection Flow Diagram</div>
+      <div class="flow">
+        <div class="flow-step primary"><span class="flow-icon">&#128197;</span>Rent Due Day<span class="flow-sub">Per tenancy</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step warning"><span class="flow-icon">&#9203;</span>+2 Days<span class="flow-sub">Tolerance period</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step"><span class="flow-icon">&#128270;</span>Check Linked Tx<span class="flow-sub">txTenancy field</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step" style="background:var(--red-500);color:white;border-color:var(--red-600)"><span class="flow-icon">&#9888;</span>Potential CFV<span class="flow-sub">No linked payment</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Status Lifecycle -->
   <div class="section" id="lifecycle">
-    <h2 class="section-title"><span class="icon">&#128260;</span> 3. CFV Lifecycle Flow</h2>
+    <h2 class="section-title"><span class="icon">&#128260;</span> 5. Status Lifecycle &amp; Transitions</h2>
     <div class="card">
+      <p>CFV tenancies move through these statuses. The <strong>Payment Status</strong> field (<code>tenPayStatus</code>) on the Tenancies table in Airtable is the source of truth.</p>
       <div class="flow">
-        <div class="flow-step" style="background: var(--red-500); color: white; border-color: var(--red-600);"><span class="flow-icon">&#9888;</span>Open<span class="flow-sub">New CFV detected</span></div>
+        <div class="flow-step success"><span class="flow-icon">&#128181;</span>In Payment<span class="flow-sub">Normal state</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step warning"><span class="flow-icon">&#128172;</span>Chasing<span class="flow-sub">Chase sequence active</span></div>
+        <div class="flow-step warning"><span class="flow-icon">&#9888;</span>Potential CFV<span class="flow-sub">Auto-detected</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step purple"><span class="flow-icon">&#129309;</span>Promised<span class="flow-sub">Tenant committed</span></div>
+        <div class="flow-step" style="background:var(--red-500);color:white;border-color:var(--red-600)"><span class="flow-icon">&#128680;</span>CFV<span class="flow-sub">Confirmed</span></div>
         <div class="flow-arrow">&#10132;</div>
-        <div class="flow-step success"><span class="flow-icon">&#128181;</span>Paid<span class="flow-sub">Payment received</span></div>
+        <div class="flow-step purple"><span class="flow-icon">&#9989;</span>CFV Actioned<span class="flow-sub">Action taken</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step success"><span class="flow-icon">&#128181;</span>In Payment<span class="flow-sub">Resolved</span></div>
       </div>
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>CFVs that remain unresolved beyond 90 days are escalated for potential write-off or legal action. The decision is logged in the Comments field.</span>
-      </div>
-    </div>
-  </div>
 
-  <!-- 4. Potential CFVs (v1.4) -->
-  <div class="section" id="potential">
-    <h2 class="section-title"><span class="icon">&#9888;&#65039;</span> 4. Potential CFVs</h2>
-    <div class="card">
-      <p>A <strong>Potential CFV</strong> is a pre-emptive alert raised when the system detects a high probability of a missed payment before the 3rd-of-month confirmation scan. Common triggers include:</p>
-      <ul>
-        <li>A tenant with a history of late payments approaching their due date</li>
-        <li>A tenancy flagged as at-risk in Airtable</li>
-        <li>No incoming bank transaction matching the expected rent by the 2nd of the month</li>
-      </ul>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-red">CFV &mdash; Confirmed void (no payment received)</span>
-        <span class="metric-chip mc-amber" style="background:#fce7f3;color:#be185d">Potential &mdash; Likely void, unconfirmed</span>
-        <span class="metric-chip mc-amber">CFV Actioned &mdash; Void acknowledged, action taken</span>
-      </div>
-      <div class="info-box warn">
-        <span class="ib-icon">&#9888;&#65039;</span>
-        <span>Potential CFVs appear in the dashboard with a pink badge. They do not trigger chase communications until confirmed as a full CFV. Monitor them and convert manually if payment is not received.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 5. Days Overdue Calculation -->
-  <div class="section" id="overdue">
-    <h2 class="section-title"><span class="icon">&#128197;</span> 5. Days Overdue Calculation</h2>
-    <div class="card">
-      <p>The <strong>Days Overdue</strong> field is a live formula: <code>DATETIME_DIFF(TODAY(), {Due Date}, 'days')</code></p>
-      <p>This value drives the colour coding on the dashboard:</p>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green">0&ndash;7 days</span>
-        <span class="metric-chip mc-amber">8&ndash;30 days</span>
-        <span class="metric-chip mc-red">31+ days</span>
-      </div>
-      <div class="info-box tip">
-        <span class="ib-icon">&#128161;</span>
-        <span>The dashboard sorts CFVs by Days Overdue descending by default, bringing the most critical items to the top.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 6. 3-Stage Chase Sequence -->
-  <div class="section" id="chase">
-    <h2 class="section-title"><span class="icon">&#128172;</span> 6. 3-Stage Chase Sequence</h2>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-1">1</span>
-        <h3>Stage 1 &mdash; Friendly Reminder</h3>
-        <span class="wf-tag">Days 3&ndash;7</span>
-      </div>
-      <div class="wf-body">
-        <h4>When</h4>
-        <p>Triggered automatically 3 days after the due date if no payment detected.</p>
-        <h4>Action</h4>
-        <p>A friendly SMS and/or email is sent to the tenant reminding them of the missed payment. The tone is informal and assumes an oversight.</p>
-        <h4>Template</h4>
-        <p>Uses the "Friendly Reminder" template from the Communications library. Includes the amount owed and a payment link.</p>
-      </div>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-2">2</span>
-        <h3>Stage 2 &mdash; Formal Notice</h3>
-        <span class="wf-tag">Days 14&ndash;21</span>
-      </div>
-      <div class="wf-body">
-        <h4>When</h4>
-        <p>If Stage 1 has not resolved the CFV within 14 days of the due date.</p>
-        <h4>Action</h4>
-        <p>A formal letter or email is sent referencing the tenancy agreement terms and requesting immediate payment. Copied to any guarantor on file.</p>
-        <h4>Escalation</h4>
-        <p>The CFV status moves to <strong>Chasing</strong> and the chase stage updates to Stage 2.</p>
-      </div>
-    </div>
-
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-3">3</span>
-        <h3>Stage 3 &mdash; Legal / Final Warning</h3>
-        <span class="wf-tag">Days 30+</span>
-      </div>
-      <div class="wf-body">
-        <h4>When</h4>
-        <p>If the CFV remains unpaid after 30 days and Stages 1 and 2 have been exhausted.</p>
-        <h4>Action</h4>
-        <p>A final warning letter is issued referencing potential legal proceedings or Section 8 notice. Kevin reviews before sending.</p>
-        <h4>Decision Point</h4>
-        <p>At this stage, a decision is made: negotiate a payment plan, proceed with legal action, or write off the debt. The decision is recorded in Comments.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- 7. Payment Detection -->
-  <div class="section" id="payment">
-    <h2 class="section-title"><span class="icon">&#128181;</span> 7. Payment Detection</h2>
-    <div class="card">
-      <p>Payments are detected through the daily bank transaction reconciliation process. When a payment is matched to a tenant with an open CFV:</p>
-      <ol class="steps">
-        <li>The reconciliation script identifies the tenant by payment reference or sender name.</li>
-        <li>The payment amount is compared against the CFV amount owed.</li>
-        <li>If the payment covers the full amount, the CFV status is set to <strong>Paid</strong> automatically.</li>
-        <li>If a partial payment is received, the <strong>Amount Owed</strong> is reduced and a comment is added logging the partial payment.</li>
-      </ol>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>Manual payment marking is also available via the dashboard for cash payments or payments received outside the normal banking flow.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 8. UC Check (v1.4) -->
-  <div class="section" id="uccheck">
-    <h2 class="section-title"><span class="icon">&#128269;</span> 8. UC Check</h2>
-    <div class="card">
-      <p>The <strong>UC Check</strong> button appears on cash flow rows in the overview where a tenant receives Universal Credit housing payments. It allows you to verify whether a UC payment is expected or has been confirmed for a given period.</p>
-      <ol class="steps">
-        <li>Click the purple <strong>UC</strong> button next to the relevant cash flow row.</li>
-        <li>The system queries the tenant's payment schedule and displays the expected UC payment date and amount.</li>
-        <li>If the payment has been confirmed received, the button turns green (<strong>Done</strong>).</li>
-        <li>If no payment is detected, leave the CFV open and proceed with the standard chase sequence.</li>
-      </ol>
-      <div class="info-box info">
-        <span class="ib-icon">&#8505;&#65039;</span>
-        <span>UC payments are typically received on a fixed day each month set by DWP. Delays of 1&ndash;3 working days are normal. Only escalate to a CFV if payment is more than 5 working days late.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 9. Action Buttons -->
-  <div class="section" id="actions">
-    <h2 class="section-title"><span class="icon">&#128296;</span> 9. Action Buttons</h2>
-    <div class="card">
-      <p>The CFV dashboard row provides the following action buttons:</p>
-      <div class="grid-2">
-        <div class="card" style="border-left: 4px solid var(--blue-500);">
-          <div class="card-header"><span class="dot blue"></span> Send Chase</div>
-          <p>Sends the next chase communication based on the current stage. Advances the chase stage and updates the Last Chased date.</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--green-500);">
-          <div class="card-header"><span class="dot green"></span> Mark as Paid</div>
-          <p>Manually marks the CFV as paid. Prompts for a payment date and optional reference number.</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--amber-500);">
-          <div class="card-header"><span class="dot amber"></span> Log Promise</div>
-          <p>Records a tenant's promise to pay by a specific date. Sets status to <strong>Promised</strong> and adds the promise details to Comments.</p>
-        </div>
-        <div class="card" style="border-left: 4px solid var(--red-500);">
-          <div class="card-header"><span class="dot red"></span> Write Off</div>
-          <p>Marks the CFV as written off. Requires a reason note. This action is irreversible and removes the CFV from active views.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 10. Comments System -->
-  <div class="section" id="comments">
-    <h2 class="section-title"><span class="icon">&#128221;</span> 10. Comments System</h2>
-    <div class="card">
-      <p>Every CFV has a running Comments log that records all activity:</p>
-      <ul>
-        <li><strong>Auto-logged entries</strong> &mdash; Chase communications sent, status changes, payment detections, and promise recordings are all timestamped and appended automatically.</li>
-        <li><strong>Manual notes</strong> &mdash; Users can add free-text notes via the dashboard detail panel. Each note is timestamped with the user's name.</li>
-        <li><strong>Format</strong> &mdash; Comments use the format <code>[YYYY-MM-DD HH:mm] [Source] Message</code> for consistency.</li>
-      </ul>
-      <div class="info-box tip">
-        <span class="ib-icon">&#128161;</span>
-        <span>The Comments field serves as a full audit trail. It is used for dispute resolution and legal proceedings if escalation is required.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 11. Airtable Status IDs -->
-  <div class="section" id="status-ids">
-    <h2 class="section-title"><span class="icon">&#128736;</span> 11. Airtable Status IDs</h2>
-    <div class="card">
-      <p>The dashboard code references Airtable single-select option IDs when updating CFV status. These IDs are environment-specific and must match your Airtable base configuration.</p>
-      <table class="label-table">
+      <table class="label-table" style="margin-top:1rem">
         <thead>
-          <tr><th>Status</th><th>Display Colour</th><th>Usage</th></tr>
+          <tr><th>Transition</th><th>How It Happens</th><th>Airtable Updated?</th></tr>
         </thead>
         <tbody>
-          <tr><td><span class="label-badge lb-3">CFV</span></td><td>Red</td><td>Confirmed void &mdash; no payment received, chase sequence active</td></tr>
-          <tr><td><span class="label-badge lb-2">CFV Actioned</span></td><td>Amber</td><td>Void acknowledged and action taken (e.g. payment plan agreed)</td></tr>
-          <tr><td><span class="label-badge lb-7" style="background:#fce7f3;color:#be185d">Potential</span></td><td>Pink</td><td>Likely void detected early, not yet confirmed &mdash; monitor only</td></tr>
-          <tr><td><span class="label-badge lb-2">Chasing</span></td><td>Amber</td><td>Chase communications in progress</td></tr>
-          <tr><td><span class="label-badge lb-6">Promised</span></td><td>Purple</td><td>Tenant has committed to a payment date</td></tr>
-          <tr><td><span class="label-badge lb-4">Paid</span></td><td>Green</td><td>Full payment received and reconciled</td></tr>
-          <tr><td><span class="label-badge lb-8">Written Off</span></td><td>Grey</td><td>Debt deemed unrecoverable, removed from active view</td></tr>
+          <tr><td>In Payment &rarr; <span class="label-badge lb-amber">Potential CFV</span></td><td>Automatic: due day + 2 days passed with no linked reconciled transaction</td><td>No &mdash; display only in dashboard</td></tr>
+          <tr><td>Potential CFV &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Confirm CFV&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
+          <tr><td>Potential CFV &rarr; dismissed</td><td>User clicks <strong>&ldquo;Not a CFV&rdquo;</strong> button. Stored in localStorage for 25 days, then re-checks.</td><td>No &mdash; localStorage only</td></tr>
+          <tr><td>CFV &rarr; <span class="label-badge lb-amber">CFV Actioned</span></td><td>User clicks <strong>&ldquo;Mark Actioned&rdquo;</strong> button</td><td>Yes &mdash; PATCH to set status to CFV Actioned</td></tr>
+          <tr><td>CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td>User clicks <strong>&ldquo;In Payment&rdquo;</strong> button, or <strong>automatically</strong> when a reconciled linked transaction is detected</td><td>Yes &mdash; PATCH to set status to In Payment</td></tr>
+          <tr><td>CFV Actioned &rarr; <span class="label-badge lb-red">CFV</span></td><td>User clicks <strong>&ldquo;Move to CFV&rdquo;</strong> button, or user confirms a re-flag</td><td>Yes &mdash; PATCH to set status to CFV</td></tr>
+          <tr><td>CFV / CFV Actioned &rarr; <span class="label-badge lb-green">In Payment</span></td><td><strong>Auto-return:</strong> system detects a reconciled transaction linked to this tenancy in the current month</td><td>Yes &mdash; automatic PATCH + audit comment</td></tr>
+        </tbody>
+      </table>
+
+      <div class="info-box danger">
+        <span class="ib-icon">&#128721;</span>
+        <span><strong>Potential CFV</strong> is a dashboard-only status. It does NOT exist in Airtable. The tenancy remains &ldquo;In Payment&rdquo; in Airtable until you click &ldquo;Confirm CFV&rdquo;.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Auto-Return to In Payment -->
+  <div class="section" id="auto-return">
+    <h2 class="section-title"><span class="icon">&#128260;</span> 6. Auto-Return to In Payment</h2>
+    <div class="card">
+      <p>When the system detects that a tenancy currently in <strong>CFV</strong> or <strong>CFV Actioned</strong> status has a reconciled transaction linked to it in the current month, it automatically:</p>
+      <ol class="steps">
+        <li>Sets a local flag (<code>cfv_{id}_returned</code>) to prevent the tenancy from re-appearing before Airtable syncs.</li>
+        <li>Sends a <strong>PATCH</strong> request to Airtable to update the tenancy&rsquo;s Payment Status to <strong>In Payment</strong>.</li>
+        <li>Clears all chase tracking data from localStorage (chase start date, CFV start date, return dismissal).</li>
+        <li>Updates the local data array so the dashboard reflects the change immediately.</li>
+        <li>Adds an audit comment to the Airtable tenancy record: <em>&ldquo;Auto-returned to In Payment &mdash; reconciled transaction linked to this tenancy detected for [Month Year].&rdquo;</em></li>
+        <li>Re-renders the CFV tab and updates the sidebar badges.</li>
+      </ol>
+
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>If the Airtable PATCH fails, the local flag is removed so the auto-return will retry on the next page load or tab switch.</span>
+      </div>
+
+      <div class="flow">
+        <div class="flow-step" style="background:var(--red-500);color:white;border-color:var(--red-600)"><span class="flow-icon">&#128680;</span>CFV / CFV Actioned</div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step primary"><span class="flow-icon">&#128270;</span>Linked Tx Found<span class="flow-sub">Reconciled this month</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step warning"><span class="flow-icon">&#128228;</span>PATCH Airtable<span class="flow-sub">Status &rarr; In Payment</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step success"><span class="flow-icon">&#128172;</span>Audit Comment<span class="flow-sub">Auto-logged</span></div>
+        <div class="flow-arrow">&#10132;</div>
+        <div class="flow-step success"><span class="flow-icon">&#128181;</span>In Payment<span class="flow-sub">Resolved</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. CFV Table & Columns -->
+  <div class="section" id="table-columns">
+    <h2 class="section-title"><span class="icon">&#128203;</span> 7. CFV Table &amp; Columns</h2>
+    <div class="card">
+      <p>The CFV table displays all detected cash flow voids, sorted by status (Potential first, then CFV, then CFV Actioned) and then by due day.</p>
+      <table class="label-table">
+        <thead>
+          <tr><th>Column</th><th>Source</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Tenant</strong></td><td><code>tenSurname</code> + <code>tenRef</code></td><td>Tenant surname (bold) with tenancy reference below in grey.</td></tr>
+          <tr><td><strong>Property</strong></td><td><code>tenProperty</code> + <code>tenUnitRef</code></td><td>Property name with unit reference below.</td></tr>
+          <tr><td><strong>Rent</strong></td><td><code>tenRent</code></td><td>Monthly rent amount in &pound;, right-aligned with tabular numerals.</td></tr>
+          <tr><td><strong>Due Day</strong></td><td><code>tenDueDay</code></td><td>The day of the month rent is due (e.g. 1, 15, 28).</td></tr>
+          <tr><td><strong>Days Overdue</strong></td><td>Calculated</td><td>Days since the CFV start date (see below). Colour-coded: black (0&ndash;3), amber (4&ndash;7), red (8+).</td></tr>
+          <tr><td><strong>Status</strong></td><td><code>tenPayStatus</code></td><td>Badge: <span class="label-badge lb-amber">Potential CFV</span>, <span class="label-badge lb-red">CFV</span>, <span class="label-badge lb-purple">CFV Actioned</span>, or <span class="label-badge lb-amber">Re-flagged</span></td></tr>
+          <tr><td><strong>Chase</strong></td><td>Calculated</td><td>Chase stage badge (Stage 1 / 2 / 3). Dash for CFV Actioned items.</td></tr>
+          <tr><td><strong>Contact</strong></td><td><code>tenantPhone</code> + <code>tenantEmail</code></td><td>Clickable phone (tel:) and email (mailto:) links. Shows warning if no contact info.</td></tr>
+          <tr><td><strong>Actions</strong></td><td>&mdash;</td><td>Context-sensitive action buttons (see Section 8).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Days Overdue Calculation</div>
+      <p>Days overdue is calculated from a <strong>persistent start date</strong> stored in localStorage, not a live formula:</p>
+      <ol class="steps">
+        <li>When a CFV is first detected, the system calculates the due date for the current (or previous) month based on the tenancy&rsquo;s <code>tenDueDay</code>.</li>
+        <li>If the due day this month is still in the future, it uses <strong>last month&rsquo;s</strong> due date as the start.</li>
+        <li>This start date is stored in <code>cfv_{tenancyId}_startDate</code> in localStorage.</li>
+        <li>Days overdue = <code>Math.floor((today - cfvStartDate) / 86400000)</code>, minimum 0.</li>
+      </ol>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>Because the start date persists in localStorage, the days overdue counter continues to climb across months &mdash; it does not reset on the 1st of each month.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Action Buttons Reference -->
+  <div class="section" id="actions">
+    <h2 class="section-title"><span class="icon">&#128296;</span> 8. Action Buttons Reference</h2>
+    <div class="card">
+      <p>Each row in the CFV table shows different action buttons depending on the tenancy&rsquo;s current status. Every status-changing action shows a confirmation dialog before proceeding.</p>
+
+      <h4 style="margin-top:1rem;font-weight:700">When status is: <span class="label-badge lb-amber">Potential CFV</span></h4>
+      <table class="label-table">
+        <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Confirm CFV</strong></td><td>Red background, white text</td><td>After confirmation dialog: sends PATCH to Airtable to set status to <strong>CFV</strong>. Adds audit comment &ldquo;Confirmed as CFV from Leadership Dashboard.&rdquo; Re-renders CFV tab after 1.5s, reloads dashboard after 3s.</td></tr>
+          <tr><td><strong>Not a CFV</strong></td><td>Green/success style</td><td>After confirmation dialog: stores dismissal timestamp in localStorage (<code>cfv_dismissed_{id}</code>). Adds comment &ldquo;Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.&rdquo; Clears chase tracking data. <strong>Auto-expires after 25 days</strong> &mdash; the system will re-check on the next cycle.</td></tr>
+        </tbody>
+      </table>
+
+      <h4 style="margin-top:1.5rem;font-weight:700">When status is: <span class="label-badge lb-red">CFV</span></h4>
+      <table class="label-table">
+        <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Mark Actioned</strong></td><td>Blue/primary</td><td>After confirmation: PATCHes Airtable to set status to <strong>CFV Actioned</strong>. Adds audit comment. Button shows &ldquo;Done &#10003;&rdquo; in green on success.</td></tr>
+          <tr><td><strong>&#128172; Comments</strong></td><td>Default style, shows count</td><td>Opens the comments panel for this tenancy (see Section 11). Shows the number of existing comments as a badge.</td></tr>
+        </tbody>
+      </table>
+
+      <h4 style="margin-top:1.5rem;font-weight:700">When status is: <span class="label-badge lb-purple">CFV Actioned</span></h4>
+      <table class="label-table">
+        <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>In Payment</strong></td><td>Green/success</td><td>After confirmation: PATCHes status to In Payment. Clears all localStorage tracking. Adds audit comment &ldquo;Returned to In Payment from Leadership Dashboard. Payment confirmed.&rdquo; Sets local returned flag.</td></tr>
+          <tr><td><strong>Move to CFV</strong></td><td>Red border, red text</td><td>After confirmation: PATCHes status back to CFV. Adds audit comment &ldquo;Moved back to CFV from CFV Actioned via Leadership Dashboard.&rdquo;</td></tr>
+          <tr><td><strong>&#128172; Comments</strong></td><td>Default, shows count</td><td>Opens comments panel.</td></tr>
+        </tbody>
+      </table>
+
+      <h4 style="margin-top:1.5rem;font-weight:700">When status is: <span class="label-badge lb-amber">Re-flagged</span> (CFV Actioned + overdue)</h4>
+      <table class="label-table">
+        <thead><tr><th>Button</th><th>Appearance</th><th>What It Does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Confirm CFV</strong></td><td>Red background</td><td>After confirmation: PATCHes status back to CFV. Adds comment &ldquo;Re-flagged as CFV &mdash; payment not received on next due date.&rdquo; Clears re-flag dismissal.</td></tr>
+          <tr><td><strong>Dismiss</strong></td><td>Default</td><td>Stores dismissal in localStorage. The re-flag badge disappears but the tenancy stays as CFV Actioned.</td></tr>
+          <tr><td><strong>&#128172; Comments</strong></td><td>Default, shows count</td><td>Opens comments panel.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>All buttons show <strong>&ldquo;...&rdquo;</strong> while processing and are disabled to prevent double-clicks. On success they show <strong>&ldquo;Done &#10003;&rdquo;</strong> or <strong>&ldquo;Confirmed &#10003;&rdquo;</strong>. On failure they show <strong>&ldquo;Failed&rdquo;</strong> and re-enable.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Chase Stage Tracking -->
+  <div class="section" id="chase">
+    <h2 class="section-title"><span class="icon">&#128172;</span> 9. Chase Stage Tracking</h2>
+    <div class="card">
+      <p>Each CFV is assigned a <strong>chase stage</strong> based on how many days have passed since the chase was initiated. Chase stages are <strong>visual indicators only</strong> &mdash; they do not trigger automated communications.</p>
+      <table class="label-table">
+        <thead><tr><th>Stage</th><th>Days Since Chase Start</th><th>Label</th><th>Description</th><th>Badge Colour</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Stage 1</strong></td><td>0+ days</td><td>Friendly reminder</td><td>Initial stage &mdash; contact the tenant informally to remind them of the missed payment.</td><td>Blue/default</td></tr>
+          <tr><td><strong>Stage 2</strong></td><td>3+ days</td><td>Follow-up chase</td><td>If Stage 1 hasn&rsquo;t resolved, escalate to a more formal follow-up.</td><td>Amber</td></tr>
+          <tr><td><strong>Stage 3</strong></td><td>7+ days</td><td>Escalation</td><td>Formal escalation &mdash; may require letters, legal references, or management review.</td><td>Red</td></tr>
         </tbody>
       </table>
       <div class="info-box warn">
         <span class="ib-icon">&#9888;&#65039;</span>
-        <span>If Airtable status option IDs change (e.g. after recreating a field), the dashboard code constants must be updated to match. Check <code>config.js</code> for the mapping.</span>
+        <span>The chase stage badge appears only on <strong>Potential CFV</strong> and <strong>CFV</strong> rows. CFV Actioned rows show a dash instead. The chase start date is stored in localStorage (<code>cfv_{id}_chaseStart</code>) and persists across browser sessions.</span>
       </div>
     </div>
   </div>
 
-  <!-- 12. Troubleshooting -->
+  <!-- 10. Re-Flagging Logic -->
+  <div class="section" id="reflag">
+    <h2 class="section-title"><span class="icon">&#9888;&#65039;</span> 10. Re-Flagging Logic</h2>
+    <div class="card">
+      <p>A <strong>CFV Actioned</strong> tenancy can be automatically re-flagged if the next month&rsquo;s due date passes without payment. The system checks:</p>
+      <ol class="steps">
+        <li>Is the tenancy currently <strong>CFV Actioned</strong>?</li>
+        <li>Has the due day for the current month already passed?</li>
+        <li>Have at least <strong>2 days</strong> (<code>CFV_TOLERANCE_DAYS</code>) elapsed since the due day?</li>
+        <li>Has the user previously dismissed this re-flag? (Check <code>cfv_reflag_dismissed_{id}</code> in localStorage.)</li>
+      </ol>
+      <p>If all conditions are met and the re-flag hasn&rsquo;t been dismissed, the row shows a <strong>&ldquo;Re-flagged &#9888;&rdquo;</strong> badge in amber/warning style, along with &ldquo;Confirm CFV&rdquo; and &ldquo;Dismiss&rdquo; buttons.</p>
+      <div class="info-box tip">
+        <span class="ib-icon">&#128161;</span>
+        <span>Re-flagging ensures that &ldquo;CFV Actioned&rdquo; tenancies don&rsquo;t get forgotten. If the tenant was promised to pay and misses the next due date, the system brings it back to your attention.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11. Comments & Audit Trail -->
+  <div class="section" id="comments">
+    <h2 class="section-title"><span class="icon">&#128221;</span> 11. Comments &amp; Audit Trail</h2>
+    <div class="card">
+      <p>Every CFV action creates an audit comment on the Airtable tenancy record via the <strong>Comments API</strong>. You can also view and add comments manually.</p>
+
+      <h4 style="margin-top:1rem;font-weight:700">Automatic Comments</h4>
+      <p>The following actions automatically add a comment to the tenancy record:</p>
+      <ul>
+        <li>Confirming a potential as CFV: <em>&ldquo;Confirmed as CFV from Leadership Dashboard.&rdquo;</em></li>
+        <li>Dismissing a potential: <em>&ldquo;Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.&rdquo;</em></li>
+        <li>Marking as CFV Actioned: <em>&ldquo;Status changed to CFV Actioned from Leadership Dashboard.&rdquo;</em></li>
+        <li>Returning to In Payment: <em>&ldquo;Returned to In Payment from Leadership Dashboard. Payment confirmed.&rdquo;</em></li>
+        <li>Moving back to CFV: <em>&ldquo;Moved back to CFV from CFV Actioned via Leadership Dashboard.&rdquo;</em></li>
+        <li>Re-flagging: <em>&ldquo;Re-flagged as CFV &mdash; payment not received on next due date.&rdquo;</em></li>
+        <li>Auto-return: <em>&ldquo;Auto-returned to In Payment &mdash; reconciled transaction linked to this tenancy detected for [Month Year].&rdquo;</em></li>
+      </ul>
+
+      <h4 style="margin-top:1rem;font-weight:700">Viewing Comments</h4>
+      <ol class="steps">
+        <li>Click the <strong>&#128172; Comments</strong> button on any CFV or CFV Actioned row.</li>
+        <li>A comments panel appears below the table, showing the tenant&rsquo;s name and reference.</li>
+        <li>All comments are loaded from Airtable (with pagination for long histories).</li>
+        <li>Each comment shows the date/time, author name/email, and the comment text.</li>
+        <li>Click <strong>Close</strong> to dismiss the panel.</li>
+      </ol>
+
+      <h4 style="margin-top:1rem;font-weight:700">Adding a Manual Comment</h4>
+      <ol class="steps">
+        <li>Open the comments panel for the tenancy.</li>
+        <li>Type your note in the textarea at the bottom.</li>
+        <li>Click <strong>Add Comment</strong>. The comment is posted to Airtable and the panel refreshes.</li>
+      </ol>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>If no comments load and you know there should be some, your PAT may be missing the <code>data.recordComments:read</code> scope. Update your PAT at <a href="https://airtable.com/create/tokens">airtable.com/create/tokens</a>.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 12. Sidebar Badges -->
+  <div class="section" id="sidebar-badges">
+    <h2 class="section-title"><span class="icon">&#128276;</span> 12. Sidebar Badges</h2>
+    <div class="card">
+      <p>The <strong>Cash Flow Voids OS</strong> sidebar menu item shows numeric badges that update every time the dashboard loads or the CFV tab renders:</p>
+      <table class="label-table">
+        <thead><tr><th>Badge</th><th>Colour</th><th>What It Counts</th></tr></thead>
+        <tbody>
+          <tr><td><strong>CFV count</strong></td><td><span class="label-badge lb-red">Red</span></td><td>Number of confirmed CFVs + non-dismissed potential CFVs</td></tr>
+          <tr><td><strong>Actioned count</strong></td><td><span class="label-badge lb-amber">Orange</span></td><td>Number of CFV Actioned tenancies</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:0.5rem">Badges are hidden when their count is zero. Dismissed potential CFVs are excluded from the red badge count.</p>
+      <div class="info-box info">
+        <span class="ib-icon">&#8505;&#65039;</span>
+        <span>Badges also update after reconciliation (from the reconciliation engine) and after any CFV status change, so they always reflect the current state.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13. Data Fields & Airtable Reference -->
+  <div class="section" id="data-fields">
+    <h2 class="section-title"><span class="icon">&#128736;</span> 13. Data Fields &amp; Airtable Reference</h2>
+    <div class="card">
+      <div class="card-header">Tenancies Table Fields Used</div>
+      <table class="label-table">
+        <thead><tr><th>Human Name</th><th>Field ID</th><th>Type</th><th>Used For</th></tr></thead>
+        <tbody>
+          <tr><td>Payment Status</td><td><code>fldxU3dPUnbK0SCDq</code></td><td>Single Select</td><td>Current status: In Payment, CFV, CFV Actioned</td></tr>
+          <tr><td>Monthly Rent</td><td><code>fldDMyfZLFMeONPq8</code></td><td>Currency</td><td>Expected rent amount</td></tr>
+          <tr><td>Due Day</td><td><code>fldhy2U0CQmM2oS4P</code></td><td>Number</td><td>Day of month rent is due</td></tr>
+          <tr><td>Surname</td><td><code>fldOXazTqBWieEOK2</code></td><td>Text</td><td>Tenant display name</td></tr>
+          <tr><td>Tenancy Reference</td><td><code>fldyNVvFn4x8GY14q</code></td><td>Text</td><td>Unique reference code</td></tr>
+          <tr><td>Unit Reference</td><td><code>fldql2nyQlPfkPP4p</code></td><td>Lookup</td><td>Linked rental unit name</td></tr>
+          <tr><td>Property</td><td><code>fldxfIa0W1nqCbLo2</code></td><td>Lookup</td><td>Property name</td></tr>
+          <tr><td>Linked Tenant</td><td><code>fld1i5bDoHL3B6rUf</code></td><td>Link</td><td>Links to Tenants table for contact info</td></tr>
+          <tr><td>Tenant Status</td><td><code>fldgWAyha1Uij1SZP</code></td><td>Rollup</td><td>Active/Former &mdash; only Active tenancies are checked</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-header">Transactions Table Fields Used</div>
+      <table class="label-table">
+        <thead><tr><th>Human Name</th><th>Field ID</th><th>Type</th><th>Used For</th></tr></thead>
+        <tbody>
+          <tr><td>Reconciled</td><td><code>fldxKX1IbIFcAOnn5</code></td><td>Checkbox</td><td>Only reconciled transactions count as payment</td></tr>
+          <tr><td>Tenancy (link)</td><td><code>fldPmAMmxwqs4SdPa</code></td><td>Link</td><td>Direct link to tenancy record &mdash; this is how payment is matched</td></tr>
+          <tr><td>Date</td><td><code>fldoyQ6Rr9cHp3bgQ</code></td><td>Date</td><td>Must be in the current calendar month</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-header">Tenants Table Fields Used</div>
+      <table class="label-table">
+        <thead><tr><th>Human Name</th><th>Field ID</th><th>Type</th><th>Used For</th></tr></thead>
+        <tbody>
+          <tr><td>Tenant Name</td><td><code>fldxBKW7QnujSDWqA</code></td><td>Text</td><td>Full name display</td></tr>
+          <tr><td>Contact Number</td><td><code>fldraHUkWfqo4olLF</code></td><td>Phone</td><td>Clickable tel: link in Contact column</td></tr>
+          <tr><td>Email Address</td><td><code>fldybEduFY3DWWTfT</code></td><td>Email</td><td>Clickable mailto: link in Contact column</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-header">Airtable Payment Status Select IDs</div>
+      <table class="label-table">
+        <thead><tr><th>Status Name</th><th>Select Option ID</th><th>Used In Code As</th></tr></thead>
+        <tbody>
+          <tr><td><span class="label-badge lb-green">In Payment</span></td><td><code>sel4I99slfpd7Vc1t</code></td><td><code>CFV_STATUS_IDS.inPayment</code></td></tr>
+          <tr><td><span class="label-badge lb-red">CFV</span></td><td><code>sel2mWzsvOd8d8de0</code></td><td><code>CFV_STATUS_IDS.cfv</code></td></tr>
+          <tr><td><span class="label-badge lb-amber">CFV Actioned</span></td><td><code>selmhFXah5Bodgg9x</code></td><td><code>CFV_STATUS_IDS.cfvActioned</code></td></tr>
+        </tbody>
+      </table>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>If these select option IDs change in Airtable (e.g. by deleting and recreating the field), you must update the constants in <code>js/cfv.js</code> to match.</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">API Calls Made by CFV OS</div>
+      <table class="label-table">
+        <thead><tr><th>Method</th><th>Endpoint</th><th>When</th></tr></thead>
+        <tbody>
+          <tr><td><code>PATCH</code></td><td><code>/v0/{base}/Tenancies/{id}</code></td><td>Every status change (Confirm CFV, Mark Actioned, In Payment, Move to CFV, auto-return)</td></tr>
+          <tr><td><code>POST</code></td><td><code>/v0/{base}/Tenancies/{id}/comments</code></td><td>Every status change + manual comment add</td></tr>
+          <tr><td><code>GET</code></td><td><code>/v0/{base}/Tenancies/{id}/comments</code></td><td>When rendering the CFV table (comment counts) and when opening the comments panel</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 14. Local Storage Keys -->
+  <div class="section" id="localStorage">
+    <h2 class="section-title"><span class="icon">&#128190;</span> 14. Local Storage Keys</h2>
+    <div class="card">
+      <p>The CFV OS stores tracking data in your browser&rsquo;s localStorage. These persist across sessions but are specific to the browser/device.</p>
+      <table class="label-table">
+        <thead><tr><th>Key Pattern</th><th>Value</th><th>Purpose</th><th>Cleared When</th></tr></thead>
+        <tbody>
+          <tr><td><code>cfv_{id}_startDate</code></td><td>ISO date string</td><td>The due date when this CFV was first detected. Used for &ldquo;days overdue&rdquo; calculation.</td><td>Returned to In Payment (manual or auto)</td></tr>
+          <tr><td><code>cfv_{id}_chaseStart</code></td><td>ISO date string</td><td>When the chase stage tracking began. Used to determine Stage 1/2/3.</td><td>Returned to In Payment or dismissed</td></tr>
+          <tr><td><code>cfv_{id}_returned</code></td><td>&ldquo;1&rdquo;</td><td>Prevents a just-returned tenancy from re-appearing before the next full data load.</td><td>Cleared if Airtable PATCH fails</td></tr>
+          <tr><td><code>cfv_{id}_returnDismissed</code></td><td>&ldquo;1&rdquo;</td><td>Legacy flag for dismissing return banners.</td><td>Returned to In Payment</td></tr>
+          <tr><td><code>cfv_dismissed_{id}</code></td><td>ISO date string</td><td>Potential CFV dismissed by user. <strong>Auto-expires after 25 days</strong> &mdash; system re-checks.</td><td>Expires automatically after 25 days</td></tr>
+          <tr><td><code>cfv_reflag_dismissed_{id}</code></td><td>ISO date string</td><td>Re-flag dismissed by user. Tenancy stays CFV Actioned.</td><td>When user confirms re-flag as CFV</td></tr>
+        </tbody>
+      </table>
+      <div class="info-box warn">
+        <span class="ib-icon">&#9888;&#65039;</span>
+        <span>Clearing your browser data or using a different device will reset all localStorage tracking. Days overdue and chase stages will be recalculated from scratch on the next load.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 15. Troubleshooting -->
   <div class="section" id="troubleshooting">
-    <h2 class="section-title"><span class="icon">&#128295;</span> 12. Troubleshooting</h2>
+    <h2 class="section-title"><span class="icon">&#128295;</span> 15. Troubleshooting</h2>
     <div class="card">
       <div class="ts-item">
-        <div class="ts-problem">CFV not generated for a known missed payment</div>
-        <div class="ts-solution">Check the tenant's tenancy record is active and has the correct expected rent. Verify the reconciliation script ran on the 3rd. Review the bank transactions for any mismatched references.</div>
+        <div class="ts-problem">A tenant paid but the CFV is still showing</div>
+        <div class="ts-solution">The payment transaction must be <strong>reconciled</strong> and <strong>linked to the tenancy record</strong> via the Tenancy field in Airtable. Check the transaction in the Reconciliation view &mdash; if the Tenancy field is empty, the CFV system cannot detect it. Reconcile the transaction with the correct tenancy link and reload the CFV tab.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Chase email not sending</div>
-        <div class="ts-solution">Verify the tenant has an email address in the Contacts table. Check the email service integration (Gmail/Make) for quota or authentication errors. Review the chase template for merge field issues.</div>
+        <div class="ts-problem">CFV not detected for a known missed payment</div>
+        <div class="ts-solution">Check: (1) Is the tenancy status <strong>In Payment</strong> in Airtable? CFVs are only auto-detected for In Payment tenancies. (2) Is the tenant status <strong>Active</strong> (not Former)? (3) Is the rent amount greater than zero? (4) Has the due day + 2 days passed this month? If all are correct, reload the dashboard to trigger a fresh detection.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Payment received but CFV still shows as Open</div>
-        <div class="ts-solution">The payment may not have been reconciled yet. Run the reconciliation manually or check the transaction matching rules. The payment reference may not match the expected pattern.</div>
+        <div class="ts-problem">Auto-return didn&rsquo;t clear a CFV after reconciliation</div>
+        <div class="ts-solution">Auto-return only runs when you load or switch to the CFV tab. Reload the page or click the CFV sidebar item to trigger detection. Also verify the transaction date is within the <strong>current calendar month</strong> &mdash; payments from previous months won&rsquo;t trigger auto-return.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Days Overdue shows negative number</div>
-        <div class="ts-solution">This can happen if the due date is in the future. The CFV may have been created prematurely. Review the detection logic or correct the due date in Airtable.</div>
+        <div class="ts-problem">Status update failed &mdash; alert says &ldquo;Failed to update Airtable&rdquo;</div>
+        <div class="ts-solution">Your Airtable PAT needs the <code>data.records:write</code> scope. Go to <a href="https://airtable.com/create/tokens">airtable.com/create/tokens</a>, edit your token, and ensure this scope is enabled. Also check your internet connection.</div>
       </div>
       <div class="ts-item">
-        <div class="ts-problem">Status dropdown not updating from the dashboard</div>
-        <div class="ts-solution">Check that the Airtable API key has write permissions. Verify the status option IDs in <code>config.js</code> match the current Airtable field configuration.</div>
+        <div class="ts-problem">Comments not loading &mdash; panel shows &ldquo;No comments yet&rdquo;</div>
+        <div class="ts-solution">Your PAT may be missing the <code>data.recordComments:read</code> scope. The system will show a link to update your token. Add the scope and refresh.</div>
       </div>
+      <div class="ts-item">
+        <div class="ts-problem">Sidebar badges not showing any numbers</div>
+        <div class="ts-solution">Badges only appear when there are CFVs to show. If you expect to see badges, ensure the dashboard data has loaded (check for the spinning loader). The badges update after the initial data load and after every CFV tab render.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Days overdue resets to 0 unexpectedly</div>
+        <div class="ts-solution">The days overdue counter is stored in localStorage. If you cleared your browser data or switched to a different device, the start date will be recalculated. This is expected behaviour &mdash; the counter will resume from the current month&rsquo;s due date.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">A dismissed potential CFV has reappeared</div>
+        <div class="ts-solution">Dismissals auto-expire after <strong>25 days</strong> by design. If the tenant still hasn&rsquo;t paid, the system re-flags them for review. Dismiss again or confirm as CFV if payment is still missing.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 16. Changelog -->
+  <div class="section" id="changelog">
+    <h2 class="section-title"><span class="icon">&#128203;</span> 16. Changelog</h2>
+    <div class="card">
+      <table class="label-table">
+        <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
+        <tbody>
+          <tr><td><strong>1.6</strong></td><td>16 Apr 2026</td><td>Complete SOP rewrite. Documented: direct tenancy-linked payment detection (replaced keyword matching), auto-return to In Payment, re-flagging logic, sidebar badges, all action buttons per status, comments system via Airtable Comments API, localStorage tracking keys, chase stages (visual only, not automated), all Airtable field IDs and select option IDs.</td></tr>
+          <tr><td><strong>1.4</strong></td><td>12 Apr 2026</td><td>Added Potential CFVs section, UC Check section, status IDs reference.</td></tr>
+          <tr><td><strong>1.0</strong></td><td>Mar 2026</td><td>Initial SOP release.</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
