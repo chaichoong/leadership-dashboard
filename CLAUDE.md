@@ -89,14 +89,10 @@ The git repo IS the source of truth. Edit files directly here.
 - Push to `main` branch → auto-deploys in 2-3 minutes
 - Always `git pull` before starting work, and push promptly after committing
 
-## Git Hooks Setup
-
-After cloning, install the pre-commit hook:
-```bash
-ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
-```
-This auto-bumps `pageVer` in PAGE_REGISTRY whenever a page's source file is committed. The file-to-page mapping is in `scripts/pre-commit`.
-
 ## Version Tracking
 
-PAGE_REGISTRY in `js/config.js` tracks page and SOP versions. `pageVer` is auto-bumped by the pre-commit hook when source files change. When the SOP is updated to match, manually bump `sopVer` to match `pageVer`.
+PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
+- **`pageVer` is auto-bumped** by a GitHub Action (`.github/workflows/auto-bump-pagever.yml`) whenever a page's source file is pushed to main. No manual steps needed.
+- A local pre-commit hook (`scripts/pre-commit`) also bumps versions at commit time if installed: `ln -sf ../../scripts/pre-commit .git/hooks/pre-commit`
+- The file-to-page mapping is in `scripts/pre-commit-action.py`. Update it when adding new pages.
+- When the SOP is updated to match, manually bump `sopVer` to match `pageVer`.

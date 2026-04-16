@@ -1,0 +1,42 @@
+name: Auto-bump pageVer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'js/dashboard.js'
+      - 'js/cfv.js'
+      - 'js/invoices.js'
+      - 'js/pnl.js'
+      - 'js/fintable.js'
+      - 'js/sitemap.js'
+      - 'follow-up.html'
+      - 'compliance.html'
+      - 'os/tasks/index.html'
+      - 'os/index.html'
+      - 'os/business-plan-builder/index.html'
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    # Skip if this commit was made by the action itself (prevent infinite loop)
+    if: "!contains(github.event.head_commit.message, '[auto-bump]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Detect changed pages and bump versions
+        run: |
+          python3 scripts/pre-commit-action.py
+        env:
+          CHANGED_FILES: ${{ join(github.event.commits.*.modified, ' ') }} ${{ join(github.event.commits.*.added, ' ') }}
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet js/config.js && exit 0
+          git add js/config.js
+          git commit -m "Auto-bump pageVer for modified pages [auto-bump]"
+          git push

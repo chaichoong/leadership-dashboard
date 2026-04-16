@@ -1,104 +1,17 @@
 #!/usr/bin/env python3
 """
-Pre-commit hook: auto-bumps pageVer in js/config.js PAGE_REGISTRY
-when source files for a page are modified in the commit.
-
+Local pre-commit hook — delegates to the shared script.
 Install: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
-
-File-to-page mapping:
-  js/dashboard.js        → overview
-  js/cfv.js              → cfv
-  js/invoices.js         → invoices
-  js/cashflow.js         → (no entry yet — add when needed)
-  js/reconciliation.js   → (shared — no single page)
-  js/fintable.js         → fintable
-  js/sitemap.js          → sitemap
-  js/pnl.js              → pnl
-  js/ai-assistant.js     → (no entry — embedded)
-  follow-up.html         → comms
-  compliance.html        → compliance
-  os/tasks/index.html    → tasks
-  os/index.html          → os-hub
-  os/business-plan-builder/index.html → os-bplan
 """
-
+import os
 import subprocess
-import re
 import sys
 
-# Map of source files → PAGE_REGISTRY id
-FILE_TO_PAGE = {
-    'js/dashboard.js':      'overview',
-    'js/cfv.js':            'cfv',
-    'js/invoices.js':       'invoices',
-    'js/pnl.js':            'pnl',
-    'js/fintable.js':       'fintable',
-    'js/sitemap.js':        'sitemap',
-    'follow-up.html':       'comms',
-    'compliance.html':      'compliance',
-    'os/tasks/index.html':  'tasks',
-    'os/index.html':        'os-hub',
-    'os/business-plan-builder/index.html': 'os-bplan',
-}
+script_dir = os.path.dirname(os.path.abspath(__file__))
+shared_script = os.path.join(script_dir, 'pre-commit-action.py')
 
-CONFIG_FILE = 'js/config.js'
-
-def get_staged_files():
-    result = subprocess.run(
-        ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR'],
-        capture_output=True, text=True
-    )
-    return result.stdout.strip().split('\n') if result.stdout.strip() else []
-
-def bump_version(ver_str):
-    """Bump patch version: '1.4' → '1.5', '2.0' → '2.1'"""
-    parts = ver_str.split('.')
-    if len(parts) == 2:
-        return f"{parts[0]}.{int(parts[1]) + 1}"
-    return ver_str  # can't parse, leave it
-
-def main():
-    staged = get_staged_files()
-
-    # Find which pages need a version bump
-    pages_to_bump = set()
-    for f in staged:
-        if f in FILE_TO_PAGE:
-            pages_to_bump.add(FILE_TO_PAGE[f])
-
-    if not pages_to_bump:
-        return 0  # nothing to bump
-
-    # Skip if config.js itself isn't readable
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            content = f.read()
-    except FileNotFoundError:
-        return 0
-
-    modified = False
-    for page_id in pages_to_bump:
-        # Match the pageVer for this specific page entry
-        # Pattern: id: 'page_id', ... pageVer: 'X.Y'
-        pattern = re.compile(
-            r"(id:\s*'" + re.escape(page_id) + r"'[^}]*?pageVer:\s*')(\d+\.\d+)(')"
-        )
-        match = pattern.search(content)
-        if match:
-            old_ver = match.group(2)
-            new_ver = bump_version(old_ver)
-            if old_ver != new_ver:
-                content = content[:match.start(2)] + new_ver + content[match.end(2):]
-                modified = True
-                print(f"  📦 Auto-bump: {page_id} pageVer {old_ver} → {new_ver}")
-
-    if modified:
-        with open(CONFIG_FILE, 'w') as f:
-            f.write(content)
-        # Re-stage config.js so the version bump is included in this commit
-        subprocess.run(['git', 'add', CONFIG_FILE])
-
-    return 0
-
-if __name__ == '__main__':
-    sys.exit(main())
+if os.path.exists(shared_script):
+    result = subprocess.run([sys.executable, shared_script], cwd=os.getcwd())
+    sys.exit(result.returncode)
+else:
+    sys.exit(0)
