@@ -32,67 +32,62 @@
         return tenantId ? tenantLookup[tenantId] : null;
     }
 
-    // Detect CFVs: active tenancies where rent is 2+ days overdue with no matching transaction
+    // ── Core payment detection: uses direct tenancy link on transactions ──
+    // Returns true if there's a reconciled transaction linked to this tenancy
+    // in the current calendar month. No keyword matching, no formula dependency.
+    function hasLinkedPaymentThisMonth(tenancyId, today) {
+        const thisMonth = today.getMonth();
+        const thisYear = today.getFullYear();
+        return allTransactions.some(tx => {
+            if (!getField(tx, F.txReconciled)) return false;
+            // Check direct tenancy link
+            const linkedTenancy = getField(tx, F.txTenancy);
+            const linkedId = extractLinkedId(linkedTenancy);
+            if (linkedId !== tenancyId) return false;
+            // Check transaction is in the current month
+            const txDateStr = getField(tx, F.txDate);
+            if (!txDateStr) return false;
+            const txDate = new Date(txDateStr);
+            return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
+        });
+    }
+
+    // Detect CFVs using direct tenancy-linked transactions.
+    // Auto-queues status updates back to In Payment when payment is confirmed.
     function detectCFVs() {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tenantLookup = buildTenantLookup();
         const cfvList = [];
+        // Tenancies to auto-return to In Payment (processed after loop)
+        const autoReturnQueue = [];
 
         allTenancies.forEach(tenancy => {
             const statusName = getPaymentStatusName(getField(tenancy, F.tenPayStatus)).toLowerCase().trim();
 
-            // Include existing CFV and CFV Actioned tenancies
+            // ── Path A: Existing CFV / CFV Actioned tenancies ──
             if (statusName === 'cfv' || statusName === 'cfv actioned') {
-                // Skip if locally marked as returned to In Payment (prevents re-showing before Airtable syncs)
+                // Skip if locally marked as returned (prevents re-showing before Airtable syncs)
                 if (localStorage.getItem('cfv_' + tenancy.id + '_returned')) return;
+
+                const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today);
+
+                // Auto-return to In Payment if a linked reconciled transaction exists
+                if (paidDetected) {
+                    autoReturnQueue.push(tenancy.id);
+                    return; // Don't add to CFV list — it's being cleared
+                }
 
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
                 const entry = buildCFVEntry(tenancy, tenant, statusName, today);
 
-                // Check if paid — first use Airtable formula, then fall back to
-                // scanning recent reconciled transactions for a matching payment
-                let paidDetected = !!getField(tenancy, F.tenPaidThisMonth);
-
-                if (!paidDetected && allTransactions.length > 0) {
-                    // Secondary check: look for a reconciled transaction this month
-                    // matching the tenant name/ref and approximate rent amount
-                    const surname = String(getField(tenancy, F.tenSurname) || '').toLowerCase();
-                    const ref = String(getField(tenancy, F.tenRef) || '').toLowerCase();
-                    const rent = Number(getField(tenancy, F.tenRent)) || 0;
-                    const thisMonth = today.getMonth();
-                    const thisYear = today.getFullYear();
-
-                    const keywords = [surname, ...ref.split(/[\s–\-]+/)].filter(w => w.length >= 3);
-
-                    paidDetected = allTransactions.some(tx => {
-                        if (!getField(tx, F.txReconciled)) return false;
-                        const txDateStr = getField(tx, F.txDate);
-                        if (!txDateStr) return false;
-                        const txDate = new Date(txDateStr);
-                        if (txDate.getMonth() !== thisMonth || txDate.getFullYear() !== thisYear) return false;
-                        const txAmt = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
-                        if (rent > 0 && Math.abs(txAmt - rent) > rent * 0.33) return false;
-                        const txText = (String(getField(tx, F.txVendor) || '') + ' ' + String(getField(tx, F.txDescription) || '')).toLowerCase();
-                        return keywords.some(kw => txText.includes(kw));
-                    });
-                }
-
-                if (paidDetected) {
-                    const dismissKey = 'cfv_' + tenancy.id + '_returnDismissed';
-                    if (!localStorage.getItem(dismissKey)) {
-                        entry.paymentDetected = true;
-                    }
-                }
-
-                // Re-flag check: if CFV Actioned but next due date has passed (2+ days) with no payment
-                if (statusName === 'cfv actioned' && !paidDetected) {
+                // Re-flag check: CFV Actioned but next due date has passed with no payment
+                if (statusName === 'cfv actioned') {
                     const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
                     const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
                     const daysSinceDue = today >= dueThisMonth ? Math.floor((today - dueThisMonth) / 86400000) : 0;
-                    const paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
 
-                    if (daysSinceDue >= CFV_TOLERANCE_DAYS && !paidThisMonth) {
+                    if (daysSinceDue >= CFV_TOLERANCE_DAYS) {
                         const reflagDismissKey = 'cfv_reflag_dismissed_' + tenancy.id;
                         if (!localStorage.getItem(reflagDismissKey)) {
                             entry.reflagged = true;
@@ -104,7 +99,7 @@
                 return;
             }
 
-            // Check "In Payment" tenancies for potential new CFVs
+            // ── Path B: "In Payment" tenancies — check for potential new CFVs ──
             if (statusName !== 'in payment') return;
             if (!isTenantStatusActive(tenancy)) return;
 
@@ -112,48 +107,77 @@
             if (rent <= 0) return;
 
             const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-            let paidThisMonth = getField(tenancy, F.tenPaidThisMonth);
-
-            // Secondary check: scan reconciled transactions if Airtable formula hasn't caught up
-            if (!paidThisMonth && allTransactions.length > 0) {
-                const surname = String(getField(tenancy, F.tenSurname) || '').toLowerCase();
-                const ref = String(getField(tenancy, F.tenRef) || '').toLowerCase();
-                const rent = Number(getField(tenancy, F.tenRent)) || 0;
-                const thisMonth = today.getMonth();
-                const thisYear = today.getFullYear();
-                const keywords = [surname, ...ref.split(/[\s–\-]+/)].filter(w => w.length >= 3);
-
-                paidThisMonth = allTransactions.some(tx => {
-                    if (!getField(tx, F.txReconciled)) return false;
-                    const txDateStr = getField(tx, F.txDate);
-                    if (!txDateStr) return false;
-                    const txDate = new Date(txDateStr);
-                    if (txDate.getMonth() !== thisMonth || txDate.getFullYear() !== thisYear) return false;
-                    const txAmt = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
-                    if (rent > 0 && Math.abs(txAmt - rent) > rent * 0.33) return false;
-                    const txText = (String(getField(tx, F.txVendor) || '') + ' ' + String(getField(tx, F.txDescription) || '')).toLowerCase();
-                    return keywords.some(kw => txText.includes(kw));
-                });
-            }
-
-            // Calculate days overdue directly — don't rely on Airtable formula
-            // which may not be populated for all tenancies
             const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
             let daysOverdue = 0;
             if (today >= dueThisMonth) {
                 daysOverdue = Math.floor((today - dueThisMonth) / 86400000);
             }
 
-            // Flag as potential CFV if: 2+ days overdue AND not paid this month
-            if (daysOverdue >= CFV_TOLERANCE_DAYS && !paidThisMonth) {
-                const tenant = getTenantForTenancy(tenancy, tenantLookup);
-                const entry = buildCFVEntry(tenancy, tenant, 'potential', today);
-                entry.autoDetected = true;
-                cfvList.push(entry);
-            }
+            // Only check if due date has passed + tolerance
+            if (daysOverdue < CFV_TOLERANCE_DAYS) return;
+
+            // Check for linked reconciled payment this month
+            const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today);
+            if (paidThisMonth) return; // Paid — not a CFV
+
+            // No linked payment found — flag as potential CFV
+            const tenant = getTenantForTenancy(tenancy, tenantLookup);
+            const entry = buildCFVEntry(tenancy, tenant, 'potential', today);
+            entry.autoDetected = true;
+            cfvList.push(entry);
         });
 
+        // Process auto-returns in the background (don't block detection)
+        if (autoReturnQueue.length > 0) {
+            cfvAutoReturnToPayment(autoReturnQueue);
+        }
+
         return cfvList;
+    }
+
+    // Automatically return tenancies to In Payment when linked payment is detected
+    async function cfvAutoReturnToPayment(tenancyIds) {
+        for (const tenancyId of tenancyIds) {
+            // Skip if already processed
+            if (localStorage.getItem('cfv_' + tenancyId + '_returned')) continue;
+
+            // Mark locally first so re-renders don't show it
+            localStorage.setItem('cfv_' + tenancyId + '_returned', '1');
+
+            const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.inPayment);
+            if (ok) {
+                // Clear chase tracking and CFV start date
+                localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
+                localStorage.removeItem('cfv_' + tenancyId + '_startDate');
+                localStorage.removeItem('cfv_' + tenancyId + '_returnDismissed');
+                // Update local data
+                const rec = allTenancies.find(t => t.id === tenancyId);
+                if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.inPayment, name: 'In Payment', color: 'cyanLight2' };
+                // Add audit comment
+                const surname = rec ? String(getField(rec, F.tenSurname) || '') : '';
+                await addTenancyComment(tenancyId, `Auto-returned to In Payment — reconciled transaction linked to this tenancy detected for ${new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}.`);
+                console.log(`CFV auto-return: ${surname || tenancyId} → In Payment`);
+            } else {
+                // Airtable update failed — remove local flag so it retries next load
+                localStorage.removeItem('cfv_' + tenancyId + '_returned');
+                console.warn(`CFV auto-return failed for ${tenancyId}`);
+            }
+        }
+        // Re-render after all updates
+        if (tenancyIds.length > 0) {
+            renderCFVTab();
+            if (typeof updateCFVSidebarBadges === 'function') {
+                const cfvList = detectCFVs();
+                const visible = cfvList.filter(e => {
+                    if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
+                    return true;
+                });
+                updateCFVSidebarBadges(
+                    visible.filter(e => e.status === 'cfv' || e.status === 'potential').length,
+                    visible.filter(e => e.status === 'cfv actioned').length
+                );
+            }
+        }
     }
 
     function buildCFVEntry(tenancy, tenant, status, today) {
@@ -407,22 +431,7 @@
                 `;
             }
 
-            // Payment detected banner (for CFV Actioned with paid this month)
-            let paymentBanner = '';
-            if (entry.paymentDetected) {
-                paymentBanner = `<tr>
-                    <td colspan="9" style="padding:6px 12px;background:#f0fdf4;border-left:3px solid #16a34a">
-                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                            <span style="font-size:11px;font-weight:700;color:#16a34a">Payment detected this month</span>
-                            <span style="font-size:12px;color:#1e293b">Return ${escHtml(entry.surname)} to In Payment?</span>
-                            <div style="margin-left:auto;display:flex;gap:6px">
-                                <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">✓ Approve</button>
-                                <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReturn('${entry.tenancyId}',this)">✗ Dismiss</button>
-                            </div>
-                        </div>
-                    </td>
-                </tr>`;
-            }
+            // Payment detected banner removed — auto-return handles this now
 
             return `<tr>
                 <td style="font-weight:600">${escHtml(entry.surname)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.ref)}</span></td>
@@ -434,7 +443,7 @@
                 <td>${chaseBadge}</td>
                 <td>${contactHtml}</td>
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
-            </tr>${paymentBanner}`;
+            </tr>`;
         }).join('');
     }
 

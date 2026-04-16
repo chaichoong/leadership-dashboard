@@ -693,7 +693,7 @@
             if (!localTx.fields) localTx.fields = {};
             localTx.fields[F.txReconciled] = true;
             if (catId) localTx.fields[F.txCategory] = [catId];
-            if (tenancyId) localTx.fields[F.txTenancy] = [tenancyId];
+            if (tenancyId) localTx.fields[F.txTenancy] = [{ id: tenancyId }];
         }
         // Re-run CFV sidebar badge count so cleared CFVs disappear immediately
         if (typeof updateCFVSidebarBadges === 'function' && typeof detectCFVs === 'function') {

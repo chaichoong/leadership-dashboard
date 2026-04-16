@@ -136,20 +136,15 @@
             updateSitemapBadge();
             // CFV badges: quick count from tenancy data
             try {
-                const todayForBadge = new Date(); todayForBadge.setHours(0,0,0,0);
-                let badgeCfv = 0, badgeActioned = 0;
-                tenancies.forEach(t => {
-                    const status = getPaymentStatusName(getField(t, F.tenPayStatus)).toLowerCase().trim();
-                    if (status === 'cfv') badgeCfv++;
-                    else if (status === 'cfv actioned') badgeActioned++;
-                    else if (status === 'in payment' && isTenantStatusActive(t)) {
-                        const dueDay = getNumVal(t, F.tenDueDay, 1);
-                        const dueDate = new Date(todayForBadge.getFullYear(), todayForBadge.getMonth(), dueDay);
-                        const overdue = todayForBadge >= dueDate ? Math.floor((todayForBadge - dueDate) / 86400000) : 0;
-                        if (overdue >= CFV_TOLERANCE_DAYS && !getField(t, F.tenPaidThisMonth) && !localStorage.getItem('cfv_dismissed_' + t.id)) badgeCfv++;
-                    }
+                const cfvList = detectCFVs();
+                const visible = cfvList.filter(e => {
+                    if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
+                    return true;
                 });
-                updateCFVSidebarBadges(badgeCfv, badgeActioned);
+                updateCFVSidebarBadges(
+                    visible.filter(e => e.status === 'cfv' || e.status === 'potential').length,
+                    visible.filter(e => e.status === 'cfv actioned').length
+                );
             } catch(e) { console.warn('Badge update failed:', e); }
 
             // Schedule smart refresh — defers if user is actively interacting
