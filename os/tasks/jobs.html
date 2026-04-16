@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>My Jobs</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--border:#2e3348;
+  --text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--accent2:#818cf8;
+  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;
+}
+html{font-size:16px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;-webkit-tap-highlight-color:transparent}
+
+/* === Name Picker Overlay === */
+.picker-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
+.picker-card{text-align:center;width:90%;max-width:360px}
+.picker-card h1{font-size:24px;font-weight:700;margin-bottom:6px}
+.picker-card p{font-size:14px;color:var(--muted);margin-bottom:28px}
+.picker-btns{display:flex;flex-direction:column;gap:12px}
+.picker-btn{display:flex;align-items:center;justify-content:center;gap:12px;padding:18px 20px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:18px;font-weight:700;transition:all .15s;min-height:60px}
+.picker-btn:hover,.picker-btn:active{border-color:var(--accent);background:var(--accent);color:#fff}
+.picker-btn .avatar{width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0;background:var(--accent)}
+
+/* === Auth Overlay === */
+.auth-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9998}
+.auth-card{text-align:center;width:90%;max-width:360px}
+.auth-card h2{font-size:20px;margin-bottom:6px}
+.auth-card p{font-size:13px;color:var(--muted);margin-bottom:20px}
+.auth-card input{width:100%;padding:14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:15px;margin-bottom:12px}
+.auth-card input:focus{outline:none;border-color:var(--accent)}
+.auth-card button{width:100%;padding:14px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+.auth-card button:hover{background:var(--accent2)}
+
+/* === Header === */
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.header-left h1{font-size:18px;font-weight:700}
+.header-left .subtitle{font-size:12px;color:var(--muted)}
+.header-right{display:flex;align-items:center;gap:10px}
+.refresh-btn{width:44px;height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;transition:all .15s}
+.refresh-btn:active{background:var(--accent);border-color:var(--accent);color:#fff}
+.refresh-btn.spinning svg{animation:spin .6s linear infinite}
+.task-count{background:var(--accent);color:#fff;padding:2px 10px;border-radius:12px;font-size:13px;font-weight:700}
+
+/* === Loading / Empty === */
+.loader{display:flex;align-items:center;justify-content:center;padding:60px 20px;color:var(--muted);font-size:15px;gap:10px}
+.spin-icon{width:22px;height:22px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:80px 20px;color:var(--muted)}
+.empty .icon{font-size:32px;margin-bottom:12px;color:var(--green)}
+.empty p{font-size:16px}
+
+/* === Task List === */
+.task-list{padding:12px;display:flex;flex-direction:column;gap:10px}
+
+/* === Task Card === */
+.task-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:border-color .15s}
+.task-card.expanded{border-color:var(--accent)}
+.task-card-header{padding:16px 18px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+.task-card-header:active{background:var(--surface2)}
+.task-name{font-size:16px;font-weight:700;line-height:1.3}
+.task-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.task-meta .separator{color:var(--border)}
+
+/* Badges */
+.badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap}
+.badge-today{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge-overdue{background:rgba(239,68,68,.15);color:#f87171}
+.badge-upcoming{background:rgba(99,102,241,.1);color:var(--accent2)}
+.badge-todo{background:rgba(6,182,212,.1);color:#06b6d4}
+.badge-approval{background:rgba(168,85,247,.1);color:#a855f7}
+.badge-urgent{background:rgba(239,68,68,.15);color:#f87171}
+.badge-high{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge-not-urgent{background:rgba(34,197,94,.1);color:var(--green)}
+.badge-project{background:rgba(236,72,153,.1);color:#ec4899}
+.badge-business{background:rgba(99,102,241,.08);color:var(--accent2);font-size:11px}
+
+/* === Expanded Detail === */
+.task-detail{display:none;padding:0 18px 18px;border-top:1px solid var(--border)}
+.task-card.expanded .task-detail{display:block}
+.detail-section{margin-top:14px}
+.detail-section h4{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.detail-section p{font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.detail-section .no-content{color:var(--muted);font-style:italic;font-size:13px}
+
+/* Attachments */
+.attachment-list{display:flex;flex-wrap:wrap;gap:8px}
+.attachment-link{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--accent2);font-size:13px;font-weight:600;text-decoration:none;min-height:44px}
+.attachment-link:active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.attachment-thumb{width:36px;height:36px;border-radius:4px;object-fit:cover}
+
+/* === Action Buttons === */
+.actions{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+.action-btn{width:100%;padding:16px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;min-height:54px;transition:all .15s}
+.action-btn:active{transform:scale(0.98)}
+.btn-complete{background:var(--green);color:#fff}
+.btn-complete:active{background:#16a34a}
+.btn-complete:disabled{opacity:.5;cursor:not-allowed}
+.btn-note{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+.btn-note:active{border-color:var(--accent);color:var(--accent2)}
+
+/* === Note Input === */
+.note-input-area{display:none;margin-top:10px}
+.note-input-area.open{display:block}
+.note-input-area textarea{width:100%;min-height:100px;padding:14px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:15px;font-family:inherit;resize:vertical}
+.note-input-area textarea:focus{outline:none;border-color:var(--accent)}
+.note-actions{display:flex;gap:10px;margin-top:10px}
+.note-actions button{flex:1;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;min-height:48px}
+.note-save{background:var(--accent);color:#fff;border:none}
+.note-save:active{background:var(--accent2)}
+.note-save:disabled{opacity:.5;cursor:not-allowed}
+.note-cancel{background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
+.note-cancel:active{border-color:var(--accent)}
+
+/* === Footer === */
+.footer{text-align:center;padding:24px 20px 40px;font-size:13px;color:var(--muted)}
+.footer a{color:var(--accent2);text-decoration:underline;cursor:pointer;padding:8px;display:inline-block;min-height:44px;line-height:28px}
+
+/* === Card remove animation === */
+.task-card.removing{transition:all .35s ease-out;opacity:0;transform:translateX(100%);max-height:0;margin:0;padding:0;border:none;overflow:hidden}
+
+/* === Toast === */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);color:var(--text);padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.toast.show{opacity:1}
+.toast.success{border-color:var(--green);color:var(--green)}
+.toast.error{border-color:var(--red);color:var(--red)}
+
+/* === Error banner === */
+.error-banner{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:14px 18px;margin:12px;font-size:14px;color:var(--red);text-align:center}
+.error-banner button{margin-top:8px;padding:10px 20px;border-radius:8px;border:none;background:var(--red);color:#fff;font-size:14px;font-weight:700;cursor:pointer;min-height:44px}
+</style>
+</head>
+<body>
+
+<!-- Auth Overlay -->
+<div id="authOverlay" class="auth-overlay" style="display:none">
+  <div class="auth-card">
+    <h2>Authentication Required</h2>
+    <p>Enter your Airtable Personal Access Token to continue.</p>
+    <input id="authInput" type="password" placeholder="pat..." autocomplete="off">
+    <button onclick="submitAuth()">Connect</button>
+  </div>
+</div>
+
+<!-- Name Picker Overlay -->
+<div id="pickerOverlay" class="picker-overlay" style="display:none">
+  <div class="picker-card">
+    <h1>My Jobs</h1>
+    <p>Who are you?</p>
+    <div id="pickerBtns" class="picker-btns"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="appHeader" class="header" style="display:none">
+  <div class="header-left">
+    <h1 id="headerName">Jobs</h1>
+    <div class="subtitle" id="headerSubtitle">Loading...</div>
+  </div>
+  <div class="header-right">
+    <span class="task-count" id="taskCount">0</span>
+    <button class="refresh-btn" id="refreshBtn" onclick="refreshTasks()" title="Refresh">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Main Content -->
+<div id="mainContent" style="display:none">
+  <div id="taskList" class="task-list"></div>
+  <div class="footer">
+    <a id="switchUserLink" onclick="switchUser()">Switch user</a>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script>
+/* ====== Config ====== */
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const TABLE_ID = 'tblqB8b22hKBL4PF1';
+const API_BASE = 'https://api.airtable.com/v0';
+
+const F = {
+  name:        'fldgFjGBw6bTKJFCD',
+  dueDate:     'fld7XP8w8kbxfETV4',
+  status:      'fldx4qCw17UfrKpaN',
+  assignee:    'fldELMncVJYPDRJNc',
+  priority:    'fldS21RwmwOqt71LI',
+  timeEst:     'fld10VzzbiNNgRmIi',
+  description: 'fldRGhBQViKZKtkQ6',
+  attachments: 'fldEbs9cscRr8elcw',
+  notes:       'fldR7apBzSp3oxFxz',
+  business:    'fldLu1Y4GzyWcDoxr',
+};
+
+const CONTRACTORS = [
+  { key: 'gary', name: 'Gary' },
+  { key: 'roy',  name: 'Roy' },
+  { key: 'rob',  name: 'Rob' },
+];
+
+const STATUS_SORT = { Overdue:0, Today:1, Approval:2, 'To do':3, Upcoming:4 };
+const PRIORITY_SORT = { Urgent:0, High:1, Project:2, 'Not Urgent':3 };
+const LS_KEY = '_task_contractor';
+
+let PAT = '';
+let currentContractor = null;
+let tasks = [];
+
+/* ====== Helpers ====== */
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function gf(rec, fid) {
+  return rec.fields ? rec.fields[fid] : undefined;
+}
+
+function formatDate(d) {
+  if (!d) return 'No date';
+  const dt = new Date(d + 'T00:00:00');
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const diff = Math.round((target - today) / 86400000);
+  const opts = { day: 'numeric', month: 'short' };
+  const label = dt.toLocaleDateString('en-GB', opts);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  if (diff < -1) return label + ' (overdue)';
+  if (diff <= 7) return label + ' (' + diff + 'd)';
+  return label;
+}
+
+function isOverdue(task) {
+  if (!task.dueDate) return false;
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const due = new Date(task.dueDate + 'T00:00:00');
+  return due < today;
+}
+
+function statusClass(status) {
+  const map = {
+    Today: 'badge-today', Overdue: 'badge-overdue', Upcoming: 'badge-upcoming',
+    'To do': 'badge-todo', Approval: 'badge-approval',
+  };
+  return map[status] || 'badge-todo';
+}
+
+function priorityClass(p) {
+  const map = { Urgent:'badge-urgent', High:'badge-high', Project:'badge-project', 'Not Urgent':'badge-not-urgent' };
+  return map[p] || '';
+}
+
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type || '');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.className = 'toast'; }, 3000);
+}
+
+function parseTask(rec) {
+  const statusObj = gf(rec, F.status);
+  const priorityObj = gf(rec, F.priority);
+  const assigneeObj = gf(rec, F.assignee);
+  const timeEstObj = gf(rec, F.timeEst);
+  const businessLinks = gf(rec, F.business) || [];
+
+  let businessName = '';
+  if (Array.isArray(businessLinks) && businessLinks.length > 0) {
+    if (typeof businessLinks[0] === 'object' && businessLinks[0].name) {
+      businessName = businessLinks[0].name;
+    } else if (typeof businessLinks[0] === 'string') {
+      businessName = businessLinks[0];
+    }
+  }
+
+  return {
+    id: rec.id,
+    name: gf(rec, F.name) || '(Untitled)',
+    dueDate: gf(rec, F.dueDate) || '',
+    status: statusObj ? statusObj.name : '',
+    priority: priorityObj ? priorityObj.name : '',
+    assignee: assigneeObj ? assigneeObj.name : '',
+    timeEst: timeEstObj ? timeEstObj.name : '',
+    description: gf(rec, F.description) || '',
+    notes: gf(rec, F.notes) || '',
+    attachments: gf(rec, F.attachments) || [],
+    business: businessName,
+  };
+}
+
+/* ====== Auth ====== */
+function initAuth() {
+  // Try parent window PAT (iframe context)
+  try { if (window.parent && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e) {}
+  // Try localStorage
+  const stored = localStorage.getItem('_dlr_pat');
+  if (stored) { PAT = stored; return true; }
+  return false;
+}
+
+function submitAuth() {
+  const val = document.getElementById('authInput').value.trim();
+  if (!val) return;
+  PAT = val;
+  localStorage.setItem('_dlr_pat', val);
+  document.getElementById('authOverlay').style.display = 'none';
+  boot();
+}
+
+/* ====== Contractor Picker ====== */
+function renderPicker() {
+  const container = document.getElementById('pickerBtns');
+  container.innerHTML = CONTRACTORS.map(c =>
+    `<button class="picker-btn" onclick="selectContractor('${c.key}')">
+      <span class="avatar">${escHtml(c.name[0])}</span>
+      ${escHtml(c.name)}
+    </button>`
+  ).join('');
+  document.getElementById('pickerOverlay').style.display = 'flex';
+}
+
+function selectContractor(key) {
+  localStorage.setItem(LS_KEY, key);
+  currentContractor = CONTRACTORS.find(c => c.key === key);
+  document.getElementById('pickerOverlay').style.display = 'none';
+  showApp();
+  loadTasks();
+}
+
+function switchUser() {
+  localStorage.removeItem(LS_KEY);
+  currentContractor = null;
+  tasks = [];
+  document.getElementById('appHeader').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'none';
+  renderPicker();
+}
+
+/* ====== API ====== */
+async function fetchTasks() {
+  const name = currentContractor.name;
+  const formula = encodeURIComponent(`AND({Status}!="Completed",{Assignee}="${name}")`);
+  const fieldIds = Object.values(F).map(id => `fields%5B%5D=${id}`).join('&');
+  const url = `${API_BASE}/${BASE_ID}/${TABLE_ID}?returnFieldsByFieldId=true&filterByFormula=${formula}&${fieldIds}`;
+
+  let allRecords = [];
+  let offset = null;
+
+  do {
+    const pageUrl = offset ? url + '&offset=' + encodeURIComponent(offset) : url;
+    const resp = await fetch(pageUrl, {
+      headers: { 'Authorization': 'Bearer ' + PAT }
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error('API error ' + resp.status + ': ' + err);
+    }
+    const data = await resp.json();
+    allRecords = allRecords.concat(data.records || []);
+    offset = data.offset || null;
+  } while (offset);
+
+  return allRecords.map(parseTask);
+}
+
+async function patchTask(taskId, fields) {
+  const url = `${API_BASE}/${BASE_ID}/${TABLE_ID}/${taskId}`;
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields, typecast: true })
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error('Update failed: ' + err);
+  }
+  return resp.json();
+}
+
+/* ====== Load & Render ====== */
+async function loadTasks() {
+  const listEl = document.getElementById('taskList');
+  listEl.innerHTML = '<div class="loader"><span class="spin-icon"></span> Loading jobs...</div>';
+  document.getElementById('headerSubtitle').textContent = 'Loading...';
+
+  try {
+    tasks = await fetchTasks();
+    sortTasks();
+    renderTasks();
+  } catch (e) {
+    listEl.innerHTML = `<div class="error-banner">${escHtml(e.message)}<br><button onclick="loadTasks()">Retry</button></div>`;
+    document.getElementById('headerSubtitle').textContent = 'Error loading';
+  }
+}
+
+async function refreshTasks() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  try {
+    tasks = await fetchTasks();
+    sortTasks();
+    renderTasks();
+    showToast('Refreshed', 'success');
+  } catch (e) {
+    showToast('Refresh failed', 'error');
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+function sortTasks() {
+  tasks.sort((a, b) => {
+    // Overdue first, then by status order, then by priority, then by due date
+    const aOver = isOverdue(a) ? 0 : 1;
+    const bOver = isOverdue(b) ? 0 : 1;
+    if (aOver !== bOver) return aOver - bOver;
+
+    const aStatus = STATUS_SORT[a.status] !== undefined ? STATUS_SORT[a.status] : 99;
+    const bStatus = STATUS_SORT[b.status] !== undefined ? STATUS_SORT[b.status] : 99;
+    if (aStatus !== bStatus) return aStatus - bStatus;
+
+    const aPri = PRIORITY_SORT[a.priority] !== undefined ? PRIORITY_SORT[a.priority] : 99;
+    const bPri = PRIORITY_SORT[b.priority] !== undefined ? PRIORITY_SORT[b.priority] : 99;
+    if (aPri !== bPri) return aPri - bPri;
+
+    if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+    if (a.dueDate) return -1;
+    if (b.dueDate) return 1;
+    return 0;
+  });
+}
+
+function renderTasks() {
+  const listEl = document.getElementById('taskList');
+  document.getElementById('taskCount').textContent = tasks.length;
+  document.getElementById('headerSubtitle').textContent = tasks.length + ' active job' + (tasks.length !== 1 ? 's' : '');
+
+  if (tasks.length === 0) {
+    listEl.innerHTML = '<div class="empty"><div class="icon">&#10003;</div><p>All jobs complete. Nice work!</p></div>';
+    return;
+  }
+
+  listEl.innerHTML = tasks.map((t, i) => {
+    const displayStatus = isOverdue(t) && t.status !== 'Overdue' ? 'Overdue' : t.status;
+    const sClass = statusClass(displayStatus);
+    const pClass = priorityClass(t.priority);
+    const dueTxt = formatDate(t.dueDate);
+
+    let attachHtml = '';
+    if (t.attachments && t.attachments.length > 0) {
+      attachHtml = '<div class="detail-section"><h4>Attachments</h4><div class="attachment-list">' +
+        t.attachments.map(att => {
+          const fname = escHtml(att.filename || 'File');
+          const url = escHtml(att.url || '');
+          const isImg = att.type && att.type.startsWith('image/');
+          const thumbHtml = isImg && att.thumbnails && att.thumbnails.small
+            ? '<img class="attachment-thumb" src="' + escHtml(att.thumbnails.small.url) + '" alt="">'
+            : '';
+          return '<a class="attachment-link" href="' + url + '" target="_blank" rel="noopener">' +
+            thumbHtml + fname + '</a>';
+        }).join('') +
+        '</div></div>';
+    }
+
+    return `<div class="task-card" id="card-${t.id}" data-idx="${i}">
+      <div class="task-card-header" onclick="toggleCard('${t.id}')">
+        <div class="task-name">${escHtml(t.name)}</div>
+        <div class="task-meta">
+          <span>${dueTxt}</span>
+          <span class="separator">|</span>
+          <span class="badge ${sClass}">${escHtml(displayStatus)}</span>
+          ${t.priority ? '<span class="badge ' + pClass + '">' + escHtml(t.priority) + '</span>' : ''}
+          ${t.business ? '<span class="badge badge-business">' + escHtml(t.business) + '</span>' : ''}
+        </div>
+      </div>
+      <div class="task-detail">
+        ${t.description ? '<div class="detail-section"><h4>Description</h4><p>' + escHtml(t.description) + '</p></div>' : ''}
+        ${t.notes ? '<div class="detail-section"><h4>Notes</h4><p>' + escHtml(t.notes) + '</p></div>' : ''}
+        ${t.timeEst ? '<div class="detail-section"><h4>Time Estimate</h4><p>' + escHtml(t.timeEst) + '</p></div>' : ''}
+        ${attachHtml}
+        <div class="actions">
+          <button class="action-btn btn-complete" id="completeBtn-${t.id}" onclick="markComplete('${t.id}')">&#10003; Mark Complete</button>
+          <button class="action-btn btn-note" onclick="toggleNoteInput('${t.id}')">&#9998; Add Note</button>
+        </div>
+        <div class="note-input-area" id="noteArea-${t.id}">
+          <textarea id="noteText-${t.id}" placeholder="Type your note here..."></textarea>
+          <div class="note-actions">
+            <button class="note-cancel" onclick="toggleNoteInput('${t.id}')">Cancel</button>
+            <button class="note-save" id="saveNoteBtn-${t.id}" onclick="saveNote('${t.id}')">Save Note</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ====== Card Interactions ====== */
+function toggleCard(id) {
+  const card = document.getElementById('card-' + id);
+  if (!card) return;
+  const wasExpanded = card.classList.contains('expanded');
+  // Collapse all others
+  document.querySelectorAll('.task-card.expanded').forEach(c => c.classList.remove('expanded'));
+  if (!wasExpanded) {
+    card.classList.add('expanded');
+    // Scroll card into view after a brief moment
+    setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+  }
+}
+
+async function markComplete(id) {
+  const btn = document.getElementById('completeBtn-' + id);
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Completing...';
+
+  try {
+    await patchTask(id, { [F.status]: { name: 'Completed' } });
+    // Animate removal
+    const card = document.getElementById('card-' + id);
+    if (card) {
+      card.classList.add('removing');
+      setTimeout(() => {
+        tasks = tasks.filter(t => t.id !== id);
+        renderTasks();
+        showToast('Job marked complete', 'success');
+      }, 400);
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '\u2713 Mark Complete';
+    showToast('Failed to complete: ' + e.message, 'error');
+  }
+}
+
+function toggleNoteInput(id) {
+  const area = document.getElementById('noteArea-' + id);
+  if (!area) return;
+  area.classList.toggle('open');
+  if (area.classList.contains('open')) {
+    const ta = document.getElementById('noteText-' + id);
+    if (ta) ta.focus();
+  }
+}
+
+async function saveNote(id) {
+  const ta = document.getElementById('noteText-' + id);
+  const btn = document.getElementById('saveNoteBtn-' + id);
+  if (!ta || !btn) return;
+  const text = ta.value.trim();
+  if (!text) { showToast('Enter a note first', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  try {
+    const task = tasks.find(t => t.id === id);
+    const now = new Date();
+    const timestamp = now.toLocaleDateString('en-GB') + ' ' + now.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+    const prefix = '[' + currentContractor.name + ' - ' + timestamp + '] ';
+    const existingNotes = task ? task.notes : '';
+    const updatedNotes = existingNotes
+      ? existingNotes + '\n\n' + prefix + text
+      : prefix + text;
+
+    await patchTask(id, { [F.notes]: updatedNotes });
+
+    // Update local data
+    if (task) task.notes = updatedNotes;
+    ta.value = '';
+    toggleNoteInput(id);
+    // Re-render to show updated notes
+    renderTasks();
+    // Re-expand the card
+    setTimeout(() => {
+      const card = document.getElementById('card-' + id);
+      if (card) card.classList.add('expanded');
+    }, 10);
+    showToast('Note saved', 'success');
+  } catch (e) {
+    showToast('Failed to save note: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Note';
+  }
+}
+
+/* ====== App Startup ====== */
+function showApp() {
+  document.getElementById('appHeader').style.display = 'flex';
+  document.getElementById('mainContent').style.display = 'block';
+  document.getElementById('headerName').textContent = currentContractor.name + "'s Jobs";
+}
+
+function boot() {
+  // Check for saved contractor
+  const savedKey = localStorage.getItem(LS_KEY);
+  if (savedKey) {
+    const contractor = CONTRACTORS.find(c => c.key === savedKey);
+    if (contractor) {
+      currentContractor = contractor;
+      showApp();
+      loadTasks();
+      return;
+    }
+  }
+  renderPicker();
+}
+
+// Init
+(function init() {
+  if (!initAuth()) {
+    document.getElementById('authOverlay').style.display = 'flex';
+    return;
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

@@ -149,6 +149,42 @@ a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
 .routine-block{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
 .routine-block .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 
+/* Timeline */
+.timeline{display:flex;flex-direction:column;gap:2px;margin-bottom:24px;position:relative}
+.timeline::before{content:'';position:absolute;left:54px;top:0;bottom:0;width:2px;background:var(--border);z-index:0}
+.tl-slot{display:flex;align-items:stretch;gap:12px;min-height:44px;position:relative;z-index:1}
+.tl-time{width:50px;text-align:right;font-size:12px;font-weight:600;color:var(--muted);padding-top:10px;flex-shrink:0}
+.tl-dot{width:10px;height:10px;border-radius:50%;margin-top:14px;flex-shrink:0;z-index:2}
+.tl-dot.event{background:var(--cyan)}.tl-dot.task{background:var(--accent)}.tl-dot.routine{background:var(--amber)}.tl-dot.buffer{background:var(--border)}
+.tl-card{flex:1;border-radius:8px;padding:10px 14px;font-size:13px;min-width:0}
+.tl-card.event{background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.2)}
+.tl-card.task{background:var(--surface);border:1px solid var(--border)}
+.tl-card.routine{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.15)}
+.tl-card.buffer{background:transparent;border:1px dashed var(--border);color:var(--muted);font-style:italic}
+.tl-card h4{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px}
+.tl-card .tl-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.tl-card .tl-actions{display:flex;gap:6px;margin-top:6px}
+
+/* Calendar event badge */
+.cal-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:rgba(6,182,212,.12);color:var(--cyan)}
+
+/* Planner modal */
+.planner-overlay{position:fixed;inset:0;background:rgba(15,17,23,.9);display:flex;align-items:center;justify-content:center;z-index:9998}
+.planner-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;max-width:560px;width:95%;max-height:85vh;overflow-y:auto}
+.planner-card h2{font-size:18px;margin-bottom:4px}
+.planner-card p{font-size:13px;color:var(--muted);margin-bottom:16px}
+.planner-suggestion{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;font-size:13px}
+.planner-suggestion .reason{font-size:11px;color:var(--muted);margin-top:4px}
+.planner-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+
+/* Routine config */
+.routine-config{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:20px}
+.routine-config h3{font-size:14px;margin-bottom:12px}
+.routine-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap}
+.routine-row:last-child{border-bottom:none}
+.routine-row input,.routine-row select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px}
+.routine-row input[type=number]{width:60px}
+
 /* Kanban */
 .kanban-controls{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 .kanban-month-nav{display:flex;align-items:center;gap:8px}
@@ -454,11 +490,49 @@ const TIME_MINUTES = { '15 min':15, '30 min':30, '45 min':45, '1 hr':60, '2 hr':
 const WEEKLY_CAPACITY_HRS = 40;
 const DAILY_AVAILABLE_HRS = 6;
 
-const ROUTINE_BLOCKS = [
-  { name: 'Get Ready', duration: 30, icon: 'circle' },
-  { name: 'Lunch', duration: 30, icon: 'circle' },
-  { name: 'Run', duration: 60, icon: 'circle' },
+// Google Calendar Apps Script URL — deploy gcal-proxy.gs as a Google Apps Script web app
+// and paste the URL here. Leave empty to skip calendar integration.
+const GCAL_SCRIPT_URL = '';
+
+// Default routine rules (user can customise, stored in localStorage)
+const DEFAULT_ROUTINE = [
+  { name: 'Get Ready', duration: 30, preferred: 'morning', fixed: false, order: 1 },
+  { name: 'Lunch', duration: 30, preferred: 'midday', fixed: false, order: 2, rule: 'before-run-2h' },
+  { name: 'Run', duration: 60, preferred: 'afternoon', fixed: false, order: 3 },
 ];
+
+// Working hours config
+const DEFAULT_WORK_CONFIG = {
+  startHour: 8,
+  endHour: 18,
+  maxTaskHours: 6,
+};
+
+function getRoutineBlocks() {
+  try {
+    const stored = localStorage.getItem('_task_routine');
+    if (stored) return JSON.parse(stored);
+  } catch(e) {}
+  return DEFAULT_ROUTINE;
+}
+
+function getWorkConfig() {
+  try {
+    const stored = localStorage.getItem('_task_workconfig');
+    if (stored) return JSON.parse(stored);
+  } catch(e) {}
+  return DEFAULT_WORK_CONFIG;
+}
+
+function saveRoutineBlocks(blocks) {
+  localStorage.setItem('_task_routine', JSON.stringify(blocks));
+}
+
+function saveWorkConfig(config) {
+  localStorage.setItem('_task_workconfig', JSON.stringify(config));
+}
+
+const ROUTINE_BLOCKS = getRoutineBlocks();
 
 // =======================================
 // STATE
@@ -477,6 +551,294 @@ let kanbanProjectFilter = '';
 let projectFilter = 'active';
 let expandedProject = null;
 let currentUser = null;
+let calendarEvents = [];
+let showRoutineConfig = false;
+let plannerOverlay = null; // null = hidden, object = planner state
+
+// =======================================
+// GOOGLE CALENDAR FETCH
+// =======================================
+async function fetchCalendarEvents() {
+  if (!GCAL_SCRIPT_URL) return [];
+  try {
+    const today = todayStr();
+    const url = `${GCAL_SCRIPT_URL}?date=${today}`;
+    const res = await fetch(url);
+    if (!res.ok) { console.warn('Calendar fetch failed:', res.status); return []; }
+    const data = await res.json();
+    return (data.events || []).map(ev => ({
+      summary: ev.summary || ev.title || '(No title)',
+      start: ev.start || ev.startTime || '',
+      end: ev.end || ev.endTime || '',
+      location: ev.location || '',
+      allDay: ev.allDay || false,
+      type: 'event',
+    }));
+  } catch(e) {
+    console.warn('Calendar fetch error:', e);
+    return [];
+  }
+}
+
+function parseTimeToMinutes(timeStr) {
+  // Parse "HH:MM" or ISO datetime to minutes since midnight
+  if (!timeStr) return null;
+  let match = timeStr.match(/(\d{1,2}):(\d{2})/);
+  if (match) return parseInt(match[1]) * 60 + parseInt(match[2]);
+  // Try ISO
+  try {
+    const d = new Date(timeStr);
+    if (!isNaN(d)) return d.getHours() * 60 + d.getMinutes();
+  } catch(e) {}
+  return null;
+}
+
+function minutesToTime(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
+}
+
+// =======================================
+// SMART DAILY PLANNER
+// =======================================
+function buildDayTimeline(todayTasks, overdueTasks, calEvents, routineBlocks) {
+  const config = getWorkConfig();
+  const dayStart = config.startHour * 60;
+  const dayEnd = config.endHour * 60;
+
+  // 1. Build fixed blocks from calendar events
+  const blocks = [];
+
+  // Calendar events
+  calEvents.forEach(ev => {
+    if (ev.allDay) return; // Skip all-day events (shown separately)
+    const start = parseTimeToMinutes(ev.start);
+    const end = parseTimeToMinutes(ev.end);
+    if (start !== null && end !== null) {
+      blocks.push({ type: 'event', name: ev.summary, start, end, duration: end - start, location: ev.location });
+    }
+  });
+
+  // Sort fixed blocks by start time
+  blocks.sort((a, b) => a.start - b.start);
+
+  // 2. Place routine blocks respecting rules
+  const routine = [...routineBlocks].sort((a, b) => a.order - b.order);
+  const placedRoutine = placeRoutineBlocks(routine, blocks, dayStart, dayEnd);
+  blocks.push(...placedRoutine);
+  blocks.sort((a, b) => a.start - b.start);
+
+  // 3. Find free slots for tasks
+  const freeSlots = findFreeSlots(blocks, dayStart, dayEnd);
+
+  // 4. Schedule tasks into free slots (priority order: urgent first)
+  const allDayTasks = [...overdueTasks, ...todayTasks];
+  allDayTasks.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
+
+  const scheduledTasks = [];
+  const deferredTasks = [];
+  let slotIdx = 0;
+  let slotUsed = 0; // minutes used in current slot
+
+  allDayTasks.forEach(task => {
+    const taskMins = task.minutes || 30; // default 30min if no estimate
+    let placed = false;
+
+    while (slotIdx < freeSlots.length) {
+      const slot = freeSlots[slotIdx];
+      const remaining = (slot.end - slot.start) - slotUsed;
+
+      if (remaining >= taskMins) {
+        const taskStart = slot.start + slotUsed;
+        scheduledTasks.push({
+          type: 'task',
+          name: task.name,
+          start: taskStart,
+          end: taskStart + taskMins,
+          duration: taskMins,
+          task: task,
+          isOverdue: overdueTasks.includes(task),
+        });
+        slotUsed += taskMins;
+        placed = true;
+        break;
+      } else if (remaining >= 15) {
+        // Split task if remaining time is at least 15 min - move to next slot
+        slotIdx++;
+        slotUsed = 0;
+      } else {
+        slotIdx++;
+        slotUsed = 0;
+      }
+    }
+
+    if (!placed) {
+      deferredTasks.push(task);
+    }
+  });
+
+  // Merge all blocks into final timeline
+  const timeline = [...blocks, ...scheduledTasks];
+  timeline.sort((a, b) => a.start - b.start);
+
+  // Calculate summary
+  const totalTaskMins = allDayTasks.reduce((s, t) => s + (t.minutes || 30), 0);
+  const totalFreeMins = freeSlots.reduce((s, sl) => s + (sl.end - sl.start), 0);
+  const scheduledMins = scheduledTasks.reduce((s, t) => s + t.duration, 0);
+
+  return {
+    timeline,
+    deferredTasks,
+    scheduledTasks,
+    totalTaskMins,
+    totalFreeMins,
+    scheduledMins,
+    dayStart,
+    dayEnd,
+    allDayEvents: calEvents.filter(ev => ev.allDay),
+  };
+}
+
+function placeRoutineBlocks(routine, fixedBlocks, dayStart, dayEnd) {
+  const placed = [];
+  const runBlock = routine.find(r => r.name === 'Run');
+  let runTime = null;
+
+  // Place Run first (preferred afternoon = after 14:00)
+  if (runBlock) {
+    const prefStart = runBlock.preferred === 'afternoon' ? 14 * 60 : (runBlock.preferred === 'morning' ? 9 * 60 : 12 * 60);
+    runTime = findSlotFor(runBlock.duration, prefStart, fixedBlocks, dayStart, dayEnd);
+    if (runTime !== null) {
+      placed.push({ type: 'routine', name: runBlock.name, start: runTime, end: runTime + runBlock.duration, duration: runBlock.duration });
+    }
+  }
+
+  // Place Lunch (must be 2+ hrs before run if run exists)
+  const lunchBlock = routine.find(r => r.name === 'Lunch');
+  if (lunchBlock) {
+    let lunchDeadline = dayEnd;
+    if (runTime !== null && lunchBlock.rule === 'before-run-2h') {
+      lunchDeadline = runTime - 120; // must finish 2hrs before run
+    }
+    const prefStart = lunchBlock.preferred === 'midday' ? 12 * 60 : 12 * 60;
+    const allFixed = [...fixedBlocks, ...placed];
+    let lunchTime = findSlotFor(lunchBlock.duration, Math.min(prefStart, lunchDeadline - lunchBlock.duration), allFixed, dayStart, Math.min(dayEnd, lunchDeadline));
+    if (lunchTime !== null) {
+      placed.push({ type: 'routine', name: lunchBlock.name, start: lunchTime, end: lunchTime + lunchBlock.duration, duration: lunchBlock.duration });
+    }
+  }
+
+  // Place Get Ready (morning)
+  const getReadyBlock = routine.find(r => r.name === 'Get Ready');
+  if (getReadyBlock) {
+    const allFixed = [...fixedBlocks, ...placed];
+    const grTime = findSlotFor(getReadyBlock.duration, dayStart, allFixed, dayStart, dayEnd);
+    if (grTime !== null) {
+      placed.push({ type: 'routine', name: getReadyBlock.name, start: grTime, end: grTime + getReadyBlock.duration, duration: getReadyBlock.duration });
+    }
+  }
+
+  // Place any custom routine blocks
+  routine.filter(r => !['Run', 'Lunch', 'Get Ready'].includes(r.name)).forEach(r => {
+    const allFixed = [...fixedBlocks, ...placed];
+    const prefStart = r.preferred === 'morning' ? 9 * 60 : r.preferred === 'afternoon' ? 14 * 60 : 12 * 60;
+    const t = findSlotFor(r.duration, prefStart, allFixed, dayStart, dayEnd);
+    if (t !== null) {
+      placed.push({ type: 'routine', name: r.name, start: t, end: t + r.duration, duration: r.duration });
+    }
+  });
+
+  return placed;
+}
+
+function findSlotFor(duration, preferredStart, fixedBlocks, dayStart, dayEnd) {
+  // Try preferred time first, then search forward, then backward
+  const sorted = [...fixedBlocks].sort((a, b) => a.start - b.start);
+
+  function conflicts(start, end) {
+    return sorted.some(b => start < b.end && end > b.start);
+  }
+
+  // Try preferred
+  if (preferredStart >= dayStart && preferredStart + duration <= dayEnd && !conflicts(preferredStart, preferredStart + duration)) {
+    return preferredStart;
+  }
+
+  // Search forward from preferred
+  for (let t = preferredStart; t + duration <= dayEnd; t += 15) {
+    if (t >= dayStart && !conflicts(t, t + duration)) return t;
+  }
+
+  // Search backward from preferred
+  for (let t = preferredStart - 15; t >= dayStart; t -= 15) {
+    if (t + duration <= dayEnd && !conflicts(t, t + duration)) return t;
+  }
+
+  return null;
+}
+
+function findFreeSlots(blocks, dayStart, dayEnd) {
+  const sorted = [...blocks].sort((a, b) => a.start - b.start);
+  const free = [];
+  let cursor = dayStart;
+
+  sorted.forEach(b => {
+    if (b.start > cursor) {
+      free.push({ start: cursor, end: b.start });
+    }
+    cursor = Math.max(cursor, b.end);
+  });
+
+  if (cursor < dayEnd) {
+    free.push({ start: cursor, end: dayEnd });
+  }
+
+  return free.filter(s => (s.end - s.start) >= 15); // min 15min slots
+}
+
+// =======================================
+// OVERDUE AUTO-RESCHEDULE (Kevin only)
+// =======================================
+async function autoRescheduleOverdue() {
+  if (!currentUser || currentUser.key !== 'kevin') return { count: 0 };
+
+  const today = todayStr();
+  const member = TEAM.find(m => m.key === 'kevin');
+  if (!member) return { count: 0 };
+
+  const overdue = allTasks.filter(t =>
+    t.assigneeEmail === member.email &&
+    t.dueDate && t.dueDate < today &&
+    t.status !== 'Completed' &&
+    !t.someDay
+  );
+
+  if (overdue.length === 0) return { count: 0 };
+
+  // Batch reschedule: preserve original due date, set to today
+  const patches = overdue.map(t => {
+    const fields = { [F.dueDate]: today };
+    // Only set origDueDate if not already set (don't overwrite first occurrence)
+    if (!t.origDueDate) {
+      fields[F.origDueDate] = t.dueDate;
+    }
+    return patchTask(t.id, fields).then(() => {
+      t.origDueDate = t.origDueDate || t.dueDate;
+      t.dueDate = today;
+    }).catch(e => console.warn('Failed to reschedule', t.id, e));
+  });
+
+  // Process in batches of 10 to avoid rate limits
+  for (let i = 0; i < patches.length; i += 10) {
+    await Promise.all(patches.slice(i, i + 10));
+    if (i + 10 < patches.length) await new Promise(r => setTimeout(r, 250));
+  }
+
+  return { count: overdue.length, tasks: overdue };
+}
 
 // =======================================
 // AUTH
@@ -841,6 +1203,8 @@ function renderMyDay() {
   const today = todayStr();
   const now = new Date();
   const dayName = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const config = getWorkConfig();
+  const routineBlocks = getRoutineBlocks();
 
   // Get tasks for the active user
   let tasks = allTasks.filter(t => !t.someDay && t.status !== 'Completed');
@@ -859,17 +1223,21 @@ function renderMyDay() {
 
   const todayHrs = todayTasks.reduce((s, t) => s + t.minutes, 0) / 60;
   const overdueHrs = overdueTasks.reduce((s, t) => s + t.minutes, 0) / 60;
-  const routineMins = ROUTINE_BLOCKS.reduce((s, b) => s + b.duration, 0);
+  const routineMins = routineBlocks.reduce((s, b) => s + b.duration, 0);
   const totalHrs = todayHrs + overdueHrs;
-  const capPct = Math.min(100, (totalHrs / DAILY_AVAILABLE_HRS) * 100);
+  const availHrs = config.maxTaskHours;
+  const capPct = Math.min(150, (totalHrs / availHrs) * 100);
   const capColor = capPct > 100 ? 'var(--red)' : capPct > 80 ? 'var(--amber)' : 'var(--green)';
+
+  // Build timeline
+  const plan = buildDayTimeline(todayTasks, overdueTasks, calendarEvents, routineBlocks);
 
   let html = '';
 
   // Header
   html += `<div class="myday-header">
     <h2>${dayName}</h2>
-    <div class="date-sub">${todayTasks.length} tasks today &middot; ${totalHrs.toFixed(1)} hrs work &middot; ${overdueTasks.length} overdue</div>
+    <div class="date-sub">${todayTasks.length} tasks today &middot; ${totalHrs.toFixed(1)} hrs work &middot; ${calendarEvents.length} calendar events &middot; ${overdueTasks.length} overdue</div>
   </div>`;
 
   // KPI row
@@ -877,65 +1245,151 @@ function renderMyDay() {
     <div class="kpi ${todayTasks.length > 0 ? 'amber' : 'green'}"><div class="value" style="font-size:22px">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
     <div class="kpi purple"><div class="value" style="font-size:22px">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
     <div class="kpi ${overdueTasks.length > 0 ? 'red' : 'green'}"><div class="value" style="font-size:22px">${overdueTasks.length}</div><div class="label">Overdue</div></div>
-    <div class="kpi cyan"><div class="value" style="font-size:22px">${DAILY_AVAILABLE_HRS - routineMins/60}h</div><div class="label">Available</div></div>
+    <div class="kpi cyan"><div class="value" style="font-size:22px">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
+    <div class="kpi ${capPct > 100 ? 'red' : 'green'}"><div class="value" style="font-size:22px">${availHrs - routineMins/60}h</div><div class="label">Available</div></div>
   </div>`;
 
   // Capacity bar
   html += `<div class="myday-capacity">
-    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">${totalHrs.toFixed(1)} hrs of ${DAILY_AVAILABLE_HRS} hrs available</span></h3>
-    <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${capPct}%;background:${capColor}"></div></div>
+    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:8px">${totalHrs.toFixed(1)} hrs tasks + ${(routineMins/60).toFixed(1)} hrs routine of ${config.endHour - config.startHour} hrs day</span></h3>
+    <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100, capPct)}%;background:${capColor}"></div></div>
     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
       <span>${capPct.toFixed(0)}% utilised</span>
       <span>${capPct > 100 ? 'OVERCOMMITTED - consider deferring tasks' : capPct > 80 ? 'Tight day' : 'Capacity available'}</span>
     </div>
   </div>`;
 
-  // Overdue notice for Kevin
+  // Overdue auto-reschedule notice for Kevin
   if (currentUser && currentUser.key === 'kevin' && overdueTasks.length > 0) {
     html += `<div class="overdue-notice">
-      <span style="font-size:18px">!</span>
-      <span>${overdueTasks.length} overdue task${overdueTasks.length !== 1 ? 's' : ''} rescheduled to today</span>
+      <span style="font-size:18px;font-weight:700">!</span>
+      <span>${overdueTasks.length} overdue task${overdueTasks.length !== 1 ? 's' : ''} auto-rescheduled to today (originals preserved)</span>
     </div>`;
   }
 
-  // Plan My Day button
-  html += `<div style="display:flex;gap:8px;margin-bottom:24px">
-    <button class="btn btn-primary" disabled style="opacity:.5;cursor:not-allowed">Plan My Day (AI - coming soon)</button>
+  // Deferred tasks warning
+  if (plan.deferredTasks.length > 0) {
+    html += `<div class="overdue-notice" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.06);color:var(--amber)">
+      <span style="font-size:18px;font-weight:700">!</span>
+      <span>${plan.deferredTasks.length} task${plan.deferredTasks.length !== 1 ? 's' : ''} won't fit today (${(plan.deferredTasks.reduce((s,t) => s + (t.minutes||30), 0)/60).toFixed(1)} hrs) - consider rescheduling</span>
+    </div>`;
+  }
+
+  // Action buttons
+  html += `<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="openPlanner()">Plan My Day</button>
+    <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
+    ${!GCAL_SCRIPT_URL ? '<span style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px">Calendar: not connected (set GCAL_SCRIPT_URL)</span>' : ''}
   </div>`;
 
-  // Routine blocks
-  html += `<div class="myday-section">
-    <h3>Routine Blocks</h3>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${ROUTINE_BLOCKS.map(b => `<div class="routine-block"><div class="dot"></div>${escHtml(b.name)} &middot; ${formatMins(b.duration)}</div>`).join('')}
-    </div>
-  </div>`;
+  // Routine config panel (collapsible)
+  if (showRoutineConfig) {
+    html += renderRoutineConfigPanel(routineBlocks, config);
+  }
 
-  // Overdue tasks
-  if (overdueTasks.length > 0) {
+  // All-day events
+  const allDayEvents = calendarEvents.filter(ev => ev.allDay);
+  if (allDayEvents.length > 0) {
     html += `<div class="myday-section">
-      <h3><span style="color:var(--red)">Overdue Tasks</span> <span style="font-size:12px;font-weight:400;color:var(--muted)">${overdueTasks.length} tasks &middot; ${overdueHrs.toFixed(1)} hrs</span></h3>
-      <div class="myday-tasks">
-        ${overdueTasks.map(t => mydayTaskCard(t, true)).join('')}
+      <h3>All-Day Events</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${allDayEvents.map(ev => `<div class="routine-block" style="border-color:rgba(6,182,212,.2)"><span class="cal-badge">ALL DAY</span> ${escHtml(ev.summary)}</div>`).join('')}
       </div>
     </div>`;
   }
 
-  // Today tasks
+  // Timeline view
   html += `<div class="myday-section">
-    <h3>Today's Tasks <span style="font-size:12px;font-weight:400;color:var(--muted)">${todayTasks.length} tasks &middot; ${todayHrs.toFixed(1)} hrs</span></h3>
-    <div class="myday-tasks">
-      ${todayTasks.length > 0 ? todayTasks.map(t => mydayTaskCard(t, false)).join('') :
-      '<div class="empty-state" style="padding:30px"><p>No tasks scheduled for today. Check your Task List or Kanban.</p></div>'}
-    </div>
-  </div>`;
+    <h3>Daily Timeline <span style="font-size:12px;font-weight:400;color:var(--muted)">${config.startHour}:00 - ${config.endHour}:00</span></h3>`;
+
+  if (plan.timeline.length > 0) {
+    html += `<div class="timeline">`;
+    plan.timeline.forEach(block => {
+      const timeStr = minutesToTime(block.start);
+      const endStr = minutesToTime(block.end);
+      const durStr = formatMins(block.duration);
+
+      if (block.type === 'event') {
+        html += `<div class="tl-slot">
+          <div class="tl-time">${timeStr}</div>
+          <div class="tl-dot event"></div>
+          <div class="tl-card event">
+            <h4>${escHtml(block.name)}</h4>
+            <div class="tl-meta"><span>${timeStr} - ${endStr}</span><span>${durStr}</span>${block.location ? `<span>${escHtml(block.location)}</span>` : ''}<span class="cal-badge">CALENDAR</span></div>
+          </div>
+        </div>`;
+      } else if (block.type === 'routine') {
+        html += `<div class="tl-slot">
+          <div class="tl-time">${timeStr}</div>
+          <div class="tl-dot routine"></div>
+          <div class="tl-card routine">
+            <h4>${escHtml(block.name)}</h4>
+            <div class="tl-meta"><span>${timeStr} - ${endStr}</span><span>${durStr}</span></div>
+          </div>
+        </div>`;
+      } else if (block.type === 'task') {
+        const t = block.task;
+        const borderStyle = block.isOverdue ? 'border-color:rgba(239,68,68,.3)' : '';
+        html += `<div class="tl-slot">
+          <div class="tl-time">${timeStr}</div>
+          <div class="tl-dot task"></div>
+          <div class="tl-card task" style="${borderStyle}">
+            <h4>${escHtml(block.name)}</h4>
+            <div class="tl-meta">
+              <span>${timeStr} - ${endStr}</span><span>${durStr}</span>
+              ${priorityBadge(t.priority)}
+              ${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
+              ${avatarSmall(t)}
+              ${block.isOverdue ? '<span style="color:var(--red);font-weight:600">OVERDUE</span>' : ''}
+            </div>
+            <div class="tl-actions">
+              <div class="status-dd">
+                <button class="btn btn-sm" onclick="event.stopPropagation();toggleStatusMenu('tl-${t.id}')">Status</button>
+                <div class="status-dd-menu" id="sm-tl-${t.id}">
+                  ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s =>
+                    `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`
+                  ).join('')}
+                </div>
+              </div>
+              <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--green)">Complete</button>
+            </div>
+          </div>
+        </div>`;
+      }
+    });
+    html += `</div>`;
+  } else {
+    html += `<div class="empty-state" style="padding:30px"><p>No timeline items. Add tasks to today or connect Google Calendar.</p></div>`;
+  }
+  html += `</div>`;
+
+  // Deferred tasks section
+  if (plan.deferredTasks.length > 0) {
+    html += `<div class="myday-section">
+      <h3><span style="color:var(--amber)">Won't Fit Today</span> <span style="font-size:12px;font-weight:400;color:var(--muted)">${plan.deferredTasks.length} tasks</span></h3>
+      <div class="myday-tasks">
+        ${plan.deferredTasks.map(t => mydayTaskCard(t, false)).join('')}
+      </div>
+    </div>`;
+  }
+
+  // Unscheduled today tasks (those with no time estimate — shown as a list below timeline)
+  const unscheduledToday = todayTasks.filter(t => !plan.scheduledTasks.some(st => st.task && st.task.id === t.id) && !plan.deferredTasks.includes(t));
+  if (unscheduledToday.length > 0) {
+    html += `<div class="myday-section">
+      <h3>Also Today <span style="font-size:12px;font-weight:400;color:var(--muted)">${unscheduledToday.length} tasks</span></h3>
+      <div class="myday-tasks">
+        ${unscheduledToday.map(t => mydayTaskCard(t, false)).join('')}
+      </div>
+    </div>`;
+  }
 
   container.innerHTML = html;
 }
 
 function mydayTaskCard(t, isOverdue) {
   const borderColor = isOverdue ? 'border-color:var(--red)' : '';
-  return `<div class="myday-task" style="${borderColor}" onclick="switchView('list')">
+  return `<div class="myday-task" style="${borderColor}">
     <div class="task-time">${t.timeEst || formatMins(t.minutes) || '-'}</div>
     <div class="task-info">
       <h4>${escHtml(t.name)}</h4>
@@ -947,15 +1401,230 @@ function mydayTaskCard(t, isOverdue) {
         ${statusBadge(t.status)}
       </div>
     </div>
-    <div class="status-dd">
-      <button class="btn btn-sm" onclick="event.stopPropagation();toggleStatusMenu('md-${t.id}')">Status</button>
-      <div class="status-dd-menu" id="sm-md-${t.id}">
-        ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s =>
-          `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`
-        ).join('')}
+    <div style="display:flex;gap:4px">
+      <div class="status-dd">
+        <button class="btn btn-sm" onclick="event.stopPropagation();toggleStatusMenu('md-${t.id}')">Status</button>
+        <div class="status-dd-menu" id="sm-md-${t.id}">
+          ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s =>
+            `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`
+          ).join('')}
+        </div>
       </div>
+      <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--green)">Done</button>
     </div>
   </div>`;
+}
+
+// =======================================
+// ROUTINE CONFIG PANEL
+// =======================================
+function renderRoutineConfigPanel(routineBlocks, config) {
+  let html = `<div class="routine-config" id="routineConfigPanel">
+    <h3>Routine Configuration <button class="btn btn-sm" onclick="toggleRoutineConfig()" style="float:right">Close</button></h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Set once, the planner respects these as hard blocks every day.</p>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px">Working Hours</div>
+      <div style="display:flex;gap:10px;align-items:center;font-size:13px">
+        <label>Start: <input type="number" id="cfgStartHour" value="${config.startHour}" min="5" max="12" style="width:50px"> :00</label>
+        <label>End: <input type="number" id="cfgEndHour" value="${config.endHour}" min="14" max="22" style="width:50px"> :00</label>
+        <label>Max task hrs: <input type="number" id="cfgMaxHrs" value="${config.maxTaskHours}" min="2" max="12" style="width:50px"></label>
+      </div>
+    </div>
+
+    <div style="font-size:12px;font-weight:600;margin-bottom:6px">Routine Blocks</div>
+    <div id="routineBlockRows">`;
+
+  routineBlocks.forEach((b, i) => {
+    html += `<div class="routine-row" data-idx="${i}">
+      <input type="text" value="${escHtml(b.name)}" placeholder="Name" style="width:120px" data-field="name">
+      <label>Duration: <input type="number" value="${b.duration}" min="15" max="180" step="15" data-field="duration"> min</label>
+      <label>Preferred:
+        <select data-field="preferred">
+          <option value="morning" ${b.preferred === 'morning' ? 'selected' : ''}>Morning</option>
+          <option value="midday" ${b.preferred === 'midday' ? 'selected' : ''}>Midday</option>
+          <option value="afternoon" ${b.preferred === 'afternoon' ? 'selected' : ''}>Afternoon</option>
+        </select>
+      </label>
+      <label style="font-size:11px">Rule:
+        <select data-field="rule">
+          <option value="" ${!b.rule ? 'selected' : ''}>None</option>
+          <option value="before-run-2h" ${b.rule === 'before-run-2h' ? 'selected' : ''}>2h before Run</option>
+        </select>
+      </label>
+      <button class="btn btn-sm btn-danger" onclick="removeRoutineBlock(${i})">X</button>
+    </div>`;
+  });
+
+  html += `</div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-sm" onclick="addRoutineBlock()">+ Add Block</button>
+      <button class="btn btn-sm btn-primary" onclick="saveRoutineConfig()">Save</button>
+      <button class="btn btn-sm" onclick="resetRoutineConfig()">Reset to Defaults</button>
+    </div>
+  </div>`;
+  return html;
+}
+
+function toggleRoutineConfig() {
+  showRoutineConfig = !showRoutineConfig;
+  renderMyDay();
+}
+
+function addRoutineBlock() {
+  const blocks = getRoutineBlocks();
+  blocks.push({ name: 'New Block', duration: 30, preferred: 'morning', fixed: false, order: blocks.length + 1 });
+  saveRoutineBlocks(blocks);
+  renderMyDay();
+}
+
+function removeRoutineBlock(idx) {
+  const blocks = getRoutineBlocks();
+  blocks.splice(idx, 1);
+  saveRoutineBlocks(blocks);
+  renderMyDay();
+}
+
+function saveRoutineConfig() {
+  const rows = document.querySelectorAll('#routineBlockRows .routine-row');
+  const blocks = [];
+  rows.forEach((row, i) => {
+    blocks.push({
+      name: row.querySelector('[data-field="name"]').value || 'Block',
+      duration: parseInt(row.querySelector('[data-field="duration"]').value) || 30,
+      preferred: row.querySelector('[data-field="preferred"]').value || 'morning',
+      rule: row.querySelector('[data-field="rule"]').value || '',
+      fixed: false,
+      order: i + 1,
+    });
+  });
+  saveRoutineBlocks(blocks);
+
+  const config = {
+    startHour: parseInt(document.getElementById('cfgStartHour').value) || 8,
+    endHour: parseInt(document.getElementById('cfgEndHour').value) || 18,
+    maxTaskHours: parseInt(document.getElementById('cfgMaxHrs').value) || 6,
+  };
+  saveWorkConfig(config);
+
+  showRoutineConfig = false;
+  renderMyDay();
+}
+
+function resetRoutineConfig() {
+  localStorage.removeItem('_task_routine');
+  localStorage.removeItem('_task_workconfig');
+  showRoutineConfig = false;
+  renderMyDay();
+}
+
+// =======================================
+// PLANNER OVERLAY
+// =======================================
+function openPlanner() {
+  const today = todayStr();
+  const config = getWorkConfig();
+  const routineBlocks = getRoutineBlocks();
+
+  let tasks = allTasks.filter(t => !t.someDay && t.status !== 'Completed');
+  if (activeTeam !== 'all') {
+    const member = TEAM.find(m => m.key === activeTeam);
+    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
+  }
+
+  const todayTasks = tasks.filter(t => t.status === 'Today' || t.dueDate === today);
+  const overdueTasks = tasks.filter(t => (t.status === 'Overdue' || isOverdue(t)) && t.dueDate !== today && t.status !== 'Today');
+  const plan = buildDayTimeline(todayTasks, overdueTasks, calendarEvents, routineBlocks);
+
+  const totalMins = plan.totalTaskMins;
+  const freeMins = plan.totalFreeMins;
+  const overcommitted = totalMins > freeMins;
+
+  let html = `<div class="planner-overlay" id="plannerOverlay" onclick="if(event.target===this)closePlanner()">
+    <div class="planner-card">
+      <h2>Plan My Day</h2>
+      <p>Smart scheduling based on your calendar, routine, and task priorities.</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+        <div class="kpi ${overcommitted ? 'red' : 'green'}" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(totalMins)}</div><div class="label">Task Time</div></div>
+        <div class="kpi cyan" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(freeMins)}</div><div class="label">Free Time</div></div>
+      </div>`;
+
+  if (overcommitted) {
+    html += `<div class="overdue-notice" style="margin-bottom:12px">
+      <span style="font-size:16px;font-weight:700">!</span>
+      <span>Your day is overcommitted by ${formatMins(totalMins - freeMins)}. Suggested deferrals below.</span>
+    </div>`;
+
+    // Suggest deferring lowest-priority tasks
+    const sortedForDeferral = [...todayTasks, ...overdueTasks].sort((a, b) => {
+      // Defer Not Urgent first, then furthest deadline
+      const priDiff = (PRIORITY_ORDER[b.priority] ?? 99) - (PRIORITY_ORDER[a.priority] ?? 99);
+      if (priDiff !== 0) return priDiff;
+      if (!a.dueDate) return -1;
+      if (!b.dueDate) return 1;
+      return b.dueDate.localeCompare(a.dueDate);
+    });
+
+    let excessMins = totalMins - freeMins;
+    const toDeferSuggestions = [];
+    sortedForDeferral.forEach(t => {
+      if (excessMins <= 0) return;
+      toDeferSuggestions.push(t);
+      excessMins -= (t.minutes || 30);
+    });
+
+    if (toDeferSuggestions.length > 0) {
+      html += `<div style="font-size:13px;font-weight:600;margin-bottom:8px">Suggested to defer:</div>`;
+      toDeferSuggestions.forEach(t => {
+        html += `<div class="planner-suggestion">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span>${escHtml(t.name)}</span>
+            <button class="btn btn-sm" onclick="deferTask('${t.id}')">Defer to tomorrow</button>
+          </div>
+          <div class="reason">${t.priority || 'No priority'} - ${formatMins(t.minutes || 30)} - ${t.business || 'No business'}</div>
+        </div>`;
+      });
+    }
+  } else {
+    html += `<div style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--green)">
+      Your day looks good! All ${todayTasks.length + overdueTasks.length} tasks fit within available time.
+    </div>`;
+  }
+
+  // Scheduled summary
+  html += `<div style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:12px">Scheduled (${plan.scheduledTasks.length} tasks):</div>`;
+  plan.scheduledTasks.forEach(block => {
+    html += `<div class="planner-suggestion" style="padding:8px 12px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;color:var(--accent2);min-width:90px">${minutesToTime(block.start)} - ${minutesToTime(block.end)}</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(block.name)}</span>
+        <span style="font-size:11px;color:var(--muted)">${formatMins(block.duration)}</span>
+      </div>
+    </div>`;
+  });
+
+  html += `<div class="planner-actions">
+      <button class="btn" onclick="closePlanner()">Close</button>
+    </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closePlanner() {
+  const overlay = document.getElementById('plannerOverlay');
+  if (overlay) overlay.remove();
+}
+
+async function deferTask(taskId) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  await updateTaskDueDate(taskId, tomorrowStr);
+  closePlanner();
+  renderMyDay();
 }
 
 // =======================================
@@ -1650,12 +2319,15 @@ function renderAll() {
 async function loadAllData() {
   document.getElementById('loader').style.display = 'flex';
   try {
-    const [rawTasks, rawProjects] = await Promise.all([
+    // Fetch tasks, projects, and calendar events in parallel
+    const [rawTasks, rawProjects, calEvents] = await Promise.all([
       fetchTable(TASKS_TABLE, TASK_FIELD_IDS, `AND({Status}!="Completed",{Some Day}=FALSE())`),
       fetchTable(PROJECTS_TABLE, PROJECT_FIELD_IDS, ''),
+      fetchCalendarEvents(),
     ]);
     allTasks = rawTasks.map(parseTask);
     allProjects = rawProjects.map(parseProject);
+    calendarEvents = calEvents;
 
     // Resolve project names for tasks that only have IDs
     const projMap = {};
@@ -1666,7 +2338,13 @@ async function loadAllData() {
       }
     });
 
-    document.getElementById('taskCount').textContent = `${allTasks.length} tasks, ${allProjects.length} projects`;
+    // Auto-reschedule Kevin's overdue tasks (preserves original due dates)
+    const rescheduleResult = await autoRescheduleOverdue();
+    if (rescheduleResult.count > 0) {
+      console.log(`Auto-rescheduled ${rescheduleResult.count} overdue tasks to today`);
+    }
+
+    document.getElementById('taskCount').textContent = `${allTasks.length} tasks, ${allProjects.length} projects${calEvents.length ? `, ${calEvents.length} cal events` : ''}`;
     document.getElementById('lastSync').textContent = `Synced ${new Date().toLocaleTimeString('en-GB')}`;
     document.getElementById('loader').style.display = 'none';
     renderAll();
