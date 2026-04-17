@@ -18,7 +18,7 @@
         { id: 'launch-plan', name: 'Operations Director Launch Plan', icon: '🚀', pageVer: '1.0', sopFile: '',                         sopVer: '1.0', standalone: 'index.html#launch-plan' },
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',          icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
-        { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.3', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.0', standalone: 'os/business-plan-builder/index.html' },
+        { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.3', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
         // /OS-INTEGRATION: PAGE_REGISTRY
         { id: 'fintable',  name: 'Fintable Sync Monitor',          icon: '🔌', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'sitemap',    name: 'Site Map & Links',              icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
