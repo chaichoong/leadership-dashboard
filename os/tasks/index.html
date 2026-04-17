@@ -14,9 +14,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;gap:12px}
 .auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:13px;width:280px}
 .auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}
-.auth-bar button:hover{background:var(--accent)}
 
-/* Identity Overlay */
+/* Identity */
 .identity-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.5);display:flex;align-items:center;justify-content:center;z-index:9999}
 .identity-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:16px;padding:40px;text-align:center;max-width:420px;width:90%}
 .identity-card h2{font-size:22px;margin-bottom:8px}
@@ -35,17 +34,16 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .user-badge .avatar{width:24px;height:24px;font-size:10px}
 .switch-user{font-size:11px;color:var(--text-secondary);cursor:pointer;text-decoration:underline}
 .switch-user:hover{color:var(--accent)}
-.main{padding:20px 24px;max-width:1400px;margin:0 auto}
+.main{padding:20px 24px;max-width:1500px;margin:0 auto}
 
-/* Team Switcher */
+/* Team */
 .team-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
-.team-btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;transition:all .15s}
+.team-btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600}
 .team-btn:hover{border-color:var(--accent);color:var(--text-primary)}
 .team-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .team-btn .count{background:rgba(255,255,255,0.25);padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px}
-.team-btn.active .count{background:rgba(255,255,255,0.25)}
 
-/* KPI Cards */
+/* KPI */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px}
 .kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;text-align:center}
 .kpi .value{font-size:28px;font-weight:700;margin-bottom:2px}
@@ -55,36 +53,39 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .kpi.purple .value{color:var(--accent)}.kpi.accent .value{color:var(--accent)}
 
 /* Tabs */
-.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border-default);padding-bottom:0;overflow-x:auto}
-.view-tab{padding:8px 16px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s;white-space:nowrap}
+.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border-default);overflow-x:auto}
+.view-tab{padding:8px 16px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
 .view-tab:hover{color:var(--text-primary)}
 .view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 
-/* Controls Bar */
+/* Controls */
 .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
 .search-box{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:13px;width:260px}
 .search-box:focus{outline:none;border-color:var(--accent)}
 .filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 10px;border-radius:6px;font-size:13px;cursor:pointer}
 .filter-select:focus{outline:none;border-color:var(--accent)}
-.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent)}
+.btn-primary:hover{background:var(--accent-hover);color:#fff}
 .btn-danger{background:var(--danger);border-color:var(--danger);color:#fff}
-.btn-danger:hover{opacity:.85}
 .btn-sm{padding:4px 10px;font-size:11px}
+.btn-icon{padding:4px 8px;font-size:13px;line-height:1}
 
-/* Task Table */
+/* Task table */
 .task-table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
 .task-table{width:100%;border-collapse:collapse;font-size:13px}
 .task-table th{background:var(--bg-surface-2);padding:10px 12px;text-align:left;font-weight:600;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1}
-.task-table td{padding:10px 12px;border-top:1px solid var(--border-default);vertical-align:middle}
-.task-table tr{cursor:pointer;transition:background .1s}
+.task-table td{padding:8px 12px;border-top:1px solid var(--border-default);vertical-align:middle}
 .task-table tbody tr:hover{background:var(--bg-surface-2)}
 .task-table tr.expanded{background:var(--bg-surface-2)}
 .task-name{font-weight:600;color:var(--text-primary);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-table .cb-cell{width:36px;text-align:center}
 .task-table .cb-cell input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--accent)}
+.editable-cell{cursor:pointer;padding:4px 6px;border-radius:4px;min-height:24px;display:inline-block}
+.editable-cell:hover{background:var(--bg-surface-2);outline:1px solid var(--border-default)}
+.inline-input, .inline-select{background:var(--bg-surface);border:1px solid var(--accent);color:var(--text-primary);padding:3px 6px;border-radius:4px;font-size:13px;font-family:inherit;width:100%}
+.hard-deadline-flag{color:var(--danger);font-weight:700;margin-left:4px}
 
 /* Badges */
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
@@ -108,160 +109,176 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .avatar-other{background:#64748b}
 .assignee-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
 
-/* Detail Panel (slide-down) */
-.detail-row{display:none}
-.detail-row.open{display:table-row}
-.detail-content{background:var(--bg-surface-2);padding:16px 20px;border-radius:0 0 8px 8px}
-.detail-content h4{font-size:13px;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-.detail-desc{font-size:13px;line-height:1.6;color:var(--text-primary);max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-bottom:12px}
-.detail-meta{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)}
-.detail-meta span{display:flex;align-items:center;gap:4px}
-.detail-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.detail-actions button{padding:5px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
-.detail-actions button:hover{border-color:var(--accent);color:var(--accent)}
-.detail-actions button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.detail-actions button.primary:hover{background:var(--accent)}
+/* Task detail drawer (modal) */
+.drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
+.drawer{background:var(--bg-surface);width:520px;max-width:95vw;height:100vh;overflow-y:auto;box-shadow:var(--shadow-lg);padding:24px;position:relative}
+.drawer h2{font-size:18px;margin-bottom:4px}
+.drawer-close{position:absolute;top:16px;right:20px;background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1}
+.field-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-subtle);font-size:13px}
+.field-row label{min-width:120px;color:var(--text-secondary);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+.field-row .field-val{flex:1;min-width:0}
+.field-row input[type=text], .field-row input[type=date], .field-row input[type=number], .field-row select, .field-row textarea{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 8px;border-radius:4px;font-size:13px;font-family:inherit;width:100%}
+.field-row textarea{min-height:60px;resize:vertical}
+.field-row input:focus, .field-row select:focus, .field-row textarea:focus{outline:none;border-color:var(--accent)}
+.field-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--danger);cursor:pointer}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-surface);border:1px solid var(--accent);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text-primary);box-shadow:var(--shadow-md);z-index:10001;opacity:0;transform:translateY(10px);transition:all .2s}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.err{border-color:var(--danger)}
 
 /* My Day */
-.myday-header{text-align:center;margin-bottom:24px}
+.myday-header{text-align:center;margin-bottom:20px}
 .myday-header h2{font-size:24px;font-weight:700;margin-bottom:4px}
 .myday-header .date-sub{font-size:14px;color:var(--text-secondary)}
-.myday-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
-.myday-capacity{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;margin-bottom:24px}
+.myday-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.myday-capacity{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;margin-bottom:16px}
 .myday-capacity h3{font-size:14px;margin-bottom:8px}
 .cap-bar-outer{height:10px;background:var(--bg-surface-2);border-radius:5px;overflow:hidden}
 .cap-bar-inner{height:100%;border-radius:5px;transition:width .4s}
-.myday-tasks{display:flex;flex-direction:column;gap:8px}
-.myday-task{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
-.myday-task:hover{border-color:var(--accent)}
-.myday-task .task-time{font-size:12px;color:var(--text-secondary);min-width:50px;text-align:center;font-weight:600}
-.myday-task .task-info{flex:1;min-width:0}
-.myday-task .task-info h4{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.myday-task .task-info .meta{font-size:12px;color:var(--text-secondary);display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
-.myday-section{margin-bottom:24px}
-.myday-section h3{font-size:14px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.overdue-notice{background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:10px;padding:12px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--danger)}
-.routine-block{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text-secondary)}
-.routine-block .dot{width:8px;height:8px;border-radius:50%;background:var(--text-secondary)}
 
-/* Timeline */
-.timeline{display:flex;flex-direction:column;gap:2px;margin-bottom:24px;position:relative}
-.timeline::before{content:'';position:absolute;left:54px;top:0;bottom:0;width:2px;background:var(--border-default);z-index:0}
-.tl-slot{display:flex;align-items:stretch;gap:12px;min-height:44px;position:relative;z-index:1}
-.tl-time{width:50px;text-align:right;font-size:12px;font-weight:600;color:var(--text-secondary);padding-top:10px;flex-shrink:0}
-.tl-dot{width:10px;height:10px;border-radius:50%;margin-top:14px;flex-shrink:0;z-index:2}
-.tl-dot.event{background:var(--info)}.tl-dot.task{background:var(--accent)}.tl-dot.routine{background:var(--warning)}.tl-dot.buffer{background:var(--border-default)}
-.tl-card{flex:1;border-radius:8px;padding:10px 14px;font-size:13px;min-width:0}
-.tl-card.event{background:var(--info-bg);border:1px solid var(--info-border)}
-.tl-card.task{background:var(--bg-surface);border:1px solid var(--border-default)}
-.tl-card.routine{background:var(--warning-bg);border:1px solid var(--warning-bg)}
-.tl-card.buffer{background:transparent;border:1px dashed var(--border-default);color:var(--text-secondary);font-style:italic}
-.tl-card h4{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:2px}
-.tl-card .tl-meta{font-size:11px;color:var(--text-secondary);display:flex;gap:8px;flex-wrap:wrap}
-.tl-card .tl-actions{display:flex;gap:6px;margin-top:6px}
+/* Timeline split */
+.myday-split{display:grid;grid-template-columns:70% 30%;gap:16px;min-height:600px}
+@media(max-width:900px){.myday-split{grid-template-columns:1fr}}
+.tl-wrap{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:12px;overflow-y:auto;position:relative}
+.tl-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.tl-header h3{font-size:14px}
+.tl-canvas{position:relative;margin-left:56px;border-left:2px solid var(--border-default);min-height:400px}
+.tl-hour{position:absolute;left:-56px;width:50px;text-align:right;font-size:11px;color:var(--text-secondary);font-weight:600}
+.tl-hour-line{position:absolute;left:0;right:0;border-top:1px dashed var(--border-subtle);pointer-events:none}
+.tl-block{position:absolute;left:6px;right:6px;border-radius:6px;padding:6px 10px;font-size:12px;overflow:hidden;cursor:move;border:1px solid;box-sizing:border-box;user-select:none}
+.tl-block .tb-title{font-weight:600;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-block .tb-meta{font-size:10px;opacity:.85;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tl-block.event{background:var(--info-bg);border-color:var(--info-border);color:var(--info)}
+.tl-block.routine{background:var(--warning-bg);border-color:var(--warning-bg);color:var(--warning)}
+.tl-block.task{background:var(--accent-soft);border-color:var(--accent);color:var(--text-primary)}
+.tl-block.task.p-Urgent{background:var(--danger-bg);border-color:var(--danger)}
+.tl-block.task.p-High{background:var(--info-bg);border-color:var(--info)}
+.tl-block.task.p-Project{background:var(--accent-soft);border-color:var(--accent)}
+.tl-block.dragging{opacity:.5}
+.tl-block .resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:linear-gradient(to bottom, transparent, rgba(0,0,0,0.08))}
 
-/* Calendar event badge */
-.cal-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;background:var(--info-bg);color:var(--info)}
+/* Side panel tasks */
+.side-panel{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:12px;overflow-y:auto;max-height:700px}
+.side-panel h3{font-size:13px;margin-bottom:8px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px}
+.side-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:12px;cursor:grab}
+.side-card:hover{border-color:var(--accent)}
+.side-card h4{font-size:12px;font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-card .sc-meta{display:flex;gap:6px;align-items:center;color:var(--text-secondary);font-size:10px;flex-wrap:wrap}
 
-/* Planner modal */
-.planner-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);display:flex;align-items:center;justify-content:center;z-index:9998}
-.planner-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:16px;padding:28px;max-width:560px;width:95%;max-height:85vh;overflow-y:auto}
-.planner-card h2{font-size:18px;margin-bottom:4px}
-.planner-card p{font-size:13px;color:var(--text-secondary);margin-bottom:16px}
-.planner-suggestion{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:12px;margin-bottom:8px;font-size:13px}
-.planner-suggestion .reason{font-size:11px;color:var(--text-secondary);margin-top:4px}
-.planner-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
-
-/* Routine config */
+/* Routine/planner (kept) */
 .routine-config{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;margin-bottom:20px}
 .routine-config h3{font-size:14px;margin-bottom:12px}
 .routine-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-default);font-size:13px;flex-wrap:wrap}
-.routine-row:last-child{border-bottom:none}
 .routine-row input,.routine-row select{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px}
 .routine-row input[type=number]{width:60px}
+.overdue-notice{background:var(--danger-bg);border:1px solid var(--danger);border-radius:10px;padding:12px 18px;margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--danger)}
+.planner-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);display:flex;align-items:center;justify-content:center;z-index:9998}
+.planner-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:16px;padding:28px;max-width:640px;width:95%;max-height:85vh;overflow-y:auto}
+.planner-card h2{font-size:18px;margin-bottom:4px}
+.planner-card p{font-size:13px;color:var(--text-secondary);margin-bottom:16px}
+.planner-suggestion{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px}
+.planner-suggestion .reason{font-size:11px;color:var(--text-secondary);margin-top:4px}
+.planner-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
 
 /* Kanban */
 .kanban-controls{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 .kanban-month-nav{display:flex;align-items:center;gap:8px}
 .kanban-month-nav span{font-size:16px;font-weight:700;min-width:160px;text-align:center}
-.kanban-board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;min-height:400px}
+.kanban-board{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;min-height:400px}
 @media(max-width:900px){.kanban-board{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.kanban-board{grid-template-columns:1fr}}
 .kanban-col{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;min-height:300px;display:flex;flex-direction:column}
-.kanban-col-header{padding:12px 14px;border-bottom:1px solid var(--border-default);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary)}
-.kanban-col-header .week-range{display:block;font-size:11px;font-weight:400;color:var(--text-secondary);margin-top:2px}
-.kanban-col-header .week-hours{display:block;font-size:11px;color:var(--accent);margin-top:4px}
-.kanban-col-body{padding:8px;flex:1;display:flex;flex-direction:column;gap:6px;min-height:100px}
-.kanban-col-body.drag-over{background:var(--accent-soft);border-radius:0 0 10px 10px}
-.kanban-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px;cursor:grab;transition:all .15s;font-size:12px}
-.kanban-card:active{cursor:grabbing}
-.kanban-card.dragging{opacity:.4}
+.kanban-col-header{padding:10px 12px;border-bottom:1px solid var(--border-default);font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-secondary)}
+.kanban-col-header .week-range{display:block;font-size:10px;font-weight:400;color:var(--text-secondary);margin-top:2px}
+.kanban-col-header .week-hours{display:block;font-size:10px;color:var(--accent);margin-top:2px}
+.kanban-col-body{padding:6px;flex:1;display:flex;flex-direction:column;gap:5px;min-height:100px}
+.kanban-col-body.drag-over{background:var(--accent-soft)}
+.kanban-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:6px;padding:6px 8px;cursor:grab;font-size:11px;min-height:72px}
 .kanban-card:hover{border-color:var(--accent)}
-.kanban-card h4{font-size:13px;font-weight:600;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.kanban-card .card-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--text-secondary);margin-top:4px}
-.kanban-card .card-meta .avatar{width:20px;height:20px;font-size:9px}
-.kanban-card .card-project{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:600;display:inline-block;margin-top:4px}
+.kanban-card h4{font-size:11px;font-weight:600;margin-bottom:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+.kanban-card .card-meta{display:flex;align-items:center;gap:4px;flex-wrap:wrap;color:var(--text-secondary);margin-top:3px;font-size:10px}
+.kanban-card .card-meta .avatar{width:16px;height:16px;font-size:8px}
+.kanban-card .card-project{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;display:inline-block;margin-top:2px}
+.kanban-card .pri-dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+.kanban-card .pri-dot.Urgent{background:var(--danger)}
+.kanban-card .pri-dot.High{background:var(--info)}
+.kanban-card .pri-dot.Project{background:var(--accent)}
+.kanban-card .pri-dot.\\Not\\ Urgent{background:var(--success)}
 
 /* Projects */
-.projects-filter{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-.projects-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
-.project-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;padding:20px;transition:border-color .15s;cursor:pointer}
+.projects-filter{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.projects-list{display:flex;flex-direction:column;gap:12px}
+.project-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;padding:18px;cursor:pointer}
 .project-card:hover{border-color:var(--accent)}
-.project-card h3{font-size:16px;font-weight:700;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.project-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.project-head h3{font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .project-status{display:inline-block;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:700}
 .project-status.on-track,.project-status.on-target{background:var(--success-bg);color:var(--success)}
 .project-status.off-track{background:var(--danger-bg);color:var(--danger)}
 .project-status.not-started{background:var(--bg-surface-2);color:var(--text-secondary)}
 .project-status.completed{background:var(--accent-soft);color:var(--accent)}
-.project-progress{margin:12px 0}
-.project-progress .bar-outer{height:8px;background:var(--bg-surface-2);border-radius:4px;overflow:hidden}
-.project-progress .bar-inner{height:100%;border-radius:4px;background:var(--success);transition:width .4s}
-.project-progress .progress-text{display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-top:4px}
-.project-meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:8px}
-.project-meta span{display:flex;align-items:center;gap:4px}
-.project-expanded{margin-top:16px;border-top:1px solid var(--border-default);padding-top:12px}
-.project-expanded h4{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.project-body{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+@media(max-width:700px){.project-body{grid-template-columns:1fr}}
+.project-col h5{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:4px}
+.project-col .val{font-size:13px;margin-bottom:8px}
+.kpi-bar{height:10px;background:var(--bg-surface-2);border-radius:5px;overflow:hidden;margin:4px 0}
+.kpi-bar-inner{height:100%;background:var(--success);border-radius:5px;transition:width .4s}
+.project-expanded{margin-top:14px;border-top:1px solid var(--border-default);padding-top:12px}
+.project-expanded h4{font-size:11px;color:var(--text-secondary);text-transform:uppercase;margin-bottom:6px}
 .project-task-list{font-size:12px}
-.project-task-item{padding:6px 0;border-bottom:1px solid var(--border-default);display:flex;align-items:center;gap:8px}
+.project-task-item{padding:6px 0;border-bottom:1px solid var(--border-default);display:flex;align-items:center;gap:8px;cursor:pointer}
+.project-task-item:hover{background:var(--bg-surface-2)}
 
-/* Capacity Section */
+/* Capacity */
 .capacity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:24px}
-.capacity-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:20px}
+.capacity-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:20px;position:relative}
 .capacity-card h3{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.cap-cog{position:absolute;top:14px;right:14px;cursor:pointer;color:var(--text-secondary);background:none;border:none;font-size:16px}
+.cap-cog:hover{color:var(--accent)}
 .cap-bar-wrap{height:8px;background:var(--bg-surface-2);border-radius:4px;margin:6px 0 4px;overflow:hidden}
 .cap-bar{height:100%;border-radius:4px;transition:width .4s}
 .cap-stat{display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:8px}
-.cap-breakdown{font-size:12px;color:var(--text-secondary);margin-top:8px}
-.cap-breakdown div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border-default)}
+.stacked-bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:6px 0;background:var(--bg-surface-2)}
+.stacked-bar span{display:inline-block;height:100%}
+.stacked-legend{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;margin-top:4px}
+.stacked-legend span{display:flex;align-items:center;gap:4px}
+.stacked-legend i{display:inline-block;width:10px;height:10px;border-radius:2px}
 
-/* Recurring Section */
-.recurring-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-.recurring-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px}
+/* Recurring */
+.person-section{margin-bottom:24px}
+.person-section h3{font-size:14px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.freq-group{margin-bottom:12px}
+.freq-group h4{font-size:12px;color:var(--accent);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.5px}
+.recurring-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}
+.recurring-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px;font-size:12px;cursor:pointer}
+.recurring-card:hover{border-color:var(--accent)}
 .recurring-card h4{font-size:13px;font-weight:600;margin-bottom:4px}
-.recurring-card .meta{font-size:12px;color:var(--text-secondary)}
+.recurring-card .meta{font-size:11px;color:var(--text-secondary)}
 
-/* Status update dropdown */
+/* Status dropdown */
 .status-dd{position:relative;display:inline-block}
 .status-dd-menu{display:none;position:absolute;top:100%;left:0;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;padding:4px;z-index:100;min-width:120px;box-shadow:var(--shadow-lg)}
 .status-dd-menu.open{display:block}
 .status-dd-item{padding:6px 10px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap}
 .status-dd-item:hover{background:var(--bg-surface-2)}
 
-/* Loading */
+/* Loader + empty */
 .loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text-secondary);font-size:14px;gap:10px}
 .spin{width:20px;height:20px;border:2px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-
-/* Empty state */
 .empty-state{text-align:center;padding:60px 20px;color:var(--text-secondary)}
-.empty-state .icon{font-size:36px;margin-bottom:12px}
-.empty-state p{font-size:14px}
 
-/* Bulk actions bar */
+/* Bulk */
 .bulk-bar{background:var(--bg-surface);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:13px}
 .bulk-bar .selected-count{font-weight:700;color:var(--accent)}
 
-/* Responsive */
+/* Modal generic */
+.modal-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:12px;padding:24px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto}
+.modal h2{font-size:18px;margin-bottom:12px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
 @media(max-width:768px){
   .main{padding:12px}
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
@@ -269,28 +286,18 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   .search-box{width:100%}
   .topbar{padding:12px 16px}
   .myday-kpi-row{grid-template-columns:repeat(2,1fr)}
-  .projects-grid{grid-template-columns:1fr}
-}
-@media print{
-  .auth-bar,.topbar,.team-bar,.view-tabs,.controls,.detail-actions,.identity-overlay{display:none!important}
-  body{background:#fff;color:#000}
-  .task-table th{background:#f1f5f9;color:#334155}
-  .task-table td{border-color:#e2e8f0}
-  .kpi{border-color:#e2e8f0;background:#fff}
-  .kpi .value{color:#1e293b!important}
+  .drawer{width:100%}
 }
 </style>
 </head>
 <body>
 
-<!-- Auth (reads from parent or own PAT) -->
 <div class="auth-bar" id="authBar" style="display:none">
   <span style="font-size:13px;color:var(--text-secondary)">Airtable PAT:</span>
   <input type="password" id="patInput" placeholder="pat_xxxxxxxxxxxx...">
   <button onclick="doAuth()">Connect</button>
 </div>
 
-<!-- Identity Overlay -->
 <div class="identity-overlay" id="identityOverlay" style="display:none">
   <div class="identity-card">
     <h2>Who are you?</h2>
@@ -299,7 +306,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   </div>
 </div>
 
-<!-- Top Bar -->
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
@@ -313,14 +319,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <div class="main">
-
-  <!-- Team Switcher -->
   <div class="team-bar" id="teamBar"></div>
-
-  <!-- KPI Cards -->
   <div class="kpi-grid" id="kpiGrid"></div>
 
-  <!-- View Tabs -->
   <div class="view-tabs" id="viewTabs">
     <button class="view-tab active" data-view="myday" onclick="switchView('myday')">My Day</button>
     <button class="view-tab" data-view="list" onclick="switchView('list')">Task List</button>
@@ -330,10 +331,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <button class="view-tab" data-view="recurring" onclick="switchView('recurring')">Recurring</button>
   </div>
 
-  <!-- View: My Day -->
   <div id="view-myday"></div>
 
-  <!-- View: Task List -->
   <div id="view-list" style="display:none">
     <div id="bulkBar" class="bulk-bar" style="display:none">
       <span class="selected-count"><span id="bulkCount">0</span> selected</span>
@@ -355,6 +354,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <option value="">All Priorities</option>
         <option value="Urgent">Urgent</option>
         <option value="High">High</option>
+        <option value="Project">Project</option>
         <option value="Not Urgent">Not Urgent</option>
       </select>
       <select class="filter-select" id="filterBusiness" onchange="renderTasks()">
@@ -363,14 +363,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <option value="Operations Director">Operations Director</option>
         <option value="Personal">Personal</option>
       </select>
-      <select class="filter-select" id="sortBy" onchange="renderTasks()">
-        <option value="due-asc">Due Date (soonest)</option>
-        <option value="due-desc">Due Date (latest)</option>
-        <option value="priority">Priority</option>
-        <option value="status">Status</option>
-        <option value="name">Name (A-Z)</option>
-        <option value="time-desc">Time Estimate (high-low)</option>
-      </select>
+      <button class="btn btn-primary btn-sm" onclick="runAutoSchedulePreview()">Auto-Schedule</button>
     </div>
 
     <div class="task-table-wrap">
@@ -384,8 +377,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <th>Status</th>
             <th>Assignee</th>
             <th>Priority</th>
-            <th>Time Est.</th>
+            <th>Time</th>
             <th>Business</th>
+            <th>Hard</th>
             <th>Recurring</th>
           </tr>
         </thead>
@@ -402,37 +396,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     </div>
   </div>
 
-  <!-- View: Kanban -->
   <div id="view-kanban" style="display:none"></div>
-
-  <!-- View: Projects -->
   <div id="view-projects" style="display:none"></div>
-
-  <!-- View: Capacity -->
-  <div id="view-capacity" style="display:none">
-    <div class="capacity-grid" id="capacityGrid"></div>
-  </div>
-
-  <!-- View: Recurring -->
+  <div id="view-capacity" style="display:none"><div class="capacity-grid" id="capacityGrid"></div></div>
   <div id="view-recurring" style="display:none">
     <div style="margin-bottom:16px">
-      <p style="font-size:13px;color:var(--text-secondary)">Recurring tasks identified for potential AI agent automation. Tasks marked with a recurring frequency or the &ldquo;Recurring?&rdquo; flag are shown below.</p>
+      <p style="font-size:13px;color:var(--text-secondary)">Recurring tasks grouped by person and frequency. Click any task to edit.</p>
     </div>
     <div id="recurringContent"></div>
   </div>
-
 </div>
 
-<!-- Loading overlay -->
 <div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
+<div class="toast" id="toast"></div>
 
 <script>
-// =======================================
 // CONFIG
-// =======================================
 const BASE_ID = 'appnqjDpqDniH3IRl';
 const TASKS_TABLE = 'tblqB8b22hKBL4PF1';
 const PROJECTS_TABLE = 'tblHrpTMd5LNYn8v1';
+const BUSINESSES_TABLE = 'tblpqkvWJJo8Uu25q';
 
 const F = {
   name:        'fldgFjGBw6bTKJFCD',
@@ -455,6 +438,7 @@ const F = {
   business:    'fldLu1Y4GzyWcDoxr',
   projects:    'fldBg0rQy0FrOAkRN',
   origDueDate: 'fldS2OR7oQKC7T1to',
+  hardDeadline:'fldZKzIxgyrQ8CG8a',
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -470,71 +454,55 @@ const PF = {
   completed:  'fldliObR7TdTdjht7',
   deliverable:'flduh2IybVmweI6lD',
   defOfDone:  'fldgjzVEnfnZowrBD',
+  kpiName:    'fldABYFMf2yBKWdlD',
+  kpiTarget:  'fldaI0voHia91SYZz',
+  kpiCurrent: 'fldB1QJDUsukxKzjQ',
+  kpiUnit:    'fldrYZEghROXYf6w0',
+  kpiTracking:'fld2wYB5ZEn9WRcjN',
+  business:   'fldLu1Y4GzyWcDoxr',
 };
 const PROJECT_FIELD_IDS = Object.values(PF);
 
 const TEAM = [
-  { key: 'kevin', name: 'Kevin Brittain',   email: 'kevin@runpreneur.org.uk', slackId: '' },
-  { key: 'mica',  name: 'Mica Albovias',    email: 'micaa.work@gmail.com',    slackId: 'U08HW0TAWAE' },
-  { key: 'erica', name: 'Ericamae Atenta',  email: 'atentaerica@gmail.com',   slackId: '' },
+  { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
+  { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
+  { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
 ];
+
+const STATUS_OPTIONS = ['Today','Upcoming','To do','Approval','Completed','Overdue'];
+const PRIORITY_OPTIONS = ['Urgent','High','Project','Not Urgent'];
+const TIME_OPTIONS = ['15 min','30 min','45 min','1 hr','2 hr','3 hr','4 hr','8 hr'];
+const RECUR_OPTIONS = ['','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'];
+const BUSINESS_OPTIONS = ['Real Estate','Operations Director','Personal'];
+const KPI_UNIT_OPTIONS = ['£','%','count','days','items','hours'];
 
 const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, 'To do':3, Upcoming:4, Completed:5 };
-const PRIORITY_ORDER = { Urgent:0, High:1, Project:2, 'Not Urgent':3 };
+const PRIORITY_ORDER = { Project:0, Urgent:1, High:2, 'Not Urgent':3 };
 const TIME_MINUTES = { '15 min':15, '30 min':30, '45 min':45, '1 hr':60, '2 hr':120, '3 hr':180, '4 hr':240, '8 hr':480 };
-const WEEKLY_CAPACITY_HRS = 40;
-const DAILY_AVAILABLE_HRS = 6;
+const PIXELS_PER_MIN = 1.3; // 15 min = ~20px, 1hr = 78px
+const SNAP_MIN = 15;
 
-// Google Calendar Apps Script URL — deploy gcal-proxy.gs as a Google Apps Script web app
-// and paste the URL here. Leave empty to skip calendar integration.
 const GCAL_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyFfjqpBqy5G9jJHaFEgQfOYcJwrRkyqxVIxya61Bz5DiM5RftQ0kLhk7-YftCX1Gnblw/exec';
 
-// Default routine rules (user can customise, stored in localStorage)
 const DEFAULT_ROUTINE = [
-  { name: 'Get Ready', duration: 30, preferred: 'morning', fixed: false, order: 1 },
-  { name: 'Lunch', duration: 30, preferred: 'midday', fixed: false, order: 2, rule: 'before-run-2h' },
-  { name: 'Run', duration: 60, preferred: 'afternoon', fixed: false, order: 3 },
+  { name:'Get Ready', duration:30, preferred:'morning', fixed:false, order:1 },
+  { name:'Lunch',     duration:30, preferred:'midday', fixed:false, order:2, rule:'before-run-2h' },
+  { name:'Run',       duration:60, preferred:'afternoon', fixed:false, order:3 },
 ];
+const DEFAULT_WORK_CONFIG = { startHour:8, endHour:18, maxTaskHours:6 };
 
-// Working hours config
-const DEFAULT_WORK_CONFIG = {
-  startHour: 8,
-  endHour: 18,
-  maxTaskHours: 6,
-};
+function getRoutineBlocks(){try{const s=localStorage.getItem('_task_routine');if(s)return JSON.parse(s)}catch(e){}return DEFAULT_ROUTINE}
+function getWorkConfig(){try{const s=localStorage.getItem('_task_workconfig');if(s)return JSON.parse(s)}catch(e){}return DEFAULT_WORK_CONFIG}
+function saveRoutineBlocks(b){localStorage.setItem('_task_routine',JSON.stringify(b))}
+function saveWorkConfig(c){localStorage.setItem('_task_workconfig',JSON.stringify(c))}
+function getPersonCapacity(key){const s=localStorage.getItem('_task_capacity_'+key);return s?parseInt(s):40}
+function setPersonCapacity(key,hrs){localStorage.setItem('_task_capacity_'+key,String(hrs))}
 
-function getRoutineBlocks() {
-  try {
-    const stored = localStorage.getItem('_task_routine');
-    if (stored) return JSON.parse(stored);
-  } catch(e) {}
-  return DEFAULT_ROUTINE;
-}
-
-function getWorkConfig() {
-  try {
-    const stored = localStorage.getItem('_task_workconfig');
-    if (stored) return JSON.parse(stored);
-  } catch(e) {}
-  return DEFAULT_WORK_CONFIG;
-}
-
-function saveRoutineBlocks(blocks) {
-  localStorage.setItem('_task_routine', JSON.stringify(blocks));
-}
-
-function saveWorkConfig(config) {
-  localStorage.setItem('_task_workconfig', JSON.stringify(config));
-}
-
-const ROUTINE_BLOCKS = getRoutineBlocks();
-
-// =======================================
 // STATE
-// =======================================
 let PAT = '';
 let allTasks = [];
 let allProjects = [];
+let BUSINESS_MAP = {}; // name -> id
 let activeTeam = 'all';
 let currentView = 'myday';
 let currentPage = 1;
@@ -548,1813 +516,1319 @@ let expandedProject = null;
 let currentUser = null;
 let calendarEvents = [];
 let showRoutineConfig = false;
-let plannerOverlay = null; // null = hidden, object = planner state
+let drawerTaskId = null;
+const saveDebounce = {};
 
-// =======================================
-// GOOGLE CALENDAR FETCH
-// =======================================
-async function fetchCalendarEvents() {
-  if (!GCAL_SCRIPT_URL) return [];
-  try {
-    const today = todayStr();
-    const url = `${GCAL_SCRIPT_URL}?date=${today}`;
-    const res = await fetch(url);
-    if (!res.ok) { console.warn('Calendar fetch failed:', res.status); return []; }
-    const data = await res.json();
-    return (data.events || []).map(ev => ({
-      summary: ev.summary || ev.title || '(No title)',
-      start: ev.start || ev.startTime || '',
-      end: ev.end || ev.endTime || '',
-      location: ev.location || '',
-      allDay: ev.allDay || false,
-      type: 'event',
-    }));
-  } catch(e) {
-    console.warn('Calendar fetch error:', e);
-    return [];
-  }
-}
+// ===== UTIL =====
+function todayStr(){return new Date().toISOString().slice(0,10)}
+function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
+function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function toast(msg, err){const el=document.getElementById('toast');el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),1800)}
+function strColor(s){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return`hsl(${Math.abs(h)%360},60%,55%)`}
+function strColorBg(s){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return`hsla(${Math.abs(h)%360},60%,55%,0.12)`}
+function parseTimeToMinutes(s){if(!s)return null;let m=s.match(/(\d{1,2}):(\d{2})/);if(m)return parseInt(m[1])*60+parseInt(m[2]);try{const d=new Date(s);if(!isNaN(d))return d.getHours()*60+d.getMinutes()}catch(e){}return null}
+function minutesToTime(m){const h=Math.floor(m/60),mm=m%60,ampm=h>=12?'PM':'AM',h12=h===0?12:h>12?h-12:h;return`${h12}:${String(mm).padStart(2,'0')} ${ampm}`}
+function formatMins(m){if(!m)return'-';if(m<60)return m+'m';const h=Math.floor(m/60),r=m%60;return r?`${h}h ${r}m`:`${h}h`}
+function minutesToTimeEst(mins){let best=TIME_OPTIONS[0],bd=Infinity;TIME_OPTIONS.forEach(o=>{const d=Math.abs(TIME_MINUTES[o]-mins);if(d<bd){bd=d;best=o}});return best}
+function isOverdue(t){if(!t.dueDate||t.status==='Completed')return false;return t.dueDate<todayStr()}
+function isWeekend(dateStr){const d=new Date(dateStr+'T00:00:00').getDay();return d===0||d===6}
+function addDays(dateStr,n){const d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
 
-function parseTimeToMinutes(timeStr) {
-  // Parse "HH:MM" or ISO datetime to minutes since midnight
-  if (!timeStr) return null;
-  let match = timeStr.match(/(\d{1,2}):(\d{2})/);
-  if (match) return parseInt(match[1]) * 60 + parseInt(match[2]);
-  // Try ISO
-  try {
-    const d = new Date(timeStr);
-    if (!isNaN(d)) return d.getHours() * 60 + d.getMinutes();
-  } catch(e) {}
-  return null;
-}
-
-function minutesToTime(mins) {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
-}
-
-// =======================================
-// SMART DAILY PLANNER
-// =======================================
-function buildDayTimeline(todayTasks, overdueTasks, calEvents, routineBlocks) {
-  const config = getWorkConfig();
-  const dayStart = config.startHour * 60;
-  const dayEnd = config.endHour * 60;
-
-  // 1. Build fixed blocks from calendar events
-  const blocks = [];
-
-  // Calendar events
-  calEvents.forEach(ev => {
-    if (ev.allDay) return; // Skip all-day events (shown separately)
-    const start = parseTimeToMinutes(ev.start);
-    const end = parseTimeToMinutes(ev.end);
-    if (start !== null && end !== null) {
-      blocks.push({ type: 'event', name: ev.summary, start, end, duration: end - start, location: ev.location });
-    }
-  });
-
-  // Sort fixed blocks by start time
-  blocks.sort((a, b) => a.start - b.start);
-
-  // 2. Place routine blocks respecting rules
-  const routine = [...routineBlocks].sort((a, b) => a.order - b.order);
-  const placedRoutine = placeRoutineBlocks(routine, blocks, dayStart, dayEnd);
-  blocks.push(...placedRoutine);
-  blocks.sort((a, b) => a.start - b.start);
-
-  // 3. Find free slots for tasks
-  const freeSlots = findFreeSlots(blocks, dayStart, dayEnd);
-
-  // 4. Schedule tasks into free slots (priority order: urgent first)
-  const allDayTasks = [...overdueTasks, ...todayTasks];
-  allDayTasks.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
-
-  const scheduledTasks = [];
-  const deferredTasks = [];
-  let slotIdx = 0;
-  let slotUsed = 0; // minutes used in current slot
-
-  allDayTasks.forEach(task => {
-    const taskMins = task.minutes || 30; // default 30min if no estimate
-    let placed = false;
-
-    while (slotIdx < freeSlots.length) {
-      const slot = freeSlots[slotIdx];
-      const remaining = (slot.end - slot.start) - slotUsed;
-
-      if (remaining >= taskMins) {
-        const taskStart = slot.start + slotUsed;
-        scheduledTasks.push({
-          type: 'task',
-          name: task.name,
-          start: taskStart,
-          end: taskStart + taskMins,
-          duration: taskMins,
-          task: task,
-          isOverdue: overdueTasks.includes(task),
-        });
-        slotUsed += taskMins;
-        placed = true;
-        break;
-      } else if (remaining >= 15) {
-        // Split task if remaining time is at least 15 min - move to next slot
-        slotIdx++;
-        slotUsed = 0;
-      } else {
-        slotIdx++;
-        slotUsed = 0;
-      }
-    }
-
-    if (!placed) {
-      deferredTasks.push(task);
-    }
-  });
-
-  // Merge all blocks into final timeline
-  const timeline = [...blocks, ...scheduledTasks];
-  timeline.sort((a, b) => a.start - b.start);
-
-  // Calculate summary
-  const totalTaskMins = allDayTasks.reduce((s, t) => s + (t.minutes || 30), 0);
-  const totalFreeMins = freeSlots.reduce((s, sl) => s + (sl.end - sl.start), 0);
-  const scheduledMins = scheduledTasks.reduce((s, t) => s + t.duration, 0);
-
-  return {
-    timeline,
-    deferredTasks,
-    scheduledTasks,
-    totalTaskMins,
-    totalFreeMins,
-    scheduledMins,
-    dayStart,
-    dayEnd,
-    allDayEvents: calEvents.filter(ev => ev.allDay),
-  };
-}
-
-function placeRoutineBlocks(routine, fixedBlocks, dayStart, dayEnd) {
-  const placed = [];
-  const runBlock = routine.find(r => r.name === 'Run');
-  let runTime = null;
-
-  // Place Run first (preferred afternoon = after 14:00)
-  if (runBlock) {
-    const prefStart = runBlock.preferred === 'afternoon' ? 14 * 60 : (runBlock.preferred === 'morning' ? 9 * 60 : 12 * 60);
-    runTime = findSlotFor(runBlock.duration, prefStart, fixedBlocks, dayStart, dayEnd);
-    if (runTime !== null) {
-      placed.push({ type: 'routine', name: runBlock.name, start: runTime, end: runTime + runBlock.duration, duration: runBlock.duration });
-    }
-  }
-
-  // Place Lunch (must be 2+ hrs before run if run exists)
-  const lunchBlock = routine.find(r => r.name === 'Lunch');
-  if (lunchBlock) {
-    let lunchDeadline = dayEnd;
-    if (runTime !== null && lunchBlock.rule === 'before-run-2h') {
-      lunchDeadline = runTime - 120; // must finish 2hrs before run
-    }
-    const prefStart = lunchBlock.preferred === 'midday' ? 12 * 60 : 12 * 60;
-    const allFixed = [...fixedBlocks, ...placed];
-    let lunchTime = findSlotFor(lunchBlock.duration, Math.min(prefStart, lunchDeadline - lunchBlock.duration), allFixed, dayStart, Math.min(dayEnd, lunchDeadline));
-    if (lunchTime !== null) {
-      placed.push({ type: 'routine', name: lunchBlock.name, start: lunchTime, end: lunchTime + lunchBlock.duration, duration: lunchBlock.duration });
-    }
-  }
-
-  // Place Get Ready (morning)
-  const getReadyBlock = routine.find(r => r.name === 'Get Ready');
-  if (getReadyBlock) {
-    const allFixed = [...fixedBlocks, ...placed];
-    const grTime = findSlotFor(getReadyBlock.duration, dayStart, allFixed, dayStart, dayEnd);
-    if (grTime !== null) {
-      placed.push({ type: 'routine', name: getReadyBlock.name, start: grTime, end: grTime + getReadyBlock.duration, duration: getReadyBlock.duration });
-    }
-  }
-
-  // Place any custom routine blocks
-  routine.filter(r => !['Run', 'Lunch', 'Get Ready'].includes(r.name)).forEach(r => {
-    const allFixed = [...fixedBlocks, ...placed];
-    const prefStart = r.preferred === 'morning' ? 9 * 60 : r.preferred === 'afternoon' ? 14 * 60 : 12 * 60;
-    const t = findSlotFor(r.duration, prefStart, allFixed, dayStart, dayEnd);
-    if (t !== null) {
-      placed.push({ type: 'routine', name: r.name, start: t, end: t + r.duration, duration: r.duration });
-    }
-  });
-
-  return placed;
-}
-
-function findSlotFor(duration, preferredStart, fixedBlocks, dayStart, dayEnd) {
-  // Try preferred time first, then search forward, then backward
-  const sorted = [...fixedBlocks].sort((a, b) => a.start - b.start);
-
-  function conflicts(start, end) {
-    return sorted.some(b => start < b.end && end > b.start);
-  }
-
-  // Try preferred
-  if (preferredStart >= dayStart && preferredStart + duration <= dayEnd && !conflicts(preferredStart, preferredStart + duration)) {
-    return preferredStart;
-  }
-
-  // Search forward from preferred
-  for (let t = preferredStart; t + duration <= dayEnd; t += 15) {
-    if (t >= dayStart && !conflicts(t, t + duration)) return t;
-  }
-
-  // Search backward from preferred
-  for (let t = preferredStart - 15; t >= dayStart; t -= 15) {
-    if (t + duration <= dayEnd && !conflicts(t, t + duration)) return t;
-  }
-
-  return null;
-}
-
-function findFreeSlots(blocks, dayStart, dayEnd) {
-  const sorted = [...blocks].sort((a, b) => a.start - b.start);
-  const free = [];
-  let cursor = dayStart;
-
-  sorted.forEach(b => {
-    if (b.start > cursor) {
-      free.push({ start: cursor, end: b.start });
-    }
-    cursor = Math.max(cursor, b.end);
-  });
-
-  if (cursor < dayEnd) {
-    free.push({ start: cursor, end: dayEnd });
-  }
-
-  return free.filter(s => (s.end - s.start) >= 15); // min 15min slots
-}
-
-// =======================================
-// OVERDUE AUTO-RESCHEDULE (Kevin only)
-// =======================================
-async function autoRescheduleOverdue() {
-  if (!currentUser || currentUser.key !== 'kevin') return { count: 0 };
-
-  const today = todayStr();
-  const member = TEAM.find(m => m.key === 'kevin');
-  if (!member) return { count: 0 };
-
-  const overdue = allTasks.filter(t =>
-    t.assigneeEmail === member.email &&
-    t.dueDate && t.dueDate < today &&
-    t.status !== 'Completed' &&
-    !t.someDay
-  );
-
-  if (overdue.length === 0) return { count: 0 };
-
-  // Batch reschedule: preserve original due date, set to today
-  const patches = overdue.map(t => {
-    const fields = { [F.dueDate]: today };
-    // Only set origDueDate if not already set (don't overwrite first occurrence)
-    if (!t.origDueDate) {
-      fields[F.origDueDate] = t.dueDate;
-    }
-    return patchTask(t.id, fields).then(() => {
-      t.origDueDate = t.origDueDate || t.dueDate;
-      t.dueDate = today;
-    }).catch(e => console.warn('Failed to reschedule', t.id, e));
-  });
-
-  // Process in batches of 10 to avoid rate limits
-  for (let i = 0; i < patches.length; i += 10) {
-    await Promise.all(patches.slice(i, i + 10));
-    if (i + 10 < patches.length) await new Promise(r => setTimeout(r, 250));
-  }
-
-  return { count: overdue.length, tasks: overdue };
-}
-
-// =======================================
-// AUTH
-// =======================================
-function initAuth() {
-  try { if (window.parent && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e) {}
-  const stored = localStorage.getItem('_dlr_pat');
-  if (stored) { PAT = stored; return true; }
-  document.getElementById('authBar').style.display = 'flex';
-  document.getElementById('loader').style.display = 'none';
+// ===== AUTH =====
+function initAuth(){
+  try{if(window.parent&&window.parent.PAT){PAT=window.parent.PAT;return true}}catch(e){}
+  const stored=localStorage.getItem('_dlr_pat');
+  if(stored){PAT=stored;return true}
+  document.getElementById('authBar').style.display='flex';
+  document.getElementById('loader').style.display='none';
   return false;
 }
-
-function doAuth() {
-  const v = document.getElementById('patInput').value.trim();
-  if (!v) return;
-  PAT = v;
-  localStorage.setItem('_dlr_pat', v);
-  document.getElementById('authBar').style.display = 'none';
-  document.getElementById('loader').style.display = 'flex';
+function doAuth(){
+  const v=document.getElementById('patInput').value.trim();if(!v)return;
+  PAT=v;localStorage.setItem('_dlr_pat',v);
+  document.getElementById('authBar').style.display='none';
+  document.getElementById('loader').style.display='flex';
   checkIdentityAndLoad();
 }
 
-// =======================================
-// TEAM IDENTITY
-// =======================================
-function initIdentity() {
-  const stored = localStorage.getItem('_task_user');
-  if (stored) {
-    try {
-      currentUser = JSON.parse(stored);
-      if (currentUser && currentUser.key) {
-        renderUserBadge();
-        return true;
-      }
-    } catch(e) {}
-  }
-  showIdentityOverlay();
-  return false;
+// ===== IDENTITY =====
+function initIdentity(){
+  const s=localStorage.getItem('_task_user');
+  if(s){try{currentUser=JSON.parse(s);if(currentUser&&currentUser.key){renderUserBadge();return true}}catch(e){}}
+  showIdentityOverlay();return false;
 }
-
-function showIdentityOverlay() {
-  const overlay = document.getElementById('identityOverlay');
-  const btns = document.getElementById('identityBtns');
-  btns.innerHTML = TEAM.map(m => {
-    const initial = m.name.split(' ').map(w => w[0]).join('');
-    return `<button class="identity-btn" onclick="selectIdentity('${m.key}')">
-      <span class="avatar avatar-${m.key}">${initial}</span>
-      ${escHtml(m.name)}
-    </button>`;
-  }).join('');
-  overlay.style.display = 'flex';
+function showIdentityOverlay(){
+  const btns=document.getElementById('identityBtns');
+  btns.innerHTML=TEAM.map(m=>{const i=m.name.split(' ').map(w=>w[0]).join('');
+    return`<button class="identity-btn" onclick="selectIdentity('${m.key}')"><span class="avatar avatar-${m.key}">${i}</span>${escHtml(m.name)}</button>`}).join('');
+  document.getElementById('identityOverlay').style.display='flex';
 }
-
-function selectIdentity(key) {
-  const member = TEAM.find(m => m.key === key);
-  if (!member) return;
-  currentUser = { key: member.key, name: member.name, email: member.email };
-  localStorage.setItem('_task_user', JSON.stringify(currentUser));
-  document.getElementById('identityOverlay').style.display = 'none';
-  renderUserBadge();
-  // Default to showing the user's own tasks
-  activeTeam = key;
-  loadAllData();
+function selectIdentity(key){
+  const m=TEAM.find(x=>x.key===key);if(!m)return;
+  currentUser={key:m.key,name:m.name,email:m.email};
+  localStorage.setItem('_task_user',JSON.stringify(currentUser));
+  document.getElementById('identityOverlay').style.display='none';
+  renderUserBadge();activeTeam=key;loadAllData();
 }
-
-function switchUser() {
-  localStorage.removeItem('_task_user');
-  currentUser = null;
-  showIdentityOverlay();
+function switchUser(){localStorage.removeItem('_task_user');currentUser=null;showIdentityOverlay()}
+function renderUserBadge(){
+  if(!currentUser)return;
+  const b=document.getElementById('userBadge');
+  const i=currentUser.name.split(' ').map(w=>w[0]).join('');
+  b.innerHTML=`<span class="avatar avatar-${currentUser.key}">${i}</span>${escHtml(currentUser.name.split(' ')[0])}<span class="switch-user" onclick="switchUser()">Switch</span>`;
+  b.style.display='flex';
 }
+function checkIdentityAndLoad(){if(initIdentity()){activeTeam=currentUser.key;loadAllData()}}
 
-function renderUserBadge() {
-  if (!currentUser) return;
-  const badge = document.getElementById('userBadge');
-  const initial = currentUser.name.split(' ').map(w => w[0]).join('');
-  badge.innerHTML = `<span class="avatar avatar-${currentUser.key}">${initial}</span>
-    ${escHtml(currentUser.name.split(' ')[0])}
-    <span class="switch-user" onclick="switchUser()">Switch</span>`;
-  badge.style.display = 'flex';
-}
-
-function checkIdentityAndLoad() {
-  if (initIdentity()) {
-    activeTeam = currentUser.key;
-    loadAllData();
-  }
-}
-
-// =======================================
-// AIRTABLE FETCH
-// =======================================
-async function fetchTable(tableId, fieldIds, filter) {
-  let all = [], offset = null;
-  const params = new URLSearchParams({ returnFieldsByFieldId: 'true', pageSize: '100' });
-  if (filter) params.set('filterByFormula', filter);
-  fieldIds.forEach(fid => params.append('fields[]', fid));
-  do {
-    const url = `https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}${offset ? '&offset='+offset : ''}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        PAT = '';
-        localStorage.removeItem('_dlr_pat');
-        document.getElementById('authBar').style.display = 'flex';
-        document.getElementById('loader').innerHTML = '<span style="color:var(--danger)">Invalid token. Please re-enter your PAT.</span>';
+// ===== FETCH =====
+async function fetchTable(tableId,fieldIds,filter){
+  let all=[],offset=null;
+  const params=new URLSearchParams({returnFieldsByFieldId:'true',pageSize:'100'});
+  if(filter)params.set('filterByFormula',filter);
+  if(fieldIds)fieldIds.forEach(fid=>params.append('fields[]',fid));
+  do{
+    const url=`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}${offset?'&offset='+offset:''}`;
+    const res=await fetch(url,{headers:{Authorization:`Bearer ${PAT}`}});
+    if(!res.ok){
+      if(res.status===401||res.status===403){
+        PAT='';localStorage.removeItem('_dlr_pat');
+        document.getElementById('authBar').style.display='flex';
+        document.getElementById('loader').innerHTML='<span style="color:var(--danger)">Invalid token.</span>';
         throw new Error('Auth failed');
       }
       throw new Error(`API error ${res.status}`);
     }
-    const data = await res.json();
-    all = all.concat(data.records);
-    offset = data.offset || null;
-  } while (offset);
+    const data=await res.json();all=all.concat(data.records);offset=data.offset||null;
+  }while(offset);
   return all;
 }
 
-// =======================================
-// DATA PROCESSING
-// =======================================
-function gf(rec, fid) {
-  return rec.cellValuesByFieldId ? rec.cellValuesByFieldId[fid] : (rec.fields ? rec.fields[fid] : undefined);
+async function fetchBusinesses(){
+  try{
+    const recs=await fetchTable(BUSINESSES_TABLE,null,'');
+    BUSINESS_MAP={};
+    recs.forEach(r=>{
+      const f=r.fields||{};
+      const name=f.Name||f.name||Object.values(f)[0];
+      if(name&&BUSINESS_OPTIONS.includes(name)){BUSINESS_MAP[name]=r.id}
+    });
+  }catch(e){console.warn('businesses fetch failed',e)}
 }
 
-function parseTask(rec) {
-  const statusObj = gf(rec, F.status);
-  const priorityObj = gf(rec, F.priority);
-  const assigneeObj = gf(rec, F.assignee);
-  const timeEstObj = gf(rec, F.timeEst);
-  const recurObj = gf(rec, F.recurring);
-  const catObj = gf(rec, F.category);
-  const businessLinks = gf(rec, F.business) || [];
-  const projectLinks = gf(rec, F.projects) || [];
+async function fetchCalendarEvents(){
+  if(!GCAL_SCRIPT_URL)return[];
+  try{
+    const res=await fetch(`${GCAL_SCRIPT_URL}?date=${todayStr()}`);
+    if(!res.ok)return[];
+    const data=await res.json();
+    return(data.events||[]).map(ev=>({
+      summary:ev.summary||ev.title||'(No title)',
+      start:ev.start||ev.startTime||'',
+      end:ev.end||ev.endTime||'',
+      location:ev.location||'',
+      allDay:ev.allDay||false,
+      type:'event',
+    }));
+  }catch(e){return[]}
+}
 
-  const timeDur = gf(rec, F.timeDur) || 0;
-  let minutes = 0;
-  if (timeDur > 0) {
-    minutes = timeDur / 60;
-  } else if (timeEstObj) {
-    minutes = TIME_MINUTES[timeEstObj.name] || 0;
+// ===== PARSE =====
+function gf(rec,fid){return rec.cellValuesByFieldId?rec.cellValuesByFieldId[fid]:(rec.fields?rec.fields[fid]:undefined)}
+
+function parseTask(rec){
+  const statusObj=gf(rec,F.status);
+  const priorityObj=gf(rec,F.priority);
+  const assigneeObj=gf(rec,F.assignee);
+  const timeEstObj=gf(rec,F.timeEst);
+  const recurObj=gf(rec,F.recurring);
+  const catObj=gf(rec,F.category);
+  const businessLinks=gf(rec,F.business)||[];
+  const projectLinks=gf(rec,F.projects)||[];
+  const timeDur=gf(rec,F.timeDur)||0;
+  let minutes=0;
+  if(timeDur>0)minutes=timeDur/60;else if(timeEstObj)minutes=TIME_MINUTES[timeEstObj.name]||0;
+
+  let businessName='';let businessId='';
+  if(Array.isArray(businessLinks)&&businessLinks.length>0){
+    const b=businessLinks[0];
+    if(typeof b==='object'){businessName=b.name||'';businessId=b.id||''}
+    else if(typeof b==='string'){businessId=b}
+  }
+  let projectNames=[],projectIds=[];
+  if(Array.isArray(projectLinks))projectLinks.forEach(p=>{
+    if(typeof p==='object'){if(p.name)projectNames.push(p.name);if(p.id)projectIds.push(p.id)}
+    else if(typeof p==='string')projectIds.push(p);
+  });
+
+  return {
+    id:rec.id,
+    name:gf(rec,F.name)||'(Untitled)',
+    dueDate:gf(rec,F.dueDate)||'',
+    status:statusObj?statusObj.name:'',
+    assignee:assigneeObj?assigneeObj.name:'',
+    assigneeEmail:assigneeObj?assigneeObj.email:'',
+    assigneeId:assigneeObj?assigneeObj.id:'',
+    priority:priorityObj?priorityObj.name:'',
+    timeEst:timeEstObj?timeEstObj.name:'',
+    minutes,
+    recurring:recurObj?recurObj.name:'',
+    recurFlag:!!gf(rec,F.recurFlag),
+    someDay:!!gf(rec,F.someDay),
+    description:gf(rec,F.description)||'',
+    notes:gf(rec,F.notes)||'',
+    attachments:gf(rec,F.attachments)||[],
+    category:catObj?catObj.name:'',
+    completion:gf(rec,F.completion)||'',
+    created:gf(rec,F.created)||'',
+    onHold:!!gf(rec,F.onHold),
+    business:businessName,
+    businessId,
+    projectNames,projectIds,
+    origDueDate:gf(rec,F.origDueDate)||'',
+    hardDeadline:!!gf(rec,F.hardDeadline),
+    _startMin:null, // scheduled start minute of day (for My Day timeline)
+  };
+}
+
+function parseProject(rec){
+  const statusObj=gf(rec,PF.status);
+  const kpiUnitObj=gf(rec,PF.kpiUnit);
+  const businessLinks=gf(rec,PF.business)||[];
+  let businessName='';
+  if(Array.isArray(businessLinks)&&businessLinks[0]){
+    const b=businessLinks[0];
+    if(typeof b==='object'&&b.name)businessName=b.name;
+  }
+  return {
+    id:rec.id,
+    name:gf(rec,PF.name)||'(Untitled Project)',
+    status:statusObj?statusObj.name:'',
+    start:gf(rec,PF.start)||'',
+    end:gf(rec,PF.end)||'',
+    totalTasks:gf(rec,PF.totalTasks)||0,
+    completedTasks:gf(rec,PF.completedTasks)||0,
+    overdue:gf(rec,PF.overdue)||0,
+    completionPct:gf(rec,PF.completionPct)||0,
+    completed:!!gf(rec,PF.completed),
+    deliverable:gf(rec,PF.deliverable)||'',
+    defOfDone:gf(rec,PF.defOfDone)||'',
+    kpiName:gf(rec,PF.kpiName)||'',
+    kpiTarget:gf(rec,PF.kpiTarget)||0,
+    kpiCurrent:gf(rec,PF.kpiCurrent)||0,
+    kpiUnit:kpiUnitObj?kpiUnitObj.name:'',
+    kpiTracking:gf(rec,PF.kpiTracking)||'',
+    business:businessName,
+  };
+}
+
+// ===== PATCH =====
+async function patchTask(taskId,fields){
+  const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,{
+    method:'PATCH',
+    headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+    body:JSON.stringify({fields,typecast:true})
+  });
+  return res;
+}
+async function patchProject(pid,fields){
+  const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}/${pid}`,{
+    method:'PATCH',
+    headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+    body:JSON.stringify({fields,typecast:true})
+  });
+  return res;
+}
+
+// Update one task field; updates local state; toasts.
+async function updateTaskField(taskId,fieldKey,rawValue){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const prev={...task};
+  let payload={};
+  const fid=F[fieldKey];
+  try{
+    if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'){
+      payload[fid]=rawValue?{name:rawValue}:null;
+      task[fieldKey]=rawValue;
+      if(fieldKey==='timeEst')task.minutes=TIME_MINUTES[rawValue]||task.minutes;
+    } else if(fieldKey==='business'){
+      if(rawValue&&BUSINESS_MAP[rawValue]){
+        payload[fid]=[{id:BUSINESS_MAP[rawValue]}];
+        task.business=rawValue;task.businessId=BUSINESS_MAP[rawValue];
+      } else if(!rawValue){payload[fid]=[];task.business='';task.businessId=''}
+    } else if(fieldKey==='hardDeadline'||fieldKey==='someDay'||fieldKey==='onHold'||fieldKey==='recurFlag'){
+      payload[fid]=!!rawValue;task[fieldKey]=!!rawValue;
+    } else if(fieldKey==='dueDate'||fieldKey==='origDueDate'){
+      payload[fid]=rawValue||null;task[fieldKey]=rawValue||'';
+    } else if(fieldKey==='assignee'){
+      // rawValue = team key
+      const member=TEAM.find(m=>m.key===rawValue);
+      if(member){payload[fid]={email:member.email};task.assignee=member.name;task.assigneeEmail=member.email}
+    } else {
+      payload[fid]=rawValue;task[fieldKey]=rawValue;
+    }
+    const res=await patchTask(taskId,payload);
+    if(!res.ok){throw new Error('HTTP '+res.status)}
+    toast('Saved');
+  }catch(e){
+    Object.assign(task,prev);
+    toast('Failed to save',true);
+    console.warn('patch failed',e);
+  }
+}
+
+// Debounced text save
+function debouncedSave(taskId,fieldKey,value){
+  const k=taskId+':'+fieldKey;
+  clearTimeout(saveDebounce[k]);
+  saveDebounce[k]=setTimeout(()=>updateTaskField(taskId,fieldKey,value),500);
+}
+
+// ===== SHARED RENDER HELPERS =====
+function statusBadge(status){
+  const cls={Today:'badge-today',Overdue:'badge-overdue',Upcoming:'badge-upcoming','To do':'badge-todo',Completed:'badge-completed',Approval:'badge-approval'}[status]||'badge-todo';
+  return`<span class="badge ${cls}">${escHtml(status||'-')}</span>`;
+}
+function priorityBadge(p){
+  if(!p)return'<span style="color:var(--text-secondary)">-</span>';
+  const cls={Urgent:'badge-urgent',High:'badge-high',Project:'badge-project','Not Urgent':'badge-not-urgent'}[p]||'';
+  return`<span class="badge ${cls}">${escHtml(p)}</span>`;
+}
+function avatarHtml(t){
+  if(!t.assignee)return'<span style="color:var(--text-secondary)">-</span>';
+  const k=teamKey(t.assigneeEmail);
+  const i=t.assignee.split(' ').map(w=>w[0]).join('').slice(0,2);
+  return`<div class="assignee-cell"><span class="avatar avatar-${k}">${i}</span>${escHtml(t.assignee.split(' ')[0])}</div>`;
+}
+function avatarSmall(t){
+  if(!t.assignee)return'';
+  const k=teamKey(t.assigneeEmail);
+  const i=t.assignee.split(' ').map(w=>w[0]).join('').slice(0,2);
+  return`<span class="avatar avatar-${k}" style="width:18px;height:18px;font-size:9px">${i}</span>`;
+}
+function formatDueDate(d){
+  if(!d)return'<span style="color:var(--text-secondary)">No date</span>';
+  const today=todayStr();
+  const dt=new Date(d+'T00:00:00');
+  const diff=Math.round((dt-new Date(today+'T00:00:00'))/86400000);
+  const f=dt.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'});
+  if(d<today)return`<span style="color:var(--danger);font-weight:600">${f}</span> <span style="font-size:10px;color:var(--danger)">(${Math.abs(diff)}d ago)</span>`;
+  if(d===today)return`<span style="color:var(--warning);font-weight:600">Today</span>`;
+  if(diff<=7)return`<span style="color:var(--warning)">${f}</span> <span style="font-size:10px;color:var(--text-secondary)">(${diff}d)</span>`;
+  return`<span>${f}</span>`;
+}
+
+// ===== TEAM BAR =====
+function renderTeamBar(){
+  const counts={all:0};TEAM.forEach(m=>counts[m.key]=0);
+  const active=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
+  active.forEach(t=>{counts.all++;const k=teamKey(t.assigneeEmail);if(counts[k]!==undefined)counts[k]++});
+  let h=`<button class="team-btn ${activeTeam==='all'?'active':''}" onclick="setTeam('all')">All<span class="count">${counts.all}</span></button>`;
+  TEAM.forEach(m=>{const f=m.name.split(' ')[0];
+    h+=`<button class="team-btn ${activeTeam===m.key?'active':''}" onclick="setTeam('${m.key}')"><span class="avatar avatar-${m.key}">${f[0]}</span> ${f}<span class="count">${counts[m.key]}</span></button>`;
+  });
+  document.getElementById('teamBar').innerHTML=h;
+}
+
+// ===== KPIs =====
+function renderKPIs(){
+  let tasks=allTasks.filter(t=>!t.someDay);
+  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  const today=todayStr();
+  const active=tasks.filter(t=>t.status!=='Completed');
+  const overdue=active.filter(t=>t.status==='Overdue'||isOverdue(t));
+  const dueToday=active.filter(t=>t.dueDate===today||t.status==='Today');
+  const upcoming=active.filter(t=>t.status==='Upcoming');
+  const totalHrs=active.reduce((s,t)=>s+t.minutes,0)/60;
+  const todoCount=active.filter(t=>t.status==='To do').length;
+  const recurCount=active.filter(t=>t.recurring||t.recurFlag).length;
+  const kpis=[
+    {label:'Due Today',value:dueToday.length,cls:dueToday.length>0?'amber':'green'},
+    {label:'Overdue',value:overdue.length,cls:overdue.length>0?'red':'green'},
+    {label:'Upcoming',value:upcoming.length,cls:'accent'},
+    {label:'To Do',value:todoCount,cls:'cyan'},
+    {label:'Hours Allocated',value:totalHrs.toFixed(1),cls:'purple'},
+    {label:'Active Tasks',value:active.length,cls:'green'},
+    {label:'Recurring',value:recurCount,cls:'accent'},
+  ];
+  document.getElementById('kpiGrid').innerHTML=kpis.map(k=>`<div class="kpi ${k.cls}"><div class="value">${k.value}</div><div class="label">${k.label}</div></div>`).join('');
+}
+
+// ======================================================
+// TASK DETAIL DRAWER (inline-editable all fields)
+// ======================================================
+function openTaskDrawer(taskId){
+  drawerTaskId=taskId;
+  const t=allTasks.find(x=>x.id===taskId);if(!t)return;
+  closeDrawer();
+  const overlay=document.createElement('div');
+  overlay.className='drawer-overlay';
+  overlay.id='drawerOverlay';
+  overlay.onclick=(e)=>{if(e.target===overlay)closeDrawer()};
+  overlay.innerHTML=`<div class="drawer">
+    <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)">${escHtml(t.name)}</h2>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
+
+    <div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></div></div>
+    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value)">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Hard Deadline</label><div class="field-val" style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)"><span style="color:var(--danger);font-size:12px">Flag as immovable</span></div></div>
+    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Project</label><div class="field-val" style="color:var(--text-secondary);font-size:12px">${t.projectNames.length?escHtml(t.projectNames.join(', ')):'None linked'}</div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)">${escHtml(t.description)}</textarea></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Notes / Comments</label><div class="field-val"><textarea oninput="drwSaveText('notes',this.value)">${escHtml(t.notes)}</textarea></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+function closeDrawer(){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();drawerTaskId=null}
+function drwSaveText(fieldKey,val){if(!drawerTaskId)return;debouncedSave(drawerTaskId,fieldKey,val)}
+
+// ======================================================
+// MY DAY — interactive timeline
+// ======================================================
+function getMyDayTasks(){
+  const today=todayStr();
+  let tasks=allTasks.filter(t=>!t.someDay&&t.status!=='Completed');
+  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  const todayTasks=tasks.filter(t=>t.status==='Today'||t.dueDate===today);
+  const overdueTasks=tasks.filter(t=>(t.status==='Overdue'||isOverdue(t))&&t.dueDate!==today&&t.status!=='Today');
+  const other=tasks.filter(t=>!todayTasks.includes(t)&&!overdueTasks.includes(t));
+  return{todayTasks,overdueTasks,other};
+}
+
+function placeRoutineBlocks(routine,fixedBlocks,dayStart,dayEnd){
+  const placed=[];
+  const runBlock=routine.find(r=>r.name==='Run');
+  let runTime=null;
+  if(runBlock){
+    const prefStart=runBlock.preferred==='afternoon'?14*60:(runBlock.preferred==='morning'?9*60:12*60);
+    runTime=findSlotFor(runBlock.duration,prefStart,fixedBlocks,dayStart,dayEnd);
+    if(runTime!==null)placed.push({type:'routine',name:runBlock.name,start:runTime,end:runTime+runBlock.duration,duration:runBlock.duration});
+  }
+  const lunchBlock=routine.find(r=>r.name==='Lunch');
+  if(lunchBlock){
+    let lunchDeadline=dayEnd;
+    if(runTime!==null&&lunchBlock.rule==='before-run-2h')lunchDeadline=runTime-120;
+    const prefStart=12*60;
+    const allFixed=[...fixedBlocks,...placed];
+    const lunchTime=findSlotFor(lunchBlock.duration,Math.min(prefStart,lunchDeadline-lunchBlock.duration),allFixed,dayStart,Math.min(dayEnd,lunchDeadline));
+    if(lunchTime!==null)placed.push({type:'routine',name:lunchBlock.name,start:lunchTime,end:lunchTime+lunchBlock.duration,duration:lunchBlock.duration});
+  }
+  const gr=routine.find(r=>r.name==='Get Ready');
+  if(gr){
+    const allFixed=[...fixedBlocks,...placed];
+    const t=findSlotFor(gr.duration,dayStart,allFixed,dayStart,dayEnd);
+    if(t!==null)placed.push({type:'routine',name:gr.name,start:t,end:t+gr.duration,duration:gr.duration});
+  }
+  routine.filter(r=>!['Run','Lunch','Get Ready'].includes(r.name)).forEach(r=>{
+    const allFixed=[...fixedBlocks,...placed];
+    const prefStart=r.preferred==='morning'?9*60:r.preferred==='afternoon'?14*60:12*60;
+    const t=findSlotFor(r.duration,prefStart,allFixed,dayStart,dayEnd);
+    if(t!==null)placed.push({type:'routine',name:r.name,start:t,end:t+r.duration,duration:r.duration});
+  });
+  return placed;
+}
+function findSlotFor(duration,preferred,fixedBlocks,dayStart,dayEnd){
+  const sorted=[...fixedBlocks].sort((a,b)=>a.start-b.start);
+  function conflicts(s,e){return sorted.some(b=>s<b.end&&e>b.start)}
+  if(preferred>=dayStart&&preferred+duration<=dayEnd&&!conflicts(preferred,preferred+duration))return preferred;
+  for(let t=preferred;t+duration<=dayEnd;t+=15){if(t>=dayStart&&!conflicts(t,t+duration))return t}
+  for(let t=preferred-15;t>=dayStart;t-=15){if(t+duration<=dayEnd&&!conflicts(t,t+duration))return t}
+  return null;
+}
+function findFreeSlots(blocks,dayStart,dayEnd){
+  const sorted=[...blocks].sort((a,b)=>a.start-b.start);
+  const free=[];let cursor=dayStart;
+  sorted.forEach(b=>{if(b.start>cursor)free.push({start:cursor,end:b.start});cursor=Math.max(cursor,b.end)});
+  if(cursor<dayEnd)free.push({start:cursor,end:dayEnd});
+  return free.filter(s=>s.end-s.start>=15);
+}
+
+// Build blocks with absolute start/end minute-of-day for the timeline
+function buildTimelineBlocks(){
+  const config=getWorkConfig();
+  const routine=getRoutineBlocks();
+  const dayStart=config.startHour*60,dayEnd=config.endHour*60;
+  const{todayTasks,overdueTasks}=getMyDayTasks();
+
+  const fixed=[];
+  calendarEvents.forEach(ev=>{if(ev.allDay)return;const s=parseTimeToMinutes(ev.start),e=parseTimeToMinutes(ev.end);if(s!==null&&e!==null)fixed.push({type:'event',name:ev.summary,start:s,end:e,duration:e-s,location:ev.location})});
+  fixed.sort((a,b)=>a.start-b.start);
+
+  const routinePlaced=placeRoutineBlocks([...routine].sort((a,b)=>a.order-b.order),fixed,dayStart,dayEnd);
+  const allFixed=[...fixed,...routinePlaced].sort((a,b)=>a.start-b.start);
+  const free=findFreeSlots(allFixed,dayStart,dayEnd);
+
+  // Sort tasks by priority; if task has _startMin, honor it
+  const tasks=[...overdueTasks,...todayTasks].sort((a,b)=>(PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99));
+  const placedTasks=[];const deferred=[];
+  let slotIdx=0,slotUsed=0;
+
+  tasks.forEach(task=>{
+    const mins=task.minutes||30;
+    // If manually scheduled (via drag), use that start
+    if(task._startMin!==null&&task._startMin!==undefined){
+      placedTasks.push({type:'task',name:task.name,start:task._startMin,end:task._startMin+mins,duration:mins,task});
+      return;
+    }
+    let placed=false;
+    while(slotIdx<free.length){
+      const slot=free[slotIdx];const rem=slot.end-slot.start-slotUsed;
+      if(rem>=mins){const s=slot.start+slotUsed;placedTasks.push({type:'task',name:task.name,start:s,end:s+mins,duration:mins,task});slotUsed+=mins;placed=true;break}
+      else {slotIdx++;slotUsed=0}
+    }
+    if(!placed)deferred.push(task);
+  });
+
+  return {blocks:[...allFixed,...placedTasks].sort((a,b)=>a.start-b.start),deferred,dayStart,dayEnd};
+}
+
+function renderMyDay(){
+  const container=document.getElementById('view-myday');
+  const now=new Date();
+  const dayName=now.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const config=getWorkConfig();
+  const {todayTasks,overdueTasks,other}=getMyDayTasks();
+  const plan=buildTimelineBlocks();
+
+  const todayHrs=todayTasks.reduce((s,t)=>s+t.minutes,0)/60;
+  const overdueHrs=overdueTasks.reduce((s,t)=>s+t.minutes,0)/60;
+  const totalHrs=todayHrs+overdueHrs;
+  const availHrs=config.maxTaskHours;
+  const capPct=Math.min(150,(totalHrs/availHrs)*100);
+  const capColor=capPct>100?'var(--danger)':capPct>80?'var(--warning)':'var(--success)';
+
+  let html=`<div class="myday-header"><h2>${dayName}</h2><div class="date-sub">${todayTasks.length} tasks today &middot; ${totalHrs.toFixed(1)} hrs &middot; ${calendarEvents.length} cal events &middot; ${overdueTasks.length} overdue</div></div>`;
+
+  html+=`<div class="myday-kpi-row">
+    <div class="kpi ${todayTasks.length>0?'amber':'green'}"><div class="value" style="font-size:22px">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
+    <div class="kpi purple"><div class="value" style="font-size:22px">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
+    <div class="kpi ${overdueTasks.length>0?'red':'green'}"><div class="value" style="font-size:22px">${overdueTasks.length}</div><div class="label">Overdue</div></div>
+    <div class="kpi cyan"><div class="value" style="font-size:22px">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
+    <div class="kpi ${capPct>100?'red':'green'}"><div class="value" style="font-size:22px">${plan.deferred.length}</div><div class="label">Deferred</div></div>
+  </div>`;
+
+  html+=`<div class="myday-capacity">
+    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px">${totalHrs.toFixed(1)}h of ${availHrs}h task capacity</span></h3>
+    <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100,capPct)}%;background:${capColor}"></div></div>
+  </div>`;
+
+  if(currentUser&&currentUser.key==='kevin'&&overdueTasks.length>0){
+    html+=`<div class="overdue-notice"><strong>!</strong> ${overdueTasks.length} overdue task${overdueTasks.length!==1?'s':''} auto-rescheduled to today (originals preserved)</div>`;
   }
 
-  // Resolve business name from linked records
-  let businessName = '';
-  if (Array.isArray(businessLinks) && businessLinks.length > 0) {
-    // Linked record objects may have a name property or just be IDs
-    if (typeof businessLinks[0] === 'object' && businessLinks[0].name) {
-      businessName = businessLinks[0].name;
-    } else if (typeof businessLinks[0] === 'string') {
-      businessName = businessLinks[0];
+  html+=`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="runAutoSchedulePreview()">Auto-Schedule</button>
+    <button class="btn" onclick="openPlanner()">Plan My Day</button>
+    <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
+  </div>`;
+
+  if(showRoutineConfig)html+=renderRoutineConfigPanel(getRoutineBlocks(),config);
+
+  // SPLIT: timeline left, other tasks right
+  html+=`<div class="myday-split">`;
+  // LEFT: timeline
+  const totalMinutes=plan.dayEnd-plan.dayStart;
+  const tlHeight=Math.max(500,totalMinutes*PIXELS_PER_MIN);
+  html+=`<div class="tl-wrap">
+    <div class="tl-header"><h3>Daily Timeline ${config.startHour}:00 - ${config.endHour}:00</h3><span style="font-size:11px;color:var(--text-secondary)">Drag to move &middot; drag bottom edge to resize</span></div>
+    <div class="tl-canvas" id="tlCanvas" style="height:${tlHeight}px"
+         ondragover="event.preventDefault()"
+         ondrop="dropOnTimeline(event)">`;
+  // hour lines
+  for(let h=config.startHour;h<=config.endHour;h++){
+    const y=(h*60-plan.dayStart)*PIXELS_PER_MIN;
+    html+=`<div class="tl-hour" style="top:${y-6}px">${h}:00</div>`;
+    html+=`<div class="tl-hour-line" style="top:${y}px"></div>`;
+  }
+  // blocks
+  plan.blocks.forEach(b=>{
+    const top=(b.start-plan.dayStart)*PIXELS_PER_MIN;
+    const height=Math.max(22,(b.end-b.start)*PIXELS_PER_MIN);
+    if(b.type==='event'){
+      html+=`<div class="tl-block event" style="top:${top}px;height:${height}px"><div class="tb-title">${escHtml(b.name)}</div><div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${b.location?escHtml(b.location):'Calendar'}</div></div>`;
+    } else if(b.type==='routine'){
+      html+=`<div class="tl-block routine" style="top:${top}px;height:${height}px"><div class="tb-title">${escHtml(b.name)}</div><div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)}</div></div>`;
+    } else if(b.type==='task'){
+      const t=b.task;
+      const pCls=t.priority?'p-'+t.priority.replace(' ',''):'';
+      const flag=t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':'';
+      html+=`<div class="tl-block task ${pCls}" data-task-id="${t.id}" draggable="true"
+        ondragstart="dragTaskBlock(event,'${t.id}')"
+        onclick="if(!window._tlDragging)openTaskDrawer('${t.id}')"
+        onmousedown="tlBlockMouseDown(event,'${t.id}',${b.start},${b.end-b.start})"
+        style="top:${top}px;height:${height}px">
+        <div class="tb-title">${escHtml(b.name)}${flag}</div>
+        <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${priorityBadge(t.priority)} ${t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''} ${avatarSmall(t)}</div>
+        <div class="resize-handle" onmousedown="event.stopPropagation();tlResizeStart(event,'${t.id}',${b.start},${b.end-b.start})"></div>
+      </div>`;
+    }
+  });
+  html+=`</div></div>`;
+
+  // RIGHT: side panel other tasks
+  html+=`<div class="side-panel">
+    <h3>Other Tasks Available (${other.length})</h3>
+    <input type="text" class="search-box" placeholder="Search..." style="width:100%;margin-bottom:8px" oninput="filterSidePanel(this.value)">
+    <div id="sidePanelList">`;
+  other.sort((a,b)=>(PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99)).slice(0,50).forEach(t=>{
+    html+=`<div class="side-card" draggable="true"
+      ondragstart="dragSideTask(event,'${t.id}')"
+      onclick="openTaskDrawer('${t.id}')"
+      data-name="${escHtml(t.name).toLowerCase()}">
+      <h4>${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag">!</span>':''}</h4>
+      <div class="sc-meta">${priorityBadge(t.priority)}<span>${t.timeEst||formatMins(t.minutes)||'-'}</span>${t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''}${avatarSmall(t)}${t.dueDate?`<span>${t.dueDate}</span>`:''}</div>
+    </div>`;
+  });
+  html+=`</div></div></div>`;
+
+  container.innerHTML=html;
+}
+
+function filterSidePanel(q){
+  q=(q||'').toLowerCase();
+  document.querySelectorAll('#sidePanelList .side-card').forEach(el=>{
+    el.style.display=el.dataset.name.includes(q)?'':'none';
+  });
+}
+
+// Timeline drag & resize
+window._tlDragging=false;
+let _dragCtx=null;
+function tlBlockMouseDown(e,taskId,startMin,durMin){
+  // Native HTML5 drag handles movement; this just flags.
+}
+function dragTaskBlock(e,taskId){
+  window._tlDragging=true;
+  e.dataTransfer.setData('text/plain',JSON.stringify({kind:'tlmove',taskId}));
+  e.dataTransfer.effectAllowed='move';
+  setTimeout(()=>{e.target.classList.add('dragging')},0);
+}
+function dragSideTask(e,taskId){
+  e.dataTransfer.setData('text/plain',JSON.stringify({kind:'sideschedule',taskId}));
+  e.dataTransfer.effectAllowed='move';
+}
+function dropOnTimeline(e){
+  e.preventDefault();
+  let data;try{data=JSON.parse(e.dataTransfer.getData('text/plain'))}catch(err){return}
+  const canvas=document.getElementById('tlCanvas');
+  const rect=canvas.getBoundingClientRect();
+  const config=getWorkConfig();
+  const y=e.clientY-rect.top;
+  let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
+  minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
+  const task=allTasks.find(t=>t.id===data.taskId);if(!task)return;
+  task._startMin=minOfDay;
+  if(data.kind==='sideschedule'){
+    // Schedule for today: set status Today + dueDate today
+    updateTaskField(task.id,'status','Today');
+    updateTaskField(task.id,'dueDate',todayStr());
+  }
+  window._tlDragging=false;
+  renderMyDay();
+  setTimeout(()=>{window._tlDragging=false},100);
+}
+
+// Resize handler — listens to mousemove globally
+function tlResizeStart(e,taskId,startMin,durMin){
+  e.preventDefault();
+  const startY=e.clientY;
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  function onMove(ev){
+    const dy=ev.clientY-startY;
+    let newDur=durMin+Math.round(dy/PIXELS_PER_MIN);
+    newDur=Math.max(SNAP_MIN,Math.round(newDur/SNAP_MIN)*SNAP_MIN);
+    const el=document.querySelector(`.tl-block.task[data-task-id="${taskId}"]`);
+    if(el)el.style.height=Math.max(22,newDur*PIXELS_PER_MIN)+'px';
+    _dragCtx={taskId,newDur};
+  }
+  function onUp(){
+    document.removeEventListener('mousemove',onMove);
+    document.removeEventListener('mouseup',onUp);
+    if(_dragCtx&&_dragCtx.taskId===taskId){
+      const est=minutesToTimeEst(_dragCtx.newDur);
+      updateTaskField(taskId,'timeEst',est);
+      task.minutes=TIME_MINUTES[est]||_dragCtx.newDur;
+      _dragCtx=null;
+      renderMyDay();
     }
   }
-
-  // Resolve project names from linked records
-  let projectNames = [];
-  let projectIds = [];
-  if (Array.isArray(projectLinks)) {
-    projectLinks.forEach(p => {
-      if (typeof p === 'object' && p.name) {
-        projectNames.push(p.name);
-        projectIds.push(p.id || '');
-      } else if (typeof p === 'string') {
-        projectIds.push(p);
-      }
-    });
-  }
-
-  return {
-    id: rec.id,
-    name: gf(rec, F.name) || '(Untitled)',
-    dueDate: gf(rec, F.dueDate) || '',
-    status: statusObj ? statusObj.name : '',
-    statusColor: statusObj ? statusObj.color : '',
-    assignee: assigneeObj ? assigneeObj.name : '',
-    assigneeEmail: assigneeObj ? assigneeObj.email : '',
-    priority: priorityObj ? priorityObj.name : '',
-    timeEst: timeEstObj ? timeEstObj.name : '',
-    minutes,
-    recurring: recurObj ? recurObj.name : '',
-    recurFlag: !!gf(rec, F.recurFlag),
-    someDay: !!gf(rec, F.someDay),
-    description: gf(rec, F.description) || '',
-    notes: gf(rec, F.notes) || '',
-    attachments: gf(rec, F.attachments) || [],
-    category: catObj ? catObj.name : '',
-    completion: gf(rec, F.completion) || '',
-    created: gf(rec, F.created) || '',
-    onHold: !!gf(rec, F.onHold),
-    business: businessName,
-    projectNames,
-    projectIds,
-    origDueDate: gf(rec, F.origDueDate) || '',
-  };
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onUp);
 }
 
-function parseProject(rec) {
-  const statusObj = gf(rec, PF.status);
-  return {
-    id: rec.id,
-    name: gf(rec, PF.name) || '(Untitled Project)',
-    status: statusObj ? statusObj.name : '',
-    start: gf(rec, PF.start) || '',
-    end: gf(rec, PF.end) || '',
-    totalTasks: gf(rec, PF.totalTasks) || 0,
-    completedTasks: gf(rec, PF.completedTasks) || 0,
-    overdue: gf(rec, PF.overdue) || 0,
-    completionPct: gf(rec, PF.completionPct) || 0,
-    completed: !!gf(rec, PF.completed),
-    deliverable: gf(rec, PF.deliverable) || '',
-    defOfDone: gf(rec, PF.defOfDone) || '',
-  };
-}
-
-function isOverdue(t) {
-  if (!t.dueDate || t.status === 'Completed') return false;
-  return t.dueDate < todayStr();
-}
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function teamKey(email) {
-  const m = TEAM.find(t => t.email === email);
-  return m ? m.key : 'other';
-}
-
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
-// Consistent colour from a string (for project cards)
-function strColor(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 60%, 55%)`;
-}
-
-function strColorBg(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); }
-  const hue = Math.abs(hash) % 360;
-  return `hsla(${hue}, 60%, 55%, 0.12)`;
-}
-
-// =======================================
-// SHARED RENDER HELPERS
-// =======================================
-function statusBadge(status) {
-  const cls = {
-    Today: 'badge-today', Overdue: 'badge-overdue', Upcoming: 'badge-upcoming',
-    'To do': 'badge-todo', Completed: 'badge-completed', Approval: 'badge-approval'
-  }[status] || 'badge-todo';
-  return `<span class="badge ${cls}">${escHtml(status)}</span>`;
-}
-
-function priorityBadge(p) {
-  if (!p) return '<span style="color:var(--text-secondary)">-</span>';
-  const cls = { Urgent: 'badge-urgent', High: 'badge-high', Project: 'badge-project', 'Not Urgent': 'badge-not-urgent' }[p] || '';
-  return `<span class="badge ${cls}">${escHtml(p)}</span>`;
-}
-
-function avatarHtml(t) {
-  if (!t.assignee) return '<span style="color:var(--text-secondary)">-</span>';
-  const k = teamKey(t.assigneeEmail);
-  const initial = t.assignee.split(' ').map(w => w[0]).join('').slice(0, 2);
-  return `<div class="assignee-cell"><span class="avatar avatar-${k}">${initial}</span>${escHtml(t.assignee.split(' ')[0])}</div>`;
-}
-
-function avatarSmall(t) {
-  if (!t.assignee) return '';
-  const k = teamKey(t.assigneeEmail);
-  const initial = t.assignee.split(' ').map(w => w[0]).join('').slice(0, 2);
-  return `<span class="avatar avatar-${k}">${initial}</span>`;
-}
-
-function formatDueDate(d) {
-  if (!d) return '<span style="color:var(--text-secondary)">No date</span>';
-  const today = todayStr();
-  const dt = new Date(d + 'T00:00:00');
-  const diff = Math.round((dt - new Date(today + 'T00:00:00')) / 86400000);
-  const formatted = dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
-  if (d < today) return `<span style="color:var(--danger);font-weight:600">${formatted}</span> <span style="font-size:10px;color:var(--danger)">(${Math.abs(diff)}d ago)</span>`;
-  if (d === today) return `<span style="color:var(--warning);font-weight:600">Today</span>`;
-  if (diff <= 7) return `<span style="color:var(--warning)">${formatted}</span> <span style="font-size:10px;color:var(--text-secondary)">(${diff}d)</span>`;
-  return `<span>${formatted}</span>`;
-}
-
-function formatMins(m) {
-  if (!m) return '-';
-  if (m < 60) return m + 'm';
-  const h = Math.floor(m / 60);
-  const r = m % 60;
-  return r ? `${h}h ${r}m` : `${h}h`;
-}
-
-// =======================================
-// TEAM BAR
-// =======================================
-function renderTeamBar() {
-  const counts = { all: 0 };
-  TEAM.forEach(m => counts[m.key] = 0);
-  const active = allTasks.filter(t => t.status !== 'Completed' && !t.someDay);
-  active.forEach(t => {
-    counts.all++;
-    const k = teamKey(t.assigneeEmail);
-    if (counts[k] !== undefined) counts[k]++;
-  });
-
-  let html = `<button class="team-btn ${activeTeam === 'all' ? 'active' : ''}" onclick="setTeam('all')">All<span class="count">${counts.all}</span></button>`;
-  TEAM.forEach(m => {
-    const firstName = m.name.split(' ')[0];
-    html += `<button class="team-btn ${activeTeam === m.key ? 'active' : ''}" onclick="setTeam('${m.key}')">
-      <span class="avatar avatar-${m.key}">${firstName[0]}</span> ${firstName}<span class="count">${counts[m.key]}</span>
-    </button>`;
-  });
-  document.getElementById('teamBar').innerHTML = html;
-}
-
-// =======================================
-// KPI CARDS
-// =======================================
-function renderKPIs() {
-  let tasks = allTasks.filter(t => !t.someDay);
-  if (activeTeam !== 'all') {
-    const member = TEAM.find(m => m.key === activeTeam);
-    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
-  }
-
-  const today = todayStr();
-  const active = tasks.filter(t => t.status !== 'Completed');
-  const overdue = active.filter(t => t.status === 'Overdue' || isOverdue(t));
-  const dueToday = active.filter(t => t.dueDate === today || t.status === 'Today');
-  const upcoming = active.filter(t => t.status === 'Upcoming');
-  const totalHrs = active.reduce((s, t) => s + t.minutes, 0) / 60;
-  const todoCount = active.filter(t => t.status === 'To do').length;
-  const recurringCount = active.filter(t => t.recurring || t.recurFlag).length;
-
-  const kpis = [
-    { label: 'Due Today', value: dueToday.length, cls: dueToday.length > 0 ? 'amber' : 'green' },
-    { label: 'Overdue', value: overdue.length, cls: overdue.length > 0 ? 'red' : 'green' },
-    { label: 'Upcoming', value: upcoming.length, cls: 'accent' },
-    { label: 'To Do', value: todoCount, cls: 'cyan' },
-    { label: 'Hours Allocated', value: totalHrs.toFixed(1), cls: 'purple' },
-    { label: 'Active Tasks', value: active.length, cls: 'green' },
-    { label: 'Recurring', value: recurringCount, cls: 'accent' },
-  ];
-
-  document.getElementById('kpiGrid').innerHTML = kpis.map(k =>
-    `<div class="kpi ${k.cls}"><div class="value">${k.value}</div><div class="label">${k.label}</div></div>`
-  ).join('');
-}
-
-// =======================================
-// MY DAY VIEW
-// =======================================
-function renderMyDay() {
-  const container = document.getElementById('view-myday');
-  const today = todayStr();
-  const now = new Date();
-  const dayName = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const config = getWorkConfig();
-  const routineBlocks = getRoutineBlocks();
-
-  // Get tasks for the active user
-  let tasks = allTasks.filter(t => !t.someDay && t.status !== 'Completed');
-  if (activeTeam !== 'all') {
-    const member = TEAM.find(m => m.key === activeTeam);
-    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
-  }
-
-  const todayTasks = tasks.filter(t => t.status === 'Today' || t.dueDate === today);
-  const overdueTasks = tasks.filter(t => (t.status === 'Overdue' || isOverdue(t)) && t.dueDate !== today && t.status !== 'Today');
-
-  // Sort by priority
-  const priSort = (a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-  todayTasks.sort(priSort);
-  overdueTasks.sort(priSort);
-
-  const todayHrs = todayTasks.reduce((s, t) => s + t.minutes, 0) / 60;
-  const overdueHrs = overdueTasks.reduce((s, t) => s + t.minutes, 0) / 60;
-  const routineMins = routineBlocks.reduce((s, b) => s + b.duration, 0);
-  const totalHrs = todayHrs + overdueHrs;
-  const availHrs = config.maxTaskHours;
-  const capPct = Math.min(150, (totalHrs / availHrs) * 100);
-  const capColor = capPct > 100 ? 'var(--danger)' : capPct > 80 ? 'var(--warning)' : 'var(--success)';
-
-  // Build timeline
-  const plan = buildDayTimeline(todayTasks, overdueTasks, calendarEvents, routineBlocks);
-
-  let html = '';
-
-  // Header
-  html += `<div class="myday-header">
-    <h2>${dayName}</h2>
-    <div class="date-sub">${todayTasks.length} tasks today &middot; ${totalHrs.toFixed(1)} hrs work &middot; ${calendarEvents.length} calendar events &middot; ${overdueTasks.length} overdue</div>
-  </div>`;
-
-  // KPI row
-  html += `<div class="myday-kpi-row">
-    <div class="kpi ${todayTasks.length > 0 ? 'amber' : 'green'}"><div class="value" style="font-size:22px">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
-    <div class="kpi purple"><div class="value" style="font-size:22px">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
-    <div class="kpi ${overdueTasks.length > 0 ? 'red' : 'green'}"><div class="value" style="font-size:22px">${overdueTasks.length}</div><div class="label">Overdue</div></div>
-    <div class="kpi cyan"><div class="value" style="font-size:22px">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
-    <div class="kpi ${capPct > 100 ? 'red' : 'green'}"><div class="value" style="font-size:22px">${availHrs - routineMins/60}h</div><div class="label">Available</div></div>
-  </div>`;
-
-  // Capacity bar
-  html += `<div class="myday-capacity">
-    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px">${totalHrs.toFixed(1)} hrs tasks + ${(routineMins/60).toFixed(1)} hrs routine of ${config.endHour - config.startHour} hrs day</span></h3>
-    <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100, capPct)}%;background:${capColor}"></div></div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-top:4px">
-      <span>${capPct.toFixed(0)}% utilised</span>
-      <span>${capPct > 100 ? 'OVERCOMMITTED - consider deferring tasks' : capPct > 80 ? 'Tight day' : 'Capacity available'}</span>
-    </div>
-  </div>`;
-
-  // Overdue auto-reschedule notice for Kevin
-  if (currentUser && currentUser.key === 'kevin' && overdueTasks.length > 0) {
-    html += `<div class="overdue-notice">
-      <span style="font-size:18px;font-weight:700">!</span>
-      <span>${overdueTasks.length} overdue task${overdueTasks.length !== 1 ? 's' : ''} auto-rescheduled to today (originals preserved)</span>
-    </div>`;
-  }
-
-  // Deferred tasks warning
-  if (plan.deferredTasks.length > 0) {
-    html += `<div class="overdue-notice" style="border-color:rgba(245,158,11,.3);background:var(--warning-bg);color:var(--warning)">
-      <span style="font-size:18px;font-weight:700">!</span>
-      <span>${plan.deferredTasks.length} task${plan.deferredTasks.length !== 1 ? 's' : ''} won't fit today (${(plan.deferredTasks.reduce((s,t) => s + (t.minutes||30), 0)/60).toFixed(1)} hrs) - consider rescheduling</span>
-    </div>`;
-  }
-
-  // Action buttons
-  html += `<div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
-    <button class="btn btn-primary" onclick="openPlanner()">Plan My Day</button>
-    <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
-    ${!GCAL_SCRIPT_URL ? '<span style="font-size:11px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">Calendar: not connected (set GCAL_SCRIPT_URL)</span>' : ''}
-  </div>`;
-
-  // Routine config panel (collapsible)
-  if (showRoutineConfig) {
-    html += renderRoutineConfigPanel(routineBlocks, config);
-  }
-
-  // All-day events
-  const allDayEvents = calendarEvents.filter(ev => ev.allDay);
-  if (allDayEvents.length > 0) {
-    html += `<div class="myday-section">
-      <h3>All-Day Events</h3>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${allDayEvents.map(ev => `<div class="routine-block" style="border-color:var(--info-border)"><span class="cal-badge">ALL DAY</span> ${escHtml(ev.summary)}</div>`).join('')}
-      </div>
-    </div>`;
-  }
-
-  // Timeline view
-  html += `<div class="myday-section">
-    <h3>Daily Timeline <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">${config.startHour}:00 - ${config.endHour}:00</span></h3>`;
-
-  if (plan.timeline.length > 0) {
-    html += `<div class="timeline">`;
-    plan.timeline.forEach(block => {
-      const timeStr = minutesToTime(block.start);
-      const endStr = minutesToTime(block.end);
-      const durStr = formatMins(block.duration);
-
-      if (block.type === 'event') {
-        html += `<div class="tl-slot">
-          <div class="tl-time">${timeStr}</div>
-          <div class="tl-dot event"></div>
-          <div class="tl-card event">
-            <h4>${escHtml(block.name)}</h4>
-            <div class="tl-meta"><span>${timeStr} - ${endStr}</span><span>${durStr}</span>${block.location ? `<span>${escHtml(block.location)}</span>` : ''}<span class="cal-badge">CALENDAR</span></div>
-          </div>
-        </div>`;
-      } else if (block.type === 'routine') {
-        html += `<div class="tl-slot">
-          <div class="tl-time">${timeStr}</div>
-          <div class="tl-dot routine"></div>
-          <div class="tl-card routine">
-            <h4>${escHtml(block.name)}</h4>
-            <div class="tl-meta"><span>${timeStr} - ${endStr}</span><span>${durStr}</span></div>
-          </div>
-        </div>`;
-      } else if (block.type === 'task') {
-        const t = block.task;
-        const borderStyle = block.isOverdue ? 'border-color:rgba(239,68,68,.3)' : '';
-        html += `<div class="tl-slot">
-          <div class="tl-time">${timeStr}</div>
-          <div class="tl-dot task"></div>
-          <div class="tl-card task" style="${borderStyle}">
-            <h4>${escHtml(block.name)}</h4>
-            <div class="tl-meta">
-              <span>${timeStr} - ${endStr}</span><span>${durStr}</span>
-              ${priorityBadge(t.priority)}
-              ${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
-              ${avatarSmall(t)}
-              ${block.isOverdue ? '<span style="color:var(--danger);font-weight:600">OVERDUE</span>' : ''}
-            </div>
-            <div class="tl-actions">
-              <div class="status-dd">
-                <button class="btn btn-sm" onclick="event.stopPropagation();toggleStatusMenu('tl-${t.id}')">Status</button>
-                <div class="status-dd-menu" id="sm-tl-${t.id}">
-                  ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s =>
-                    `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`
-                  ).join('')}
-                </div>
-              </div>
-              <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--success)">Complete</button>
-            </div>
-          </div>
-        </div>`;
-      }
-    });
-    html += `</div>`;
-  } else {
-    html += `<div class="empty-state" style="padding:30px"><p>No timeline items. Add tasks to today or connect Google Calendar.</p></div>`;
-  }
-  html += `</div>`;
-
-  // Deferred tasks section
-  if (plan.deferredTasks.length > 0) {
-    html += `<div class="myday-section">
-      <h3><span style="color:var(--warning)">Won't Fit Today</span> <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">${plan.deferredTasks.length} tasks</span></h3>
-      <div class="myday-tasks">
-        ${plan.deferredTasks.map(t => mydayTaskCard(t, false)).join('')}
-      </div>
-    </div>`;
-  }
-
-  // Unscheduled today tasks (those with no time estimate — shown as a list below timeline)
-  const unscheduledToday = todayTasks.filter(t => !plan.scheduledTasks.some(st => st.task && st.task.id === t.id) && !plan.deferredTasks.includes(t));
-  if (unscheduledToday.length > 0) {
-    html += `<div class="myday-section">
-      <h3>Also Today <span style="font-size:12px;font-weight:400;color:var(--text-secondary)">${unscheduledToday.length} tasks</span></h3>
-      <div class="myday-tasks">
-        ${unscheduledToday.map(t => mydayTaskCard(t, false)).join('')}
-      </div>
-    </div>`;
-  }
-
-  container.innerHTML = html;
-}
-
-function mydayTaskCard(t, isOverdue) {
-  const borderColor = isOverdue ? 'border-color:var(--danger)' : '';
-  return `<div class="myday-task" style="${borderColor}">
-    <div class="task-time">${t.timeEst || formatMins(t.minutes) || '-'}</div>
-    <div class="task-info">
-      <h4>${escHtml(t.name)}</h4>
-      <div class="meta">
-        ${priorityBadge(t.priority)}
-        ${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
-        ${avatarSmall(t)}
-        ${isOverdue && t.dueDate ? `<span style="color:var(--danger)">${formatDueDate(t.dueDate)}</span>` : ''}
-        ${statusBadge(t.status)}
-      </div>
-    </div>
-    <div style="display:flex;gap:4px">
-      <div class="status-dd">
-        <button class="btn btn-sm" onclick="event.stopPropagation();toggleStatusMenu('md-${t.id}')">Status</button>
-        <div class="status-dd-menu" id="sm-md-${t.id}">
-          ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s =>
-            `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`
-          ).join('')}
-        </div>
-      </div>
-      <button class="btn btn-sm" onclick="event.stopPropagation();updateStatus('${t.id}','Completed')" style="color:var(--success)">Done</button>
-    </div>
-  </div>`;
-}
-
-// =======================================
-// ROUTINE CONFIG PANEL
-// =======================================
-function renderRoutineConfigPanel(routineBlocks, config) {
-  let html = `<div class="routine-config" id="routineConfigPanel">
-    <h3>Routine Configuration <button class="btn btn-sm" onclick="toggleRoutineConfig()" style="float:right">Close</button></h3>
-    <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Set once, the planner respects these as hard blocks every day.</p>
-
-    <div style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:600;margin-bottom:6px">Working Hours</div>
+// ======================================================
+// ROUTINE CONFIG (unchanged)
+// ======================================================
+function renderRoutineConfigPanel(routineBlocks,config){
+  let html=`<div class="routine-config"><h3>Routine Configuration <button class="btn btn-sm" onclick="toggleRoutineConfig()" style="float:right">Close</button></h3>
+    <div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;margin-bottom:6px">Working Hours</div>
       <div style="display:flex;gap:10px;align-items:center;font-size:13px">
-        <label>Start: <input type="number" id="cfgStartHour" value="${config.startHour}" min="5" max="12" style="width:50px"> :00</label>
-        <label>End: <input type="number" id="cfgEndHour" value="${config.endHour}" min="14" max="22" style="width:50px"> :00</label>
-        <label>Max task hrs: <input type="number" id="cfgMaxHrs" value="${config.maxTaskHours}" min="2" max="12" style="width:50px"></label>
-      </div>
-    </div>
-
+        <label>Start: <input type="number" id="cfgStartHour" value="${config.startHour}" min="5" max="12" style="width:50px"></label>
+        <label>End: <input type="number" id="cfgEndHour" value="${config.endHour}" min="14" max="22" style="width:50px"></label>
+        <label>Max hrs: <input type="number" id="cfgMaxHrs" value="${config.maxTaskHours}" min="2" max="12" style="width:50px"></label>
+      </div></div>
     <div style="font-size:12px;font-weight:600;margin-bottom:6px">Routine Blocks</div>
     <div id="routineBlockRows">`;
-
-  routineBlocks.forEach((b, i) => {
-    html += `<div class="routine-row" data-idx="${i}">
-      <input type="text" value="${escHtml(b.name)}" placeholder="Name" style="width:120px" data-field="name">
-      <label>Duration: <input type="number" value="${b.duration}" min="15" max="180" step="15" data-field="duration"> min</label>
-      <label>Preferred:
-        <select data-field="preferred">
-          <option value="morning" ${b.preferred === 'morning' ? 'selected' : ''}>Morning</option>
-          <option value="midday" ${b.preferred === 'midday' ? 'selected' : ''}>Midday</option>
-          <option value="afternoon" ${b.preferred === 'afternoon' ? 'selected' : ''}>Afternoon</option>
-        </select>
-      </label>
-      <label style="font-size:11px">Rule:
-        <select data-field="rule">
-          <option value="" ${!b.rule ? 'selected' : ''}>None</option>
-          <option value="before-run-2h" ${b.rule === 'before-run-2h' ? 'selected' : ''}>2h before Run</option>
-        </select>
-      </label>
+  routineBlocks.forEach((b,i)=>{
+    html+=`<div class="routine-row" data-idx="${i}">
+      <input type="text" value="${escHtml(b.name)}" style="width:120px" data-field="name">
+      <label>Dur: <input type="number" value="${b.duration}" min="15" max="180" step="15" data-field="duration"> min</label>
+      <label>Pref: <select data-field="preferred">
+        <option value="morning" ${b.preferred==='morning'?'selected':''}>Morning</option>
+        <option value="midday" ${b.preferred==='midday'?'selected':''}>Midday</option>
+        <option value="afternoon" ${b.preferred==='afternoon'?'selected':''}>Afternoon</option>
+      </select></label>
+      <label>Rule: <select data-field="rule">
+        <option value="" ${!b.rule?'selected':''}>None</option>
+        <option value="before-run-2h" ${b.rule==='before-run-2h'?'selected':''}>2h before Run</option>
+      </select></label>
       <button class="btn btn-sm btn-danger" onclick="removeRoutineBlock(${i})">X</button>
     </div>`;
   });
-
-  html += `</div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn btn-sm" onclick="addRoutineBlock()">+ Add Block</button>
-      <button class="btn btn-sm btn-primary" onclick="saveRoutineConfig()">Save</button>
-      <button class="btn btn-sm" onclick="resetRoutineConfig()">Reset to Defaults</button>
-    </div>
-  </div>`;
+  html+=`</div><div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn btn-sm" onclick="addRoutineBlock()">+ Add</button>
+    <button class="btn btn-sm btn-primary" onclick="saveRoutineConfig()">Save</button>
+    <button class="btn btn-sm" onclick="resetRoutineConfig()">Reset</button>
+  </div></div>`;
   return html;
 }
-
-function toggleRoutineConfig() {
-  showRoutineConfig = !showRoutineConfig;
-  renderMyDay();
-}
-
-function addRoutineBlock() {
-  const blocks = getRoutineBlocks();
-  blocks.push({ name: 'New Block', duration: 30, preferred: 'morning', fixed: false, order: blocks.length + 1 });
+function toggleRoutineConfig(){showRoutineConfig=!showRoutineConfig;renderMyDay()}
+function addRoutineBlock(){const b=getRoutineBlocks();b.push({name:'New',duration:30,preferred:'morning',fixed:false,order:b.length+1});saveRoutineBlocks(b);renderMyDay()}
+function removeRoutineBlock(i){const b=getRoutineBlocks();b.splice(i,1);saveRoutineBlocks(b);renderMyDay()}
+function saveRoutineConfig(){
+  const rows=document.querySelectorAll('#routineBlockRows .routine-row');const blocks=[];
+  rows.forEach((r,i)=>blocks.push({
+    name:r.querySelector('[data-field="name"]').value||'Block',
+    duration:parseInt(r.querySelector('[data-field="duration"]').value)||30,
+    preferred:r.querySelector('[data-field="preferred"]').value||'morning',
+    rule:r.querySelector('[data-field="rule"]').value||'',fixed:false,order:i+1}));
   saveRoutineBlocks(blocks);
-  renderMyDay();
+  saveWorkConfig({startHour:parseInt(document.getElementById('cfgStartHour').value)||8,endHour:parseInt(document.getElementById('cfgEndHour').value)||18,maxTaskHours:parseInt(document.getElementById('cfgMaxHrs').value)||6});
+  showRoutineConfig=false;renderMyDay();
 }
+function resetRoutineConfig(){localStorage.removeItem('_task_routine');localStorage.removeItem('_task_workconfig');showRoutineConfig=false;renderMyDay()}
 
-function removeRoutineBlock(idx) {
-  const blocks = getRoutineBlocks();
-  blocks.splice(idx, 1);
-  saveRoutineBlocks(blocks);
-  renderMyDay();
-}
+// ======================================================
+// SMART CROSS-DAY AUTO-SCHEDULE
+// ======================================================
+function scheduleTasksAcrossDays(){
+  const member=TEAM.find(m=>m.key===activeTeam)||(currentUser?TEAM.find(m=>m.key===currentUser.key):null);
+  if(!member)return{moves:[],warnings:['Pick a user first']};
 
-function saveRoutineConfig() {
-  const rows = document.querySelectorAll('#routineBlockRows .routine-row');
-  const blocks = [];
-  rows.forEach((row, i) => {
-    blocks.push({
-      name: row.querySelector('[data-field="name"]').value || 'Block',
-      duration: parseInt(row.querySelector('[data-field="duration"]').value) || 30,
-      preferred: row.querySelector('[data-field="preferred"]').value || 'morning',
-      rule: row.querySelector('[data-field="rule"]').value || '',
-      fixed: false,
-      order: i + 1,
-    });
+  const config=getWorkConfig();
+  const routineMins=getRoutineBlocks().reduce((s,b)=>s+b.duration,0);
+  const workHrs=config.endHour-config.startHour;
+  const dailyCapMin=Math.max(0,workHrs*60-routineMins);
+
+  let tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
+  tasks.sort((a,b)=>{
+    // Hard deadlines first, then priority
+    if(a.hardDeadline!==b.hardDeadline)return a.hardDeadline?-1:1;
+    return (PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99);
   });
-  saveRoutineBlocks(blocks);
 
-  const config = {
-    startHour: parseInt(document.getElementById('cfgStartHour').value) || 8,
-    endHour: parseInt(document.getElementById('cfgEndHour').value) || 18,
-    maxTaskHours: parseInt(document.getElementById('cfgMaxHrs').value) || 6,
-  };
-  saveWorkConfig(config);
+  // Day->minutes used map; seed with today's calendar events
+  const usage={};
+  const today=todayStr();
+  usage[today]=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?en-st:0)},0);
 
-  showRoutineConfig = false;
-  renderMyDay();
-}
+  const moves=[];const warnings=[];
+  let cursorDay=today;
+  function nextWorkDay(d){let x=addDays(d,1);while(isWeekend(x))x=addDays(x,1);return x}
+  if(isWeekend(cursorDay))cursorDay=nextWorkDay(cursorDay);
 
-function resetRoutineConfig() {
-  localStorage.removeItem('_task_routine');
-  localStorage.removeItem('_task_workconfig');
-  showRoutineConfig = false;
-  renderMyDay();
-}
-
-// =======================================
-// PLANNER OVERLAY
-// =======================================
-function openPlanner() {
-  const today = todayStr();
-  const config = getWorkConfig();
-  const routineBlocks = getRoutineBlocks();
-
-  let tasks = allTasks.filter(t => !t.someDay && t.status !== 'Completed');
-  if (activeTeam !== 'all') {
-    const member = TEAM.find(m => m.key === activeTeam);
-    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
-  }
-
-  const todayTasks = tasks.filter(t => t.status === 'Today' || t.dueDate === today);
-  const overdueTasks = tasks.filter(t => (t.status === 'Overdue' || isOverdue(t)) && t.dueDate !== today && t.status !== 'Today');
-  const plan = buildDayTimeline(todayTasks, overdueTasks, calendarEvents, routineBlocks);
-
-  const totalMins = plan.totalTaskMins;
-  const freeMins = plan.totalFreeMins;
-  const overcommitted = totalMins > freeMins;
-
-  let html = `<div class="planner-overlay" id="plannerOverlay" onclick="if(event.target===this)closePlanner()">
-    <div class="planner-card">
-      <h2>Plan My Day</h2>
-      <p>Smart scheduling based on your calendar, routine, and task priorities.</p>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
-        <div class="kpi ${overcommitted ? 'red' : 'green'}" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(totalMins)}</div><div class="label">Task Time</div></div>
-        <div class="kpi cyan" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(freeMins)}</div><div class="label">Free Time</div></div>
-      </div>`;
-
-  if (overcommitted) {
-    html += `<div class="overdue-notice" style="margin-bottom:12px">
-      <span style="font-size:16px;font-weight:700">!</span>
-      <span>Your day is overcommitted by ${formatMins(totalMins - freeMins)}. Suggested deferrals below.</span>
-    </div>`;
-
-    // Suggest deferring lowest-priority tasks
-    const sortedForDeferral = [...todayTasks, ...overdueTasks].sort((a, b) => {
-      // Defer Not Urgent first, then furthest deadline
-      const priDiff = (PRIORITY_ORDER[b.priority] ?? 99) - (PRIORITY_ORDER[a.priority] ?? 99);
-      if (priDiff !== 0) return priDiff;
-      if (!a.dueDate) return -1;
-      if (!b.dueDate) return 1;
-      return b.dueDate.localeCompare(a.dueDate);
-    });
-
-    let excessMins = totalMins - freeMins;
-    const toDeferSuggestions = [];
-    sortedForDeferral.forEach(t => {
-      if (excessMins <= 0) return;
-      toDeferSuggestions.push(t);
-      excessMins -= (t.minutes || 30);
-    });
-
-    if (toDeferSuggestions.length > 0) {
-      html += `<div style="font-size:13px;font-weight:600;margin-bottom:8px">Suggested to defer:</div>`;
-      toDeferSuggestions.forEach(t => {
-        html += `<div class="planner-suggestion">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-            <span>${escHtml(t.name)}</span>
-            <button class="btn btn-sm" onclick="deferTask('${t.id}')">Defer to tomorrow</button>
-          </div>
-          <div class="reason">${t.priority || 'No priority'} - ${formatMins(t.minutes || 30)} - ${t.business || 'No business'}</div>
-        </div>`;
-      });
+  tasks.forEach(task=>{
+    const mins=task.minutes||30;
+    if(task.hardDeadline){
+      // Leave it where it is — but track usage
+      if(task.dueDate){usage[task.dueDate]=(usage[task.dueDate]||0)+mins}
+      return;
     }
-  } else {
-    html += `<div style="background:var(--success-bg);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--success)">
-      Your day looks good! All ${todayTasks.length + overdueTasks.length} tasks fit within available time.
-    </div>`;
-  }
-
-  // Scheduled summary
-  html += `<div style="font-size:13px;font-weight:600;margin-bottom:8px;margin-top:12px">Scheduled (${plan.scheduledTasks.length} tasks):</div>`;
-  plan.scheduledTasks.forEach(block => {
-    html += `<div class="planner-suggestion" style="padding:8px 12px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:11px;color:var(--accent);min-width:90px">${minutesToTime(block.start)} - ${minutesToTime(block.end)}</span>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(block.name)}</span>
-        <span style="font-size:11px;color:var(--text-secondary)">${formatMins(block.duration)}</span>
-      </div>
-    </div>`;
-  });
-
-  html += `<div class="planner-actions">
-      <button class="btn" onclick="closePlanner()">Close</button>
-    </div>
-    </div>
-  </div>`;
-
-  document.body.insertAdjacentHTML('beforeend', html);
-}
-
-function closePlanner() {
-  const overlay = document.getElementById('plannerOverlay');
-  if (overlay) overlay.remove();
-}
-
-async function deferTask(taskId) {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-  await updateTaskDueDate(taskId, tomorrowStr);
-  closePlanner();
-  renderMyDay();
-}
-
-// =======================================
-// TASK LIST VIEW
-// =======================================
-function getFilteredTasks() {
-  // Task List only shows Urgent, High, Not Urgent (NOT Project)
-  let tasks = allTasks.filter(t => !t.someDay && t.priority !== 'Project');
-
-  // Team filter
-  if (activeTeam !== 'all') {
-    const member = TEAM.find(m => m.key === activeTeam);
-    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
-  }
-
-  // Status filter
-  const sf = document.getElementById('filterStatus').value;
-  if (sf) {
-    if (sf === 'Overdue') {
-      tasks = tasks.filter(t => t.status === 'Overdue' || isOverdue(t));
-    } else {
-      tasks = tasks.filter(t => t.status === sf);
-    }
-  }
-
-  // Priority filter
-  const pf = document.getElementById('filterPriority').value;
-  if (pf) tasks = tasks.filter(t => t.priority === pf);
-
-  // Business filter
-  const bf = document.getElementById('filterBusiness').value;
-  if (bf) tasks = tasks.filter(t => t.business === bf);
-
-  // Search
-  const q = document.getElementById('searchBox').value.toLowerCase().trim();
-  if (q) tasks = tasks.filter(t =>
-    t.name.toLowerCase().includes(q) ||
-    t.assignee.toLowerCase().includes(q) ||
-    t.description.toLowerCase().includes(q) ||
-    t.business.toLowerCase().includes(q)
-  );
-
-  // Sort
-  const sortKey = document.getElementById('sortBy').value;
-  tasks.sort((a, b) => {
-    switch (sortKey) {
-      case 'due-asc':
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      case 'due-desc':
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return b.dueDate.localeCompare(a.dueDate);
-      case 'priority':
-        return (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-      case 'status':
-        return (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
-      case 'name':
-        return a.name.localeCompare(b.name);
-      case 'time-desc':
-        return b.minutes - a.minutes;
-      default:
-        return 0;
-    }
-  });
-
-  return tasks;
-}
-
-function renderTasks() {
-  const tasks = getFilteredTasks();
-  const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
-  if (currentPage > totalPages) currentPage = totalPages;
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const page = tasks.slice(start, start + PAGE_SIZE);
-
-  let html = '';
-  page.forEach((t, i) => {
-    const idx = start + i + 1;
-    const isExp = expandedTask === t.id;
-    const overdueFlag = isOverdue(t);
-    const rowStyle = overdueFlag && t.status !== 'Overdue' ? ' style="border-left:3px solid var(--danger)"' : '';
-    const isChecked = selectedTasks.has(t.id);
-
-    html += `<tr class="${isExp ? 'expanded' : ''}"${rowStyle}>
-      <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
-      <td style="color:var(--text-secondary)" onclick="toggleDetail('${t.id}')">${idx}</td>
-      <td onclick="toggleDetail('${t.id}')"><div class="task-name">${escHtml(t.name)}</div>${t.recurring ? `<span class="badge badge-recurring">${escHtml(t.recurring)}</span>` : ''}</td>
-      <td onclick="toggleDetail('${t.id}')">${formatDueDate(t.dueDate)}</td>
-      <td onclick="toggleDetail('${t.id}')">${statusBadge(overdueFlag && t.status !== 'Overdue' && t.status !== 'Completed' ? 'Overdue' : t.status)}</td>
-      <td onclick="toggleDetail('${t.id}')">${avatarHtml(t)}</td>
-      <td onclick="toggleDetail('${t.id}')">${priorityBadge(t.priority)}</td>
-      <td onclick="toggleDetail('${t.id}')">${t.timeEst || (t.minutes ? Math.round(t.minutes) + 'm' : '<span style="color:var(--text-secondary)">-</span>')}</td>
-      <td onclick="toggleDetail('${t.id}')">${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : '<span style="color:var(--text-secondary)">-</span>'}</td>
-      <td onclick="toggleDetail('${t.id}')">${t.recurring ? `<span style="color:var(--accent)">${escHtml(t.recurring)}</span>` : (t.recurFlag ? '<span style="color:var(--accent)">Yes</span>' : '<span style="color:var(--text-secondary)">-</span>')}</td>
-    </tr>`;
-
-    // Detail row
-    html += `<tr class="detail-row ${isExp ? 'open' : ''}" id="detail-${t.id}"><td colspan="10"><div class="detail-content">`;
-    if (t.description || t.notes) {
-      html += `<h4>Description</h4><div class="detail-desc">${escHtml(t.description || t.notes)}</div>`;
-    }
-    html += `<div class="detail-meta">`;
-    if (t.category) html += `<span>Category: <strong>${escHtml(t.category)}</strong></span>`;
-    if (t.business) html += `<span>Business: <strong>${escHtml(t.business)}</strong></span>`;
-    if (t.projectNames.length) html += `<span>Project: <strong>${t.projectNames.map(escHtml).join(', ')}</strong></span>`;
-    if (t.created) html += `<span>Created: ${new Date(t.created).toLocaleDateString('en-GB')}</span>`;
-    if (t.completion) html += `<span>Completed: ${new Date(t.completion).toLocaleDateString('en-GB')}</span>`;
-    if (t.attachments.length) html += `<span>${t.attachments.length} attachment(s)</span>`;
-    if (t.onHold) html += `<span style="color:var(--warning)">On Hold</span>`;
-    html += `</div>`;
-
-    if (t.attachments.length) {
-      html += `<div style="margin-top:8px">`;
-      t.attachments.forEach(a => {
-        html += `<a href="${escHtml(a.url)}" target="_blank" style="font-size:12px;margin-right:12px">Attachment: ${escHtml(a.filename)}</a>`;
-      });
-      html += `</div>`;
-    }
-
-    html += `<div class="detail-actions">`;
-    html += `<div class="status-dd"><button onclick="event.stopPropagation();toggleStatusMenu('${t.id}')">Change Status</button>
-      <div class="status-dd-menu" id="sm-${t.id}">
-        ${['Today','Upcoming','To do','Approval','Completed','Overdue'].map(s => `<div class="status-dd-item" onclick="event.stopPropagation();updateStatus('${t.id}','${s}')">${s}</div>`).join('')}
-      </div></div>`;
-    html += `<a href="https://airtable.com/${BASE_ID}/${TASKS_TABLE}/${t.id}" target="_blank"><button onclick="event.stopPropagation()">Open in Airtable</button></a>`;
-    html += `</div>`;
-    html += `</div></td></tr>`;
-  });
-
-  if (!page.length) {
-    html = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found matching your filters.</td></tr>`;
-  }
-
-  document.getElementById('taskBody').innerHTML = html;
-  document.getElementById('showingCount').textContent = `Showing ${page.length} of ${tasks.length} tasks`;
-  document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages}`;
-  document.getElementById('prevPage').disabled = currentPage <= 1;
-  document.getElementById('nextPage').disabled = currentPage >= totalPages;
-
-  // Bulk bar
-  updateBulkBar();
-}
-
-function toggleDetail(id) {
-  expandedTask = expandedTask === id ? null : id;
-  renderTasks();
-}
-
-function changePage(dir) {
-  currentPage += dir;
-  renderTasks();
-  document.querySelector('.task-table-wrap').scrollTop = 0;
-}
-
-// =======================================
-// BULK ACTIONS
-// =======================================
-function toggleTaskSelect(id, checked) {
-  if (checked) { selectedTasks.add(id); } else { selectedTasks.delete(id); }
-  updateBulkBar();
-}
-
-function toggleSelectAll(checked) {
-  const tasks = getFilteredTasks();
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const page = tasks.slice(start, start + PAGE_SIZE);
-  page.forEach(t => {
-    if (checked) { selectedTasks.add(t.id); } else { selectedTasks.delete(t.id); }
-  });
-  renderTasks();
-}
-
-function clearSelection() {
-  selectedTasks.clear();
-  document.getElementById('selectAll').checked = false;
-  renderTasks();
-}
-
-function updateBulkBar() {
-  const bar = document.getElementById('bulkBar');
-  if (selectedTasks.size > 0) {
-    bar.style.display = 'flex';
-    document.getElementById('bulkCount').textContent = selectedTasks.size;
-  } else {
-    bar.style.display = 'none';
-  }
-}
-
-async function bulkComplete() {
-  if (selectedTasks.size === 0) return;
-  const ids = [...selectedTasks];
-  const promises = ids.map(id => patchTask(id, { [F.status]: { name: 'Completed' } }));
-  try {
-    await Promise.all(promises);
-    ids.forEach(id => {
-      const t = allTasks.find(x => x.id === id);
-      if (t) { t.status = 'Completed'; t.completion = new Date().toISOString(); }
-    });
-    selectedTasks.clear();
-    renderAll();
-  } catch(e) { console.error('Bulk complete failed:', e); }
-}
-
-async function bulkReschedule() {
-  if (selectedTasks.size === 0) return;
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-  const ids = [...selectedTasks];
-  const promises = ids.map(id => patchTask(id, { [F.dueDate]: tomorrowStr }));
-  try {
-    await Promise.all(promises);
-    ids.forEach(id => {
-      const t = allTasks.find(x => x.id === id);
-      if (t) t.dueDate = tomorrowStr;
-    });
-    selectedTasks.clear();
-    renderAll();
-  } catch(e) { console.error('Bulk reschedule failed:', e); }
-}
-
-// =======================================
-// STATUS MENU & PATCH
-// =======================================
-function toggleStatusMenu(id) {
-  const menu = document.getElementById('sm-' + id);
-  if (!menu) return;
-  document.querySelectorAll('.status-dd-menu.open').forEach(m => { if (m !== menu) m.classList.remove('open'); });
-  menu.classList.toggle('open');
-}
-
-document.addEventListener('click', () => {
-  document.querySelectorAll('.status-dd-menu.open').forEach(m => m.classList.remove('open'));
-});
-
-async function patchTask(taskId, fields) {
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`;
-  return fetch(url, {
-    method: 'PATCH',
-    headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields, typecast: true })
-  });
-}
-
-async function updateStatus(taskId, newStatus) {
-  try {
-    const resp = await patchTask(taskId, { [F.status]: { name: newStatus } });
-    if (resp.ok) {
-      const task = allTasks.find(t => t.id === taskId);
-      if (task) {
-        task.status = newStatus;
-        if (newStatus === 'Completed') task.completion = new Date().toISOString();
+    let day=cursorDay;
+    let tries=0;
+    while(tries<60){
+      const used=usage[day]||0;
+      if(used+mins<=dailyCapMin){
+        // Check: if there's a hard deadline task downstream, don't schedule past its date
+        // For simplicity: just fit.
+        if(task.dueDate!==day){moves.push({task,from:task.dueDate,to:day})}
+        usage[day]=used+mins;
+        return;
       }
-      renderAll();
+      day=nextWorkDay(day);tries++;
     }
-  } catch (e) { console.error('Failed to update status:', e); }
-}
-
-async function updateTaskDueDate(taskId, newDate) {
-  try {
-    const resp = await patchTask(taskId, { [F.dueDate]: newDate });
-    if (resp.ok) {
-      const task = allTasks.find(t => t.id === taskId);
-      if (task) task.dueDate = newDate;
-      renderAll();
-    }
-  } catch (e) { console.error('Failed to update due date:', e); }
-}
-
-// =======================================
-// KANBAN VIEW
-// =======================================
-function getWeeksOfMonth(year, month) {
-  // month is 0-indexed
-  const weeks = [
-    { label: 'Week 1', start: 1, end: 7 },
-    { label: 'Week 2', start: 8, end: 14 },
-    { label: 'Week 3', start: 15, end: 21 },
-    { label: 'Week 4', start: 22, end: 31 },
-  ];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  return weeks.map(w => {
-    const actualEnd = Math.min(w.end, daysInMonth);
-    const startStr = `${year}-${String(month+1).padStart(2,'0')}-${String(w.start).padStart(2,'0')}`;
-    const endStr = `${year}-${String(month+1).padStart(2,'0')}-${String(actualEnd).padStart(2,'0')}`;
-    const startDisplay = new Date(year, month, w.start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    const endDisplay = new Date(year, month, actualEnd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    return { ...w, actualEnd, startStr, endStr, rangeDisplay: `${startDisplay} - ${endDisplay}` };
+    warnings.push(`Could not schedule "${task.name}" within 60 days`);
   });
+
+  return{moves,warnings};
 }
 
-function getKanbanTasks() {
-  // Kanban only shows Project priority tasks
-  let tasks = allTasks.filter(t => !t.someDay && t.priority === 'Project' && t.status !== 'Completed');
-
-  if (activeTeam !== 'all') {
-    const member = TEAM.find(m => m.key === activeTeam);
-    if (member) tasks = tasks.filter(t => t.assigneeEmail === member.email);
+function runAutoSchedulePreview(){
+  const {moves,warnings}=scheduleTasksAcrossDays();
+  closeDrawer();
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='autoModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  let html=`<div class="modal"><h2>Auto-Schedule Preview</h2>`;
+  if(moves.length===0)html+=`<p>No changes needed — everything fits in its current day.</p>`;
+  else{
+    html+=`<p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
+    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
+    <table class="task-table"><thead><tr><th>Task</th><th>From</th><th>To</th><th>Time</th></tr></thead><tbody>
+    ${moves.map(m=>`<tr><td>${escHtml(m.task.name)}</td><td>${m.from||'-'}</td><td><strong>${m.to}</strong></td><td>${m.task.timeEst||formatMins(m.task.minutes)}</td></tr>`).join('')}
+    </tbody></table></div>`;
   }
-
-  if (kanbanProjectFilter) {
-    tasks = tasks.filter(t => t.projectIds.includes(kanbanProjectFilter) || t.projectNames.some(n => n === kanbanProjectFilter));
+  if(warnings.length)html+=`<div style="color:var(--danger);font-size:12px;margin-top:10px">${warnings.map(escHtml).join('<br>')}</div>`;
+  html+=`<div class="modal-actions">
+    <button class="btn" onclick="document.getElementById('autoModal').remove()">Cancel</button>
+    ${moves.length?`<button class="btn btn-primary" onclick="applyAutoSchedule()">Apply ${moves.length} changes</button>`:''}
+  </div></div>`;
+  overlay.innerHTML=html;
+  document.body.appendChild(overlay);
+  window._pendingMoves=moves;
+}
+async function applyAutoSchedule(){
+  const moves=window._pendingMoves||[];
+  document.getElementById('autoModal').remove();
+  for(let i=0;i<moves.length;i+=8){
+    await Promise.all(moves.slice(i,i+8).map(m=>updateTaskField(m.task.id,'dueDate',m.to)));
   }
+  toast(`Moved ${moves.length} tasks`);
+  renderAll();
+}
 
+// ======================================================
+// KEVIN OVERDUE AUTO-RESCHEDULE (keep)
+// ======================================================
+async function autoRescheduleOverdue(){
+  if(!currentUser||currentUser.key!=='kevin')return{count:0};
+  const today=todayStr();
+  const member=TEAM.find(m=>m.key==='kevin');if(!member)return{count:0};
+  const overdue=allTasks.filter(t=>t.assigneeEmail===member.email&&t.dueDate&&t.dueDate<today&&t.status!=='Completed'&&!t.someDay&&!t.hardDeadline);
+  if(overdue.length===0)return{count:0};
+  const patches=overdue.map(t=>{
+    const fields={[F.dueDate]:today};
+    if(!t.origDueDate)fields[F.origDueDate]=t.dueDate;
+    return patchTask(t.id,fields).then(()=>{t.origDueDate=t.origDueDate||t.dueDate;t.dueDate=today}).catch(e=>console.warn('resched fail',t.id,e));
+  });
+  for(let i=0;i<patches.length;i+=10){await Promise.all(patches.slice(i,i+10));if(i+10<patches.length)await new Promise(r=>setTimeout(r,250))}
+  return{count:overdue.length};
+}
+
+// ======================================================
+// PLANNER (lightweight summary modal — keeps existing button)
+// ======================================================
+function openPlanner(){
+  const {todayTasks,overdueTasks}=getMyDayTasks();
+  const plan=buildTimelineBlocks();
+  const totalMins=todayTasks.concat(overdueTasks).reduce((s,t)=>s+(t.minutes||30),0);
+  const scheduledMins=plan.blocks.filter(b=>b.type==='task').reduce((s,b)=>s+b.duration,0);
+
+  const overlay=document.createElement('div');
+  overlay.className='planner-overlay';overlay.id='plannerOverlay';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  let html=`<div class="planner-card"><h2>Plan My Day</h2><p>Calendar + routine + priority order.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div class="kpi ${plan.deferred.length?'red':'green'}" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(totalMins)}</div><div class="label">Task Time</div></div>
+      <div class="kpi cyan" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(scheduledMins)}</div><div class="label">Scheduled</div></div>
+    </div>`;
+  if(plan.deferred.length){
+    html+=`<div style="font-size:13px;font-weight:600;margin-bottom:8px">Won't fit today (${plan.deferred.length}):</div>`;
+    plan.deferred.forEach(t=>{html+=`<div class="planner-suggestion"><div>${escHtml(t.name)}</div><div class="reason">${t.priority||'-'} &middot; ${t.timeEst||formatMins(t.minutes||30)}</div></div>`});
+  } else html+=`<div style="background:var(--success-bg);padding:12px;border-radius:8px;font-size:13px;color:var(--success)">Your day fits!</div>`;
+  html+=`<div class="planner-actions"><button class="btn" onclick="document.getElementById('plannerOverlay').remove()">Close</button></div></div>`;
+  overlay.innerHTML=html;document.body.appendChild(overlay);
+}
+
+// ======================================================
+// TASK LIST
+// ======================================================
+function getFilteredTasks(){
+  let tasks=allTasks.filter(t=>!t.someDay);
+  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  const sf=document.getElementById('filterStatus').value;
+  if(sf){if(sf==='Overdue')tasks=tasks.filter(t=>t.status==='Overdue'||isOverdue(t));else tasks=tasks.filter(t=>t.status===sf)}
+  const pf=document.getElementById('filterPriority').value;if(pf)tasks=tasks.filter(t=>t.priority===pf);
+  const bf=document.getElementById('filterBusiness').value;if(bf)tasks=tasks.filter(t=>t.business===bf);
+  const q=document.getElementById('searchBox').value.toLowerCase().trim();
+  if(q)tasks=tasks.filter(t=>t.name.toLowerCase().includes(q)||(t.assignee||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q)||(t.business||'').toLowerCase().includes(q));
+  // Sort: priority group (Project, Urgent, High, Not Urgent), then due date
+  tasks.sort((a,b)=>{
+    const pa=PRIORITY_ORDER[a.priority]??99,pb=PRIORITY_ORDER[b.priority]??99;
+    if(pa!==pb)return pa-pb;
+    if(!a.dueDate&&!b.dueDate)return 0;
+    if(!a.dueDate)return 1;if(!b.dueDate)return -1;
+    return a.dueDate.localeCompare(b.dueDate);
+  });
   return tasks;
 }
 
-function renderKanban() {
-  const container = document.getElementById('view-kanban');
-  const year = kanbanMonth.getFullYear();
-  const month = kanbanMonth.getMonth();
-  const monthName = kanbanMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-  const weeks = getWeeksOfMonth(year, month);
-  const tasks = getKanbanTasks();
+function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
+  const opts=options.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
+  return `<select class="inline-select" onchange="updateTaskField('${taskId}','${fieldKey}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
+}
 
-  // Unique project names for filter
-  const projectSet = new Set();
-  allTasks.filter(t => t.priority === 'Project').forEach(t => t.projectNames.forEach(n => projectSet.add(n)));
-  const projectOptions = [...projectSet].sort();
+function renderTasks(){
+  const tasks=getFilteredTasks();
+  const totalPages=Math.max(1,Math.ceil(tasks.length/PAGE_SIZE));
+  if(currentPage>totalPages)currentPage=totalPages;
+  const start=(currentPage-1)*PAGE_SIZE;
+  const page=tasks.slice(start,start+PAGE_SIZE);
 
-  let html = '';
+  let html='';
+  page.forEach((t,i)=>{
+    const idx=start+i+1;
+    const ov=isOverdue(t);
+    const checked=selectedTasks.has(t.id);
+    const rowStyle=ov&&t.status!=='Overdue'?' style="border-left:3px solid var(--danger)"':'';
+    const dispStatus=ov&&t.status!=='Overdue'&&t.status!=='Completed'?'Overdue':t.status;
 
-  // Controls
-  html += `<div class="kanban-controls">
-    <div class="kanban-month-nav">
-      <button class="btn btn-sm" onclick="kanbanNav(-1)">&laquo;</button>
-      <span>${monthName}</span>
-      <button class="btn btn-sm" onclick="kanbanNav(1)">&raquo;</button>
-    </div>
+    html+=`<tr${rowStyle}>
+      <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
+      <td style="color:var(--text-secondary)">${idx}</td>
+      <td onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.recurring?`<span class="badge badge-recurring">${escHtml(t.recurring)}</span>`:''}</td>
+      <td><input type="date" class="inline-input" value="${t.dueDate||''}" onclick="event.stopPropagation()" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'status',dispStatus,STATUS_OPTIONS)}</td>
+      <td onclick="event.stopPropagation()"><select class="inline-select" onchange="updateTaskField('${t.id}','assignee',this.value);renderTasks()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'priority',t.priority,['',...PRIORITY_OPTIONS])}</td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'timeEst',t.timeEst,['',...TIME_OPTIONS])}</td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'business',t.business,['',...BUSINESS_OPTIONS])}</td>
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)"></td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'recurring',t.recurring,RECUR_OPTIONS)}</td>
+    </tr>`;
+  });
+  if(!page.length)html=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
+
+  document.getElementById('taskBody').innerHTML=html;
+  document.getElementById('showingCount').textContent=`Showing ${page.length} of ${tasks.length}`;
+  document.getElementById('pageInfo').textContent=`Page ${currentPage} of ${totalPages}`;
+  document.getElementById('prevPage').disabled=currentPage<=1;
+  document.getElementById('nextPage').disabled=currentPage>=totalPages;
+  updateBulkBar();
+}
+function changePage(d){currentPage+=d;renderTasks();document.querySelector('.task-table-wrap').scrollTop=0}
+
+// Bulk
+function toggleTaskSelect(id,c){if(c)selectedTasks.add(id);else selectedTasks.delete(id);updateBulkBar()}
+function toggleSelectAll(c){const tasks=getFilteredTasks();const s=(currentPage-1)*PAGE_SIZE;tasks.slice(s,s+PAGE_SIZE).forEach(t=>{if(c)selectedTasks.add(t.id);else selectedTasks.delete(t.id)});renderTasks()}
+function clearSelection(){selectedTasks.clear();const sa=document.getElementById('selectAll');if(sa)sa.checked=false;renderTasks()}
+function updateBulkBar(){const bar=document.getElementById('bulkBar');if(selectedTasks.size>0){bar.style.display='flex';document.getElementById('bulkCount').textContent=selectedTasks.size}else bar.style.display='none'}
+async function bulkComplete(){
+  if(!selectedTasks.size)return;const ids=[...selectedTasks];
+  await Promise.all(ids.map(id=>updateTaskField(id,'status','Completed')));
+  selectedTasks.clear();renderAll();
+}
+async function bulkReschedule(){
+  if(!selectedTasks.size)return;
+  const t=new Date();t.setDate(t.getDate()+1);const s=t.toISOString().slice(0,10);
+  const ids=[...selectedTasks];
+  await Promise.all(ids.map(id=>updateTaskField(id,'dueDate',s)));
+  selectedTasks.clear();renderAll();
+}
+
+// ======================================================
+// KANBAN
+// ======================================================
+function getWeeksOfMonth(year,month){
+  const weeks=[{label:'Week 1',start:1,end:7},{label:'Week 2',start:8,end:14},{label:'Week 3',start:15,end:21},{label:'Week 4',start:22,end:31}];
+  const dim=new Date(year,month+1,0).getDate();
+  return weeks.map(w=>{
+    const actualEnd=Math.min(w.end,dim);
+    const startStr=`${year}-${String(month+1).padStart(2,'0')}-${String(w.start).padStart(2,'0')}`;
+    const endStr=`${year}-${String(month+1).padStart(2,'0')}-${String(actualEnd).padStart(2,'0')}`;
+    const sd=new Date(year,month,w.start).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const ed=new Date(year,month,actualEnd).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    return{...w,actualEnd,startStr,endStr,rangeDisplay:`${sd} - ${ed}`};
+  });
+}
+
+function getKanbanTasks(){
+  let tasks=allTasks.filter(t=>!t.someDay&&t.priority==='Project'&&t.status!=='Completed');
+  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  if(kanbanProjectFilter)tasks=tasks.filter(t=>t.projectIds.includes(kanbanProjectFilter)||t.projectNames.some(n=>n===kanbanProjectFilter));
+  return tasks;
+}
+
+function renderKanban(){
+  const container=document.getElementById('view-kanban');
+  const year=kanbanMonth.getFullYear(),month=kanbanMonth.getMonth();
+  const monthName=kanbanMonth.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+  const weeks=getWeeksOfMonth(year,month);
+  const tasks=getKanbanTasks();
+  const projSet=new Set();allTasks.filter(t=>t.priority==='Project').forEach(t=>t.projectNames.forEach(n=>projSet.add(n)));
+  const projOpts=[...projSet].sort();
+
+  let html=`<div class="kanban-controls">
+    <div class="kanban-month-nav"><button class="btn btn-sm" onclick="kanbanNav(-1)">&laquo;</button><span>${monthName}</span><button class="btn btn-sm" onclick="kanbanNav(1)">&raquo;</button></div>
     <select class="filter-select" onchange="kanbanProjectFilter=this.value;renderKanban()">
       <option value="">All Projects</option>
-      ${projectOptions.map(p => `<option value="${escHtml(p)}" ${kanbanProjectFilter === p ? 'selected' : ''}>${escHtml(p)}</option>`).join('')}
+      ${projOpts.map(p=>`<option value="${escHtml(p)}" ${kanbanProjectFilter===p?'selected':''}>${escHtml(p)}</option>`).join('')}
     </select>
-    <span style="font-size:12px;color:var(--text-secondary)">${tasks.length} project tasks</span>
+    <span style="font-size:12px;color:var(--text-secondary)">${tasks.length} tasks</span>
   </div>`;
-
-  // Board
-  html += `<div class="kanban-board">`;
-  weeks.forEach((w, wi) => {
-    // Tasks in this week
-    const weekTasks = tasks.filter(t => {
-      if (!t.dueDate) return wi === 3; // no date -> last week
-      return t.dueDate >= w.startStr && t.dueDate <= w.endStr;
-    });
-    const weekHrs = weekTasks.reduce((s, t) => s + t.minutes, 0) / 60;
-
-    html += `<div class="kanban-col">
-      <div class="kanban-col-header">
-        ${w.label}
-        <span class="week-range">${w.rangeDisplay}</span>
-        <span class="week-hours">${weekHrs.toFixed(1)} hrs allocated</span>
-      </div>
-      <div class="kanban-col-body" id="kanban-week-${wi}"
-        ondragover="event.preventDefault();this.classList.add('drag-over')"
-        ondragleave="this.classList.remove('drag-over')"
-        ondrop="dropKanbanCard(event,${wi})">`;
-
-    weekTasks.forEach(t => {
-      const projName = t.projectNames[0] || '';
-      const projColor = projName ? strColor(projName) : 'var(--text-secondary)';
-      const projBg = projName ? strColorBg(projName) : 'transparent';
-      html += `<div class="kanban-card" draggable="true"
-        ondragstart="dragKanbanCard(event,'${t.id}')"
-        ondragend="this.classList.remove('dragging')"
-        id="kcard-${t.id}">
-        <h4>${escHtml(t.name)}</h4>
+  html+=`<div class="kanban-board">`;
+  weeks.forEach((w,wi)=>{
+    const wt=tasks.filter(t=>{if(!t.dueDate)return wi===3;return t.dueDate>=w.startStr&&t.dueDate<=w.endStr});
+    const wh=wt.reduce((s,t)=>s+t.minutes,0)/60;
+    html+=`<div class="kanban-col">
+      <div class="kanban-col-header">${w.label}<span class="week-range">${w.rangeDisplay}</span><span class="week-hours">${wh.toFixed(1)}h</span></div>
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanCard(event,${wi})">`;
+    wt.forEach(t=>{
+      const pn=t.projectNames[0]||'';
+      const pcol=pn?strColor(pn):'var(--text-secondary)',pbg=pn?strColorBg(pn):'transparent';
+      html+=`<div class="kanban-card" draggable="true" ondragstart="dragKanbanCard(event,'${t.id}')" onclick="openTaskDrawer('${t.id}')">
+        <h4>${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag">!</span>':''}</h4>
         <div class="card-meta">
           ${avatarSmall(t)}
-          <span>${t.timeEst || formatMins(t.minutes) || '-'}</span>
-          ${t.business ? `<span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
+          <span>${t.timeEst||formatMins(t.minutes)||'-'}</span>
+          <span class="pri-dot ${t.priority||''}"></span>
+          ${t.business?`<span class="badge badge-business" style="font-size:9px">${escHtml(t.business)}</span>`:''}
         </div>
-        ${projName ? `<span class="card-project" style="background:${projBg};color:${projColor}">${escHtml(projName)}</span>` : ''}
+        ${pn?`<span class="card-project" style="background:${pbg};color:${pcol}">${escHtml(pn)}</span>`:''}
       </div>`;
     });
-
-    if (weekTasks.length === 0) {
-      html += `<div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:12px">No tasks</div>`;
-    }
-
-    html += `</div></div>`;
+    if(!wt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
+    html+=`</div></div>`;
   });
-  html += `</div>`;
-
-  container.innerHTML = html;
+  html+=`</div>`;
+  container.innerHTML=html;
 }
-
-let draggedTaskId = null;
-
-function dragKanbanCard(e, taskId) {
-  draggedTaskId = taskId;
-  e.dataTransfer.effectAllowed = 'move';
-  e.target.classList.add('dragging');
-}
-
-function dropKanbanCard(e, weekIdx) {
-  e.preventDefault();
-  e.currentTarget.classList.remove('drag-over');
-  if (!draggedTaskId) return;
-
-  const year = kanbanMonth.getFullYear();
-  const month = kanbanMonth.getMonth();
-  const weeks = getWeeksOfMonth(year, month);
-  const week = weeks[weekIdx];
-  // Set due date to first day of target week
-  const newDate = week.startStr;
-
-  updateTaskDueDate(draggedTaskId, newDate);
-  draggedTaskId = null;
-}
-
-function kanbanNav(dir) {
-  kanbanMonth.setMonth(kanbanMonth.getMonth() + dir);
-  renderKanban();
-}
-
-// =======================================
-// PROJECTS VIEW
-// =======================================
-function renderProjects() {
-  const container = document.getElementById('view-projects');
-  let projects = [...allProjects];
-
-  // Filter
-  if (projectFilter === 'active') {
-    projects = projects.filter(p => !p.completed && p.status !== 'Completed');
-  } else if (projectFilter === 'completed') {
-    projects = projects.filter(p => p.completed || p.status === 'Completed');
+let draggedTaskId=null;
+function dragKanbanCard(e,id){draggedTaskId=id;e.dataTransfer.effectAllowed='move'}
+function dropKanbanCard(e,wi){
+  e.preventDefault();e.currentTarget.classList.remove('drag-over');
+  if(!draggedTaskId)return;
+  const weeks=getWeeksOfMonth(kanbanMonth.getFullYear(),kanbanMonth.getMonth());
+  const w=weeks[wi];
+  // Find day in this week with least allocated hours for this user
+  const task=allTasks.find(t=>t.id===draggedTaskId);if(!task){draggedTaskId=null;return}
+  const member=TEAM.find(m=>m.email===task.assigneeEmail);
+  const userTasks=member?allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay&&t.id!==task.id):[];
+  let bestDay=w.startStr,bestHrs=Infinity;
+  for(let d=w.start;d<=w.actualEnd;d++){
+    const ds=`${kanbanMonth.getFullYear()}-${String(kanbanMonth.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if(isWeekend(ds))continue;
+    const hrs=userTasks.filter(t=>t.dueDate===ds).reduce((s,t)=>s+t.minutes,0)/60;
+    if(hrs<bestHrs){bestHrs=hrs;bestDay=ds}
   }
+  updateTaskField(draggedTaskId,'dueDate',bestDay).then(()=>renderKanban());
+  draggedTaskId=null;
+}
+function kanbanNav(d){kanbanMonth.setMonth(kanbanMonth.getMonth()+d);renderKanban()}
 
-  // Sort: active first, then by completion%
-  projects.sort((a, b) => {
-    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-    return (b.completionPct || 0) - (a.completionPct || 0);
-  });
+// ======================================================
+// PROJECTS
+// ======================================================
+function renderProjects(){
+  const container=document.getElementById('view-projects');
+  let projects=[...allProjects];
+  if(projectFilter==='active')projects=projects.filter(p=>!p.completed&&p.status!=='Completed');
+  else if(projectFilter==='completed')projects=projects.filter(p=>p.completed||p.status==='Completed');
+  projects.sort((a,b)=>{if(a.completed!==b.completed)return a.completed?1:-1;return(b.completionPct||0)-(a.completionPct||0)});
 
-  let html = '';
-
-  // Filters
-  html += `<div class="projects-filter">
-    <button class="btn ${projectFilter === 'active' ? 'btn-primary' : ''}" onclick="projectFilter='active';renderProjects()">Active</button>
-    <button class="btn ${projectFilter === 'completed' ? 'btn-primary' : ''}" onclick="projectFilter='completed';renderProjects()">Completed</button>
-    <button class="btn ${projectFilter === 'all' ? 'btn-primary' : ''}" onclick="projectFilter='all';renderProjects()">All</button>
-    <span style="font-size:12px;color:var(--text-secondary);margin-left:8px">${projects.length} projects</span>
+  let html=`<div class="projects-filter">
+    <button class="btn ${projectFilter==='active'?'btn-primary':''}" onclick="projectFilter='active';renderProjects()">Active</button>
+    <button class="btn ${projectFilter==='completed'?'btn-primary':''}" onclick="projectFilter='completed';renderProjects()">Completed</button>
+    <button class="btn ${projectFilter==='all'?'btn-primary':''}" onclick="projectFilter='all';renderProjects()">All</button>
+    <button class="btn btn-primary" style="margin-left:auto" onclick="openCreateProjectModal()">+ Create Project</button>
+    <span style="font-size:12px;color:var(--text-secondary)">${projects.length} projects</span>
   </div>`;
+  if(!projects.length){html+=`<div class="empty-state"><p>No projects.</p></div>`;container.innerHTML=html;return}
 
-  if (projects.length === 0) {
-    html += `<div class="empty-state"><div class="icon">-</div><p>No projects found.</p></div>`;
-    container.innerHTML = html;
-    return;
-  }
+  html+=`<div class="projects-list">`;
+  projects.forEach(p=>{
+    const pct=typeof p.completionPct==='number'?p.completionPct:parseFloat(p.completionPct)||0;
+    const barW=Math.min(100,pct*100);
+    const statusCls=(p.status||'').toLowerCase().replace(/\s+/g,'-');
+    const isExp=expandedProject===p.id;
+    const linked=allTasks.filter(t=>t.projectIds.includes(p.id)||t.projectNames.includes(p.name));
+    const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
 
-  html += `<div class="projects-grid">`;
-  projects.forEach(p => {
-    const pctNum = typeof p.completionPct === 'number' ? p.completionPct : parseFloat(p.completionPct) || 0;
-    const pctDisplay = (pctNum * 100).toFixed(0);
-    const barWidth = Math.min(100, pctNum * 100);
-    const statusCls = (p.status || '').toLowerCase().replace(/\s+/g, '-');
-    const isExpanded = expandedProject === p.id;
-
-    // Find linked tasks
-    const linkedTasks = allTasks.filter(t => t.projectIds.includes(p.id) || t.projectNames.includes(p.name));
-
-    html += `<div class="project-card" onclick="toggleProject('${p.id}')">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
-        <h3 title="${escHtml(p.name)}">${escHtml(p.name)}</h3>
-        <span class="project-status ${statusCls}">${escHtml(p.status || 'Unknown')}</span>
-      </div>
-
-      <div class="project-progress">
-        <div class="bar-outer"><div class="bar-inner" style="width:${barWidth}%;${barWidth >= 100 ? 'background:var(--accent)' : ''}"></div></div>
-        <div class="progress-text">
-          <span>${p.completedTasks || 0} / ${p.totalTasks || 0} tasks</span>
-          <span>${pctDisplay}%</span>
+    html+=`<div class="project-card" onclick="toggleProject('${p.id}')">
+      <div class="project-head"><h3>${escHtml(p.name)}</h3><span class="project-status ${statusCls}">${escHtml(p.status||'Unknown')}</span></div>
+      <div class="project-body">
+        <div class="project-col">
+          <h5>Business</h5><div class="val">${escHtml(p.business||'-')}</div>
+          <h5>Dates</h5><div class="val">${p.start?new Date(p.start+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'}):'-'} &rarr; ${p.end?new Date(p.end+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'}):'-'}</div>
         </div>
-      </div>
-
-      <div class="project-meta">
-        ${p.overdue ? `<span style="color:var(--danger)">${p.overdue} overdue</span>` : ''}
-        ${p.start && p.end ? `<span>${new Date(p.start+'T00:00:00').toLocaleDateString('en-GB',{month:'short',year:'2-digit'})} - ${new Date(p.end+'T00:00:00').toLocaleDateString('en-GB',{month:'short',year:'2-digit'})}</span>` : ''}
+        <div class="project-col">
+          <h5>KPI: ${escHtml(p.kpiName||'None')}</h5>
+          <div class="val">${p.kpiUnit==='£'?'£':''}${p.kpiCurrent||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''} / ${p.kpiUnit==='£'?'£':''}${p.kpiTarget||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}</div>
+          <div class="kpi-bar"><div class="kpi-bar-inner" style="width:${kpiPct}%"></div></div>
+          <div style="font-size:11px;color:var(--text-secondary)">${kpiPct.toFixed(0)}%</div>
+        </div>
+        <div class="project-col">
+          <h5>Tasks</h5><div class="val">${p.completedTasks||0} / ${p.totalTasks||0} done${p.overdue?` &middot; <span style="color:var(--danger)">${p.overdue} overdue</span>`:''}</div>
+          <div class="kpi-bar"><div class="kpi-bar-inner" style="width:${barW}%"></div></div>
+          <div style="font-size:11px;color:var(--text-secondary)">${(pct*100).toFixed(0)}% complete</div>
+        </div>
       </div>`;
-
-    // Expanded view
-    if (isExpanded) {
-      html += `<div class="project-expanded">`;
-      if (p.deliverable) {
-        html += `<h4>Deliverable</h4><div style="font-size:13px;color:var(--text-primary);margin-bottom:12px;white-space:pre-wrap">${escHtml(p.deliverable)}</div>`;
-      }
-      if (p.defOfDone) {
-        html += `<h4>Definition of Done</h4><div style="font-size:13px;color:var(--text-primary);margin-bottom:12px;white-space:pre-wrap">${escHtml(p.defOfDone)}</div>`;
-      }
-      html += `<h4>Linked Tasks (${linkedTasks.length})</h4>`;
-      if (linkedTasks.length > 0) {
-        html += `<div class="project-task-list">`;
-        linkedTasks.slice(0, 20).forEach(t => {
-          html += `<div class="project-task-item">
-            ${statusBadge(isOverdue(t) && t.status !== 'Overdue' ? 'Overdue' : t.status)}
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>
-            ${avatarSmall(t)}
-            <span style="color:var(--text-secondary)">${t.timeEst || '-'}</span>
-          </div>`;
+    if(isExp){
+      html+=`<div class="project-expanded" onclick="event.stopPropagation()">`;
+      html+=`<h4>Edit KPI</h4><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
+        <input type="text" placeholder="KPI name" value="${escHtml(p.kpiName)}" onblur="projEdit('${p.id}','kpiName',this.value)" class="inline-input">
+        <input type="number" placeholder="Current" value="${p.kpiCurrent}" onblur="projEdit('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input">
+        <input type="number" placeholder="Target" value="${p.kpiTarget}" onblur="projEdit('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input">
+        <select class="inline-select" onchange="projEdit('${p.id}','kpiUnit',this.value)"><option value="">unit</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+      </div>`;
+      html+=`<h4>Tracking Method</h4><textarea style="width:100%;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px;border-radius:4px;font-size:12px;min-height:50px;font-family:inherit" oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
+      if(p.deliverable)html+=`<h4 style="margin-top:10px">Deliverable</h4><div style="font-size:12px;white-space:pre-wrap">${escHtml(p.deliverable)}</div>`;
+      html+=`<h4 style="margin-top:10px">Linked Tasks (${linked.length})</h4>`;
+      if(linked.length){
+        html+=`<div class="project-task-list">`;
+        linked.slice(0,20).forEach(t=>{
+          html+=`<div class="project-task-item" onclick="event.stopPropagation();openTaskDrawer('${t.id}')">${statusBadge(t.status)}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>${avatarSmall(t)}<span style="color:var(--text-secondary);font-size:11px">${t.timeEst||'-'}</span></div>`;
         });
-        if (linkedTasks.length > 20) {
-          html += `<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... and ${linkedTasks.length - 20} more</div>`;
-        }
-        html += `</div>`;
-      } else {
-        html += `<div style="font-size:12px;color:var(--text-secondary);padding:8px 0">No linked tasks found.</div>`;
+        if(linked.length>20)html+=`<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... ${linked.length-20} more</div>`;
+        html+=`</div>`;
       }
-      html += `</div>`;
+      html+=`</div>`;
     }
-
-    html += `</div>`;
+    html+=`</div>`;
   });
-  html += `</div>`;
+  html+=`</div>`;
+  container.innerHTML=html;
+}
+function toggleProject(id){expandedProject=expandedProject===id?null:id;renderProjects()}
 
-  container.innerHTML = html;
+async function projEdit(pid,fieldKey,val){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  const fid=PF[fieldKey];
+  let payload={};
+  if(fieldKey==='kpiUnit'){payload[fid]=val?{name:val}:null;p.kpiUnit=val}
+  else{payload[fid]=val;p[fieldKey]=val}
+  try{const r=await patchProject(pid,payload);if(!r.ok)throw new Error('');toast('Saved')}catch(e){toast('Failed',true)}
+}
+const _pTimers={};
+function projEditDebounced(pid,fieldKey,val){
+  const k=pid+':'+fieldKey;clearTimeout(_pTimers[k]);
+  _pTimers[k]=setTimeout(()=>projEdit(pid,fieldKey,val),500);
 }
 
-function toggleProject(id) {
-  expandedProject = expandedProject === id ? null : id;
-  renderProjects();
+function openCreateProjectModal(){
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='createProjModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML=`<div class="modal"><h2>Create Project</h2>
+    <div class="field-row"><label>Name</label><input type="text" id="cpName"></div>
+    <div class="field-row"><label>Business</label><select id="cpBusiness"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option>${b}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Status</label><select id="cpStatus"><option>Not Started</option><option>On Track</option><option>Off Track</option><option>Completed</option></select></div>
+    <div class="field-row"><label>Start</label><input type="date" id="cpStart"></div>
+    <div class="field-row"><label>End</label><input type="date" id="cpEnd"></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="cpDesc"></textarea></div>
+    <div class="field-row"><label>KPI Name</label><input type="text" id="cpKpiName"></div>
+    <div class="field-row"><label>KPI Target</label><input type="number" id="cpKpiTarget"></div>
+    <div class="field-row"><label>KPI Unit</label><select id="cpKpiUnit"><option value="">-</option>${KPI_UNIT_OPTIONS.map(u=>`<option>${u}</option>`).join('')}</select></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>KPI Tracking</label><textarea id="cpKpiTracking"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('createProjModal').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCreateProject()">Create</button>
+    </div></div>`;
+  document.body.appendChild(overlay);
+}
+async function submitCreateProject(){
+  const fields={};
+  const name=document.getElementById('cpName').value.trim();if(!name){toast('Name required',true);return}
+  fields[PF.name]=name;
+  const biz=document.getElementById('cpBusiness').value;if(biz&&BUSINESS_MAP[biz])fields[PF.business]=[{id:BUSINESS_MAP[biz]}];
+  const status=document.getElementById('cpStatus').value;if(status)fields[PF.status]={name:status};
+  const start=document.getElementById('cpStart').value;if(start)fields[PF.start]=start;
+  const end=document.getElementById('cpEnd').value;if(end)fields[PF.end]=end;
+  const desc=document.getElementById('cpDesc').value;if(desc)fields[PF.deliverable]=desc;
+  const kn=document.getElementById('cpKpiName').value;if(kn)fields[PF.kpiName]=kn;
+  const kt=parseFloat(document.getElementById('cpKpiTarget').value);if(!isNaN(kt))fields[PF.kpiTarget]=kt;
+  const ku=document.getElementById('cpKpiUnit').value;if(ku)fields[PF.kpiUnit]={name:ku};
+  const ktr=document.getElementById('cpKpiTracking').value;if(ktr)fields[PF.kpiTracking]=ktr;
+
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}`,{method:'POST',headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},body:JSON.stringify({fields,typecast:true})});
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    allProjects.push(parseProject(data));
+    document.getElementById('createProjModal').remove();
+    toast('Project created');
+    renderProjects();
+  }catch(e){toast('Failed: '+e.message,true)}
 }
 
-// =======================================
-// CAPACITY VIEW
-// =======================================
-function renderCapacity() {
-  const members = activeTeam === 'all' ? TEAM : TEAM.filter(m => m.key === activeTeam);
-  let html = '';
+// ======================================================
+// CAPACITY
+// ======================================================
+function renderCapacity(){
+  const members=activeTeam==='all'?TEAM:TEAM.filter(m=>m.key===activeTeam);
+  let html='';
 
-  members.forEach(member => {
-    const tasks = allTasks.filter(t =>
-      t.assigneeEmail === member.email && t.status !== 'Completed' && !t.someDay
-    );
-    const totalMins = tasks.reduce((s, t) => s + t.minutes, 0);
-    const totalHrs = totalMins / 60;
-    const pct = Math.min(100, (totalHrs / WEEKLY_CAPACITY_HRS) * 100);
-    let barColor = 'var(--success)';
-    if (pct > 90) barColor = 'var(--danger)';
-    else if (pct > 70) barColor = 'var(--warning)';
-
-    const statusBreak = {};
-    tasks.forEach(t => { const s = t.status || 'Unset'; statusBreak[s] = (statusBreak[s] || 0) + t.minutes; });
-    const priorityBreak = {};
-    tasks.forEach(t => { const p = t.priority || 'Unset'; priorityBreak[p] = (priorityBreak[p] || 0) + t.minutes; });
-    const overdue = tasks.filter(t => isOverdue(t));
-
-    html += `<div class="capacity-card">
-      <h3><span class="avatar avatar-${member.key}">${member.name[0]}</span> ${member.name}</h3>
-      <div class="cap-stat"><span>${totalHrs.toFixed(1)} hrs allocated</span><span>${WEEKLY_CAPACITY_HRS} hrs capacity</span></div>
-      <div class="cap-bar-wrap"><div class="cap-bar" style="width:${pct}%;background:${barColor}"></div></div>
-      <div style="font-size:12px;color:${pct > 90 ? 'var(--danger)' : 'var(--text-secondary)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} active tasks${overdue.length ? ` &middot; <span style="color:var(--danger)">${overdue.length} overdue</span>` : ''}</div>
-      <h4 style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">By Status</h4>
-      <div class="cap-breakdown">
-        ${Object.entries(statusBreak).sort((a,b) => b[1]-a[1]).map(([s,m]) => `<div><span>${s}</span><span>${(m/60).toFixed(1)} hrs (${totalMins > 0 ? Math.round(m/totalMins*100) : 0}%)</span></div>`).join('')}
-      </div>
-      <h4 style="font-size:11px;color:var(--text-secondary);margin:8px 0 4px">By Priority</h4>
-      <div class="cap-breakdown">
-        ${Object.entries(priorityBreak).sort((a,b) => b[1]-a[1]).map(([p,m]) => `<div><span>${p}</span><span>${(m/60).toFixed(1)} hrs</span></div>`).join('')}
-      </div>
-    </div>`;
-  });
-
-  // Team summary card
-  if (activeTeam === 'all') {
-    const allActive = allTasks.filter(t => t.status !== 'Completed' && !t.someDay);
-    const totalTeamMins = allActive.reduce((s, t) => s + t.minutes, 0);
-    const totalTeamHrs = totalTeamMins / 60;
-    const teamCapacity = TEAM.length * WEEKLY_CAPACITY_HRS;
-    const teamPct = Math.min(100, (totalTeamHrs / teamCapacity) * 100);
-
-    html = `<div class="capacity-card" style="grid-column:1/-1;border-color:var(--accent)">
+  if(activeTeam==='all'){
+    const allActive=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
+    const totalTeamHrs=allActive.reduce((s,t)=>s+t.minutes,0)/60;
+    const teamCap=TEAM.reduce((s,m)=>s+getPersonCapacity(m.key),0);
+    const teamPct=Math.min(100,(totalTeamHrs/teamCap)*100);
+    html+=`<div class="capacity-card" style="grid-column:1/-1;border-color:var(--accent)">
       <h3>Team Overview</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-bottom:12px">
         <div class="kpi green" style="padding:12px"><div class="value" style="font-size:22px">${allActive.length}</div><div class="label">Active Tasks</div></div>
         <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${totalTeamHrs.toFixed(1)}</div><div class="label">Hours Allocated</div></div>
-        <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${teamCapacity}</div><div class="label">Team Capacity (hrs)</div></div>
-        <div class="kpi ${teamPct > 90 ? 'red' : teamPct > 70 ? 'amber' : 'green'}" style="padding:12px"><div class="value" style="font-size:22px">${teamPct.toFixed(0)}%</div><div class="label">Utilisation</div></div>
+        <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${teamCap}</div><div class="label">Team Capacity (hrs)</div></div>
+        <div class="kpi ${teamPct>90?'red':teamPct>70?'amber':'green'}" style="padding:12px"><div class="value" style="font-size:22px">${teamPct.toFixed(0)}%</div><div class="label">Utilisation</div></div>
       </div>
-      <div class="cap-bar-wrap" style="height:12px"><div class="cap-bar" style="width:${teamPct}%;background:${teamPct > 90 ? 'var(--danger)' : teamPct > 70 ? 'var(--warning)' : 'var(--success)'}"></div></div>
-    </div>` + html;
+      <div class="cap-bar-wrap" style="height:12px"><div class="cap-bar" style="width:${teamPct}%;background:${teamPct>90?'var(--danger)':teamPct>70?'var(--warning)':'var(--success)'}"></div></div>
+    </div>`;
   }
 
-  document.getElementById('capacityGrid').innerHTML = html;
-}
+  members.forEach(member=>{
+    const tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
+    const totalHrs=tasks.reduce((s,t)=>s+t.minutes,0)/60;
+    const cap=getPersonCapacity(member.key);
+    const pct=Math.min(100,(totalHrs/cap)*100);
+    const color=pct>90?'var(--danger)':pct>70?'var(--warning)':'var(--success)';
+    const priBreak={};tasks.forEach(t=>{const p=t.priority||'Unset';priBreak[p]=(priBreak[p]||0)+t.minutes});
+    const statBreak={};tasks.forEach(t=>{const s=t.status||'Unset';statBreak[s]=(statBreak[s]||0)+t.minutes});
+    const totalMin=tasks.reduce((s,t)=>s+t.minutes,0);
+    const priColors={Urgent:'var(--danger)',High:'var(--info)',Project:'var(--accent)','Not Urgent':'var(--success)',Unset:'var(--text-muted)'};
+    const statColors={Today:'var(--warning)',Overdue:'var(--danger)',Upcoming:'var(--accent)','To do':'var(--info)',Approval:'var(--accent-gold)',Unset:'var(--text-muted)'};
 
-// =======================================
-// RECURRING VIEW
-// =======================================
-function renderRecurring() {
-  const container = document.getElementById('recurringContent');
-
-  let recurring = allTasks.filter(t => (t.recurring || t.recurFlag) && !t.someDay);
-  if (activeTeam !== 'all') {
-    const member = TEAM.find(m => m.key === activeTeam);
-    if (member) recurring = recurring.filter(t => t.assigneeEmail === member.email);
-  }
-
-  const groups = {};
-  recurring.forEach(t => {
-    const freq = t.recurring || 'Flagged';
-    if (!groups[freq]) groups[freq] = [];
-    groups[freq].push(t);
+    html+=`<div class="capacity-card">
+      <button class="cap-cog" onclick="editCapacity('${member.key}')" title="Set capacity">&#9881;</button>
+      <h3><span class="avatar avatar-${member.key}">${member.name[0]}</span> ${member.name}</h3>
+      <div class="cap-stat"><span>${totalHrs.toFixed(1)}h allocated</span><span>${cap}h capacity</span></div>
+      <div class="cap-bar-wrap"><div class="cap-bar" style="width:${pct}%;background:${color}"></div></div>
+      <div style="font-size:12px;color:${pct>90?'var(--danger)':'var(--text-secondary)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} tasks</div>
+      <h5 style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase">Priority</h5>
+      <div class="stacked-bar">${Object.entries(priBreak).map(([k,v])=>`<span style="width:${totalMin?v/totalMin*100:0}%;background:${priColors[k]||'#888'}" title="${k}: ${(v/60).toFixed(1)}h"></span>`).join('')}</div>
+      <div class="stacked-legend">${Object.entries(priBreak).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<span><i style="background:${priColors[k]||'#888'}"></i>${k} ${(v/60).toFixed(1)}h</span>`).join('')}</div>
+      <h5 style="font-size:11px;color:var(--text-secondary);margin:10px 0 4px;text-transform:uppercase">Status</h5>
+      <div class="stacked-bar">${Object.entries(statBreak).map(([k,v])=>`<span style="width:${totalMin?v/totalMin*100:0}%;background:${statColors[k]||'#888'}" title="${k}: ${(v/60).toFixed(1)}h"></span>`).join('')}</div>
+      <div class="stacked-legend">${Object.entries(statBreak).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<span><i style="background:${statColors[k]||'#888'}"></i>${k} ${(v/60).toFixed(1)}h</span>`).join('')}</div>
+    </div>`;
   });
 
-  const freqOrder = ['Daily', 'Weekly', 'Fortnightly', 'Monthly', 'Quarterly', 'Bi-Annually', 'Annually', 'Flagged'];
-  let html = '';
+  document.getElementById('capacityGrid').innerHTML=html;
+}
 
-  // Summary
-  const activeTasks = recurring.filter(t => t.status !== 'Completed');
-  const totalMins = activeTasks.reduce((s, t) => s + t.minutes, 0);
-  html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+function editCapacity(key){
+  const current=getPersonCapacity(key);
+  const v=prompt(`Weekly capacity (hrs) for ${TEAM.find(m=>m.key===key).name}:`,current);
+  if(v===null)return;
+  const n=parseInt(v);if(!isNaN(n)&&n>0){setPersonCapacity(key,n);renderCapacity()}
+}
+
+// ======================================================
+// RECURRING — grouped by person, then frequency
+// ======================================================
+function renderRecurring(){
+  const container=document.getElementById('recurringContent');
+  // Support object or string form of recurring field
+  let recurring=allTasks.filter(t=>{
+    const r=t.recurring||t.recurFlag;
+    return r&&!t.someDay;
+  });
+  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)recurring=recurring.filter(t=>t.assigneeEmail===m.email)}
+
+  const active=recurring.filter(t=>t.status!=='Completed');
+  const totalMins=active.reduce((s,t)=>s+t.minutes,0);
+
+  let html=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
     <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${recurring.length}</div><div class="label">Total Recurring</div></div>
     <div class="kpi accent" style="padding:12px"><div class="value" style="font-size:22px">${(totalMins/60).toFixed(1)}</div><div class="label">Hours / Cycle</div></div>
-    <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t => t.status === 'Completed').length}</div><div class="label">Completed</div></div>
-    <div class="kpi amber" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t => isOverdue(t)).length}</div><div class="label">Overdue</div></div>
+    <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t=>t.status==='Completed').length}</div><div class="label">Completed</div></div>
+    <div class="kpi amber" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t=>isOverdue(t)).length}</div><div class="label">Overdue</div></div>
   </div>`;
 
-  freqOrder.forEach(freq => {
-    const tasks = groups[freq];
-    if (!tasks || !tasks.length) return;
-    html += `<h3 style="font-size:14px;margin:16px 0 8px;color:var(--accent)">${freq} <span style="color:var(--text-secondary);font-weight:400">(${tasks.length})</span></h3>`;
-    html += `<div class="recurring-grid" style="margin-bottom:12px">`;
-    tasks.forEach(t => {
-      const od = isOverdue(t);
-      html += `<div class="recurring-card" style="${od ? 'border-color:var(--danger)' : ''}">
-        <h4>${escHtml(t.name)}</h4>
-        <div class="meta">
-          ${avatarHtml(t)} &middot; ${statusBadge(t.status)} &middot; ${t.timeEst || '-'}
-          ${t.business ? ` &middot; <span class="badge badge-business">${escHtml(t.business)}</span>` : ''}
-          ${od ? '<span style="color:var(--danger);margin-left:8px">OVERDUE</span>' : ''}
-        </div>
-      </div>`;
+  const freqOrder=['Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually','Flagged'];
+  const members=activeTeam==='all'?TEAM:TEAM.filter(m=>m.key===activeTeam);
+
+  members.forEach(member=>{
+    const mTasks=recurring.filter(t=>t.assigneeEmail===member.email);
+    if(!mTasks.length)return;
+    const mHrs=mTasks.reduce((s,t)=>s+t.minutes,0)/60;
+    html+=`<div class="person-section"><h3><span class="avatar avatar-${member.key}">${member.name[0]}</span>${escHtml(member.name)} <span style="font-size:12px;color:var(--text-secondary);font-weight:400">&middot; ${mTasks.length} tasks &middot; ${mHrs.toFixed(1)}h/cycle</span></h3>`;
+    const groups={};
+    mTasks.forEach(t=>{const f=t.recurring||'Flagged';(groups[f]=groups[f]||[]).push(t)});
+    freqOrder.forEach(f=>{
+      const g=groups[f];if(!g)return;
+      html+=`<div class="freq-group"><h4>${f} (${g.length})</h4><div class="recurring-grid">`;
+      g.forEach(t=>{
+        const od=isOverdue(t);
+        html+=`<div class="recurring-card" style="${od?'border-color:var(--danger)':''}" onclick="openTaskDrawer('${t.id}')">
+          <h4>${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag">!</span>':''}</h4>
+          <div class="meta">${statusBadge(t.status)} &middot; ${t.timeEst||'-'}${t.business?` &middot; <span class="badge badge-business">${escHtml(t.business)}</span>`:''}${od?' <span style="color:var(--danger)">OVERDUE</span>':''}</div>
+        </div>`;
+      });
+      html+=`</div></div>`;
     });
-    html += `</div>`;
+    html+=`</div>`;
   });
 
-  if (!recurring.length) {
-    html = `<div class="empty-state"><p>No recurring tasks found.</p></div>`;
-  }
-
-  container.innerHTML = html;
+  if(!recurring.length)html=`<div class="empty-state"><p>No recurring tasks found.</p></div>`;
+  container.innerHTML=html;
 }
 
-// =======================================
-// VIEW SWITCHING
-// =======================================
-function switchView(view) {
-  currentView = view;
-  document.querySelectorAll('.view-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-
-  const views = ['myday', 'list', 'kanban', 'projects', 'capacity', 'recurring'];
-  views.forEach(v => {
-    const el = document.getElementById('view-' + v);
-    if (el) el.style.display = v === view ? '' : 'none';
+// ======================================================
+// VIEW SWITCH
+// ======================================================
+function switchView(view){
+  currentView=view;
+  document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
+  ['myday','list','kanban','projects','capacity','recurring'].forEach(v=>{
+    const el=document.getElementById('view-'+v);if(el)el.style.display=v===view?'':'none';
   });
-
-  if (view === 'myday') renderMyDay();
-  if (view === 'list') renderTasks();
-  if (view === 'kanban') renderKanban();
-  if (view === 'projects') renderProjects();
-  if (view === 'capacity') renderCapacity();
-  if (view === 'recurring') renderRecurring();
+  if(view==='myday')renderMyDay();
+  if(view==='list')renderTasks();
+  if(view==='kanban')renderKanban();
+  if(view==='projects')renderProjects();
+  if(view==='capacity')renderCapacity();
+  if(view==='recurring')renderRecurring();
+}
+function setTeam(key){activeTeam=key;currentPage=1;expandedTask=null;selectedTasks.clear();renderAll()}
+function renderAll(){
+  renderTeamBar();renderKPIs();
+  if(currentView==='myday')renderMyDay();
+  if(currentView==='list')renderTasks();
+  if(currentView==='kanban')renderKanban();
+  if(currentView==='projects')renderProjects();
+  if(currentView==='capacity')renderCapacity();
+  if(currentView==='recurring')renderRecurring();
 }
 
-function setTeam(key) {
-  activeTeam = key;
-  currentPage = 1;
-  expandedTask = null;
-  selectedTasks.clear();
-  renderAll();
-}
-
-function renderAll() {
-  renderTeamBar();
-  renderKPIs();
-  if (currentView === 'myday') renderMyDay();
-  if (currentView === 'list') renderTasks();
-  if (currentView === 'kanban') renderKanban();
-  if (currentView === 'projects') renderProjects();
-  if (currentView === 'capacity') renderCapacity();
-  if (currentView === 'recurring') renderRecurring();
-}
-
-// =======================================
+// ======================================================
 // LOAD
-// =======================================
-async function loadAllData() {
-  document.getElementById('loader').style.display = 'flex';
-  try {
-    // Fetch tasks, projects, and calendar events in parallel
-    const [rawTasks, rawProjects, calEvents] = await Promise.all([
-      fetchTable(TASKS_TABLE, TASK_FIELD_IDS, `AND({Status}!="Completed",{Some Day}=FALSE())`),
-      fetchTable(PROJECTS_TABLE, PROJECT_FIELD_IDS, ''),
+// ======================================================
+async function loadAllData(){
+  document.getElementById('loader').style.display='flex';
+  try{
+    await fetchBusinesses();
+    const[rawTasks,rawProjects,cal]=await Promise.all([
+      fetchTable(TASKS_TABLE,TASK_FIELD_IDS,`AND({Status}!="Completed",{Some Day}=FALSE())`),
+      fetchTable(PROJECTS_TABLE,PROJECT_FIELD_IDS,''),
       fetchCalendarEvents(),
     ]);
-    allTasks = rawTasks.map(parseTask);
-    allProjects = rawProjects.map(parseProject);
-    calendarEvents = calEvents;
+    allTasks=rawTasks.map(parseTask);
+    allProjects=rawProjects.map(parseProject);
+    calendarEvents=cal;
 
-    // Resolve project names for tasks that only have IDs
-    const projMap = {};
-    allProjects.forEach(p => { projMap[p.id] = p.name; });
-    allTasks.forEach(t => {
-      if (t.projectIds.length > 0 && t.projectNames.length === 0) {
-        t.projectNames = t.projectIds.map(id => projMap[id] || '').filter(Boolean);
-      }
-    });
+    const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
+    allTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
 
-    // Auto-reschedule Kevin's overdue tasks (preserves original due dates)
-    const rescheduleResult = await autoRescheduleOverdue();
-    if (rescheduleResult.count > 0) {
-      console.log(`Auto-rescheduled ${rescheduleResult.count} overdue tasks to today`);
-    }
+    const r=await autoRescheduleOverdue();
+    if(r.count>0)console.log(`Rescheduled ${r.count} overdue`);
 
-    document.getElementById('taskCount').textContent = `${allTasks.length} tasks, ${allProjects.length} projects${calEvents.length ? `, ${calEvents.length} cal events` : ''}`;
-    document.getElementById('lastSync').textContent = `Synced ${new Date().toLocaleTimeString('en-GB')}`;
-    document.getElementById('loader').style.display = 'none';
+    document.getElementById('taskCount').textContent=`${allTasks.length} tasks, ${allProjects.length} projects${cal.length?`, ${cal.length} cal events`:''}`;
+    document.getElementById('lastSync').textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
+    document.getElementById('loader').style.display='none';
     renderAll();
-  } catch (e) {
+  }catch(e){
     console.error(e);
-    document.getElementById('loader').innerHTML = `<span style="color:var(--danger)">Failed to load data. ${escHtml(e.message)}</span>`;
+    document.getElementById('loader').innerHTML=`<span style="color:var(--danger)">Failed to load. ${escHtml(e.message)}</span>`;
   }
 }
 
-// =======================================
 // INIT
-// =======================================
-if (initAuth()) {
-  checkIdentityAndLoad();
-}
+if(initAuth()){checkIdentityAndLoad()}
 </script>
 </body>
 </html>
