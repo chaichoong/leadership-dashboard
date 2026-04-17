@@ -3,359 +3,179 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Business Plan Builder - Standard Operating Procedure</title>
+<title>Business Launch Plan Builder &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <style>
-/* ====== RESET & BASE ====== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
-  line-height: 1.6;
-  color: var(--text-primary);
-  background: var(--bg-app);
+  line-height: 1.6; color: var(--text-primary); background: var(--bg-app);
 }
-
-/* ====== COLOUR VARIABLES ====== */
-:root {
-  /* Remapped to Sage Executive palette; variable names kept for backwards compat */
-  --blue-50: #EEF3EF; --blue-100: #DDE8DF; --blue-200: #C4D6C8;
-  --blue-500: #4DA574; --blue-600: #368859; --blue-700: #2C6E49; --blue-800: #1B4A30; --blue-900: #133524;
-  --indigo-50: #EEF3EF; --indigo-100: #DDE8DF; --indigo-500: #4DA574; --indigo-600: #368859; --indigo-700: #2C6E49;
-  --green-50: #EEF3EF; --green-100: #DDE8DF; --green-500: #4DA574; --green-600: #368859; --green-700: #2C6E49;
-  --amber-50: #F7EFD9; --amber-100: #EFE3CA; --amber-500: #C6A15B; --amber-600: #8A6B2D;
-  --red-50: #F7EAEA; --red-100: #EED9D9; --red-500: #C25353; --red-600: #A33B3B;
-  --purple-50: #EEF3EF; --purple-500: #4DA574; --purple-600: #368859;
-  --slate-50: #FAFBF8; --slate-100: #F4F6F1; --slate-200: #E5E8E1; --slate-300: #DDE1D9;
-  --slate-400: #8A928C; --slate-500: #5A6660; --slate-600: #3B4A46; --slate-700: #2F3D39; --slate-800: #1C2422;
-  --shadow-sm: 0 1px 2px rgba(28,36,34,0.04);
-  --shadow: 0 1px 3px rgba(28,36,34,0.06), 0 1px 2px rgba(28,36,34,0.04);
-  --shadow-md: 0 4px 6px -1px rgba(28,36,34,0.08), 0 2px 4px -1px rgba(28,36,34,0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(28,36,34,0.08), 0 4px 6px -2px rgba(28,36,34,0.04);
-  --radius: 12px;
-  --radius-sm: 8px;
+.header { background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%); color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+.header::after { content:''; position:absolute; top:-50%; right:-10%; width:500px; height:500px; background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%); border-radius:50%; }
+.header-inner { max-width:1100px; margin:0 auto; position:relative; z-index:1; }
+.header-back { display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; opacity:0.7; text-decoration:none; color:white; margin-bottom:1rem; transition:opacity 0.15s; }
+.header-back:hover { opacity:1; }
+.header h1 { font-size:2.2rem; font-weight:700; margin-bottom:0.3rem; letter-spacing:-0.5px; }
+.header .subtitle { font-size:1.05rem; opacity:0.85; }
+.header .version { font-size:0.85rem; opacity:0.6; margin-top:0.5rem; }
+.container { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+.section { margin-top:2.5rem; }
+.section-title { font-size:1.5rem; font-weight:700; color:var(--accent); padding-bottom:0.5rem; border-bottom:3px solid var(--accent-soft); margin-bottom:1.25rem; display:flex; align-items:center; gap:0.5rem; }
+.section-title .icon { font-size:1.4rem; }
+.card { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); padding:1.5rem; margin-bottom:1.25rem; border:1px solid var(--border-default); }
+.card-header { font-size:1.1rem; font-weight:600; color:var(--text-primary); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+.quick-ref { background:linear-gradient(135deg,var(--accent-soft) 0%,var(--accent-soft) 100%); border:2px solid var(--accent-soft); border-radius:var(--radius-xl); padding:1.5rem; margin-top:-1rem; position:relative; z-index:2; box-shadow:var(--shadow-lg); }
+.quick-ref h2 { font-size:1.2rem; color:var(--accent); margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.qr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0.75rem; }
+.qr-item { background:var(--bg-surface); border-radius:var(--radius-lg); padding:0.75rem 1rem; border-left:4px solid var(--accent); font-size:0.88rem; }
+.qr-item .qr-label { font-weight:600; color:var(--text-secondary); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; }
+.qr-item .qr-value { color:var(--text-primary); margin-top:0.15rem; word-break:break-all; }
+.qr-item .qr-value a { color:var(--accent); text-decoration:none; }
+.qr-item .qr-value a:hover { text-decoration:underline; }
+.toc { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); padding:1.5rem; border:1px solid var(--border-default); }
+.toc h2 { font-size:1.15rem; color:var(--accent); margin-bottom:1rem; }
+.toc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0.35rem 1.5rem; }
+.toc a { display:flex; align-items:center; gap:0.5rem; color:var(--text-secondary); text-decoration:none; padding:0.35rem 0.5rem; border-radius:6px; font-size:0.9rem; transition:background 0.15s; }
+.toc a:hover { background:var(--accent-soft); color:var(--accent); }
+.toc a .toc-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:0.7rem; font-weight:700; flex-shrink:0; }
+.flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:0; padding:1.5rem 0; }
+.flow-step { background:var(--bg-surface); border:2px solid var(--accent-soft); border-radius:var(--radius-lg); padding:0.75rem 1.1rem; text-align:center; font-size:0.85rem; font-weight:600; color:var(--text-secondary); min-width:110px; }
+.flow-step.primary { background:var(--accent); color:white; border-color:var(--accent); }
+.flow-step.success { background:var(--success); color:white; border-color:var(--success); }
+.flow-step.warning { background:var(--warning); color:white; border-color:var(--warning); }
+.flow-step.purple { background:var(--accent); color:white; border-color:var(--accent); }
+.flow-step .flow-icon { font-size:1.3rem; display:block; margin-bottom:0.25rem; }
+.flow-step .flow-sub { font-weight:400; font-size:0.75rem; opacity:0.85; margin-top:0.15rem; }
+.flow-arrow { font-size:1.4rem; color:var(--text-muted); padding:0 0.3rem; flex-shrink:0; }
+.label-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.88rem; }
+.label-table th { background:var(--accent); color:white; padding:0.75rem 1rem; text-align:left; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+.label-table th:first-child { border-radius:var(--radius-lg) 0 0 0; }
+.label-table th:last-child { border-radius:0 var(--radius-lg) 0 0; }
+.label-table td { padding:0.65rem 1rem; border-bottom:1px solid var(--border-default); vertical-align:top; }
+.label-table tr:last-child td { border-bottom:none; }
+.label-table tr:nth-child(even) td { background:var(--bg-surface-2); }
+.label-table tr:hover td { background:var(--accent-soft); }
+.label-badge { display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; font-weight:600; font-size:0.78rem; white-space:nowrap; }
+.lb-blue { background:var(--accent-soft); color:var(--accent); } .lb-amber { background:var(--warning-bg); color:var(--warning); }
+.lb-red { background:var(--danger-bg); color:var(--danger); } .lb-green { background:var(--success-bg); color:var(--success); }
+.lb-purple { background:var(--accent-soft); color:var(--accent); }
+.wf-card { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); border:1px solid var(--border-default); overflow:hidden; margin-bottom:1.5rem; }
+.wf-header { padding:1rem 1.5rem; display:flex; align-items:center; gap:0.75rem; border-bottom:1px solid var(--border-default); }
+.wf-num { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; font-weight:700; font-size:1rem; flex-shrink:0; color:white; background:var(--accent); }
+.wf-header h3 { font-size:1.1rem; font-weight:700; color:var(--text-primary); }
+.wf-header .wf-tag { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--bg-subtle); color:var(--text-secondary); font-weight:500; }
+.wf-body { padding:1.25rem 1.5rem; }
+.wf-body h4 { font-size:0.9rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem; margin-top:1rem; }
+.wf-body h4:first-child { margin-top:0; }
+.steps { counter-reset:step; list-style:none; padding:0; }
+.steps li { position:relative; padding:0.5rem 0 0.5rem 2.5rem; font-size:0.9rem; line-height:1.5; }
+.steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0.45rem; width:24px; height:24px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.steps li + li { border-top:1px solid var(--bg-subtle); }
+.info-box { padding:0.85rem 1rem; border-radius:var(--radius-lg); font-size:0.88rem; margin:0.75rem 0; display:flex; align-items:flex-start; gap:0.6rem; }
+.info-box.info { background:var(--accent-soft); border-left:4px solid var(--accent); color:var(--accent); }
+.info-box.warn { background:var(--warning-bg); border-left:4px solid var(--warning); color:var(--warning); }
+.info-box.danger { background:var(--danger-bg); border-left:4px solid var(--danger); color:var(--danger); }
+.info-box.tip { background:var(--success-bg); border-left:4px solid var(--success); color:var(--success); }
+.info-box .ib-icon { font-size:1.1rem; flex-shrink:0; margin-top:0.05rem; }
+code { background:var(--bg-subtle); padding:0.15rem 0.4rem; border-radius:4px; font-size:0.82rem; font-family:'SF Mono',Monaco,Consolas,monospace; color:var(--accent); }
+.ts-item { margin-bottom:0.75rem; }
+.ts-problem { font-weight:600; color:var(--danger); font-size:0.9rem; }
+.ts-solution { font-size:0.88rem; color:var(--text-secondary); margin-top:0.2rem; padding-left:1rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+strong { color:var(--text-primary); } a { color:var(--accent); }
+p { margin-bottom:0.5rem; } ul,ol { margin-left:1.25rem; margin-bottom:0.5rem; }
+li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px solid var(--border-default); margin:1.5rem 0; }
+@media (max-width:768px) {
+  .header h1 { font-size:1.6rem; } .qr-grid { grid-template-columns:1fr; }
+  .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
+  .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
+  .container { padding:0 1rem 3rem; }
 }
-
-/* ====== HEADER ====== */
-.header {
-  background: linear-gradient(135deg, var(--blue-800) 0%, var(--indigo-700) 100%);
-  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
-}
-.header::after {
-  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
-  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
-  border-radius: 50%;
-}
-.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
-.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
-.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
-.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
-.header-back {
-  color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.85rem;
-  display: inline-block; margin-bottom: 0.75rem; transition: color 0.15s;
-}
-.header-back:hover { color: white; }
-
-/* ====== LAYOUT ====== */
-.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
-.section { margin-top: 2.5rem; }
-.section-title {
-  font-size: 1.5rem; font-weight: 700; color: var(--blue-800);
-  padding-bottom: 0.5rem; border-bottom: 3px solid var(--blue-200);
-  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
-}
-.section-title .icon { font-size: 1.4rem; }
-
-/* ====== CARDS ====== */
-.card {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--slate-200);
-}
-.card-header {
-  font-size: 1.1rem; font-weight: 600; color: var(--slate-800);
-  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
-}
-
-/* ====== QUICK REFERENCE ====== */
-.quick-ref {
-  background: linear-gradient(135deg, var(--blue-50) 0%, var(--indigo-50) 100%);
-  border: 2px solid var(--blue-200); border-radius: var(--radius);
-  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
-  box-shadow: var(--shadow-lg);
-}
-.quick-ref h2 { font-size: 1.2rem; color: var(--blue-800); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
-.qr-item {
-  background: white; border-radius: var(--radius-sm); padding: 0.75rem 1rem;
-  border-left: 4px solid var(--blue-500); font-size: 0.88rem;
-}
-.qr-item .qr-label { font-weight: 600; color: var(--slate-600); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.qr-item .qr-value { color: var(--slate-800); margin-top: 0.15rem; word-break: break-all; }
-.qr-item .qr-value a { color: var(--blue-600); text-decoration: none; }
-.qr-item .qr-value a:hover { text-decoration: underline; }
-
-/* ====== TABLE OF CONTENTS ====== */
-.toc {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 1.5rem; border: 1px solid var(--slate-200);
-}
-.toc h2 { font-size: 1.15rem; color: var(--blue-800); margin-bottom: 1rem; }
-.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
-.toc a {
-  display: flex; align-items: center; gap: 0.5rem;
-  color: var(--slate-700); text-decoration: none; padding: 0.35rem 0.5rem;
-  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
-}
-.toc a:hover { background: var(--blue-50); color: var(--blue-700); }
-.toc a .toc-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--blue-100); color: var(--blue-700);
-  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
-}
-
-/* ====== FLOW DIAGRAMS ====== */
-.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
-.flow-step {
-  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius-sm);
-  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
-  color: var(--slate-700); min-width: 110px; position: relative;
-}
-.flow-step.primary { background: var(--blue-600); color: white; border-color: var(--blue-700); }
-.flow-step.success { background: var(--green-600); color: white; border-color: var(--green-700); }
-.flow-step.warning { background: var(--amber-500); color: white; border-color: var(--amber-600); }
-.flow-step.purple { background: var(--purple-600); color: white; border-color: var(--purple-600); }
-.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
-.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
-.flow-arrow {
-  font-size: 1.4rem; color: var(--slate-400); padding: 0 0.3rem; flex-shrink: 0;
-}
-.flow-arrow-down {
-  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
-  font-size: 1.4rem; color: var(--slate-400);
-}
-
-/* ====== ARCHITECTURE DIAGRAM ====== */
-.arch-diagram {
-  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
-  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
-}
-.arch-box {
-  background: white; border: 2px solid var(--blue-200); border-radius: var(--radius);
-  padding: 1.25rem; text-align: center; min-height: 120px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-}
-.arch-box.highlight { border-color: var(--blue-500); background: var(--blue-50); }
-.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
-.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--slate-800); }
-.arch-box .arch-desc { font-size: 0.78rem; color: var(--slate-500); margin-top: 0.25rem; }
-.arch-connector { text-align: center; font-size: 1.5rem; color: var(--slate-400); }
-
-/* ====== LABEL TABLE ====== */
-.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
-.label-table th {
-  background: var(--blue-700); color: white; padding: 0.75rem 1rem;
-  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
-}
-.label-table th:first-child { border-radius: var(--radius-sm) 0 0 0; }
-.label-table th:last-child { border-radius: 0 var(--radius-sm) 0 0; }
-.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
-.label-table tr:last-child td { border-bottom: none; }
-.label-table tr:nth-child(even) td { background: var(--slate-50); }
-.label-table tr:hover td { background: var(--blue-50); }
-.label-badge {
-  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
-  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
-}
-.label-badge.lb-1 { background: var(--blue-100); color: var(--blue-700); }
-.label-badge.lb-2 { background: var(--amber-100); color: var(--amber-600); }
-.label-badge.lb-3 { background: var(--red-100); color: var(--red-600); }
-.label-badge.lb-4 { background: var(--green-100); color: var(--green-700); }
-.label-badge.lb-5 { background: var(--indigo-100); color: var(--indigo-700); }
-.label-badge.lb-6 { background: var(--purple-50); color: var(--purple-600); }
-
-/* ====== WORKFLOW CARDS ====== */
-.wf-card {
-  background: white; border-radius: var(--radius); box-shadow: var(--shadow);
-  border: 1px solid var(--slate-200); overflow: hidden; margin-bottom: 1.5rem;
-}
-.wf-header {
-  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
-  border-bottom: 1px solid var(--slate-200);
-}
-.wf-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
-  flex-shrink: 0; color: white;
-}
-.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--slate-800); }
-.wf-header .wf-tag {
-  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
-  background: var(--slate-100); color: var(--slate-600); font-weight: 500;
-}
-.wf-body { padding: 1.25rem 1.5rem; }
-.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--slate-700); margin-bottom: 0.5rem; margin-top: 1rem; }
-.wf-body h4:first-child { margin-top: 0; }
-
-/* Colour coding for workflow numbers */
-.wf-num.wf-1 { background: var(--blue-600); } .wf-num.wf-2 { background: var(--amber-600); }
-.wf-num.wf-3 { background: var(--red-600); } .wf-num.wf-4 { background: var(--green-600); }
-.wf-num.wf-5 { background: var(--indigo-600); } .wf-num.wf-6 { background: var(--purple-600); }
-
-/* ====== STEP LISTS ====== */
-.steps { counter-reset: step; list-style: none; padding: 0; }
-.steps li {
-  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
-}
-.steps li::before {
-  counter-increment: step; content: counter(step);
-  position: absolute; left: 0; top: 0.45rem;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--blue-100); color: var(--blue-700);
-  font-size: 0.75rem; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.steps li + li { border-top: 1px solid var(--slate-100); }
-
-/* ====== INFO BOXES ====== */
-.info-box {
-  padding: 0.85rem 1rem; border-radius: var(--radius-sm); font-size: 0.88rem;
-  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
-}
-.info-box.info { background: var(--blue-50); border-left: 4px solid var(--blue-500); color: var(--blue-800); }
-.info-box.warn { background: var(--amber-50); border-left: 4px solid var(--amber-500); color: var(--amber-600); }
-.info-box.danger { background: var(--red-50); border-left: 4px solid var(--red-500); color: var(--red-600); }
-.info-box.tip { background: var(--green-50); border-left: 4px solid var(--green-500); color: var(--green-700); }
-.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
-
-/* ====== CODE / MONO ====== */
-code {
-  background: var(--slate-100); padding: 0.15rem 0.4rem; border-radius: 4px;
-  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--indigo-600);
-}
-
-/* ====== TROUBLESHOOTING ====== */
-.ts-item { margin-bottom: 0.75rem; }
-.ts-problem { font-weight: 600; color: var(--red-600); font-size: 0.9rem; }
-.ts-solution { font-size: 0.88rem; color: var(--slate-700); margin-top: 0.2rem; padding-left: 1rem; }
-
-/* ====== TWO-COL GRID ====== */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-
-/* ====== PRINT ====== */
-@media print {
-  body { background: white; font-size: 10pt; }
-  .header { background: var(--blue-800) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
-  .section { break-inside: avoid; }
-  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
-
-/* ====== RESPONSIVE ====== */
-@media (max-width: 768px) {
-  .header h1 { font-size: 1.6rem; }
-  .qr-grid { grid-template-columns: 1fr; }
-  .toc-grid { grid-template-columns: 1fr; }
-  .arch-diagram { grid-template-columns: 1fr; }
-  .arch-connector { transform: rotate(90deg); }
-  .grid-2 { grid-template-columns: 1fr; }
-  .flow { flex-direction: column; }
-  .flow-arrow { transform: rotate(90deg); }
-  .container { padding: 0 1rem 3rem; }
-}
-
-/* ====== MISC ====== */
-strong { color: var(--slate-800); }
-a { color: var(--blue-600); }
-p { margin-bottom: 0.5rem; }
-ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
-li { margin-bottom: 0.2rem; font-size: 0.9rem; }
-hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
 </style>
 </head>
 <body>
 
-<!-- ============ HEADER ============ -->
 <div class="header">
   <div class="header-inner">
-    <a href="../../sop.html" class="header-back">&#x2190; Back to SOP Index</a>
-    <h1>&#x1F4DD; Business Plan Builder</h1>
-    <div class="subtitle">Standard Operating Procedure &mdash; AI-Powered Conversational Plan Builder</div>
-    <div class="version">Module PLAN-01 &bull; Version 1.0 &bull; 13 Apr 2026 &bull; Owner: Kevin Brittain</div>
+    <a href="../../index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
+    <h1>&#x1F680; Business Launch Plan Builder</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; AI-powered conversational plan builder with interactive 30-day PM dashboard</div>
+    <div class="version">Version 1.3 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
 <div class="container">
 
-<!-- ============ QUICK REFERENCE ============ -->
+<!-- QUICK REFERENCE -->
 <div class="quick-ref">
   <h2>&#x26A1; Quick Reference</h2>
   <div class="qr-grid">
     <div class="qr-item">
-      <div class="qr-label">Module ID</div>
-      <div class="qr-value">PLAN-01</div>
-    </div>
-    <div class="qr-item">
-      <div class="qr-label">Location</div>
+      <div class="qr-label">Access URL</div>
       <div class="qr-value"><code>os/business-plan-builder/index.html</code></div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">Proxy Server</div>
-      <div class="qr-value"><code>os/business-plan-builder/serve.py</code><br>(port 8095)</div>
+      <div class="qr-label">AI Providers</div>
+      <div class="qr-value">Claude (Anthropic), ChatGPT (OpenAI), Custom Endpoint</div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">Primary Tools</div>
-      <div class="qr-value">HTML, CSS, JavaScript, Python (proxy)</div>
+      <div class="qr-label">Proxy Endpoint</div>
+      <div class="qr-value"><code>/api/chat</code> (required for API calls)</div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">API</div>
-      <div class="qr-value">Anthropic Claude API</div>
+      <div class="qr-label">localStorage Key</div>
+      <div class="qr-value"><code>od-bplan-v4</code></div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">Approval Required</div>
-      <div class="qr-value">No</div>
+      <div class="qr-label">Plan Sections</div>
+      <div class="qr-value">10 sections across 3 groups (Foundation, Commercial, Execution)</div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">Category</div>
-      <div class="qr-value">Operations &mdash; Planning</div>
+      <div class="qr-label">30-Day Plan Tasks</div>
+      <div class="qr-value">~30&ndash;40 tasks, 4 weeks, assigned to real team members</div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">Version</div>
-      <div class="qr-value">1.0</div>
+      <div class="qr-label">Export</div>
+      <div class="qr-value">Browser print dialog (Export as PDF button)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Reset URL</div>
+      <div class="qr-value"><code>?reset</code> query string clears all data</div>
     </div>
   </div>
 </div>
 
-<!-- ============ TABLE OF CONTENTS ============ -->
+<!-- TABLE OF CONTENTS -->
 <div class="section">
   <div class="toc">
     <h2>&#x1F4D1; Table of Contents</h2>
     <div class="toc-grid">
-      <a href="#purpose"><span class="toc-num">1</span> Purpose &amp; Overview</a>
-      <a href="#architecture"><span class="toc-num">2</span> System Architecture</a>
-      <a href="#setup"><span class="toc-num">3</span> Initial Setup</a>
-      <a href="#building"><span class="toc-num">4</span> Building the Plan</a>
-      <a href="#plan-view"><span class="toc-num">5</span> Viewing the Plan Output</a>
-      <a href="#review-edit"><span class="toc-num">6</span> Reviewing &amp; Editing Sections</a>
-      <a href="#sections"><span class="toc-num">7</span> The 10 Business Plan Sections</a>
-      <a href="#data"><span class="toc-num">8</span> Data Persistence &amp; Storage</a>
-      <a href="#proxy"><span class="toc-num">9</span> Proxy Server (serve.py)</a>
-      <a href="#troubleshooting"><span class="toc-num">10</span> Troubleshooting</a>
+      <a href="#overview"><span class="toc-num">1</span> Overview &amp; Purpose</a>
+      <a href="#access"><span class="toc-num">2</span> How to Access</a>
+      <a href="#structure"><span class="toc-num">3</span> Plan Builder Structure</a>
+      <a href="#workflow"><span class="toc-num">4</span> Step-by-Step Workflow</a>
+      <a href="#ai-features"><span class="toc-num">5</span> AI Generation Features</a>
+      <a href="#saving"><span class="toc-num">6</span> Saving &amp; Exporting</a>
+      <a href="#buttons"><span class="toc-num">7</span> Action Buttons Reference</a>
+      <a href="#troubleshooting"><span class="toc-num">8</span> Troubleshooting</a>
+      <a href="#changelog"><span class="toc-num">9</span> Changelog</a>
     </div>
   </div>
 </div>
 
-<!-- ============ 1. PURPOSE & OVERVIEW ============ -->
-<div class="section" id="purpose">
-  <h2 class="section-title"><span class="icon">&#x1F3AF;</span> 1. Purpose &amp; Overview</h2>
+<!-- 1. OVERVIEW -->
+<div class="section" id="overview">
+  <h2 class="section-title"><span class="icon">&#x1F3AF;</span> 1. Overview &amp; Purpose</h2>
 
   <div class="card">
     <div class="card-header">&#x1F4A1; What It Does</div>
-    <p>The Business Plan Builder is an AI-powered conversational tool that guides you through creating a complete business plan. It uses the Anthropic Claude API to have a natural chat conversation, walking you through 10 key sections one at a time.</p>
-    <p>You talk to the AI, answer its questions, and it builds a professional business plan with rich visual output &mdash; KPI cards, tabbed sections, timeline bars, and collapsible accordions. No templates to fill in, no blank pages to stare at. Just a conversation.</p>
+    <p>The Business Launch Plan Builder is an AI-powered conversational tool that guides you through building a complete business plan and a detailed 30-day launch action plan. Instead of filling in a blank template, you have a natural chat conversation with an AI coach that asks focused questions, extracts your answers, and automatically assembles a polished business plan with rich visual output.</p>
+    <p>When the plan is complete, it renders as a full-screen document with KPI summary cards, tabbed section navigation, collapsible accordions, financial tables, and &mdash; if the 30-day dashboard is generated &mdash; a live project management view with task status tracking, workload balance, and progress KPIs.</p>
 
     <div class="info-box tip">
       <span class="ib-icon">&#x1F4AC;</span>
-      <div><strong>Think of it like this:</strong> Instead of writing a business plan from scratch, you have a chat with an AI advisor who asks you the right questions and turns your answers into a polished plan.</div>
+      <div><strong>Think of it like this:</strong> You are talking to a top-tier business consultant. You answer their questions, they take notes, and at the end they hand you a finished plan. The AI does all the structuring and writing.</div>
     </div>
   </div>
 
@@ -363,547 +183,700 @@ hr { border: none; border-top: 1px solid var(--slate-200); margin: 1.5rem 0; }
     <div class="card-header">&#x1F504; End-to-End Flow</div>
     <div class="flow">
       <div class="flow-step primary">
-        <span class="flow-icon">&#x1F511;</span>
-        Setup API Key
-        <span class="flow-sub">Enter key &amp; model</span>
+        <span class="flow-icon">&#x2699;&#xFE0F;</span>
+        Setup
+        <span class="flow-sub">Provider, key, name</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step">
         <span class="flow-icon">&#x1F4AC;</span>
-        Chat with AI
-        <span class="flow-sub">Answer questions</span>
+        Chat
+        <span class="flow-sub">10 phases of questions</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step warning">
         <span class="flow-icon">&#x1F4CB;</span>
-        Build 10 Sections
-        <span class="flow-sub">One at a time</span>
+        Sections Captured
+        <span class="flow-sub">Auto-saved as JSON</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step success">
         <span class="flow-icon">&#x1F4CA;</span>
         View Plan
         <span class="flow-sub">Rich visual output</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step purple">
-        <span class="flow-icon">&#x270F;&#xFE0F;</span>
-        Review / Edit
-        <span class="flow-sub">Refine any section</span>
+        <span class="flow-icon">&#x2728;</span>
+        Generate 30-Day Plan
+        <span class="flow-sub">AI-built PM dashboard</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step success">
         <span class="flow-icon">&#x1F4E4;</span>
-        Export
+        Export PDF
         <span class="flow-sub">Print or save</span>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ============ 2. SYSTEM ARCHITECTURE ============ -->
-<div class="section" id="architecture">
-  <h2 class="section-title"><span class="icon">&#x1F3D7;</span> 2. System Architecture</h2>
-
-  <div class="card">
-    <div class="card-header">&#x1F310; Component Overview</div>
-    <p>The Business Plan Builder is a client-side HTML/JavaScript application that connects to the Anthropic Claude API through a local Python proxy server. The proxy is needed because browsers block direct API calls to external services (a security feature called CORS).</p>
-
-    <div class="arch-diagram">
-      <div class="arch-box highlight">
-        <div class="arch-icon">&#x1F4BB;</div>
-        <div class="arch-title">Browser UI</div>
-        <div class="arch-desc">index.html<br>Chat + Plan views</div>
-      </div>
-      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
-      <div class="arch-box highlight" style="border-color: var(--indigo-500); background: var(--indigo-50);">
-        <div class="arch-icon">&#x1F40D;</div>
-        <div class="arch-title">Proxy Server</div>
-        <div class="arch-desc">serve.py<br>Port 8095</div>
-      </div>
-      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
-      <div class="arch-box highlight" style="border-color: var(--green-500); background: var(--green-50);">
-        <div class="arch-icon">&#x1F916;</div>
-        <div class="arch-title">Claude API</div>
-        <div class="arch-desc">api.anthropic.com<br>AI responses</div>
-      </div>
-    </div>
-
-    <div class="info-box info">
-      <span class="ib-icon">&#x2139;&#xFE0F;</span>
-      <div><strong>Why the proxy?</strong> Browsers won't let a web page call <code>api.anthropic.com</code> directly (CORS policy). The proxy runs on <code>localhost</code> (same origin as the page), so the browser allows it. It's a simple pass-through &mdash; no data is stored.</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F4C2; File Structure</div>
-    <table class="label-table">
-      <thead>
-        <tr><th>File</th><th>Purpose</th><th>Type</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><code>index.html</code></td>
-          <td>The main application &mdash; chat UI, plan view, all JavaScript logic</td>
-          <td><span class="label-badge lb-1">Frontend</span></td>
-        </tr>
-        <tr>
-          <td><code>serve.py</code></td>
-          <td>Python proxy server that forwards API requests to Claude and serves the HTML file</td>
-          <td><span class="label-badge lb-5">Backend</span></td>
-        </tr>
-        <tr>
-          <td><code>sop.html</code></td>
-          <td>This document &mdash; the Standard Operating Procedure</td>
-          <td><span class="label-badge lb-4">Docs</span></td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ============ 3. INITIAL SETUP ============ -->
-<div class="section" id="setup">
-  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 3. Initial Setup</h2>
+<!-- 2. HOW TO ACCESS -->
+<div class="section" id="access">
+  <h2 class="section-title"><span class="icon">&#x1F511;</span> 2. How to Access</h2>
 
   <div class="wf-card">
     <div class="wf-header">
-      <span class="wf-num wf-1">1</span>
-      <h3>Initial Setup</h3>
-      <span class="wf-tag">First-time &amp; every session</span>
+      <span class="wf-num">1</span>
+      <h3>Opening the App &amp; Setup Screen</h3>
+      <span class="wf-tag">First-time &amp; every new plan</span>
     </div>
     <div class="wf-body">
-      <h4>Start the Proxy Server</h4>
-      <ol class="steps">
-        <li>Open a terminal window on your computer.</li>
-        <li>Navigate to the business plan builder folder: <code>cd os/business-plan-builder</code></li>
-        <li>Run the proxy server: <code>python3 serve.py</code></li>
-        <li>You should see a message saying the server is running on port <strong>8095</strong>.</li>
-        <li>Leave this terminal window open &mdash; closing it stops the server.</li>
-      </ol>
+      <h4>Prerequisites</h4>
+      <p>The app sends API calls to an AI provider through a proxy endpoint (<code>/api/chat</code>). The proxy must be running before you start chatting. Without it the app will display a "Could not connect to AI" error on the setup screen.</p>
 
       <h4>Open the Application</h4>
       <ol class="steps">
-        <li>Open your browser and go to <code>http://localhost:8095</code></li>
-        <li>The <strong>Setup Screen</strong> appears asking for your API key and model choice.</li>
-        <li>Enter your <strong>Anthropic API key</strong> (starts with <code>sk-ant-</code>).</li>
-        <li>Select a <strong>model</strong> from the dropdown (e.g. Claude Sonnet, Claude Opus).</li>
-        <li>Click <strong>Start Building</strong> to enter the chat view.</li>
-      </ol>
-
-      <div class="info-box warn">
-        <span class="ib-icon">&#x26A0;&#xFE0F;</span>
-        <div><strong>API key stays local:</strong> Your API key is only sent from your browser to the local proxy server, which forwards it to Anthropic. It is never stored on disk or sent anywhere else.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 4. BUILDING THE PLAN ============ -->
-<div class="section" id="building">
-  <h2 class="section-title"><span class="icon">&#x1F4AC;</span> 4. Building the Plan</h2>
-
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-2">2</span>
-      <h3>Building the Plan</h3>
-      <span class="wf-tag">Core workflow</span>
-    </div>
-    <div class="wf-body">
-      <h4>The Chat View</h4>
-      <p>After setup, you enter a chat view with two main areas:</p>
-      <ul>
-        <li><strong>Sidebar (left):</strong> Shows all 10 business plan sections. The current section is highlighted. Completed sections get a green tick.</li>
-        <li><strong>Chat area (right):</strong> A messaging interface where you talk to the AI. Type your messages at the bottom and press Enter or click Send.</li>
-      </ul>
-
-      <h4>How the Conversation Works</h4>
-      <ol class="steps">
-        <li>The AI starts by introducing itself and asking about your business idea for the <strong>Executive Summary</strong> section.</li>
-        <li>Type your answer and send it. The AI will ask follow-up questions to get more detail.</li>
-        <li>After enough information is gathered, the AI saves that section and automatically moves to the next one.</li>
-        <li>A green <strong>"Section captured"</strong> message appears in the chat when a section is complete.</li>
-        <li>This process repeats for all 10 sections until the entire plan is built.</li>
-      </ol>
-
-      <div class="info-box tip">
-        <span class="ib-icon">&#x1F4A1;</span>
-        <div><strong>Be detailed:</strong> The more information you give the AI, the better your plan will be. Don't just give one-word answers &mdash; explain your thinking. The AI uses everything you say to write each section.</div>
-      </div>
-
-      <h4>Sidebar Progress Indicators</h4>
-      <table class="label-table">
-        <thead>
-          <tr><th>Indicator</th><th>Meaning</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><span class="label-badge lb-1">Highlighted (blue)</span></td><td>Currently being discussed with the AI</td></tr>
-          <tr><td><span class="label-badge lb-4">Green tick</span></td><td>Section complete &mdash; click to review</td></tr>
-          <tr><td><span class="label-badge lb-2">Dimmed</span></td><td>Not started yet &mdash; waiting in queue</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 5. VIEWING THE PLAN ============ -->
-<div class="section" id="plan-view">
-  <h2 class="section-title"><span class="icon">&#x1F4CA;</span> 5. Viewing the Plan Output</h2>
-
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-3">3</span>
-      <h3>Viewing the Plan Output</h3>
-      <span class="wf-tag">Visual output</span>
-    </div>
-    <div class="wf-body">
-      <h4>Opening the Plan View</h4>
-      <ol class="steps">
-        <li>Once at least one section is complete, the <strong>"View Plan"</strong> button appears in the sidebar footer.</li>
-        <li>Click it to open a full-screen overlay showing your business plan.</li>
-        <li>The plan opens with a header, KPI summary cards, and tabbed navigation for each section.</li>
-      </ol>
-
-      <h4>Plan View Features</h4>
-      <div class="grid-2">
-        <div class="card" style="margin-bottom: 0;">
-          <div class="card-header">&#x1F4C8; KPI Cards</div>
-          <p>A row of 4 summary cards at the top showing key metrics extracted from your plan (e.g. target market size, revenue projections, team size).</p>
-        </div>
-        <div class="card" style="margin-bottom: 0;">
-          <div class="card-header">&#x1F4D1; Tabbed Navigation</div>
-          <p>Sticky tab bar to jump between sections. Tabs are colour-coded by group: Foundation (blue), Commercial (green), Execution (amber).</p>
-        </div>
-        <div class="card" style="margin-bottom: 0;">
-          <div class="card-header">&#x1F4C4; Section Cards</div>
-          <p>Each section displays its content in styled cards with headers, bullet points, and highlight boxes for key figures.</p>
-        </div>
-        <div class="card" style="margin-bottom: 0;">
-          <div class="card-header">&#x1F4C5; Timeline &amp; Accordions</div>
-          <p>The Implementation Timeline shows visual progress bars. Some sections use collapsible accordions to keep the view tidy.</p>
-        </div>
-      </div>
-
-      <h4>Exporting / Printing</h4>
-      <ol class="steps">
-        <li>Click the <strong>"Export PDF"</strong> button in the plan view toolbar.</li>
-        <li>Your browser's print dialog opens with the plan formatted for printing.</li>
-        <li>Choose <strong>Save as PDF</strong> or send directly to a printer.</li>
+        <li>Navigate to <code>os/business-plan-builder/index.html</code> from the main platform (the page is loaded in an iframe via the OS Hub, or open directly in a browser tab).</li>
+        <li>The <strong>Setup Screen</strong> loads. You will see fields for provider, API key, model, and your name.</li>
+        <li>Select your <strong>AI Provider</strong>: Claude (Anthropic), ChatGPT (OpenAI), or Custom Endpoint. The model dropdown updates automatically based on your choice.</li>
+        <li>Enter your <strong>API Key</strong> (Anthropic keys start with <code>sk-ant-</code>; OpenAI keys start with <code>sk-</code>). If using a Custom Endpoint, enter the endpoint URL instead; no key field is shown.</li>
+        <li>Select a <strong>Model</strong> from the dropdown. Claude Sonnet is the default and recommended for balance of speed and quality. Claude Opus produces richer plans but costs more.</li>
+        <li>Enter your <strong>Name</strong> (optional but recommended &mdash; the AI greets you by name and personalises the conversation).</li>
+        <li>Click <strong>Start Building Your Plan</strong>. The app validates that a key or custom endpoint is present, then transitions to the chat view and immediately sends the first message to the AI.</li>
       </ol>
 
       <div class="info-box info">
-        <span class="ib-icon">&#x1F5A8;&#xFE0F;</span>
-        <div><strong>Print styling:</strong> The plan view includes dedicated print CSS that hides the toolbar, adjusts colours for paper, and ensures page breaks fall in sensible places.</div>
+        <span class="ib-icon">&#x1F4BE;</span>
+        <div><strong>Session restore:</strong> If you previously completed part of a plan, the app automatically reloads your conversation from <code>localStorage</code> key <code>od-bplan-v4</code> and skips the setup screen, returning you exactly where you left off.</div>
+      </div>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+        <div><strong>API key security:</strong> Your key is stored in browser <code>localStorage</code> only. It is never written to disk by the platform and is only transmitted from your browser to the proxy endpoint, which forwards it to the AI provider.</div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ============ 6. REVIEWING & EDITING ============ -->
-<div class="section" id="review-edit">
-  <h2 class="section-title"><span class="icon">&#x270F;&#xFE0F;</span> 6. Reviewing &amp; Editing Sections</h2>
-
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-4">4</span>
-      <h3>Reviewing &amp; Editing Sections</h3>
-      <span class="wf-tag">Refine your plan</span>
-    </div>
-    <div class="wf-body">
-      <h4>View Discussion</h4>
-      <p>After a section is complete, you can review the conversation that built it:</p>
-      <ol class="steps">
-        <li>Click a completed section (green tick) in the sidebar.</li>
-        <li>A <strong>Review Panel</strong> opens showing the section data and the full AI conversation for that section.</li>
-        <li>Scroll through the discussion to see exactly what questions the AI asked and what you answered.</li>
-      </ol>
-
-      <h4>Edit Section</h4>
-      <p>Want to change something? You can send follow-up edits to any completed section:</p>
-      <ol class="steps">
-        <li>In the Review Panel, find the <strong>Edit Section</strong> area at the bottom.</li>
-        <li>Type your edit instruction (e.g. "Change the revenue target to &pound;500k" or "Add a section about partnerships").</li>
-        <li>Click <strong>Send Edit</strong>. The AI processes your change and updates the section.</li>
-        <li>The updated content appears immediately in the review panel and plan view.</li>
-      </ol>
-
-      <div class="info-box tip">
-        <span class="ib-icon">&#x2705;</span>
-        <div><strong>Non-destructive edits:</strong> Editing a section doesn't lose any data. The AI takes the existing section content, applies your change, and saves the updated version. You can edit as many times as you like.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 7. THE 10 SECTIONS ============ -->
-<div class="section" id="sections">
-  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 7. The 10 Business Plan Sections</h2>
+<!-- 3. PLAN BUILDER STRUCTURE -->
+<div class="section" id="structure">
+  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 3. Plan Builder Structure</h2>
 
   <div class="card">
-    <div class="card-header">&#x1F4DA; Section Breakdown</div>
-    <p>The AI guides you through these 10 sections in order. Each section builds on the previous ones, so the plan stays consistent throughout.</p>
+    <div class="card-header">&#x1F4DA; The 10 Sections</div>
+    <p>The AI guides you through exactly 10 sections in order. Each section corresponds to one phase of the conversation. Sections are grouped into three colour-coded tabs in the plan view.</p>
 
     <table class="label-table">
       <thead>
-        <tr><th>#</th><th>Section</th><th>What It Covers</th><th>Group</th></tr>
+        <tr><th>#</th><th>Section ID</th><th>Display Title</th><th>What the AI Extracts</th><th>Group</th></tr>
       </thead>
       <tbody>
         <tr>
           <td>1</td>
-          <td><strong>Executive Summary</strong></td>
-          <td>High-level overview of the business, mission, and key value proposition</td>
-          <td><span class="label-badge lb-1">Foundation</span></td>
+          <td><code>overview</code></td>
+          <td>Business Idea</td>
+          <td>Business name, description, problem, solution, industry, stage</td>
+          <td><span class="label-badge lb-blue">Foundation</span></td>
         </tr>
         <tr>
           <td>2</td>
-          <td><strong>Problem &amp; Solution</strong></td>
-          <td>The problem you solve and how your product/service addresses it</td>
-          <td><span class="label-badge lb-1">Foundation</span></td>
+          <td><code>market</code></td>
+          <td>Target Customer</td>
+          <td>Ideal customer profile, pain points (array), current alternative, market size, geographic focus</td>
+          <td><span class="label-badge lb-blue">Foundation</span></td>
         </tr>
         <tr>
           <td>3</td>
-          <td><strong>Target Market</strong></td>
-          <td>Who your customers are, market size, demographics, and segments</td>
-          <td><span class="label-badge lb-1">Foundation</span></td>
+          <td><code>value</code></td>
+          <td>Your Edge</td>
+          <td>Value proposition, unique selling points (array), competitive advantage</td>
+          <td><span class="label-badge lb-blue">Foundation</span></td>
         </tr>
         <tr>
           <td>4</td>
-          <td><strong>Business Model</strong></td>
-          <td>How you make money &mdash; pricing, revenue streams, unit economics</td>
-          <td><span class="label-badge lb-4">Commercial</span></td>
+          <td><code>products</code></td>
+          <td>Products &amp; Pricing</td>
+          <td>Products array (name, description, price each), revenue model, pricing strategy</td>
+          <td><span class="label-badge lb-green">Commercial</span></td>
         </tr>
         <tr>
           <td>5</td>
-          <td><strong>Marketing Strategy</strong></td>
-          <td>How you reach customers &mdash; channels, messaging, acquisition strategy</td>
-          <td><span class="label-badge lb-4">Commercial</span></td>
+          <td><code>revenue</code></td>
+          <td>Revenue Model</td>
+          <td>Year 1 revenue target, Year 3 target, customers per month, avg transaction value, key assumptions</td>
+          <td><span class="label-badge lb-green">Commercial</span></td>
         </tr>
         <tr>
           <td>6</td>
-          <td><strong>Operations Plan</strong></td>
-          <td>Day-to-day operations, processes, tools, and supply chain</td>
-          <td><span class="label-badge lb-2">Execution</span></td>
+          <td><code>costs</code></td>
+          <td>Costs &amp; Investment</td>
+          <td>Startup costs array (item + cost), monthly costs array (item + cost), funding source, break-even estimate</td>
+          <td><span class="label-badge lb-green">Commercial</span></td>
         </tr>
         <tr>
           <td>7</td>
-          <td><strong>Financial Projections</strong></td>
-          <td>Revenue forecasts, costs, break-even analysis, funding needs</td>
-          <td><span class="label-badge lb-2">Execution</span></td>
+          <td><code>team</code></td>
+          <td>Team &amp; Resources</td>
+          <td>Founder role, team members array (name, role, specialization: marketing/systems/product), key hires, tools &amp; software, skills gaps</td>
+          <td><span class="label-badge lb-amber">Execution</span></td>
         </tr>
         <tr>
           <td>8</td>
-          <td><strong>Team &amp; Resources</strong></td>
-          <td>Key team members, roles, hiring plans, and advisory board</td>
-          <td><span class="label-badge lb-2">Execution</span></td>
+          <td><code>marketing</code></td>
+          <td>Marketing &amp; Sales</td>
+          <td>Channels array, sales process (text), lead generation strategy, marketing budget</td>
+          <td><span class="label-badge lb-amber">Execution</span></td>
         </tr>
         <tr>
           <td>9</td>
-          <td><strong>Risk Analysis</strong></td>
-          <td>Key risks, mitigation strategies, and contingency plans</td>
-          <td><span class="label-badge lb-3">Execution</span></td>
+          <td><code>launch</code></td>
+          <td>30-Day Launch Plan</td>
+          <td>Launch date, week 1&ndash;4 summaries, pre-launch checklist, and (when generated) a full <code>weeks</code> array with day-level tasks</td>
+          <td><span class="label-badge lb-amber">Execution</span></td>
         </tr>
         <tr>
           <td>10</td>
-          <td><strong>Implementation Timeline</strong></td>
-          <td>Milestones, deadlines, and phased rollout plan</td>
-          <td><span class="label-badge lb-5">Execution</span></td>
+          <td><code>metrics</code></td>
+          <td>Success Metrics</td>
+          <td>30-day milestone, 90-day milestone, 12-month milestone, KPIs array, biggest risk, risk mitigation</td>
+          <td><span class="label-badge lb-amber">Execution</span></td>
         </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F5C2;&#xFE0F; Sidebar Progress Indicators</div>
+    <p>The left sidebar shows all 10 sections with a status dot. The dot style changes as you progress.</p>
+    <table class="label-table">
+      <thead><tr><th>Dot State</th><th>CSS Class</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Number only, dimmed</td><td><code>section-item</code> (no modifier)</td><td>Not yet started &mdash; waiting in queue</td></tr>
+        <tr><td>Number, accent-coloured</td><td><code>section-item active</code></td><td>Currently being discussed with the AI</td></tr>
+        <tr><td>Green tick, clickable</td><td><code>section-item done</code></td><td>Captured and saved &mdash; click to open Review Panel</td></tr>
+        <tr><td>Solid green background</td><td><code>section-item reviewing</code></td><td>Currently open in the Review Panel</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
-<!-- ============ 8. DATA PERSISTENCE ============ -->
-<div class="section" id="data">
-  <h2 class="section-title"><span class="icon">&#x1F4BE;</span> 8. Data Persistence &amp; Storage</h2>
+<!-- 4. STEP-BY-STEP WORKFLOW -->
+<div class="section" id="workflow">
+  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 4. Step-by-Step Workflow</h2>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num">2</span>
+      <h3>Completing the Conversation</h3>
+      <span class="wf-tag">Core workflow</span>
+    </div>
+    <div class="wf-body">
+      <h4>The Chat Interface</h4>
+      <p>After setup, you enter the main app layout with two areas side by side:</p>
+      <ul>
+        <li><strong>Sidebar (left, 280px):</strong> Shows the 10 sections with progress dots. The footer has <strong>View Your Plan</strong> and <strong>Start Over</strong> buttons.</li>
+        <li><strong>Chat area (right):</strong> A header showing the current section name and phase count, a scrollable message history, and a text input at the bottom.</li>
+      </ul>
+
+      <h4>Sending Messages</h4>
+      <ol class="steps">
+        <li>Type your answer in the textarea at the bottom. Press <strong>Enter</strong> to send (Shift+Enter adds a new line without sending). Or click the send arrow button.</li>
+        <li>The textarea auto-resizes as you type (up to 150px tall). While the AI is responding, both the textarea and send button are disabled.</li>
+        <li>A three-dot typing indicator appears while the AI is generating a response.</li>
+        <li>The AI's reply appears as a chat bubble labelled "AI Coach". Your messages appear on the right labelled with your name (or "You" if no name was entered).</li>
+      </ol>
+
+      <h4>How Sections Are Captured</h4>
+      <ol class="steps">
+        <li>When the AI has gathered enough information for a phase, it writes a summary message. Hidden inside that message is a structured data block in the format <code>[PLANDATA:section_id]{...JSON...}[/PLANDATA]</code>.</li>
+        <li>The app automatically strips the data block from the displayed message (so you never see it), parses the JSON, and stores it in <code>planData</code>.</li>
+        <li>A green <strong>"[Section Title] captured in your plan"</strong> banner appears in the chat immediately after the AI's summary message.</li>
+        <li>The sidebar dot for that section turns green. The chat header title and phase counter advance to the next section.</li>
+        <li>The <strong>View Your Plan</strong> button in the sidebar footer becomes enabled as soon as any section is completed.</li>
+      </ol>
+
+      <div class="info-box tip">
+        <span class="ib-icon">&#x1F4A1;</span>
+        <div><strong>Quality tip:</strong> The AI asks one question at a time. Give detailed, specific answers &mdash; numbers, names, actual figures. Vague answers produce vague plan content. The AI will ask follow-up questions if your answer is too brief before moving on.</div>
+      </div>
+
+      <h4>Context Window Management</h4>
+      <p>If the conversation grows beyond 50 messages, the app automatically summarises the completed sections and trims the message history to the last 48 messages. This prevents hitting API context limits on long sessions. Your plan data is never lost &mdash; only the conversation history is compressed.</p>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num">3</span>
+      <h3>Viewing the Plan</h3>
+      <span class="wf-tag">Plan overlay</span>
+    </div>
+    <div class="wf-body">
+      <h4>Opening the Plan View</h4>
+      <ol class="steps">
+        <li>Click <strong>View Your Plan</strong> in the sidebar footer. This button is enabled as soon as at least one section is complete.</li>
+        <li>A full-screen overlay slides over the entire app showing your business plan.</li>
+        <li>The overlay has a sticky top bar with two buttons: <strong>Back to Chat</strong> and <strong>Export as PDF</strong>.</li>
+      </ol>
+
+      <h4>Plan View Layout</h4>
+      <ul>
+        <li><strong>Plan header:</strong> Business name (styled large), "Business Plan &amp; 30-Day Launch Action Plan" subtitle, and a generated-on date.</li>
+        <li><strong>KPI Row (4 cards):</strong> Revenue Target Y1, Break-Even, Monthly Customers, Launch Date &mdash; pulled directly from the <code>revenue</code>, <code>costs</code>, and <code>launch</code> section data.</li>
+        <li><strong>Sticky tab bar:</strong> One tab per section, colour-coded by group &mdash; Foundation tabs have a green accent border, Commercial tabs a success-green border, Execution tabs an amber border. Clicking a tab shows that section and hides all others.</li>
+        <li><strong>Section content:</strong> Each section renders using a tailored layout (see the Plan Section Renders table below).</li>
+        <li><strong>Section action buttons:</strong> Every section header has two buttons &mdash; <strong>View Discussion</strong> and <strong>Edit Section</strong>. These toggle panels within the plan view.</li>
+      </ul>
+
+      <h4>Per-Section Render Styles</h4>
+      <table class="label-table">
+        <thead><tr><th>Section</th><th>Key Visual Elements</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Business Idea</strong></td><td>Accent card with business name, elevator pitch highlight, industry/stage KPI mini-cards, problem/solution side-by-side highlights</td></tr>
+          <tr><td><strong>Target Customer</strong></td><td>Collapsible accordion steps: Ideal Customer (open by default), Pain Points (amber bullet list), Market Size &amp; Geography (two-column highlights)</td></tr>
+          <tr><td><strong>Your Edge</strong></td><td>Value proposition highlight box, USPs in a card grid (2 or 3 columns), Competitive Advantage accordion step</td></tr>
+          <tr><td><strong>Products &amp; Pricing</strong></td><td>Products table inside collapsible step (Name / Description / Price columns), Revenue Model and Pricing Strategy side-by-side highlights</td></tr>
+          <tr><td><strong>Revenue Model</strong></td><td>4-cell metric grid: Y1 revenue, Y3 revenue, customers/month, avg transaction; Key Assumptions highlight if present</td></tr>
+          <tr><td><strong>Costs &amp; Investment</strong></td><td>Startup costs table, Monthly costs table, Funding Source and Break-Even side-by-side highlights</td></tr>
+          <tr><td><strong>Team &amp; Resources</strong></td><td>Founder Role accordion (open), Key Hires as coloured tags, Tools &amp; Software as green tags, Skills Gaps as a warning decision callout box</td></tr>
+          <tr><td><strong>Marketing &amp; Sales</strong></td><td>One accordion step per marketing channel, Sales Process as a numbered funnel diagram, Lead Gen and Marketing Budget cards</td></tr>
+          <tr><td><strong>30-Day Launch Plan</strong></td><td>Either a thin summary view (week summaries + Generate button) or a full interactive PM dashboard (see Section 5)</td></tr>
+          <tr><td><strong>Success Metrics</strong></td><td>3-column milestone cards (30d / 90d / 365d), KPIs as accent-coloured tags, Biggest Risk as a warning decision callout</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num">4</span>
+      <h3>Reviewing &amp; Editing a Section</h3>
+      <span class="wf-tag">Refinement</span>
+    </div>
+    <div class="wf-body">
+      <h4>Review Panel (from Sidebar)</h4>
+      <p>Clicking a completed section (green tick) in the sidebar opens a Review Panel in place of the chat messages:</p>
+      <ol class="steps">
+        <li>The chat message area is hidden. The Review Panel slides in showing the section icon, title, and a <strong>Back to Chat</strong> button.</li>
+        <li><strong>Current Data</strong> block: every JSON field captured for that section is shown in labelled data cards (arrays shown as bullet lists; objects shown as &ldquo;value1 &mdash; value2&rdquo; lines).</li>
+        <li><strong>Discussion</strong> block: the AI and user messages for that specific section are replayed in a scrollable panel, colour-coded by role (green = you, accent = AI Coach).</li>
+        <li><strong>Make Changes</strong> block: a textarea and <strong>Update</strong> button for sending an edit instruction (see below).</li>
+      </ol>
+
+      <h4>Editing from Inside the Plan View</h4>
+      <p>Inside the full plan overlay, each section also has <strong>Edit Section</strong> and <strong>View Discussion</strong> action buttons directly above the section content. These work identically to the Review Panel edit but stay within the plan view without navigating away.</p>
+
+      <h4>How a Section Edit Works</h4>
+      <ol class="steps">
+        <li>Type your edit instruction &mdash; e.g. <em>"Change the launch date to 1st June"</em> or <em>"Add a new product called Premium Coaching at &pound;150"</em>.</li>
+        <li>Press Enter or click <strong>Update</strong>. The textarea and button disable and a <em>"Updating section&hellip;"</em> message appears.</li>
+        <li>The app builds a focused prompt containing the current section JSON and your instruction, then calls the AI with a fresh single-message conversation (not part of the main chat history).</li>
+        <li>The AI returns a brief confirmation and an updated <code>[PLANDATA:section_id]{...}[/PLANDATA]</code> block. The app extracts the new JSON, updates <code>planData</code>, saves to <code>localStorage</code>, and reloads the view.</li>
+        <li>The edit is also appended to that section&rsquo;s discussion log as <em>&ldquo;&#x270F;&#xFE0F; Edit: [your instruction]&rdquo;</em> followed by the AI&rsquo;s confirmation.</li>
+      </ol>
+
+      <div class="info-box info">
+        <span class="ib-icon">&#x2705;</span>
+        <div><strong>Non-destructive:</strong> Edits always preserve all fields the user did not ask to change. The AI receives the complete current JSON and is instructed to return all fields, not just the modified ones.</div>
+      </div>
+
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+        <div>If the AI does not return a valid <code>[PLANDATA:...]</code> block, the edit fails and displays <em>"AI did not return updated data. Try rephrasing your request."</em> Rephrase and try again.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 5. AI GENERATION FEATURES -->
+<div class="section" id="ai-features">
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 5. AI Generation Features</h2>
 
   <div class="card">
-    <div class="card-header">&#x1F5C4;&#xFE0F; How Your Data Is Saved</div>
-    <p>The Business Plan Builder saves all your progress to your browser's <strong>localStorage</strong>. This means your data stays on your computer and persists between browser sessions (unlike sessionStorage, which clears when you close the tab).</p>
+    <div class="card-header">&#x1F4AC; Main Conversation (Plan Building)</div>
+    <p>The primary AI conversation uses a detailed system prompt built by the <code>buildSystemPrompt(userName)</code> function. Key behaviours the AI is instructed to follow:</p>
+    <ul>
+      <li>Ask <strong>one question at a time</strong>. Never dump multiple questions in a single message.</li>
+      <li>Keep responses to 2&ndash;4 sentences when asking questions.</li>
+      <li>Reference UK business context where relevant (Companies House, HMRC, etc.).</li>
+      <li>After gathering enough information for each phase, write an encouraging summary and embed the structured data block <code>[PLANDATA:section_id]{...JSON...}[/PLANDATA]</code> at the very end of that message.</li>
+      <li>For the <code>launch</code> section, ask for actual team member names and their specialization (marketing / systems / product) so tasks in the 30-day plan can be assigned to real people.</li>
+      <li>Throughout phases 8 and 9, suggest specific AI tools and prompts the user can use (ChatGPT, Claude, Canva AI, etc.) to accelerate their launch.</li>
+      <li>After all 10 phases are complete, congratulate the user and include <code>[PLAN_COMPLETE]</code> at the very end of the message. The app then shows a star banner and enables the plan view.</li>
+    </ul>
 
+    <div class="info-box info">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div>The app also supports a fallback format <code>&lt;plan_data section="id"&gt;...JSON...&lt;/plan_data&gt;</code> via the <code>extractPlanDataFromText()</code> function, in case the AI uses XML-style tags instead of the bracket format.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F680; Generate Detailed 30-Day Plan (AI)</div>
+    <p>After the main conversation completes the <code>launch</code> section with week-level summaries, the 30-Day Launch Plan tab shows a <strong>Generate detailed 30-day plan</strong> button. This triggers a separate AI call via <code>generateLaunchPlan()</code>.</p>
+
+    <h4 style="margin-top:1rem;font-size:.9rem;font-weight:600;color:var(--text-secondary)">What the AI receives</h4>
+    <ul>
+      <li>The entire <code>planData</code> object as JSON context.</li>
+      <li>A formatted list of team members with their 0-based index numbers and specializations.</li>
+      <li>The target launch date (or today + 30 days if no date was set).</li>
+    </ul>
+
+    <h4 style="margin-top:1rem;font-size:.9rem;font-weight:600;color:var(--text-secondary)">What the AI must produce</h4>
+    <ul>
+      <li>A single <code>[PLANDATA:launch]{...}[/PLANDATA]</code> block with no prose before or after.</li>
+      <li>Exactly 4 weeks, each with 4&ndash;5 working days, each day with 2&ndash;3 tasks.</li>
+      <li>Total approximately 30&ndash;40 tasks, every one tailored specifically to this business (no generic filler).</li>
+      <li>Each task has: <code>id</code> (task-1, task-2&hellip;), <code>title</code>, <code>detail</code> (how to do it / what success looks like), <code>category</code> (marketing | systems | product), and <code>suggestedOwner</code> (0-based index matching the team member whose specialization matches the task category).</li>
+      <li>Week themes: w1=accent, w2=blue, w3=amber, w4=green.</li>
+    </ul>
+
+    <p style="margin-top:.75rem">On success, the new <code>launch</code> data is merged with the existing plan data (preserving any fields the AI omitted), saved to <code>localStorage</code>, and the plan view re-renders with the full interactive PM dashboard. The app then auto-scrolls to the 30-Day Launch tab.</p>
+
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
+      <div>The <strong>Regenerate plan</strong> button (shown at the bottom of the 30-Day Dashboard after generation) calls the same function and overwrites the existing task data. Any status or owner changes made since the last generation will be lost. Export to PDF before regenerating if you want to keep a record.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x270F;&#xFE0F; Section Edit AI Call</div>
+    <p>Every time you submit an edit from the Review Panel or the plan view Edit Section panel, the app makes a separate, isolated AI call. It builds a system prompt with the current section JSON and instructs the AI to apply only the requested changes, return all fields, and end with a <code>[PLANDATA:section_id]{...}[/PLANDATA]</code> block. This call uses the same provider, model, and key as the main session.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4F1; Supported AI Providers</div>
     <table class="label-table">
-      <thead>
-        <tr><th>Item</th><th>Details</th></tr>
-      </thead>
+      <thead><tr><th>Provider</th><th>Setup field shown</th><th>Default model options</th><th>Proxy route</th></tr></thead>
       <tbody>
         <tr>
-          <td><strong>Storage Key</strong></td>
-          <td><code>od-bplan-v4</code></td>
+          <td><strong>Claude (Anthropic)</strong></td>
+          <td>API Key (<code>sk-ant-...</code>)</td>
+          <td>Claude Sonnet, Claude Opus, Claude Haiku</td>
+          <td><code>/api/chat</code> with <code>provider: "anthropic"</code></td>
         </tr>
         <tr>
-          <td><strong>What's Saved</strong></td>
-          <td>All section data, chat history, section completion status, KPI values</td>
+          <td><strong>ChatGPT (OpenAI)</strong></td>
+          <td>API Key (<code>sk-...</code>)</td>
+          <td>GPT-4o, GPT-4o Mini</td>
+          <td><code>/api/chat</code> with <code>provider: "openai"</code></td>
         </tr>
         <tr>
-          <td><strong>Where It Lives</strong></td>
-          <td>Browser localStorage (on your machine only)</td>
+          <td><strong>Custom Endpoint</strong></td>
+          <td>Endpoint URL (no API key field)</td>
+          <td>Default (single option)</td>
+          <td><code>/api/chat</code> with <code>provider: "custom"</code> and <code>endpoint</code> field</td>
         </tr>
-        <tr>
-          <td><strong>Persistence</strong></td>
-          <td>Survives browser restarts. Only cleared if you manually clear browser data or use the app's reset function.</td>
-        </tr>
+      </tbody>
+    </table>
+    <div class="info-box info" style="margin-top:.75rem">
+      <span class="ib-icon">&#x2139;&#xFE0F;</span>
+      <div>All three providers call the same proxy route (<code>/api/chat</code> or the value of <code>PROXY_ENDPOINT</code>). The proxy differentiates by the <code>provider</code> field in the request body. The Custom Endpoint option is designed for self-hosted proxies or OpenAI-compatible APIs.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 6. SAVING & EXPORTING -->
+<div class="section" id="saving">
+  <h2 class="section-title"><span class="icon">&#x1F4BE;</span> 6. Saving &amp; Exporting</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F5C4;&#xFE0F; Auto-Save to localStorage</div>
+    <p>The app saves all state after every AI response and after every section edit. The <code>saveState()</code> function writes a single JSON object to <code>localStorage</code> under the key <code>od-bplan-v4</code>. The saved object contains:</p>
+    <table class="label-table">
+      <thead><tr><th>Field</th><th>What it stores</th></tr></thead>
+      <tbody>
+        <tr><td><code>config</code></td><td>Provider, model, API key, username, endpoint URL</td></tr>
+        <tr><td><code>messages</code></td><td>Full conversation history (all roles, including raw data blocks before they are stripped)</td></tr>
+        <tr><td><code>planData</code></td><td>All captured section JSON objects, keyed by section ID</td></tr>
+        <tr><td><code>completedSections</code></td><td>Array of section IDs that have been successfully captured</td></tr>
+        <tr><td><code>sectionMessages</code></td><td>Per-section conversation log (role + cleaned text, no data blocks)</td></tr>
+        <tr><td><code>lastSectionMsgIndex</code></td><td>Index pointer used to slice messages for the next section&rsquo;s discussion log</td></tr>
       </tbody>
     </table>
 
     <div class="info-box warn">
       <span class="ib-icon">&#x26A0;&#xFE0F;</span>
-      <div><strong>Clearing browser data will delete your plan.</strong> If you clear your browser's cache/storage, or use a "Clear All Data" function in the browser, your saved business plan will be lost. Export to PDF before clearing.</div>
+      <div><strong>Browser storage limits:</strong> Browsers typically allow 5&ndash;10 MB per origin. A full business plan with a detailed 30-day task structure is large; if <code>saveState()</code> silently fails (try/catch swallows errors), data will not persist. Export to PDF when the plan is complete.</div>
     </div>
 
     <div class="info-box info">
       <span class="ib-icon">&#x1F4A1;</span>
-      <div><strong>Different browsers = different data.</strong> localStorage is per-browser. A plan saved in Chrome won't appear in Safari. Stick to one browser for your planning session.</div>
+      <div><strong>Task tracking is stored separately.</strong> The 30-day PM dashboard saves task statuses under key <code>bpb-launch-status-{plan-slug}</code> and owner overrides under <code>bpb-launch-owners-{plan-slug}</code>. The plan slug is derived from the business name. These keys are independent of <code>od-bplan-v4</code>.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F4E4; Export as PDF</div>
+    <ol class="steps">
+      <li>Open the plan view (click <strong>View Your Plan</strong>).</li>
+      <li>Click <strong>Export as PDF</strong> in the sticky top bar. This calls <code>window.print()</code>.</li>
+      <li>Your browser&rsquo;s print dialog opens. Select <strong>Save as PDF</strong> as the destination, or choose a printer.</li>
+      <li>For best results, set margins to &ldquo;Minimum&rdquo; or &ldquo;None&rdquo; and enable &ldquo;Background graphics&rdquo; / &ldquo;Print backgrounds&rdquo; so the plan&rsquo;s colour blocks print correctly.</li>
+    </ol>
+
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F5A8;&#xFE0F;</span>
+      <div><strong>Print CSS:</strong> The plan view includes dedicated print styles that hide the toolbar, tab bar, discussion panels, edit panels, the generate button, and the filter/workload bars from the PM dashboard. Accordions are forced open so all content is visible in print. Section page breaks are set to <code>avoid</code> for tidy pagination.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; Resetting &amp; Starting Over</div>
+    <p>The <strong>Start Over</strong> button in the sidebar footer opens a confirmation modal. Clicking <strong>Delete Everything</strong> calls <code>doReset()</code>:</p>
+    <ul>
+      <li>Removes the <code>od-bplan-v4</code> key from <code>localStorage</code>.</li>
+      <li>Clears all in-memory state (<code>messages</code>, <code>planData</code>, <code>completedSections</code>, <code>sectionMessages</code>).</li>
+      <li>Hides the app view and shows the setup screen for a fresh start.</li>
+    </ul>
+    <p>Alternatively, add <code>?reset</code> to the URL. The app detects this on load, removes <code>od-bplan-v4</code>, and clears the URL parameter before showing the setup screen.</p>
+
+    <div class="info-box danger">
+      <span class="ib-icon">&#x1F6A8;</span>
+      <div><strong>Reset is permanent.</strong> There is no undo. Export your plan to PDF before resetting if you want a copy.</div>
     </div>
   </div>
 </div>
 
-<!-- ============ 9. PROXY SERVER ============ -->
-<div class="section" id="proxy">
-  <h2 class="section-title"><span class="icon">&#x1F40D;</span> 9. Proxy Server (serve.py)</h2>
+<!-- 7. ACTION BUTTONS REFERENCE -->
+<div class="section" id="buttons">
+  <h2 class="section-title"><span class="icon">&#x1F39B;&#xFE0F;</span> 7. Action Buttons Reference</h2>
 
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-5">5</span>
-      <h3>Technical Architecture &mdash; Proxy Server</h3>
-      <span class="wf-tag">Technical</span>
-    </div>
-    <div class="wf-body">
-      <h4>What It Does</h4>
-      <p>The <code>serve.py</code> file is a small Python HTTP server that does two things:</p>
-      <ul>
-        <li><strong>Serves the HTML file:</strong> When you visit <code>http://localhost:8095</code>, it serves <code>index.html</code>.</li>
-        <li><strong>Proxies API calls:</strong> When the browser sends a request to <code>/api/messages</code>, the proxy forwards it to <code>https://api.anthropic.com/v1/messages</code> and returns the response.</li>
-      </ul>
-
-      <h4>Why It's Needed</h4>
-      <p>Browsers enforce a security rule called <strong>CORS</strong> (Cross-Origin Resource Sharing). This prevents web pages from making API calls to different domains. The proxy runs on <code>localhost</code> (same origin as the page), so the browser allows it.</p>
-
-      <h4>Request Flow</h4>
-      <div class="flow">
-        <div class="flow-step">
-          <span class="flow-icon">&#x1F4BB;</span>
-          Browser
-          <span class="flow-sub">User sends message</span>
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step primary">
-          <span class="flow-icon">&#x1F310;</span>
-          localhost:8095
-          <span class="flow-sub">/api/messages</span>
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step purple">
-          <span class="flow-icon">&#x1F40D;</span>
-          serve.py
-          <span class="flow-sub">Forwards request</span>
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step success">
-          <span class="flow-icon">&#x1F916;</span>
-          Claude API
-          <span class="flow-sub">Returns response</span>
-        </div>
-      </div>
-
-      <h4>Running the Server</h4>
-      <table class="label-table">
-        <thead>
-          <tr><th>Command</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>python3 serve.py</code></td>
-            <td>Start the proxy server on port 8095</td>
-          </tr>
-          <tr>
-            <td><code>Ctrl + C</code></td>
-            <td>Stop the server</td>
-          </tr>
-          <tr>
-            <td><code>lsof -i :8095</code></td>
-            <td>Check if anything is already using port 8095</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div class="info-box danger">
-        <span class="ib-icon">&#x1F6A8;</span>
-        <div><strong>Server must be running:</strong> If the proxy server isn't running, the app will show a "Failed to fetch" error when you try to chat. Always start <code>serve.py</code> before using the app.</div>
-      </div>
-    </div>
+  <div class="card">
+    <div class="card-header">&#x1F4CB; All Buttons</div>
+    <table class="label-table">
+      <thead>
+        <tr><th>Button Label</th><th>Where It Appears</th><th>What It Does</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Start Building Your Plan</strong></td>
+          <td>Setup screen</td>
+          <td>Validates the API key / endpoint, saves config, seeds the first user message, calls <code>showApp()</code> and immediately triggers <code>sendToAI()</code> so the AI sends its opening welcome message.</td>
+        </tr>
+        <tr>
+          <td><strong>Send</strong> (arrow icon)</td>
+          <td>Chat input bar</td>
+          <td>Calls <code>handleSend()</code> &mdash; appends the user&rsquo;s text to the message array, shows it in the chat, and triggers an AI call. Also triggered by pressing Enter.</td>
+        </tr>
+        <tr>
+          <td><strong>View Your Plan</strong></td>
+          <td>Sidebar footer</td>
+          <td>Calls <code>showPlan()</code>. Disabled until at least one section is complete. Renders the full-screen plan overlay.</td>
+        </tr>
+        <tr>
+          <td><strong>Start Over</strong></td>
+          <td>Sidebar footer</td>
+          <td>Calls <code>showResetModal()</code>. Opens the confirmation modal. Does not delete data yet.</td>
+        </tr>
+        <tr>
+          <td><strong>Delete Everything</strong></td>
+          <td>Reset confirmation modal</td>
+          <td>Calls <code>doReset()</code>. Clears localStorage and resets all state to initial values.</td>
+        </tr>
+        <tr>
+          <td><strong>Cancel</strong></td>
+          <td>Reset confirmation modal</td>
+          <td>Calls <code>hideResetModal()</code>. Closes the modal with no changes.</td>
+        </tr>
+        <tr>
+          <td><strong>Back to Chat</strong></td>
+          <td>Plan view toolbar; Review Panel header</td>
+          <td>Plan toolbar: calls <code>closePlan()</code>, removes <code>active</code> class from overlay. Review Panel: calls <code>closeSectionReview()</code>, restores the chat message view.</td>
+        </tr>
+        <tr>
+          <td><strong>Export as PDF</strong></td>
+          <td>Plan view toolbar</td>
+          <td>Calls <code>window.print()</code>. Opens the browser print dialog with print CSS applied.</td>
+        </tr>
+        <tr>
+          <td><strong>Section tab</strong> (e.g. &ldquo;&#x1F4CB; Business Idea&rdquo;)</td>
+          <td>Plan view sticky tab bar</td>
+          <td>Calls <code>showPlanTab(id, tabEl)</code>. Removes <code>active</code> from all section divs and tabs, then adds it to the clicked tab and the corresponding <code>#sec-{id}</code> div.</td>
+        </tr>
+        <tr>
+          <td><strong>View Discussion</strong></td>
+          <td>Section action bar (plan view)</td>
+          <td>Calls <code>toggleDiscussion(sectionId, btnEl)</code>. Closes all open discussion/edit panels, then toggles the <code>#disc-{id}</code> panel. Shows the AI/user conversation for that section.</td>
+        </tr>
+        <tr>
+          <td><strong>Edit Section</strong></td>
+          <td>Section action bar (plan view)</td>
+          <td>Calls <code>toggleEditPanel(sectionId, btnEl)</code>. Closes all open panels, then opens the <code>#edit-{id}</code> panel and focuses the textarea.</td>
+        </tr>
+        <tr>
+          <td><strong>Update</strong></td>
+          <td>Edit panel (plan view); Review Panel</td>
+          <td>Plan view: calls <code>sendSectionEdit(sectionId)</code>. Review Panel: calls <code>sendRpSectionEdit(sectionId)</code>. Both make an isolated AI API call to apply the edit instruction.</td>
+        </tr>
+        <tr>
+          <td><strong>Accordion step header</strong></td>
+          <td>Collapsible step blocks in plan sections</td>
+          <td>Calls <code>toggleStep(el)</code>. Toggles the <code>open</code> class on the step wrapper, showing or hiding the step body content.</td>
+        </tr>
+        <tr>
+          <td><strong>&#x2728; Generate detailed 30-day plan</strong></td>
+          <td>30-Day Launch Plan section (before generation)</td>
+          <td>Calls <code>generateLaunchPlan()</code>. Makes an AI call with the full plan context and team data to produce a structured <code>weeks</code> array. Replaces the thin summary with the full PM dashboard on success.</td>
+        </tr>
+        <tr>
+          <td><strong>&#x21BB; Regenerate plan</strong></td>
+          <td>30-Day PM Dashboard footer</td>
+          <td>Same as Generate &mdash; calls <code>generateLaunchPlan()</code>. Overwrites existing task data.</td>
+        </tr>
+        <tr>
+          <td><strong>Task status button</strong> (e.g. &ldquo;To Do&rdquo;)</td>
+          <td>30-Day PM Dashboard, each task row</td>
+          <td>Calls <code>lpCycleStatus(taskId)</code>. Cycles the task through To Do &rarr; In Progress &rarr; Done &rarr; To Do. Saves the new status (with owner name and timestamp) to <code>localStorage</code> key <code>bpb-launch-status-{plan-slug}</code> and updates the KPI row and workload bar.</td>
+        </tr>
+        <tr>
+          <td><strong>Owner dropdown</strong></td>
+          <td>30-Day PM Dashboard, each task row</td>
+          <td>Calls <code>lpSwitchOwner(sel, taskId)</code>. Updates the owner tag colour and name for the task, saves to <code>bpb-launch-owners-{plan-slug}</code>, refreshes the workload bar, and calls <code>lpCheckBalance()</code> to show a toast warning if the task category does not match the owner&rsquo;s specialization or if another team member has idle days.</td>
+        </tr>
+        <tr>
+          <td><strong>Filter bar buttons</strong> (All Tasks, [name], In Progress)</td>
+          <td>30-Day PM Dashboard</td>
+          <td>Calls <code>lpFilterBy(filter)</code>. Dims all task rows that do not match the selected filter. Filter options: <code>all</code>, <code>m0/m1/m2&hellip;</code> (by team member index), <code>inprogress</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>Week nav buttons</strong> (e.g. &ldquo;Week 1 &mdash; Foundation&rdquo;)</td>
+          <td>30-Day PM Dashboard</td>
+          <td>Calls <code>lpScrollToWeek(wid)</code>. Smooth-scrolls to the corresponding week section using <code>scrollIntoView</code>.</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
-<!-- ============ 10. TROUBLESHOOTING ============ -->
+<!-- 8. TROUBLESHOOTING -->
 <div class="section" id="troubleshooting">
-  <h2 class="section-title"><span class="icon">&#x1F527;</span> 10. Troubleshooting</h2>
+  <h2 class="section-title"><span class="icon">&#x1F527;</span> 8. Troubleshooting</h2>
 
   <div class="card">
     <div class="card-header">&#x1F6E0;&#xFE0F; Common Issues &amp; Fixes</div>
 
     <div class="ts-item">
-      <div class="ts-problem">&#x274C; "Failed to fetch" or CORS error when chatting</div>
+      <div class="ts-problem">&#x274C; "Could not connect to AI: Failed to fetch" on the setup screen</div>
       <div class="ts-solution">
-        <strong>Cause:</strong> The proxy server (<code>serve.py</code>) is not running.<br>
-        <strong>Fix:</strong> Open a terminal, navigate to the <code>os/business-plan-builder</code> folder, and run <code>python3 serve.py</code>. Make sure it says it's listening on port 8095 before trying again.
+        <strong>Cause:</strong> The proxy server is not running, or the <code>/api/chat</code> route is unavailable.<br>
+        <strong>Fix:</strong> Start the proxy server for your deployment environment. In development, this is typically <code>python3 serve.py</code> in the <code>os/business-plan-builder/</code> directory. Confirm the server is listening before trying again. If using GitHub Pages (no proxy), you need a custom endpoint or a deployed API proxy.
       </div>
     </div>
 
     <div class="ts-item">
-      <div class="ts-problem">&#x274C; "messages: at least 1 message is required" error</div>
+      <div class="ts-problem">&#x274C; "Server error 401" when chatting</div>
       <div class="ts-solution">
-        <strong>Cause:</strong> You tried to send an empty first message, or the message array wasn't built correctly.<br>
-        <strong>Fix:</strong> Make sure you type something in the chat box before pressing Send. If the error persists, refresh the page and try again.
+        <strong>Cause:</strong> The API key is invalid, expired, or incorrectly entered.<br>
+        <strong>Fix:</strong> Click <strong>Start Over</strong> (or add <code>?reset</code> to the URL) to return to the setup screen and re-enter your API key. Verify the key is active in your provider&rsquo;s console. Anthropic keys start with <code>sk-ant-</code>.
       </div>
     </div>
 
     <div class="ts-item">
-      <div class="ts-problem">&#x274C; API key error (401 Unauthorized)</div>
+      <div class="ts-problem">&#x274C; AI is not capturing sections / no green banner appears</div>
       <div class="ts-solution">
-        <strong>Cause:</strong> The API key is invalid, expired, or wasn't entered correctly.<br>
-        <strong>Fix:</strong> Go back to the setup screen and re-enter your Anthropic API key. Make sure it starts with <code>sk-ant-</code> and has no extra spaces. Check your Anthropic console to confirm the key is active.
+        <strong>Cause:</strong> The AI responded normally but did not include a <code>[PLANDATA:section_id]{...}[/PLANDATA]</code> block. This occasionally happens if the AI drifts from its instructions.<br>
+        <strong>Fix:</strong> Keep answering questions. The AI will eventually write a summary message with the data block. If it keeps asking new questions without capturing, prompt it directly: <em>"Please summarise what we&rsquo;ve discussed and save this section."</em>
       </div>
     </div>
 
     <div class="ts-item">
-      <div class="ts-problem">&#x274C; My plan has disappeared</div>
+      <div class="ts-problem">&#x274C; Edit fails with "AI did not return updated data"</div>
       <div class="ts-solution">
-        <strong>Cause:</strong> Browser localStorage was cleared, or you're using a different browser/profile.<br>
-        <strong>Fix:</strong> Unfortunately, if localStorage was cleared, the data is gone. To prevent this: (1) always export your plan to PDF when it's finished, (2) don't clear browser data while working on a plan, (3) use the same browser and profile each time.
+        <strong>Cause:</strong> The AI returned a response without the required <code>[PLANDATA:section_id]</code> block.<br>
+        <strong>Fix:</strong> Rephrase your edit request to be very specific. For example, instead of <em>"Update the products"</em>, try <em>"Change the price of [Product Name] to &pound;99."</em> Being more precise helps the AI produce a correctly structured response.
       </div>
     </div>
 
     <div class="ts-item">
-      <div class="ts-problem">&#x274C; Port 8095 already in use</div>
+      <div class="ts-problem">&#x274C; Generate 30-day plan fails or shows "Error: AI did not return a valid launch plan"</div>
       <div class="ts-solution">
-        <strong>Cause:</strong> Another instance of <code>serve.py</code> is already running, or another app is using port 8095.<br>
-        <strong>Fix:</strong> Find the process with <code>lsof -i :8095</code> to get the PID, then <code>kill &lt;PID&gt;</code>. Then restart the server.
+        <strong>Cause:</strong> The AI response did not contain the required <code>[PLANDATA:launch]</code> block. Often caused by the model hitting a token limit on a very large plan context, or a transient API error.<br>
+        <strong>Fix:</strong> Click <strong>&#x21BB; Regenerate plan</strong> to try again. If it fails repeatedly, try switching to a larger model (Claude Opus or GPT-4o) which can handle more context.
       </div>
     </div>
 
     <div class="ts-item">
-      <div class="ts-problem">&#x274C; The AI seems stuck or the typing indicator won't stop</div>
+      <div class="ts-problem">&#x274C; My plan has disappeared after refreshing the browser</div>
       <div class="ts-solution">
-        <strong>Cause:</strong> The API request may have timed out or the response was too large.<br>
-        <strong>Fix:</strong> Wait 30 seconds. If still stuck, refresh the page. Your progress is saved in localStorage, so you won't lose completed sections.
+        <strong>Cause:</strong> Browser <code>localStorage</code> was cleared, the <code>od-bplan-v4</code> key was deleted, you are using a different browser/profile, or you added <code>?reset</code> to the URL.<br>
+        <strong>Fix:</strong> If the data is gone, it cannot be recovered. Going forward: export to PDF when the plan is complete, use one consistent browser, and do not clear browser data while working on a plan.
+      </div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; The typing indicator shows but never resolves</div>
+      <div class="ts-solution">
+        <strong>Cause:</strong> The API call timed out or the connection dropped.<br>
+        <strong>Fix:</strong> Wait 30 seconds. If the indicator is still spinning, refresh the page. Your completed sections are saved in <code>localStorage</code> and will reload automatically.
+      </div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; Task status changes are not saved after refreshing</div>
+      <div class="ts-solution">
+        <strong>Cause:</strong> Task statuses are saved under a different key (<code>bpb-launch-status-{plan-slug}</code>) derived from the business name. If the business name changed, the key changes and old statuses are not found.<br>
+        <strong>Fix:</strong> Keep the business name consistent. Check the exact localStorage key in your browser&rsquo;s DevTools (Application &rarr; Local Storage) to confirm the key matches.
+      </div>
+    </div>
+
+    <div class="ts-item">
+      <div class="ts-problem">&#x274C; "View Your Plan" button is greyed out</div>
+      <div class="ts-solution">
+        <strong>Cause:</strong> No sections have been captured yet. The button enables as soon as <code>completedSections.length &gt; 0</code>.<br>
+        <strong>Fix:</strong> Continue the conversation until the AI captures at least one section (you will see the green captured banner).
       </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">&#x1F4DE; Getting Help</div>
-    <p>If you run into an issue not listed above:</p>
+    <div class="card-header">&#x1F4DE; Diagnosing Issues</div>
     <ul>
-      <li>Check the browser's <strong>Developer Console</strong> (press <code>F12</code> &rarr; Console tab) for error messages.</li>
-      <li>Check the terminal running <code>serve.py</code> for any Python error messages.</li>
-      <li>Make sure you have a working internet connection (required for the Claude API).</li>
+      <li>Open <strong>Browser DevTools</strong> (F12 &rarr; Console) to see JavaScript errors or failed network requests.</li>
+      <li>Check the <strong>Network tab</strong> to see what is sent to <code>/api/chat</code> and what the server returns.</li>
+      <li>Check the <strong>Application &rarr; Local Storage</strong> tab to confirm <code>od-bplan-v4</code> exists and contains valid JSON.</li>
+      <li>Check the terminal running the proxy server for any Python error messages.</li>
     </ul>
   </div>
 </div>
 
+<!-- 9. CHANGELOG -->
+<div class="section" id="changelog">
+  <h2 class="section-title"><span class="icon">&#x1F4C5;</span> 9. Changelog</h2>
+
+  <div class="card">
+    <table class="label-table">
+      <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>1.3</strong></td>
+          <td>17 Apr 2026</td>
+          <td>Complete rewrite of SOP to match current code (v4). Documents multi-provider support (Anthropic / OpenAI / Custom), the interactive 30-day PM dashboard (task status cycling, owner switching, workload balance toast, filter bar, week navigation, progress KPIs), section edit flow from both Review Panel and plan view, context window management, per-section discussion logs, separate localStorage keys for task statuses and owner overrides, and <code>?reset</code> URL parameter.</td>
+        </tr>
+        <tr>
+          <td>1.2</td>
+          <td>&mdash;</td>
+          <td>Internal draft (not published).</td>
+        </tr>
+        <tr>
+          <td>1.1</td>
+          <td>&mdash;</td>
+          <td>Internal draft (not published).</td>
+        </tr>
+        <tr>
+          <td>1.0</td>
+          <td>13 Apr 2026</td>
+          <td>Initial SOP covering setup screen, 10 sections, chat workflow, plan view, review/edit panel, localStorage persistence, and proxy server architecture.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <hr>
-<p style="text-align: center; color: var(--slate-400); font-size: 0.82rem; padding: 1rem 0;">
-  Business Plan Builder SOP &bull; Module PLAN-01 &bull; Version 1.0 &bull; 13 Apr 2026 &bull; Owner: Kevin Brittain
+<p style="text-align:center;color:var(--text-muted);font-size:0.82rem;padding:1rem 0">
+  Business Launch Plan Builder SOP &bull; Version 1.3 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain
 </p>
 
 </div><!-- end .container -->
