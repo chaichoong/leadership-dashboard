@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task &amp; Project Management OS &mdash; Standard Operating Procedure</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  line-height: 1.6; color: var(--text-primary); background: var(--bg-app);
+}
+.header { background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%); color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+.header::after { content:''; position:absolute; top:-50%; right:-10%; width:500px; height:500px; background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%); border-radius:50%; }
+.header-inner { max-width:1100px; margin:0 auto; position:relative; z-index:1; }
+.header-back { display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; opacity:0.7; text-decoration:none; color:white; margin-bottom:1rem; transition:opacity 0.15s; }
+.header-back:hover { opacity:1; }
+.header h1 { font-size:2.2rem; font-weight:700; margin-bottom:0.3rem; letter-spacing:-0.5px; }
+.header .subtitle { font-size:1.05rem; opacity:0.85; }
+.header .version { font-size:0.85rem; opacity:0.6; margin-top:0.5rem; }
+.container { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+.section { margin-top:2.5rem; }
+.section-title { font-size:1.5rem; font-weight:700; color:var(--accent); padding-bottom:0.5rem; border-bottom:3px solid var(--accent-soft); margin-bottom:1.25rem; display:flex; align-items:center; gap:0.5rem; }
+.section-title .icon { font-size:1.4rem; }
+.card { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); padding:1.5rem; margin-bottom:1.25rem; border:1px solid var(--border-default); }
+.card-header { font-size:1.1rem; font-weight:600; color:var(--text-primary); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+.quick-ref { background:linear-gradient(135deg,var(--accent-soft) 0%,var(--accent-soft) 100%); border:2px solid var(--accent-soft); border-radius:var(--radius-xl); padding:1.5rem; margin-top:-1rem; position:relative; z-index:2; box-shadow:var(--shadow-lg); }
+.quick-ref h2 { font-size:1.2rem; color:var(--accent); margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.qr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0.75rem; }
+.qr-item { background:var(--bg-surface); border-radius:var(--radius-lg); padding:0.75rem 1rem; border-left:4px solid var(--accent); font-size:0.88rem; }
+.qr-item .qr-label { font-weight:600; color:var(--text-secondary); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; }
+.qr-item .qr-value { color:var(--text-primary); margin-top:0.15rem; word-break:break-all; }
+.qr-item .qr-value a { color:var(--accent); text-decoration:none; }
+.qr-item .qr-value a:hover { text-decoration:underline; }
+.toc { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); padding:1.5rem; border:1px solid var(--border-default); }
+.toc h2 { font-size:1.15rem; color:var(--accent); margin-bottom:1rem; }
+.toc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0.35rem 1.5rem; }
+.toc a { display:flex; align-items:center; gap:0.5rem; color:var(--text-secondary); text-decoration:none; padding:0.35rem 0.5rem; border-radius:6px; font-size:0.9rem; transition:background 0.15s; }
+.toc a:hover { background:var(--accent-soft); color:var(--accent); }
+.toc a .toc-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:0.7rem; font-weight:700; flex-shrink:0; }
+.flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:0; padding:1.5rem 0; }
+.flow-step { background:var(--bg-surface); border:2px solid var(--accent-soft); border-radius:var(--radius-lg); padding:0.75rem 1.1rem; text-align:center; font-size:0.85rem; font-weight:600; color:var(--text-secondary); min-width:110px; }
+.flow-step.primary { background:var(--accent); color:white; border-color:var(--accent); }
+.flow-step.success { background:var(--success); color:white; border-color:var(--success); }
+.flow-step.warning { background:var(--warning); color:white; border-color:var(--warning); }
+.flow-step.purple { background:var(--accent); color:white; border-color:var(--accent); }
+.flow-step .flow-icon { font-size:1.3rem; display:block; margin-bottom:0.25rem; }
+.flow-step .flow-sub { font-weight:400; font-size:0.75rem; opacity:0.85; margin-top:0.15rem; }
+.flow-arrow { font-size:1.4rem; color:var(--text-muted); padding:0 0.3rem; flex-shrink:0; }
+.label-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.88rem; }
+.label-table th { background:var(--accent); color:white; padding:0.75rem 1rem; text-align:left; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+.label-table th:first-child { border-radius:var(--radius-lg) 0 0 0; }
+.label-table th:last-child { border-radius:0 var(--radius-lg) 0 0; }
+.label-table td { padding:0.65rem 1rem; border-bottom:1px solid var(--border-default); vertical-align:top; }
+.label-table tr:last-child td { border-bottom:none; }
+.label-table tr:nth-child(even) td { background:var(--bg-surface-2); }
+.label-table tr:hover td { background:var(--accent-soft); }
+.label-badge { display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; font-weight:600; font-size:0.78rem; white-space:nowrap; }
+.lb-blue { background:var(--accent-soft); color:var(--accent); } .lb-amber { background:var(--warning-bg); color:var(--warning); }
+.lb-red { background:var(--danger-bg); color:var(--danger); } .lb-green { background:var(--success-bg); color:var(--success); }
+.lb-purple { background:var(--accent-soft); color:var(--accent); }
+.wf-card { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); border:1px solid var(--border-default); overflow:hidden; margin-bottom:1.5rem; }
+.wf-header { padding:1rem 1.5rem; display:flex; align-items:center; gap:0.75rem; border-bottom:1px solid var(--border-default); }
+.wf-num { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; font-weight:700; font-size:1rem; flex-shrink:0; color:white; background:var(--accent); }
+.wf-header h3 { font-size:1.1rem; font-weight:700; color:var(--text-primary); }
+.wf-header .wf-tag { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--bg-subtle); color:var(--text-secondary); font-weight:500; }
+.wf-body { padding:1.25rem 1.5rem; }
+.wf-body h4 { font-size:0.9rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem; margin-top:1rem; }
+.wf-body h4:first-child { margin-top:0; }
+.steps { counter-reset:step; list-style:none; padding:0; }
+.steps li { position:relative; padding:0.5rem 0 0.5rem 2.5rem; font-size:0.9rem; line-height:1.5; }
+.steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0.45rem; width:24px; height:24px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.steps li + li { border-top:1px solid var(--bg-subtle); }
+.info-box { padding:0.85rem 1rem; border-radius:var(--radius-lg); font-size:0.88rem; margin:0.75rem 0; display:flex; align-items:flex-start; gap:0.6rem; }
+.info-box.info { background:var(--accent-soft); border-left:4px solid var(--accent); color:var(--accent); }
+.info-box.warn { background:var(--warning-bg); border-left:4px solid var(--warning); color:var(--warning); }
+.info-box.danger { background:var(--danger-bg); border-left:4px solid var(--danger); color:var(--danger); }
+.info-box.tip { background:var(--success-bg); border-left:4px solid var(--success); color:var(--success); }
+.info-box .ib-icon { font-size:1.1rem; flex-shrink:0; margin-top:0.05rem; }
+code { background:var(--bg-subtle); padding:0.15rem 0.4rem; border-radius:4px; font-size:0.82rem; font-family:'SF Mono',Monaco,Consolas,monospace; color:var(--accent); }
+.ts-item { margin-bottom:0.75rem; }
+.ts-problem { font-weight:600; color:var(--danger); font-size:0.9rem; }
+.ts-solution { font-size:0.88rem; color:var(--text-secondary); margin-top:0.2rem; padding-left:1rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+strong { color:var(--text-primary); } a { color:var(--accent); }
+p { margin-bottom:0.5rem; } ul,ol { margin-left:1.25rem; margin-bottom:0.5rem; }
+li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px solid var(--border-default); margin:1.5rem 0; }
+@media (max-width:768px) {
+  .header h1 { font-size:1.6rem; } .qr-grid { grid-template-columns:1fr; }
+  .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
+  .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
+  .container { padding:0 1rem 3rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <a href="../index.html" class="header-back">&#x2190; Back to OS Hub</a>
+    <h1>&#x2705; Task and Project Management OS</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Team task management, smart daily planning, calendar integration, and project tracking synced with Airtable</div>
+    <div class="version">Version 1.1 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Quick Reference -->
+  <div class="quick-ref" id="quick-ref">
+    <h2>&#x26A1; Quick Reference</h2>
+    <div class="qr-grid">
+      <div class="qr-item">
+        <div class="qr-label">Access URL</div>
+        <div class="qr-value">os/tasks/index.html</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Contractor Jobs View</div>
+        <div class="qr-value">os/tasks/jobs.html</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Airtable Base ID</div>
+        <div class="qr-value"><code>appnqjDpqDniH3IRl</code></div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Tasks Table ID</div>
+        <div class="qr-value"><code>tblqB8b22hKBL4PF1</code></div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Projects Table ID</div>
+        <div class="qr-value"><code>tblHrpTMd5LNYn8v1</code></div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Authentication</div>
+        <div class="qr-value">Airtable PAT (stored in <code>localStorage</code> key <code>_dlr_pat</code>)</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Weekly Capacity</div>
+        <div class="qr-value">40 hrs per person</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Daily Available Hours</div>
+        <div class="qr-value">6 hrs (default, configurable)</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Page Size</div>
+        <div class="qr-value">50 tasks per page (Task List view)</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Team Members</div>
+        <div class="qr-value">Kevin Brittain, Mica Albovias, Ericamae Atenta</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Calendar Integration</div>
+        <div class="qr-value">Google Apps Script proxy (GCAL_SCRIPT_URL)</div>
+      </div>
+      <div class="qr-item">
+        <div class="qr-label">Auto-Reschedule</div>
+        <div class="qr-value">Kevin only &mdash; runs on every load</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table of Contents -->
+  <div class="section">
+    <div class="toc" id="toc">
+      <h2>&#x1F4CB; Table of Contents</h2>
+      <div class="toc-grid">
+        <a href="#overview"><span class="toc-num">1</span> Overview &amp; Purpose</a>
+        <a href="#access"><span class="toc-num">2</span> How to Access</a>
+        <a href="#views"><span class="toc-num">3</span> Task Views</a>
+        <a href="#lifecycle"><span class="toc-num">4</span> Task Lifecycle &amp; Status</a>
+        <a href="#creating"><span class="toc-num">5</span> Creating &amp; Editing Tasks</a>
+        <a href="#planner"><span class="toc-num">6</span> Smart Daily Planner</a>
+        <a href="#calendar"><span class="toc-num">7</span> Calendar Integration</a>
+        <a href="#contractor"><span class="toc-num">8</span> Contractor Jobs View</a>
+        <a href="#buttons"><span class="toc-num">9</span> Action Buttons Reference</a>
+        <a href="#filters"><span class="toc-num">10</span> Filtering, Sorting &amp; Search</a>
+        <a href="#fields"><span class="toc-num">11</span> Airtable Fields Reference</a>
+        <a href="#troubleshooting"><span class="toc-num">12</span> Troubleshooting</a>
+        <a href="#changelog"><span class="toc-num">13</span> Changelog</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. Overview -->
+  <div class="section" id="overview">
+    <div class="section-title"><span class="icon">&#x1F4CB;</span> 1. Overview &amp; Purpose</div>
+    <div class="card">
+      <p>The Task and Project Management OS is a self-contained web application that provides the operations team with a unified view of all tasks and projects stored in Airtable. It is designed for daily operational use by Kevin Brittain, Mica Albovias, and Ericamae Atenta, and provides a separate mobile-optimised view for contractors (Gary, Roy, Rob).</p>
+      <p>The system fetches all non-completed, non-someday tasks from Airtable on every load and presents them across six specialist views. Tasks can be updated in real-time &mdash; status changes and due-date adjustments write directly back to Airtable via the REST API. No separate backend is required.</p>
+      <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Key capabilities</h4>
+      <ul>
+        <li>Six views: My Day, Task List, Kanban (by week), Projects, Capacity, and Recurring</li>
+        <li>Smart Daily Planner that slots tasks around calendar events and personal routines</li>
+        <li>Google Calendar integration via a Google Apps Script proxy</li>
+        <li>Automatic rescheduling of Kevin's overdue tasks to today on every load</li>
+        <li>Team and personal identity switcher (each user sees their own tasks by default)</li>
+        <li>Bulk operations: mark multiple tasks complete or reschedule them in one action</li>
+        <li>Drag-and-drop Kanban board for scheduling project tasks across calendar weeks</li>
+        <li>Separate contractor jobs page (<code>jobs.html</code>) optimised for mobile use</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 2. How to Access -->
+  <div class="section" id="access">
+    <div class="section-title"><span class="icon">&#x1F511;</span> 2. How to Access</div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num">1</div>
+        <h3>First-time setup</h3>
+        <span class="wf-tag">One-off</span>
+      </div>
+      <div class="wf-body">
+        <ol class="steps">
+          <li>Open <strong>os/tasks/index.html</strong> in your browser (or via the OS Hub iframe).</li>
+          <li>If prompted, enter your <strong>Airtable Personal Access Token</strong> (starting with <code>pat_</code>) in the auth bar at the top and click <strong>Connect</strong>. The token is stored in <code>localStorage</code> under the key <code>_dlr_pat</code> and will not be asked for again on the same device.</li>
+          <li>The <strong>identity overlay</strong> appears. Select your name (Kevin Brittain, Mica Albovias, or Ericamae Atenta). Your choice is saved to <code>localStorage</code> under <code>_task_user</code>. The system defaults to showing your tasks in the team filter.</li>
+          <li>Data loads automatically. The top bar shows the sync timestamp once loading is complete.</li>
+        </ol>
+        <div class="info-box info">
+          <span class="ib-icon">&#x2139;</span>
+          <span>If the app is loaded inside the main platform iframe, it automatically inherits the parent window's PAT via <code>window.parent.PAT</code> and skips the auth bar entirely.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num">2</div>
+        <h3>Returning visits</h3>
+        <span class="wf-tag">Daily use</span>
+      </div>
+      <div class="wf-body">
+        <ol class="steps">
+          <li>The page loads with your saved identity and PAT. No login is needed.</li>
+          <li>Data is fetched from Airtable in parallel with calendar events on every load.</li>
+          <li>Kevin's overdue tasks are automatically rescheduled to today in the background.</li>
+          <li>To reload manually at any time, click <strong>Refresh</strong> in the top-right corner.</li>
+          <li>To switch user, click <strong>Switch</strong> next to your name badge in the top bar. This clears the saved identity and shows the selector again.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Task Views -->
+  <div class="section" id="views">
+    <div class="section-title"><span class="icon">&#x1F4CA;</span> 3. Task Views</div>
+    <p style="margin-bottom:1rem;color:var(--text-secondary);font-size:0.9rem;">The six views are accessible via the tab bar below the KPI cards. Each view serves a distinct purpose and may show a different subset of tasks.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header">&#x2600; My Day</div>
+        <p>The default view. Shows today's tasks and overdue tasks for the active team member. Builds a <strong>visual day timeline</strong> from 08:00 to 18:00 (configurable) by slotting tasks into gaps between calendar events and routine blocks. Includes KPI row, capacity bar, deferred-task warnings, and inline status dropdowns.</p>
+        <div class="info-box tip">
+          <span class="ib-icon">&#x2714;</span>
+          <span>Tasks with no time estimate are still shown in the "Also Today" section below the timeline.</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">&#x1F4CB; Task List</div>
+        <p>A paginated table of all non-someday, non-Project-priority tasks. Each row shows task name, due date, status badge, assignee avatar, priority, time estimate, business, and recurring flag. Clicking any row expands it in-place to show description, metadata, attachments, a status dropdown, and an "Open in Airtable" link. Supports bulk selection.</p>
+        <div class="info-box info">
+          <span class="ib-icon">&#x2139;</span>
+          <span>The Task List deliberately excludes <strong>Project</strong>-priority tasks; those are managed in the Kanban view.</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">&#x1F4CC; Kanban</div>
+        <p>A four-column week-by-week board showing only <strong>Project</strong>-priority tasks for the selected month. Columns are Week 1 (days 1–7), Week 2 (8–14), Week 3 (15–21), Week 4 (22–end). Each column header shows the date range and total hours allocated. Cards are <strong>draggable</strong> &mdash; dropping a card onto a different column updates the task's due date to the first day of that week in Airtable. Month navigation uses the Previous / Next buttons.</p>
+      </div>
+      <div class="card">
+        <div class="card-header">&#x1F4C1; Projects</div>
+        <p>A card grid of all projects from the Projects Airtable table. Each card shows project name, status badge, progress bar (completed tasks / total tasks), overdue count, and date range. Clicking a card expands it to show the Deliverable, Definition of Done, and up to 20 linked tasks. Filter by Active, Completed, or All. Projects sorted: active first, then by completion percentage descending.</p>
+      </div>
+      <div class="card">
+        <div class="card-header">&#x1F4C8; Capacity</div>
+        <p>Per-person utilisation cards showing total hours allocated vs. the <strong>40 hr/week</strong> capacity constant. Colour coding: green below 70%, amber 70–90%, red above 90%. Each card breaks down hours by status and by priority. When "All" is selected in the team switcher, a Team Overview card appears across the top spanning the full grid width.</p>
+      </div>
+      <div class="card">
+        <div class="card-header">&#x1F504; Recurring</div>
+        <p>All tasks where the <code>Recurring</code> field or <code>Recurring?</code> flag is set. Groups tasks by frequency: Daily, Weekly, Fortnightly, Monthly, Quarterly, Bi-Annually, Annually, Flagged. Shows summary KPIs (total recurring, hours per cycle, completed, overdue). Intended to identify candidates for AI agent automation.</p>
+      </div>
+    </div>
+
+    <div class="info-box info" style="margin-top:1rem;">
+      <span class="ib-icon">&#x2139;</span>
+      <span>All views respect the <strong>Team Switcher</strong> at the top. Selecting a person's name filters every view to only their tasks. Selecting <strong>All</strong> shows the whole team.</span>
+    </div>
+  </div>
+
+  <!-- 4. Task Lifecycle & Status -->
+  <div class="section" id="lifecycle">
+    <div class="section-title"><span class="icon">&#x1F504;</span> 4. Task Lifecycle &amp; Status</div>
+
+    <div class="card">
+      <div class="card-header">Task status flow</div>
+      <div class="flow">
+        <div class="flow-step">
+          <span class="flow-icon">&#x1F4DD;</span>
+          To do
+          <span class="flow-sub">Backlog task</span>
+        </div>
+        <div class="flow-arrow">&#x2192;</div>
+        <div class="flow-step warning">
+          <span class="flow-icon">&#x23F0;</span>
+          Today
+          <span class="flow-sub">Due today</span>
+        </div>
+        <div class="flow-arrow">&#x2192;</div>
+        <div class="flow-step primary">
+          <span class="flow-icon">&#x1F4C5;</span>
+          Upcoming
+          <span class="flow-sub">Scheduled</span>
+        </div>
+        <div class="flow-arrow">&#x2192;</div>
+        <div class="flow-step purple">
+          <span class="flow-icon">&#x2705;</span>
+          Approval
+          <span class="flow-sub">Awaiting sign-off</span>
+        </div>
+        <div class="flow-arrow">&#x2192;</div>
+        <div class="flow-step success">
+          <span class="flow-icon">&#x2714;</span>
+          Completed
+          <span class="flow-sub">Done</span>
+        </div>
+      </div>
+      <div class="info-box danger" style="margin-top:0.5rem;">
+        <span class="ib-icon">&#x26A0;</span>
+        <span><strong>Overdue</strong> is a derived state: a task is treated as Overdue when its due date is before today and its status is not "Completed". The Airtable field can also hold "Overdue" as an explicit value. Overdue tasks appear with a red left border in the Task List and with an "OVERDUE" label in the timeline.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Status sort order</div>
+      <p style="margin-bottom:0.75rem;font-size:0.88rem;color:var(--text-secondary);">The system uses a numeric sort order internally to rank tasks in the My Day and Recurring views. Lower numbers appear first.</p>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Sort order</th>
+            <th>Badge colour</th>
+            <th>Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="label-badge lb-red">Overdue</span></td>
+            <td>0 (highest priority)</td>
+            <td>Red</td>
+            <td>Past due date and not completed. Auto-rescheduled to today for Kevin on load.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-amber">Today</span></td>
+            <td>1</td>
+            <td>Amber</td>
+            <td>Task is explicitly set to Today, or its due date equals today's date.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">Approval</span></td>
+            <td>2</td>
+            <td>Blue (accent)</td>
+            <td>Task completed by assignee but awaiting approval before final sign-off.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">To do</span></td>
+            <td>3</td>
+            <td>Info blue</td>
+            <td>Standard backlog task with no specific due date urgency.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">Upcoming</span></td>
+            <td>4</td>
+            <td>Accent green</td>
+            <td>Scheduled for a future date.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-green">Completed</span></td>
+            <td>5 (lowest)</td>
+            <td>Green</td>
+            <td>Task is done. Excluded from all live views (filtered out on fetch).</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Priority levels</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Priority</th>
+            <th>Sort order</th>
+            <th>Appears in</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="label-badge lb-red">Urgent</span></td>
+            <td>0</td>
+            <td>My Day, Task List, Capacity, Recurring</td>
+            <td>Scheduled first in the daily planner. Deferred last in overcommitment suggestions.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">High</span></td>
+            <td>1</td>
+            <td>My Day, Task List, Capacity, Recurring</td>
+            <td>Second priority in planner scheduling.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-blue">Project</span></td>
+            <td>2</td>
+            <td>Kanban only</td>
+            <td>Project tasks are excluded from Task List and My Day; shown only in the Kanban view.</td>
+          </tr>
+          <tr>
+            <td><span class="label-badge lb-green">Not Urgent</span></td>
+            <td>3</td>
+            <td>My Day, Task List, Capacity, Recurring</td>
+            <td>Deferred first when the planner identifies an overcommitted day.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 5. Creating & Editing Tasks -->
+  <div class="section" id="creating">
+    <div class="section-title"><span class="icon">&#x270F;</span> 5. Creating &amp; Editing Tasks</div>
+
+    <div class="card">
+      <div class="card-header">Creating tasks</div>
+      <p>Tasks are created directly in <strong>Airtable</strong> (table <code>tblqB8b22hKBL4PF1</code>). The Task Manager OS does not provide a create-task form &mdash; it is a read and update interface only.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;</span>
+        <span>After creating a task in Airtable, click <strong>Refresh</strong> in the top bar to pull the latest data into the OS page.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Editing task status (in-page)</div>
+      <p>Status can be changed without leaving the page in three ways:</p>
+      <ol class="steps">
+        <li>In <strong>My Day / timeline</strong>: click the <strong>Status</strong> button on any task card to open a dropdown with all statuses (Today, Upcoming, To do, Approval, Completed, Overdue). Or click <strong>Complete</strong> to jump straight to Completed.</li>
+        <li>In <strong>Task List</strong>: expand a task row, then use the <strong>Change Status</strong> dropdown in the detail panel. The page re-renders immediately after the Airtable PATCH request succeeds.</li>
+        <li>In <strong>My Day / card list</strong>: click the <strong>Status</strong> button on a card card, or click <strong>Done</strong> to mark Completed directly.</li>
+      </ol>
+      <p style="margin-top:0.75rem;">All status changes call <code>patchTask(taskId, { [F.status]: { name: newStatus } })</code> which sends a <strong>PATCH</strong> request to <code>https://api.airtable.com/v0/{BASE_ID}/{TASKS_TABLE}/{taskId}</code> with <code>typecast: true</code>.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Editing due dates (in-page)</div>
+      <p>Due dates can be updated in these ways:</p>
+      <ul>
+        <li>Drag a Kanban card to a different week column. The due date is set to the <strong>first day</strong> of the target week.</li>
+        <li>Click <strong>Defer to tomorrow</strong> in the Plan My Day overlay. This sets the due date to tomorrow's date.</li>
+        <li>The bulk <strong>Reschedule Selected</strong> button sets the due date to tomorrow for all ticked tasks.</li>
+      </ul>
+      <p style="margin-top:0.75rem;">All due-date changes call <code>updateTaskDueDate(taskId, newDate)</code> which sends a PATCH to the same endpoint with field <code>fld7XP8w8kbxfETV4</code>.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Opening in Airtable</div>
+      <p>In the Task List expanded row, an <strong>Open in Airtable</strong> button opens the record directly at <code>https://airtable.com/{BASE_ID}/{TASKS_TABLE}/{recordId}</code> in a new tab. Use this for full editing (all fields, attachments, linked records).</p>
+    </div>
+  </div>
+
+  <!-- 6. Smart Daily Planner -->
+  <div class="section" id="planner">
+    <div class="section-title"><span class="icon">&#x1F5D3;</span> 6. Smart Daily Planner</div>
+
+    <div class="card">
+      <div class="card-header">How the planner works</div>
+      <p>The Smart Daily Planner is triggered when the My Day view loads and also when <strong>Plan My Day</strong> is clicked. It calls <code>buildDayTimeline(todayTasks, overdueTasks, calEvents, routineBlocks)</code> to construct a minute-by-minute schedule for the working day.</p>
+      <h4>Algorithm (in order)</h4>
+      <ol class="steps">
+        <li><strong>Place calendar events</strong> as fixed blocks. All-day events are shown separately and do not block slots. Timed events are placed by parsing their start/end times to minutes since midnight.</li>
+        <li><strong>Place routine blocks</strong> using <code>placeRoutineBlocks()</code>. The "Run" block is placed first (preferred afternoon = 14:00). Lunch is placed next with the rule "must finish 2 hrs before Run". "Get Ready" is placed at the start of the working day. Any custom blocks are placed in order.</li>
+        <li><strong>Find free slots</strong> using <code>findFreeSlots()</code>. A slot must be at least 15 minutes long to be used.</li>
+        <li><strong>Schedule tasks into free slots</strong> in priority order (Urgent first, then High, then Not Urgent). Overdue tasks are included before today's tasks. Each task uses its <code>timeDur</code> field (seconds, converted to minutes) if set; otherwise it falls back to <code>timeEst</code> name (e.g. "1 hr" = 60 min); otherwise defaults to 30 minutes.</li>
+        <li><strong>Deferred tasks</strong> are those that could not fit in any remaining slot. They appear in the "Won't Fit Today" warning section.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Routine configuration</div>
+      <p>Click <strong>Configure Routine</strong> in the My Day view to open the routine editor panel. Settings are saved to <code>localStorage</code> and persist between sessions.</p>
+      <table class="label-table">
+        <thead>
+          <tr><th>Setting</th><th>localStorage key</th><th>Default value</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Routine blocks (name, duration, preferred time, rule)</td>
+            <td><code>_task_routine</code></td>
+            <td>Get Ready (30 min, morning), Lunch (30 min, midday, before-run-2h), Run (60 min, afternoon)</td>
+          </tr>
+          <tr>
+            <td>Working hours config (start, end, max task hours)</td>
+            <td><code>_task_workconfig</code></td>
+            <td>Start: 8:00, End: 18:00, Max task hours: 6</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="info-box info" style="margin-top:0.75rem;">
+        <span class="ib-icon">&#x2139;</span>
+        <span>The available rule options for a routine block are <strong>None</strong> and <strong>2h before Run</strong>. Click <strong>Reset to Defaults</strong> to remove saved settings from localStorage and restore the three default blocks.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Plan My Day overlay</div>
+      <p>Clicking <strong>Plan My Day</strong> opens a modal overlay showing:</p>
+      <ul>
+        <li>Two KPI tiles: total task time vs. total free time</li>
+        <li>If overcommitted: a warning with the excess amount, and a <strong>Defer to tomorrow</strong> button for each suggested deferral (lowest-priority tasks first)</li>
+        <li>If capacity is OK: a confirmation that all tasks fit</li>
+        <li>A list of scheduled tasks with their proposed time slots (start time &mdash; end time, duration)</li>
+      </ul>
+      <p style="margin-top:0.5rem;">Clicking outside the modal or pressing <strong>Close</strong> dismisses it.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Auto-reschedule (Kevin only)</div>
+      <p>Every time data loads, <code>autoRescheduleOverdue()</code> runs automatically for Kevin's account. It finds all tasks where:</p>
+      <ul>
+        <li>Assignee email = <code>kevin@runpreneur.org.uk</code></li>
+        <li>Due date is before today</li>
+        <li>Status is not "Completed"</li>
+        <li><code>someDay</code> field is not set</li>
+      </ul>
+      <p style="margin-top:0.5rem;">For each matching task it sets the due date to today. If the task has no <code>origDueDate</code> yet, it also saves the original due date to the <code>fldS2OR7oQKC7T1to</code> field. Patches are sent in batches of 10 with a 250 ms delay between batches to avoid rate limits.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;</span>
+        <span>This runs silently on load. The My Day view shows a notice confirming how many tasks were rescheduled. It does not run for Mica or Ericamae.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Calendar Integration -->
+  <div class="section" id="calendar">
+    <div class="section-title"><span class="icon">&#x1F4C5;</span> 7. Calendar Integration</div>
+
+    <div class="card">
+      <div class="card-header">How Google Calendar data is fetched</div>
+      <p>The page calls <code>fetchCalendarEvents()</code> on every data load. This makes a GET request to the <strong>Google Apps Script proxy URL</strong> configured in the constant <code>GCAL_SCRIPT_URL</code> at the top of the script, passing today's date as a query parameter (<code>?date=YYYY-MM-DD</code>).</p>
+      <p style="margin-top:0.5rem;">The proxy (deployed as a Google Apps Script web app) returns a JSON object with an <code>events</code> array. Each event must have: <code>summary</code>, <code>start</code>, <code>end</code>, optionally <code>location</code>, and <code>allDay</code>. Start and end can be either <code>HH:MM</code> or an ISO datetime string.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;</span>
+        <span>If <code>GCAL_SCRIPT_URL</code> is empty, calendar fetching is skipped silently and a "Calendar: not connected" note appears in the My Day action bar. The rest of the page still works normally.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Calendar events in My Day</div>
+      <p>Once fetched, calendar events appear in the My Day timeline as <strong>blue "CALENDAR" blocks</strong>. All-day events appear in a separate "All-Day Events" section above the timeline, not as time-slot blocks. The count of calendar events for today is shown in the My Day KPI row and in the page subtitle.</p>
+      <div class="info-box tip">
+        <span class="ib-icon">&#x2714;</span>
+        <span>Calendar events are treated as immovable fixed blocks. The planner will not place tasks or routine blocks during calendar event time slots.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Contractor Jobs View -->
+  <div class="section" id="contractor">
+    <div class="section-title"><span class="icon">&#x1F477;</span> 8. Contractor Jobs View</div>
+
+    <div class="card">
+      <div class="card-header">Purpose and access</div>
+      <p>The file <code>os/tasks/jobs.html</code> is a separate, mobile-optimised page for contractors. It shows each contractor only their own active, non-completed tasks. The interface is minimal and touch-friendly, with large tap targets (minimum 44 px height) and no complex views.</p>
+      <p style="margin-top:0.5rem;">Contractors: <strong>Gary</strong>, <strong>Roy</strong>, <strong>Rob</strong>. The same Airtable base and tasks table are used (<code>appnqjDpqDniH3IRl</code>, <code>tblqB8b22hKBL4PF1</code>). The contractor's name is used as the filter value for the Assignee field in the Airtable formula: <code>AND({Status}!="Completed", {Assignee}="{name}")</code>.</p>
+    </div>
+
+    <div class="wf-card">
+      <div class="wf-header">
+        <div class="wf-num">1</div>
+        <h3>First-time setup (contractor)</h3>
+      </div>
+      <div class="wf-body">
+        <ol class="steps">
+          <li>Open <code>os/tasks/jobs.html</code> on your mobile browser.</li>
+          <li>If the auth overlay appears, enter the Airtable PAT and tap <strong>Connect</strong>. The PAT is saved to <code>localStorage</code> (<code>_dlr_pat</code>).</li>
+          <li>The name picker shows: tap your name (Gary, Roy, or Rob). Your selection is saved to <code>localStorage</code> (<code>_task_contractor</code>).</li>
+          <li>Your active jobs load in priority and status order.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Job card interactions</div>
+      <p>Each job appears as a card with the task name, due date, status badge, priority badge, and business badge. Tapping a card expands it to show:</p>
+      <ul>
+        <li>Description (if set)</li>
+        <li>Notes (existing notes from Airtable)</li>
+        <li>Time estimate (if set)</li>
+        <li>Attachments as tappable links (images show a thumbnail)</li>
+        <li>Two action buttons: <strong>Mark Complete</strong> and <strong>Add Note</strong></li>
+      </ul>
+      <div class="info-box tip">
+        <span class="ib-icon">&#x2714;</span>
+        <span>Only one card can be expanded at a time. Tapping another card collapses the previous one and scrolls the new one into view.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Contractor actions</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Action</th><th>What it does</th><th>API call</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Mark Complete</strong></td>
+            <td>Sets the task status to "Completed" in Airtable. The card animates off screen (slide right, fade out) and is removed from the list. A success toast appears.</td>
+            <td>PATCH <code>{F.status}: { name: "Completed" }</code></td>
+          </tr>
+          <tr>
+            <td><strong>Add Note</strong></td>
+            <td>Opens a text area below the action buttons. Saving prepends a timestamped prefix <code>[Name - DD/MM/YYYY HH:MM]</code> to the new note text, appends it to any existing notes, and writes back to Airtable. The card re-renders to show the updated notes.</td>
+            <td>PATCH <code>{F.notes}: updatedNotes</code></td>
+          </tr>
+          <tr>
+            <td><strong>Refresh</strong> (header button)</td>
+            <td>Re-fetches all tasks from Airtable. The button shows a spinning icon while loading.</td>
+            <td>GET with same assignee filter</td>
+          </tr>
+          <tr>
+            <td><strong>Switch user</strong> (footer link)</td>
+            <td>Clears the saved contractor from localStorage and shows the name picker again.</td>
+            <td>No API call</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Sort order (contractor view)</div>
+      <p>Tasks are sorted by <code>sortTasks()</code>: overdue first (regardless of stated status), then by status order (Overdue 0, Today 1, Approval 2, To do 3, Upcoming 4), then by priority order (Urgent 0, High 1, Project 2, Not Urgent 3), then by due date ascending.</p>
+    </div>
+  </div>
+
+  <!-- 9. Action Buttons Reference -->
+  <div class="section" id="buttons">
+    <div class="section-title"><span class="icon">&#x1F518;</span> 9. Action Buttons Reference</div>
+
+    <div class="card">
+      <div class="card-header">Top bar &amp; global controls</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Button / Control</th><th>Location</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Refresh</strong></td>
+            <td>Top-right of topbar</td>
+            <td>Calls <code>loadAllData()</code> to re-fetch tasks, projects, and calendar events from Airtable.</td>
+          </tr>
+          <tr>
+            <td><strong>Switch</strong> (next to name badge)</td>
+            <td>Top-right of topbar</td>
+            <td>Calls <code>switchUser()</code>. Clears <code>_task_user</code> from localStorage and shows the identity overlay.</td>
+          </tr>
+          <tr>
+            <td>Team switcher buttons (All / Kevin / Mica / Ericamae)</td>
+            <td>Team bar below topbar</td>
+            <td>Calls <code>setTeam(key)</code>. Filters all views to the selected person. Badge shows count of active non-someday tasks.</td>
+          </tr>
+          <tr>
+            <td>View tabs (My Day / Task List / Kanban / Projects / Capacity / Recurring)</td>
+            <td>View tab bar</td>
+            <td>Calls <code>switchView(view)</code> to show the selected view and hide all others.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">My Day view buttons</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Button</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Plan My Day</strong></td>
+            <td>Opens the planner overlay. Shows task time vs. free time, deferred task suggestions, and scheduled task list. Clicking outside or "Close" dismisses it.</td>
+          </tr>
+          <tr>
+            <td><strong>Configure Routine</strong></td>
+            <td>Toggles the routine configuration panel. Allows editing working hours (start/end, max task hours) and routine blocks (name, duration, preferred time slot, rule).</td>
+          </tr>
+          <tr>
+            <td><strong>+ Add Block</strong> (routine panel)</td>
+            <td>Adds a new routine block with defaults: "New Block", 30 min, morning, no rule. Saved to <code>_task_routine</code> in localStorage.</td>
+          </tr>
+          <tr>
+            <td><strong>Save</strong> (routine panel)</td>
+            <td>Reads all routine rows and work config inputs, saves to localStorage, closes panel, re-renders My Day.</td>
+          </tr>
+          <tr>
+            <td><strong>Reset to Defaults</strong> (routine panel)</td>
+            <td>Removes <code>_task_routine</code> and <code>_task_workconfig</code> from localStorage and reloads My Day with the built-in defaults.</td>
+          </tr>
+          <tr>
+            <td><strong>X</strong> (on a routine block row)</td>
+            <td>Removes that routine block from the saved list immediately.</td>
+          </tr>
+          <tr>
+            <td><strong>Status</strong> (on timeline task card)</td>
+            <td>Opens a dropdown with statuses: Today, Upcoming, To do, Approval, Completed, Overdue. Selecting one calls <code>updateStatus(taskId, newStatus)</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Complete</strong> (on timeline task card)</td>
+            <td>Directly calls <code>updateStatus(taskId, 'Completed')</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Status</strong> (on My Day task card)</td>
+            <td>Same status dropdown as timeline cards but for tasks in the "Also Today" and "Won't Fit Today" sections.</td>
+          </tr>
+          <tr>
+            <td><strong>Done</strong> (on My Day task card)</td>
+            <td>Directly calls <code>updateStatus(taskId, 'Completed')</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Defer to tomorrow</strong> (planner overlay)</td>
+            <td>Calls <code>deferTask(taskId)</code> which sets due date to tomorrow, closes the planner, re-renders My Day.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Task List view buttons</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Button / Control</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Row checkbox</td>
+            <td>Adds/removes task from <code>selectedTasks</code> Set. Shows the bulk actions bar when at least one is selected.</td>
+          </tr>
+          <tr>
+            <td>Header checkbox (Select All)</td>
+            <td>Selects / deselects all tasks on the current page.</td>
+          </tr>
+          <tr>
+            <td><strong>Complete Selected</strong> (bulk bar)</td>
+            <td>Calls <code>bulkComplete()</code>. Sends PATCH for all selected task IDs in parallel, setting status to "Completed".</td>
+          </tr>
+          <tr>
+            <td><strong>Reschedule Selected</strong> (bulk bar)</td>
+            <td>Calls <code>bulkReschedule()</code>. Sends PATCH for all selected task IDs in parallel, setting due date to tomorrow.</td>
+          </tr>
+          <tr>
+            <td><strong>Clear</strong> (bulk bar)</td>
+            <td>Calls <code>clearSelection()</code>. Removes all task IDs from the selection Set and hides the bulk bar.</td>
+          </tr>
+          <tr>
+            <td><strong>Change Status</strong> (row detail)</td>
+            <td>Status dropdown in expanded task row. Calls <code>updateStatus(taskId, newStatus)</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Open in Airtable</strong> (row detail)</td>
+            <td>Opens the Airtable record URL in a new tab.</td>
+          </tr>
+          <tr>
+            <td><strong>&laquo; Prev</strong> / <strong>Next &raquo;</strong></td>
+            <td>Paginate through the filtered task list (50 tasks per page).</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Kanban view buttons</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Button / Control</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>&laquo;</strong> / <strong>&raquo;</strong> month nav</td>
+            <td>Calls <code>kanbanNav(-1)</code> or <code>kanbanNav(1)</code> to move the visible month back or forward.</td>
+          </tr>
+          <tr>
+            <td>Project filter dropdown</td>
+            <td>Filters Kanban cards to a specific project. Updates <code>kanbanProjectFilter</code> and re-renders. Defaults to "All Projects".</td>
+          </tr>
+          <tr>
+            <td>Drag card to week column</td>
+            <td>On drop, calls <code>dropKanbanCard(event, weekIdx)</code> which calls <code>updateTaskDueDate(taskId, weekStartDate)</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Projects view buttons</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Button</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Active</strong></td>
+            <td>Sets <code>projectFilter = 'active'</code>. Shows projects where <code>completed</code> is false and status is not "Completed".</td>
+          </tr>
+          <tr>
+            <td><strong>Completed</strong></td>
+            <td>Sets <code>projectFilter = 'completed'</code>. Shows projects where <code>completed</code> is true or status equals "Completed".</td>
+          </tr>
+          <tr>
+            <td><strong>All</strong></td>
+            <td>Sets <code>projectFilter = 'all'</code>. Shows all projects.</td>
+          </tr>
+          <tr>
+            <td>Click project card</td>
+            <td>Calls <code>toggleProject(id)</code>. Expands/collapses the project's detail section (Deliverable, Definition of Done, linked tasks).</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 10. Filtering, Sorting & Search -->
+  <div class="section" id="filters">
+    <div class="section-title"><span class="icon">&#x1F50D;</span> 10. Filtering, Sorting &amp; Search</div>
+
+    <div class="card">
+      <div class="card-header">Task List filters &amp; sort</div>
+      <p>All controls live in the <code>.controls</code> bar above the task table. Every change immediately triggers <code>renderTasks()</code> via <code>oninput</code> or <code>onchange</code> events and resets to page 1.</p>
+      <table class="label-table">
+        <thead>
+          <tr><th>Control</th><th>ID</th><th>Options / behaviour</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Search box</td>
+            <td><code>searchBox</code></td>
+            <td>Free-text search. Matches against task name, assignee name, description, and business name (case-insensitive).</td>
+          </tr>
+          <tr>
+            <td>Status filter</td>
+            <td><code>filterStatus</code></td>
+            <td>All Statuses / Today / Overdue / Upcoming / To do / Approval. "Overdue" also matches tasks where <code>isOverdue(t)</code> is true, not just explicit Overdue status.</td>
+          </tr>
+          <tr>
+            <td>Priority filter</td>
+            <td><code>filterPriority</code></td>
+            <td>All Priorities / Urgent / High / Not Urgent. ("Project" is excluded from Task List entirely.)</td>
+          </tr>
+          <tr>
+            <td>Business filter</td>
+            <td><code>filterBusiness</code></td>
+            <td>All Businesses / Real Estate / Operations Director / Personal.</td>
+          </tr>
+          <tr>
+            <td>Sort</td>
+            <td><code>sortBy</code></td>
+            <td>Due Date (soonest), Due Date (latest), Priority, Status, Name (A-Z), Time Estimate (high-low).</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="info-box info" style="margin-top:0.75rem;">
+        <span class="ib-icon">&#x2139;</span>
+        <span>The base filter before any user selection excludes tasks where <code>someDay</code> is true and tasks with priority "Project". The Airtable fetch itself excludes completed tasks and someday tasks using the formula <code>AND({Status}!="Completed",{Some Day}=FALSE())</code>.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Kanban project filter</div>
+      <p>A dropdown in the Kanban controls bar lists all unique project names found across tasks with priority "Project". Selecting a name sets <code>kanbanProjectFilter</code> and re-renders the board. Tasks with no matching project ID or name are excluded.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Recurring view groups</div>
+      <p>The Recurring view groups tasks by their recurring frequency field value. The display order is hard-coded as: Daily, Weekly, Fortnightly, Monthly, Quarterly, Bi-Annually, Annually, Flagged. "Flagged" captures tasks where the <code>Recurring?</code> checkbox is true but the recurring text field is empty.</p>
+    </div>
+  </div>
+
+  <!-- 11. Airtable Fields Reference -->
+  <div class="section" id="fields">
+    <div class="section-title"><span class="icon">&#x1F4BE;</span> 11. Airtable Fields Reference</div>
+
+    <div class="card">
+      <div class="card-header">Tasks table (<code>tblqB8b22hKBL4PF1</code>) &mdash; field IDs</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Field name</th>
+            <th>Constant</th>
+            <th>Airtable field ID</th>
+            <th>Type / notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Name</td><td><code>F.name</code></td><td><code>fldgFjGBw6bTKJFCD</code></td><td>Single-line text. Primary display field.</td></tr>
+          <tr><td>Due Date</td><td><code>F.dueDate</code></td><td><code>fld7XP8w8kbxfETV4</code></td><td>Date (YYYY-MM-DD). Used for overdue detection and scheduling.</td></tr>
+          <tr><td>Status</td><td><code>F.status</code></td><td><code>fldx4qCw17UfrKpaN</code></td><td>Single select: Overdue, Today, Approval, To do, Upcoming, Completed.</td></tr>
+          <tr><td>Assignee</td><td><code>F.assignee</code></td><td><code>fldELMncVJYPDRJNc</code></td><td>Collaborator. Has <code>.name</code> and <code>.email</code> properties.</td></tr>
+          <tr><td>Priority</td><td><code>F.priority</code></td><td><code>fldS21RwmwOqt71LI</code></td><td>Single select: Urgent, High, Project, Not Urgent.</td></tr>
+          <tr><td>Time Estimate</td><td><code>F.timeEst</code></td><td><code>fld10VzzbiNNgRmIi</code></td><td>Single select: 15 min, 30 min, 45 min, 1 hr, 2 hr, 3 hr, 4 hr, 8 hr. Used for planner if timeDur is absent.</td></tr>
+          <tr><td>Time Duration</td><td><code>F.timeDur</code></td><td><code>flduPjY0p7MmQzDvH</code></td><td>Duration (seconds). Used for precise planner scheduling when set.</td></tr>
+          <tr><td>Description</td><td><code>F.description</code></td><td><code>fldRGhBQViKZKtkQ6</code></td><td>Long text. Shown in expanded task row and contractor detail.</td></tr>
+          <tr><td>Attachments</td><td><code>F.attachments</code></td><td><code>fldEbs9cscRr8elcw</code></td><td>Attachments array. Each item has <code>url</code>, <code>filename</code>, <code>type</code>, and optional <code>thumbnails.small.url</code>.</td></tr>
+          <tr><td>Recurring</td><td><code>F.recurring</code></td><td><code>fldNhDWBX5gQm2p6b</code></td><td>Single select: Daily, Weekly, Fortnightly, Monthly, Quarterly, Bi-Annually, Annually. Used for Recurring view grouping.</td></tr>
+          <tr><td>Recurring? (flag)</td><td><code>F.recurFlag</code></td><td><code>fldW4ym7haKK0BZzt</code></td><td>Checkbox. Shows task in Recurring view even without a frequency label.</td></tr>
+          <tr><td>Some Day</td><td><code>F.someDay</code></td><td><code>fldmhkeRaDkiL3Ga4</code></td><td>Checkbox. Someday tasks are excluded from all views and from the Airtable fetch filter.</td></tr>
+          <tr><td>Notes</td><td><code>F.notes</code></td><td><code>fldR7apBzSp3oxFxz</code></td><td>Long text. Contractors append timestamped notes here.</td></tr>
+          <tr><td>Category</td><td><code>F.category</code></td><td><code>fldVDvfhfOUBNvAxe</code></td><td>Single select. Shown in expanded row metadata.</td></tr>
+          <tr><td>Completion Date</td><td><code>F.completion</code></td><td><code>fldFOi1SwEKuJRmdN</code></td><td>Date. Set automatically when status changes to Completed.</td></tr>
+          <tr><td>Created</td><td><code>F.created</code></td><td><code>fldywB2EXESbXB7it</code></td><td>Date. Shown in expanded row metadata.</td></tr>
+          <tr><td>On Hold</td><td><code>F.onHold</code></td><td><code>fldWib3IHh3jY9vBZ</code></td><td>Checkbox. Shows "On Hold" warning in expanded row.</td></tr>
+          <tr><td>Business</td><td><code>F.business</code></td><td><code>fldLu1Y4GzyWcDoxr</code></td><td>Linked record (Business table). First linked record name is used for display and filtering.</td></tr>
+          <tr><td>Projects</td><td><code>F.projects</code></td><td><code>fldBg0rQy0FrOAkRN</code></td><td>Linked record (Projects table). Used to join tasks to projects in the Projects view.</td></tr>
+          <tr><td>Original Due Date</td><td><code>F.origDueDate</code></td><td><code>fldS2OR7oQKC7T1to</code></td><td>Date. Written once by auto-reschedule to preserve the original due date before rescheduling.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Projects table (<code>tblHrpTMd5LNYn8v1</code>) &mdash; field IDs</div>
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Field name</th>
+            <th>Constant</th>
+            <th>Airtable field ID</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Name</td><td><code>PF.name</code></td><td><code>fldiMZICg1KOORpte</code></td><td>Project title.</td></tr>
+          <tr><td>Status</td><td><code>PF.status</code></td><td><code>fldZ0SpReVaDS1VXb</code></td><td>Single select: On Track, On Target, Off Track, Not Started, Completed. Determines badge colour on project card.</td></tr>
+          <tr><td>Start Date</td><td><code>PF.start</code></td><td><code>fldGIlsn0cSEpnj18</code></td><td>Shown in project card meta.</td></tr>
+          <tr><td>End Date</td><td><code>PF.end</code></td><td><code>fldU0cJparnkvOUsV</code></td><td>Shown in project card meta.</td></tr>
+          <tr><td>Total Tasks</td><td><code>PF.totalTasks</code></td><td><code>fldtw6NQZ8CSF3RXi</code></td><td>Rollup / count field. Denominator in progress bar.</td></tr>
+          <tr><td>Completed Tasks</td><td><code>PF.completedTasks</code></td><td><code>fld7IDjY0xB4JGBfn</code></td><td>Rollup. Numerator in progress bar.</td></tr>
+          <tr><td>Overdue Tasks</td><td><code>PF.overdue</code></td><td><code>fld4X8l4SE4clIYhb</code></td><td>Shown in red in project card meta if &gt; 0.</td></tr>
+          <tr><td>Completion %</td><td><code>PF.completionPct</code></td><td><code>fld4sGSE2yyyMC7Sj</code></td><td>Decimal (0–1). Multiplied by 100 for display. Controls progress bar width.</td></tr>
+          <tr><td>Completed (flag)</td><td><code>PF.completed</code></td><td><code>fldliObR7TdTdjht7</code></td><td>Checkbox. Used for filtering Active/Completed projects.</td></tr>
+          <tr><td>Deliverable</td><td><code>PF.deliverable</code></td><td><code>flduh2IybVmweI6lD</code></td><td>Long text. Shown in expanded project detail.</td></tr>
+          <tr><td>Definition of Done</td><td><code>PF.defOfDone</code></td><td><code>fldgjzVEnfnZowrBD</code></td><td>Long text. Shown in expanded project detail.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header">localStorage keys</div>
+      <table class="label-table">
+        <thead>
+          <tr><th>Key</th><th>Set by</th><th>Contents</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>_dlr_pat</code></td><td>Auth flow (both pages)</td><td>Airtable Personal Access Token string.</td></tr>
+          <tr><td><code>_task_user</code></td><td><code>selectIdentity()</code></td><td>JSON: <code>{ key, name, email }</code> for the selected team member.</td></tr>
+          <tr><td><code>_task_routine</code></td><td><code>saveRoutineBlocks()</code></td><td>JSON array of routine block objects: <code>{ name, duration, preferred, fixed, order, rule? }</code>.</td></tr>
+          <tr><td><code>_task_workconfig</code></td><td><code>saveWorkConfig()</code></td><td>JSON: <code>{ startHour, endHour, maxTaskHours }</code>.</td></tr>
+          <tr><td><code>_task_contractor</code></td><td><code>selectContractor()</code> (jobs.html)</td><td>Contractor key string: "gary", "roy", or "rob".</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 12. Troubleshooting -->
+  <div class="section" id="troubleshooting">
+    <div class="section-title"><span class="icon">&#x1F527;</span> 12. Troubleshooting</div>
+    <div class="card">
+      <div class="ts-item">
+        <div class="ts-problem">Page shows "Failed to load data" or "Invalid token. Please re-enter your PAT"</div>
+        <div class="ts-solution">Your Airtable PAT has expired or is incorrect. The auth bar reappears automatically when the API returns a 401 or 403. Enter a valid PAT and click Connect. This clears the stored token and retries.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Page asks for a PAT on every load even though I already entered it</div>
+        <div class="ts-solution">The page is running in a context where localStorage is blocked (private/incognito mode, or an iframe with restricted storage). Use a regular browser tab, or ensure the platform shell is loaded first so the child iframe inherits the parent's PAT via <code>window.parent.PAT</code>.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Tasks I just created in Airtable are not showing</div>
+        <div class="ts-solution">Click <strong>Refresh</strong> in the top bar. The page only fetches data on load and on explicit refresh &mdash; it does not poll Airtable in the background.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">The Kanban board is empty</div>
+        <div class="ts-solution">The Kanban view shows only tasks with priority "Project". Check that your tasks are assigned the "Project" priority in Airtable. Also check the month navigation &mdash; tasks are placed by their due date, so a different month may be selected.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">My Day timeline shows no calendar events</div>
+        <div class="ts-solution">Check that <code>GCAL_SCRIPT_URL</code> is set in the script constants and that the Google Apps Script proxy is deployed and accessible. If the constant is empty, a "Calendar: not connected" note appears in the My Day action bar. Calendar fetch errors are logged to the browser console.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Auto-reschedule ran but some overdue tasks were not rescheduled</div>
+        <div class="ts-solution">Auto-reschedule only runs for Kevin (key "kevin"). It skips tasks where <code>someDay</code> is true. Check that the signed-in user is Kevin and that the task's <code>someDay</code> field is not checked in Airtable.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Status change button does not update; page re-renders but old status shows</div>
+        <div class="ts-solution">The PATCH request may have failed silently. Open the browser console and check for errors. Common cause: the PAT lacks write permission on the tasks table. Ensure the PAT has "create records, update records" scope on the base.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Contractor jobs page (jobs.html) shows "Error loading" with an API error message</div>
+        <div class="ts-solution">The error message is displayed inside the task list area with a Retry button. Common causes: expired PAT, network failure, or invalid contractor name (name must match the Assignee field in Airtable exactly). Tap <strong>Retry</strong> to try again, or <strong>Switch user</strong> to re-select the contractor.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Capacity view shows 0 hrs for a team member who has tasks</div>
+        <div class="ts-solution">Capacity calculates hours using <code>timeDur</code> (seconds field) first, then <code>timeEst</code> (select field). If neither is set, the task contributes 0 minutes. Ensure tasks have a Time Estimate or Time Duration set in Airtable.</div>
+      </div>
+      <div class="ts-item">
+        <div class="ts-problem">Drag-and-drop on the Kanban board does not update the due date</div>
+        <div class="ts-solution">The drop handler calls <code>updateTaskDueDate(draggedTaskId, weekStartDate)</code> which requires a successful PATCH. If the API call fails, the card visually moves but reverts on the next render. Check the browser console for errors and verify PAT write permissions.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13. Changelog -->
+  <div class="section" id="changelog">
+    <div class="section-title"><span class="icon">&#x1F4DC;</span> 13. Changelog</div>
+    <div class="card">
+      <table class="label-table">
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Date</th>
+            <th>Changes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1.1</strong></td>
+            <td>17 Apr 2026</td>
+            <td>Initial SOP created. Documents all six views, Smart Daily Planner, Google Calendar integration, auto-reschedule, contractor jobs view, all action buttons, field IDs, localStorage keys, and troubleshooting guidance.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
