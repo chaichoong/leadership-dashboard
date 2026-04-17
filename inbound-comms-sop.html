@@ -3,1782 +3,1033 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inbound Comms Tracker - Standard Operating Procedure</title>
+<title>Inbound Comms OS &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="css/tokens.css?v=1">
 <style>
-/* ====== RESET & BASE ====== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
-  line-height: 1.6;
-  color: var(--text-primary);
-  background: var(--bg-app);
+  line-height: 1.6; color: var(--text-primary); background: var(--bg-app);
 }
-
-/* ====== COLOUR VARIABLES ====== */
-/* ====== HEADER ====== */
-.header {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%);
-  color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden;
+.header { background: linear-gradient(135deg, var(--accent) 0%, var(--accent) 100%); color: white; padding: 2.5rem 2rem 2rem; position: relative; overflow: hidden; }
+.header::after { content:''; position:absolute; top:-50%; right:-10%; width:500px; height:500px; background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%); border-radius:50%; }
+.header-inner { max-width:1100px; margin:0 auto; position:relative; z-index:1; }
+.header-back { display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; opacity:0.7; text-decoration:none; color:white; margin-bottom:1rem; transition:opacity 0.15s; }
+.header-back:hover { opacity:1; }
+.header h1 { font-size:2.2rem; font-weight:700; margin-bottom:0.3rem; letter-spacing:-0.5px; }
+.header .subtitle { font-size:1.05rem; opacity:0.85; }
+.header .version { font-size:0.85rem; opacity:0.6; margin-top:0.5rem; }
+.container { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+.section { margin-top:2.5rem; }
+.section-title { font-size:1.5rem; font-weight:700; color:var(--accent); padding-bottom:0.5rem; border-bottom:3px solid var(--accent-soft); margin-bottom:1.25rem; display:flex; align-items:center; gap:0.5rem; }
+.section-title .icon { font-size:1.4rem; }
+.card { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); padding:1.5rem; margin-bottom:1.25rem; border:1px solid var(--border-default); }
+.card-header { font-size:1.1rem; font-weight:600; color:var(--text-primary); margin-bottom:0.75rem; display:flex; align-items:center; gap:0.5rem; }
+.quick-ref { background:linear-gradient(135deg,var(--accent-soft) 0%,var(--accent-soft) 100%); border:2px solid var(--accent-soft); border-radius:var(--radius-xl); padding:1.5rem; margin-top:-1rem; position:relative; z-index:2; box-shadow:var(--shadow-lg); }
+.quick-ref h2 { font-size:1.2rem; color:var(--accent); margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; }
+.qr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:0.75rem; }
+.qr-item { background:var(--bg-surface); border-radius:var(--radius-lg); padding:0.75rem 1rem; border-left:4px solid var(--accent); font-size:0.88rem; }
+.qr-item .qr-label { font-weight:600; color:var(--text-secondary); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; }
+.qr-item .qr-value { color:var(--text-primary); margin-top:0.15rem; word-break:break-all; }
+.qr-item .qr-value a { color:var(--accent); text-decoration:none; }
+.qr-item .qr-value a:hover { text-decoration:underline; }
+.toc { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); padding:1.5rem; border:1px solid var(--border-default); }
+.toc h2 { font-size:1.15rem; color:var(--accent); margin-bottom:1rem; }
+.toc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:0.35rem 1.5rem; }
+.toc a { display:flex; align-items:center; gap:0.5rem; color:var(--text-secondary); text-decoration:none; padding:0.35rem 0.5rem; border-radius:6px; font-size:0.9rem; transition:background 0.15s; }
+.toc a:hover { background:var(--accent-soft); color:var(--accent); }
+.toc a .toc-num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:0.7rem; font-weight:700; flex-shrink:0; }
+.flow { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:0; padding:1.5rem 0; }
+.flow-step { background:var(--bg-surface); border:2px solid var(--accent-soft); border-radius:var(--radius-lg); padding:0.75rem 1.1rem; text-align:center; font-size:0.85rem; font-weight:600; color:var(--text-secondary); min-width:110px; }
+.flow-step.primary { background:var(--accent); color:white; border-color:var(--accent); }
+.flow-step.success { background:var(--success); color:white; border-color:var(--success); }
+.flow-step.warning { background:var(--warning); color:white; border-color:var(--warning); }
+.flow-step.purple { background:var(--accent); color:white; border-color:var(--accent); }
+.flow-step .flow-icon { font-size:1.3rem; display:block; margin-bottom:0.25rem; }
+.flow-step .flow-sub { font-weight:400; font-size:0.75rem; opacity:0.85; margin-top:0.15rem; }
+.flow-arrow { font-size:1.4rem; color:var(--text-muted); padding:0 0.3rem; flex-shrink:0; }
+.label-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.88rem; }
+.label-table th { background:var(--accent); color:white; padding:0.75rem 1rem; text-align:left; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.5px; }
+.label-table th:first-child { border-radius:var(--radius-lg) 0 0 0; }
+.label-table th:last-child { border-radius:0 var(--radius-lg) 0 0; }
+.label-table td { padding:0.65rem 1rem; border-bottom:1px solid var(--border-default); vertical-align:top; }
+.label-table tr:last-child td { border-bottom:none; }
+.label-table tr:nth-child(even) td { background:var(--bg-surface-2); }
+.label-table tr:hover td { background:var(--accent-soft); }
+.label-badge { display:inline-block; padding:0.2rem 0.6rem; border-radius:999px; font-weight:600; font-size:0.78rem; white-space:nowrap; }
+.lb-blue { background:var(--accent-soft); color:var(--accent); } .lb-amber { background:var(--warning-bg); color:var(--warning); }
+.lb-red { background:var(--danger-bg); color:var(--danger); } .lb-green { background:var(--success-bg); color:var(--success); }
+.lb-purple { background:var(--accent-soft); color:var(--accent); }
+.wf-card { background:var(--bg-surface); border-radius:var(--radius-xl); box-shadow:var(--shadow-sm); border:1px solid var(--border-default); overflow:hidden; margin-bottom:1.5rem; }
+.wf-header { padding:1rem 1.5rem; display:flex; align-items:center; gap:0.75rem; border-bottom:1px solid var(--border-default); }
+.wf-num { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; font-weight:700; font-size:1rem; flex-shrink:0; color:white; background:var(--accent); }
+.wf-header h3 { font-size:1.1rem; font-weight:700; color:var(--text-primary); }
+.wf-header .wf-tag { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px; background:var(--bg-subtle); color:var(--text-secondary); font-weight:500; }
+.wf-body { padding:1.25rem 1.5rem; }
+.wf-body h4 { font-size:0.9rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem; margin-top:1rem; }
+.wf-body h4:first-child { margin-top:0; }
+.steps { counter-reset:step; list-style:none; padding:0; }
+.steps li { position:relative; padding:0.5rem 0 0.5rem 2.5rem; font-size:0.9rem; line-height:1.5; }
+.steps li::before { counter-increment:step; content:counter(step); position:absolute; left:0; top:0.45rem; width:24px; height:24px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:0.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.steps li + li { border-top:1px solid var(--bg-subtle); }
+.info-box { padding:0.85rem 1rem; border-radius:var(--radius-lg); font-size:0.88rem; margin:0.75rem 0; display:flex; align-items:flex-start; gap:0.6rem; }
+.info-box.info { background:var(--accent-soft); border-left:4px solid var(--accent); color:var(--accent); }
+.info-box.warn { background:var(--warning-bg); border-left:4px solid var(--warning); color:var(--warning); }
+.info-box.danger { background:var(--danger-bg); border-left:4px solid var(--danger); color:var(--danger); }
+.info-box.tip { background:var(--success-bg); border-left:4px solid var(--success); color:var(--success); }
+.info-box .ib-icon { font-size:1.1rem; flex-shrink:0; margin-top:0.05rem; }
+code { background:var(--bg-subtle); padding:0.15rem 0.4rem; border-radius:4px; font-size:0.82rem; font-family:'SF Mono',Monaco,Consolas,monospace; color:var(--accent); }
+.ts-item { margin-bottom:0.75rem; }
+.ts-problem { font-weight:600; color:var(--danger); font-size:0.9rem; }
+.ts-solution { font-size:0.88rem; color:var(--text-secondary); margin-top:0.2rem; padding-left:1rem; }
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+strong { color:var(--text-primary); } a { color:var(--accent); }
+p { margin-bottom:0.5rem; } ul,ol { margin-left:1.25rem; margin-bottom:0.5rem; }
+li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px solid var(--border-default); margin:1.5rem 0; }
+@media (max-width:768px) {
+  .header h1 { font-size:1.6rem; } .qr-grid { grid-template-columns:1fr; }
+  .toc-grid { grid-template-columns:1fr; } .grid-2 { grid-template-columns:1fr; }
+  .flow { flex-direction:column; } .flow-arrow { transform:rotate(90deg); }
+  .container { padding:0 1rem 3rem; }
 }
-.header::after {
-  content: ''; position: absolute; top: -50%; right: -10%; width: 500px; height: 500px;
-  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
-  border-radius: 50%;
-}
-.header-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
-.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; letter-spacing: -0.5px; }
-.header .subtitle { font-size: 1.05rem; opacity: 0.85; font-weight: 400; }
-.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
-
-/* ====== LAYOUT ====== */
-.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
-.section { margin-top: 2.5rem; }
-.section-title {
-  font-size: 1.5rem; font-weight: 700; color: var(--accent);
-  padding-bottom: 0.5rem; border-bottom: 3px solid var(--accent-soft);
-  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
-}
-.section-title .icon { font-size: 1.4rem; }
-
-/* ====== CARDS ====== */
-.card {
-  background:var(--bg-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm);
-  padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--border-default);
-}
-.card-header {
-  font-size: 1.1rem; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;
-}
-
-/* ====== QUICK REFERENCE ====== */
-.quick-ref {
-  background: linear-gradient(135deg, var(--accent-soft) 0%, var(--accent-soft) 100%);
-  border: 2px solid var(--accent-soft); border-radius: var(--radius-xl);
-  padding: 1.5rem; margin-top: -1rem; position: relative; z-index: 2;
-  box-shadow: var(--shadow-lg);
-}
-.quick-ref h2 { font-size: 1.2rem; color: var(--accent); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
-.qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
-.qr-item {
-  background:var(--bg-surface); border-radius: var(--radius-lg); padding: 0.75rem 1rem;
-  border-left: 4px solid var(--accent); font-size: 0.88rem;
-}
-.qr-item .qr-label { font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.qr-item .qr-value { color: var(--text-primary); margin-top: 0.15rem; word-break: break-all; }
-.qr-item .qr-value a { color: var(--accent); text-decoration: none; }
-.qr-item .qr-value a:hover { text-decoration: underline; }
-
-/* ====== TABLE OF CONTENTS ====== */
-.toc {
-  background:var(--bg-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm);
-  padding: 1.5rem; border: 1px solid var(--border-default);
-}
-.toc h2 { font-size: 1.15rem; color: var(--accent); margin-bottom: 1rem; }
-.toc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.35rem 1.5rem; }
-.toc a {
-  display: flex; align-items: center; gap: 0.5rem;
-  color: var(--text-secondary); text-decoration: none; padding: 0.35rem 0.5rem;
-  border-radius: 6px; font-size: 0.9rem; transition: background 0.15s;
-}
-.toc a:hover { background: var(--accent-soft); color: var(--accent); }
-.toc a .toc-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--accent-soft); color: var(--accent);
-  font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
-}
-
-/* ====== FLOW DIAGRAMS ====== */
-.flow { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 1.5rem 0; }
-.flow-step {
-  background:var(--bg-surface); border: 2px solid var(--accent-soft); border-radius: var(--radius-lg);
-  padding: 0.75rem 1.1rem; text-align: center; font-size: 0.85rem; font-weight: 600;
-  color: var(--text-secondary); min-width: 110px; position: relative;
-}
-.flow-step.primary { background: var(--accent); color: white; border-color: var(--accent); }
-.flow-step.success { background: var(--success); color: white; border-color: var(--success); }
-.flow-step.warning { background: var(--warning); color: white; border-color: var(--warning); }
-.flow-step.purple { background: var(--accent); color: white; border-color: var(--accent); }
-.flow-step .flow-icon { font-size: 1.3rem; display: block; margin-bottom: 0.25rem; }
-.flow-step .flow-sub { font-weight: 400; font-size: 0.75rem; opacity: 0.85; margin-top: 0.15rem; }
-.flow-arrow {
-  font-size: 1.4rem; color: var(--text-muted); padding: 0 0.3rem; flex-shrink: 0;
-}
-.flow-arrow-down {
-  display: flex; justify-content: center; width: 100%; padding: 0.3rem 0;
-  font-size: 1.4rem; color: var(--text-muted);
-}
-
-/* Vertical flow */
-.flow-vertical { flex-direction: column; align-items: center; }
-.flow-vertical .flow-step { min-width: 200px; }
-
-/* ====== ARCHITECTURE DIAGRAM ====== */
-.arch-diagram {
-  display: grid; grid-template-columns: 1fr auto 1fr auto 1fr;
-  align-items: center; gap: 0.75rem; padding: 1.5rem 0;
-}
-.arch-box {
-  background:var(--bg-surface); border: 2px solid var(--accent-soft); border-radius: var(--radius-xl);
-  padding: 1.25rem; text-align: center; min-height: 120px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-}
-.arch-box.highlight { border-color: var(--accent); background: var(--accent-soft); }
-.arch-box .arch-icon { font-size: 2rem; margin-bottom: 0.5rem; }
-.arch-box .arch-title { font-weight: 700; font-size: 0.95rem; color: var(--text-primary); }
-.arch-box .arch-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem; }
-.arch-connector { text-align: center; font-size: 1.5rem; color: var(--text-muted); }
-
-/* ====== LABEL TABLE ====== */
-.label-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.88rem; }
-.label-table th {
-  background: var(--accent); color: white; padding: 0.75rem 1rem;
-  text-align: left; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
-}
-.label-table th:first-child { border-radius: var(--radius-lg) 0 0 0; }
-.label-table th:last-child { border-radius: 0 var(--radius-lg) 0 0; }
-.label-table td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--border-default); vertical-align: top; }
-.label-table tr:last-child td { border-bottom: none; }
-.label-table tr:nth-child(even) td { background: var(--bg-surface-2); }
-.label-table tr:hover td { background: var(--accent-soft); }
-.label-badge {
-  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px;
-  font-weight: 600; font-size: 0.78rem; white-space: nowrap;
-}
-.label-badge.lb-1 { background: var(--accent-soft); color: var(--accent); }
-.label-badge.lb-2 { background: var(--warning-bg); color: var(--warning); }
-.label-badge.lb-3 { background: var(--danger-bg); color: var(--danger); }
-.label-badge.lb-4 { background: var(--success-bg); color: var(--success); }
-.label-badge.lb-5 { background: var(--accent-soft); color: var(--accent); }
-.label-badge.lb-6 { background: var(--accent-soft); color: var(--accent); }
-.label-badge.lb-7 { background: var(--danger-bg); color: var(--danger); }
-.label-badge.lb-8 { background: var(--warning-bg); color: var(--warning); }
-.label-badge.lb-9 { background: var(--success-bg); color: var(--success); }
-
-/* ====== WORKFLOW CARDS ====== */
-.wf-card {
-  background:var(--bg-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-default); overflow: hidden; margin-bottom: 1.5rem;
-}
-.wf-header {
-  padding: 1rem 1.5rem; display: flex; align-items: center; gap: 0.75rem;
-  border-bottom: 1px solid var(--border-default);
-}
-.wf-num {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 50%; font-weight: 700; font-size: 1rem;
-  flex-shrink: 0; color: white;
-}
-.wf-header h3 { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
-.wf-header .wf-tag {
-  font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px;
-  background: var(--bg-subtle); color: var(--text-secondary); font-weight: 500;
-}
-.wf-body { padding: 1.25rem 1.5rem; }
-.wf-body h4 { font-size: 0.9rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.5rem; margin-top: 1rem; }
-.wf-body h4:first-child { margin-top: 0; }
-
-/* Colour coding for workflow numbers */
-.wf-num.wf-1 { background: var(--accent); } .wf-num.wf-2 { background: var(--warning); }
-.wf-num.wf-3 { background: var(--danger); } .wf-num.wf-4 { background: var(--success); }
-.wf-num.wf-5 { background: var(--accent); } .wf-num.wf-6 { background: var(--accent); }
-.wf-num.wf-7 { background: var(--danger); } .wf-num.wf-8 { background: var(--warning); }
-.wf-num.wf-9 { background: var(--success); }
-
-/* ====== STEP LISTS ====== */
-.steps { counter-reset: step; list-style: none; padding: 0; }
-.steps li {
-  position: relative; padding: 0.5rem 0 0.5rem 2.5rem; font-size: 0.9rem; line-height: 1.5;
-}
-.steps li::before {
-  counter-increment: step; content: counter(step);
-  position: absolute; left: 0; top: 0.45rem;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--accent-soft); color: var(--accent);
-  font-size: 0.75rem; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.steps li + li { border-top: 1px solid var(--bg-subtle); }
-
-/* ====== METRIC DOTS ====== */
-.dot {
-  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  margin-right: 0.35rem; vertical-align: middle;
-}
-.dot.green { background: var(--success); }
-.dot.amber { background: var(--warning); }
-.dot.red { background: var(--danger); }
-.dot.blue { background: var(--accent); }
-
-/* ====== METRICS BAR ====== */
-.metrics-bar {
-  display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;
-}
-.metric-chip {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
-}
-.metric-chip.mc-green { background: var(--success-bg); color: var(--success); }
-.metric-chip.mc-amber { background: var(--warning-bg); color: var(--warning); }
-.metric-chip.mc-red { background: var(--danger-bg); color: var(--danger); }
-.metric-chip.mc-blue { background: var(--accent-soft); color: var(--accent); }
-
-/* ====== INFO BOXES ====== */
-.info-box {
-  padding: 0.85rem 1rem; border-radius: var(--radius-lg); font-size: 0.88rem;
-  margin: 0.75rem 0; display: flex; align-items: flex-start; gap: 0.6rem;
-}
-.info-box.info { background: var(--accent-soft); border-left: 4px solid var(--accent); color: var(--accent); }
-.info-box.warn { background: var(--warning-bg); border-left: 4px solid var(--warning); color: var(--warning); }
-.info-box.danger { background: var(--danger-bg); border-left: 4px solid var(--danger); color: var(--danger); }
-.info-box.tip { background: var(--success-bg); border-left: 4px solid var(--success); color: var(--success); }
-.info-box .ib-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
-
-/* ====== CODE / MONO ====== */
-code {
-  background: var(--bg-subtle); padding: 0.15rem 0.4rem; border-radius: 4px;
-  font-size: 0.82rem; font-family: 'SF Mono', Monaco, Consolas, monospace; color: var(--accent);
-}
-
-/* ====== TROUBLESHOOTING ====== */
-.ts-item { margin-bottom: 0.75rem; }
-.ts-problem { font-weight: 600; color: var(--danger); font-size: 0.9rem; }
-.ts-solution { font-size: 0.88rem; color: var(--text-secondary); margin-top: 0.2rem; padding-left: 1rem; }
-
-/* ====== TWO-COL GRID ====== */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-
-/* ====== AIRTABLE FLOW ====== */
-.at-flow {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
-  align-items: center; padding: 1rem 0;
-}
-.at-flow .flow-step { min-width: auto; }
-
-/* ====== PRINT ====== */
-@media print {
-  body { background:var(--bg-surface); font-size: 10pt; }
-  .header { background: var(--accent) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .card, .wf-card, .quick-ref, .toc { box-shadow: none; border: 1px solid var(--border-default); break-inside: avoid; }
-  .section { break-inside: avoid; }
-  .flow-step { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
-
-/* ====== RESPONSIVE ====== */
-@media (max-width: 768px) {
-  .header h1 { font-size: 1.6rem; }
-  .qr-grid { grid-template-columns: 1fr; }
-  .toc-grid { grid-template-columns: 1fr; }
-  .arch-diagram { grid-template-columns: 1fr; }
-  .arch-connector { transform: rotate(90deg); }
-  .grid-2 { grid-template-columns: 1fr; }
-  .flow { flex-direction: column; }
-  .flow-arrow { transform: rotate(90deg); }
-  .at-flow { grid-template-columns: 1fr; }
-  .container { padding: 0 1rem 3rem; }
-}
-
-/* ====== MISC ====== */
-strong { color: var(--text-primary); }
-a { color: var(--accent); }
-p { margin-bottom: 0.5rem; }
-ul, ol { margin-left: 1.25rem; margin-bottom: 0.5rem; }
-li { margin-bottom: 0.2rem; font-size: 0.9rem; }
-hr { border: none; border-top: 1px solid var(--border-default); margin: 1.5rem 0; }
 </style>
 </head>
 <body>
 
-<!-- ============ HEADER ============ -->
 <div class="header">
   <div class="header-inner">
-    <h1>&#x1F4E8; Inbound Comms Tracker</h1>
-    <div class="subtitle">Standard Operating Procedure &mdash; Complete System Guide</div>
-    <div class="version">Version 3.1 &bull; Last Updated: 12 April 2026 &bull; Owner: Kevin Brittain</div>
+    <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
+    <h1>&#x1F4E8; Inbound Comms</h1>
+    <div class="subtitle">Standard Operating Procedure &mdash; Gmail label management, AI drafting, task automation and compliance processing</div>
+    <div class="version">Version 2.3 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
 <div class="container">
 
-<!-- ============ QUICK REFERENCE ============ -->
+<!-- QUICK REFERENCE -->
 <div class="quick-ref">
   <h2>&#x26A1; Quick Reference</h2>
   <div class="qr-grid">
     <div class="qr-item">
-      <div class="qr-label">Web App URL</div>
-      <div class="qr-value"><a href="https://chaichoong.github.io/inbound-comms-tracker" target="_blank">chaichoong.github.io/inbound-comms-tracker</a></div>
+      <div class="qr-label">Access URL</div>
+      <div class="qr-value"><a href="follow-up.html">follow-up.html</a></div>
     </div>
     <div class="qr-item">
       <div class="qr-label">Gmail Account</div>
       <div class="qr-value">kevin@runpreneur.org.uk<br>(kevinbrittain@gmail.com)</div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">GitHub Repository</div>
-      <div class="qr-value"><a href="https://github.com/chaichoong/inbound-comms-tracker" target="_blank">chaichoong/inbound-comms-tracker</a></div>
-    </div>
-    <div class="qr-item">
-      <div class="qr-label">AI Proxy / Cloud Store</div>
-      <div class="qr-value"><a href="https://claude-proxy.kevinbrittain.workers.dev" target="_blank">claude-proxy.kevinbrittain.workers.dev</a></div>
+      <div class="qr-label">AI Proxy (Claude)</div>
+      <div class="qr-value">claude-proxy.kevinbrittain.workers.dev<br>Cloudflare Worker</div>
     </div>
     <div class="qr-item">
       <div class="qr-label">Airtable Base</div>
       <div class="qr-value">Operations Director<br><code>appnqjDpqDniH3IRl</code></div>
     </div>
     <div class="qr-item">
-      <div class="qr-label">Source File (Edit Here)</div>
-      <div class="qr-value">Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <strong>follow-up.html</strong></div>
-    </div>
-    <div class="qr-item">
-      <div class="qr-label">Scheduled Tasks</div>
-      <div class="qr-value">8am, 12pm, 4pm UK time<br>(Claude Desktop &gt; Scheduled)</div>
-    </div>
-    <div class="qr-item">
       <div class="qr-label">Auto-Refresh</div>
-      <div class="qr-value">Every 15 minutes (when idle)</div>
+      <div class="qr-value">Every 15 minutes (idle only)</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Page Size</div>
+      <div class="qr-value">50 emails per page</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Knowledge Base</div>
+      <div class="qr-value">20 emails per label &bull; Synced via Cloudflare KV</div>
+    </div>
+    <div class="qr-item">
+      <div class="qr-label">Attachment Limit</div>
+      <div class="qr-value">20 MB total per email (Gmail limit)</div>
     </div>
   </div>
 </div>
 
-<!-- ============ TABLE OF CONTENTS ============ -->
+<!-- TABLE OF CONTENTS -->
 <div class="section">
   <div class="toc">
     <h2>&#x1F4D1; Table of Contents</h2>
     <div class="toc-grid">
-      <a href="#setup" style="font-weight:600; color: var(--accent);"><span class="toc-num" style="background: var(--success);">0</span> First-Time Setup Guide</a>
-      <a href="#architecture"><span class="toc-num">1</span> System Architecture</a>
-      <a href="#labels"><span class="toc-num">2</span> The 9 Gmail Labels</a>
-      <a href="#inbox"><span class="toc-num">3</span> Inbox Triage Workflow</a>
-      <a href="#wf-respond"><span class="toc-num">4</span> To Respond (Label 1)</a>
-      <a href="#wf-followup"><span class="toc-num">5</span> Follow-up (Label 2)</a>
-      <a href="#wf-pay"><span class="toc-num">6</span> To Pay (Label 3)</a>
-      <a href="#wf-archive"><span class="toc-num">7</span> Paid &amp; Responded (4 &amp; 5)</a>
-      <a href="#wf-newsletter"><span class="toc-num">8</span> Newsletter (Label 6)</a>
-      <a href="#wf-delete"><span class="toc-num">9</span> Delete/Unsubscribe (Label 7)</a>
-      <a href="#wf-task"><span class="toc-num">10</span> Task Automation (Labels 8 &amp; 9)</a>
-      <a href="#ai"><span class="toc-num">11</span> AI Features &amp; Rules</a>
-      <a href="#search-pagination"><span class="toc-num">12</span> Search, Pagination &amp; Undo</a>
-      <a href="#backup-sync"><span class="toc-num">13</span> Backup &amp; Cloud Sync</a>
-      <a href="#audit"><span class="toc-num">14</span> Audit Trail</a>
-      <a href="#settings"><span class="toc-num">15</span> Settings &amp; Data Storage</a>
-      <a href="#updating"><span class="toc-num">16</span> Updating the App</a>
-      <a href="#troubleshooting"><span class="toc-num">17</span> Troubleshooting</a>
-      <a href="#limitations"><span class="toc-num">18</span> Known Limitations</a>
-      <a href="#technical"><span class="toc-num">19</span> Technical Reference</a>
+      <a href="#overview"><span class="toc-num">1</span> Overview &amp; Purpose</a>
+      <a href="#access"><span class="toc-num">2</span> How to Access</a>
+      <a href="#views"><span class="toc-num">3</span> Communication Views / Tabs</a>
+      <a href="#lifecycle"><span class="toc-num">4</span> Communication Lifecycle &amp; Status</a>
+      <a href="#gmail-labels"><span class="toc-num">5</span> Gmail Label System</a>
+      <a href="#action-buttons"><span class="toc-num">6</span> Action Buttons Reference</a>
+      <a href="#reply-workflow"><span class="toc-num">7</span> Reply &amp; Response Workflow</a>
+      <a href="#ai-features"><span class="toc-num">8</span> AI Features</a>
+      <a href="#search"><span class="toc-num">9</span> Filtering &amp; Search</a>
+      <a href="#task-automation"><span class="toc-num">10</span> Airtable Task Automation</a>
+      <a href="#compliance"><span class="toc-num">11</span> Property Compliance Processing</a>
+      <a href="#backup-sync"><span class="toc-num">12</span> Backup, Sync &amp; Audit Log</a>
+      <a href="#fields-ref"><span class="toc-num">13</span> Airtable Fields Reference</a>
+      <a href="#localstorage"><span class="toc-num">14</span> localStorage Keys Reference</a>
+      <a href="#troubleshooting"><span class="toc-num">15</span> Troubleshooting</a>
+      <a href="#changelog"><span class="toc-num">16</span> Changelog</a>
     </div>
   </div>
 </div>
 
-<!-- ============ 0. FIRST-TIME SETUP GUIDE ============ -->
-<div class="section" id="setup">
-  <h2 class="section-title"><span class="icon">&#x1F6E0;&#xFE0F;</span> 0. First-Time Setup Guide</h2>
-
-  <div class="card" style="border-left: 4px solid var(--success);">
-    <div class="card-header">&#x1F4CB; What You Will Need</div>
-    <p>Before starting, make sure you have access to the following:</p>
+<!-- 1. OVERVIEW -->
+<div class="section" id="overview">
+  <h2 class="section-title"><span class="icon">&#x1F4CB;</span> 1. Overview &amp; Purpose</h2>
+  <div class="card">
+    <div class="card-header">What this page does</div>
+    <p>The Inbound Comms OS is a Gmail-integrated email management tool embedded as a standalone page (<code>follow-up.html</code>) inside the Leadership Dashboard. It connects directly to Gmail via Google OAuth 2.0, reads emails by label, and provides a structured workflow for ensuring every inbound communication is actioned, responded to, or filed.</p>
+    <p>Key capabilities:</p>
     <ul>
-      <li>A <strong>Google account</strong> (Gmail) that you want to manage</li>
-      <li>A <strong>GitHub account</strong> (free) for hosting the app</li>
-      <li>A <strong>Cloudflare account</strong> (free tier) for the AI proxy worker</li>
-      <li>An <strong>Anthropic API key</strong> (for Claude AI features)</li>
-      <li>An <strong>Airtable account</strong> (free tier, optional) for task automation</li>
+      <li><strong>Label-based triage</strong> — view emails sorted into 9 numbered Gmail labels (plus a Property Compliance label 10)</li>
+      <li><strong>AI drafting</strong> — Claude Sonnet drafts responses; Claude Haiku drafts unsubscribe requests and classifies inbox emails</li>
+      <li><strong>Inbox triage</strong> — unlabelled emails are shown with AI-suggested labels; apply individually or all at once</li>
+      <li><strong>Auto label management</strong> — when someone replies to a Follow Up email, the label is automatically removed</li>
+      <li><strong>Airtable integration</strong> — moving an email to label 8 auto-creates a task; label 9 is set when Airtable marks that task Completed</li>
+      <li><strong>Property compliance</strong> — emails on the Compliance label are parsed by AI to create certificate records in Airtable</li>
+      <li><strong>Cloud sync</strong> — knowledge base and AI corrections sync between devices via Cloudflare KV</li>
     </ul>
-    <p style="margin-top: 0.75rem; font-size: 0.88rem; color: var(--text-muted);">Estimated setup time: 30 to 45 minutes for all steps.</p>
   </div>
-
   <div class="card">
-    <div class="card-header">&#x1F1E6; Step 1: Create Gmail Labels</div>
-    <p>Create the following 9 labels in your Gmail account. The numbering prefix is essential because the app uses it to identify each label.</p>
-    <ol class="steps">
-      <li>Open <strong>Gmail</strong> and go to <strong>Settings &gt; Labels</strong></li>
-      <li>Click <strong>"Create new label"</strong> for each of the following:
-        <ul style="margin-top: 0.5rem;">
-          <li><code>1: To Respond</code></li>
-          <li><code>2: Follow Up</code></li>
-          <li><code>3: To Pay</code></li>
-          <li><code>4: Paid</code></li>
-          <li><code>5: Responded</code></li>
-          <li><code>6: Newsletter</code></li>
-          <li><code>7: Delete &amp; Unsubscribe</code></li>
-          <li><code>8: Task created</code></li>
-          <li><code>9: Task completed</code></li>
-        </ul>
-      </li>
-      <li>The exact names must match (including the number, colon, and space)</li>
-    </ol>
+    <div class="card-header">System components</div>
+    <div class="flow">
+      <div class="flow-step primary">
+        <span class="flow-icon">&#x1F4E7;</span>
+        Gmail
+        <span class="flow-sub">OAuth2 + Gmail API</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step" style="border-color:var(--accent); background:var(--accent-soft);">
+        <span class="flow-icon">&#x1F4C4;</span>
+        follow-up.html
+        <span class="flow-sub">Single page app</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step" style="border-color:var(--accent); background:var(--accent-soft);">
+        <span class="flow-icon">&#x1F916;</span>
+        Claude AI
+        <span class="flow-sub">Haiku + Sonnet</span>
+      </div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step success">
+        <span class="flow-icon">&#x1F4CA;</span>
+        Airtable
+        <span class="flow-sub">Tasks &amp; Compliance</span>
+      </div>
+    </div>
+    <p style="margin-top:0.5rem;">The Cloudflare Worker at <code>claude-proxy.kevinbrittain.workers.dev</code> serves as a secure proxy between the page and the Claude API, and also provides cloud storage (Cloudflare KV) for the knowledge base.</p>
   </div>
+</div>
 
+<!-- 2. HOW TO ACCESS -->
+<div class="section" id="access">
+  <h2 class="section-title"><span class="icon">&#x1F511;</span> 2. How to Access</h2>
   <div class="card">
-    <div class="card-header">&#x1F1E7; Step 2: Set Up Google Cloud Project</div>
-    <p>The app needs a Google Cloud project to access Gmail via API.</p>
+    <div class="card-header">Signing in</div>
     <ol class="steps">
-      <li>Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a></li>
-      <li>Create a <strong>new project</strong> (e.g. "Inbound Comms Tracker")</li>
-      <li>Enable the <strong>Gmail API</strong>:
-        <ul>
-          <li>Go to <strong>APIs &amp; Services &gt; Library</strong></li>
-          <li>Search for "Gmail API" and click <strong>Enable</strong></li>
-        </ul>
-      </li>
-      <li>Create an <strong>API Key</strong>:
-        <ul>
-          <li>Go to <strong>APIs &amp; Services &gt; Credentials</strong></li>
-          <li>Click <strong>"Create Credentials" &gt; "API Key"</strong></li>
-          <li>Restrict the key: set <strong>Application restrictions</strong> to "HTTP referrers" and add your GitHub Pages URL (e.g. <code>https://yourusername.github.io/*</code>)</li>
-          <li>Under <strong>API restrictions</strong>, select "Restrict key" and choose <strong>Gmail API</strong></li>
-        </ul>
-      </li>
-      <li>Create an <strong>OAuth 2.0 Client ID</strong>:
-        <ul>
-          <li>Click <strong>"Create Credentials" &gt; "OAuth client ID"</strong></li>
-          <li>Application type: <strong>Web application</strong></li>
-          <li>Under <strong>Authorized JavaScript origins</strong>, add: <code>https://yourusername.github.io</code></li>
-          <li>No redirect URIs needed</li>
-          <li>Copy the <strong>Client ID</strong> (you will need it later)</li>
-        </ul>
-      </li>
-      <li>Configure the <strong>OAuth consent screen</strong>:
-        <ul>
-          <li>Go to <strong>APIs &amp; Services &gt; OAuth consent screen</strong></li>
-          <li>User type: <strong>External</strong></li>
-          <li>Add the Gmail scopes: <code>gmail.readonly</code>, <code>gmail.modify</code>, <code>gmail.send</code>, <code>gmail.compose</code></li>
-          <li>Add your email as a <strong>test user</strong> (required while in "Testing" status)</li>
-        </ul>
-      </li>
+      <li>Open <a href="follow-up.html">follow-up.html</a> from the Leadership Dashboard sidebar, or navigate to it directly.</li>
+      <li>The auth screen shows "Inbound Comms Tracker" with a <strong>Sign in with Google</strong> button. Click it.</li>
+      <li>Approve the Google OAuth consent screen. Required scopes: <code>gmail.modify</code>, <code>gmail.send</code>, <code>gmail.settings.basic</code>.</li>
+      <li>The app loads your Gmail labels, then automatically loads the Inbox (Unlabelled) view.</li>
     </ol>
-    <div class="info-box warn" style="margin-top: 0.75rem;">
-      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
-      <div>While the app is in "Testing" mode, only users listed as test users can sign in. To allow anyone, you must submit the app for <strong>Google verification</strong>.</div>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F512;</span>
+      <div>The OAuth token is stored in <code>sessionStorage</code> (not localStorage), so it is cleared when you close the browser tab. You will need to sign in again each session. The token is proactively refreshed <strong>5 minutes before expiry</strong> while the page is open.</div>
     </div>
   </div>
-
   <div class="card">
-    <div class="card-header">&#x1F1E8; Step 3: Deploy the Cloudflare Worker</div>
-    <p>The Cloudflare Worker acts as a secure proxy between the app and the Claude AI API.</p>
-    <ol class="steps">
-      <li>Go to <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> and sign in (or create a free account)</li>
-      <li>Navigate to <strong>Workers &amp; Pages</strong></li>
-      <li>Click <strong>"Create"</strong> and choose <strong>"Create Worker"</strong></li>
-      <li>Name it something like <code>claude-proxy</code> and click <strong>Deploy</strong></li>
-      <li>Click <strong>"Edit code"</strong> and paste the full worker source code (provided with the app)</li>
-      <li>Update the <strong>allowed origin</strong> in the worker code to match your GitHub Pages URL:
-        <pre style="background: var(--bg-subtle); padding: 0.5rem; border-radius: 6px; font-size: 0.85rem; margin-top: 0.5rem; overflow-x: auto;">const isAllowed = origin === 'https://yourusername.github.io'
-  || referer.startsWith('https://yourusername.github.io/');</pre>
-      </li>
-      <li>Click <strong>Deploy</strong></li>
-      <li>Add environment secrets:
-        <ul>
-          <li>Go to <strong>Settings &gt; Variables &amp; Secrets</strong></li>
-          <li>Add <code>CLAUDE_API_KEY</code> with your Anthropic API key</li>
-        </ul>
-      </li>
-      <li>Create a <strong>KV Namespace</strong> for cloud sync (optional but recommended):
-        <ul>
-          <li>Go to <strong>Workers &amp; Pages &gt; KV</strong></li>
-          <li>Create a namespace called <code>SHARED_DATA</code></li>
-          <li>Go back to your worker <strong>Settings &gt; Bindings</strong></li>
-          <li>Add a KV binding: variable name <code>SHARED_DATA</code>, select the namespace you created</li>
-        </ul>
-      </li>
-    </ol>
-    <p style="margin-top: 0.5rem; font-size: 0.88rem;">Your worker URL will be: <code>https://your-worker-name.your-subdomain.workers.dev</code></p>
+    <div class="card-header">Signing out</div>
+    <p>Click the <strong>Sign out</strong> button in the top-right header. This revokes the OAuth token and returns you to the auth screen.</p>
   </div>
-
   <div class="card">
-    <div class="card-header">&#x1F1E9; Step 4: Configure and Deploy the Web App</div>
-    <p>Update the source code with your own credentials, then deploy to GitHub Pages.</p>
+    <div class="card-header">First-time setup: Build Knowledge Base</div>
+    <p>On first sign-in, if no knowledge base exists and you switch to the Inbox view, a prompt appears: <strong>"Build Knowledge Base?"</strong>.</p>
     <ol class="steps">
-      <li>Open <code>follow-up.html</code> in a text editor</li>
-      <li>Find and replace these values near the top of the <code>&lt;script&gt;</code> section:
-        <ul style="margin-top: 0.5rem;">
-          <li><code>CLIENT_ID</code>: paste your Google OAuth Client ID</li>
-          <li><code>API_KEY</code>: paste your Google API Key</li>
-          <li><code>WORKER_BASE</code>: paste your Cloudflare Worker URL</li>
-        </ul>
-      </li>
-      <li>Create a <strong>new GitHub repository</strong> (e.g. <code>inbound-comms-tracker</code>)</li>
-      <li>Upload <code>follow-up.html</code> as <code>index.html</code> to the repository</li>
-      <li>Enable <strong>GitHub Pages</strong>:
-        <ul>
-          <li>Go to repository <strong>Settings &gt; Pages</strong></li>
-          <li>Source: <strong>Deploy from a branch</strong></li>
-          <li>Branch: <strong>main</strong>, folder: <strong>/ (root)</strong></li>
-          <li>Click <strong>Save</strong></li>
-        </ul>
-      </li>
-      <li>Your app will be live at <code>https://yourusername.github.io/inbound-comms-tracker</code> within a few minutes</li>
+      <li>Click <strong>Build Now</strong> (or dismiss and do it later via Settings).</li>
+      <li>The app fetches the 20 most recent emails from each numbered label (1–9) and stores sender patterns and subject keywords locally.</li>
+      <li>Once built, AI suggestions appear automatically whenever you load the Inbox view.</li>
     </ol>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F1EA; Step 5: Airtable Integration (Optional)</div>
-    <p>If you want automatic task creation when emails are labelled "8: Task created", set up the Airtable connection.</p>
-    <ol class="steps">
-      <li>Create an <a href="https://airtable.com" target="_blank">Airtable</a> base with a table for tasks</li>
-      <li>The table needs these fields (exact field types matter):
-        <ul style="margin-top: 0.5rem;">
-          <li><strong>Task Name</strong> (Single line text)</li>
-          <li><strong>Status</strong> (Single select, with options including "Today" and "Completed")</li>
-          <li><strong>Assignee</strong> (Collaborator)</li>
-          <li><strong>Priority</strong> (Single select, with options including "Urgent")</li>
-          <li><strong>Time Estimate</strong> (Single select)</li>
-          <li><strong>Description</strong> (Long text)</li>
-          <li><strong>Inbound Communication Task</strong> (Checkbox)</li>
-          <li><strong>Inbound Source Type</strong> (Single select)</li>
-          <li><strong>Inbound Message Content</strong> (Long text)</li>
-          <li><strong>Inbound Sender</strong> (Single line text)</li>
-          <li><strong>Inbound Date Received</strong> (Date)</li>
-          <li><strong>Inbound Note URL Link</strong> (URL)</li>
-          <li><strong>Due Date</strong> (Date)</li>
-        </ul>
-      </li>
-      <li>Create a <strong>Personal Access Token</strong> at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>:
-        <ul>
-          <li>Scopes needed: <code>data.records:read</code> and <code>data.records:write</code></li>
-          <li>Grant access to your base</li>
-        </ul>
-      </li>
-      <li>In the app, open <strong>Settings</strong> (gear icon) and enter:
-        <ul>
-          <li><strong>Airtable PAT</strong>: your Personal Access Token</li>
-          <li><strong>Base ID</strong>: found in the Airtable URL (<code>app...</code>)</li>
-          <li><strong>Table ID</strong>: found in the Airtable URL (<code>tbl...</code>)</li>
-          <li><strong>Assignee ID</strong>: the user ID to assign tasks to (<code>usr...</code>)</li>
-        </ul>
-      </li>
-    </ol>
-    <div class="info-box" style="margin-top: 0.75rem;">
-      <span class="ib-icon">&#x1F4A1;</span>
-      <div>To find your Airtable Base ID and Table ID, open your base in a browser. The URL format is: <code>airtable.com/appXXXXXX/tblYYYYYY/...</code>. The <code>app</code> part is your Base ID, the <code>tbl</code> part is your Table ID.</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F1EB; Step 6: First Sign-In and Knowledge Base</div>
-    <ol class="steps">
-      <li>Open your deployed app URL in a browser</li>
-      <li>Click <strong>"Sign in with Google"</strong> and authorize the requested permissions</li>
-      <li>The app will prompt you to <strong>Build Knowledge Base</strong>. Click "Build KB" to let the AI learn your label patterns from your 20 most recent emails per label.</li>
-      <li>Once the KB is built, switch to the <strong>Inbox</strong> view to start triaging unlabelled emails with AI-powered suggestions</li>
-    </ol>
-    <div class="info-box" style="margin-top: 0.75rem;">
-      <span class="ib-icon">&#x2705;</span>
-      <div><strong>Setup complete.</strong> The app is now fully operational. Refer to the sections below for detailed workflows for each label, AI features, backup options, and troubleshooting.</div>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x1F9E0;</span>
+      <div>The knowledge base takes about 30 seconds to build. It is automatically synced to Cloudflare KV so other devices pick it up without rebuilding.</div>
     </div>
   </div>
 </div>
 
-<!-- ============ 1. ARCHITECTURE ============ -->
-<div class="section" id="architecture">
-  <h2 class="section-title"><span class="icon">&#x1F3D7;</span> 1. System Architecture</h2>
+<!-- 3. COMMUNICATION VIEWS -->
+<div class="section" id="views">
+  <h2 class="section-title"><span class="icon">&#x1F4C2;</span> 3. Communication Views / Tabs</h2>
+  <p>Use the <strong>label dropdown</strong> in the header to switch between views. The dropdown also shows live email counts for key labels (1, 2, 3, 8). Each view has a custom column layout.</p>
 
   <div class="card">
-    <div class="card-header">&#x1F310; Component Overview</div>
-    <p>The Inbound Comms Tracker is a client-side web application that orchestrates email management across five connected services:</p>
-
-    <div class="arch-diagram">
-      <div class="arch-box highlight">
-        <div class="arch-icon">&#x1F4E7;</div>
-        <div class="arch-title">Gmail</div>
-        <div class="arch-desc">Email source via<br>Google OAuth2 &amp; Gmail API</div>
-      </div>
-      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
-      <div class="arch-box highlight" style="border-color: var(--accent); background: var(--accent-soft);">
-        <div class="arch-icon">&#x1F4BB;</div>
-        <div class="arch-title">Web App</div>
-        <div class="arch-desc">GitHub Pages<br>Single HTML file (index.html)</div>
-      </div>
-      <div class="arch-connector">&#x27A1;&#xFE0F;</div>
-      <div class="arch-box" style="border-color: var(--accent); background: var(--accent-soft);">
-        <div class="arch-icon">&#x1F916;</div>
-        <div class="arch-title">Claude AI</div>
-        <div class="arch-desc">Via Cloudflare Worker proxy<br>Haiku &amp; Sonnet models</div>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 1rem;">
-      <div class="arch-box" style="border-color: var(--success); background: var(--success-bg);">
-        <div class="arch-icon">&#x1F4CA;</div>
-        <div class="arch-title">Airtable</div>
-        <div class="arch-desc">Operations Director base<br>Real-time task creation<br>&amp; completion detection</div>
-      </div>
-      <div class="arch-box" style="border-color: var(--warning); background: var(--warning-bg);">
-        <div class="arch-icon">&#x1F510;</div>
-        <div class="arch-title">OAuth Token Manager</div>
-        <div class="arch-desc">Auto-refresh 5 min<br>before token expiry</div>
-      </div>
-      <div class="arch-box" style="border-color: var(--accent); background: var(--accent-soft);">
-        <div class="arch-icon">&#x2601;&#xFE0F;</div>
-        <div class="arch-title">Cloudflare KV</div>
-        <div class="arch-desc">SHARED_DATA namespace<br>Cross-device cloud storage</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F517; Cloudflare Worker Endpoints</div>
-    <p>The <code>claude-proxy</code> worker now serves four endpoints:</p>
-    <div style="overflow-x: auto;">
+    <div class="card-header">Available views</div>
+    <div style="overflow-x:auto;">
       <table class="label-table">
         <thead>
-          <tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr>
+          <tr><th>View / Label</th><th>Sorted by</th><th>Columns shown</th><th>Special behaviour</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>POST</code></td><td><code>/</code></td><td>Claude API proxy &mdash; forwards AI requests to Claude (Haiku &amp; Sonnet)</td></tr>
-          <tr><td><code>POST</code></td><td><code>/gmail-labels</code></td><td>Gmail label modification (legacy, no longer used by the web app)</td></tr>
-          <tr><td><code>GET</code></td><td><code>/shared-data</code></td><td>Retrieve shared data from KV (knowledge base, corrections, KB build date)</td></tr>
-          <tr><td><code>POST</code></td><td><code>/shared-data</code></td><td>Save shared data to KV (key, data, timestamp)</td></tr>
+          <tr>
+            <td><strong>Inbox (Unlabelled)</strong><br><code>__INBOX__</code></td>
+            <td>Newest first</td>
+            <td>#, Subject/From, Date, AI Suggestion, Apply dropdown, Apply/Apply All button</td>
+            <td>AI suggestions load automatically; no global search scope button shown</td>
+          </tr>
+          <tr>
+            <td><strong>1: To Respond</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Respond</em>), Move Label</td>
+            <td>Days thresholds: critical &#8805;14d, warning &#8805;7d, ok &lt;7d</td>
+          </tr>
+          <tr>
+            <td><strong>2: Follow Up</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
+            <td>Auto-removes label if the recipient has replied (detected on load); critical &#8805;14d</td>
+          </tr>
+          <tr>
+            <td><strong>3: To Pay</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Invoice Date, Days Old, Last Activity, Last Update, Action (<em>Delay Payment</em>), Move Label</td>
+            <td>Tracks delay payment history; critical &#8805;14d</td>
+          </tr>
+          <tr>
+            <td><strong>4: Paid</strong> / <strong>5: Responded</strong></td>
+            <td>Newest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Move Label</td>
+            <td>Archive view; critical &#8805;90d, warning &#8805;30d</td>
+          </tr>
+          <tr>
+            <td><strong>6: Newsletter</strong></td>
+            <td>Newest first</td>
+            <td>#, Subject/From, Date, Days Old, Read button, Move Label</td>
+            <td>Read/Unread filter bar; "Read All" button in header; read rows shown at 50% opacity</td>
+          </tr>
+          <tr>
+            <td><strong>7: Delete &amp; Unsubscribe</strong></td>
+            <td>Newest first</td>
+            <td>#, Subject/From, Date, Unsubscribe button, Move Label</td>
+            <td>"Unsub All" in header; supports link, mailto, and manual unsubscribe methods</td>
+          </tr>
+          <tr>
+            <td><strong>8: Task created</strong></td>
+            <td>Oldest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Action (<em>Follow up</em>), Move Label</td>
+            <td>On load, auto-checks Airtable for completed tasks and moves them to label 9; critical &#8805;14d</td>
+          </tr>
+          <tr>
+            <td><strong>9: Task completed</strong></td>
+            <td>Newest first</td>
+            <td>#, Subject/From, Last Activity, Days Old, Move Label</td>
+            <td>Shows completion time bands (7d, 7–14d, 14–30d)</td>
+          </tr>
+          <tr>
+            <td><strong>10: Property Compliance</strong></td>
+            <td>Newest first</td>
+            <td>#, Subject/From, Date, Status badge, Move Label</td>
+            <td>Compliance banner shows processed/pending counts; "Process All Pending" button; links to compliance.html</td>
+          </tr>
         </tbody>
       </table>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">&#x1F504; Data Sync Flow</div>
-    <p>Data flows between local storage and the cloud for multi-device support:</p>
-    <div class="flow" style="padding: 1rem 0;">
-      <div class="flow-step primary">
-        <span class="flow-icon">&#x1F4BB;</span>
-        localStorage
-        <span class="flow-sub">Browser storage</span>
+    <div class="card-header">Days-old colour coding</div>
+    <p>The <strong>Days Old</strong> column uses colour to flag urgency. Thresholds differ by view type:</p>
+    <div class="grid-2">
+      <div>
+        <p><strong>Action views</strong> (To Respond, Follow Up, To Pay, Task Created):</p>
+        <ul>
+          <li><span class="label-badge lb-red">Critical</span> &mdash; 14+ days old</li>
+          <li><span class="label-badge lb-amber">Warning</span> &mdash; 7–13 days old</li>
+          <li><span class="label-badge lb-green">OK</span> &mdash; under 7 days old</li>
+        </ul>
       </div>
-      <span class="flow-arrow">&#x21C4;</span>
-      <div class="flow-step" style="background: var(--accent-soft); border-color: var(--accent);">
-        <span class="flow-icon">&#x2601;&#xFE0F;</span>
-        Cloudflare KV
-        <span class="flow-sub">SHARED_DATA namespace</span>
-      </div>
-      <span class="flow-arrow">&#x21C4;</span>
-      <div class="flow-step success">
-        <span class="flow-icon">&#x1F4F1;</span>
-        Any Device
-        <span class="flow-sub">Same learned data</span>
+      <div>
+        <p><strong>Standard views</strong> (all others except Archive):</p>
+        <ul>
+          <li><span class="label-badge lb-red">Critical</span> &mdash; 30+ days old</li>
+          <li><span class="label-badge lb-amber">Warning</span> &mdash; 14–29 days old</li>
+          <li><span class="label-badge lb-green">OK</span> &mdash; under 14 days old</li>
+        </ul>
       </div>
     </div>
-    <div class="info-box info">
-      <span class="ib-icon">&#x2601;&#xFE0F;</span>
-      <div>On app load (after auth), the app fetches cloud data. If the cloud version is newer than local, it uses the cloud version. If local is newer, it syncs to the cloud. Sync failures are handled gracefully &mdash; the app falls back to localStorage silently.</div>
-    </div>
+    <p style="margin-top:0.75rem;"><strong>Archive views</strong> (Paid, Responded): critical 90+ days, warning 30–89 days, ok under 30 days.</p>
   </div>
 
   <div class="card">
-    <div class="card-header">&#x1F504; Email Lifecycle Flow</div>
-    <p>Every email follows this journey through the system:</p>
+    <div class="card-header">Stats bar</div>
+    <p>Each view shows a 4-card stats bar above the email list. The stats always reflect the <em>full dataset</em> for the label, not just the current page or search filter.</p>
+    <ul>
+      <li><strong>Label views</strong>: Total, Critical, Warning, Recent counts</li>
+      <li><strong>Inbox view</strong>: Total Unlabelled, AI Suggested, Applied Today, AI Accuracy (30-day %)</li>
+      <li><strong>Newsletter view</strong>: Total, Unread, Read, Showing (respects filter)</li>
+      <li><strong>Delete view</strong>: Total, Pending, Unsubscribed, Unsubs (30-day)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- 4. COMMUNICATION LIFECYCLE -->
+<div class="section" id="lifecycle">
+  <h2 class="section-title"><span class="icon">&#x1F504;</span> 4. Communication Lifecycle &amp; Status</h2>
+
+  <div class="card">
+    <div class="card-header">Standard email lifecycle</div>
     <div class="flow">
       <div class="flow-step primary">
         <span class="flow-icon">&#x1F4E5;</span>
         New Email
         <span class="flow-sub">Arrives in Gmail</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step" style="background: var(--accent-soft); border-color: var(--accent);">
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step" style="border-color:var(--accent); background:var(--accent-soft);">
         <span class="flow-icon">&#x1F4CB;</span>
         Inbox Triage
-        <span class="flow-sub">AI suggests label</span>
+        <span class="flow-sub">Unlabelled — AI suggests label</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step warning">
-        <span class="flow-icon">&#x1F3F7;&#xFE0F;</span>
-        Labelled
-        <span class="flow-sub">1-9 categories</span>
+        <span class="flow-icon">&#x1F3F7;</span>
+        Action Label
+        <span class="flow-sub">1, 2, 3, 6, 7, 8, 10</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step purple">
-        <span class="flow-icon">&#x2699;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step" style="border-color:var(--accent); background:var(--accent-soft);">
+        <span class="flow-icon">&#x2699;</span>
         Action Taken
-        <span class="flow-sub">Reply / Pay / Task</span>
+        <span class="flow-sub">Reply / Pay / Task / Unsub</span>
       </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
+      <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step success">
         <span class="flow-icon">&#x2705;</span>
         Complete
-        <span class="flow-sub">Archived / Resolved</span>
+        <span class="flow-sub">Label 4, 5, or 9</span>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 2. LABELS ============ -->
-<div class="section" id="labels">
-  <h2 class="section-title"><span class="icon">&#x1F3F7;&#xFE0F;</span> 2. The 9 Gmail Labels</h2>
-  <div class="card" style="overflow-x: auto;">
-    <table class="label-table">
-      <thead>
-        <tr>
-          <th>Label</th>
-          <th>Purpose</th>
-          <th>Sort</th>
-          <th>Key Actions</th>
-          <th>Metrics</th>
-          <th>Count in Menu</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><span class="label-badge lb-1">1: to respond</span></td>
-          <td>Emails needing a reply</td>
-          <td>Oldest first</td>
-          <td>AI Draft Response, Move</td>
-          <td><span class="dot green"></span>&lt;7d &nbsp;<span class="dot amber"></span>7-13d &nbsp;<span class="dot red"></span>14d+</td>
-          <td>Yes</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-2">2: to follow-up</span></td>
-          <td>Sent replies awaiting response</td>
-          <td>Oldest first</td>
-          <td>Follow Up, Move, Auto-detect replies</td>
-          <td><span class="dot green"></span>&lt;7d &nbsp;<span class="dot amber"></span>7-13d &nbsp;<span class="dot red"></span>14d+</td>
-          <td>Yes</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-3">3. to pay</span></td>
-          <td>Invoices / payments pending</td>
-          <td>Oldest first</td>
-          <td>Delay Payment (AI draft + send, stays in label), Move</td>
-          <td>Invoice Date, Days Old, Last Activity</td>
-          <td>Yes</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-4">4: paid</span></td>
-          <td>Paid invoices (archive)</td>
-          <td>Newest first</td>
-          <td>Move only</td>
-          <td><span class="dot green"></span>&lt;30d &nbsp;<span class="dot amber"></span>30-89d &nbsp;<span class="dot red"></span>90d+</td>
-          <td>No</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-5">5: responded</span></td>
-          <td>Sent responses (archive)</td>
-          <td>Newest first</td>
-          <td>Move only</td>
-          <td><span class="dot green"></span>&lt;30d &nbsp;<span class="dot amber"></span>30-89d &nbsp;<span class="dot red"></span>90d+</td>
-          <td>No</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-6">6: newsletter</span></td>
-          <td>Newsletter subscriptions</td>
-          <td>Newest first</td>
-          <td>Filter (All/Unread/Read), Mark Read, Read All</td>
-          <td><span class="dot red"></span>Unread &nbsp;<span class="dot green"></span>Read &nbsp;<span class="dot blue"></span>Total</td>
-          <td>No</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-7">7: delete</span></td>
-          <td>Emails to delete / unsubscribe</td>
-          <td>Newest first</td>
-          <td>Unsubscribe (3 methods), Mark Done, Unsub All</td>
-          <td><span class="dot red"></span>Pending &nbsp;<span class="dot green"></span>Done &nbsp;<span class="dot blue"></span>30d</td>
-          <td>No</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-8">8: task created</span></td>
-          <td>Emails needing Airtable task</td>
-          <td>Oldest first</td>
-          <td>Auto-creates Airtable task via scheduled job</td>
-          <td><span class="dot green"></span>&lt;7d &nbsp;<span class="dot amber"></span>7-13d &nbsp;<span class="dot red"></span>14d+</td>
-          <td>Yes</td>
-        </tr>
-        <tr>
-          <td><span class="label-badge lb-9">9: task completed</span></td>
-          <td>Completed task emails (archive)</td>
-          <td>Oldest first</td>
-          <td>Standard actions</td>
-          <td><span class="dot green"></span>7d &nbsp;<span class="dot amber"></span>7-14d &nbsp;<span class="dot amber"></span>14-30d &nbsp;<span class="dot blue"></span>Total</td>
-          <td>No</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div class="info-box info" style="margin-top: 1rem;">
-      <span class="ib-icon">&#x1F522;</span>
-      <div><strong>Dropdown counts:</strong> Labels 1, 2, 3, and 8 show email counts in the label dropdown menu. Label 9 and archive labels do not. The Inbox (Unlabelled) view also shows its email count in the dropdown.</div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 3. INBOX TRIAGE ============ -->
-<div class="section" id="inbox">
-  <h2 class="section-title"><span class="icon">&#x1F4E5;</span> 3. Inbox Triage Workflow</h2>
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num" style="background: var(--accent);">&#x1F50D;</span>
-      <h3>Inbox (Unlabelled) View</h3>
-      <span class="wf-tag">Default View</span>
-    </div>
-    <div class="wf-body">
-      <p>Shows all inbox emails that do <strong>not</strong> yet have any numbered label (1-9). This is the starting point for all email management. The email count is displayed in the dropdown menu.</p>
-
-      <div class="flow" style="padding: 1rem 0;">
-        <div class="flow-step primary">
-          <span class="flow-icon">&#x1F4E5;</span>
-          Open App
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step" style="background: var(--accent-soft); border-color: var(--accent);">
-          <span class="flow-icon">&#x1F916;</span>
-          AI Suggests Labels
-          <span class="flow-sub">Auto-classifies each email</span>
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step" style="background: var(--warning-bg); border-color: var(--warning);">
-          <span class="flow-icon">&#x1F441;&#xFE0F;</span>
-          Review &amp; Adjust
-          <span class="flow-sub">Change if AI is wrong</span>
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step success">
-          <span class="flow-icon">&#x2705;</span>
-          Apply / Apply All
-          <span class="flow-sub">Emails move to labels</span>
-        </div>
-      </div>
-
-      <h4>&#x1F3AF; AI Confidence Indicators</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> High Confidence (90%+)</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> Medium Confidence (65-89%)</span>
-      </div>
-
-      <h4>&#x1F4C8; Accuracy Tracking</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> 90%+ = Good</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> 65-89% = Needs Attention</span>
-        <span class="metric-chip mc-red"><span class="dot red"></span> &lt;65% = Poor</span>
-      </div>
-
-      <div class="info-box tip">
-        <span class="ib-icon">&#x1F4A1;</span>
-        <div>The AI <strong>learns from corrections</strong>. When you change a suggested label, the system stores this correction in localStorage (and syncs to Cloudflare KV) and improves future suggestions.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 4. TO RESPOND ============ -->
-<div class="section" id="wf-respond">
-  <h2 class="section-title"><span class="icon">&#x2709;&#xFE0F;</span> 4. Workflow: To Respond (Label 1)</h2>
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-1">1</span>
-      <h3>1: to respond</h3>
-      <span class="wf-tag">Oldest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x23F1;&#xFE0F; Response Time Metrics</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;7 days</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> Warning: 7-13 days</span>
-        <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
-      </div>
-
-      <h4>&#x1F4CB; Steps</h4>
-      <ol class="steps">
-        <li>Select <strong>"1: to respond"</strong> from the label dropdown</li>
-        <li>Emails appear sorted oldest first &mdash; prioritise red (critical) items</li>
-        <li>Click <strong>"Respond"</strong> on an email &mdash; the loading screen shows "Claude is drafting your response..."</li>
-        <li>Review the draft alongside the original email content</li>
-        <li>If amendments are needed, type feedback in the textarea and click <strong>"Revise"</strong></li>
-        <li>Optionally add attachments via the <strong>Add Attachment</strong> button (up to 20MB total)</li>
-        <li>Choose destination:
-          <ul>
-            <li><strong>Send &amp; Move to Responded</strong> &rarr; moves to label 5 (done)</li>
-            <li><strong>Send &amp; Move to Follow-up</strong> &rarr; moves to label 2 (awaiting reply)</li>
-          </ul>
-        </li>
-      </ol>
-
-      <div class="flow" style="padding: 1rem 0;">
-        <div class="flow-step primary">
-          <span class="flow-icon">&#x1F4E7;</span>
-          Email in Label 1
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step purple">
-          <span class="flow-icon">&#x1F916;</span>
-          AI Drafts Reply
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step warning">
-          <span class="flow-icon">&#x270F;&#xFE0F;</span>
-          Review / Amend
-        </div>
-        <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-        <div class="flow-step success">
-          <span class="flow-icon">&#x1F4E4;</span>
-          Send &amp; Move
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 5. FOLLOW-UP ============ -->
-<div class="section" id="wf-followup">
-  <h2 class="section-title"><span class="icon">&#x1F504;</span> 5. Workflow: Follow-up (Label 2)</h2>
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-2">2</span>
-      <h3>2: to follow-up</h3>
-      <span class="wf-tag">Oldest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x23F1;&#xFE0F; Follow-up Time Metrics</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;7 days</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> Warning: 7-13 days</span>
-        <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
-      </div>
-
-      <h4>&#x1F4CB; Steps</h4>
-      <ol class="steps">
-        <li>Select <strong>"2: to follow-up"</strong> from the label dropdown</li>
-        <li>Review emails sorted oldest first &mdash; these are sent replies awaiting a response</li>
-        <li>Click <strong>"Follow Up"</strong> &mdash; the loading screen shows "Claude is drafting your follow-up..."</li>
-        <li>Review, amend if needed, optionally add attachments, then send</li>
-      </ol>
-
-      <div class="info-box info">
-        <span class="ib-icon">&#x1F504;</span>
-        <div><strong>Auto-detection:</strong> The system automatically detects when someone replies to a followed-up email and moves it back to the inbox for re-triage. This check runs every time you navigate to the follow-up view or refresh.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 6. TO PAY ============ -->
-<div class="section" id="wf-pay">
-  <h2 class="section-title"><span class="icon">&#x1F4B0;</span> 6. Workflow: To Pay (Label 3)</h2>
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-3">3</span>
-      <h3>3. to pay</h3>
-      <span class="wf-tag">Oldest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x1F4CA; Custom Columns</h4>
-      <p>This view has unique columns not found in other labels:</p>
-      <ul>
-        <li><strong>Invoice Date</strong> &mdash; When the invoice was received</li>
-        <li><strong>Days Old</strong> &mdash; Age of the invoice</li>
-        <li><strong>Last Activity</strong> &mdash; Most recent action taken</li>
-        <li><strong>Last Update</strong> &mdash; Days since last delay email was sent</li>
-      </ul>
-
-      <h4>&#x1F4CB; Steps</h4>
-      <ol class="steps">
-        <li>Select <strong>"3. to pay"</strong> from the label dropdown</li>
-        <li>Review outstanding invoices sorted oldest first</li>
-        <li>Click <strong>"Delay Payment"</strong> to generate an AI-drafted financial difficulty email</li>
-        <li>The loading screen shows <strong>"Claude is drafting a delayed payment message..."</strong></li>
-        <li>The AI references your financial situation and avoids repeating the same wording to the same creditor</li>
-        <li>Review, amend if needed, and optionally add attachments via the <strong>Add Attachment</strong> button</li>
-        <li>Click <strong>"Send"</strong> &mdash; the email is sent but <strong>stays in the To Pay label</strong> (it is not moved)</li>
-        <li>When the invoice is eventually paid, use the Move dropdown to move to <strong>label 4 (paid)</strong></li>
-      </ol>
-
-      <div class="info-box info">
-        <span class="ib-icon">&#x2139;&#xFE0F;</span>
-        <div><strong>No label move on send:</strong> Unlike other labels, sending a delay payment email does <strong>not</strong> move the email to another label. The email stays in To Pay because the invoice is still outstanding. The automation will detect when the invoice is reconciled.</div>
-      </div>
-
-      <div class="info-box warn">
-        <span class="ib-icon">&#x26A0;&#xFE0F;</span>
-        <div><strong>Delay History Tracking:</strong> The system tracks all delay emails per creditor in localStorage. The AI uses this history to avoid sending repetitive or identical delay notifications.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 7. ARCHIVE ============ -->
-<div class="section" id="wf-archive">
-  <h2 class="section-title"><span class="icon">&#x1F4C1;</span> 7. Workflow: Paid &amp; Responded (Labels 4 &amp; 5)</h2>
-  <div class="grid-2">
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-4">4</span>
-        <h3>4: paid</h3>
-        <span class="wf-tag">Newest First</span>
-      </div>
-      <div class="wf-body">
-        <p>Archive of paid invoices. No action buttons &mdash; only the Move dropdown to reclassify if needed.</p>
-        <div class="metrics-bar" style="margin-top: 0.5rem;">
-          <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;30d</span>
-          <span class="metric-chip mc-amber"><span class="dot amber"></span> Medium: 30-89d</span>
-          <span class="metric-chip mc-red"><span class="dot red"></span> Long Term: 90d+</span>
-        </div>
-      </div>
-    </div>
-    <div class="wf-card">
-      <div class="wf-header">
-        <span class="wf-num wf-5">5</span>
-        <h3>5: responded</h3>
-        <span class="wf-tag">Newest First</span>
-      </div>
-      <div class="wf-body">
-        <p>Archive of sent responses. No action buttons &mdash; only the Move dropdown to reclassify if needed.</p>
-        <div class="metrics-bar" style="margin-top: 0.5rem;">
-          <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;30d</span>
-          <span class="metric-chip mc-amber"><span class="dot amber"></span> Medium: 30-89d</span>
-          <span class="metric-chip mc-red"><span class="dot red"></span> Long Term: 90d+</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 8. NEWSLETTER ============ -->
-<div class="section" id="wf-newsletter">
-  <h2 class="section-title"><span class="icon">&#x1F4F0;</span> 8. Workflow: Newsletter (Label 6)</h2>
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-6">6</span>
-      <h3>6: newsletter</h3>
-      <span class="wf-tag">Newest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x1F4CA; Metrics</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-red"><span class="dot red"></span> Unread</span>
-        <span class="metric-chip mc-green"><span class="dot green"></span> Read</span>
-        <span class="metric-chip mc-blue"><span class="dot blue"></span> Total</span>
-      </div>
-
-      <h4>&#x1F50D; Filter Buttons</h4>
-      <p>A filter bar appears above the email list with three options:</p>
-      <div class="metrics-bar" style="margin-top: 0.5rem;">
-        <span class="metric-chip mc-blue"><span class="dot blue"></span> All &mdash; show all newsletters (default)</span>
-        <span class="metric-chip mc-red"><span class="dot red"></span> Unread &mdash; show only unread newsletters</span>
-        <span class="metric-chip mc-green"><span class="dot green"></span> Read &mdash; show only read newsletters</span>
-      </div>
-      <p style="margin-top: 0.5rem;">The active filter is highlighted in purple. Filters work alongside search &mdash; if you search while "Unread" is selected, results are filtered to unread newsletters matching your search term. Switching labels resets the filter to "All".</p>
-
-      <h4 style="margin-top: 1rem;">&#x1F4CB; Actions</h4>
-      <ul>
-        <li><strong>Mark Read</strong> &mdash; Mark individual newsletters as read</li>
-        <li><strong>Read All</strong> &mdash; Bulk-mark all newsletters as read</li>
-      </ul>
-
-      <div class="info-box info">
-        <span class="ib-icon">&#x1F4BE;</span>
-        <div>Read state persists across sessions via <strong>localStorage</strong> &mdash; your read/unread tracking is saved in the browser.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 9. DELETE / UNSUBSCRIBE ============ -->
-<div class="section" id="wf-delete">
-  <h2 class="section-title"><span class="icon">&#x1F5D1;&#xFE0F;</span> 9. Workflow: Delete &amp; Unsubscribe (Label 7)</h2>
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-7">7</span>
-      <h3>7: delete</h3>
-      <span class="wf-tag">Newest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x1F4CA; Metrics</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-red"><span class="dot red"></span> Pending</span>
-        <span class="metric-chip mc-green"><span class="dot green"></span> Unsubscribed</span>
-        <span class="metric-chip mc-blue"><span class="dot blue"></span> Unsubs 30 day</span>
-      </div>
-
-      <h4>&#x1F6AB; Four Unsubscribe Methods</h4>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 0.5rem;">
-        <div style="background: var(--success-bg); border: 1px solid var(--success-border); border-radius: var(--radius-lg); padding: 1rem; text-align: center;">
-          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x1F4E7;</div>
-          <div style="font-weight: 700; color: var(--success); margin-bottom: 0.25rem;">1. Auto-Email</div>
-          <div style="font-size: 0.82rem; color: var(--text-secondary);">If email has a <code>mailto:</code> unsubscribe header, sends unsubscribe email automatically</div>
-        </div>
-        <div style="background: var(--accent-soft); border: 1px solid var(--accent-soft); border-radius: var(--radius-lg); padding: 1rem; text-align: center;">
-          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x1F517;</div>
-          <div style="font-weight: 700; color: var(--accent); margin-bottom: 0.25rem;">2. Link</div>
-          <div style="font-size: 0.82rem; color: var(--text-secondary);">If email has an <code>https:</code> unsubscribe header, opens the link in a new tab</div>
-        </div>
-        <div style="background: var(--accent-soft); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 1rem; text-align: center;">
-          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x1F916;</div>
-          <div style="font-weight: 700; color: var(--accent); margin-bottom: 0.25rem;">3. AI Draft</div>
-          <div style="font-size: 0.82rem; color: var(--text-secondary);">"Reply to Request Unsubscribe" button drafts a polite unsubscribe request via AI</div>
-        </div>
-        <div style="background: var(--accent-soft); border: 1px solid var(--accent-soft); border-radius: var(--radius-lg); padding: 1rem; text-align: center;">
-          <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">&#x2705;</div>
-          <div style="font-weight: 700; color: var(--accent); margin-bottom: 0.25rem;">4. Mark Done</div>
-          <div style="font-size: 0.82rem; color: var(--text-secondary);">For emails you've already unsubscribed from or that have no link &mdash; manually mark as done to update the metrics</div>
-        </div>
-      </div>
-
-      <div class="info-box info" style="margin-top: 1rem;">
-        <span class="ib-icon">&#x2139;&#xFE0F;</span>
-        <div><strong>"Mark Done" override:</strong> Emails with no unsubscribe link show a <strong>"Mark Done"</strong> button instead of a disabled "No link" label. You can also click <strong>"Mark as Already Unsubscribed"</strong> in the expanded email view for any email. This logs the unsubscribe as "manual" and updates the Pending/Unsubscribed metrics immediately.</div>
-      </div>
-
-      <div class="info-box tip" style="margin-top: 0.5rem;">
-        <span class="ib-icon">&#x1F680;</span>
-        <div><strong>"Unsub All" button:</strong> Batch-processes all mailto-based unsubscribes in one click. Only works for emails with mailto: unsubscribe headers.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 10. TASK AUTOMATION ============ -->
-<div class="section" id="wf-task">
-  <h2 class="section-title"><span class="icon">&#x2705;</span> 10. Workflow: Task Automation (Labels 8 &amp; 9)</h2>
-
-  <div class="card">
-    <div class="card-header">&#x1F504; Airtable Task Automation Flow</div>
-    <p>This workflow bridges Gmail and Airtable in <strong>real-time</strong>. When an email is moved to label 8, a task is created instantly in Airtable. When a task is completed in Airtable, the email automatically moves to label 9 on next page load.</p>
-
-    <div class="flow" style="padding: 1.5rem 0;">
-      <div class="flow-step primary">
-        <span class="flow-icon">&#x1F4E7;</span>
-        Email moved to<br>Label 8
-        <span class="flow-sub">Via web app dropdown</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step purple">
-        <span class="flow-icon">&#x1F916;</span>
-        AI Generates<br>Task Content
-        <span class="flow-sub">Title + description<br>via Claude Haiku</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step" style="background: var(--success-bg); border-color: var(--success);">
-        <span class="flow-icon">&#x1F4CA;</span>
-        Task Created<br>in Airtable
-        <span class="flow-sub">Instant via API</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step" style="background: var(--warning-bg); border-color: var(--warning);">
-        <span class="flow-icon">&#x2705;</span>
-        Task Completed<br>in Airtable
-        <span class="flow-sub">By assignee</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step success">
-        <span class="flow-icon">&#x1F4E9;</span>
-        Email Auto-Moves<br>to Label 9
-        <span class="flow-sub">On next page load</span>
-      </div>
-    </div>
-
-    <div class="info-box info" style="margin-top: 0.75rem;">
-      <span class="ib-icon">&#x26A1;</span>
-      <div><strong>Real-time integration:</strong> Task creation happens immediately when the label change occurs (from any page: inbox apply, label dropdown, or bulk apply). No scheduled delay. Duplicate detection prevents the same email creating multiple tasks.</div>
-    </div>
-  </div>
-
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-8">8</span>
-      <h3>8: task created</h3>
-      <span class="wf-tag">Oldest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x1F4CA; Metrics</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> Recent: &lt;7 days</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> Warning: 7-13 days</span>
-        <span class="metric-chip mc-red"><span class="dot red"></span> Critical: 14+ days</span>
-      </div>
-
-      <h4>&#x1F916; Real-Time Task Creation Details</h4>
-      <p>When an email is moved to label 8 (via dropdown or inbox apply), the app <strong>immediately</strong> creates an Airtable record with:</p>
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1.5rem; margin-top: 0.5rem; font-size: 0.88rem;">
-        <div><strong>Title:</strong> "INBOUND: [AI-generated action item]"</div>
-        <div><strong>Assignee:</strong> Mica Albovias</div>
-        <div><strong>Description:</strong> AI-generated summary</div>
-        <div><strong>Status:</strong> Today</div>
-        <div><strong>Priority:</strong> Urgent</div>
-        <div><strong>Time Estimate:</strong> 15 min</div>
-        <div><strong>Due Date:</strong> Today</div>
-        <div><strong>Source Type:</strong> Gmail</div>
-        <div><strong>Checkbox:</strong> "Inbound Communication Task" ticked</div>
-        <div><strong>Email Data:</strong> Link, sender, date, content</div>
-      </div>
-
-      <div class="info-box info" style="margin-top: 0.75rem;">
-        <span class="ib-icon">&#x1F3F7;&#xFE0F;</span>
-        <div><strong>Duplicate prevention:</strong> Before creating a task, the app checks Airtable for existing records linked to the same Gmail thread ID. If one exists, it skips creation and shows "Airtable task already exists".</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="wf-card">
-    <div class="wf-header">
-      <span class="wf-num wf-9">9</span>
-      <h3>9: task completed</h3>
-      <span class="wf-tag">Oldest First</span>
-    </div>
-    <div class="wf-body">
-      <h4>&#x1F4CA; Metrics</h4>
-      <div class="metrics-bar">
-        <span class="metric-chip mc-green"><span class="dot green"></span> Last 7 days</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> 7-14 days</span>
-        <span class="metric-chip mc-amber"><span class="dot amber"></span> 14-30 days</span>
-        <span class="metric-chip mc-blue"><span class="dot blue"></span> Total</span>
-      </div>
-
-      <p style="margin-top: 0.75rem;">When you navigate to <strong>label 8</strong>, the app automatically queries Airtable for any inbound tasks marked "Completed". Matching emails are <strong>instantly moved from label 8 to label 9</strong> and a success toast shows how many were moved.</p>
-
-      <div class="info-box info">
-        <span class="ib-icon">&#x26A1;</span>
-        <div><strong>Completion check runs on every label 8 page load.</strong> No scheduled tasks needed. The app uses the Gmail API directly to modify labels, which is faster and more reliable than the previous Cloudflare Worker approach.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 11. AI FEATURES ============ -->
-<div class="section" id="ai">
-  <h2 class="section-title"><span class="icon">&#x1F916;</span> 11. AI Features &amp; Rules</h2>
-
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-header">&#x1F3F7;&#xFE0F; Label Suggestions</div>
-      <p><strong>Model:</strong> Claude Haiku (fast, cheap)</p>
-      <p><strong>Where:</strong> Inbox view</p>
-      <p>Classifies incoming emails and suggests the appropriate label (1-9). Learns from corrections stored in localStorage and synced to Cloudflare KV.</p>
-    </div>
-    <div class="card">
-      <div class="card-header">&#x2709;&#xFE0F; Response &amp; Follow-up Drafting</div>
-      <p><strong>Model:</strong> Claude Sonnet (quality)</p>
-      <p><strong>Where:</strong> Labels 1, 2, and all other labels with action buttons</p>
-      <p>Drafts replies and follow-ups based on email content and your knowledge base entries. The loading message adapts to the context:</p>
-      <ul style="margin-top: 0.5rem;">
-        <li><strong>Label 1:</strong> "Claude is drafting your response..."</li>
-        <li><strong>Label 2:</strong> "Claude is drafting your follow-up..."</li>
-        <li><strong>Label 3:</strong> "Claude is drafting a delayed payment message..."</li>
-        <li><strong>Label 7:</strong> "Claude is drafting your unsubscribe request..."</li>
-      </ul>
-      <p style="margin-top: 0.5rem;">All draft modals support <strong>file attachments</strong> (up to 20MB total). Click "Add Attachment" to attach files before sending.</p>
-    </div>
-    <div class="card">
-      <div class="card-header">&#x1F4B0; Delay Payment Drafts</div>
-      <p><strong>Model:</strong> Claude Sonnet (quality)</p>
-      <p><strong>Where:</strong> Label 3</p>
-      <p>Drafts financial difficulty emails. Tracks delay history per creditor to avoid repetitive wording.</p>
-    </div>
-    <div class="card">
-      <div class="card-header">&#x1F6AB; Unsubscribe Drafts</div>
-      <p><strong>Model:</strong> Claude Haiku (fast)</p>
-      <p><strong>Where:</strong> Label 7</p>
-      <p>Drafts polite unsubscribe request emails when auto-methods are not available.</p>
-    </div>
-  </div>
-
-  <div class="info-box danger" style="margin-top: 0.75rem;">
-    <span class="ib-icon">&#x1F6A8;</span>
-    <div><strong>CRITICAL RULE:</strong> All AI-generated emails must <strong>NOT</strong> contain em dashes (&mdash;) or en dashes (&ndash;). This rule is enforced in the AI prompts.</div>
-  </div>
-</div>
-
-<!-- ============ 12. SEARCH, PAGINATION & UNDO ============ -->
-<div class="section" id="search-pagination">
-  <h2 class="section-title"><span class="icon">&#x1F50D;</span> 12. Search, Pagination &amp; Undo</h2>
-
-  <div class="card">
-    <div class="card-header">&#x1F50E; Search &amp; Filter</div>
-    <p>A search box appears between the stats bar and the email list in all views. There are <strong>two search modes</strong>:</p>
-
-    <h4 style="margin-top: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Local Search (&#x201C;This Label&#x201D;)</h4>
-    <ul>
-      <li><strong>Real-time filtering</strong> with 300ms debounce as you type</li>
-      <li><strong>Searches across:</strong> subject, sender name, sender email, snippet text, and full email body content (HTML is converted to plain text for searching)</li>
-      <li>Shows <strong>&#x201C;Showing X of Y emails&#x201D;</strong> when a filter is active</li>
-      <li>Only searches emails loaded in the <strong>current label view</strong></li>
-    </ul>
-
-    <h4 style="margin-top: 1rem; margin-bottom: 0.5rem; color: var(--accent);">Global Search (&#x201C;All Emails&#x201D;)</h4>
-    <ul>
-      <li>Click the <strong>&#x201C;This Label&#x201D;</strong> button next to the search box to toggle to <strong>&#x201C;All Emails&#x201D;</strong> mode (button turns purple)</li>
-      <li>Type your search term and press <strong>Enter</strong> to search</li>
-      <li>Uses the <strong>Gmail API server-side search</strong> &#x2014; same engine as the Gmail search bar</li>
-      <li>Searches your <strong>entire Gmail account</strong> (all labels, inbox, sent, archived)</li>
-      <li>Each result shows a <strong>purple label tag</strong> indicating which of the 9 numbered labels it belongs to (or &#x201C;Unlabelled&#x201D;)</li>
-      <li>Results display in a simplified read-only view (subject, from, label, date, days old)</li>
-      <li>Click any row to expand and read the full thread</li>
-      <li>Click <strong>&#x201C;All Emails&#x201D;</strong> again or clear the search to return to the current label view</li>
-    </ul>
-
-    <div class="info-box">
-      <span class="ib-icon">&#x2139;&#xFE0F;</span>
-      <div><strong>Global search limits:</strong> Results are capped at <strong>100 matches</strong> for speed (the 100 most recent). Because it searches the entire Gmail account, results may include emails outside the 9 numbered labels &#x2014; these show as &#x201C;Unlabelled&#x201D;.</div>
-    </div>
-
-    <div class="info-box" style="margin-top: 0.5rem;">
-      <span class="ib-icon">&#x2705;</span>
-      <div><strong>Full body search supported:</strong> Local search covers subject, sender, snippet, and full email body content. HTML emails are automatically converted to plain text for searching.</div>
-    </div>
-
-    <p style="margin-top: 0.75rem;"><strong>Clear button (X)</strong> resets both search modes. Pagination applies to all search results.</p>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F4C4; Pagination</div>
-    <p>All views display <strong>50 emails per page</strong> with navigation controls below the email list.</p>
-    <ul>
-      <li><strong>Previous / Next</strong> buttons for navigation</li>
-      <li><strong>"Page X of Y"</strong> indicator shows current position</li>
-      <li>Stats and metrics always reflect <strong>ALL emails</strong>, not just the current page</li>
-      <li>Page resets to 1 when switching labels, refreshing, or searching</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x21A9;&#xFE0F; Undo Last Action</div>
-    <p>After any label move, an undo notification appears at the bottom of the screen.</p>
-    <div class="flow" style="padding: 1rem 0;">
-      <div class="flow-step primary">
-        <span class="flow-icon">&#x1F3F7;&#xFE0F;</span>
-        Move Email
-        <span class="flow-sub">Label change applied</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step" style="background: var(--text-secondary); color: white; border-color: var(--text-primary);">
-        <span class="flow-icon">&#x1F4AC;</span>
-        Toast Notification
-        <span class="flow-sub">Dark bar at bottom</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step warning">
-        <span class="flow-icon">&#x21A9;&#xFE0F;</span>
-        Click "Undo"
-        <span class="flow-sub">Within 10 seconds</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step success">
-        <span class="flow-icon">&#x2705;</span>
-        Label Reversed
-        <span class="flow-sub">Via Gmail API</span>
-      </div>
-    </div>
-    <ul>
-      <li>Shows <strong>"Moved [subject] to [label]"</strong> with an "Undo" button</li>
-      <li>Auto-dismisses after <strong>10 seconds</strong></li>
-      <li>Tracks only the most recent action (<strong>single undo level</strong>)</li>
-    </ul>
-  </div>
-</div>
-
-<!-- ============ 13. BACKUP & CLOUD SYNC ============ -->
-<div class="section" id="backup-sync">
-  <h2 class="section-title"><span class="icon">&#x1F4BE;</span> 13. Backup &amp; Cloud Sync</h2>
-
-  <div class="card">
-    <div class="card-header">&#x1F4E6; Auto-Backup System</div>
-    <p>The app automatically backs up all localStorage data after key actions:</p>
-    <ul>
-      <li>Building knowledge base</li>
-      <li>Applying inbox labels in bulk</li>
-      <li>Sending emails</li>
-    </ul>
-    <p style="margin-top: 0.5rem;">On app load, if the last backup was <strong>24+ hours ago</strong>, it auto-exports a backup JSON file.</p>
-
-    <h4 style="margin-top: 1rem;">&#x1F4CB; What's Included in Backups</h4>
-    <ul>
-      <li>Knowledge base</li>
-      <li>AI corrections</li>
-      <li>Accuracy log</li>
-      <li>Delay payment log</li>
-      <li>Read newsletters</li>
-      <li>Unsubscribe log</li>
-      <li>Sender name</li>
-      <li>Applied today counts</li>
-      <li>Response amendments</li>
-    </ul>
-
-    <h4 style="margin-top: 1rem;">&#x2699;&#xFE0F; Manual Backup &amp; Restore</h4>
-    <p>Available in <strong>Settings &gt; Backup &amp; Restore</strong> section:</p>
-    <ul>
-      <li><strong>Export</strong> &mdash; Downloads a JSON file with all app data</li>
-      <li><strong>Import</strong> &mdash; Restores from a previously exported JSON file</li>
-    </ul>
-
-    <div class="info-box tip">
-      <span class="ib-icon">&#x1F4A1;</span>
-      <div>A <strong>"Backup: Xh ago"</strong> indicator in the header shows when the last backup was created. If this indicator is missing, the auto-backup code may not have loaded.</div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">&#x2601;&#xFE0F; Shared Cloud Data Store (Cloudflare KV)</div>
-    <p>Knowledge base, AI corrections, and KB build date are synced to Cloudflare KV storage for multi-device support.</p>
-
-    <h4 style="margin-top: 1rem;">&#x1F504; How Cloud Sync Works</h4>
-    <ol class="steps">
-      <li>On app load (after authentication), the app fetches cloud data from <code>GET /shared-data</code></li>
-      <li>If cloud data is <strong>newer than local</strong>, the cloud version replaces local data</li>
-      <li>If local data is <strong>newer than cloud</strong>, local data syncs up to the cloud</li>
-      <li>After building knowledge base or logging AI corrections, data syncs to cloud automatically</li>
-    </ol>
-
-    <h4 style="margin-top: 1rem;">&#x1F4CA; Cloud Sync Status Indicators</h4>
-    <div class="metrics-bar">
-      <span class="metric-chip mc-green"><span class="dot green"></span> Synced &mdash; data is up to date</span>
-      <span class="metric-chip mc-amber"><span class="dot amber"></span> Syncing... &mdash; transfer in progress</span>
-      <span class="metric-chip mc-red"><span class="dot red"></span> Offline &mdash; cloud unreachable</span>
-    </div>
-
-    <div class="info-box info" style="margin-top: 0.75rem;">
-      <span class="ib-icon">&#x2601;&#xFE0F;</span>
-      <div><strong>Multi-device support:</strong> Any device opening the app gets the same learned data. Failures are handled gracefully &mdash; the app falls back to localStorage silently.</div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 14. AUDIT TRAIL ============ -->
-<div class="section" id="audit">
-  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 14. Audit Trail</h2>
-
-  <div class="card">
-    <div class="card-header">&#x1F4CB; Action Logging</div>
-    <p>All user and system actions are logged to localStorage (<code>'audit_log'</code>) with timestamps.</p>
-
-    <h4 style="margin-top: 1rem;">&#x1F4CA; Events Tracked</h4>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1.5rem; font-size: 0.88rem; margin-top: 0.5rem;">
-      <div>Label moves</div>
-      <div>Emails sent</div>
-      <div>AI drafts generated</div>
-      <div>Inbox label applications</div>
-      <div>Unsubscribes</div>
-      <div>KB builds</div>
-      <div>Backup exports/imports</div>
-      <div>Undo actions</div>
-      <div>Cloud syncs</div>
-      <div>&nbsp;</div>
-    </div>
-
-    <h4 style="margin-top: 1rem;">&#x1F441;&#xFE0F; Viewing the Audit Log</h4>
-    <ul>
-      <li>Open <strong>Settings &gt; Audit Log</strong> section</li>
-      <li>Shows <strong>last 50 entries</strong> with timestamp, action icon, and description</li>
-      <li><strong>Export as CSV</strong> button downloads the full log</li>
-      <li><strong>Clear Log</strong> button (with confirmation prompt) resets the log</li>
-    </ul>
-
-    <div class="info-box warn">
-      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
-      <div><strong>Storage limit:</strong> Maximum <strong>500 entries</strong> are stored. When this limit is reached, the oldest entries are trimmed automatically.</div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 15. SETTINGS & DATA ============ -->
-<div class="section" id="settings">
-  <h2 class="section-title"><span class="icon">&#x2699;&#xFE0F;</span> 15. Settings &amp; Data Storage</h2>
-
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-header">&#x2699;&#xFE0F; Settings Panel</div>
-      <p>Access via the gear icon in the header bar.</p>
-      <ul>
-        <li><strong>Sender Name</strong> &mdash; Used in all AI-drafted emails for sign-off</li>
-        <li><strong>Airtable Integration</strong> &mdash; Personal Access Token for real-time task creation (required for label 8 automation). Optional: Base ID, Table ID, and Assignee ID for custom configurations</li>
-        <li><strong>Knowledge Base</strong> &mdash; Auto-built by fetching 20 recent emails from each numbered label and extracting sender/subject patterns. Click "Build KB" to generate. A prompt appears automatically on first visit to the inbox if no KB exists</li>
-        <li><strong>Backup &amp; Restore</strong> &mdash; Manual export/import of all app data as JSON</li>
-        <li><strong>Audit Log</strong> &mdash; View, export (CSV), and clear action history</li>
-      </ul>
-    </div>
-    <div class="card">
-      <div class="card-header">&#x1F4BE; Data Storage Locations</div>
-      <p><strong>sessionStorage</strong> (clears on tab close):</p>
-      <ul>
-        <li>Gmail authentication token</li>
-        <li>Token expiry timestamp (for proactive refresh)</li>
-      </ul>
-      <p style="margin-top: 0.5rem;"><strong>localStorage</strong> (persists in browser):</p>
-      <ul>
-        <li>Knowledge base entries</li>
-        <li>AI correction history</li>
-        <li>Accuracy log</li>
-        <li>Delay payment log</li>
-        <li>Read newsletter tracking</li>
-        <li>Unsubscribe log</li>
-        <li>Response amendments</li>
-        <li>Applied today counts</li>
-        <li>Sender name</li>
-        <li>Airtable PAT and config (base ID, table ID, assignee)</li>
-        <li>Audit log (max 500 entries)</li>
-        <li>Auto-backup data snapshot</li>
-        <li>Last backup timestamp</li>
-      </ul>
-      <p style="margin-top: 0.5rem;"><strong>Cloudflare KV</strong> (cloud, multi-device):</p>
-      <ul>
-        <li>Knowledge base entries</li>
-        <li>AI correction history</li>
-        <li>KB build date</li>
-      </ul>
-    </div>
-  </div>
-
-  <div class="info-box info">
-    <span class="ib-icon">&#x2601;&#xFE0F;</span>
-    <div><strong>Multi-device data:</strong> Knowledge base and AI corrections sync across devices via Cloudflare KV. Other data (delay log, newsletters, audit log, etc.) remains browser-specific in localStorage but is included in backup exports.</div>
-  </div>
-</div>
-
-<!-- ============ 16. UPDATING ============ -->
-<div class="section" id="updating">
-  <h2 class="section-title"><span class="icon">&#x1F680;</span> 16. Updating the App</h2>
-
-  <div class="card">
-    <div class="card-header">&#x1F4DD; Deployment Process &mdash; Two Files</div>
-    <p>The deployment now involves <strong>two separate files</strong>:</p>
-
-    <h4 style="margin-top: 1rem;">&#x1F310; File 1: Web App (index.html &rarr; GitHub)</h4>
-    <div class="flow">
-      <div class="flow-step primary">
-        <span class="flow-icon">&#x270F;&#xFE0F;</span>
-        Edit Source
-        <span class="flow-sub">follow-up.html<br>in Google Drive</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step" style="background: var(--warning-bg); border-color: var(--warning);">
-        <span class="flow-icon">&#x1F4CB;</span>
-        Copy as index.html
-        <span class="flow-sub">Rename for GitHub</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step purple">
-        <span class="flow-icon">&#x1F4E4;</span>
-        Upload to GitHub
-        <span class="flow-sub">Main branch</span>
-      </div>
-      <span class="flow-arrow">&#x27A1;&#xFE0F;</span>
-      <div class="flow-step success">
-        <span class="flow-icon">&#x1F30D;</span>
-        Auto-Deploy
-        <span class="flow-sub">GitHub Pages</span>
-      </div>
-    </div>
-
-    <h4 style="margin-top: 1.5rem;">&#x2601;&#xFE0F; File 2: Cloudflare Worker (cloudflare-worker.js &rarr; Cloudflare)</h4>
-    <ol class="steps">
-      <li>Go to <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a></li>
-      <li>Navigate to <strong>Workers &amp; Pages &gt; claude-proxy</strong></li>
-      <li>Click <strong>"Edit code"</strong></li>
-      <li>Select all existing code (<strong>Cmd+A</strong>) and delete</li>
-      <li>Paste the new worker code</li>
-      <li>Click <strong>Deploy</strong></li>
-    </ol>
-
-    <h4 style="margin-top: 1rem;">&#x1F4C2; File Locations</h4>
-    <ul>
-      <li><strong>Source file (web app):</strong> Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <code>follow-up.html</code></li>
-      <li><strong>Source file (worker):</strong> Google Drive &gt; Claude Cowork &gt; Claude Outputs &gt; Leadership Dashboard &gt; <code>cloudflare-worker.js</code></li>
-      <li><strong>GitHub repo:</strong> <code>chaichoong/inbound-comms-tracker</code> &gt; <code>index.html</code></li>
-      <li><strong>Live URL:</strong> <a href="https://chaichoong.github.io/inbound-comms-tracker" target="_blank">chaichoong.github.io/inbound-comms-tracker</a></li>
-      <li><strong>Worker URL:</strong> <a href="https://claude-proxy.kevinbrittain.workers.dev" target="_blank">claude-proxy.kevinbrittain.workers.dev</a></li>
-    </ul>
-  </div>
-</div>
-
-<!-- ============ 17. TROUBLESHOOTING ============ -->
-<div class="section" id="troubleshooting">
-  <h2 class="section-title"><span class="icon">&#x1F527;</span> 17. Troubleshooting</h2>
-  <div class="card">
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; "Too many concurrent requests"</div>
-      <div class="ts-solution">The app processes label changes sequentially with 300ms delays to avoid Gmail rate limits. Wait a few seconds and retry. This usually happens when applying many labels at once.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Emails not loading</div>
-      <div class="ts-solution">Check that you are signed in (click the Sign In button). The session expires periodically and needs re-authentication via Google OAuth.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; AI not working / drafts not generating</div>
-      <div class="ts-solution">Check that the Cloudflare Worker (<code>claude-proxy.kevinbrittain.workers.dev</code>) is running. Test by visiting the URL directly in a browser. If down, check the Cloudflare Workers dashboard.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Scheduled tasks not running</div>
-      <div class="ts-solution">Open Claude Desktop and check the Scheduled section. Both tasks need tool permissions approved on first run. Verify they show recent successful runs at 8am, 12pm, or 4pm UK time.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Airtable tasks not being created</div>
-      <div class="ts-solution">Verify the scheduled task <code>inbound-comms-create-airtable-tasks</code> is enabled and has run recently. Also check Airtable access token is still valid.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; AI suggestions seem inaccurate</div>
-      <div class="ts-solution">The AI learns from corrections. Keep correcting wrong suggestions &mdash; the accuracy should improve over time. Check the accuracy percentage in the inbox view header. If localStorage was cleared, the learning history was lost.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Cloud sync shows "Offline"</div>
-      <div class="ts-solution">The Cloudflare Worker KV binding may not be set up correctly. Check that the <code>SHARED_DATA</code> namespace exists and is bound to the worker in the Cloudflare dashboard under Settings &gt; Bindings.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Knowledge base not syncing across devices</div>
-      <div class="ts-solution">Ensure you have built the KB at least once after the cloud sync update. The sync only happens after KB builds or AI corrections. Open the app on each device and check the cloud sync indicator in the header.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Backup not happening</div>
-      <div class="ts-solution">Check the "Backup: Xh ago" indicator in the header. If it is missing, the auto-backup code may not have loaded. Try a manual export from Settings &gt; Backup &amp; Restore.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Search not finding emails</div>
-      <div class="ts-solution">In <strong>&#x201C;This Label&#x201D;</strong> mode, search only covers emails loaded in the current view. Switch to <strong>&#x201C;All Emails&#x201D;</strong> mode (click the scope button) and press Enter to search across your entire Gmail account. Global search is capped at 100 results.</div>
-    </div>
-    <div class="ts-item">
-      <div class="ts-problem">&#x1F534; Pagination showing wrong count</div>
-      <div class="ts-solution">Stats always show totals for ALL emails, regardless of pagination. The page count and "Page X of Y" indicator reflect the current filtered or full set. This is by design.</div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 18. KNOWN LIMITATIONS ============ -->
-<div class="section" id="limitations">
-  <h2 class="section-title"><span class="icon">&#x26A0;&#xFE0F;</span> 18. Known Limitations</h2>
-  <div class="card">
-    <p>The following are known limitations of the current system. These are accepted trade-offs, not bugs.</p>
-    <div style="margin-top: 0.75rem;">
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--warning);">&#x1F7E1; Google Client ID and API Key visible in public repo</div>
-        <div class="ts-solution">The Google Client ID and API Key are embedded in the public HTML file. The API Key is restricted by HTTP referrer and API scope, and the Cloudflare Worker validates request origins. The Airtable PAT is stored in the user's browser localStorage, not in the source code.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--warning);">&#x1F7E1; Basic AI learning system</div>
-        <div class="ts-solution">AI learning is based on a lookup table of corrections, not sophisticated machine learning. It stores past corrections and feeds them into future prompts.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--success);">&#x2705; Exponential backoff for rate limits</div>
-        <div class="ts-solution">Gmail API rate limits (429) and server errors (503/529) are handled with exponential backoff and automatic retries (up to 3 attempts). Sequential label changes also use 300ms delays to stay within quota.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--warning);">&#x1F7E1; Single HTML file architecture (~150KB)</div>
-        <div class="ts-solution">The entire app is a single HTML file with embedded CSS and JavaScript. This simplifies deployment but becomes harder to maintain as it grows.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--warning);">&#x1F7E1; No collaborative features</div>
-        <div class="ts-solution">The app is designed for single-user operation. While data syncs across devices via Cloudflare KV, there is no multi-user support or collaboration.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--success);">&#x2705; Global search available</div>
-        <div class="ts-solution">Local search ("This Label") only covers emails loaded in the current view. Use <strong>Global search ("All Emails")</strong> to search across your entire Gmail account. Global search is capped at 100 results and may return emails outside the 9 numbered labels.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--warning);">&#x1F7E1; Single-level undo only</div>
-        <div class="ts-solution">Only the most recent label move can be undone. There is no multi-step undo history.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--warning);">&#x1F7E1; Audit log limited to 500 entries</div>
-        <div class="ts-solution">The audit log stores a maximum of 500 entries in localStorage. Older entries are trimmed automatically. Export as CSV before clearing if you need a full history.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--success);">&#x2705; Proactive OAuth token refresh</div>
-        <div class="ts-solution">The app automatically refreshes the Google OAuth token 5 minutes before expiry, preventing mid-session authentication failures.</div>
-      </div>
-      <div class="ts-item">
-        <div class="ts-problem" style="color: var(--success);">&#x2705; XSS-safe HTML rendering</div>
-        <div class="ts-solution">Email HTML is sanitized via DOMParser with a strict tag and attribute allowlist. Script tags, event handlers, javascript: URIs, and data: URIs are all stripped before rendering.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 19. TECHNICAL REFERENCE ============ -->
-<div class="section" id="technical">
-  <h2 class="section-title"><span class="icon">&#x1F4D6;</span> 19. Technical Reference</h2>
-  <div class="card">
-    <div class="card-header">&#x1F511; API Credentials &amp; Identifiers</div>
-    <div style="overflow-x: auto;">
+    <div class="card-header">Label lifecycle paths</div>
+    <div style="overflow-x:auto;">
       <table class="label-table">
         <thead>
-          <tr><th>Component</th><th>Value</th></tr>
+          <tr><th>Starting Label</th><th>Action</th><th>Resulting Label</th></tr>
         </thead>
         <tbody>
-          <tr><td><strong>Google Client ID</strong></td><td><code>194836632219-qs3huadlat6f3vq17e68el61gvspce99.apps.googleusercontent.com</code></td></tr>
-          <tr><td><strong>Google API Key</strong></td><td><code>AIzaSyARLbCY5crLqM7wHbU2etW5WZP-WrjKNdA</code></td></tr>
-          <tr><td><strong>Claude Proxy URL</strong></td><td><code>https://claude-proxy.kevinbrittain.workers.dev</code></td></tr>
-          <tr><td><strong>Cloudflare KV Namespace</strong></td><td><code>SHARED_DATA</code> (bound to claude-proxy worker)</td></tr>
-          <tr><td><strong>Airtable Base ID</strong></td><td><code>appnqjDpqDniH3IRl</code> (Operations Director)</td></tr>
-          <tr><td><strong>Airtable Table ID</strong></td><td><code>tblqB8b22hKBL4PF1</code> (Tasks)</td></tr>
-          <tr><td><strong>GitHub Repository</strong></td><td><code>chaichoong/inbound-comms-tracker</code></td></tr>
-          <tr><td><strong>Gmail Accounts</strong></td><td><code>kevin@runpreneur.org.uk</code> / <code>kevinbrittain@gmail.com</code></td></tr>
+          <tr><td><span class="label-badge lb-amber">1: To Respond</span></td><td>Send response and move to Responded</td><td><span class="label-badge lb-green">5: Responded</span></td></tr>
+          <tr><td><span class="label-badge lb-amber">1: To Respond</span></td><td>Send response and move to Follow Up</td><td><span class="label-badge lb-blue">2: Follow Up</span></td></tr>
+          <tr><td><span class="label-badge lb-blue">2: Follow Up</span></td><td>Recipient replies (auto-detected)</td><td>Label removed, thread returns to inbox</td></tr>
+          <tr><td><span class="label-badge lb-blue">2: Follow Up</span></td><td>Send follow-up, move to Responded</td><td><span class="label-badge lb-green">5: Responded</span></td></tr>
+          <tr><td><span class="label-badge lb-red">3: To Pay</span></td><td>Send delay payment, stay in label</td><td>Stays in <span class="label-badge lb-red">3: To Pay</span></td></tr>
+          <tr><td><span class="label-badge lb-red">3: To Pay</span></td><td>Move via dropdown</td><td><span class="label-badge lb-green">4: Paid</span> (or any label)</td></tr>
+          <tr><td><span class="label-badge lb-purple">8: Task created</span></td><td>Airtable task marked Completed</td><td><span class="label-badge lb-green">9: Task completed</span> (auto)</td></tr>
+          <tr><td>Any action label</td><td>Use "Move to..." dropdown</td><td>Any other label</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F504;</span>
+      <div>When an email is moved from any label to another, the old label is <strong>removed</strong> and the new label is <strong>added</strong> on <em>every message</em> in the thread. Moves are rate-limited with 300ms delays between messages to avoid Gmail API errors.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Undo last label move</div>
+    <p>After any label move via the "Move to..." dropdown, an <strong>Undo</strong> toast appears at the bottom of the screen for 10 seconds. Click <strong>Undo</strong> to reverse the move. Only the <em>most recent</em> move can be undone.</p>
+  </div>
+</div>
+
+<!-- 5. GMAIL LABEL SYSTEM -->
+<div class="section" id="gmail-labels">
+  <h2 class="section-title"><span class="icon">&#x1F3F7;</span> 5. Gmail Label System</h2>
+  <div class="card">
+    <p>The app detects labels by matching the pattern <code>/^[1-9]\d?[.:]\s/</code> — i.e. labels that start with a number, then a colon or period, then a space. Labels must be created in Gmail with exact names including the number prefix.</p>
+    <p>Labels displayed in the dropdown, sorted numerically. Live counts are shown for labels <strong>1, 2, 3, and 8</strong>. The inbox count shows unlabelled threads.</p>
+    <div style="overflow-x:auto; margin-top:1rem;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Label</th><th>Purpose</th><th>Sort Order</th><th>Days Threshold</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>1: To Respond</code></td><td>Emails requiring a reply from you</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>2: Follow Up</code></td><td>Emails you have sent and are waiting for a reply on</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>3: To Pay</code></td><td>Invoices and payment requests</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>4: Paid</code></td><td>Archive of paid invoices</td><td>Newest first</td><td>Critical 90+d, Warning 30+d</td></tr>
+          <tr><td><code>5: Responded</code></td><td>Archive of responded emails</td><td>Newest first</td><td>Critical 90+d, Warning 30+d</td></tr>
+          <tr><td><code>6: Newsletter</code></td><td>Marketing and newsletter emails</td><td>Newest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>7: Delete &amp; Unsubscribe</code></td><td>Emails to unsubscribe from</td><td>Newest first</td><td>Standard (30/14d)</td></tr>
+          <tr><td><code>8: Task created</code></td><td>Emails where an Airtable task has been created</td><td>Oldest first</td><td>Critical 14+d, Warning 7–13d</td></tr>
+          <tr><td><code>9: Task completed</code></td><td>Archive of completed inbound tasks</td><td>Newest first</td><td>Custom (14–30d / 7–14d / &lt;7d)</td></tr>
+          <tr><td><code>10: Property Compliance</code> (or <code>10.</code>)</td><td>Compliance certificate emails (GSC, EICR, Insurance, Fire Alarm)</td><td>Newest first</td><td>Standard</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 6. ACTION BUTTONS REFERENCE -->
+<div class="section" id="action-buttons">
+  <h2 class="section-title"><span class="icon">&#x1F5B1;</span> 6. Action Buttons Reference</h2>
+
+  <div class="card">
+    <div class="card-header">Header buttons</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Button</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Refresh</strong></td><td>Reloads all emails for the current label from Gmail. Disabled while loading.</td></tr>
+          <tr><td><strong>&#9881; (Settings)</strong></td><td>Opens the Settings modal: sender name, Airtable credentials, Knowledge Base builder, Backup/Restore, and Audit Log.</td></tr>
+          <tr><td><strong>Sign out</strong></td><td>Revokes the OAuth token and returns to the auth screen.</td></tr>
+          <tr><td><strong>Apply All</strong> (inbox only)</td><td>Applies all label selections that have been made in the inbox Apply dropdowns in one batch. Processes from highest to lowest index to avoid re-indexing issues.</td></tr>
+          <tr><td><strong>Read All</strong> (newsletter only)</td><td>Marks all currently loaded newsletter emails as read in localStorage.</td></tr>
+          <tr><td><strong>Unsub All</strong> (delete only)</td><td>Sends unsubscribe emails for all threads that have a <code>mailto:</code> unsubscribe link. Threads with HTTP links only are skipped (require manual action).</td></tr>
+          <tr><td><strong>Process All Pending</strong> (compliance only)</td><td>Runs AI compliance extraction on all unprocessed compliance emails, creating Airtable cert records.</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">&#x2601;&#xFE0F; Cloudflare Worker Endpoints</div>
-    <table class="label-table">
-      <thead>
-        <tr><th>Endpoint</th><th>Method</th><th>Payload / Purpose</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><code>POST /</code></td>
-          <td>POST</td>
-          <td>Claude API proxy &mdash; forwards requests with <code>CLAUDE_API_KEY</code> secret</td>
-        </tr>
-        <tr>
-          <td><code>POST /gmail-labels</code></td>
-          <td>POST</td>
-          <td><code>{ accessToken, messageIds, addLabelIds, removeLabelIds }</code> &mdash; modifies Gmail labels server-side</td>
-        </tr>
-        <tr>
-          <td><code>GET /shared-data</code></td>
-          <td>GET</td>
-          <td>Retrieves shared data (knowledge base, corrections, KB build date) from KV</td>
-        </tr>
-        <tr>
-          <td><code>POST /shared-data</code></td>
-          <td>POST</td>
-          <td><code>{ key, data, timestamp }</code> &mdash; saves shared data to KV</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F4CA; Airtable Integration Reference</div>
-    <table class="label-table">
-      <thead>
-        <tr><th>Function</th><th>Trigger</th><th>Details</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Task Creation</strong></td>
-          <td>Real-time (on label change to 8)</td>
-          <td>AI generates title ("INBOUND: ...") and description via Claude Haiku. Creates record with Status=Today, Priority=Urgent, Time=15min, Due=Today. Checks for duplicates first.</td>
-        </tr>
-        <tr>
-          <td><strong>Completion Check</strong></td>
-          <td>On label 8 page load</td>
-          <td>Queries Airtable for tasks with "Completed" status and "Inbound Communication Task" = true. Moves matching emails from label 8 to 9 via Gmail API directly.</td>
-        </tr>
-      </tbody>
-    </table>
-    <div class="info-box warn" style="margin-top: 0.75rem;">
-      <span class="ib-icon">&#x26A0;&#xFE0F;</span>
-      <div><strong>Requires Airtable PAT</strong> configured in Settings. Without it, task creation shows an error and completion check is silently skipped. Token needs <code>data.records:read</code> and <code>data.records:write</code> scopes.</div>
+    <div class="card-header">Per-row buttons</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Button label</th><th>Appears on view</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Respond</strong></td>
+            <td>Label 1: To Respond</td>
+            <td>Opens the Draft modal. Claude Sonnet drafts a response. You can edit, add attachments, revise with feedback, then send. Sends with "Send &rarr; Responded" (moves to label 5) or "Send &rarr; Follow Up" (moves to label 2).</td>
+          </tr>
+          <tr>
+            <td><strong>Follow up</strong></td>
+            <td>Labels 2, 8, and any unlisted label</td>
+            <td>Opens the Draft modal. Claude Sonnet drafts a follow-up message. Same send options as Respond.</td>
+          </tr>
+          <tr>
+            <td><strong>Delay Payment</strong></td>
+            <td>Label 3: To Pay</td>
+            <td>Opens the Draft modal. Claude Sonnet drafts a delay/extension request referencing previous delay history. The only send button is <strong>Send</strong> (stays in To Pay label). Logs the payment delay to localStorage.</td>
+          </tr>
+          <tr>
+            <td><strong>Apply</strong></td>
+            <td>Inbox (Unlabelled)</td>
+            <td>Applies the selected label from the adjacent dropdown to the email, removes it from the inbox, and records AI accuracy. If label 8 is selected, auto-creates an Airtable task.</td>
+          </tr>
+          <tr>
+            <td><strong>Read</strong></td>
+            <td>Label 6: Newsletter</td>
+            <td>Marks the thread as read in localStorage. Row becomes 50% opacity. Button changes to "Read" (disabled).</td>
+          </tr>
+          <tr>
+            <td><strong>Unsubscribe</strong></td>
+            <td>Label 7: Delete &amp; Unsubscribe</td>
+            <td>If the email has a <code>List-Unsubscribe</code> HTTP URL: opens it in a new tab. If it has a <code>mailto:</code> link: sends an unsubscribe email automatically. Both methods log to <code>unsubscribe_log</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Mark Done</strong></td>
+            <td>Label 7 (no unsubscribe link available)</td>
+            <td>Marks the thread as already unsubscribed in localStorage without sending anything.</td>
+          </tr>
+          <tr>
+            <td><strong>Reply to Request Unsubscribe</strong></td>
+            <td>Label 7 expanded body</td>
+            <td>Opens Draft modal. Claude Haiku drafts a short, polite unsubscribe request email. Send button is "Send Unsubscribe".</td>
+          </tr>
+          <tr>
+            <td><strong>Open Unsubscribe Link</strong></td>
+            <td>Label 7 expanded body (HTTP link present)</td>
+            <td>Opens the unsubscribe URL in a new tab.</td>
+          </tr>
+          <tr>
+            <td><strong>Mark as Already Unsubscribed</strong></td>
+            <td>Label 7 expanded body</td>
+            <td>Same as "Mark Done" — logs as manually unsubscribed.</td>
+          </tr>
+          <tr>
+            <td><strong>Process Now</strong></td>
+            <td>Label 10 expanded body (unprocessed only)</td>
+            <td>Runs AI compliance extraction on the single email and creates Airtable cert record(s).</td>
+          </tr>
+          <tr>
+            <td><strong>Move to... (dropdown)</strong></td>
+            <td>All label views (not inbox)</td>
+            <td>Moves the email to the selected label. Triggers Airtable task creation if moved to label 8, or compliance processing if moved to label 10.</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">&#x1F504; Auto-Refresh Behaviour</div>
-    <ul>
-      <li>Triggers every <strong>15 minutes</strong></li>
-      <li>Only fires when the app is <strong>idle</strong> (no draft modal open, no rows expanded, no dropdowns changed)</li>
-      <li>Manual refresh available via the <strong>Refresh button</strong></li>
-      <li>Every <strong>label switch</strong> triggers a fresh data load</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <div class="card-header">&#x1F4BB; Header Indicators</div>
-    <p>The app header bar shows several status indicators:</p>
-    <ul>
-      <li><strong>Backup: Xh ago</strong> &mdash; Time since last auto-backup export</li>
-      <li><strong>Cloud sync status</strong> &mdash; Synced / Syncing... / Offline</li>
-      <li><strong>Sign in / Account</strong> &mdash; Gmail authentication status</li>
-      <li><strong>Settings gear</strong> &mdash; Opens the settings panel</li>
-    </ul>
+    <div class="card-header">Draft modal buttons</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead>
+          <tr><th>Button</th><th>Colour</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Revise</strong></td><td>Green (accent)</td><td>Sends the current draft and your feedback to Claude Sonnet to produce a revised draft. Stores the feedback in <code>response_amendments</code> for future AI learning.</td></tr>
+          <tr><td><strong>Add Attachment</strong></td><td>Bordered</td><td>Opens file picker. Files are Base64-encoded and added as MIME attachments. Total limit 20 MB.</td></tr>
+          <tr><td><strong>Send &rarr; Responded</strong></td><td>Green (success)</td><td>Sends the email and moves the thread from current label to label 5: Responded.</td></tr>
+          <tr><td><strong>Send &rarr; Follow Up</strong></td><td>Amber (warning)</td><td>Sends the email and moves the thread from current label to label 2: Follow Up.</td></tr>
+          <tr><td><strong>Send</strong> (To Pay only)</td><td>Green (accent)</td><td>Sends the delay payment email and keeps the thread in label 3: To Pay. Logs the delay to <code>delay_payment_log</code>.</td></tr>
+          <tr><td><strong>Send Unsubscribe</strong></td><td>Red (danger)</td><td>Sends the unsubscribe request email and marks the thread as unsubscribed. Only shown when opened from label 7.</td></tr>
+          <tr><td><strong>Cancel</strong></td><td>Default</td><td>Closes the modal without sending. Pending attachments are cleared.</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
-<!-- ============ FOOTER ============ -->
-<div style="text-align: center; padding: 2rem 0 1rem; color: var(--text-muted); font-size: 0.82rem; border-top: 1px solid var(--border-default); margin-top: 2rem;">
-  Inbound Comms Tracker &mdash; Standard Operating Procedure &bull; Version 3.1 &bull; 12 April 2026<br>
-  Prepared for handover and ongoing management reference
+<!-- 7. REPLY & RESPONSE WORKFLOW -->
+<div class="section" id="reply-workflow">
+  <h2 class="section-title"><span class="icon">&#x1F4E4;</span> 7. Reply &amp; Response Workflow</h2>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num">1</span>
+      <h3>Drafting a response</h3>
+      <span class="wf-tag">Labels 1, 2, 3</span>
+    </div>
+    <div class="wf-body">
+      <h4>Steps</h4>
+      <ol class="steps">
+        <li>Click the action button (<strong>Respond</strong>, <strong>Follow up</strong>, or <strong>Delay Payment</strong>) on any email row.</li>
+        <li>The Draft modal opens. A spinner shows while Claude is drafting.</li>
+        <li>The original email is shown at the top for context. The <strong>From</strong> dropdown lets you select which email alias to send from (fetched from Gmail send-as settings).</li>
+        <li>Review and edit the <strong>To</strong>, <strong>Subject</strong>, and <strong>Your Response</strong> fields as needed.</li>
+        <li>Optionally add attachments (click <strong>Add Attachment</strong>, max 20 MB total).</li>
+        <li>Optionally type feedback in <strong>Feedback / Amendments</strong> and click <strong>Revise</strong> to get a revised draft.</li>
+        <li>Click the appropriate send button to send and move the email.</li>
+      </ol>
+      <div class="info-box info">
+        <span class="ib-icon">&#x1F916;</span>
+        <div><strong>AI model used:</strong> Respond/Follow Up/Delay Payment use <code>claude-sonnet-4-20250514</code> (max 500 tokens). Unsubscribe requests use <code>claude-haiku-4-5-20251001</code> (max 300 tokens).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num" style="background:var(--warning);">2</span>
+      <h3>Delay payment workflow</h3>
+      <span class="wf-tag">Label 3: To Pay</span>
+    </div>
+    <div class="wf-body">
+      <p>The delay payment prompt is context-aware. If previous delay emails have been sent for the same thread, they are listed in the prompt so Claude can acknowledge them and avoid repeating the same wording.</p>
+      <p>After sending, the date is recorded in <code>delay_payment_log</code>. The "Last Update" column in the To Pay view shows how many days ago the last delay email was sent for each thread.</p>
+      <div class="info-box warn">
+        <span class="ib-icon">&#x26A0;</span>
+        <div>Clicking <strong>Send</strong> from the delay payment modal keeps the email in label 3 (To Pay). It does <em>not</em> move it. Move it manually via the dropdown when the payment is actually made.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num" style="background:var(--danger);">3</span>
+      <h3>AI self-learning from feedback</h3>
+      <span class="wf-tag">Revise feature</span>
+    </div>
+    <div class="wf-body">
+      <p>Every time you click <strong>Revise</strong>, the feedback is stored in <code>response_amendments</code> (up to 50 entries). The next time a draft is generated for any email, the most recent 20 amendments are included in the prompt so Claude adapts to your preferences over time.</p>
+      <p>Example stored amendment: <em>Subject: "Invoice #1234", Feedback: "Make it more formal and add our company name"</em>.</p>
+    </div>
+  </div>
+
+  <div class="wf-card">
+    <div class="wf-header">
+      <span class="wf-num" style="background:var(--success);">4</span>
+      <h3>Follow Up auto-removal</h3>
+      <span class="wf-tag">Label 2</span>
+    </div>
+    <div class="wf-body">
+      <p>Each time the Follow Up label is loaded, the app checks every thread. If the <strong>last message</strong> in the thread is from someone other than your Gmail send-as aliases, it concludes the recipient has replied, and automatically removes the label from all messages in the thread. A success banner shows how many threads were moved back.</p>
+    </div>
+  </div>
+</div>
+
+<!-- 8. AI FEATURES -->
+<div class="section" id="ai-features">
+  <h2 class="section-title"><span class="icon">&#x1F916;</span> 8. AI Features</h2>
+
+  <div class="card">
+    <div class="card-header">AI inbox label suggestions</div>
+    <p>When you load the Inbox (Unlabelled) view and a knowledge base exists, <code>requestAISuggestions()</code> runs automatically. Emails are sent to Claude Haiku in <strong>batches of 5</strong> for classification.</p>
+    <p>Each suggestion has a <strong>confidence level</strong>:</p>
+    <ul>
+      <li><span class="label-badge lb-green">high</span> &mdash; green border on the suggestion badge</li>
+      <li><span class="label-badge lb-amber">medium</span> &mdash; amber border</li>
+      <li><span class="label-badge lb-red">low</span> &mdash; red border (treat with caution)</li>
+    </ul>
+    <p>Hover over the suggestion badge to see the AI's reason (e.g. "Invoice from known supplier").</p>
+    <p>The suggested label is pre-selected in the Apply dropdown. You can change it before clicking Apply. If you pick a <em>different</em> label from what the AI suggested, the correction is stored in <code>label_corrections</code> and synced to the cloud for future suggestions.</p>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4CA;</span>
+      <div>The <strong>AI Accuracy (30 day)</strong> stat shows the percentage of suggestions that matched what you actually applied, calculated over the last 30 days. Green = 90%+, Amber = 65–89%, Red = below 65%.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">AI retry logic</div>
+    <p>The AI suggestion loop retries up to 3 times on HTTP 529 (overloaded) responses, with delays of 2.5s, 5s, and 7.5s. For other API errors the batch shows "Retry later" badges.</p>
+    <p>A separate <code>retryWithBackoff()</code> function handles rate-limited (HTTP 429) or overloaded (HTTP 529/503) responses for general API calls, with exponential backoff starting at 1s and up to 3 retries.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">AI Airtable task generation</div>
+    <p>When an email is moved to label 8 (or an inbox label of 8 is applied), <code>generateAirtableTaskContent()</code> calls Claude Haiku (max 300 tokens) to produce:</p>
+    <ul>
+      <li>A task title starting with <code>INBOUND: </code> (under 100 chars)</li>
+      <li>An actionable description (under 500 chars)</li>
+    </ul>
+    <p>If the AI call fails, a fallback title of <code>INBOUND: {email subject}</code> is used.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">AI compliance extraction</div>
+    <p>When an email is in the Property Compliance label, <code>processComplianceEmail()</code> calls Claude Haiku (max 500 tokens) to extract:</p>
+    <ul>
+      <li><code>cert_type</code>: one of <strong>GSC</strong>, <strong>EICR</strong>, <strong>Landlord Insurance</strong>, <strong>Fire Alarm</strong></li>
+      <li><code>property_name</code>: matched against your Airtable properties list</li>
+      <li><code>renewal_date</code>: as YYYY-MM-DD</li>
+      <li><code>status</code>: Active or Expired</li>
+    </ul>
+    <p>The response can be a single object or an array (for emails containing multiple certs). After creating a new cert record, older records of the same type and property are automatically marked as <strong>Expired</strong> in Airtable (batch PATCH, up to 10 at a time).</p>
+  </div>
+</div>
+
+<!-- 9. FILTERING & SEARCH -->
+<div class="section" id="search">
+  <h2 class="section-title"><span class="icon">&#x1F50D;</span> 9. Filtering &amp; Search</h2>
+
+  <div class="card">
+    <div class="card-header">Local search (within the current label)</div>
+    <p>The search bar appears below the stats after emails load. Type to search with a 300ms debounce. Searches across: subject, sender name, sender email, snippet, and the full decoded body of every message in the thread.</p>
+    <p>A clear button (&#x00D7;) appears in the search box. Below the box, a count shows "Showing X of Y emails". Pagination resets to page 1 on each search.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Global search (across all labels)</div>
+    <p>Click the <strong>This Label</strong> scope button to switch it to <strong>All Emails</strong>. In global mode, type your query and press <strong>Enter</strong>. The app uses the Gmail API's <code>q</code> parameter to search (up to 100 results).</p>
+    <p>Results are displayed in a special global view showing Subject/From, Label, Date, and Age columns. Each result shows which label the email belongs to via a tag badge.</p>
+    <p>The current label's emails are saved while global search is active. Clearing the search or switching the scope back restores them.</p>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;</span>
+      <div>The scope toggle button is <strong>hidden on the Inbox view</strong> (global search is always available via the Enter key in Inbox). Switching labels clears any active search.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Newsletter filter bar</div>
+    <p>When viewing label 6 (Newsletter), a filter bar appears with three buttons: <strong>All</strong>, <strong>Unread</strong>, <strong>Read</strong>. These filter the list by the local read status stored in <code>read_newsletters</code>. The filter combines with any active search query.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Pagination</div>
+    <p>Pages contain <strong>50 emails</strong> each. The pagination bar shows at the bottom of the list when there is more than one page. Previous / Next buttons navigate between pages; clicking scrolls back to the top of the list.</p>
+  </div>
+</div>
+
+<!-- 10. AIRTABLE TASK AUTOMATION -->
+<div class="section" id="task-automation">
+  <h2 class="section-title"><span class="icon">&#x1F4CA;</span> 10. Airtable Task Automation</h2>
+
+  <div class="card">
+    <div class="card-header">How it works</div>
+    <p>When an email is moved to <strong>label 8: Task created</strong> (via the label dropdown or the inbox Apply button), the app automatically:</p>
+    <ol class="steps">
+      <li>Checks if a task already exists for this thread (by searching the <code>Inbound Note URL Link</code> field for the Gmail thread ID).</li>
+      <li>Calls Claude Haiku to generate a task title and description.</li>
+      <li>Creates a new record in the Airtable Operations Director base with Status = <strong>Today</strong>, Priority = <strong>Urgent</strong>, Time Estimate = <strong>15 min</strong>.</li>
+      <li>Sets the Gmail thread URL as the <code>Inbound Note URL Link</code> so the task can be traced back.</li>
+    </ol>
+    <div class="info-box warn">
+      <span class="ib-icon">&#x26A0;</span>
+      <div>Airtable integration requires a Personal Access Token configured in Settings. Without it, moving to label 8 will show an error and no task will be created. The email moves to the label regardless.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Auto-completion detection (label 8 &rarr; 9)</div>
+    <p>Every time you load <strong>label 8</strong>, the app queries Airtable for inbound tasks (<code>Inbound Communication Task = true</code>) with Status = <strong>Completed</strong> and a Gmail URL in the <code>Inbound Note URL Link</code> field.</p>
+    <p>Any loaded emails that match are automatically moved from label 8 to <strong>label 9: Task completed</strong> in Gmail, and removed from the current list. A success banner shows how many were moved.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Default Airtable configuration</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead><tr><th>Setting</th><th>Default value</th></tr></thead>
+        <tbody>
+          <tr><td>Base ID</td><td><code>appnqjDpqDniH3IRl</code></td></tr>
+          <tr><td>Table ID (Tasks)</td><td><code>tblqB8b22hKBL4PF1</code></td></tr>
+          <tr><td>Default Assignee</td><td><code>usrP7K5pmPSdVVgTN</code> (Mica Albovias)</td></tr>
+          <tr><td>Completed status option ID</td><td><code>selI6Otekm3JyaBSJ</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:0.75rem;">These can be overridden in Settings. The Airtable PAT must be set in Settings — there is no default.</p>
+  </div>
+</div>
+
+<!-- 11. PROPERTY COMPLIANCE -->
+<div class="section" id="compliance">
+  <h2 class="section-title"><span class="icon">&#x1F3E2;</span> 11. Property Compliance Processing</h2>
+
+  <div class="card">
+    <div class="card-header">Overview</div>
+    <p>Emails labelled with a label beginning with <code>10</code> (e.g. "10: Property Compliance") trigger automatic compliance certificate processing. The app uses AI to parse the email and create records in the Airtable Compliance Certs table.</p>
+    <p>Valid certificate types: <strong>GSC</strong>, <strong>EICR</strong>, <strong>Landlord Insurance</strong>, <strong>Fire Alarm</strong>.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Processing steps</div>
+    <ol class="steps">
+      <li>The app fetches all properties from the Airtable Properties table (cached in memory during the session).</li>
+      <li>Claude Haiku analyses the email body and extracts cert type, property name, renewal date, and status.</li>
+      <li>The property name is matched (case-insensitive) against your Airtable properties by full name or short name.</li>
+      <li>A new cert record is created in the Compliance Certs table with a link back to the Gmail thread URL in the Notes field.</li>
+      <li>Older Active certs of the same type and property are automatically marked <strong>Expired</strong>.</li>
+      <li>The processing result is stored in <code>compliance_processed</code> in localStorage.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Compliance status badges</div>
+    <ul>
+      <li><span class="label-badge lb-green">Processed</span> &mdash; cert record created successfully</li>
+      <li><span class="label-badge lb-red">Failed</span> or <span class="label-badge lb-red">No Match</span> &mdash; AI could not extract details or no matching property found</li>
+      <li><span class="label-badge lb-amber">Pending</span> &mdash; not yet processed</li>
+    </ul>
+    <p style="margin-top:0.5rem;">Failed emails can be retried via <strong>Process Now</strong> in the expanded row, or via <strong>Process All Pending</strong> in the compliance banner.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Compliance Airtable tables</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead><tr><th>Table</th><th>Table ID</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Compliance Certs</td><td><code>tbl35rf9qtmq0P87r</code></td><td>Stores certificate records</td></tr>
+          <tr><td>Properties</td><td><code>tbl6f0OkAmTC2jbuG</code></td><td>Source list of properties for matching</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 12. BACKUP, SYNC & AUDIT -->
+<div class="section" id="backup-sync">
+  <h2 class="section-title"><span class="icon">&#x1F4BE;</span> 12. Backup, Sync &amp; Audit Log</h2>
+
+  <div class="card">
+    <div class="card-header">Auto-backup</div>
+    <p>After every significant action (send email, apply label, build KB, etc.) the app silently saves a backup of all localStorage data to the key <code>auto_backup_data</code>. If no backup has been taken in the last 24 hours, one is triggered on app load.</p>
+    <p>The <strong>backup indicator</strong> in the header shows the age of the last backup (e.g. "Backup: 2h ago"). If over 24 hours old it turns red.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Manual backup &amp; restore</div>
+    <p>Open Settings (gear icon) and scroll to <strong>Backup &amp; Restore</strong>.</p>
+    <ul>
+      <li><strong>Export Backup</strong>: downloads a JSON file named <code>inbound-comms-backup-YYYY-MM-DD.json</code> containing all local data.</li>
+      <li><strong>Import Backup</strong>: restores from a previously exported JSON file. If the file does not match the expected format, a confirmation prompt is shown.</li>
+    </ul>
+    <p>Keys included in backup: <code>label_knowledge_base</code>, <code>kb_last_built</code>, <code>ai_corrections</code>, <code>ai_accuracy_log</code>, <code>delay_payment_log</code>, <code>read_newsletters</code>, <code>unsubscribe_log</code>, <code>sender_name</code>, <code>applied_today_count</code>, <code>applied_today_date</code>, <code>response_amendments</code>.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Cloud sync (Cloudflare KV)</div>
+    <p>On every app load (after auth), <code>syncFromCloud()</code> fetches the shared data from Cloudflare KV. Three keys are synced:</p>
+    <ul>
+      <li><code>label_knowledge_base</code> — AI label patterns</li>
+      <li><code>kb_last_built</code> — timestamp of last KB build</li>
+      <li><code>ai_corrections</code> — user label corrections</li>
+    </ul>
+    <p>If the cloud version is newer (based on <code>kb_last_built</code> timestamp), all three keys are pulled from the cloud. If local is newer, all three are pushed to the cloud. The cloud sync indicator in the header shows: <strong>Syncing...</strong> (amber), <strong>Synced</strong> (green), or <strong>Offline</strong> (red) if the request fails.</p>
+    <div class="info-box tip">
+      <span class="ib-icon">&#x2601;</span>
+      <div>Cloud sync means the knowledge base and corrections are shared across all devices and browsers — you only need to build the KB once.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Audit log</div>
+    <p>Every action is recorded in <code>audit_log</code> in localStorage (up to 500 entries, newest last). Open Settings to view the last 50 entries (newest first) with timestamp, icon, and description.</p>
+    <p>Audit actions logged: <code>label_move</code>, <code>email_sent</code>, <code>ai_draft</code>, <code>inbox_label</code>, <code>inbox_label_bulk</code>, <code>unsubscribe</code>, <code>kb_build</code>, <code>backup_export</code>, <code>backup_import</code>, <code>undo</code>, <code>cloud_sync</code>, <code>airtable_create</code>, <code>airtable_complete</code>, <code>compliance_cert</code>.</p>
+    <p>From Settings you can <strong>Export Log (CSV)</strong> (downloads <code>audit-log-YYYY-MM-DD.csv</code>) or <strong>Clear Log</strong> (requires confirmation).</p>
+  </div>
+</div>
+
+<!-- 13. AIRTABLE FIELDS REFERENCE -->
+<div class="section" id="fields-ref">
+  <h2 class="section-title"><span class="icon">&#x1F4D0;</span> 13. Airtable Fields Reference</h2>
+
+  <div class="card">
+    <div class="card-header">Tasks table fields (used when creating inbound tasks)</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead><tr><th>Field name</th><th>Field ID</th><th>Type</th><th>Value set by app</th></tr></thead>
+        <tbody>
+          <tr><td>Task Name</td><td><code>fldgFjGBw6bTKJFCD</code></td><td>Single line text</td><td>AI-generated: "INBOUND: ..."</td></tr>
+          <tr><td>Status</td><td><code>fldx4qCw17UfrKpaN</code></td><td>Single select</td><td>"Today"</td></tr>
+          <tr><td>Assignee</td><td><code>fldELMncVJYPDRJNc</code></td><td>Collaborator</td><td>Default or Settings override</td></tr>
+          <tr><td>Priority</td><td><code>fldS21RwmwOqt71LI</code></td><td>Single select</td><td>"Urgent"</td></tr>
+          <tr><td>Time Estimate</td><td><code>fld10VzzbiNNgRmIi</code></td><td>Single select</td><td>"15 min"</td></tr>
+          <tr><td>Description</td><td><code>fldRGhBQViKZKtkQ6</code></td><td>Long text</td><td>AI-generated description</td></tr>
+          <tr><td>Inbound Communication Task</td><td><code>fldueazD67F7fUGee</code></td><td>Checkbox</td><td>true</td></tr>
+          <tr><td>Inbound Source Type</td><td><code>fldiXSzcMol6Tdwij</code></td><td>Single select</td><td>"Gmail"</td></tr>
+          <tr><td>Inbound Message Content</td><td><code>fldiSNijdCy5GXuzL</code></td><td>Long text</td><td>Full email body (up to 5000 chars)</td></tr>
+          <tr><td>Inbound Sender</td><td><code>fldzf4xlbrQuktx0i</code></td><td>Single line text</td><td>Sender email address</td></tr>
+          <tr><td>Inbound Date Received</td><td><code>fldR4peEZRXo7tjoI</code></td><td>Date</td><td>Today's date</td></tr>
+          <tr><td>Inbound Note URL Link</td><td><code>fldXf1p0vtHqOZcKl</code></td><td>URL</td><td>Gmail thread URL</td></tr>
+          <tr><td>Due Date</td><td><code>fld7XP8w8kbxfETV4</code></td><td>Date</td><td>Today's date</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Compliance Certs table fields</div>
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead><tr><th>Field name</th><th>Field ID</th><th>Value set by app</th></tr></thead>
+        <tbody>
+          <tr><td>Type</td><td><code>fld00ZuxT8uKagM0b</code></td><td>AI-extracted cert type (GSC / EICR / Landlord Insurance / Fire Alarm)</td></tr>
+          <tr><td>Property</td><td><code>fldXdDStBL7xrytgT</code></td><td>Linked record ID matched from Properties table</td></tr>
+          <tr><td>Unit</td><td><code>fldAa2aZINAPgmR79</code></td><td>(Not set by app)</td></tr>
+          <tr><td>Status</td><td><code>fldcSmrEQxoqpEQYF</code></td><td>"Active" or "Expired"</td></tr>
+          <tr><td>Renewal Date</td><td><code>fldhZw8IrmgLt1hLY</code></td><td>AI-extracted date (YYYY-MM-DD)</td></tr>
+          <tr><td>Notes</td><td><code>fldzNfi71BXP1E3pj</code></td><td>Gmail thread URL + AI summary</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 14. LOCALSTORAGE KEYS -->
+<div class="section" id="localstorage">
+  <h2 class="section-title"><span class="icon">&#x1F5C4;</span> 14. localStorage Keys Reference</h2>
+  <div class="card">
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead><tr><th>Key</th><th>What it stores</th><th>Max size / entries</th></tr></thead>
+        <tbody>
+          <tr><td><code>label_knowledge_base</code></td><td>JSON object: {labelName: [{senderEmail, senderName, subjectKeywords, snippet}]}</td><td>20 patterns per label</td></tr>
+          <tr><td><code>kb_last_built</code></td><td>Unix timestamp (ms) when the KB was last built</td><td>Single value</td></tr>
+          <tr><td><code>label_corrections</code></td><td>Array of corrections: {sender, subject, suggestedLabel, correctedLabel, date}</td><td>100 entries</td></tr>
+          <tr><td><code>ai_accuracy_log</code></td><td>Array: {date, suggested, applied, correct}</td><td>500 entries</td></tr>
+          <tr><td><code>delay_payment_log</code></td><td>Array: {threadId, subject, recipient, date}</td><td>500 entries</td></tr>
+          <tr><td><code>read_newsletters</code></td><td>Array of thread IDs marked as read</td><td>1000 entries</td></tr>
+          <tr><td><code>unsubscribe_log</code></td><td>Array: {threadId, sender, method, date}</td><td>500 entries</td></tr>
+          <tr><td><code>compliance_processed</code></td><td>Object: {threadId: {status, certsCreated, processedAt}}</td><td>Unbounded</td></tr>
+          <tr><td><code>audit_log</code></td><td>Array: {timestamp, action, description}</td><td>500 entries</td></tr>
+          <tr><td><code>response_amendments</code></td><td>Array: {subject, feedback, date} from Revise actions</td><td>50 entries</td></tr>
+          <tr><td><code>sender_name</code></td><td>Your name for AI sign-offs (default: "Kevin")</td><td>Single value</td></tr>
+          <tr><td><code>airtable_pat</code></td><td>Airtable Personal Access Token</td><td>Single value</td></tr>
+          <tr><td><code>airtable_base_id</code></td><td>Override for default base ID</td><td>Single value</td></tr>
+          <tr><td><code>airtable_table_id</code></td><td>Override for default table ID</td><td>Single value</td></tr>
+          <tr><td><code>airtable_assignee</code></td><td>Override for default assignee user ID</td><td>Single value</td></tr>
+          <tr><td><code>applied_today_YYYY-MM-DD</code></td><td>Count of labels applied today (one key per day)</td><td>Single value per day</td></tr>
+          <tr><td><code>auto_backup_data</code></td><td>JSON snapshot of all backup keys (silently updated)</td><td>Single value</td></tr>
+          <tr><td><code>last_auto_backup</code></td><td>Unix timestamp of last auto-backup</td><td>Single value</td></tr>
+          <tr><td><code>kb_prompt_dismissed</code></td><td>"true" if user has dismissed the KB build prompt</td><td>Single value</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info-box info">
+      <span class="ib-icon">&#x1F4BB;</span>
+      <div>The Gmail OAuth token is stored in <code>sessionStorage</code> (not localStorage) under the keys <code>gmail_token</code> and <code>gmail_token_expires</code>. It is cleared automatically when the browser tab is closed.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 15. TROUBLESHOOTING -->
+<div class="section" id="troubleshooting">
+  <h2 class="section-title"><span class="icon">&#x1F527;</span> 15. Troubleshooting</h2>
+
+  <div class="card">
+    <div class="ts-item">
+      <div class="ts-problem">Page shows auth screen even though I was signed in before</div>
+      <div class="ts-solution">The OAuth token is in sessionStorage and is cleared when the tab closes. Click "Sign in with Google" again. This is expected behaviour for security.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">"Session expired. Please sign in again." error appears</div>
+      <div class="ts-solution">The token expired mid-session (rare — the app proactively refreshes 5 minutes before expiry). Sign out and sign in again. If this happens frequently, check that the Google OAuth consent screen app is not in a restricted state.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Emails not loading — "Failed to load emails" error</div>
+      <div class="ts-solution">Check your internet connection. If the error includes a Gmail API error message, the API may be temporarily down. Try clicking Refresh. Check the browser console for detailed error messages.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">AI suggestions show "Retry later" or "Error" badges</div>
+      <div class="ts-solution">The Claude API was overloaded (HTTP 529). The app retries up to 3 times. If still failing, click Refresh to reload the page and try again after a few minutes.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">AI suggestions are inaccurate</div>
+      <div class="ts-solution">Rebuild the knowledge base: open Settings, click "Build KB". This re-trains from the 20 most recent emails per label. Also check that past corrections are being applied — the AI accuracy % should improve over time as you correct suggestions.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">"Label not found" when moving an email</div>
+      <div class="ts-solution">The label name in the dropdown does not match a label in your Gmail account. This can happen if a label was renamed or deleted. Click Refresh to reload labels.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Airtable task not created when moving to label 8</div>
+      <div class="ts-solution">Check Settings — your Airtable PAT must be set. The error message "Airtable token not configured" confirms this. Also check that the base ID and table ID are correct (defaults: <code>appnqjDpqDniH3IRl</code> / <code>tblqB8b22hKBL4PF1</code>).</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Compliance processing shows "No Match" or "Failed"</div>
+      <div class="ts-solution">The AI could not identify the certificate type or property. Check that the email subject/body clearly mentions one of the valid cert types (GSC, EICR, Landlord Insurance, Fire Alarm) and a property name that matches your Airtable Properties table. You can retry via the "Process Now" button in the expanded row.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">"Please wait, a label change is already in progress"</div>
+      <div class="ts-solution">A label move is rate-limited with 300ms delays per message. Wait a moment and try again. If it appears stuck, click Refresh.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Cloud sync shows "Offline" indicator</div>
+      <div class="ts-solution">The Cloudflare Worker is unreachable. The app falls back to localStorage — all functionality still works, but knowledge base will not sync to other devices until connectivity is restored. The indicator updates automatically on the next sync attempt.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Follow Up emails not being auto-removed after replies</div>
+      <div class="ts-solution">The auto-removal checks the last message sender against your Gmail send-as aliases. If the alias is not set up in Gmail Settings &gt; Accounts &gt; Send mail as, or is not verified, the comparison may fail. Ensure all your sending email addresses are listed as verified send-as aliases in Gmail.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Email body shows "(Unable to decode content)"</div>
+      <div class="ts-solution">The email uses an unusual Base64 encoding. This is a display issue only — all actions (reply, move) still work on the email. The sender can be asked to resend in a standard format.</div>
+    </div>
+    <div class="ts-item">
+      <div class="ts-problem">Attachment download fails</div>
+      <div class="ts-solution">Attachment data is fetched on demand from the Gmail API. If the session token expired mid-download, sign in again and retry. Large attachments near the 20 MB limit may also time out.</div>
+    </div>
+  </div>
+</div>
+
+<!-- 16. CHANGELOG -->
+<div class="section" id="changelog">
+  <h2 class="section-title"><span class="icon">&#x1F4DD;</span> 16. Changelog</h2>
+  <div class="card">
+    <div style="overflow-x:auto;">
+      <table class="label-table">
+        <thead><tr><th>Version</th><th>Date</th><th>Changes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>2.3</strong></td>
+            <td>17 Apr 2026</td>
+            <td>Full rewrite based on thorough code analysis. Added: Property Compliance label 10 workflow, auto-completion detection for label 8&rarr;9, cloud sync via Cloudflare KV, global search, pagination, undo toast, newsletter read/unread filter, delay payment history tracking, AI accuracy tracking and stats, response amendments self-learning, attachment support in draft modal, compliance processing (batch and individual), full localStorage keys reference, complete troubleshooting section. Corrected AI model versions (Haiku 4-5, Sonnet 4). Fixed access URL to <code>follow-up.html</code>.</td>
+          </tr>
+          <tr>
+            <td>2.2</td>
+            <td>12 Apr 2026</td>
+            <td>Previous version. Documented 9 labels, basic AI suggestions, Airtable task creation, backup/restore, audit log.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 </div><!-- /container -->
