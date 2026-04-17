@@ -70,6 +70,11 @@
                 // Skip if locally marked as returned (prevents re-showing before Airtable syncs)
                 if (localStorage.getItem('cfv_' + tenancy.id + '_returned')) return;
 
+                // Skip if the tenancy has ended — tenant status will be "Former" after
+                // the tenancy-ender skill runs. This keeps the CFV OS in sync with the
+                // Leadership Dashboard, which filters voids by active tenant status.
+                if (!isTenantStatusActive(tenancy)) return;
+
                 const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today);
 
                 // Auto-return to In Payment if a linked reconciled transaction exists
