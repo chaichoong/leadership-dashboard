@@ -314,6 +314,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
+    <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
     <button class="btn" onclick="loadAllData()">Refresh</button>
   </div>
 </div>
@@ -364,6 +365,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <option value="Personal">Personal</option>
       </select>
       <button class="btn btn-primary btn-sm" onclick="runAutoSchedulePreview()">Auto-Schedule</button>
+      <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ Add Task</button>
     </div>
 
     <div class="task-table-wrap">
@@ -768,6 +770,14 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     }
     const res=await patchTask(taskId,payload);
     if(!res.ok){throw new Error('HTTP '+res.status)}
+    // Clear persisted start time if task completes or moves to a different day
+    if(fieldKey==='status'&&rawValue==='Completed'){
+      const today=todayStr();saveStartTime(today,taskId,null);
+    }
+    if(fieldKey==='dueDate'){
+      const today=todayStr();
+      if(rawValue!==today)saveStartTime(today,taskId,null);
+    }
     toast('Saved');
   }catch(e){
     Object.assign(task,prev);
@@ -963,13 +973,21 @@ function buildTimelineBlocks(){
   const allFixed=[...fixed,...routinePlaced].sort((a,b)=>a.start-b.start);
   const free=findFreeSlots(allFixed,dayStart,dayEnd);
 
-  // Sort tasks by priority; if task has _startMin, honor it
+  // Sort tasks by priority; if task has _startMin or saved start time, honor it
+  const today=todayStr();
+  const savedStarts=getStartTimes(today);
   const tasks=[...overdueTasks,...todayTasks].sort((a,b)=>(PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99));
   const placedTasks=[];const deferred=[];
   let slotIdx=0,slotUsed=0;
 
   tasks.forEach(task=>{
     const mins=task.minutes||30;
+    // Prefer persisted start time (localStorage) over in-memory _startMin
+    const savedStart=savedStarts[task.id];
+    if(savedStart!=null){
+      placedTasks.push({type:'task',name:task.name,start:savedStart,end:savedStart+mins,duration:mins,task});
+      return;
+    }
     // If manually scheduled (via drag), use that start
     if(task._startMin!==null&&task._startMin!==undefined){
       placedTasks.push({type:'task',name:task.name,start:task._startMin,end:task._startMin+mins,duration:mins,task});
@@ -1022,6 +1040,7 @@ function renderMyDay(){
   }
 
   html+=`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
     <button class="btn btn-primary" onclick="runAutoSchedulePreview()">Auto-Schedule</button>
     <button class="btn" onclick="openPlanner()">Plan My Day</button>
     <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
@@ -1123,6 +1142,8 @@ function dropOnTimeline(e){
   minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
   const task=allTasks.find(t=>t.id===data.taskId);if(!task)return;
   task._startMin=minOfDay;
+  // Persist start time locally (per-date)
+  saveStartTime(todayStr(),task.id,minOfDay);
   if(data.kind==='sideschedule'){
     // Schedule for today: set status Today + dueDate today
     updateTaskField(task.id,'status','Today');
@@ -1608,6 +1629,77 @@ const _pTimers={};
 function projEditDebounced(pid,fieldKey,val){
   const k=pid+':'+fieldKey;clearTimeout(_pTimers[k]);
   _pTimers[k]=setTimeout(()=>projEdit(pid,fieldKey,val),500);
+}
+
+// ======================================================
+// CREATE TASK MODAL
+// ======================================================
+function openCreateTaskModal(){
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='createTaskModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  const today=todayStr();
+  const defaultKey=(currentUser&&currentUser.key)||'kevin';
+  overlay.innerHTML=`<div class="modal"><h2>Add Task</h2>
+    <div class="field-row"><label>Name</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
+    <div class="field-row"><label>Due date</label><input type="date" id="ctDue" value="${today}"></div>
+    <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Time estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='30 min'?'selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Hard Deadline</label><div class="field-val"><input type="checkbox" id="ctHard"></div></div>
+    <div class="field-row"><label>Status</label><select id="ctStatus"><option>Today</option><option selected>Upcoming</option><option>To do</option></select></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3"></textarea></div>
+    <div class="field-row"><label>Recurring</label><select id="ctRecur">${['None','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option>${r}</option>`).join('')}</select></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('createTaskModal').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCreateTask()">Add Task</button>
+    </div></div>`;
+  document.body.appendChild(overlay);
+}
+async function submitCreateTask(){
+  const name=document.getElementById('ctName').value.trim();
+  if(!name){toast('Name required',true);return}
+  const fields={};
+  fields[F.name]=name;
+  const due=document.getElementById('ctDue').value;if(due)fields[F.dueDate]=due;
+  const status=document.getElementById('ctStatus').value;if(status)fields[F.status]=status;
+  const assigneeKey=document.getElementById('ctAssignee').value;
+  const member=TEAM.find(m=>m.key===assigneeKey);
+  if(member)fields[F.assignee]={email:member.email};
+  const priority=document.getElementById('ctPriority').value;if(priority)fields[F.priority]=priority;
+  const timeEst=document.getElementById('ctTimeEst').value;if(timeEst)fields[F.timeEst]=timeEst;
+  const desc=document.getElementById('ctDesc').value;if(desc)fields[F.description]=desc;
+  const recur=document.getElementById('ctRecur').value;if(recur&&recur!=='None')fields[F.recurring]=recur;
+  const biz=document.getElementById('ctBusiness').value;
+  if(biz&&BUSINESS_MAP[biz])fields[F.business]=[{id:BUSINESS_MAP[biz]}];
+  fields[F.hardDeadline]=document.getElementById('ctHard').checked;
+
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({fields,typecast:true})
+    });
+    if(!res.ok){const t=await res.text();throw new Error('HTTP '+res.status+' '+t)}
+    const data=await res.json();
+    allTasks.push(parseTask(data));
+    document.getElementById('createTaskModal').remove();
+    toast('Task added');
+    renderAll();
+  }catch(e){toast('Failed: '+e.message,true)}
+}
+
+// ======================================================
+// LOCAL START-TIME PERSISTENCE (My Day timeline)
+// ======================================================
+function getStartTimes(dateStr){
+  try{return JSON.parse(localStorage.getItem('_task_starttimes_'+dateStr)||'{}')}catch(e){return {}}
+}
+function saveStartTime(dateStr,taskId,startMin){
+  const map=getStartTimes(dateStr);
+  if(startMin==null)delete map[taskId];else map[taskId]=startMin;
+  localStorage.setItem('_task_starttimes_'+dateStr,JSON.stringify(map));
 }
 
 function openCreateProjectModal(){
