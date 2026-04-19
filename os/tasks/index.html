@@ -26,10 +26,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .identity-btn .avatar{width:36px;height:36px;font-size:14px}
 
 /* Layout */
-.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
 .topbar h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
 .topbar .subtitle{font-size:12px;color:var(--text-secondary)}
-.topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.topbar-right .btn{height:32px;padding:0 12px;font-size:12px;display:inline-flex;align-items:center;line-height:1}
 .user-badge{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-primary);background:var(--bg-surface-2);padding:4px 12px 4px 4px;border-radius:20px}
 .user-badge .avatar{width:24px;height:24px;font-size:10px}
 .switch-user{font-size:11px;color:var(--text-secondary);cursor:pointer;text-decoration:underline}
@@ -77,7 +78,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .kpi.purple .value{color:var(--accent)}.kpi.accent .value{color:var(--accent)}
 
 /* Tabs */
-.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border-default);overflow-x:auto}
+.view-tabs{display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border-default);overflow-x:auto;position:sticky;top:57px;z-index:40;background:var(--bg-app);padding-top:4px}
 .view-tab{padding:8px 16px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
 .view-tab:hover{color:var(--text-primary)}
 .view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
@@ -95,6 +96,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .btn-danger{background:var(--danger);border-color:var(--danger);color:#fff}
 .btn-sm{padding:4px 10px;font-size:11px}
 .btn-icon{padding:4px 8px;font-size:13px;line-height:1}
+.action-row .btn{height:34px;padding:0 14px;font-size:13px;display:inline-flex;align-items:center;line-height:1}
 
 /* Task table */
 .task-table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
@@ -145,18 +147,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
 .btn-success{background:var(--success);border-color:var(--success);color:#fff}
 .btn-success:hover{background:var(--success);color:#fff;opacity:.9}
-.row-actions{display:inline-flex;gap:4px;opacity:0;transition:opacity .15s}
-.task-table tr:hover .row-actions,
-.side-card:hover .row-actions,
-.kanban-card:hover .row-actions,
-.recurring-card:hover .row-actions,
-.ded-row:hover .row-actions{opacity:1}
-.row-act-btn{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-secondary);border-radius:4px;width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;line-height:1}
-.row-act-btn:hover{background:var(--bg-surface-2)}
-.row-act-btn.complete{color:var(--success);border-color:var(--success)}
-.row-act-btn.complete:hover{background:var(--success);color:#fff}
-.row-act-btn.delete{color:var(--danger);border-color:var(--danger)}
-.row-act-btn.delete:hover{background:var(--danger);color:#fff}
+.row-actions{display:inline-flex;gap:6px;opacity:1}
+.row-act-btn{border:none;border-radius:50%;width:24px;height:24px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;line-height:1;color:#fff;font-weight:700;flex-shrink:0}
+.row-act-btn.complete{background:var(--success)}
+.row-act-btn.complete:hover{background:var(--success);filter:brightness(1.1)}
+.row-act-btn.delete{background:var(--danger)}
+.row-act-btn.delete:hover{background:var(--danger);filter:brightness(1.1)}
 .field-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-subtle);font-size:13px}
 .field-row label{min-width:120px;color:var(--text-secondary);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 .field-row .field-val{flex:1;min-width:0}
@@ -216,7 +212,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .routine-row input,.routine-row select{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:4px 8px;border-radius:4px;font-size:12px}
 .routine-row input[type=number]{width:60px}
 .overdue-notice{background:var(--danger-bg);border:1px solid var(--danger);border-radius:10px;padding:12px 18px;margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--danger)}
-.planner-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);display:flex;align-items:center;justify-content:center;z-index:9998}
+/* .planner-overlay — removed with Plan My Day */
 .planner-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:16px;padding:28px;max-width:640px;width:95%;max-height:85vh;overflow-y:auto}
 .planner-card h2{font-size:18px;margin-bottom:4px}
 .planner-card p{font-size:13px;color:var(--text-secondary);margin-bottom:16px}
@@ -237,7 +233,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .kanban-col-header .week-hours{display:block;font-size:10px;color:var(--accent);margin-top:2px}
 .kanban-col-body{padding:6px;flex:1;display:flex;flex-direction:column;gap:5px;min-height:100px}
 .kanban-col-body.drag-over{background:var(--accent-soft)}
-.kanban-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:6px;padding:6px 8px;cursor:grab;font-size:11px;min-height:72px}
+.kanban-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:6px;padding:6px 8px 6px 8px;cursor:grab;font-size:11px;min-height:72px;padding-right:62px}
 .kanban-card:hover{border-color:var(--accent)}
 .kanban-card h4{font-size:11px;font-weight:600;margin-bottom:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
 .kanban-card .card-meta{display:flex;align-items:center;gap:4px;flex-wrap:wrap;color:var(--text-secondary);margin-top:3px;font-size:10px}
@@ -294,7 +290,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .freq-group{margin-bottom:12px}
 .freq-group h4{font-size:12px;color:var(--accent);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.5px}
 .recurring-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px}
-.recurring-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px;font-size:12px;cursor:pointer}
+.recurring-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:10px 68px 10px 12px;font-size:12px;cursor:pointer}
 .recurring-card:hover{border-color:var(--accent)}
 .recurring-card h4{font-size:13px;font-weight:600;margin-bottom:4px}
 .recurring-card .meta{font-size:11px;color:var(--text-secondary)}
@@ -357,12 +353,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
-    <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
-    <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4;display:flex;flex-direction:column;align-items:flex-start;line-height:1.1;padding:6px 10px" title="Undo last action (Cmd+Z)">
-      <span style="font-weight:600">Undo</span>
-      <span id="undoBtnLabel" style="font-size:10px;color:var(--text-secondary);font-weight:400;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Nothing to undo</span>
+    <button class="btn" onclick="loadAllData()" title="Reload data from Airtable">Refresh</button>
+    <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4" title="Undo last action (Cmd+Z) — Nothing to undo">
+      <span>Undo</span><span id="undoBtnLabel" style="display:none"></span>
     </button>
-    <button class="btn" onclick="loadAllData()">Refresh</button>
+    <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
   </div>
 </div>
 
@@ -653,13 +648,15 @@ async function fetchTable(tableId,fieldIds,filter){
 
 async function fetchBusinesses(){
   try{
-    const recs=await fetchTable(BUSINESSES_TABLE,null,'');
+    // Businesses table primary field "Business Name" = fldbbRqVxLxUdHwIR
+    const recs=await fetchTable(BUSINESSES_TABLE,['fldbbRqVxLxUdHwIR','fldgGU2PJze8LVuCT'],'');
     BUSINESS_MAP={};
     recs.forEach(r=>{
-      const f=r.fields||{};
-      const name=f.Name||f.name||Object.values(f)[0];
+      const c=r.cellValuesByFieldId||r.fields||{};
+      const name=c.fldbbRqVxLxUdHwIR||c.fldgGU2PJze8LVuCT||c.Name||c.name||Object.values(c)[0];
       if(name&&BUSINESS_OPTIONS.includes(name)){BUSINESS_MAP[name]=r.id}
     });
+    console.log('[Businesses] loaded',BUSINESS_MAP);
   }catch(e){console.warn('businesses fetch failed',e)}
 }
 
@@ -1558,10 +1555,12 @@ function updateUndoButton(){
   if(undoStack.length===0){
     btn.disabled=true;btn.style.opacity='0.4';
     lbl.textContent='Nothing to undo';
+    btn.title='Undo last action (Cmd+Z) — Nothing to undo';
   } else {
     btn.disabled=false;btn.style.opacity='1';
     const last=undoStack[undoStack.length-1];
     lbl.textContent='Undo: '+(last.label||'last action');
+    btn.title='Undo: '+(last.label||'last action')+' (Cmd+Z)';
   }
 }
 async function doUndo(){
@@ -1653,8 +1652,8 @@ document.addEventListener('keydown',function(e){
 
 function rowActionsHtml(taskId){
   return `<span class="row-actions" onclick="event.stopPropagation()">
-    <button class="row-act-btn complete" title="Complete" onclick="completeTaskInline('${taskId}',event)">&#10003;</button>
-    <button class="row-act-btn delete" title="Delete" onclick="deleteTask('${taskId}',event)">&times;</button>
+    <button class="row-act-btn complete" title="Mark as complete" aria-label="Mark as complete" onclick="completeTaskInline('${taskId}',event)">&#10003;</button>
+    <button class="row-act-btn delete" title="Delete this task" aria-label="Delete this task" onclick="deleteTask('${taskId}',event)">&times;</button>
   </span>`;
 }
 
@@ -1817,17 +1816,10 @@ function renderMyDay(){
     html+=`<div class="overdue-notice"><strong>!</strong> ${overdueTasks.length} overdue task${overdueTasks.length!==1?'s':''} auto-rescheduled to today (originals preserved)</div>`;
   }
 
-  html+=`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-start">
-    <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
-    <div style="display:flex;flex-direction:column;align-items:flex-start">
-      <button class="btn btn-primary" onclick="runAutoSchedulePreview()" title="Spreads tasks across multiple working days. Respects hard deadlines, fills each day to capacity, bumps overflow forward. Shows a preview before applying.">Auto-Schedule</button>
-      <span style="font-size:10px;color:var(--text-secondary);margin-top:2px;max-width:180px">Spread tasks across multiple days with preview</span>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-start">
-      <button class="btn" onclick="openPlanner()" title="Shows a preview of today only &mdash; what fits, what doesn't, with defer-to-tomorrow suggestions. Read-only.">Plan My Day</button>
-      <span style="font-size:10px;color:var(--text-secondary);margin-top:2px;max-width:180px">Today-only read-only preview</span>
-    </div>
-    <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
+  html+=`<div class="action-row" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-primary" onclick="openCreateTaskModal()" title="Create a new task">+ Add Task</button>
+    <button class="btn btn-primary" onclick="runAutoSchedulePreview()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
+    <button class="btn" onclick="toggleRoutineConfig()" title="Edit your daily routine blocks (wake, lunch, focus blocks, etc.)">Configure Routine</button>
   </div>`;
 
   if(showRoutineConfig)html+=renderRoutineConfigPanel(getRoutineBlocks(),config);
@@ -2268,30 +2260,7 @@ async function autoRescheduleOverdue(){
   return{count:overdue.length};
 }
 
-// ======================================================
-// PLANNER (lightweight summary modal — keeps existing button)
-// ======================================================
-function openPlanner(){
-  const {todayTasks,overdueTasks}=getMyDayTasks();
-  const plan=buildTimelineBlocks();
-  const totalMins=todayTasks.concat(overdueTasks).reduce((s,t)=>s+(t.minutes||30),0);
-  const scheduledMins=plan.blocks.filter(b=>b.type==='task').reduce((s,b)=>s+b.duration,0);
-
-  const overlay=document.createElement('div');
-  overlay.className='planner-overlay';overlay.id='plannerOverlay';
-  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
-  let html=`<div class="planner-card"><h2>Plan My Day</h2><p>Calendar + routine + priority order.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-      <div class="kpi ${plan.deferred.length?'red':'green'}" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(totalMins)}</div><div class="label">Task Time</div></div>
-      <div class="kpi cyan" style="padding:10px"><div class="value" style="font-size:18px">${formatMins(scheduledMins)}</div><div class="label">Scheduled</div></div>
-    </div>`;
-  if(plan.deferred.length){
-    html+=`<div style="font-size:13px;font-weight:600;margin-bottom:8px">Won't fit today (${plan.deferred.length}):</div>`;
-    plan.deferred.forEach(t=>{html+=`<div class="planner-suggestion"><div>${escHtml(t.name)}</div><div class="reason">${t.priority||'-'} &middot; ${t.timeEst||formatMins(t.minutes||30)}</div></div>`});
-  } else html+=`<div style="background:var(--success-bg);padding:12px;border-radius:8px;font-size:13px;color:var(--success)">Your day fits!</div>`;
-  html+=`<div class="planner-actions"><button class="btn" onclick="document.getElementById('plannerOverlay').remove()">Close</button></div></div>`;
-  overlay.innerHTML=html;document.body.appendChild(overlay);
-}
+// Plan My Day removed — use Auto-Schedule instead.
 
 // ======================================================
 // TASK LIST
