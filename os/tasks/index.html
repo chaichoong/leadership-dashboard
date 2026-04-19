@@ -2933,6 +2933,19 @@ async function loadAllData(){
 
 // INIT
 if(initAuth()){checkIdentityAndLoad()}
+
+// Explicitly expose critical functions on window for inline onclick handlers
+// (defence against any scope/module wrapper that might strip globals)
+// Wrap each assignment in try/catch so one missing function doesn't halt the rest
+['runAutoSchedulePreview','applyAutoSchedule','openCreateTaskModal','openCreateProjectModal',
+ 'openTaskDrawer','closeDrawer','deleteTask','completeTaskInline','loadAllData',
+ 'doUndo','toggleRoutineConfig','updateTaskField','renderAll'].forEach(n=>{
+  try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
+});
+
+// Visible sanity banner — prints once when the page script finishes parsing
+console.log('%c[Task OS] Script loaded at '+new Date().toLocaleTimeString(),'color:#2C6E49;font-weight:bold');
+console.log('[Task OS] runAutoSchedulePreview is',typeof window.runAutoSchedulePreview);
 </script>
 </body>
 </html>
