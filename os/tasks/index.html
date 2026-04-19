@@ -162,8 +162,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .field-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--danger);cursor:pointer}
 
 /* Toast */
-.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-surface);border:1px solid var(--accent);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text-primary);box-shadow:var(--shadow-md);z-index:10001;opacity:0;transform:translateY(10px);transition:all .2s}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-surface);border:1px solid var(--accent);border-radius:8px;padding:10px 16px;font-size:13px;color:var(--text-primary);box-shadow:var(--shadow-md);z-index:10001;opacity:0;transform:translateY(10px);transition:all .2s;max-width:520px;word-break:break-word}
 .toast.show{opacity:1;transform:translateY(0)}
+.toast.err{background:var(--danger-bg);border-color:var(--danger);color:var(--danger)}
 .toast.err{border-color:var(--danger)}
 
 /* My Day */
@@ -566,7 +567,7 @@ const saveDebounce = {};
 function todayStr(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
 function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},1800)}catch(e){console.warn('toast failed',e)}}
+function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},err?6000:1800)}catch(e){console.warn('toast failed',e)}}
 // Bulk-operation flag — suppresses per-call toast/undo during batch PATCH (auto-schedule etc.)
 let _bulkOperation=false;
 // Debounced renderAll for rapid inline field edits
@@ -872,7 +873,10 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     if(!res.ok){
       let errBody='';try{errBody=await res.text()}catch(e){}
       console.error('[PATCH failed]',taskId,fieldKey,'status',res.status,'payload',payload,'body',errBody);
-      throw new Error('HTTP '+res.status+' '+errBody.slice(0,200));
+      // Surface short error in the thrown message so toast shows it
+      let shortErr=res.status;
+      try{const j=JSON.parse(errBody);if(j&&j.error){shortErr+=' '+(j.error.type||'')+': '+(j.error.message||'')}}catch(e){shortErr+=' '+errBody.slice(0,120)}
+      throw new Error(String(shortErr));
     }
     // Clear persisted start time if task completes or moves to a different day
     if(fieldKey==='status'&&rawValue==='Completed'){
@@ -890,7 +894,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     if(!_bulkOperation)toast('Saved');
   }catch(e){
     Object.assign(task,prev);
-    if(!_bulkOperation)toast('Failed to save',true);
+    if(!_bulkOperation)toast('Failed to save: '+((e&&e.message)||'unknown error'),true);
     console.warn('patch failed',e);
     if(_bulkOperation)throw e;
   }
