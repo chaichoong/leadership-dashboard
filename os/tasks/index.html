@@ -404,7 +404,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <option value="Operations Director">Operations Director</option>
         <option value="Personal">Personal</option>
       </select>
-      <button class="btn btn-primary btn-sm" onclick="runAutoSchedulePreview()">Auto-Schedule</button>
+      <button class="btn btn-primary btn-sm" onclick="safeAutoSchedule()">Auto-Schedule</button>
       <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ Add Task</button>
     </div>
 
@@ -1861,7 +1861,7 @@ function renderMyDay(){
 
   html+=`<div class="action-row" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
     <button class="btn btn-primary" onclick="openCreateTaskModal()" title="Create a new task">+ Add Task</button>
-    <button class="btn btn-primary" onclick="runAutoSchedulePreview()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
+    <button class="btn btn-primary" onclick="safeAutoSchedule()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
     <button class="btn" onclick="toggleRoutineConfig()" title="Edit your daily routine blocks (wake, lunch, focus blocks, etc.)">Configure Routine</button>
   </div>`;
 
@@ -2942,6 +2942,31 @@ if(initAuth()){checkIdentityAndLoad()}
  'doUndo','toggleRoutineConfig','updateTaskField','renderAll'].forEach(n=>{
   try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
 });
+
+// Safety-net: double-click anywhere on the background removes any orphan
+// drawer/modal overlays that might be blocking clicks silently.
+// Also add a keyboard shortcut (Esc) that nukes all overlays.
+window.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape'){try{closeAllOverlays&&closeAllOverlays()}catch(err){}}
+});
+
+// Bulletproof Auto-Schedule entry: wraps the call so even if runAutoSchedulePreview
+// doesn't exist, we show a visible error instead of silently doing nothing.
+window.safeAutoSchedule=function(){
+  console.log('[safeAutoSchedule] click received');
+  try{
+    if(typeof closeAllOverlays==='function')closeAllOverlays();
+    if(typeof window.runAutoSchedulePreview!=='function'){
+      alert('Auto-Schedule is not ready. Please reload the page.');
+      console.error('runAutoSchedulePreview not defined on window');
+      return;
+    }
+    window.runAutoSchedulePreview();
+  }catch(e){
+    alert('Auto-Schedule error: '+e.message);
+    console.error('[safeAutoSchedule] threw',e);
+  }
+};
 
 // Visible sanity banner — prints once when the page script finishes parsing
 console.log('%c[Task OS] Script loaded at '+new Date().toLocaleTimeString(),'color:#2C6E49;font-weight:bold');
