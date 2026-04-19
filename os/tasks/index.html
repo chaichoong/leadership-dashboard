@@ -135,9 +135,28 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Task detail drawer (modal) */
 .drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
-.drawer{background:var(--bg-surface);width:520px;max-width:95vw;height:100vh;overflow-y:auto;box-shadow:var(--shadow-lg);padding:24px;position:relative}
-.drawer h2{font-size:18px;margin-bottom:4px}
-.drawer-close{position:absolute;top:16px;right:20px;background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1}
+.drawer{background:var(--bg-surface);width:520px;max-width:95vw;height:100vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg);position:relative}
+.drawer-header{position:sticky;top:0;background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:16px 24px;z-index:2;display:flex;align-items:flex-start;gap:10px}
+.drawer-header .hdr-main{flex:1;min-width:0}
+.drawer-header h2{font-size:18px;margin:0;word-break:break-word}
+.drawer-body{flex:1;overflow-y:auto;padding:16px 24px}
+.drawer-footer{position:sticky;bottom:0;background:var(--bg-surface);border-top:1px solid var(--border-default);padding:12px 24px;display:flex;gap:8px;justify-content:flex-end;z-index:2}
+.drawer h2{font-size:18px}
+.drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
+.btn-success{background:var(--success);border-color:var(--success);color:#fff}
+.btn-success:hover{background:var(--success);color:#fff;opacity:.9}
+.row-actions{display:inline-flex;gap:4px;opacity:0;transition:opacity .15s}
+.task-table tr:hover .row-actions,
+.side-card:hover .row-actions,
+.kanban-card:hover .row-actions,
+.recurring-card:hover .row-actions,
+.ded-row:hover .row-actions{opacity:1}
+.row-act-btn{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-secondary);border-radius:4px;width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;line-height:1}
+.row-act-btn:hover{background:var(--bg-surface-2)}
+.row-act-btn.complete{color:var(--success);border-color:var(--success)}
+.row-act-btn.complete:hover{background:var(--success);color:#fff}
+.row-act-btn.delete{color:var(--danger);border-color:var(--danger)}
+.row-act-btn.delete:hover{background:var(--danger);color:#fff}
 .field-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-subtle);font-size:13px}
 .field-row label{min-width:120px;color:var(--text-secondary);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 .field-row .field-val{flex:1;min-width:0}
@@ -372,7 +391,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <option value="Today">Today</option>
         <option value="Overdue">Overdue</option>
         <option value="Upcoming">Upcoming</option>
-        <option value="To do">To do</option>
         <option value="Approval">Approval</option>
       </select>
       <select class="filter-select" id="filterPriority" onchange="renderTasks()">
@@ -398,14 +416,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
           <tr>
             <th class="cb-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)"></th>
             <th style="width:36px">#</th>
-            <th>Task (D)</th>
-            <th>Assignee (E)</th>
-            <th>Due + Hard (E)</th>
-            <th>Length (L)</th>
-            <th>Importance (I)</th>
-            <th>Recurring (N)</th>
+            <th>Task</th>
+            <th>Assignee</th>
+            <th>Due Date</th>
+            <th>Time Estimate</th>
+            <th>Priority</th>
+            <th>Recurring</th>
             <th>Status</th>
             <th>Business</th>
+            <th style="width:70px">Actions</th>
           </tr>
         </thead>
         <tbody id="taskBody"></tbody>
@@ -494,14 +513,14 @@ const TEAM = [
   { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
 ];
 
-const STATUS_OPTIONS = ['Today','Upcoming','To do','Approval','Completed','Overdue'];
+const STATUS_OPTIONS = ['Today','Upcoming','Approval','Completed','Overdue'];
 const PRIORITY_OPTIONS = ['Urgent','High','Project','Not Urgent'];
 const TIME_OPTIONS = ['15 min','30 min','45 min','1 hr','2 hr','3 hr','4 hr','8 hr'];
 const RECUR_OPTIONS = ['','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'];
 const BUSINESS_OPTIONS = ['Real Estate','Operations Director','Personal'];
 const KPI_UNIT_OPTIONS = ['£','%','count','days','items','hours'];
 
-const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, 'To do':3, Upcoming:4, Completed:5 };
+const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, Upcoming:3, Completed:4 };
 const PRIORITY_ORDER = { Project:0, Urgent:1, High:2, 'Not Urgent':3 };
 const TIME_MINUTES = { '15 min':15, '30 min':30, '45 min':45, '1 hr':60, '2 hr':120, '3 hr':180, '4 hr':240, '8 hr':480 };
 const PIXELS_PER_MIN = 1.3; // 15 min = ~20px, 1hr = 78px
@@ -818,7 +837,7 @@ function debouncedSave(taskId,fieldKey,value){
 
 // ===== SHARED RENDER HELPERS =====
 function statusBadge(status){
-  const cls={Today:'badge-today',Overdue:'badge-overdue',Upcoming:'badge-upcoming','To do':'badge-todo',Completed:'badge-completed',Approval:'badge-approval'}[status]||'badge-todo';
+  const cls={Today:'badge-today',Overdue:'badge-overdue',Upcoming:'badge-upcoming',Completed:'badge-completed',Approval:'badge-approval'}[status]||'badge-upcoming';
   return`<span class="badge ${cls}">${escHtml(status||'-')}</span>`;
 }
 function priorityBadge(p){
@@ -879,6 +898,7 @@ function renderDedlineRow(t,opts){
       ${recurPill(t)}
       ${statusBadge(t.status)}
       ${businessPill(t)}
+      ${rowActionsHtml(t.id)}
     </div>
     ${endResult}
   </div>`;
@@ -894,6 +914,7 @@ function renderDedlineSideCard(t){
     <div class="sc-row1">
       ${avatarSmall(t)}
       <h4 style="flex:1;margin:0;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}${hardFlag(t)}</h4>
+      ${rowActionsHtml(t.id)}
     </div>
     <div class="sc-row2">
       ${dueDateShort(t.dueDate)}
@@ -950,13 +971,13 @@ function renderKPIs(){
   const dueToday=active.filter(t=>t.dueDate===today||t.status==='Today');
   const upcoming=active.filter(t=>t.status==='Upcoming');
   const totalHrs=active.reduce((s,t)=>s+t.minutes,0)/60;
-  const todoCount=active.filter(t=>t.status==='To do').length;
+  const approvalCount=active.filter(t=>t.status==='Approval').length;
   const recurCount=active.filter(t=>t.recurring||t.recurFlag).length;
   const kpis=[
     {label:'Due Today',value:dueToday.length,cls:dueToday.length>0?'amber':'green'},
     {label:'Overdue',value:overdue.length,cls:overdue.length>0?'red':'green'},
     {label:'Upcoming',value:upcoming.length,cls:'accent'},
-    {label:'To Do',value:todoCount,cls:'cyan'},
+    {label:'Approval',value:approvalCount,cls:'cyan'},
     {label:'Hours Allocated',value:totalHrs.toFixed(1),cls:'purple'},
     {label:'Active Tasks',value:active.length,cls:'green'},
     {label:'Recurring',value:recurCount,cls:'accent'},
@@ -976,42 +997,81 @@ function openTaskDrawer(taskId){
   overlay.id='drawerOverlay';
   overlay.onclick=(e)=>{if(e.target===overlay)closeDrawer()};
   overlay.innerHTML=`<div class="drawer">
-    <button class="drawer-close" onclick="closeDrawer()">&times;</button>
-    <div style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:1px;margin-bottom:4px">DEDLINE</div>
-    <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)">${escHtml(t.name)}</h2>
-    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
+    <div class="drawer-header">
+      <div class="hdr-main">
+        <div style="font-size:10px;color:var(--text-secondary);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">Task</div>
+        <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)">${escHtml(t.name)}</h2>
+      </div>
+      <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
-    <!-- 1. D = Task name (above as H2, editable) -->
-    <!-- 2. E = Assignee -->
-    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value)">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
-    <!-- 3. E = Due Date + Hard Deadline on same row -->
-    <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
-      <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)">
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard</label>
-    </div></div>
-    <!-- 4. L = Length -->
-    <div class="field-row"><label>Length</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-    <!-- 5. I = Importance -->
-    <div class="field-row"><label>Importance</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}</select></div></div>
-    <!-- 6. N = Number of occurrences (Recurring) -->
-    <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
-    <!-- 7. E = End Result (description) -->
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>End Result</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="What does done look like?">${escHtml(t.description)}</textarea></div></div>
+      <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value)">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
+        <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)">
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
+      </div></div>
+      <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
 
-    <div style="border-top:1px solid var(--border-default);margin:16px 0 8px;padding-top:8px;font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px">Additional</div>
-
-    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>On Hold</label><div class="field-val"><input type="checkbox" ${t.onHold?'checked':''} onchange="updateTaskField('${t.id}','onHold',this.checked)"></div></div>
-    <div class="field-row"><label>Some Day</label><div class="field-val"><input type="checkbox" ${t.someDay?'checked':''} onchange="updateTaskField('${t.id}','someDay',this.checked)"></div></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments / Notes</label><div class="field-val"><textarea oninput="drwSaveText('notes',this.value)">${escHtml(t.notes)}</textarea></div></div>
-    <div class="field-row"><label>Project</label><div class="field-val" style="color:var(--text-secondary);font-size:12px">${t.projectNames.length?escHtml(t.projectNames.join(', ')):'None linked'}</div></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
+      <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Linked Project</label><div class="field-val" style="color:var(--text-secondary);font-size:12px">${t.projectNames.length?escHtml(t.projectNames.join(', ')):'None linked'}</div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments</label><div class="field-val"><textarea oninput="drwSaveText('notes',this.value)" placeholder="Add a comment...">${escHtml(t.notes)}</textarea></div></div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-danger" onclick="deleteTask('${t.id}')">Delete</button>
+      <button class="btn btn-success" onclick="completeTaskFromDrawer('${t.id}')">Complete</button>
+    </div>
   </div>`;
   document.body.appendChild(overlay);
 }
 function closeDrawer(){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();drawerTaskId=null}
 function drwSaveText(fieldKey,val){if(!drawerTaskId)return;debouncedSave(drawerTaskId,fieldKey,val)}
+
+async function completeTaskFromDrawer(taskId){
+  await updateTaskField(taskId,'status','Completed');
+  closeDrawer();
+  renderAll();
+}
+
+async function completeTaskInline(taskId,ev){
+  if(ev){ev.stopPropagation();ev.preventDefault()}
+  await updateTaskField(taskId,'status','Completed');
+  renderAll();
+}
+
+async function deleteTask(taskId,ev){
+  if(ev){ev.stopPropagation();ev.preventDefault()}
+  const task=allTasks.find(t=>t.id===taskId);
+  const label=task?task.name:'this task';
+  if(!confirm(`Delete "${label}"? This cannot be undone.`))return;
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,{
+      method:'DELETE',
+      headers:{'Authorization':`Bearer ${PAT}`}
+    });
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    allTasks=allTasks.filter(t=>t.id!==taskId);
+    if(drawerTaskId===taskId)closeDrawer();
+    toast('Task deleted');
+    renderAll();
+  }catch(e){
+    toast('Failed to delete',true);
+    console.warn('delete failed',e);
+  }
+}
+
+function rowActionsHtml(taskId){
+  return `<span class="row-actions" onclick="event.stopPropagation()">
+    <button class="row-act-btn complete" title="Complete" onclick="completeTaskInline('${taskId}',event)">&#10003;</button>
+    <button class="row-act-btn delete" title="Delete" onclick="deleteTask('${taskId}',event)">&times;</button>
+  </span>`;
+}
 
 // ======================================================
 // MY DAY — interactive timeline
@@ -1680,9 +1740,10 @@ function renderTasks(){
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'recurring',t.recurring,RECUR_OPTIONS)}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'status',dispStatus,STATUS_OPTIONS)}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'business',t.business,['',...BUSINESS_OPTIONS])}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">${rowActionsHtml(t.id)}</td>
     </tr>`;
   });
-  if(!page.length)html=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
+  if(!page.length)html=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
 
   document.getElementById('taskBody').innerHTML=html;
   document.getElementById('showingCount').textContent=`Showing ${page.length} of ${tasks.length}`;
@@ -1762,7 +1823,8 @@ function renderKanban(){
       const pn=t.projectNames[0]||'';
       const pcol=pn?strColor(pn):'var(--text-secondary)',pbg=pn?strColorBg(pn):'transparent';
       // DEDLINE compact: L1 title, L2 avatar+due+hard+length, L3 priority+status+business
-      html+=`<div class="kanban-card" draggable="true" ondragstart="dragKanbanCard(event,'${t.id}')" onclick="openTaskDrawer('${t.id}')">
+      html+=`<div class="kanban-card" draggable="true" ondragstart="dragKanbanCard(event,'${t.id}')" onclick="openTaskDrawer('${t.id}')" style="position:relative">
+        <div style="position:absolute;top:4px;right:4px">${rowActionsHtml(t.id)}</div>
         <h4>${escHtml(t.name)}${hardFlag(t)}</h4>
         <div class="card-meta">
           ${avatarSmall(t)}
@@ -1906,23 +1968,16 @@ function openCreateTaskModal(){
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   const today=todayStr();
   const defaultKey=(currentUser&&currentUser.key)||'kevin';
-  overlay.innerHTML=`<div class="modal"><h2>Add Task <span style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:1px;margin-left:8px">DEDLINE</span></h2>
-    <!-- 1. D = Task name -->
-    <div class="field-row"><label>Task (D)</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
-    <!-- 2. E = Assignee -->
-    <div class="field-row"><label>Assignee (E)</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
-    <!-- 3. E = Due + Hard -->
-    <div class="field-row"><label>Due + Hard (E)</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard deadline</label></div></div>
-    <!-- 4. L = Length -->
-    <div class="field-row"><label>Length (L)</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='30 min'?'selected':''}>${o}</option>`).join('')}</select></div>
-    <!-- 5. I = Importance -->
-    <div class="field-row"><label>Importance (I)</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
-    <!-- 6. N = Number / Recurring -->
-    <div class="field-row"><label>Recurring (N)</label><select id="ctRecur">${['None','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option>${r}</option>`).join('')}</select></div>
-    <!-- 7. E = End Result -->
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>End Result (E)</label><textarea id="ctDesc" rows="3" placeholder="What does done look like?"></textarea></div>
+  overlay.innerHTML=`<div class="modal"><h2>Add Task</h2>
+    <div class="field-row"><label>Task</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
+    <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard Deadline</label></div></div>
+    <div class="field-row"><label>Time Estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='30 min'?'selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Recurring</label><select id="ctRecur">${['None','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option>${r}</option>`).join('')}</select></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3" placeholder="Describe the task or the end result..."></textarea></div>
     <div style="border-top:1px solid var(--border-default);margin:8px 0;padding-top:4px;font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px">Additional</div>
-    <div class="field-row"><label>Status</label><select id="ctStatus"><option>Today</option><option selected>Upcoming</option><option>To do</option></select></div>
+    <div class="field-row"><label>Status</label><select id="ctStatus"><option>Today</option><option selected>Upcoming</option><option>Approval</option></select></div>
     <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('createTaskModal').remove()">Cancel</button>
@@ -2055,7 +2110,7 @@ function renderCapacity(){
     const statBreak={};tasks.forEach(t=>{const s=t.status||'Unset';statBreak[s]=(statBreak[s]||0)+t.minutes});
     const totalMin=tasks.reduce((s,t)=>s+t.minutes,0);
     const priColors={Urgent:'var(--danger)',High:'var(--info)',Project:'var(--accent)','Not Urgent':'var(--success)',Unset:'var(--text-muted)'};
-    const statColors={Today:'var(--warning)',Overdue:'var(--danger)',Upcoming:'var(--accent)','To do':'var(--info)',Approval:'var(--accent-gold)',Unset:'var(--text-muted)'};
+    const statColors={Today:'var(--warning)',Overdue:'var(--danger)',Upcoming:'var(--accent)',Approval:'var(--accent-gold)',Unset:'var(--text-muted)'};
 
     html+=`<div class="capacity-card">
       <button class="cap-cog" onclick="editCapacity('${member.key}')" title="Set capacity">&#9881;</button>
@@ -2120,7 +2175,8 @@ function renderRecurring(){
       g.forEach(t=>{
         const od=isOverdue(t);
         // DEDLINE compact (same as Kanban card format)
-        html+=`<div class="recurring-card" style="${od?'border-color:var(--danger)':''}" onclick="openTaskDrawer('${t.id}')">
+        html+=`<div class="recurring-card" style="${od?'border-color:var(--danger);':''}position:relative" onclick="openTaskDrawer('${t.id}')">
+          <div style="position:absolute;top:6px;right:6px">${rowActionsHtml(t.id)}</div>
           <h4>${escHtml(t.name)}${hardFlag(t)}</h4>
           <div class="meta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px">
             ${avatarSmall(t)}
