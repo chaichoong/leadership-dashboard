@@ -664,17 +664,21 @@ async function fetchTable(tableId,fieldIds,filter){
   return all;
 }
 
+let BUSINESS_ID_TO_NAME={};  // reverse lookup id -> name
 async function fetchBusinesses(){
   try{
     // Businesses table primary field "Business Name" = fldbbRqVxLxUdHwIR
     const recs=await fetchTable(BUSINESSES_TABLE,['fldbbRqVxLxUdHwIR','fldgGU2PJze8LVuCT'],'');
-    BUSINESS_MAP={};
+    BUSINESS_MAP={};BUSINESS_ID_TO_NAME={};
     recs.forEach(r=>{
       const c=r.cellValuesByFieldId||r.fields||{};
       const name=c.fldbbRqVxLxUdHwIR||c.fldgGU2PJze8LVuCT||c.Name||c.name||Object.values(c)[0];
-      if(name&&BUSINESS_OPTIONS.includes(name)){BUSINESS_MAP[name]=r.id}
+      if(name){
+        BUSINESS_ID_TO_NAME[r.id]=name;
+        if(BUSINESS_OPTIONS.includes(name))BUSINESS_MAP[name]=r.id;
+      }
     });
-    console.log('[Businesses] loaded',BUSINESS_MAP);
+    console.log('[Businesses] loaded',BUSINESS_MAP,'reverse',BUSINESS_ID_TO_NAME);
   }catch(e){console.warn('businesses fetch failed',e)}
 }
 
@@ -720,17 +724,20 @@ function parseTask(rec){
   let minutes=0;
   if(timeDur>0)minutes=timeDur/60;else if(timeEstName)minutes=TIME_MINUTES[timeEstName]||0;
 
+  // NOTE: with returnFieldsByFieldId=true, Airtable returns linked records
+  // as just the ID string, NOT as {id,name} objects. Reverse-map from IDs.
   let businessName='';let businessId='';
   if(Array.isArray(businessLinks)&&businessLinks.length>0){
     const b=businessLinks[0];
     if(typeof b==='object'){businessName=b.name||'';businessId=b.id||''}
-    else if(typeof b==='string'){businessId=b}
+    else if(typeof b==='string'){businessId=b;businessName=BUSINESS_ID_TO_NAME[b]||''}
   }
   let projectNames=[],projectIds=[];
   if(Array.isArray(projectLinks))projectLinks.forEach(p=>{
     if(typeof p==='object'){if(p.name)projectNames.push(p.name);if(p.id)projectIds.push(p.id)}
-    else if(typeof p==='string')projectIds.push(p);
+    else if(typeof p==='string'){projectIds.push(p)}
   });
+  // Project names will be resolved post-fetch via allProjects map (see loadAllData)
   const collabRaw=gf(rec,F.collaborators)||[];
   const collaborators=Array.isArray(collabRaw)?collabRaw.map(c=>({id:c.id,email:c.email,name:c.name})):[];
 
@@ -2251,8 +2258,12 @@ function scheduleTasksAcrossDays(){
 }
 
 function runAutoSchedulePreview(){
-  closeAllOverlays();
-  const {moves,warnings}=scheduleTasksAcrossDays();
+  console.log('[Auto-Schedule] Starting. activeTeam=',activeTeam,'currentUser=',currentUser);
+  try{closeAllOverlays()}catch(e){console.warn('closeAllOverlays failed',e)}
+  let result;
+  try{result=scheduleTasksAcrossDays()}catch(e){console.error('[Auto-Schedule] scheduler threw',e);toast('Scheduler error — check console',true);return}
+  const {moves,warnings}=result;
+  console.log('[Auto-Schedule] Preview ready. moves=',moves.length,'warnings=',warnings);
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='autoModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
