@@ -46,6 +46,30 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* KPI */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px}
 .kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;text-align:center}
+.kpi.clickable{cursor:pointer;transition:all .15s}
+.kpi.clickable:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+.kpi.clickable:hover .label{color:var(--accent)}
+
+/* DEDLINE compact row/card */
+.ded-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12px;flex-wrap:wrap}
+.ded-row .ded-title{font-weight:600;flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)}
+.ded-row .ded-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--text-secondary)}
+.ded-row .ded-end{font-size:11px;color:var(--text-secondary);width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;margin-top:2px}
+.ded-row:hover{background:var(--bg-surface-2)}
+.side-card.ded-side{padding:8px 10px;min-height:auto}
+.side-card.ded-side .sc-row1{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.side-card.ded-side .sc-row2{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--text-secondary)}
+
+/* Drill-down modal list */
+.drill-list{max-height:60vh;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px}
+.drill-list .ded-row{border-bottom:1px solid var(--border-subtle);cursor:pointer}
+.drill-list .ded-row:last-child{border-bottom:none}
+
+/* Timeline drop-back zone */
+.side-panel.drop-target{background:var(--accent-soft);outline:2px dashed var(--accent)}
+.tl-time-tooltip{position:fixed;background:var(--bg-sidebar);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:10002;font-weight:600}
+.tl-block.routine{cursor:move}
+.tl-block.routine .resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:linear-gradient(to bottom, transparent, rgba(0,0,0,0.08))}
 .kpi .value{font-size:28px;font-weight:700;margin-bottom:2px}
 .kpi .label{font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px}
 .kpi.red .value{color:var(--danger)}.kpi.green .value{color:var(--success)}
@@ -374,15 +398,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
           <tr>
             <th class="cb-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)"></th>
             <th style="width:36px">#</th>
-            <th>Task</th>
-            <th>Due Date</th>
+            <th>Task (D)</th>
+            <th>Assignee (E)</th>
+            <th>Due + Hard (E)</th>
+            <th>Length (L)</th>
+            <th>Importance (I)</th>
+            <th>Recurring (N)</th>
             <th>Status</th>
-            <th>Assignee</th>
-            <th>Priority</th>
-            <th>Time</th>
             <th>Business</th>
-            <th>Hard</th>
-            <th>Recurring</th>
           </tr>
         </thead>
         <tbody id="taskBody"></tbody>
@@ -827,6 +850,84 @@ function formatDueDate(d){
   return`<span>${f}</span>`;
 }
 
+// ===== DEDLINE RENDERERS =====
+// DEDLINE = Due (name), Employee (assignee), End-date (due+hard flag), Length, Importance (priority), Number (recurring), End Result
+function dueDateShort(d){
+  if(!d)return '<span style="color:var(--text-muted)">No date</span>';
+  const today=todayStr();
+  const dt=new Date(d+'T00:00:00');
+  const f=dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+  if(d<today)return`<span style="color:var(--danger);font-weight:600">${f}</span>`;
+  if(d===today)return`<span style="color:var(--warning);font-weight:600">Today</span>`;
+  return`<span>${f}</span>`;
+}
+function hardFlag(t){return t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}
+function recurPill(t){return t.recurring?`<span class="badge badge-recurring">${escHtml(t.recurring)}</span>`:''}
+function businessPill(t){return t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''}
+
+// Compact DEDLINE row — used in Projects linked tasks, Recurring, drill-downs
+function renderDedlineRow(t,opts){
+  opts=opts||{};
+  const endResult=t.description?`<div class="ded-end" title="${escHtml(t.description)}">${escHtml(t.description)}</div>`:'';
+  return `<div class="ded-row" onclick="${opts.noClick?'':`openTaskDrawer('${t.id}')`}">
+    <div class="ded-title">${escHtml(t.name)}${hardFlag(t)}</div>
+    <div class="ded-meta">
+      ${avatarSmall(t)}
+      ${dueDateShort(t.dueDate)}
+      <span>${t.timeEst||formatMins(t.minutes)||'-'}</span>
+      ${priorityBadge(t.priority)}
+      ${recurPill(t)}
+      ${statusBadge(t.status)}
+      ${businessPill(t)}
+    </div>
+    ${endResult}
+  </div>`;
+}
+
+// Compact DEDLINE side card (My Day side panel) — 2-row layout
+function renderDedlineSideCard(t){
+  return `<div class="side-card ded-side" draggable="true"
+    ondragstart="dragSideTask(event,'${t.id}')"
+    onclick="openTaskDrawer('${t.id}')"
+    data-name="${escHtml(t.name).toLowerCase()}"
+    data-task-id="${t.id}">
+    <div class="sc-row1">
+      ${avatarSmall(t)}
+      <h4 style="flex:1;margin:0;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}${hardFlag(t)}</h4>
+    </div>
+    <div class="sc-row2">
+      ${dueDateShort(t.dueDate)}
+      <span>${t.timeEst||formatMins(t.minutes)||'-'}</span>
+      ${priorityBadge(t.priority)}
+      ${recurPill(t)}
+      ${statusBadge(t.status)}
+      ${businessPill(t)}
+    </div>
+  </div>`;
+}
+
+// Drill-down modal for clickable KPIs
+function openDrillDown(title,tasks,extraHtml){
+  closeDrawer();
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='drillModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  let body='';
+  if(extraHtml)body+=extraHtml;
+  if(tasks&&tasks.length){
+    body+=`<div class="drill-list">${tasks.map(t=>renderDedlineRow(t)).join('')}</div>`;
+  } else if(!extraHtml){
+    body+=`<div class="empty-state" style="padding:30px">Nothing to show.</div>`;
+  }
+  overlay.innerHTML=`<div class="modal" style="max-width:720px">
+    <h2>${escHtml(title)}</h2>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${tasks?tasks.length+' item'+(tasks.length===1?'':'s'):''}</div>
+    ${body}
+    <div class="modal-actions"><button class="btn" onclick="document.getElementById('drillModal').remove()">Close</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
 // ===== TEAM BAR =====
 function renderTeamBar(){
   const counts={all:0};TEAM.forEach(m=>counts[m.key]=0);
@@ -876,20 +977,35 @@ function openTaskDrawer(taskId){
   overlay.onclick=(e)=>{if(e.target===overlay)closeDrawer()};
   overlay.innerHTML=`<div class="drawer">
     <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+    <div style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:1px;margin-bottom:4px">DEDLINE</div>
     <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)">${escHtml(t.name)}</h2>
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
-    <div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></div></div>
-    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <!-- 1. D = Task name (above as H2, editable) -->
+    <!-- 2. E = Assignee -->
     <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value)">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Hard Deadline</label><div class="field-val" style="display:flex;align-items:center;gap:8px"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)"><span style="color:var(--danger);font-size:12px">Flag as immovable</span></div></div>
-    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+    <!-- 3. E = Due Date + Hard Deadline on same row -->
+    <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
+      <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard</label>
+    </div></div>
+    <!-- 4. L = Length -->
+    <div class="field-row"><label>Length</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+    <!-- 5. I = Importance -->
+    <div class="field-row"><label>Importance</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}</select></div></div>
+    <!-- 6. N = Number of occurrences (Recurring) -->
     <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
+    <!-- 7. E = End Result (description) -->
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>End Result</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="What does done look like?">${escHtml(t.description)}</textarea></div></div>
+
+    <div style="border-top:1px solid var(--border-default);margin:16px 0 8px;padding-top:8px;font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px">Additional</div>
+
+    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>On Hold</label><div class="field-val"><input type="checkbox" ${t.onHold?'checked':''} onchange="updateTaskField('${t.id}','onHold',this.checked)"></div></div>
+    <div class="field-row"><label>Some Day</label><div class="field-val"><input type="checkbox" ${t.someDay?'checked':''} onchange="updateTaskField('${t.id}','someDay',this.checked)"></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments / Notes</label><div class="field-val"><textarea oninput="drwSaveText('notes',this.value)">${escHtml(t.notes)}</textarea></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" style="color:var(--text-secondary);font-size:12px">${t.projectNames.length?escHtml(t.projectNames.join(', ')):'None linked'}</div></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)">${escHtml(t.description)}</textarea></div></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Notes / Comments</label><div class="field-val"><textarea oninput="drwSaveText('notes',this.value)">${escHtml(t.notes)}</textarea></div></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
   </div>`;
   document.body.appendChild(overlay);
@@ -969,7 +1085,18 @@ function buildTimelineBlocks(){
   calendarEvents.forEach(ev=>{if(ev.allDay)return;const s=parseTimeToMinutes(ev.start),e=parseTimeToMinutes(ev.end);if(s!==null&&e!==null)fixed.push({type:'event',name:ev.summary,start:s,end:e,duration:e-s,location:ev.location})});
   fixed.sort((a,b)=>a.start-b.start);
 
-  const routinePlaced=placeRoutineBlocks([...routine].sort((a,b)=>a.order-b.order),fixed,dayStart,dayEnd);
+  // Honor persisted routine start times (drag positions) before auto-placing
+  const savedStartsEarly=getStartTimes(todayStr());
+  const routineSorted=[...routine].sort((a,b)=>a.order-b.order);
+  const manualRoutine=[];const autoRoutine=[];
+  routineSorted.forEach(r=>{
+    const key='routine:'+r.name.toLowerCase().replace(/\s+/g,'');
+    if(savedStartsEarly[key]!=null){
+      manualRoutine.push({type:'routine',name:r.name,start:savedStartsEarly[key],end:savedStartsEarly[key]+r.duration,duration:r.duration});
+    } else autoRoutine.push(r);
+  });
+  const autoPlaced=placeRoutineBlocks(autoRoutine,[...fixed,...manualRoutine],dayStart,dayEnd);
+  const routinePlaced=[...manualRoutine,...autoPlaced];
   const allFixed=[...fixed,...routinePlaced].sort((a,b)=>a.start-b.start);
   const free=findFreeSlots(allFixed,dayStart,dayEnd);
 
@@ -1022,12 +1149,18 @@ function renderMyDay(){
 
   let html=`<div class="myday-header"><h2>${dayName}</h2><div class="date-sub">${todayTasks.length} tasks today &middot; ${totalHrs.toFixed(1)} hrs &middot; ${calendarEvents.length} cal events &middot; ${overdueTasks.length} overdue</div></div>`;
 
+  const workHrs=config.endHour-config.startHour;
+  const routineHrs=getRoutineBlocks().reduce((s,b)=>s+b.duration,0)/60;
+  const meetingHrs=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?(en-st)/60:0)},0);
+  const availableHrs=Math.max(0,workHrs-routineHrs-meetingHrs);
+
   html+=`<div class="myday-kpi-row">
-    <div class="kpi ${todayTasks.length>0?'amber':'green'}"><div class="value" style="font-size:22px">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
-    <div class="kpi purple"><div class="value" style="font-size:22px">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
-    <div class="kpi ${overdueTasks.length>0?'red':'green'}"><div class="value" style="font-size:22px">${overdueTasks.length}</div><div class="label">Overdue</div></div>
-    <div class="kpi cyan"><div class="value" style="font-size:22px">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
-    <div class="kpi ${capPct>100?'red':'green'}"><div class="value" style="font-size:22px">${plan.deferred.length}</div><div class="label">Deferred</div></div>
+    <div class="kpi clickable ${todayTasks.length>0?'amber':'green'}" onclick="drillTasksToday()"><div class="value" style="font-size:22px">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
+    <div class="kpi clickable purple" onclick="drillTotalHours()"><div class="value" style="font-size:22px">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
+    <div class="kpi clickable ${overdueTasks.length>0?'red':'green'}" onclick="drillOverdue()"><div class="value" style="font-size:22px">${overdueTasks.length}</div><div class="label">Overdue</div></div>
+    <div class="kpi clickable cyan" onclick="drillCalEvents()"><div class="value" style="font-size:22px">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
+    <div class="kpi clickable accent" onclick="drillAvailable()"><div class="value" style="font-size:22px">${availableHrs.toFixed(1)}</div><div class="label">Available</div></div>
+    <div class="kpi clickable ${capPct>100?'red':'green'}" onclick="drillDeferred()"><div class="value" style="font-size:22px">${plan.deferred.length}</div><div class="label">Deferred</div></div>
   </div>`;
 
   html+=`<div class="myday-capacity">
@@ -1071,7 +1204,14 @@ function renderMyDay(){
     if(b.type==='event'){
       html+=`<div class="tl-block event" style="top:${top}px;height:${height}px"><div class="tb-title">${escHtml(b.name)}</div><div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${b.location?escHtml(b.location):'Calendar'}</div></div>`;
     } else if(b.type==='routine'){
-      html+=`<div class="tl-block routine" style="top:${top}px;height:${height}px"><div class="tb-title">${escHtml(b.name)}</div><div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)}</div></div>`;
+      const rKey='routine:'+b.name.toLowerCase().replace(/\s+/g,'');
+      html+=`<div class="tl-block routine" data-routine-key="${rKey}" draggable="true"
+        ondragstart="dragRoutineBlock(event,'${rKey}',${b.start},${b.duration})"
+        style="top:${top}px;height:${height}px">
+        <div class="tb-title">${escHtml(b.name)}</div>
+        <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)}</div>
+        <div class="resize-handle" onmousedown="event.stopPropagation();routineResizeStart(event,'${rKey}','${escHtml(b.name)}',${b.start},${b.duration})"></div>
+      </div>`;
     } else if(b.type==='task'){
       const t=b.task;
       const pCls=t.priority?'p-'+t.priority.replace(' ',''):'';
@@ -1089,19 +1229,16 @@ function renderMyDay(){
   });
   html+=`</div></div>`;
 
-  // RIGHT: side panel other tasks
-  html+=`<div class="side-panel">
+  // RIGHT: side panel other tasks (DEDLINE format) — also a drop zone for un-scheduling
+  html+=`<div class="side-panel" id="sidePanel"
+      ondragover="event.preventDefault();document.getElementById('sidePanel').classList.add('drop-target')"
+      ondragleave="document.getElementById('sidePanel').classList.remove('drop-target')"
+      ondrop="dropOnSidePanel(event)">
     <h3>Other Tasks Available (${other.length})</h3>
     <input type="text" class="search-box" placeholder="Search..." style="width:100%;margin-bottom:8px" oninput="filterSidePanel(this.value)">
     <div id="sidePanelList">`;
   other.sort((a,b)=>(PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99)).slice(0,50).forEach(t=>{
-    html+=`<div class="side-card" draggable="true"
-      ondragstart="dragSideTask(event,'${t.id}')"
-      onclick="openTaskDrawer('${t.id}')"
-      data-name="${escHtml(t.name).toLowerCase()}">
-      <h4>${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag">!</span>':''}</h4>
-      <div class="sc-meta">${priorityBadge(t.priority)}<span>${t.timeEst||formatMins(t.minutes)||'-'}</span>${t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''}${avatarSmall(t)}${t.dueDate?`<span>${t.dueDate}</span>`:''}</div>
-    </div>`;
+    html+=renderDedlineSideCard(t);
   });
   html+=`</div></div></div>`;
 
@@ -1133,6 +1270,7 @@ function dragSideTask(e,taskId){
 }
 function dropOnTimeline(e){
   e.preventDefault();
+  removeTlTooltip();
   let data;try{data=JSON.parse(e.dataTransfer.getData('text/plain'))}catch(err){return}
   const canvas=document.getElementById('tlCanvas');
   const rect=canvas.getBoundingClientRect();
@@ -1140,12 +1278,21 @@ function dropOnTimeline(e){
   const y=e.clientY-rect.top;
   let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
   minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
+
+  // Routine block: persist its new start time for today
+  if(data.kind==='routinemove'){
+    const map=getStartTimes(todayStr());
+    map[data.rKey]=minOfDay;
+    localStorage.setItem('_task_starttimes_'+todayStr(),JSON.stringify(map));
+    window._tlDragging=false;
+    renderMyDay();
+    return;
+  }
+
   const task=allTasks.find(t=>t.id===data.taskId);if(!task)return;
   task._startMin=minOfDay;
-  // Persist start time locally (per-date)
   saveStartTime(todayStr(),task.id,minOfDay);
   if(data.kind==='sideschedule'){
-    // Schedule for today: set status Today + dueDate today
     updateTaskField(task.id,'status','Today');
     updateTaskField(task.id,'dueDate',todayStr());
   }
@@ -1153,6 +1300,26 @@ function dropOnTimeline(e){
   renderMyDay();
   setTimeout(()=>{window._tlDragging=false},100);
 }
+
+// Time tooltip while dragging over timeline
+function removeTlTooltip(){const t=document.getElementById('tlTooltip');if(t)t.remove()}
+document.addEventListener('dragover',function(e){
+  const canvas=document.getElementById('tlCanvas');
+  if(!canvas)return;
+  const rect=canvas.getBoundingClientRect();
+  if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom){removeTlTooltip();return}
+  const config=getWorkConfig();
+  const y=e.clientY-rect.top;
+  let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
+  minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
+  let tip=document.getElementById('tlTooltip');
+  if(!tip){tip=document.createElement('div');tip.id='tlTooltip';tip.className='tl-time-tooltip';document.body.appendChild(tip)}
+  tip.textContent=minutesToTime(minOfDay);
+  tip.style.left=(e.clientX+14)+'px';
+  tip.style.top=(e.clientY+14)+'px';
+});
+document.addEventListener('dragend',removeTlTooltip);
+document.addEventListener('drop',removeTlTooltip);
 
 // Resize handler — listens to mousemove globally
 function tlResizeStart(e,taskId,startMin,durMin){
@@ -1180,6 +1347,96 @@ function tlResizeStart(e,taskId,startMin,durMin){
   }
   document.addEventListener('mousemove',onMove);
   document.addEventListener('mouseup',onUp);
+}
+
+// Routine block drag (change start time) + drop on timeline
+function dragRoutineBlock(e,rKey,startMin,durMin){
+  window._tlDragging=true;
+  e.dataTransfer.setData('text/plain',JSON.stringify({kind:'routinemove',rKey,durMin}));
+  e.dataTransfer.effectAllowed='move';
+  setTimeout(()=>{e.target.classList.add('dragging')},0);
+}
+// Routine resize (drag bottom edge)
+function routineResizeStart(e,rKey,name,startMin,durMin){
+  e.preventDefault();
+  const startY=e.clientY;
+  function onMove(ev){
+    const dy=ev.clientY-startY;
+    let newDur=durMin+Math.round(dy/PIXELS_PER_MIN);
+    newDur=Math.max(SNAP_MIN,Math.round(newDur/SNAP_MIN)*SNAP_MIN);
+    const el=document.querySelector(`.tl-block.routine[data-routine-key="${rKey}"]`);
+    if(el)el.style.height=Math.max(22,newDur*PIXELS_PER_MIN)+'px';
+    window._routineResizeDur=newDur;
+  }
+  function onUp(){
+    document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);
+    if(window._routineResizeDur){
+      const blocks=getRoutineBlocks();
+      const b=blocks.find(x=>('routine:'+x.name.toLowerCase().replace(/\s+/g,''))===rKey);
+      if(b){b.duration=window._routineResizeDur;saveRoutineBlocks(blocks);toast('Routine updated')}
+      window._routineResizeDur=null;renderMyDay();
+    }
+  }
+  document.addEventListener('mousemove',onMove);document.addEventListener('mouseup',onUp);
+}
+
+// Extend dropOnTimeline to handle routine moves (wrap original: overridden below)
+
+// Drop on side panel (un-schedule task from today)
+function dropOnSidePanel(e){
+  e.preventDefault();
+  document.getElementById('sidePanel').classList.remove('drop-target');
+  let data;try{data=JSON.parse(e.dataTransfer.getData('text/plain'))}catch(err){return}
+  if(data.kind!=='tlmove')return;
+  const task=allTasks.find(t=>t.id===data.taskId);if(!task)return;
+  task._startMin=null;
+  saveStartTime(todayStr(),task.id,null);
+  updateTaskField(task.id,'status','Upcoming');
+  window._tlDragging=false;
+  renderMyDay();
+}
+
+// Drill-down handlers for clickable KPIs (My Day)
+function drillTasksToday(){
+  const{todayTasks}=getMyDayTasks();
+  openDrillDown('Tasks Today',todayTasks.sort((a,b)=>(PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99)));
+}
+function drillOverdue(){
+  const{overdueTasks}=getMyDayTasks();
+  openDrillDown('Overdue Tasks',overdueTasks);
+}
+function drillTotalHours(){
+  const{todayTasks,overdueTasks}=getMyDayTasks();
+  const all=[...todayTasks,...overdueTasks];
+  const totalMins=all.reduce((s,t)=>s+(t.minutes||0),0);
+  const extra=`<div style="background:var(--bg-surface-2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:13px">Total: <strong>${(totalMins/60).toFixed(1)}h</strong> across ${all.length} tasks</div>`;
+  openDrillDown('Total Hours Breakdown',all,extra);
+}
+function drillCalEvents(){
+  if(!calendarEvents.length){openDrillDown('Calendar Events',[],'<div class="empty-state" style="padding:20px">No events today.</div>');return}
+  const list=calendarEvents.map(ev=>`<div class="ded-row">
+    <div class="ded-title">${escHtml(ev.summary||'(No title)')}</div>
+    <div class="ded-meta">${ev.allDay?'All day':(ev.start||'')+' - '+(ev.end||'')}${ev.location?' &middot; '+escHtml(ev.location):''}</div>
+  </div>`).join('');
+  openDrillDown('Calendar Events',null,`<div class="drill-list">${list}</div>`);
+}
+function drillAvailable(){
+  const config=getWorkConfig();
+  const workHrs=config.endHour-config.startHour;
+  const routineHrs=getRoutineBlocks().reduce((s,b)=>s+b.duration,0)/60;
+  const meetingHrs=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?(en-st)/60:0)},0);
+  const avail=Math.max(0,workHrs-routineHrs-meetingHrs);
+  const breakdown=`<div style="font-size:13px;line-height:1.8">
+    <div>Work day (${config.startHour}:00–${config.endHour}:00): <strong>${workHrs.toFixed(1)}h</strong></div>
+    <div>− Routine (Get Ready, Lunch, Run): <strong>${routineHrs.toFixed(1)}h</strong></div>
+    <div>− Calendar meetings: <strong>${meetingHrs.toFixed(1)}h</strong></div>
+    <div style="border-top:1px solid var(--border-default);margin-top:6px;padding-top:6px">= Available for tasks: <strong style="color:var(--accent);font-size:16px">${avail.toFixed(1)}h</strong></div>
+  </div>`;
+  openDrillDown('Available Time Breakdown',null,breakdown);
+}
+function drillDeferred(){
+  const plan=buildTimelineBlocks();
+  openDrillDown('Deferred (Won\'t Fit Today)',plan.deferred);
 }
 
 // ======================================================
@@ -1412,18 +1669,20 @@ function renderTasks(){
     html+=`<tr${rowStyle}>
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
-      <td onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.recurring?`<span class="badge badge-recurring">${escHtml(t.recurring)}</span>`:''}</td>
-      <td><input type="date" class="inline-input" value="${t.dueDate||''}" onclick="event.stopPropagation()" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
-      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'status',dispStatus,STATUS_OPTIONS)}</td>
+      <td onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">${escHtml(t.description)}</div>`:''}</td>
       <td onclick="event.stopPropagation()"><select class="inline-select" onchange="updateTaskField('${t.id}','assignee',this.value);renderTasks()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></td>
-      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'priority',t.priority,['',...PRIORITY_OPTIONS])}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <input type="date" class="inline-input" style="width:130px;display:inline-block" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)">
+        <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--danger);margin-left:4px" title="Hard deadline"><input type="checkbox" style="width:13px;height:13px" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">!</label>
+      </td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'timeEst',t.timeEst,['',...TIME_OPTIONS])}</td>
-      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'business',t.business,['',...BUSINESS_OPTIONS])}</td>
-      <td onclick="event.stopPropagation()"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)"></td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'priority',t.priority,['',...PRIORITY_OPTIONS])}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'recurring',t.recurring,RECUR_OPTIONS)}</td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'status',dispStatus,STATUS_OPTIONS)}</td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'business',t.business,['',...BUSINESS_OPTIONS])}</td>
     </tr>`;
   });
-  if(!page.length)html=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
+  if(!page.length)html=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
 
   document.getElementById('taskBody').innerHTML=html;
   document.getElementById('showingCount').textContent=`Showing ${page.length} of ${tasks.length}`;
@@ -1502,12 +1761,18 @@ function renderKanban(){
     wt.forEach(t=>{
       const pn=t.projectNames[0]||'';
       const pcol=pn?strColor(pn):'var(--text-secondary)',pbg=pn?strColorBg(pn):'transparent';
+      // DEDLINE compact: L1 title, L2 avatar+due+hard+length, L3 priority+status+business
       html+=`<div class="kanban-card" draggable="true" ondragstart="dragKanbanCard(event,'${t.id}')" onclick="openTaskDrawer('${t.id}')">
-        <h4>${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag">!</span>':''}</h4>
+        <h4>${escHtml(t.name)}${hardFlag(t)}</h4>
         <div class="card-meta">
           ${avatarSmall(t)}
-          <span>${t.timeEst||formatMins(t.minutes)||'-'}</span>
-          <span class="pri-dot ${t.priority||''}"></span>
+          ${dueDateShort(t.dueDate)}
+          <span>&middot; ${t.timeEst||formatMins(t.minutes)||'-'}</span>
+        </div>
+        <div class="card-meta">
+          <span class="pri-dot ${t.priority||''}" title="${t.priority||''}"></span>
+          ${statusBadge(t.status)}
+          ${recurPill(t)}
           ${t.business?`<span class="badge badge-business" style="font-size:9px">${escHtml(t.business)}</span>`:''}
         </div>
         ${pn?`<span class="card-project" style="background:${pbg};color:${pcol}">${escHtml(pn)}</span>`:''}
@@ -1603,7 +1868,8 @@ function renderProjects(){
       if(linked.length){
         html+=`<div class="project-task-list">`;
         linked.slice(0,20).forEach(t=>{
-          html+=`<div class="project-task-item" onclick="event.stopPropagation();openTaskDrawer('${t.id}')">${statusBadge(t.status)}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>${avatarSmall(t)}<span style="color:var(--text-secondary);font-size:11px">${t.timeEst||'-'}</span></div>`;
+          // DEDLINE compact row (click opens drawer, stop propagation so it doesn't toggle project)
+          html+=`<div onclick="event.stopPropagation()">${renderDedlineRow(t)}</div>`;
         });
         if(linked.length>20)html+=`<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... ${linked.length-20} more</div>`;
         html+=`</div>`;
@@ -1640,17 +1906,24 @@ function openCreateTaskModal(){
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   const today=todayStr();
   const defaultKey=(currentUser&&currentUser.key)||'kevin';
-  overlay.innerHTML=`<div class="modal"><h2>Add Task</h2>
-    <div class="field-row"><label>Name</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
-    <div class="field-row"><label>Due date</label><input type="date" id="ctDue" value="${today}"></div>
-    <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Time estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='30 min'?'selected':''}>${o}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Hard Deadline</label><div class="field-val"><input type="checkbox" id="ctHard"></div></div>
+  overlay.innerHTML=`<div class="modal"><h2>Add Task <span style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:1px;margin-left:8px">DEDLINE</span></h2>
+    <!-- 1. D = Task name -->
+    <div class="field-row"><label>Task (D)</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
+    <!-- 2. E = Assignee -->
+    <div class="field-row"><label>Assignee (E)</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
+    <!-- 3. E = Due + Hard -->
+    <div class="field-row"><label>Due + Hard (E)</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard deadline</label></div></div>
+    <!-- 4. L = Length -->
+    <div class="field-row"><label>Length (L)</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='30 min'?'selected':''}>${o}</option>`).join('')}</select></div>
+    <!-- 5. I = Importance -->
+    <div class="field-row"><label>Importance (I)</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
+    <!-- 6. N = Number / Recurring -->
+    <div class="field-row"><label>Recurring (N)</label><select id="ctRecur">${['None','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option>${r}</option>`).join('')}</select></div>
+    <!-- 7. E = End Result -->
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>End Result (E)</label><textarea id="ctDesc" rows="3" placeholder="What does done look like?"></textarea></div>
+    <div style="border-top:1px solid var(--border-default);margin:8px 0;padding-top:4px;font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px">Additional</div>
     <div class="field-row"><label>Status</label><select id="ctStatus"><option>Today</option><option selected>Upcoming</option><option>To do</option></select></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3"></textarea></div>
-    <div class="field-row"><label>Recurring</label><select id="ctRecur">${['None','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option>${r}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('createTaskModal').remove()">Cancel</button>
       <button class="btn btn-primary" onclick="submitCreateTask()">Add Task</button>
@@ -1846,9 +2119,21 @@ function renderRecurring(){
       html+=`<div class="freq-group"><h4>${f} (${g.length})</h4><div class="recurring-grid">`;
       g.forEach(t=>{
         const od=isOverdue(t);
+        // DEDLINE compact (same as Kanban card format)
         html+=`<div class="recurring-card" style="${od?'border-color:var(--danger)':''}" onclick="openTaskDrawer('${t.id}')">
-          <h4>${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag">!</span>':''}</h4>
-          <div class="meta">${statusBadge(t.status)} &middot; ${t.timeEst||'-'}${t.business?` &middot; <span class="badge badge-business">${escHtml(t.business)}</span>`:''}${od?' <span style="color:var(--danger)">OVERDUE</span>':''}</div>
+          <h4>${escHtml(t.name)}${hardFlag(t)}</h4>
+          <div class="meta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px">
+            ${avatarSmall(t)}
+            ${dueDateShort(t.dueDate)}
+            <span>&middot; ${t.timeEst||formatMins(t.minutes)||'-'}</span>
+          </div>
+          <div class="meta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:3px">
+            ${priorityBadge(t.priority)}
+            ${recurPill(t)}
+            ${statusBadge(t.status)}
+            ${businessPill(t)}
+          </div>
+          ${od?'<div style="font-size:10px;color:var(--danger);font-weight:600;margin-top:3px">OVERDUE</div>':''}
         </div>`;
       });
       html+=`</div></div>`;
