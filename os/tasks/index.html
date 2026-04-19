@@ -358,6 +358,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <div id="userBadge" class="user-badge" style="display:none"></div>
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
     <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
+    <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4;display:flex;flex-direction:column;align-items:flex-start;line-height:1.1;padding:6px 10px" title="Undo last action (Cmd+Z)">
+      <span style="font-weight:600">Undo</span>
+      <span id="undoBtnLabel" style="font-size:10px;color:var(--text-secondary);font-weight:400;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Nothing to undo</span>
+    </button>
     <button class="btn" onclick="loadAllData()">Refresh</button>
   </div>
 </div>
@@ -473,7 +477,6 @@ const F = {
   attachments: 'fldEbs9cscRr8elcw',
   recurring:   'fldNhDWBX5gQm2p6b',
   recurFlag:   'fldW4ym7haKK0BZzt',
-  someDay:     'fldmhkeRaDkiL3Ga4',
   notes:       'fldR7apBzSp3oxFxz',
   category:    'fldVDvfhfOUBNvAxe',
   completion:  'fldFOi1SwEKuJRmdN',
@@ -483,6 +486,8 @@ const F = {
   projects:    'fldBg0rQy0FrOAkRN',
   origDueDate: 'fldS2OR7oQKC7T1to',
   hardDeadline:'fldZKzIxgyrQ8CG8a',
+  someDay:     'fldmhkeRaDkiL3Ga4',
+  collaborators:'fldcq3t6uAPgWSOP8',
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -703,6 +708,8 @@ function parseTask(rec){
     if(typeof p==='object'){if(p.name)projectNames.push(p.name);if(p.id)projectIds.push(p.id)}
     else if(typeof p==='string')projectIds.push(p);
   });
+  const collabRaw=gf(rec,F.collaborators)||[];
+  const collaborators=Array.isArray(collabRaw)?collabRaw.map(c=>({id:c.id,email:c.email,name:c.name})):[];
 
   return {
     id:rec.id,
@@ -717,7 +724,6 @@ function parseTask(rec){
     minutes,
     recurring:recurObj?recurObj.name:'',
     recurFlag:!!gf(rec,F.recurFlag),
-    someDay:!!gf(rec,F.someDay),
     description:gf(rec,F.description)||'',
     notes:gf(rec,F.notes)||'',
     attachments:gf(rec,F.attachments)||[],
@@ -730,6 +736,8 @@ function parseTask(rec){
     projectNames,projectIds,
     origDueDate:gf(rec,F.origDueDate)||'',
     hardDeadline:!!gf(rec,F.hardDeadline),
+    someDay:!!gf(rec,F.someDay),
+    collaborators,
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
 }
@@ -783,10 +791,30 @@ async function patchProject(pid,fields){
   return res;
 }
 
+// Capture the current "raw" value for a task field — same shape that updateTaskField expects as rawValue
+function captureOldRaw(task,fieldKey){
+  if(fieldKey==='assignee'){
+    const m=TEAM.find(x=>x.email===task.assigneeEmail);
+    return m?m.key:'';
+  }
+  return task[fieldKey];
+}
+
+// Human-readable version of a raw value for an undo label
+function fmtRaw(fieldKey,rawValue){
+  if(rawValue===null||rawValue===undefined||rawValue==='')return '(empty)';
+  if(fieldKey==='assignee'){
+    const m=TEAM.find(x=>x.key===rawValue);return m?m.name:rawValue;
+  }
+  if(typeof rawValue==='boolean')return rawValue?'on':'off';
+  return String(rawValue);
+}
+
 // Update one task field; updates local state; toasts.
 async function updateTaskField(taskId,fieldKey,rawValue){
   const task=allTasks.find(t=>t.id===taskId);if(!task)return;
   const prev={...task};
+  const oldRaw=captureOldRaw(task,fieldKey);
   let payload={};
   const fid=F[fieldKey];
   try{
@@ -799,7 +827,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         payload[fid]=[{id:BUSINESS_MAP[rawValue]}];
         task.business=rawValue;task.businessId=BUSINESS_MAP[rawValue];
       } else if(!rawValue){payload[fid]=[];task.business='';task.businessId=''}
-    } else if(fieldKey==='hardDeadline'||fieldKey==='someDay'||fieldKey==='onHold'||fieldKey==='recurFlag'){
+    } else if(fieldKey==='hardDeadline'||fieldKey==='onHold'||fieldKey==='recurFlag'){
       payload[fid]=!!rawValue;task[fieldKey]=!!rawValue;
     } else if(fieldKey==='dueDate'||fieldKey==='origDueDate'){
       payload[fid]=rawValue||null;task[fieldKey]=rawValue||'';
@@ -819,6 +847,11 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     if(fieldKey==='dueDate'){
       const today=todayStr();
       if(rawValue!==today)saveStartTime(today,taskId,null);
+    }
+    // Push undo entry (skip if this call is itself an undo)
+    if(!_undoInProgress){
+      const label=`Changed ${fieldKey} from ${fmtRaw(fieldKey,oldRaw)} to ${fmtRaw(fieldKey,rawValue)}`;
+      pushUndo({type:'patch',taskId,fieldKey,oldRaw,newRaw:rawValue,label});
     }
     toast('Saved');
   }catch(e){
@@ -963,10 +996,10 @@ function renderTeamBar(){
 
 // ===== KPIs =====
 function renderKPIs(){
-  let tasks=allTasks.filter(t=>!t.someDay);
+  let tasks=allTasks.slice();
   if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
   const today=todayStr();
-  const active=tasks.filter(t=>t.status!=='Completed');
+  const active=tasks.filter(t=>t.status!=='Completed'&&!t.someDay);
   const overdue=active.filter(t=>t.status==='Overdue'||isOverdue(t));
   const dueToday=active.filter(t=>t.dueDate===today||t.status==='Today');
   const upcoming=active.filter(t=>t.status==='Upcoming');
@@ -1020,8 +1053,9 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Linked Project</label><div class="field-val" style="color:var(--text-secondary);font-size:12px">${t.projectNames.length?escHtml(t.projectNames.join(', ')):'None linked'}</div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments</label><div class="field-val"><textarea oninput="drwSaveText('notes',this.value)" placeholder="Add a comment...">${escHtml(t.notes)}</textarea></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments</label><div class="field-val" id="drwCommentsWrap"><div style="color:var(--text-secondary);font-size:12px">Loading comments&hellip;</div></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn btn-danger" onclick="deleteTask('${t.id}')">Delete</button>
@@ -1029,9 +1063,199 @@ function openTaskDrawer(taskId){
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  // Kick off comments fetch (non-blocking)
+  loadCommentsIntoDrawer(t.id);
 }
 function closeDrawer(){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();drawerTaskId=null}
 function drwSaveText(fieldKey,val){if(!drawerTaskId)return;debouncedSave(drawerTaskId,fieldKey,val)}
+
+// ======================================================
+// COLLABORATORS
+// ======================================================
+function collabKeyForEmail(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
+function renderCollaboratorsDrawer(t){
+  const usedEmails=new Set((t.collaborators||[]).map(c=>(c.email||'').toLowerCase()));
+  const available=TEAM.filter(m=>!usedEmails.has(m.email.toLowerCase()));
+  const chips=(t.collaborators||[]).map(c=>{
+    const k=collabKeyForEmail(c.email);
+    const nm=(c.name||c.email||'?');
+    const first=nm.split(' ')[0];
+    const init=nm.split(' ').map(w=>w[0]).join('').slice(0,2);
+    return `<span class="collab-chip" style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:12px;padding:2px 6px 2px 2px;font-size:11px;margin:0 4px 4px 0">
+      <span class="avatar avatar-${k}" style="width:18px;height:18px;font-size:9px">${escHtml(init)}</span>
+      ${escHtml(first)}
+      <button onclick="removeCollaborator('${drawerTaskId}','${escHtml((c.email||'').replace(/'/g,"\\'"))}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;line-height:1;padding:0 2px">&times;</button>
+    </span>`;
+  }).join('');
+  let addMenu='';
+  if(available.length){
+    addMenu=`<span style="position:relative;display:inline-block">
+      <button class="btn" style="padding:2px 8px;font-size:11px" onclick="toggleCollabMenu(event)">+ Add</button>
+      <div id="collabAddMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:10;min-width:180px">
+        ${available.map(m=>`<div onclick="addCollaborator('${drawerTaskId}','${m.email}')" style="padding:6px 10px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:18px;height:18px;font-size:9px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
+      </div>
+    </span>`;
+  }
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">${chips||'<span style="color:var(--text-secondary);font-size:12px;margin-right:6px">None</span>'}${addMenu}</div>`;
+}
+function toggleCollabMenu(e){
+  e.stopPropagation();
+  const m=document.getElementById('collabAddMenu');if(!m)return;
+  const open=m.style.display==='block';
+  m.style.display=open?'none':'block';
+  if(!open){
+    setTimeout(()=>{
+      const close=(ev)=>{if(!m.contains(ev.target)){m.style.display='none';document.removeEventListener('click',close)}};
+      document.addEventListener('click',close);
+    },0);
+  }
+}
+async function patchCollaborators(taskId,newList,label){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const oldRaw=(task.collaborators||[]).map(c=>({id:c.id,email:c.email,name:c.name}));
+  const payload={};
+  payload[F.collaborators]=newList.map(c=>({email:c.email}));
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    // Re-parse collaborators from response to get ids/names
+    const collabRaw=(data.fields&&data.fields[F.collaborators])||[];
+    task.collaborators=Array.isArray(collabRaw)?collabRaw.map(c=>({id:c.id,email:c.email,name:c.name})):[];
+    // Undo
+    if(!_undoInProgress){
+      pushUndo({type:'patch',taskId,fieldKey:'collaborators',oldRaw,newRaw:task.collaborators,label:label||'Changed collaborators'});
+    }
+    const wrap=document.getElementById('drwCollabWrap');
+    if(wrap&&drawerTaskId===taskId)wrap.innerHTML=renderCollaboratorsDrawer(task);
+    toast('Saved');
+  }catch(e){
+    console.warn('collab patch failed',e);
+    toast('Failed to update collaborators',true);
+  }
+}
+async function addCollaborator(taskId,email){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const next=[...(task.collaborators||[]),{email}];
+  const m=TEAM.find(x=>x.email===email);
+  await patchCollaborators(taskId,next,`Added ${m?m.name:email} as collaborator`);
+}
+async function removeCollaborator(taskId,email){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const next=(task.collaborators||[]).filter(c=>(c.email||'').toLowerCase()!==(email||'').toLowerCase());
+  const m=TEAM.find(x=>x.email===email);
+  await patchCollaborators(taskId,next,`Removed ${m?m.name:email} as collaborator`);
+}
+
+// Extend captureOldRaw/updateTaskField (for undo 'patch' on collaborators)
+// Undo of collaborators patch needs to re-apply oldRaw: handled via a custom branch below in doUndo handling.
+
+// ======================================================
+// COMMENTS (Airtable native)
+// ======================================================
+const _drawerComments={}; // taskId -> array
+async function fetchComments(taskId){
+  const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments?pageSize=100`,{headers:{Authorization:`Bearer ${PAT}`}});
+  if(!r.ok)throw new Error('Comments fetch failed');
+  return (await r.json()).comments||[];
+}
+async function postComment(taskId,text){
+  const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments`,{
+    method:'POST',
+    headers:{Authorization:`Bearer ${PAT}`,'Content-Type':'application/json'},
+    body:JSON.stringify({text})
+  });
+  if(!r.ok)throw new Error('Comment post failed');
+  return await r.json();
+}
+async function deleteCommentApi(taskId,commentId){
+  const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments/${commentId}`,{
+    method:'DELETE',
+    headers:{Authorization:`Bearer ${PAT}`}
+  });
+  if(!r.ok)throw new Error('Comment delete failed');
+  return true;
+}
+function relTime(iso){
+  if(!iso)return'';
+  const d=new Date(iso);const now=new Date();
+  const s=Math.floor((now-d)/1000);
+  if(s<60)return'just now';
+  if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago';
+  if(s<86400*7)return Math.floor(s/86400)+'d ago';
+  return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+}
+async function loadCommentsIntoDrawer(taskId){
+  try{
+    const list=await fetchComments(taskId);
+    _drawerComments[taskId]=list;
+    if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+  }catch(e){
+    console.warn('load comments failed',e);
+    const w=document.getElementById('drwCommentsWrap');
+    if(w&&drawerTaskId===taskId)w.innerHTML='<div style="color:var(--danger);font-size:12px">Failed to load comments</div>'+commentComposerHtml(taskId);
+  }
+}
+function commentComposerHtml(taskId){
+  return `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+    <textarea id="drwCommentInput" placeholder="Add a comment..." style="min-height:60px"></textarea>
+    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitDrawerComment('${taskId}')" style="padding:4px 12px;font-size:12px">Post</button></div>
+  </div>`;
+}
+function renderCommentsInDrawer(taskId){
+  const w=document.getElementById('drwCommentsWrap');if(!w)return;
+  const list=(_drawerComments[taskId]||[]).slice().sort((a,b)=>new Date(b.createdTime)-new Date(a.createdTime));
+  const meEmail=currentUser?currentUser.email:'';
+  const items=list.map(c=>{
+    const email=(c.author&&c.author.email)||'';
+    const name=(c.author&&c.author.name)||email||'Unknown';
+    const k=collabKeyForEmail(email);
+    const init=name.split(' ').map(w=>w[0]).join('').slice(0,2);
+    const mine=email&&meEmail&&email.toLowerCase()===meEmail.toLowerCase();
+    return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+      <span class="avatar avatar-${k}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteComment('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;padding:0">&times;</button>`:''}</div>
+        <div style="font-size:13px;color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
+      </div>
+    </div>`;
+  }).join('')||'<div style="color:var(--text-secondary);font-size:12px;padding:8px 0">No comments yet.</div>';
+  w.innerHTML=`<div style="max-height:280px;overflow-y:auto">${items}</div>${commentComposerHtml(taskId)}`;
+}
+async function submitDrawerComment(taskId){
+  const ta=document.getElementById('drwCommentInput');if(!ta)return;
+  const text=(ta.value||'').trim();if(!text)return;
+  ta.disabled=true;
+  try{
+    const c=await postComment(taskId,text);
+    _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
+    pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
+    if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    toast('Comment posted');
+  }catch(e){
+    console.warn(e);toast('Failed to post comment',true);
+    ta.disabled=false;
+  }
+}
+function confirmDeleteComment(taskId,commentId){
+  if(!confirm('Delete this comment?'))return;
+  doDeleteComment(taskId,commentId);
+}
+async function doDeleteComment(taskId,commentId){
+  const list=_drawerComments[taskId]||[];
+  const c=list.find(x=>x.id===commentId);
+  const text=c?c.text:'';
+  try{
+    await deleteCommentApi(taskId,commentId);
+    _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
+    pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
+    if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    toast('Comment deleted');
+  }catch(e){
+    console.warn(e);toast('Failed to delete comment',true);
+  }
+}
 
 async function completeTaskFromDrawer(taskId){
   await updateTaskField(taskId,'status','Completed');
@@ -1045,11 +1269,40 @@ async function completeTaskInline(taskId,ev){
   renderAll();
 }
 
-async function deleteTask(taskId,ev){
+function deleteTask(taskId,ev){
   if(ev){ev.stopPropagation();ev.preventDefault()}
   const task=allTasks.find(t=>t.id===taskId);
-  const label=task?task.name:'this task';
-  if(!confirm(`Delete "${label}"? This cannot be undone.`))return;
+  if(!task)return;
+  openDeleteConfirm(task);
+}
+
+function openDeleteConfirm(task){
+  const existing=document.getElementById('deleteConfirmModal');
+  if(existing)existing.remove();
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='deleteConfirmModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML=`<div class="modal" style="max-width:460px">
+    <h2 style="margin-top:0">Delete task?</h2>
+    <p style="font-size:14px;color:var(--text-primary);margin:8px 0 6px 0"><strong>${escHtml(task.name)}</strong></p>
+    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 16px 0">This permanently deletes the record from Airtable. This cannot be undone from Airtable itself &mdash; but you can undo within this session.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('deleteConfirmModal').remove()">Cancel</button>
+      <button class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('confirmDeleteBtn').onclick=()=>{
+    overlay.remove();
+    performDeleteTask(task.id);
+  };
+}
+
+async function performDeleteTask(taskId){
+  const task=allTasks.find(t=>t.id===taskId);
+  if(!task)return;
+  // Snapshot full field payload for undo (so we can re-create a new record)
+  const snapshot=buildFieldsFromTask(task);
   try{
     const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,{
       method:'DELETE',
@@ -1058,6 +1311,7 @@ async function deleteTask(taskId,ev){
     if(!res.ok)throw new Error('HTTP '+res.status);
     allTasks=allTasks.filter(t=>t.id!==taskId);
     if(drawerTaskId===taskId)closeDrawer();
+    pushUndo({type:'delete',snapshot,label:`Deleted "${task.name}"`});
     toast('Task deleted');
     renderAll();
   }catch(e){
@@ -1065,6 +1319,128 @@ async function deleteTask(taskId,ev){
     console.warn('delete failed',e);
   }
 }
+
+// Build an Airtable fields payload from an in-memory task (for undo re-create)
+function buildFieldsFromTask(t){
+  const fields={};
+  if(t.name)fields[F.name]=t.name;
+  if(t.dueDate)fields[F.dueDate]=t.dueDate;
+  if(t.status)fields[F.status]={name:t.status};
+  if(t.assigneeEmail)fields[F.assignee]={email:t.assigneeEmail};
+  if(t.priority)fields[F.priority]={name:t.priority};
+  if(t.timeEst)fields[F.timeEst]={name:t.timeEst};
+  if(t.recurring)fields[F.recurring]={name:t.recurring};
+  if(t.recurFlag)fields[F.recurFlag]=true;
+  if(t.description)fields[F.description]=t.description;
+  if(t.notes)fields[F.notes]=t.notes;
+  if(t.category)fields[F.category]={name:t.category};
+  if(t.onHold)fields[F.onHold]=true;
+  if(t.hardDeadline)fields[F.hardDeadline]=true;
+  if(t.businessId)fields[F.business]=[{id:t.businessId}];
+  if(t.origDueDate)fields[F.origDueDate]=t.origDueDate;
+  return fields;
+}
+
+// ======================================================
+// UNDO STACK
+// ======================================================
+const undoStack=[];
+const UNDO_MAX=20;
+let _undoInProgress=false;
+function pushUndo(entry){
+  if(_undoInProgress)return;
+  undoStack.push(entry);
+  if(undoStack.length>UNDO_MAX)undoStack.shift();
+  updateUndoButton();
+}
+function updateUndoButton(){
+  const btn=document.getElementById('undoBtn');
+  const lbl=document.getElementById('undoBtnLabel');
+  if(!btn||!lbl)return;
+  if(undoStack.length===0){
+    btn.disabled=true;btn.style.opacity='0.4';
+    lbl.textContent='Nothing to undo';
+  } else {
+    btn.disabled=false;btn.style.opacity='1';
+    const last=undoStack[undoStack.length-1];
+    lbl.textContent='Undo: '+(last.label||'last action');
+  }
+}
+async function doUndo(){
+  if(!undoStack.length)return;
+  const entry=undoStack.pop();updateUndoButton();
+  _undoInProgress=true;
+  try{
+    if(entry.type==='patch'){
+      const task=allTasks.find(t=>t.id===entry.taskId);
+      if(!task){throw new Error('Task no longer in memory')}
+      if(entry.fieldKey==='collaborators'){
+        await patchCollaborators(entry.taskId,entry.oldRaw||[],'Reverted collaborators');
+      } else {
+        await updateTaskField(entry.taskId,entry.fieldKey,entry.oldRaw);
+      }
+    } else if(entry.type==='comment-add'){
+      // Undo = delete the comment we just posted
+      await deleteCommentApi(entry.taskId,entry.commentId);
+      if(_drawerComments[entry.taskId])_drawerComments[entry.taskId]=_drawerComments[entry.taskId].filter(c=>c.id!==entry.commentId);
+      if(drawerTaskId===entry.taskId)renderCommentsInDrawer(entry.taskId);
+    } else if(entry.type==='comment-delete'){
+      // Undo = re-post (new ID, lose original author/timestamp)
+      const c=await postComment(entry.taskId,entry.text||'');
+      _drawerComments[entry.taskId]=[c,...(_drawerComments[entry.taskId]||[])];
+      if(drawerTaskId===entry.taskId)renderCommentsInDrawer(entry.taskId);
+      toast('Re-posted (new timestamp/author)');
+    } else if(entry.type==='multi-patch'){
+      const task=allTasks.find(t=>t.id===entry.taskId);
+      if(!task){throw new Error('Task no longer in memory')}
+      for(const e of entry.edits){
+        await updateTaskField(entry.taskId,e.fieldKey,e.oldRaw);
+      }
+    } else if(entry.type==='delete'){
+      const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body:JSON.stringify({fields:entry.snapshot,typecast:true})
+      });
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      const data=await res.json();
+      allTasks.push(parseTask(data));
+      toast('Undone: '+entry.label+' (new record ID)');
+      renderAll();
+      _undoInProgress=false;
+      return;
+    } else if(entry.type==='create'){
+      const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${entry.taskId}`,{
+        method:'DELETE',
+        headers:{'Authorization':`Bearer ${PAT}`}
+      });
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      allTasks=allTasks.filter(t=>t.id!==entry.taskId);
+      if(drawerTaskId===entry.taskId)closeDrawer();
+    }
+    toast('Undone: '+entry.label);
+    renderAll();
+  }catch(e){
+    console.warn('undo failed',e);
+    toast('Undo failed',true);
+    // push back
+    undoStack.push(entry);updateUndoButton();
+  }finally{
+    _undoInProgress=false;
+  }
+}
+
+// Keyboard shortcut: Cmd/Ctrl+Z
+document.addEventListener('keydown',function(e){
+  if(!((e.metaKey||e.ctrlKey)&&e.key==='z'&&!e.shiftKey))return;
+  const el=document.activeElement;
+  if(el){
+    const tag=(el.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||el.isContentEditable)return;
+  }
+  e.preventDefault();
+  doUndo();
+});
 
 function rowActionsHtml(taskId){
   return `<span class="row-actions" onclick="event.stopPropagation()">
@@ -1078,7 +1454,7 @@ function rowActionsHtml(taskId){
 // ======================================================
 function getMyDayTasks(){
   const today=todayStr();
-  let tasks=allTasks.filter(t=>!t.someDay&&t.status!=='Completed');
+  let tasks=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
   if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
   const todayTasks=tasks.filter(t=>t.status==='Today'||t.dueDate===today);
   const overdueTasks=tasks.filter(t=>(t.status==='Overdue'||isOverdue(t))&&t.dueDate!==today&&t.status!=='Today');
@@ -1353,8 +1729,20 @@ function dropOnTimeline(e){
   task._startMin=minOfDay;
   saveStartTime(todayStr(),task.id,minOfDay);
   if(data.kind==='sideschedule'){
-    updateTaskField(task.id,'status','Today');
-    updateTaskField(task.id,'dueDate',todayStr());
+    const oldStatus=captureOldRaw(task,'status');
+    const oldDue=captureOldRaw(task,'dueDate');
+    const newDue=todayStr();
+    _undoInProgress=true;
+    Promise.resolve()
+      .then(()=>updateTaskField(task.id,'status','Today'))
+      .then(()=>updateTaskField(task.id,'dueDate',newDue))
+      .finally(()=>{
+        _undoInProgress=false;
+        pushUndo({type:'multi-patch',taskId:task.id,edits:[
+          {fieldKey:'status',oldRaw:oldStatus,newRaw:'Today'},
+          {fieldKey:'dueDate',oldRaw:oldDue,newRaw:newDue},
+        ],label:`Scheduled "${task.name}" for today`});
+      });
   }
   window._tlDragging=false;
   renderMyDay();
@@ -1761,14 +2149,18 @@ function clearSelection(){selectedTasks.clear();const sa=document.getElementById
 function updateBulkBar(){const bar=document.getElementById('bulkBar');if(selectedTasks.size>0){bar.style.display='flex';document.getElementById('bulkCount').textContent=selectedTasks.size}else bar.style.display='none'}
 async function bulkComplete(){
   if(!selectedTasks.size)return;const ids=[...selectedTasks];
-  await Promise.all(ids.map(id=>updateTaskField(id,'status','Completed')));
+  _undoInProgress=true;
+  try{await Promise.all(ids.map(id=>updateTaskField(id,'status','Completed')));}
+  finally{_undoInProgress=false;}
   selectedTasks.clear();renderAll();
 }
 async function bulkReschedule(){
   if(!selectedTasks.size)return;
   const t=new Date();t.setDate(t.getDate()+1);const s=t.toISOString().slice(0,10);
   const ids=[...selectedTasks];
-  await Promise.all(ids.map(id=>updateTaskField(id,'dueDate',s)));
+  _undoInProgress=true;
+  try{await Promise.all(ids.map(id=>updateTaskField(id,'dueDate',s)));}
+  finally{_undoInProgress=false;}
   selectedTasks.clear();renderAll();
 }
 
@@ -1789,7 +2181,7 @@ function getWeeksOfMonth(year,month){
 }
 
 function getKanbanTasks(){
-  let tasks=allTasks.filter(t=>!t.someDay&&t.priority==='Project'&&t.status!=='Completed');
+  let tasks=allTasks.filter(t=>t.priority==='Project'&&t.status!=='Completed'&&!t.someDay);
   if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
   if(kanbanProjectFilter)tasks=tasks.filter(t=>t.projectIds.includes(kanbanProjectFilter)||t.projectNames.some(n=>n===kanbanProjectFilter));
   return tasks;
@@ -2011,7 +2403,9 @@ async function submitCreateTask(){
     });
     if(!res.ok){const t=await res.text();throw new Error('HTTP '+res.status+' '+t)}
     const data=await res.json();
-    allTasks.push(parseTask(data));
+    const parsed=parseTask(data);
+    allTasks.push(parsed);
+    pushUndo({type:'create',taskId:parsed.id,label:`Created "${parsed.name}"`});
     document.getElementById('createTaskModal').remove();
     toast('Task added');
     renderAll();
@@ -2144,8 +2538,9 @@ function renderRecurring(){
   const container=document.getElementById('recurringContent');
   // Support object or string form of recurring field
   let recurring=allTasks.filter(t=>{
+    if(t.someDay)return false;
     const r=t.recurring||t.recurFlag;
-    return r&&!t.someDay;
+    return !!r;
   });
   if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)recurring=recurring.filter(t=>t.assigneeEmail===m.email)}
 
