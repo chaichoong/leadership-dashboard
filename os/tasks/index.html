@@ -869,7 +869,11 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       payload[fid]=rawValue;task[fieldKey]=rawValue;
     }
     const res=await patchTask(taskId,payload);
-    if(!res.ok){throw new Error('HTTP '+res.status)}
+    if(!res.ok){
+      let errBody='';try{errBody=await res.text()}catch(e){}
+      console.error('[PATCH failed]',taskId,fieldKey,'status',res.status,'payload',payload,'body',errBody);
+      throw new Error('HTTP '+res.status+' '+errBody.slice(0,200));
+    }
     // Clear persisted start time if task completes or moves to a different day
     if(fieldKey==='status'&&rawValue==='Completed'){
       const today=todayStr();saveStartTime(today,taskId,null);
@@ -2288,24 +2292,93 @@ function runAutoSchedulePreview(){
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='autoModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
-  let html=`<div class="modal"><h2>Auto-Schedule Preview</h2>`;
+  window._pendingMoves=moves;
+  window._autoWarnings=warnings;
+  overlay.innerHTML=renderAutoScheduleModal();
+  document.body.appendChild(overlay);
+}
+
+// Render (and re-render) the Auto-Schedule preview modal body
+function renderAutoScheduleModal(){
+  const moves=window._pendingMoves||[];
+  const warnings=window._autoWarnings||[];
+  let html=`<div class="modal" style="max-width:880px;width:95%"><h2>Auto-Schedule Preview</h2>`;
   if(moves.length===0)html+=`<p>No changes needed — everything fits in its current day.</p>`;
   else{
-    html+=`<p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
-    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
-    <table class="task-table"><thead><tr><th>Task</th><th>From</th><th>To</th><th>Time</th></tr></thead><tbody>
-    ${moves.map(m=>`<tr><td>${escHtml(m.task.name)}</td><td>${m.from||'-'}</td><td><strong>${m.to}</strong></td><td>${m.task.timeEst||formatMins(m.task.minutes)}</td></tr>`).join('')}
+    html+=`<p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Ordered by <strong>Priority</strong> (Project &rarr; Urgent &rarr; Not Urgent). Edit any destination date below — the capacity for that day will be recalculated and subsequent tasks will reshuffle automatically.</p>
+    <p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
+    <table class="task-table"><thead><tr><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th></tr></thead><tbody>
+    ${moves.map((m,i)=>{
+      const pri=m.task.priority||'';
+      const priCls={Project:'badge-project',Urgent:'badge-urgent','Not Urgent':'badge-not-urgent'}[pri]||'';
+      return `<tr>
+        <td style="color:var(--text-secondary);font-size:11px">${i+1}</td>
+        <td>${escHtml(m.task.name)}</td>
+        <td>${pri?`<span class="badge ${priCls}">${escHtml(pri)}</span>`:'-'}</td>
+        <td>${m.from||'-'}</td>
+        <td><input type="date" value="${m.to}" onchange="updateAutoMoveDate(${i},this.value)" style="width:140px"></td>
+        <td style="white-space:nowrap">${m.task.timeEst||formatMins(m.task.minutes)}</td>
+      </tr>`;
+    }).join('')}
     </tbody></table></div>`;
   }
-  if(warnings.length)html+=`<div style="color:var(--danger);font-size:12px;margin-top:10px">${warnings.map(escHtml).join('<br>')}</div>`;
+  if(warnings.length)html+=`<div style="color:var(--danger);font-size:12px;margin-top:10px;max-height:100px;overflow-y:auto;padding:8px;background:var(--danger-bg);border-radius:6px">${warnings.map(escHtml).join('<br>')}</div>`;
   html+=`<div class="modal-actions">
     <button class="btn" onclick="document.getElementById('autoModal').remove()">Cancel</button>
     ${moves.length?`<button class="btn btn-primary" onclick="applyAutoSchedule()">Apply ${moves.length} changes</button>`:''}
   </div></div>`;
-  overlay.innerHTML=html;
-  document.body.appendChild(overlay);
-  window._pendingMoves=moves;
+  return html;
 }
+
+// Called when user edits a destination date in the preview.
+// We reassign this task to the chosen date, then re-run the scheduler
+// with the remaining tasks to redistribute capacity intelligently.
+function updateAutoMoveDate(index,newDate){
+  if(!newDate)return;
+  const moves=window._pendingMoves||[];
+  const m=moves[index];if(!m)return;
+  // Force this task to go to the chosen date
+  m.to=newDate;
+  m._locked=true;
+  // Re-run scheduler for the UNLOCKED tasks, seeding usage with locked moves
+  try{
+    const member=TEAM.find(x=>x.key===activeTeam)||(currentUser?TEAM.find(x=>x.key===currentUser.key):null);
+    if(!member)return;
+    const config=getWorkConfig();
+    const routineMins=getRoutineBlocks().reduce((s,b)=>s+b.duration,0);
+    const dailyCapMin=Math.max(0,(config.endHour-config.startHour)*60-routineMins);
+    if(dailyCapMin<=0)return;
+    const usage={};
+    // seed with today's calendar
+    const today=todayStr();
+    usage[today]=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?en-st:0)},0);
+    // seed with all LOCKED moves + hard-deadline tasks
+    moves.filter(x=>x._locked).forEach(x=>{const mins=x.task.minutes||30;usage[x.to]=(usage[x.to]||0)+mins});
+    // also seed with existing due dates of hardDeadline tasks not in moves
+    allTasks.filter(t=>t.assigneeEmail===member.email&&t.hardDeadline&&t.status!=='Completed'&&!t.someDay&&t.dueDate).forEach(t=>{const mins=t.minutes||30;usage[t.dueDate]=(usage[t.dueDate]||0)+mins});
+    // Re-schedule the UNLOCKED moves starting from today (or Monday if today is weekend)
+    function nextWorkDay(d){let x=addDays(d,1);let g=0;while(isWeekend(x)&&g<10){x=addDays(x,1);g++}return x}
+    let cursor=today;if(isWeekend(cursor))cursor=nextWorkDay(cursor);
+    const unlocked=moves.filter(x=>!x._locked);
+    // Sort unlocked by priority
+    unlocked.sort((a,b)=>(PRIORITY_ORDER[a.task.priority]??99)-(PRIORITY_ORDER[b.task.priority]??99));
+    const newWarnings=[];
+    unlocked.forEach(mv=>{
+      const mins=mv.task.minutes||30;
+      let day=cursor;let tries=0;let placed=false;
+      while(tries<60){
+        if((usage[day]||0)+mins<=dailyCapMin){mv.to=day;usage[day]=(usage[day]||0)+mins;placed=true;break}
+        day=nextWorkDay(day);tries++;
+      }
+      if(!placed)newWarnings.push(`Could not fit "${mv.task.name}" within 60 days after your edit`);
+    });
+    window._autoWarnings=newWarnings;
+    // Re-render modal
+    const ov=document.getElementById('autoModal');if(ov)ov.innerHTML=renderAutoScheduleModal();
+  }catch(e){console.error('[updateAutoMoveDate] failed',e);toast('Could not rebalance: '+e.message,true)}
+}
+window.updateAutoMoveDate=updateAutoMoveDate;
 async function applyAutoSchedule(){
   const moves=window._pendingMoves||[];
   const modal=document.getElementById('autoModal');if(modal)modal.remove();
