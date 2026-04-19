@@ -566,7 +566,25 @@ const saveDebounce = {};
 function todayStr(){return new Date().toISOString().slice(0,10)}
 function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
-function toast(msg, err){const el=document.getElementById('toast');el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),1800)}
+function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},1800)}catch(e){console.warn('toast failed',e)}}
+// Bulk-operation flag — suppresses per-call toast/undo during batch PATCH (auto-schedule etc.)
+let _bulkOperation=false;
+// Debounced renderAll for rapid inline field edits
+let _renderAllDebounce=null;
+function renderAllDebounced(){clearTimeout(_renderAllDebounce);_renderAllDebounce=setTimeout(()=>{try{renderAll()}catch(e){console.error('renderAll failed',e)}},200)}
+// Close any open drawer/modal before opening a new one
+function closeAllOverlays(){
+  try{
+    const drawer=document.getElementById('drawerOverlay');if(drawer)drawer.remove();
+    drawerTaskId=null;
+    ['autoModal','drillModal','commentsModal','createTaskModal','createProjModal','deleteConfirmModal'].forEach(id=>{
+      const el=document.getElementById(id);if(el)el.remove();
+    });
+  }catch(e){console.warn('closeAllOverlays failed',e)}
+}
+// Global error boundary — never silently die
+window.addEventListener('error',(e)=>{try{console.error('Global error',e.error||e.message);toast('Error: '+(e.message||'unknown'),true)}catch(_){}});
+window.addEventListener('unhandledrejection',(e)=>{try{console.error('Unhandled promise rejection',e.reason);toast('Error: '+((e.reason&&e.reason.message)||'unknown'),true)}catch(_){}});
 function strColor(s){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return`hsl(${Math.abs(h)%360},60%,55%)`}
 function strColorBg(s){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return`hsla(${Math.abs(h)%360},60%,55%,0.12)`}
 function parseTimeToMinutes(s){if(!s)return null;let m=s.match(/(\d{1,2}):(\d{2})/);if(m)return parseInt(m[1])*60+parseInt(m[2]);try{const d=new Date(s);if(!isNaN(d))return d.getHours()*60+d.getMinutes()}catch(e){}return null}
@@ -853,16 +871,17 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       const today=todayStr();
       if(rawValue!==today)saveStartTime(today,taskId,null);
     }
-    // Push undo entry (skip if this call is itself an undo)
-    if(!_undoInProgress){
+    // Push undo entry (skip if this call is itself an undo or part of bulk op)
+    if(!_undoInProgress&&!_bulkOperation){
       const label=`Changed ${fieldKey} from ${fmtRaw(fieldKey,oldRaw)} to ${fmtRaw(fieldKey,rawValue)}`;
       pushUndo({type:'patch',taskId,fieldKey,oldRaw,newRaw:rawValue,label});
     }
-    toast('Saved');
+    if(!_bulkOperation)toast('Saved');
   }catch(e){
     Object.assign(task,prev);
-    toast('Failed to save',true);
+    if(!_bulkOperation)toast('Failed to save',true);
     console.warn('patch failed',e);
+    if(_bulkOperation)throw e;
   }
 }
 
@@ -968,7 +987,7 @@ function renderDedlineSideCard(t){
 // Drill-down modal for clickable KPIs — supports in-modal task detail navigation
 let drillDownState=null; // {title, tasks, extraHtml}
 function openDrillDown(title,tasks,extraHtml){
-  closeDrawer();
+  closeAllOverlays();
   drillDownState={title,tasks:tasks?tasks.map(t=>t.id):null,extraHtml};
   const existing=document.getElementById('drillModal');if(existing)existing.remove();
   const overlay=document.createElement('div');
@@ -1010,17 +1029,17 @@ function openDrillDownTaskDetail(taskId){
     </div>
     <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)" style="margin-top:0">${escHtml(t.name)}</h2>
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
-    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAllDebounced()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
-      <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()">
+      <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAllDebounced()">
       <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
     </div></div>
-    <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
-    <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAllDebounced()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value);renderAllDebounced()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
+    <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAllDebounced()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
-    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAllDebounced()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAllDebounced()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Linked Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
     <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
@@ -1212,7 +1231,12 @@ async function removeCollaborator(taskId,email){
 const _drawerComments={}; // taskId -> array
 async function fetchComments(taskId){
   const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments?pageSize=100`,{headers:{Authorization:`Bearer ${PAT}`}});
-  if(!r.ok)throw new Error('Comments fetch failed');
+  if(!r.ok){
+    const err=new Error('Comments fetch failed');
+    err.status=r.status;
+    try{err.body=await r.text()}catch(_){err.body=''}
+    throw err;
+  }
   return (await r.json()).comments||[];
 }
 async function postComment(taskId,text){
@@ -1375,7 +1399,8 @@ let _commentsModalTaskId=null;
 function openCommentsModal(taskId){
   _commentsModalTaskId=taskId;
   const task=allTasks.find(t=>t.id===taskId);
-  const existing=document.getElementById('commentsModal');if(existing)existing.remove();
+  // Remove other overlays but keep the drawer (comments opens from drawer)
+  ['autoModal','drillModal','commentsModal','createTaskModal','createProjModal','deleteConfirmModal'].forEach(id=>{const el=document.getElementById(id);if(el)el.remove()});
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='commentsModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
@@ -1395,7 +1420,16 @@ async function loadCommentsIntoModal(taskId){
   }catch(e){
     console.error('[Comments] fetch failed',e);
     const body=document.getElementById('commentsModalBody');
-    if(body)body.innerHTML=`<div style="color:var(--danger);font-size:13px;padding:12px 0">Failed to load comments &mdash; likely a PAT scope issue (need <code>data.records:read</code> and comments scope). <button class="btn" onclick="loadCommentsIntoModal('${taskId}')" style="padding:2px 8px;font-size:11px">Retry</button></div>`;
+    if(body){
+      const status=e&&e.status?e.status:'?';
+      let hint='';
+      if(status===403)hint='Your Airtable PAT likely lacks the <code>data.records:read</code> or comments scope. Re-create the token with those scopes.';
+      else if(status===401)hint='PAT is missing or invalid. Re-authenticate.';
+      else if(status===404)hint='Task record not found — it may have been deleted.';
+      else if(status>=500)hint='Airtable is having trouble — try again in a moment.';
+      else hint='Check the console for details.';
+      body.innerHTML=`<div style="color:var(--danger);font-size:13px;padding:12px 0">Failed to load comments &mdash; HTTP ${escHtml(String(status))}. ${hint} <button class="btn" onclick="loadCommentsIntoModal('${taskId}')" style="padding:2px 8px;font-size:11px;margin-left:8px">Retry</button></div>`;
+    }
   }
 }
 function renderCommentsInModal(taskId){
@@ -1467,6 +1501,8 @@ function deleteTask(taskId,ev){
   if(ev){ev.stopPropagation();ev.preventDefault()}
   const task=allTasks.find(t=>t.id===taskId);
   if(!task)return;
+  // Close existing confirm modal only (keep drawer open — user may want to cancel)
+  const existing=document.getElementById('deleteConfirmModal');if(existing)existing.remove();
   openDeleteConfirm(task);
 }
 
@@ -2157,6 +2193,7 @@ function resetRoutineConfig(){localStorage.removeItem('_task_routine');localStor
 // SMART CROSS-DAY AUTO-SCHEDULE
 // ======================================================
 function scheduleTasksAcrossDays(){
+ try{
   const member=TEAM.find(m=>m.key===activeTeam)||(currentUser?TEAM.find(m=>m.key===currentUser.key):null);
   if(!member)return{moves:[],warnings:['Pick a user first']};
 
@@ -2164,6 +2201,7 @@ function scheduleTasksAcrossDays(){
   const routineMins=getRoutineBlocks().reduce((s,b)=>s+b.duration,0);
   const workHrs=config.endHour-config.startHour;
   const dailyCapMin=Math.max(0,workHrs*60-routineMins);
+  if(dailyCapMin<=0)return{moves:[],warnings:['Daily capacity is 0 — reduce routine hours or increase working hours']};
 
   let tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
   tasks.sort((a,b)=>{
@@ -2206,11 +2244,15 @@ function scheduleTasksAcrossDays(){
   });
 
   return{moves,warnings};
+ }catch(e){
+  console.error('scheduleTasksAcrossDays crashed',e);
+  return{moves:[],warnings:['Scheduler error: '+(e.message||e)]};
+ }
 }
 
 function runAutoSchedulePreview(){
+  closeAllOverlays();
   const {moves,warnings}=scheduleTasksAcrossDays();
-  closeDrawer();
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='autoModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
@@ -2234,12 +2276,40 @@ function runAutoSchedulePreview(){
 }
 async function applyAutoSchedule(){
   const moves=window._pendingMoves||[];
-  document.getElementById('autoModal').remove();
-  for(let i=0;i<moves.length;i+=8){
-    await Promise.all(moves.slice(i,i+8).map(m=>updateTaskField(m.task.id,'dueDate',m.to)));
+  const modal=document.getElementById('autoModal');if(modal)modal.remove();
+  if(!moves.length){window._pendingMoves=null;return}
+  _bulkOperation=true;
+  const applied=[]; // {taskId, fieldKey, oldRaw, newRaw}
+  let failed=0;
+  try{
+    for(let i=0;i<moves.length;i+=8){
+      const chunk=moves.slice(i,i+8);
+      const results=await Promise.allSettled(chunk.map(m=>{
+        const oldRaw=m.task.dueDate||null;
+        return updateTaskField(m.task.id,'dueDate',m.to).then(()=>{
+          applied.push({taskId:m.task.id,fieldKey:'dueDate',oldRaw,newRaw:m.to});
+        });
+      }));
+      failed+=results.filter(r=>r.status==='rejected').length;
+    }
+    // Single undo entry covering all moves
+    if(applied.length){
+      // Group per-task so doUndo's multi-patch handler works (per-taskId)
+      // Simpler: push one patch entry per task with its own oldRaw
+      applied.forEach(a=>{
+        pushUndo({type:'patch',taskId:a.taskId,fieldKey:a.fieldKey,oldRaw:a.oldRaw,newRaw:a.newRaw,label:`Auto-schedule: moved task to ${a.newRaw}`});
+      });
+    }
+    if(failed>0)toast(`Moved ${applied.length} tasks (${failed} failed)`,true);
+    else toast(`Moved ${applied.length} tasks`);
+  }catch(e){
+    console.error('applyAutoSchedule failed',e);
+    toast('Auto-schedule failed: '+(e.message||e),true);
+  }finally{
+    _bulkOperation=false;
+    window._pendingMoves=null;
+    try{renderAll()}catch(e){console.error(e)}
   }
-  toast(`Moved ${moves.length} tasks`);
-  renderAll();
 }
 
 // ======================================================
@@ -2548,6 +2618,7 @@ function projEditDebounced(pid,fieldKey,val){
 // CREATE TASK MODAL
 // ======================================================
 function openCreateTaskModal(){
+  closeAllOverlays();
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='createTaskModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
@@ -2618,6 +2689,7 @@ function saveStartTime(dateStr,taskId,startMin){
 }
 
 function openCreateProjectModal(){
+  closeAllOverlays();
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='createProjModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
