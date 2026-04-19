@@ -1148,7 +1148,7 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Linked Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
       <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
     </div>
     <div class="drawer-footer">
@@ -1166,6 +1166,7 @@ function drwSaveText(fieldKey,val){if(!drawerTaskId)return;debouncedSave(drawerT
 // ======================================================
 function collabKeyForEmail(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function renderCollaboratorsDrawer(t){
+  const taskId=t.id;
   const usedEmails=new Set((t.collaborators||[]).map(c=>(c.email||'').toLowerCase()));
   const available=TEAM.filter(m=>!usedEmails.has(m.email.toLowerCase()));
   const chips=(t.collaborators||[]).map(c=>{
@@ -1173,22 +1174,25 @@ function renderCollaboratorsDrawer(t){
     const nm=(c.name||c.email||'?');
     const first=nm.split(' ')[0];
     const init=nm.split(' ').map(w=>w[0]).join('').slice(0,2);
-    return `<span class="collab-chip" style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:12px;padding:2px 6px 2px 2px;font-size:11px;margin:0 4px 4px 0">
+    const safeEmail=escHtml((c.email||'').replace(/'/g,"\\'"));
+    return `<span class="collab-chip" title="Click x to remove" style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:12px;padding:2px 4px 2px 2px;font-size:11px;margin:0 4px 4px 0">
       <span class="avatar avatar-${k}" style="width:18px;height:18px;font-size:9px">${escHtml(init)}</span>
       ${escHtml(first)}
-      <button onclick="removeCollaborator('${drawerTaskId}','${escHtml((c.email||'').replace(/'/g,"\\'"))}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;line-height:1;padding:0 2px">&times;</button>
+      <button onclick="removeCollaborator('${taskId}','${safeEmail}')" title="Remove ${escHtml(nm)}" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;line-height:1;padding:1px 5px;border-radius:50%;transition:all .15s" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button>
     </span>`;
   }).join('');
-  let addMenu='';
+  let addBtn='';
   if(available.length){
-    addMenu=`<span style="position:relative;display:inline-block">
-      <button class="btn" style="padding:2px 8px;font-size:11px" onclick="toggleCollabMenu(event)">+ Add</button>
-      <div id="collabAddMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:10;min-width:180px">
-        ${available.map(m=>`<div onclick="addCollaborator('${drawerTaskId}','${m.email}')" style="padding:6px 10px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:18px;height:18px;font-size:9px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
+    addBtn=`<span style="position:relative;display:inline-block">
+      <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="toggleCollabMenu(event)">+ Add Collaborator</button>
+      <div id="collabAddMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:10;min-width:200px">
+        ${available.map(m=>`<div onclick="addCollaborator('${taskId}','${m.email}')" style="padding:8px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:20px;height:20px;font-size:10px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
       </div>
     </span>`;
+  } else {
+    addBtn=`<button class="btn" style="padding:4px 12px;font-size:12px;opacity:0.6;cursor:not-allowed" disabled>All added</button>`;
   }
-  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">${chips||'<span style="color:var(--text-secondary);font-size:12px;margin-right:6px">None</span>'}${addMenu}</div>`;
+  return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">${chips}${addBtn}</div>`;
 }
 function toggleCollabMenu(e){
   e.stopPropagation();
@@ -1209,11 +1213,12 @@ async function patchCollaborators(taskId,newList,label){
   payload[F.collaborators]=newList.map(c=>({email:c.email}));
   try{
     const res=await patchTask(taskId,payload);
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const data=await res.json();
-    // Re-parse collaborators from response to get ids/names
-    const collabRaw=(data.fields&&data.fields[F.collaborators])||[];
-    task.collaborators=Array.isArray(collabRaw)?collabRaw.map(c=>({id:c.id,email:c.email,name:c.name})):[];
+    if(!res.ok){let errBody='';try{errBody=await res.text()}catch(_){};throw new Error('HTTP '+res.status+' '+errBody.slice(0,200));}
+    // Rebuild collaborators locally from what the user picked (response uses field names; avoid round-tripping).
+    task.collaborators=newList.map(c=>{
+      const member=TEAM.find(m=>m.email.toLowerCase()===((c.email||'').toLowerCase()));
+      return {id:c.id||'',email:c.email,name:member?member.name:(c.name||c.email)};
+    });
     // Undo
     if(!_undoInProgress){
       pushUndo({type:'patch',taskId,fieldKey:'collaborators',oldRaw,newRaw:task.collaborators,label:label||'Changed collaborators'});
@@ -1241,6 +1246,91 @@ async function removeCollaborator(taskId,email){
 
 // Extend captureOldRaw/updateTaskField (for undo 'patch' on collaborators)
 // Undo of collaborators patch needs to re-apply oldRaw: handled via a custom branch below in doUndo handling.
+
+// ======================================================
+// ATTACHMENTS (upload + remove via Airtable content API)
+// ======================================================
+function renderAttachmentsMarkup(t){
+  const taskId=t.id;
+  const list=(t.attachments||[]);
+  const listHtml=list.length
+    ? list.map(a=>{
+        const sizeKb=a.size?` <span style="color:var(--text-muted)">(${Math.round(a.size/1024)} KB)</span>`:'';
+        const safeId=escHtml(a.id||'');
+        return `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:6px;padding:4px 8px;margin:0 4px 4px 0;font-size:11px"><a href="${escHtml(a.url)}" target="_blank" style="text-decoration:none;color:var(--accent)">${escHtml(a.filename||'file')}</a>${sizeKb}<button onclick="removeAttachment('${taskId}','${safeId}')" title="Remove attachment" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;line-height:1;padding:1px 5px;border-radius:50%;transition:all .15s" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button></div>`;
+      }).join('')
+    : '<div style="color:var(--text-secondary);font-size:12px;margin-bottom:6px">No attachments</div>';
+  return `
+    <div id="drwAttachList" style="display:flex;flex-wrap:wrap;align-items:center;margin-bottom:6px">${listHtml}</div>
+    <input type="file" id="drwAttachInput" multiple style="display:none" onchange="uploadAttachments('${taskId}', this.files); this.value=''">
+    <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('drwAttachInput').click()">+ Add Attachment</button>
+    <span id="drwAttachStatus" style="margin-left:8px;font-size:11px;color:var(--text-secondary)"></span>
+  `;
+}
+function renderAttachmentsInDrawer(t){
+  const wrap=document.getElementById('drwAttachWrap');if(!wrap)return;
+  wrap.innerHTML=renderAttachmentsMarkup(t);
+}
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const result=reader.result;
+      const idx=(typeof result==='string')?result.indexOf(','):-1;
+      resolve(idx>=0?result.substring(idx+1):result);
+    };
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function uploadAttachments(taskId,fileList){
+  if(!fileList||!fileList.length)return;
+  const status=document.getElementById('drwAttachStatus');
+  let successCount=0;
+  for(let i=0;i<fileList.length;i++){
+    const file=fileList[i];
+    if(status)status.textContent=`Uploading ${i+1}/${fileList.length}: ${file.name}...`;
+    try{
+      const base64=await fileToBase64(file);
+      const res=await fetch(`https://content.airtable.com/v0/${BASE_ID}/${taskId}/${F.attachments}/uploadAttachment`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body:JSON.stringify({contentType:file.type||'application/octet-stream',filename:file.name,file:base64})
+      });
+      if(!res.ok){let errBody='';try{errBody=await res.text()}catch(_){};throw new Error('HTTP '+res.status+' '+errBody.slice(0,200));}
+      const data=await res.json();
+      const task=allTasks.find(t=>t.id===taskId);
+      if(task&&data.fields){
+        const att=data.fields.Attachments||data.fields[F.attachments]||data.fields.attachments;
+        if(Array.isArray(att))task.attachments=att;
+      }
+      successCount++;
+    }catch(e){
+      console.error('upload failed',file.name,e);
+      toast(`Upload failed: ${file.name} - ${e.message}`,true);
+    }
+  }
+  if(status)status.textContent='';
+  const task=allTasks.find(t=>t.id===taskId);
+  if(task)renderAttachmentsInDrawer(task);
+  if(successCount)toast(`${successCount} attachment${successCount===1?'':'s'} uploaded`);
+}
+async function removeAttachment(taskId,attachmentId){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  if(!confirm('Remove this attachment?'))return;
+  const next=(task.attachments||[]).filter(a=>a.id!==attachmentId);
+  const payload={};payload[F.attachments]=next.map(a=>({id:a.id}));
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok){let errBody='';try{errBody=await res.text()}catch(_){};throw new Error('HTTP '+res.status+' '+errBody.slice(0,200));}
+    task.attachments=next;
+    renderAttachmentsInDrawer(task);
+    toast('Attachment removed');
+  }catch(e){
+    console.error('remove attachment failed',e);
+    toast('Failed to remove attachment: '+e.message,true);
+  }
+}
 
 // ======================================================
 // COMMENTS (Airtable native)
@@ -2387,6 +2477,12 @@ function updateAutoMoveDate(index,newDate){
   }catch(e){console.error('[updateAutoMoveDate] failed',e);toast('Could not rebalance: '+e.message,true)}
 }
 window.updateAutoMoveDate=updateAutoMoveDate;
+window.uploadAttachments=uploadAttachments;
+window.removeAttachment=removeAttachment;
+window.renderAttachmentsInDrawer=renderAttachmentsInDrawer;
+window.addCollaborator=addCollaborator;
+window.removeCollaborator=removeCollaborator;
+window.toggleCollabMenu=toggleCollabMenu;
 async function applyAutoSchedule(){
   const moves=window._pendingMoves||[];
   const modal=document.getElementById('autoModal');if(modal)modal.remove();
