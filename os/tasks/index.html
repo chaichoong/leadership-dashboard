@@ -140,7 +140,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .drawer-header .hdr-main{flex:1;min-width:0}
 .drawer-header h2{font-size:18px;margin:0;word-break:break-word}
 .drawer-body{flex:1;overflow-y:auto;padding:16px 24px}
-.drawer-footer{position:sticky;bottom:0;background:var(--bg-surface);border-top:1px solid var(--border-default);padding:12px 24px;display:flex;gap:8px;justify-content:flex-end;z-index:2}
+.drawer-footer{position:sticky;bottom:0;background:var(--bg-surface);border-top:1px solid var(--border-default);padding:12px 80px 12px 24px;display:flex;gap:8px;justify-content:flex-start;z-index:2}
 .drawer h2{font-size:18px}
 .drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
 .btn-success{background:var(--success);border-color:var(--success);color:#fff}
@@ -399,9 +399,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       </select>
       <select class="filter-select" id="filterPriority" onchange="renderTasks()">
         <option value="">All Priorities</option>
-        <option value="Urgent">Urgent</option>
-        <option value="High">High</option>
         <option value="Project">Project</option>
+        <option value="Urgent">Urgent</option>
         <option value="Not Urgent">Not Urgent</option>
       </select>
       <select class="filter-select" id="filterBusiness" onchange="renderTasks()">
@@ -519,14 +518,14 @@ const TEAM = [
 ];
 
 const STATUS_OPTIONS = ['Today','Upcoming','Approval','Completed','Overdue'];
-const PRIORITY_OPTIONS = ['Urgent','High','Project','Not Urgent'];
+const PRIORITY_OPTIONS = ['Project','Urgent','Not Urgent'];
 const TIME_OPTIONS = ['15 min','30 min','45 min','1 hr','2 hr','3 hr','4 hr','8 hr'];
 const RECUR_OPTIONS = ['','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'];
 const BUSINESS_OPTIONS = ['Real Estate','Operations Director','Personal'];
 const KPI_UNIT_OPTIONS = ['£','%','count','days','items','hours'];
 
 const STATUS_ORDER = { Overdue:0, Today:1, Approval:2, Upcoming:3, Completed:4 };
-const PRIORITY_ORDER = { Project:0, Urgent:1, High:2, 'Not Urgent':3 };
+const PRIORITY_ORDER = { Project:0, Urgent:1, 'Not Urgent':2, High:1 };
 const TIME_MINUTES = { '15 min':15, '30 min':30, '45 min':45, '1 hr':60, '2 hr':120, '3 hr':180, '4 hr':240, '8 hr':480 };
 const PIXELS_PER_MIN = 1.3; // 15 min = ~20px, 1hr = 78px
 const SNAP_MIN = 15;
@@ -684,6 +683,14 @@ async function fetchCalendarEvents(){
 // ===== PARSE =====
 function gf(rec,fid){return rec.cellValuesByFieldId?rec.cellValuesByFieldId[fid]:(rec.fields?rec.fields[fid]:undefined)}
 
+// Normalise singleSelect values: may arrive as {id,name,color} OR as a plain string
+function selectName(v){
+  if(!v)return '';
+  if(typeof v==='string')return v;
+  if(typeof v==='object'&&v.name)return v.name;
+  return '';
+}
+
 function parseTask(rec){
   const statusObj=gf(rec,F.status);
   const priorityObj=gf(rec,F.priority);
@@ -694,8 +701,9 @@ function parseTask(rec){
   const businessLinks=gf(rec,F.business)||[];
   const projectLinks=gf(rec,F.projects)||[];
   const timeDur=gf(rec,F.timeDur)||0;
+  const timeEstName=selectName(timeEstObj);
   let minutes=0;
-  if(timeDur>0)minutes=timeDur/60;else if(timeEstObj)minutes=TIME_MINUTES[timeEstObj.name]||0;
+  if(timeDur>0)minutes=timeDur/60;else if(timeEstName)minutes=TIME_MINUTES[timeEstName]||0;
 
   let businessName='';let businessId='';
   if(Array.isArray(businessLinks)&&businessLinks.length>0){
@@ -715,19 +723,19 @@ function parseTask(rec){
     id:rec.id,
     name:gf(rec,F.name)||'(Untitled)',
     dueDate:gf(rec,F.dueDate)||'',
-    status:statusObj?statusObj.name:'',
+    status:selectName(statusObj),
     assignee:assigneeObj?assigneeObj.name:'',
     assigneeEmail:assigneeObj?assigneeObj.email:'',
     assigneeId:assigneeObj?assigneeObj.id:'',
-    priority:priorityObj?priorityObj.name:'',
-    timeEst:timeEstObj?timeEstObj.name:'',
+    priority:selectName(priorityObj),
+    timeEst:timeEstName,
     minutes,
-    recurring:recurObj?recurObj.name:'',
+    recurring:selectName(recurObj),
     recurFlag:!!gf(rec,F.recurFlag),
     description:gf(rec,F.description)||'',
     notes:gf(rec,F.notes)||'',
     attachments:gf(rec,F.attachments)||[],
-    category:catObj?catObj.name:'',
+    category:selectName(catObj),
     completion:gf(rec,F.completion)||'',
     created:gf(rec,F.created)||'',
     onHold:!!gf(rec,F.onHold),
@@ -754,7 +762,7 @@ function parseProject(rec){
   return {
     id:rec.id,
     name:gf(rec,PF.name)||'(Untitled Project)',
-    status:statusObj?statusObj.name:'',
+    status:selectName(statusObj),
     start:gf(rec,PF.start)||'',
     end:gf(rec,PF.end)||'',
     totalTasks:gf(rec,PF.totalTasks)||0,
@@ -767,7 +775,7 @@ function parseProject(rec){
     kpiName:gf(rec,PF.kpiName)||'',
     kpiTarget:gf(rec,PF.kpiTarget)||0,
     kpiCurrent:gf(rec,PF.kpiCurrent)||0,
-    kpiUnit:kpiUnitObj?kpiUnitObj.name:'',
+    kpiUnit:selectName(kpiUnitObj),
     kpiTracking:gf(rec,PF.kpiTracking)||'',
     business:businessName,
   };
@@ -960,26 +968,79 @@ function renderDedlineSideCard(t){
   </div>`;
 }
 
-// Drill-down modal for clickable KPIs
+// Drill-down modal for clickable KPIs — supports in-modal task detail navigation
+let drillDownState=null; // {title, tasks, extraHtml}
 function openDrillDown(title,tasks,extraHtml){
   closeDrawer();
+  drillDownState={title,tasks:tasks?tasks.map(t=>t.id):null,extraHtml};
+  const existing=document.getElementById('drillModal');if(existing)existing.remove();
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='drillModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML=`<div class="modal" id="drillModalInner" style="max-width:720px"></div>`;
+  document.body.appendChild(overlay);
+  renderDrillDownList();
+}
+function renderDrillDownList(){
+  const inner=document.getElementById('drillModalInner');if(!inner||!drillDownState)return;
+  const {title,tasks:ids,extraHtml}=drillDownState;
+  const tasks=ids?ids.map(id=>allTasks.find(t=>t.id===id)).filter(Boolean):null;
   let body='';
   if(extraHtml)body+=extraHtml;
   if(tasks&&tasks.length){
-    body+=`<div class="drill-list">${tasks.map(t=>renderDedlineRow(t)).join('')}</div>`;
+    body+=`<div class="drill-list">${tasks.map(t=>renderDedlineRowDrill(t)).join('')}</div>`;
   } else if(!extraHtml){
     body+=`<div class="empty-state" style="padding:30px">Nothing to show.</div>`;
   }
-  overlay.innerHTML=`<div class="modal" style="max-width:720px">
-    <h2>${escHtml(title)}</h2>
+  inner.innerHTML=`<h2>${escHtml(title)}</h2>
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${tasks?tasks.length+' item'+(tasks.length===1?'':'s'):''}</div>
     ${body}
-    <div class="modal-actions"><button class="btn" onclick="document.getElementById('drillModal').remove()">Close</button></div>
-  </div>`;
-  document.body.appendChild(overlay);
+    <div class="modal-actions"><button class="btn" onclick="document.getElementById('drillModal').remove()">Close</button></div>`;
+}
+// Dedline row variant that opens detail INSIDE the drill modal instead of drawer
+function renderDedlineRowDrill(t){
+  const html=renderDedlineRow(t);
+  return html.replace(`openTaskDrawer('${t.id}')`,`openDrillDownTaskDetail('${t.id}')`);
+}
+function openDrillDownTaskDetail(taskId){
+  const inner=document.getElementById('drillModalInner');if(!inner)return;
+  const t=allTasks.find(x=>x.id===taskId);if(!t)return;
+  drawerTaskId=taskId; // so drwSaveText/field updates work
+  const drawerInnerHtml=`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <button class="btn" style="padding:4px 10px;font-size:12px" onclick="renderDrillDownList()">&larr; Back</button>
+      <div style="font-size:10px;color:var(--text-secondary);font-weight:600;letter-spacing:1px;text-transform:uppercase">Task</div>
+    </div>
+    <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)" style="margin-top:0">${escHtml(t.name)}</h2>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
+    <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
+      <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
+    </div></div>
+    <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
+    <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
+    <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Linked Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
+    <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
+    <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
+      <button class="btn btn-success" onclick="completeTaskFromDrillModal('${t.id}')">Complete</button>
+      <button class="btn btn-danger" onclick="deleteTaskFromDrillModal('${t.id}')">Delete</button>
+      <button class="btn" style="margin-left:auto" onclick="document.getElementById('drillModal').remove()">Close</button>
+    </div>`;
+  inner.innerHTML=drawerInnerHtml;
+}
+async function completeTaskFromDrillModal(taskId){
+  await updateTaskField(taskId,'status','Completed');
+  renderAll();
+  renderDrillDownList();
+}
+function deleteTaskFromDrillModal(taskId){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  openDeleteConfirm(task);
 }
 
 // ===== TEAM BAR =====
@@ -1046,16 +1107,16 @@ function openTaskDrawer(taskId){
         <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
       </div></div>
       <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-      <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
       <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
 
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
-      <div class="field-row"><label>Linked Project</label><div class="field-val" style="color:var(--text-secondary);font-size:12px">${t.projectNames.length?escHtml(t.projectNames.join(', ')):'None linked'}</div></div>
+      <div class="field-row"><label>Linked Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" style="font-size:12px">${t.attachments.length?t.attachments.map(a=>`<a href="${escHtml(a.url)}" target="_blank" style="display:block;margin-bottom:4px">${escHtml(a.filename||'file')}</a>`).join(''):'<span style="color:var(--text-secondary)">None</span>'}</div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Comments</label><div class="field-val" id="drwCommentsWrap"><div style="color:var(--text-secondary);font-size:12px">Loading comments&hellip;</div></div></div>
+      <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn btn-danger" onclick="deleteTask('${t.id}')">Delete</button>
@@ -1063,8 +1124,6 @@ function openTaskDrawer(taskId){
     </div>
   </div>`;
   document.body.appendChild(overlay);
-  // Kick off comments fetch (non-blocking)
-  loadCommentsIntoDrawer(t.id);
 }
 function closeDrawer(){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();drawerTaskId=null}
 function drwSaveText(fieldKey,val){if(!drawerTaskId)return;debouncedSave(drawerTaskId,fieldKey,val)}
@@ -1257,6 +1316,144 @@ async function doDeleteComment(taskId,commentId){
   }
 }
 
+// ===== PROJECT PICKER (drawer) =====
+function renderProjectPicker(t){
+  const current=t.projectNames.length?escHtml(t.projectNames.join(', ')):'<span style="color:var(--text-secondary)">(none)</span>';
+  return `<div id="drwProjectInner" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-size:12px">${current}</span>
+    <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showProjectPickerMenu('${t.id}')">Change</button>
+  </div>`;
+}
+function showProjectPickerMenu(taskId){
+  const wrap=document.getElementById('drwProjectWrap');if(!wrap)return;
+  const active=(window.allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+  let html=`<select id="drwProjectSelect" style="max-width:260px"><option value="">(none)</option>`;
+  active.forEach(p=>{html+=`<option value="${p.id}">${escHtml(p.name)}</option>`});
+  html+=`</select> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="applyProjectPick('${taskId}')">Save</button> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="cancelProjectPick('${taskId}')">Cancel</button>`;
+  wrap.innerHTML=html;
+}
+function cancelProjectPick(taskId){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const wrap=document.getElementById('drwProjectWrap');if(wrap)wrap.innerHTML=renderProjectPicker(task);
+}
+async function applyProjectPick(taskId){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const sel=document.getElementById('drwProjectSelect');if(!sel)return;
+  const projectId=sel.value;
+  const oldProjectIds=[...(task.projectIds||[])];
+  const oldProjectNames=[...(task.projectNames||[])];
+  const oldPriority=task.priority;
+  const payload={};
+  payload[F.projects]=projectId?[{id:projectId}]:[];
+  const edits=[{fieldKey:'projects-link',oldRaw:{ids:oldProjectIds,names:oldProjectNames},newRaw:{projectId}}];
+  let setPriorityProject=false;
+  if(projectId&&task.priority!=='Project'){
+    payload[F.priority]={name:'Project'};
+    setPriorityProject=true;
+    edits.push({fieldKey:'priority',oldRaw:oldPriority,newRaw:'Project'});
+  }
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    // Update local task from response
+    const fresh=parseTask(data);
+    task.projectIds=fresh.projectIds;
+    task.projectNames=fresh.projectNames;
+    if(setPriorityProject)task.priority='Project';
+    if(!_undoInProgress){
+      pushUndo({type:'multi-patch',taskId,edits,label:projectId?`Linked project${setPriorityProject?' (priority -> Project)':''}`:'Unlinked project'});
+    }
+    const wrap=document.getElementById('drwProjectWrap');if(wrap)wrap.innerHTML=renderProjectPicker(task);
+    toast('Saved');
+    renderAll();
+  }catch(e){
+    console.warn('project link failed',e);
+    toast('Failed to link project',true);
+  }
+}
+
+// ===== COMMENTS MODAL (CFV-style) =====
+let _commentsModalTaskId=null;
+function openCommentsModal(taskId){
+  _commentsModalTaskId=taskId;
+  const task=allTasks.find(t=>t.id===taskId);
+  const existing=document.getElementById('commentsModal');if(existing)existing.remove();
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='commentsModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML=`<div class="modal" style="max-width:600px">
+    <h2 style="margin-top:0">${escHtml(task?task.name:'Task')} &mdash; Comments</h2>
+    <div id="commentsModalBody" style="max-height:60vh;overflow-y:auto"><div style="color:var(--text-secondary);font-size:12px;padding:12px 0">Loading comments&hellip;</div></div>
+    <div class="modal-actions"><button class="btn" onclick="document.getElementById('commentsModal').remove()">Close</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  loadCommentsIntoModal(taskId);
+}
+async function loadCommentsIntoModal(taskId){
+  try{
+    const list=await fetchComments(taskId);
+    _drawerComments[taskId]=list;
+    renderCommentsInModal(taskId);
+  }catch(e){
+    console.error('[Comments] fetch failed',e);
+    const body=document.getElementById('commentsModalBody');
+    if(body)body.innerHTML=`<div style="color:var(--danger);font-size:13px;padding:12px 0">Failed to load comments &mdash; likely a PAT scope issue (need <code>data.records:read</code> and comments scope). <button class="btn" onclick="loadCommentsIntoModal('${taskId}')" style="padding:2px 8px;font-size:11px">Retry</button></div>`;
+  }
+}
+function renderCommentsInModal(taskId){
+  const body=document.getElementById('commentsModalBody');if(!body)return;
+  const list=(_drawerComments[taskId]||[]).slice().sort((a,b)=>new Date(b.createdTime)-new Date(a.createdTime));
+  const meEmail=currentUser?currentUser.email:'';
+  const composer=`<div style="margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
+    <textarea id="cmtModalInput" placeholder="Add a comment..." style="min-height:60px"></textarea>
+    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitModalComment('${taskId}')" style="padding:4px 12px;font-size:12px">Post</button></div>
+  </div>`;
+  const items=list.map(c=>{
+    const email=(c.author&&c.author.email)||'';
+    const name=(c.author&&c.author.name)||email||'Unknown';
+    const k=collabKeyForEmail(email);
+    const init=name.split(' ').map(w=>w[0]).join('').slice(0,2);
+    const mine=email&&meEmail&&email.toLowerCase()===meEmail.toLowerCase();
+    return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+      <span class="avatar avatar-${k}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteCommentModal('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;padding:0">&times;</button>`:''}</div>
+        <div style="font-size:13px;color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
+      </div>
+    </div>`;
+  }).join('')||'<div style="color:var(--text-secondary);font-size:12px;padding:8px 0">No comments yet.</div>';
+  body.innerHTML=composer+items;
+}
+async function submitModalComment(taskId){
+  const ta=document.getElementById('cmtModalInput');if(!ta)return;
+  const text=(ta.value||'').trim();if(!text)return;
+  ta.disabled=true;
+  try{
+    const c=await postComment(taskId,text);
+    _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
+    pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
+    renderCommentsInModal(taskId);
+    toast('Comment posted');
+  }catch(e){
+    console.error('[Comments] post failed',e);toast('Failed to post comment',true);
+    ta.disabled=false;
+  }
+}
+function confirmDeleteCommentModal(taskId,commentId){
+  if(!confirm('Delete this comment?'))return;
+  (async()=>{
+    const list=_drawerComments[taskId]||[];
+    const c=list.find(x=>x.id===commentId);const text=c?c.text:'';
+    try{
+      await deleteCommentApi(taskId,commentId);
+      _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
+      pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
+      renderCommentsInModal(taskId);toast('Comment deleted');
+    }catch(e){console.error(e);toast('Failed to delete',true)}
+  })();
+}
+
 async function completeTaskFromDrawer(taskId){
   await updateTaskField(taskId,'status','Completed');
   closeDrawer();
@@ -1314,6 +1511,7 @@ async function performDeleteTask(taskId){
     pushUndo({type:'delete',snapshot,label:`Deleted "${task.name}"`});
     toast('Task deleted');
     renderAll();
+    if(document.getElementById('drillModal')&&drillDownState)renderDrillDownList();
   }catch(e){
     toast('Failed to delete',true);
     console.warn('delete failed',e);
@@ -1394,7 +1592,18 @@ async function doUndo(){
       const task=allTasks.find(t=>t.id===entry.taskId);
       if(!task){throw new Error('Task no longer in memory')}
       for(const e of entry.edits){
-        await updateTaskField(entry.taskId,e.fieldKey,e.oldRaw);
+        if(e.fieldKey==='projects-link'){
+          const payload={};
+          payload[F.projects]=(e.oldRaw.ids||[]).map(id=>({id}));
+          const r=await patchTask(entry.taskId,payload);
+          if(r.ok){
+            const d=await r.json();
+            const fresh=parseTask(d);
+            task.projectIds=fresh.projectIds;task.projectNames=fresh.projectNames;
+          }
+        } else {
+          await updateTaskField(entry.taskId,e.fieldKey,e.oldRaw);
+        }
       }
     } else if(entry.type==='delete'){
       const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}`,{
@@ -1608,10 +1817,16 @@ function renderMyDay(){
     html+=`<div class="overdue-notice"><strong>!</strong> ${overdueTasks.length} overdue task${overdueTasks.length!==1?'s':''} auto-rescheduled to today (originals preserved)</div>`;
   }
 
-  html+=`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+  html+=`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-start">
     <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
-    <button class="btn btn-primary" onclick="runAutoSchedulePreview()">Auto-Schedule</button>
-    <button class="btn" onclick="openPlanner()">Plan My Day</button>
+    <div style="display:flex;flex-direction:column;align-items:flex-start">
+      <button class="btn btn-primary" onclick="runAutoSchedulePreview()" title="Spreads tasks across multiple working days. Respects hard deadlines, fills each day to capacity, bumps overflow forward. Shows a preview before applying.">Auto-Schedule</button>
+      <span style="font-size:10px;color:var(--text-secondary);margin-top:2px;max-width:180px">Spread tasks across multiple days with preview</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-start">
+      <button class="btn" onclick="openPlanner()" title="Shows a preview of today only &mdash; what fits, what doesn't, with defer-to-tomorrow suggestions. Read-only.">Plan My Day</button>
+      <span style="font-size:10px;color:var(--text-secondary);margin-top:2px;max-width:180px">Today-only read-only preview</span>
+    </div>
     <button class="btn" onclick="toggleRoutineConfig()">Configure Routine</button>
   </div>`;
 
@@ -1673,7 +1888,14 @@ function renderMyDay(){
     <h3>Other Tasks Available (${other.length})</h3>
     <input type="text" class="search-box" placeholder="Search..." style="width:100%;margin-bottom:8px" oninput="filterSidePanel(this.value)">
     <div id="sidePanelList">`;
-  other.sort((a,b)=>(PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99)).slice(0,50).forEach(t=>{
+  other.sort((a,b)=>{
+    if(!a.dueDate&&!b.dueDate)return (PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99);
+    if(!a.dueDate)return 1;
+    if(!b.dueDate)return -1;
+    const dc=a.dueDate.localeCompare(b.dueDate);
+    if(dc!==0)return dc;
+    return (PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99);
+  }).slice(0,50).forEach(t=>{
     html+=renderDedlineSideCard(t);
   });
   html+=`</div></div></div>`;
@@ -2095,7 +2317,9 @@ function getFilteredTasks(){
 }
 
 function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
-  const opts=options.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
+  // Preserve legacy values (e.g. priority="High") that are no longer offered
+  const optList=current&&!options.includes(current)?[...options,current]:options;
+  const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
   return `<select class="inline-select" onchange="updateTaskField('${taskId}','${fieldKey}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
 }
 
