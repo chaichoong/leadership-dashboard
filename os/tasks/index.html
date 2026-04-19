@@ -850,7 +850,9 @@ async function updateTaskField(taskId,fieldKey,rawValue){
   const fid=F[fieldKey];
   try{
     if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'){
-      payload[fid]=rawValue?{name:rawValue}:null;
+      // Airtable singleSelect with typecast=true expects plain string,
+      // not {name: ...} — that format is rejected with INVALID_VALUE_FOR_COLUMN.
+      payload[fid]=rawValue||null;
       task[fieldKey]=rawValue;
       if(fieldKey==='timeEst')task.minutes=TIME_MINUTES[rawValue]||task.minutes;
     } else if(fieldKey==='business'){
@@ -1568,18 +1570,20 @@ async function performDeleteTask(taskId){
 
 // Build an Airtable fields payload from an in-memory task (for undo re-create)
 function buildFieldsFromTask(t){
+  // singleSelect fields with typecast=true accept plain strings; sending
+  // {name: "..."} causes INVALID_VALUE_FOR_COLUMN. Use plain strings.
   const fields={};
   if(t.name)fields[F.name]=t.name;
   if(t.dueDate)fields[F.dueDate]=t.dueDate;
-  if(t.status)fields[F.status]={name:t.status};
+  if(t.status)fields[F.status]=t.status;
   if(t.assigneeEmail)fields[F.assignee]={email:t.assigneeEmail};
-  if(t.priority)fields[F.priority]={name:t.priority};
-  if(t.timeEst)fields[F.timeEst]={name:t.timeEst};
-  if(t.recurring)fields[F.recurring]={name:t.recurring};
+  if(t.priority)fields[F.priority]=t.priority;
+  if(t.timeEst)fields[F.timeEst]=t.timeEst;
+  if(t.recurring)fields[F.recurring]=t.recurring;
   if(t.recurFlag)fields[F.recurFlag]=true;
   if(t.description)fields[F.description]=t.description;
   if(t.notes)fields[F.notes]=t.notes;
-  if(t.category)fields[F.category]={name:t.category};
+  if(t.category)fields[F.category]=t.category;
   if(t.onHold)fields[F.onHold]=true;
   if(t.hardDeadline)fields[F.hardDeadline]=true;
   if(t.businessId)fields[F.business]=[{id:t.businessId}];
