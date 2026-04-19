@@ -563,7 +563,7 @@ let drawerTaskId = null;
 const saveDebounce = {};
 
 // ===== UTIL =====
-function todayStr(){return new Date().toISOString().slice(0,10)}
+function todayStr(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
 function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},1800)}catch(e){console.warn('toast failed',e)}}
@@ -592,8 +592,8 @@ function minutesToTime(m){const h=Math.floor(m/60),mm=m%60,ampm=h>=12?'PM':'AM',
 function formatMins(m){if(!m)return'-';if(m<60)return m+'m';const h=Math.floor(m/60),r=m%60;return r?`${h}h ${r}m`:`${h}h`}
 function minutesToTimeEst(mins){let best=TIME_OPTIONS[0],bd=Infinity;TIME_OPTIONS.forEach(o=>{const d=Math.abs(TIME_MINUTES[o]-mins);if(d<bd){bd=d;best=o}});return best}
 function isOverdue(t){if(!t.dueDate||t.status==='Completed')return false;return t.dueDate<todayStr()}
-function isWeekend(dateStr){const d=new Date(dateStr+'T00:00:00').getDay();return d===0||d===6}
-function addDays(dateStr,n){const d=new Date(dateStr+'T00:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+function isWeekend(dateStr){const p=dateStr.split('-').map(Number);const d=new Date(p[0],p[1]-1,p[2]).getDay();return d===0||d===6}
+function addDays(dateStr,n){const p=dateStr.split('-').map(Number);const d=new Date(p[0],p[1]-1,p[2]);d.setDate(d.getDate()+n);const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
 
 // ===== AUTH =====
 function initAuth(){
