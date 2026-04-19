@@ -1364,7 +1364,7 @@ function renderProjectPicker(t){
 }
 function showProjectPickerMenu(taskId){
   const wrap=document.getElementById('drwProjectWrap');if(!wrap)return;
-  const active=(window.allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+  const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
   let html=`<select id="drwProjectSelect" style="max-width:260px"><option value="">(none)</option>`;
   active.forEach(p=>{html+=`<option value="${p.id}">${escHtml(p.name)}</option>`});
   html+=`</select> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="applyProjectPick('${taskId}')">Save</button> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="cancelProjectPick('${taskId}')">Cancel</button>`;
