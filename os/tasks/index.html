@@ -2201,54 +2201,75 @@ function resetRoutineConfig(){localStorage.removeItem('_task_routine');localStor
 // ======================================================
 function scheduleTasksAcrossDays(){
  try{
+  console.log('[Scheduler] Step 1: resolve member. activeTeam=',activeTeam);
   const member=TEAM.find(m=>m.key===activeTeam)||(currentUser?TEAM.find(m=>m.key===currentUser.key):null);
-  if(!member)return{moves:[],warnings:['Pick a user first']};
+  if(!member){console.log('[Scheduler] No member');return{moves:[],warnings:['Pick a user first']}}
 
+  console.log('[Scheduler] Step 2: get config');
   const config=getWorkConfig();
   const routineMins=getRoutineBlocks().reduce((s,b)=>s+b.duration,0);
   const workHrs=config.endHour-config.startHour;
   const dailyCapMin=Math.max(0,workHrs*60-routineMins);
+  console.log('[Scheduler] dailyCapMin=',dailyCapMin,'routineMins=',routineMins);
   if(dailyCapMin<=0)return{moves:[],warnings:['Daily capacity is 0 — reduce routine hours or increase working hours']};
 
+  console.log('[Scheduler] Step 3: filter tasks');
   let tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
+  console.log('[Scheduler] filtered tasks count=',tasks.length);
+
+  if(tasks.length>500){console.warn('[Scheduler] task count too large, aborting');return{moves:[],warnings:['Too many tasks to schedule ('+tasks.length+'); reduce task count first']}}
+
+  console.log('[Scheduler] Step 4: sort');
   tasks.sort((a,b)=>{
-    // Hard deadlines first, then priority
     if(a.hardDeadline!==b.hardDeadline)return a.hardDeadline?-1:1;
     return (PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99);
   });
 
-  // Day->minutes used map; seed with today's calendar events
+  console.log('[Scheduler] Step 5: seed usage map');
   const usage={};
   const today=todayStr();
   usage[today]=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?en-st:0)},0);
 
   const moves=[];const warnings=[];
   let cursorDay=today;
-  function nextWorkDay(d){let x=addDays(d,1);while(isWeekend(x))x=addDays(x,1);return x}
+  function nextWorkDay(d){
+    let x=addDays(d,1);
+    let guard=0;
+    while(isWeekend(x)&&guard<10){x=addDays(x,1);guard++}
+    if(guard>=10){console.error('[Scheduler] nextWorkDay infinite loop on',d);return x}
+    return x;
+  }
   if(isWeekend(cursorDay))cursorDay=nextWorkDay(cursorDay);
 
-  tasks.forEach(task=>{
+  console.log('[Scheduler] Step 6: process',tasks.length,'tasks');
+  let processed=0;
+  for(let i=0;i<tasks.length;i++){
+    const task=tasks[i];
     const mins=task.minutes||30;
     if(task.hardDeadline){
-      // Leave it where it is — but track usage
       if(task.dueDate){usage[task.dueDate]=(usage[task.dueDate]||0)+mins}
-      return;
+      processed++;
+      continue;
     }
     let day=cursorDay;
     let tries=0;
+    let placed=false;
     while(tries<60){
       const used=usage[day]||0;
       if(used+mins<=dailyCapMin){
-        // Check: if there's a hard deadline task downstream, don't schedule past its date
-        // For simplicity: just fit.
         if(task.dueDate!==day){moves.push({task,from:task.dueDate,to:day})}
         usage[day]=used+mins;
-        return;
+        placed=true;
+        break;
       }
-      day=nextWorkDay(day);tries++;
+      day=nextWorkDay(day);
+      tries++;
     }
-    warnings.push(`Could not schedule "${task.name}" within 60 days`);
-  });
+    if(!placed)warnings.push(`Could not schedule "${task.name}" within 60 days`);
+    processed++;
+    if(processed%25===0)console.log('[Scheduler] processed',processed,'/',tasks.length);
+  }
+  console.log('[Scheduler] DONE. moves=',moves.length,'warnings=',warnings.length);
 
   return{moves,warnings};
  }catch(e){
