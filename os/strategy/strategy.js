@@ -190,6 +190,83 @@ function renderForm(fields) {
     const host = document.getElementById('planForm');
     host.innerHTML = '';
 
+    // ────────────────────────────────────────────────────────────────
+    // PLAN HEADER — one record, two plans stacked.
+    // ────────────────────────────────────────────────────────────────
+    host.appendChild(planDivider('📜 Objective Plan',
+        'Why the business exists. Reviewed annually, tweaked quarterly. All fields below share this single Airtable record with the Strategy Plan.'));
+
+    // Objective statement
+    host.appendChild(richSection({
+        icon: '🚀', title: 'Objective',
+        hint: 'The overarching objective of the business.',
+        children: [
+            textareaField('Objective', OBJSTRAT.objective, fields[OBJSTRAT.objective] || '', 'large'),
+        ],
+    }));
+
+    // Target Statement — What / Who / How
+    host.appendChild(richSection({
+        icon: '🎯', title: 'Target Statement',
+        hint: 'What we do, who we do it for, and how we do it.',
+        children: [
+            gridOf([
+                textareaField('What we do', OBJSTRAT.targetWhat, fields[OBJSTRAT.targetWhat] || ''),
+                textareaField('Who we do it for', OBJSTRAT.targetWho, fields[OBJSTRAT.targetWho] || ''),
+                textareaField('How we do it', OBJSTRAT.targetHow, fields[OBJSTRAT.targetHow] || ''),
+            ]),
+        ],
+    }));
+
+    // Customer Profile
+    host.appendChild(richSection({
+        icon: '👤', title: 'Customer Profile',
+        hint: 'Who is our target market?',
+        children: [
+            textareaField('Customer Profile', OBJSTRAT.customerProfile, fields[OBJSTRAT.customerProfile] || '', 'large'),
+        ],
+    }));
+
+    // Undertakings 1-20 (rules of play)
+    host.appendChild(richSection({
+        icon: '🤝', title: 'Undertakings',
+        hint: 'The rules that we all follow within the business. Leave blanks empty — 20 slots.',
+        children: [undertakingsGrid(fields)],
+    }));
+
+    // USPs 1-5
+    host.appendChild(richSection({
+        icon: '⭐', title: 'Original Selling Points',
+        hint: 'What differentiates us from competitors? Up to five.',
+        children: [
+            uspsGrid(fields),
+        ],
+    }));
+
+    // Main Method steps 1-10
+    host.appendChild(richSection({
+        icon: '🧩', title: 'Main Method (Step-by-Step)',
+        hint: 'The proven process or secret recipe — what the business does, in sequential steps. Up to 10.',
+        children: [
+            methodStepsGrid(fields),
+        ],
+    }));
+
+    // Enticement
+    host.appendChild(richSection({
+        icon: '✨', title: 'Enticement',
+        hint: 'What is our offer that the target market cannot refuse?',
+        children: [
+            textareaField('Enticement', OBJSTRAT.enticement, fields[OBJSTRAT.enticement] || '', 'large'),
+        ],
+    }));
+
+    // ────────────────────────────────────────────────────────────────
+    // STRATEGY PLAN — the quarterly half.
+    // ────────────────────────────────────────────────────────────────
+    host.appendChild(planDivider('🎯 Strategy Plan',
+        'How the business wins this quarter. Iterated every 90 days. Quarterly projects feed into Projects OS; monthly stones feed into Tasks OS.'));
+
     // Nine-Year Target
     host.appendChild(richSection({
         icon: '🎯', title: 'Nine-Year Target',
@@ -269,6 +346,55 @@ function renderForm(fields) {
 }
 
 // Helpers for form building
+
+function planDivider(title, sub) {
+    const d = document.createElement('div');
+    d.className = 'plan-divider';
+    d.innerHTML = `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(sub)}</p>`;
+    return d;
+}
+
+function undertakingsGrid(fields) {
+    const grid = document.createElement('div');
+    grid.className = 'grid-cols-2';
+    OBJSTRAT.undertakings.forEach((fid, i) => {
+        grid.appendChild(singleLineField(`Undertaking ${i + 1}`, fid, fields[fid] || ''));
+    });
+    return grid;
+}
+
+function uspsGrid(fields) {
+    const grid = document.createElement('div');
+    grid.className = 'plan-form';
+    OBJSTRAT.usps.forEach((fid, i) => {
+        grid.appendChild(textareaField(`USP ${i + 1}`, fid, fields[fid] || ''));
+    });
+    return grid;
+}
+
+function methodStepsGrid(fields) {
+    const grid = document.createElement('div');
+    grid.className = 'grid-cols-2';
+    OBJSTRAT.methodSteps.forEach((fid, i) => {
+        grid.appendChild(textareaField(`Step ${i + 1}`, fid, fields[fid] || ''));
+    });
+    return grid;
+}
+
+function singleLineField(label, fieldId, value) {
+    const row = document.createElement('div');
+    row.className = 'field-row';
+    const lab = document.createElement('label');
+    lab.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.dataset.fieldId = fieldId;
+    input.value = value || '';
+    input.addEventListener('input', () => markDirty());
+    row.appendChild(lab);
+    row.appendChild(input);
+    return row;
+}
 
 function richSection({ icon, title, hint, children }) {
     const s = document.createElement('div');

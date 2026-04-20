@@ -105,6 +105,14 @@ body {
 
 /* Plan form */
 .plan-form { display: flex; flex-direction: column; gap: 22px; }
+.plan-divider {
+    margin-top: 8px; padding: 18px 20px;
+    background: var(--bg-sidebar); color: #fff;
+    border-radius: 10px; border: 1px solid var(--border-default);
+}
+.plan-divider:first-child { margin-top: 0; }
+.plan-divider h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; color: #fff; }
+.plan-divider p { font-size: 12px; opacity: 0.75; line-height: 1.5; }
 .section {
     background: var(--bg-surface); border: 1px solid var(--border-default);
     border-radius: 10px; padding: 20px;
