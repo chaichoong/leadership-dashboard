@@ -160,6 +160,7 @@ async function loadRecord() {
         const params = new URLSearchParams({
             filterByFormula: `AND({Business Name} = "${businessName}", {Quarter} = "${quarter}", {Year} = "${year}")`,
             maxRecords: '1',
+            returnFieldsByFieldId: 'true',
         });
         const data = await airtableFetch(`${TABLES.objStrat}?${params.toString()}`);
         if (data.records.length) {
@@ -579,6 +580,7 @@ async function loadPriorQuarter() {
         const params = new URLSearchParams({
             filterByFormula: `AND({Business Name} = "${businessName}", {Quarter} = "${priorQ}", {Year} = "${priorY}")`,
             maxRecords: '1',
+            returnFieldsByFieldId: 'true',
         });
         const data = await airtableFetch(`${TABLES.objStrat}?${params.toString()}`);
         if (data.records.length) {
@@ -727,15 +729,17 @@ Do not accept vague motivational language. Do not ask more than one follow-up qu
 
 function extractCompactPrior(rec) {
     const f = rec.fields || {};
+    // fields are keyed by ID because loadPriorQuarter uses returnFieldsByFieldId
+    const readSelect = v => (v && typeof v === 'object') ? v.name : v;
     return {
-        quarter: f.Quarter,
-        year: f.Year,
-        nineYear: f['Nine-Year Target'],
-        threeYear: f['Three-Year Target'],
-        oneYear: f['One-Year Target'],
-        qp1: f['Quarterly Project 1'],
-        qp2: f['Quarterly Project 2'],
-        qp3: f['Quarterly Project 3'],
+        quarter: readSelect(f[OBJSTRAT.quarter]),
+        year: readSelect(f[OBJSTRAT.year]),
+        nineYear: f[OBJSTRAT.nineYearTarget],
+        threeYear: f[OBJSTRAT.threeYearTarget],
+        oneYear: f[OBJSTRAT.oneYearTarget],
+        qp1: f[OBJSTRAT.quarterlyProjects[0]],
+        qp2: f[OBJSTRAT.quarterlyProjects[1]],
+        qp3: f[OBJSTRAT.quarterlyProjects[2]],
     };
 }
 
