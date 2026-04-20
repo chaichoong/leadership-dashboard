@@ -555,6 +555,8 @@ const PAGE_SIZE = 50;
 let expandedTask = null;
 let selectedTasks = new Set();
 let kanbanMonth = new Date();
+let kanbanViewMode = 'weeks';
+let kanbanMonthStart = (function(){const d=new Date();d.setDate(1);return d})();
 let kanbanProjectFilter = '';
 let projectFilter = 'active';
 let expandedProject = null;
@@ -594,6 +596,30 @@ function minutesToTime(m){const h=Math.floor(m/60),mm=m%60,ampm=h>=12?'PM':'AM',
 function formatMins(m){if(!m)return'-';if(m<60)return m+'m';const h=Math.floor(m/60),r=m%60;return r?`${h}h ${r}m`:`${h}h`}
 function minutesToTimeEst(mins){let best=TIME_OPTIONS[0],bd=Infinity;TIME_OPTIONS.forEach(o=>{const d=Math.abs(TIME_MINUTES[o]-mins);if(d<bd){bd=d;best=o}});return best}
 function isOverdue(t){if(!t.dueDate||t.status==='Completed')return false;return t.dueDate<todayStr()}
+function dateToMs(dateStr){const p=dateStr.split('-').map(Number);return new Date(p[0],p[1]-1,p[2]).getTime()}
+function computeProjectHealth(p){
+  if(p.completed||p.status==='Completed')return'Completed';
+  if(p.status==='Not Started')return'Not Started';
+  if(!p.start||!p.end)return p.status||null;
+  const today=todayStr();
+  const startT=dateToMs(p.start);
+  const endT=dateToMs(p.end);
+  const nowT=dateToMs(today);
+  if(endT<startT)return p.status||null;
+  if(endT<nowT)return'Off-Track';
+  const total=endT-startT;
+  const elapsed=Math.max(0,nowT-startT);
+  const timePct=total>0?(elapsed/total)*100:0;
+  let progPct=null;
+  if(p.kpiTarget>0&&p.kpiCurrent>=0){progPct=(p.kpiCurrent/p.kpiTarget)*100}
+  else if(p.totalTasks>0){progPct=((p.completedTasks||0)/p.totalTasks)*100}
+  if(progPct===null)return p.status||null;
+  if(timePct<5)return'Not Started';
+  const ratio=timePct>0?(progPct/timePct)*100:100;
+  if(ratio>=100)return'On-Target';
+  if(ratio>=85)return'On-Track';
+  return'Off-Track';
+}
 function isWeekend(dateStr){const p=dateStr.split('-').map(Number);const d=new Date(p[0],p[1]-1,p[2]).getDay();return d===0||d===6}
 function addDays(dateStr,n){const p=dateStr.split('-').map(Number);const d=new Date(p[0],p[1]-1,p[2]);d.setDate(d.getDate()+n);const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
 
@@ -2668,54 +2694,100 @@ function getKanbanTasks(){
 
 function renderKanban(){
   const container=document.getElementById('view-kanban');
-  const year=kanbanMonth.getFullYear(),month=kanbanMonth.getMonth();
-  const monthName=kanbanMonth.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
-  const weeks=getWeeksOfMonth(year,month);
   const tasks=getKanbanTasks();
   const projSet=new Set();allTasks.filter(t=>t.priority==='Project').forEach(t=>t.projectNames.forEach(n=>projSet.add(n)));
   const projOpts=[...projSet].sort();
 
+  const isMonths=kanbanViewMode==='months';
+  let navHtml;
+  if(isMonths){
+    const startLabel=kanbanMonthStart.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+    const endD=new Date(kanbanMonthStart);endD.setMonth(endD.getMonth()+11);
+    const endLabel=endD.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+    navHtml=`<div class="kanban-month-nav">
+      <button class="btn btn-sm" onclick="kanbanMonthsNav(-6)">&laquo;</button>
+      <span>${startLabel} &mdash; ${endLabel}</span>
+      <button class="btn btn-sm" onclick="kanbanMonthsNav(6)">&raquo;</button>
+      <button class="btn btn-sm" onclick="kanbanMonthsToday()">Today</button>
+    </div>`;
+  }else{
+    const monthName=kanbanMonth.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+    navHtml=`<div class="kanban-month-nav"><button class="btn btn-sm" onclick="kanbanNav(-1)">&laquo;</button><span>${monthName}</span><button class="btn btn-sm" onclick="kanbanNav(1)">&raquo;</button></div>`;
+  }
+
   let html=`<div class="kanban-controls">
-    <div class="kanban-month-nav"><button class="btn btn-sm" onclick="kanbanNav(-1)">&laquo;</button><span>${monthName}</span><button class="btn btn-sm" onclick="kanbanNav(1)">&raquo;</button></div>
+    ${navHtml}
+    <div style="display:flex;gap:4px">
+      <button class="${kanbanViewMode==='weeks'?'btn btn-primary':'btn'} btn-sm" onclick="setKanbanMode('weeks')">4 Weeks</button>
+      <button class="${kanbanViewMode==='months'?'btn btn-primary':'btn'} btn-sm" onclick="setKanbanMode('months')">12 Months</button>
+    </div>
     <select class="filter-select" onchange="kanbanProjectFilter=this.value;renderKanban()">
       <option value="">All Projects</option>
       ${projOpts.map(p=>`<option value="${escHtml(p)}" ${kanbanProjectFilter===p?'selected':''}>${escHtml(p)}</option>`).join('')}
     </select>
     <span style="font-size:12px;color:var(--text-secondary)">${tasks.length} tasks</span>
   </div>`;
-  html+=`<div class="kanban-board">`;
+  html+=isMonths?renderKanbanMonths(tasks):renderKanbanWeeks(tasks);
+  container.innerHTML=html;
+}
+function renderKanbanCardHtml(t){
+  const pn=t.projectNames[0]||'';
+  const pcol=pn?strColor(pn):'var(--text-secondary)',pbg=pn?strColorBg(pn):'transparent';
+  return `<div class="kanban-card" draggable="true" ondragstart="dragKanbanCard(event,'${t.id}')" onclick="openTaskDrawer('${t.id}')" style="position:relative">
+    <div style="position:absolute;top:4px;right:4px">${rowActionsHtml(t.id)}</div>
+    <h4>${escHtml(t.name)}${hardFlag(t)}</h4>
+    <div class="card-meta">
+      ${avatarSmall(t)}
+      ${dueDateShort(t.dueDate)}
+      <span>&middot; ${t.timeEst||formatMins(t.minutes)||'-'}</span>
+    </div>
+    <div class="card-meta">
+      <span class="pri-dot ${t.priority||''}" title="${t.priority||''}"></span>
+      ${statusBadge(t.status)}
+      ${recurPill(t)}
+      ${t.business?`<span class="badge badge-business" style="font-size:9px">${escHtml(t.business)}</span>`:''}
+    </div>
+    ${pn?`<span class="card-project" style="background:${pbg};color:${pcol}">${escHtml(pn)}</span>`:''}
+  </div>`;
+}
+function renderKanbanWeeks(tasks){
+  const year=kanbanMonth.getFullYear(),month=kanbanMonth.getMonth();
+  const weeks=getWeeksOfMonth(year,month);
+  let html=`<div class="kanban-board">`;
   weeks.forEach((w,wi)=>{
     const wt=tasks.filter(t=>{if(!t.dueDate)return wi===3;return t.dueDate>=w.startStr&&t.dueDate<=w.endStr});
     const wh=wt.reduce((s,t)=>s+t.minutes,0)/60;
     html+=`<div class="kanban-col">
       <div class="kanban-col-header">${w.label}<span class="week-range">${w.rangeDisplay}</span><span class="week-hours">${wh.toFixed(1)}h</span></div>
       <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanCard(event,${wi})">`;
-    wt.forEach(t=>{
-      const pn=t.projectNames[0]||'';
-      const pcol=pn?strColor(pn):'var(--text-secondary)',pbg=pn?strColorBg(pn):'transparent';
-      // DEDLINE compact: L1 title, L2 avatar+due+hard+length, L3 priority+status+business
-      html+=`<div class="kanban-card" draggable="true" ondragstart="dragKanbanCard(event,'${t.id}')" onclick="openTaskDrawer('${t.id}')" style="position:relative">
-        <div style="position:absolute;top:4px;right:4px">${rowActionsHtml(t.id)}</div>
-        <h4>${escHtml(t.name)}${hardFlag(t)}</h4>
-        <div class="card-meta">
-          ${avatarSmall(t)}
-          ${dueDateShort(t.dueDate)}
-          <span>&middot; ${t.timeEst||formatMins(t.minutes)||'-'}</span>
-        </div>
-        <div class="card-meta">
-          <span class="pri-dot ${t.priority||''}" title="${t.priority||''}"></span>
-          ${statusBadge(t.status)}
-          ${recurPill(t)}
-          ${t.business?`<span class="badge badge-business" style="font-size:9px">${escHtml(t.business)}</span>`:''}
-        </div>
-        ${pn?`<span class="card-project" style="background:${pbg};color:${pcol}">${escHtml(pn)}</span>`:''}
-      </div>`;
-    });
+    wt.forEach(t=>{html+=renderKanbanCardHtml(t)});
     if(!wt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
     html+=`</div></div>`;
   });
   html+=`</div>`;
-  container.innerHTML=html;
+  return html;
+}
+function renderKanbanMonths(tasks){
+  const start=new Date(kanbanMonthStart);start.setDate(1);
+  let html=`<div class="kanban-board" style="display:grid;grid-template-columns:repeat(12,minmax(140px,1fr));gap:8px;overflow-x:auto">`;
+  for(let i=0;i<12;i++){
+    const md=new Date(start);md.setMonth(start.getMonth()+i);
+    const y=md.getFullYear(),m=md.getMonth();
+    const startStr=`${y}-${String(m+1).padStart(2,'0')}-01`;
+    const lastDay=new Date(y,m+1,0).getDate();
+    const endStr=`${y}-${String(m+1).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+    const label=md.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+    const mt=tasks.filter(t=>t.dueDate&&t.dueDate>=startStr&&t.dueDate<=endStr).sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+    const mh=mt.reduce((s,t)=>s+t.minutes,0)/60;
+    html+=`<div class="kanban-col" style="min-height:400px">
+      <div class="kanban-col-header">${label}<span class="week-hours">${mh.toFixed(1)}h</span></div>
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanMonthCard(event,${i})">`;
+    mt.forEach(t=>{html+=renderKanbanCardHtml(t)});
+    if(!mt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
+    html+=`</div></div>`;
+  }
+  html+=`</div>`;
+  return html;
 }
 let draggedTaskId=null;
 function dragKanbanCard(e,id){draggedTaskId=id;e.dataTransfer.effectAllowed='move'}
@@ -2738,7 +2810,26 @@ function dropKanbanCard(e,wi){
   updateTaskField(draggedTaskId,'dueDate',bestDay).then(()=>renderKanban());
   draggedTaskId=null;
 }
+function dropKanbanMonthCard(e,mi){
+  e.preventDefault();e.currentTarget.classList.remove('drag-over');
+  if(!draggedTaskId){return}
+  const task=allTasks.find(t=>t.id===draggedTaskId);if(!task){draggedTaskId=null;return}
+  const start=new Date(kanbanMonthStart);start.setDate(1);
+  const md=new Date(start);md.setMonth(start.getMonth()+mi);
+  const y=md.getFullYear(),m=md.getMonth();
+  const lastDay=new Date(y,m+1,0).getDate();
+  // try to preserve day-of-month from today, else 1st
+  const today=new Date();
+  let targetDay=1;
+  if(today.getDate()<=lastDay)targetDay=today.getDate();
+  const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(targetDay).padStart(2,'0')}`;
+  updateTaskField(draggedTaskId,'dueDate',ds).then(()=>renderKanban());
+  draggedTaskId=null;
+}
 function kanbanNav(d){kanbanMonth.setMonth(kanbanMonth.getMonth()+d);renderKanban()}
+function kanbanMonthsNav(d){kanbanMonthStart.setMonth(kanbanMonthStart.getMonth()+d);renderKanban()}
+function kanbanMonthsToday(){const d=new Date();d.setDate(1);kanbanMonthStart=d;renderKanban()}
+function setKanbanMode(mode){kanbanViewMode=mode;renderKanban()}
 
 // ======================================================
 // PROJECTS
@@ -2763,14 +2854,16 @@ function renderProjects(){
   projects.forEach(p=>{
     const pct=typeof p.completionPct==='number'?p.completionPct:parseFloat(p.completionPct)||0;
     const barW=Math.min(100,pct*100);
-    const statusCls=(p.status||'').toLowerCase().replace(/\s+/g,'-');
+    const computedHealth=computeProjectHealth(p);
+    const displayHealth=computedHealth||'Unknown';
+    const statusCls=displayHealth.toLowerCase().replace(/\s+/g,'-');
     const isExp=expandedProject===p.id;
     const linked=allTasks.filter(t=>t.projectIds.includes(p.id)||t.projectNames.includes(p.name));
     const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
 
-    const statusTip='Status is set manually in Airtable (or here). Options: Not Started / Off-Track / On-Track / On-Target / Completed.';
+    const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed or Not Started manually in the edit panel to override.';
     html+=`<div class="project-card" onclick="toggleProject('${p.id}')">
-      <div class="project-head"><h3>${escHtml(p.name)}</h3><span class="project-status ${statusCls}">${escHtml(p.status||'Unknown')}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px">?</span></div>
+      <div class="project-head"><h3>${escHtml(p.name)}</h3><span class="project-status ${statusCls}">${escHtml(displayHealth)}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px">?</span></div>
       <div class="project-body">
         <div class="project-col">
           <h5>Business</h5><div class="val">${escHtml(p.business||'-')}</div>
@@ -3117,7 +3210,10 @@ function renderRecurring(){
   const active=recurring.filter(t=>t.status!=='Completed');
   const totalMins=active.reduce((s,t)=>s+t.minutes,0);
 
-  let html=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+  let html=`<div style="background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px">
+    <strong>How recurring tasks work:</strong> Recurring tasks are spawned automatically by Airtable's built-in automation whenever a recurring task is marked Completed. This list just shows which tasks have a recurring cadence set. No need to create the next occurrence manually.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
     <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${recurring.length}</div><div class="label">Total Recurring</div></div>
     <div class="kpi accent" style="padding:12px"><div class="value" style="font-size:22px">${(totalMins/60).toFixed(1)}</div><div class="label">Hours / Cycle</div></div>
     <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t=>t.status==='Completed').length}</div><div class="label">Completed</div></div>
@@ -3235,7 +3331,8 @@ if(initAuth()){checkIdentityAndLoad()}
  'openTaskDrawer','closeDrawer','deleteTask','completeTaskInline','loadAllData',
  'doUndo','toggleRoutineConfig','updateTaskField','renderAll',
  'updateProjectField','projEdit','projEditDebounced','completeProject','deleteProject',
- 'openDeleteProjectConfirm','performDeleteProject','toggleProject','renderProjects'].forEach(n=>{
+ 'openDeleteProjectConfirm','performDeleteProject','toggleProject','renderProjects',
+ 'setKanbanMode','kanbanMonthsNav','kanbanMonthsToday','kanbanNav','dropKanbanMonthCard','dropKanbanCard','dragKanbanCard','renderKanban'].forEach(n=>{
   try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
 });
 
