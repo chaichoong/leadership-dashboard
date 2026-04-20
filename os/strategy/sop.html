@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Objective &amp; Strategy OS &mdash; Standard Operating Procedure</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{line-height:1.6;color:var(--text-primary);background:var(--bg-app)}
+.header{background:var(--accent);color:#fff;padding:2.5rem 2rem 2rem;position:relative;overflow:hidden}
+.header::after{content:'';position:absolute;top:-50%;right:-10%;width:500px;height:500px;background:radial-gradient(circle,rgba(255,255,255,0.08) 0%,transparent 70%);border-radius:50%}
+.header-inner{max-width:1100px;margin:0 auto;position:relative;z-index:1}
+.header-back{display:inline-flex;align-items:center;gap:0.4rem;font-size:0.82rem;opacity:0.8;text-decoration:none;color:#fff;margin-bottom:1rem}
+.header-back:hover{opacity:1}
+.header h1{font-size:2.2rem;font-weight:700;margin-bottom:0.3rem;letter-spacing:-0.5px}
+.header .subtitle{font-size:1.05rem;opacity:0.9}
+.header .version{font-size:0.85rem;opacity:0.7;margin-top:0.5rem}
+.container{max-width:1100px;margin:0 auto;padding:0 1.5rem 4rem}
+.section{margin-top:2.5rem}
+.section-title{font-size:1.5rem;font-weight:700;color:var(--accent);padding-bottom:0.5rem;border-bottom:3px solid var(--accent-soft);margin-bottom:1.25rem;display:flex;align-items:center;gap:0.5rem}
+.card{background:var(--bg-surface);border-radius:var(--radius-xl);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.25rem;border:1px solid var(--border-default)}
+.card-header{font-size:1.1rem;font-weight:600;color:var(--text-primary);margin-bottom:0.75rem;display:flex;align-items:center;gap:0.5rem}
+.card p+p{margin-top:0.75rem}
+.card ul,.card ol{margin-left:1.25rem;margin-top:0.5rem}
+.card li{margin-bottom:0.35rem;font-size:0.92rem}
+.quick-ref{background:var(--accent-soft);border:2px solid var(--accent-soft);border-radius:var(--radius-xl);padding:1.5rem;margin-top:-1rem;position:relative;z-index:2;box-shadow:var(--shadow-lg)}
+.quick-ref h2{font-size:1.2rem;color:var(--accent);margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem}
+.qr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.75rem}
+.qr-item{background:var(--bg-surface);border-radius:var(--radius-lg);padding:0.75rem 1rem;border-left:4px solid var(--accent);font-size:0.88rem}
+.qr-item .qr-label{font-weight:600;color:var(--text-secondary);font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px}
+.qr-item .qr-value{color:var(--text-primary);margin-top:0.15rem;word-break:break-word}
+.qr-item .qr-value code{background:var(--bg-surface-2);padding:1px 6px;border-radius:4px;font-size:0.78rem}
+.toc{background:var(--bg-surface);border-radius:var(--radius-xl);box-shadow:var(--shadow-sm);padding:1.5rem;border:1px solid var(--border-default)}
+.toc h2{font-size:1.15rem;color:var(--accent);margin-bottom:1rem}
+.toc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0.35rem 1.5rem}
+.toc a{display:flex;align-items:center;gap:0.5rem;color:var(--text-secondary);text-decoration:none;padding:0.35rem 0.5rem;border-radius:6px;font-size:0.9rem}
+.toc a:hover{background:var(--accent-soft);color:var(--accent)}
+.toc a .toc-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:0.7rem;font-weight:700;flex-shrink:0}
+.steps{counter-reset:step;list-style:none;padding:0}
+.steps li{position:relative;padding:0.6rem 0 0.6rem 2.5rem;font-size:0.92rem;line-height:1.55;border-top:1px solid var(--bg-subtle)}
+.steps li:first-child{border-top:none}
+.steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:0.65rem;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:0.75rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+.info-box{padding:0.85rem 1rem;border-radius:var(--radius-lg);font-size:0.9rem;margin:0.75rem 0;display:flex;align-items:flex-start;gap:0.6rem}
+.info-box.info{background:var(--info-bg);border-left:4px solid var(--info);color:var(--info)}
+.info-box.tip{background:var(--success-bg);border-left:4px solid var(--success);color:var(--success)}
+.info-box.warn{background:var(--warning-bg);border-left:4px solid var(--warning);color:var(--warning)}
+.info-box.danger{background:var(--danger-bg);border-left:4px solid var(--danger);color:var(--danger)}
+.info-box .ib-icon{font-size:1.1rem;flex-shrink:0}
+.info-box strong{color:inherit}
+table.grid{width:100%;border-collapse:separate;border-spacing:0;font-size:0.88rem;margin-top:0.5rem}
+table.grid th{background:var(--accent);color:#fff;padding:0.65rem 0.9rem;text-align:left;font-weight:600;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.3px}
+table.grid th:first-child{border-radius:var(--radius-lg) 0 0 0}
+table.grid th:last-child{border-radius:0 var(--radius-lg) 0 0}
+table.grid td{padding:0.6rem 0.9rem;border-bottom:1px solid var(--border-default);vertical-align:top}
+table.grid tr:last-child td{border-bottom:none}
+table.grid tr:nth-child(even) td{background:var(--bg-surface-2)}
+table.grid code{background:var(--bg-surface-2);padding:1px 6px;border-radius:4px;font-size:0.78rem}
+.flow{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:0;padding:1rem 0}
+.flow-step{background:var(--bg-surface);border:2px solid var(--accent-soft);border-radius:var(--radius-lg);padding:0.7rem 1rem;text-align:center;font-size:0.82rem;font-weight:600;color:var(--text-secondary);min-width:110px}
+.flow-step.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.flow-step.success{background:var(--success);color:#fff;border-color:var(--success)}
+.flow-arrow{font-size:1.3rem;color:var(--text-muted);padding:0 0.3rem}
+h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <a href="../../index.html" class="header-back">&larr; Back to Dashboard</a>
+    <h1>&#x1F3AF; Objective &amp; Strategy OS</h1>
+    <p class="subtitle">Standard Operating Procedure &mdash; how the page works, how the AI wizard works, and what gets written back to Airtable.</p>
+    <p class="version">Version 1.0 &middot; Last updated April 2026</p>
+  </div>
+</div>
+
+<div class="container">
+
+<div class="quick-ref">
+  <h2>&#x26A1; Quick Reference</h2>
+  <div class="qr-grid">
+    <div class="qr-item"><div class="qr-label">Airtable Table</div><div class="qr-value"><code>Objective and Strategy</code> &middot; <code>tblEBvFw8DonwxzGh</code></div></div>
+    <div class="qr-item"><div class="qr-label">Record Grain</div><div class="qr-value">One row per Business &times; Quarter &times; Year</div></div>
+    <div class="qr-item"><div class="qr-label">AI Model</div><div class="qr-value">Claude Haiku 4.5 for wizard critique (cheap, fast, JSON-mode)</div></div>
+    <div class="qr-item"><div class="qr-label">System Prompt</div><div class="qr-value"><code>js/prompts/boardroom-mentor.js</code></div></div>
+    <div class="qr-item"><div class="qr-label">Cadence</div><div class="qr-value">Objective: annual (quarterly tweak). Strategy: every quarter.</div></div>
+    <div class="qr-item"><div class="qr-label">Feeds Into</div><div class="qr-value">Projects OS &middot; Tasks OS (stepping stones)</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="toc">
+    <h2>&#x1F4D1; Table of Contents</h2>
+    <div class="toc-grid">
+      <a href="#overview"><span class="toc-num">1</span> Overview &amp; Purpose</a>
+      <a href="#access"><span class="toc-num">2</span> How to Access</a>
+      <a href="#data"><span class="toc-num">3</span> Data Model &amp; Field Map</a>
+      <a href="#wizard"><span class="toc-num">4</span> The AI Wizard</a>
+      <a href="#quarterly"><span class="toc-num">5</span> Quarterly Review Loop</a>
+      <a href="#project-hook"><span class="toc-num">6</span> Projects &amp; Tasks Hook</a>
+      <a href="#troubleshooting"><span class="toc-num">7</span> Troubleshooting</a>
+      <a href="#changelog"><span class="toc-num">8</span> Changelog</a>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="overview">
+  <h2 class="section-title">&#x1F3AF; 1. Overview &amp; Purpose</h2>
+  <div class="card">
+    <div class="card-header">&#x1F4A1; What It Does</div>
+    <p>The Objective &amp; Strategy OS gives each business a single living document covering its <strong>9-year vision, 3-year target, 1-year target, quarterly priority projects, and monthly stepping stones</strong>. An AI wizard (&ldquo;Boardroom Mentor&rdquo;) interviews the founder section-by-section, pushes back on vague answers, and writes the finished plan straight into Airtable.</p>
+    <p>Each record is stored per <strong>Business &times; Quarter &times; Year</strong>. The plan is reviewed and iterated every quarter; prior quarters are preserved for reflection.</p>
+    <div class="info-box tip"><span class="ib-icon">&#x1F4AC;</span><div><strong>Mental model:</strong> Objective = why we exist (annual). Strategy = how we win this quarter. Quarterly Projects = the three things that, if done, make the quarter a success.</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F504; End-to-End Flow</div>
+    <div class="flow">
+      <div class="flow-step primary"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F3AF;</span>Pick business<br>quarter, year</div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F914;</span>AI Wizard<br>interview</div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F4DD;</span>Review form<br>tweak inline</div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step success"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F4BE;</span>Save to<br>Airtable</div>
+      <span class="flow-arrow">&#x27A1;</span>
+      <div class="flow-step"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F680;</span>Push projects<br>to Projects OS</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" id="access">
+  <h2 class="section-title">&#x1F6AA; 2. How to Access</h2>
+  <div class="card">
+    <ol class="steps">
+      <li>Open the Operations Director dashboard and sign in with your Airtable Personal Access Token (PAT).</li>
+      <li>In the left sidebar, click <strong>&#x1F3AF; Objective &amp; Strategy OS</strong> (second entry, under Leadership Dashboard OS).</li>
+      <li>Pick a <strong>Business</strong>, <strong>Quarter</strong>, and <strong>Year</strong>. If a record exists for that combination it loads; otherwise you see an empty-state prompt to start the AI Wizard.</li>
+      <li>If you land here from a fresh session, the PAT is remembered via <code>localStorage</code> &mdash; no second sign-in needed.</li>
+    </ol>
+    <div class="info-box info"><span class="ib-icon">&#x1F517;</span><div>Standalone URL: <code>os/strategy/index.html</code>. Loaded in-app via iframe from the main shell.</div></div>
+  </div>
+</div>
+
+<div class="section" id="data">
+  <h2 class="section-title">&#x1F5C3; 3. Data Model &amp; Field Map</h2>
+  <div class="card">
+    <p>Everything lives on a single Airtable table &mdash; one row holds both the Objective half and the Strategy half of the plan for that quarter.</p>
+    <table class="grid">
+      <thead><tr><th>Form section</th><th>Airtable field(s)</th><th>Type</th></tr></thead>
+      <tbody>
+        <tr><td>Business / Quarter / Year</td><td><code>Business</code>, <code>Quarter</code>, <code>Year</code></td><td>link, singleSelect, singleSelect</td></tr>
+        <tr><td>Objective</td><td><code>Objective</code></td><td>richText</td></tr>
+        <tr><td>Target Statement</td><td><code>Target &ndash; What we do</code>, <code>&hellip; Who we do it for</code>, <code>&hellip; How we do it</code></td><td>singleLineText &times; 3</td></tr>
+        <tr><td>Customer Profile</td><td><code>Customer Profile</code></td><td>richText</td></tr>
+        <tr><td>Undertakings (rules of play)</td><td><code>Undertakings 1</code>&hellip;<code>Undertakings 20</code> + rollup</td><td>singleLineText &times; 20</td></tr>
+        <tr><td>Unique Selling Points</td><td><code>USP 1</code>&hellip;<code>USP 5</code> + rollup</td><td>singleLineText &times; 5</td></tr>
+        <tr><td>Enticement (irresistible offer)</td><td><code>Enticement</code></td><td>richText</td></tr>
+        <tr><td>Main Method (step library)</td><td><code>Main Method 1</code>&hellip;<code>Main Method 10</code> (linked to <code>Main Methods</code> table) OR <code>Method Step 1</code>&hellip;<code>Method Step 10</code></td><td>link &times; 10 + text &times; 10</td></tr>
+        <tr><td>Nine-Year Target</td><td><code>Nine-Year Target</code></td><td>richText</td></tr>
+        <tr><td>Three-Year Target + measurables</td><td><code>Three-Year Target</code> + <code>Three-Year Measurable 1&ndash;3</code></td><td>richText + text &times; 3</td></tr>
+        <tr><td>One-Year Target + measurables</td><td><code>One-Year Target</code> + <code>One-Year Measurable 1&ndash;3</code></td><td>richText + text &times; 3</td></tr>
+        <tr><td>Quarterly Projects</td><td><code>Quarterly Project 1&ndash;3</code></td><td>singleLineText &times; 3</td></tr>
+        <tr><td>Monthly Stepping Stones</td><td><code>Q{n}. Month {m}</code> &mdash; 3 &times; 3 grid (project &times; month)</td><td>singleLineText &times; 9</td></tr>
+      </tbody>
+    </table>
+    <div class="info-box warn"><span class="ib-icon">&#x26A0;&#xFE0F;</span><div>The full list of field IDs is the single source of truth: <code>js/config.js</code> &rarr; <code>OBJSTRAT</code> constant. Always read the IDs from there &mdash; Airtable field <em>names</em> occasionally change, IDs do not.</div></div>
+  </div>
+</div>
+
+<div class="section" id="wizard">
+  <h2 class="section-title">&#x1F9D9; 4. The AI Wizard &mdash; Boardroom Mentor Voice</h2>
+
+  <div class="card">
+    <div class="card-header">&#x1F3AD; Persona</div>
+    <p>The wizard speaks as <strong>Boardroom Mentor</strong> &mdash; a composite virtual board (Chair, CFO, COO, CMO, Head of People, Real Estate Strategist, Philanthropy Steward). Direct, analytical, UK English, no motivational fluff. The full prompt lives at <code>js/prompts/boardroom-mentor.js</code> and is shared across <em>every</em> AI feature on the platform, not just this OS.</p>
+    <div class="info-box info"><span class="ib-icon">&#x1F4CC;</span><div><strong>Why it matters:</strong> the rules of the critique (specific &middot; testable &middot; sized for the horizon) come from that single prompt file. Update the voice in one place, every wizard improves.</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F6E0;&#xFE0F; How It Works, Step by Step</div>
+    <ol class="steps">
+      <li>Founder clicks <strong>AI Wizard &#9656;</strong>. The panel opens on the right of the form.</li>
+      <li>The wizard looks for the <strong>prior quarter&rsquo;s record</strong> (Q4 previous year if current is Q1). If found, it asks a reflection question first: what hit, what missed, why?</li>
+      <li>It then walks through the strategy sections in a fixed order &mdash; 9-year &rarr; 3-year target + 3 measurables &rarr; 1-year target + 3 measurables &rarr; Quarterly Project 1 + 3 stepping stones &rarr; QP2 + stones &rarr; QP3 + stones.</li>
+      <li>For every answer, the wizard calls Claude Haiku with a critique prompt that returns JSON: <code>{accept, pushback?, refined?, note?}</code>.</li>
+      <li>If the critique rejects the answer, the <strong>pushback</strong> is shown as a challenge and the founder is asked again.</li>
+      <li>If accepted, the wizard may <strong>refine</strong> the founder&rsquo;s wording, then writes the final text straight into the matching form field.</li>
+      <li>At the end, the form is fully populated. Founder reviews, tweaks inline, hits <strong>Save changes</strong>.</li>
+    </ol>
+    <div class="info-box tip"><span class="ib-icon">&#x2705;</span><div><strong>Acceptable answer</strong> = specific (numbers, dates, names) + testable (&ldquo;done&rdquo; is observable) + sized for the horizon (nine-year visionary; monthly stone = 30 days of deliverable work).</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">&#x1F511; Controls</div>
+    <ul>
+      <li><strong>Send</strong> &mdash; submits your answer for critique.</li>
+      <li><strong>Skip</strong> &mdash; leaves the field empty and moves to the next section. Useful for optional slots (e.g. Quarterly Project 3, third measurables).</li>
+      <li><strong>&times;</strong> &mdash; closes the wizard. Answers already accepted are kept in the form; press <strong>Save changes</strong> to persist.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="section" id="quarterly">
+  <h2 class="section-title">&#x1F504; 5. Quarterly Review Loop</h2>
+  <div class="card">
+    <p>At the start of every quarter, the founder should:</p>
+    <ol class="steps">
+      <li>Pick the <em>new</em> quarter in the Quarter/Year selectors.</li>
+      <li>Click <strong>AI Wizard</strong>. The wizard automatically loads the previous quarter and opens with a reflection question.</li>
+      <li>Work through the wizard &mdash; most of the 9-year, 3-year, and 1-year answers can be carried forward with small tweaks. The <strong>Quarterly Projects</strong> and <strong>Monthly Stepping Stones</strong> are what change.</li>
+      <li>Save. The old quarter&rsquo;s record stays in Airtable untouched &mdash; nothing is overwritten.</li>
+    </ol>
+    <div class="info-box info"><span class="ib-icon">&#x1F4DC;</span><div>Because every quarter is its own record, you can always scroll back through the history by switching the Quarter/Year dropdowns. Use this to see what you planned vs. what you shipped.</div></div>
+  </div>
+</div>
+
+<div class="section" id="project-hook">
+  <h2 class="section-title">&#x1F680; 6. Projects &amp; Tasks Hook</h2>
+  <div class="card">
+    <p>After saving the quarter, the wizard offers to push the three Quarterly Projects into <strong>Projects OS</strong> as proper project records, and each monthly stepping stone becomes a linked <strong>Task</strong> due at the end of its month.</p>
+    <table class="grid">
+      <thead><tr><th>Projects OS field</th><th>Auto-filled</th><th>Asked by wizard</th></tr></thead>
+      <tbody>
+        <tr><td>Project Name</td><td>From <code>Quarterly Project N</code></td><td>&mdash;</td></tr>
+        <tr><td>Business</td><td>From selected business</td><td>&mdash;</td></tr>
+        <tr><td>Start Date / End Date</td><td>Quarter bounds</td><td>&mdash;</td></tr>
+        <tr><td>Project Status</td><td>Active</td><td>&mdash;</td></tr>
+        <tr><td>Deliverable</td><td>&mdash;</td><td>Expanded from the QP text</td></tr>
+        <tr><td>Definition of Done</td><td>&mdash;</td><td>Derived from the 3 stepping stones, confirmed</td></tr>
+        <tr><td>Project Owner</td><td>&mdash;</td><td>Which team member?</td></tr>
+        <tr><td>Department</td><td>&mdash;</td><td>Which department?</td></tr>
+        <tr><td>Project Collaborators</td><td>&mdash;</td><td>Who else is on it?</td></tr>
+      </tbody>
+    </table>
+    <div class="info-box tip"><span class="ib-icon">&#x1F517;</span><div>Stepping stones become real Task records linked to the Project &mdash; no double bookkeeping. When a Task is marked complete, the matching stone on the Leadership Dashboard flips to green automatically.</div></div>
+  </div>
+</div>
+
+<div class="section" id="troubleshooting">
+  <h2 class="section-title">&#x1F527; 7. Troubleshooting</h2>
+  <div class="card">
+    <table class="grid">
+      <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td>Red banner: &ldquo;Failed to load: &hellip;&rdquo;</td><td>PAT token lacks read access to one of the tables (businesses, objective-and-strategy, projects)</td><td>Regenerate PAT in Airtable with read/write scope to the whole base.</td></tr>
+        <tr><td>Wizard pushes back on every answer</td><td>Answers are genuinely vague &mdash; the critique is doing its job.</td><td>Add numbers, dates, names. If you disagree, click <strong>Skip</strong> to accept as-is.</td></tr>
+        <tr><td>Wizard never pushes back</td><td>The AI proxy is returning a non-JSON response &mdash; fail-open is accepting everything.</td><td>Check network tab for <code>claude-proxy.kevinbrittain.workers.dev</code> errors.</td></tr>
+        <tr><td>Save fails with 422</td><td>Quarter or Year option not in the singleSelect list</td><td>Add the missing option in Airtable &rarr; table configuration.</td></tr>
+        <tr><td>Prior quarter not loading</td><td>Business name on the prior record doesn&rsquo;t match current selection</td><td>Check Business link field on the prior record.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section" id="changelog">
+  <h2 class="section-title">&#x1F4DC; 8. Changelog</h2>
+  <div class="card">
+    <ul>
+      <li><strong>1.0 &middot; April 2026</strong> &mdash; Initial release. Strategy Plan page with AI Wizard critique loop. Objective Plan page and Projects/Tasks auto-create to follow in v1.1.</li>
+    </ul>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

@@ -57,6 +57,88 @@
         return hash || 'overview';
     }
 
+    // ──────────────────────────────────────────
+    // SOP-as-context loader
+    // Each page has a Standard Operating Procedure (sopFile in PAGE_REGISTRY)
+    // We fetch the SOP HTML once per session, strip it to clean text, cache it,
+    // and inject it into the wizard's system prompt so the model understands
+    // what the page is for, what it can do, and its limitations.
+    // ──────────────────────────────────────────
+    const sopCache = {};            // { tabId: "stripped text" | null }
+    const sopInflight = {};         // { tabId: Promise } — dedupe concurrent fetches
+
+    // One-line purpose for every tab. Used as a fast-path description and as a
+    // fallback when a tab has no SOP file (launch-plan, os-strategy, fintable).
+    const PAGE_PURPOSES = {
+        'overview': 'Leadership Dashboard — financial overview, 31-day cash flow forecast, balance calculator, reconciliation accuracy, AI commentary. The single executive view of business health.',
+        'tasks': 'Task and Project Management OS — tasks and projects across the portfolio, with assignment, due dates, and Kanban-style flow.',
+        'cfv': 'CFVs (Cash Flow Voids) — detects tenancies where rent hasn\'t landed on time, runs a 3-stage chase sequence, tracks exposure.',
+        'invoices': 'Invoices — pending invoices pulled from Gmail, AI-matched to vendors/jobs, approved and marked paid.',
+        'pnl': 'Profit & Loss — business-level P&L with category breakdown, period comparison, and variance.',
+        'comms': 'Inbound Comms — email triage with AI label suggestions, follow-up tracking, priority scoring.',
+        'compliance': 'Property Compliance — certificate tracking (gas, EICR, EPC, legionella, fire, PAT), expiry monitoring, renewal actions.',
+        'airtable': 'Contractor Job List — active maintenance jobs, contractor assignment, status.',
+        'launch-plan': 'Operations Director Master Action Plan — sequenced launch checklist for the ODR product.',
+        'os-hub': 'Operating Systems Hub — directory of all business operating systems.',
+        'os-bplan': 'Business Launch Plan Builder — AI-guided wizard that produces a complete launch plan for a new business.',
+        'os-strategy': 'Objective & Strategy OS — quarterly strategy plan per business with Boardroom Mentor wizard support.',
+        'fintable': 'Fintable Sync Monitor — health of bank-account sync across all connected accounts; flags stale or disconnected feeds.',
+        'sitemap': 'Site Map & Links — registry of every page, current version, matching SOP version, and sync status.',
+    };
+
+    function stripHtmlToText(html) {
+        // Remove non-content blocks before parsing so textContent is clean
+        html = html
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<!--[\s\S]*?-->/g, '');
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const node = doc.body || doc.documentElement;
+        let text = node ? (node.textContent || '') : '';
+        // Collapse runs of whitespace but preserve paragraph breaks
+        text = text.replace(/[ \t\f\v]+/g, ' ')
+                   .replace(/\n[ \t]+/g, '\n')
+                   .replace(/\n{3,}/g, '\n\n')
+                   .trim();
+        // Guardrail: cap at ~20k chars (~5k tokens). SOPs above this get truncated
+        // with a marker so the model knows content was cut.
+        const MAX = 20000;
+        if (text.length > MAX) text = text.slice(0, MAX) + '\n\n[…SOP truncated — section beyond this point not loaded…]';
+        return text;
+    }
+
+    async function loadSOPForTab(tabId) {
+        if (sopCache[tabId] !== undefined) return sopCache[tabId];
+        if (sopInflight[tabId]) return sopInflight[tabId];
+        const page = (typeof PAGE_REGISTRY !== 'undefined') ? PAGE_REGISTRY.find(p => p.id === tabId) : null;
+        if (!page || !page.sopFile) { sopCache[tabId] = null; return null; }
+        sopInflight[tabId] = (async () => {
+            try {
+                const resp = await fetch(page.sopFile);
+                if (!resp.ok) { sopCache[tabId] = null; return null; }
+                const html = await resp.text();
+                const text = stripHtmlToText(html);
+                sopCache[tabId] = text;
+                return text;
+            } catch (e) {
+                console.warn('SOP load failed for', tabId, e);
+                sopCache[tabId] = null;
+                return null;
+            } finally {
+                delete sopInflight[tabId];
+            }
+        })();
+        return sopInflight[tabId];
+    }
+
+    // Prewarm: start fetching the SOP as soon as the panel opens or the tab changes
+    // so by the time the user sends their first message the SOP is already in memory.
+    function prewarmSOP() {
+        const tab = getActiveTab();
+        loadSOPForTab(tab).catch(() => {});
+    }
+    window.addEventListener('hashchange', prewarmSOP);
+
     function renderAIChips() {
         const container = document.getElementById('aiChips');
         if (!container) return;
@@ -78,6 +160,7 @@
         } else {
             bubble.classList.add('hidden');
             renderAIChips();
+            prewarmSOP();
             document.getElementById('aiInput').focus();
         }
     }
@@ -121,39 +204,39 @@
         return ctx;
     }
 
-    // Build system prompt
-    function buildSystemPrompt() {
+    // Build system prompt as two content blocks.
+    // Block 1 (STABLE — marked cache_control:ephemeral): Boardroom Mentor base +
+    //   current page name + one-line purpose + full SOP text. Stable per page
+    //   per session, so Anthropic's prompt cache reuses it across follow-up
+    //   questions for ~90% off on that chunk.
+    // Block 2 (DYNAMIC — not cached): live dashboard state + today's date.
+    async function buildSystemPrompt() {
         const ctx = gatherDashboardContext();
-        return `You are the AI analyst for the Operations Director dashboard \u2014 a property management leadership tool.
+        const tab = ctx.currentTab || 'overview';
+        const page = (typeof PAGE_REGISTRY !== 'undefined') ? PAGE_REGISTRY.find(p => p.id === tab) : null;
+        const pageName = page ? page.name : tab;
+        const purpose = PAGE_PURPOSES[tab] || '';
+        const sopText = await loadSOPForTab(tab);
 
-RULES:
-- Always write in British English (UK spelling: analyse, colour, organise, centre, etc.).
-- Be concise and data-driven. Use \u00a3 with commas for monetary values.
-- When data is available, give the numbers \u2014 don't hedge.
-- Flag risks in plain language. Suggest specific actions.
-- Use markdown for formatting. Keep responses under 300 words unless generating a report.
-- For reports, use structured sections with headers.
-- When referencing tenancies, include the unit reference.
+        const mentor = (typeof BOARDROOM_MENTOR_PROMPT !== 'undefined') ? BOARDROOM_MENTOR_PROMPT : '';
 
-PAGES IN THIS PLATFORM:
-- Leadership Dashboard: Financial overview, cash flow forecast, reconciliation, balance calculator, AI commentary
-- Contractor Job List: Active maintenance jobs (Airtable embed)
-- Invoices: Pending invoices from Gmail, AI matching, mark as paid
-- CFVs: Cash flow void detection, 3-stage chase, comments, status management
-- Inbound Comms: Email triage, AI label suggestions, follow-up tracking
-- Property Compliance: Certificate tracking, expiry monitoring
-- Site Map: Page registry, version tracking, SOP sync
-- Fintable Sync Monitor: Bank account sync status
+        const pageBlock = [
+            `CURRENT PAGE: ${pageName} (tab id: "${tab}")`,
+            purpose ? `PAGE PURPOSE: ${purpose}` : '',
+            sopText
+                ? `PAGE SOP — read this before answering. It describes exactly what this page does, how it works, and its limitations. Ground every answer in this:\n\n${sopText}`
+                : `PAGE SOP: Not available for this page. Work from the page purpose above and the dashboard state below. If the user asks how something works on this page and you can't tell from the state, say so rather than guessing.`,
+            `When answering, stay grounded in what this page actually does. Don't invent features the SOP doesn't mention. If a question is outside this page's scope, say so and point to the right page.`,
+        ].filter(Boolean).join('\n\n');
 
-You are aware of ALL pages and can answer questions about any of them. Adapt your responses to whichever page the user is currently viewing.
+        const stableText = `${mentor}\n\n---\n\n${pageBlock}`;
 
-CURRENT DASHBOARD STATE:
-\`\`\`json
-${JSON.stringify(ctx, null, 0)}
-\`\`\`
+        const dynamicText = `CURRENT DASHBOARD STATE (live snapshot — may change between messages):\n\`\`\`json\n${JSON.stringify(ctx, null, 0)}\n\`\`\`\n\nToday is ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.`;
 
-The user is currently viewing the "${ctx.currentTab}" page.
-Today is ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.`;
+        return [
+            { type: 'text', text: stableText, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: dynamicText },
+        ];
     }
 
     // Conversation history
@@ -247,7 +330,7 @@ Today is ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numer
         aiCooldown = true;
 
         try {
-            const systemPrompt = buildSystemPrompt();
+            const systemPrompt = await buildSystemPrompt();
             const messages = aiConversation.map(m => ({ role: m.role, content: m.content }));
 
             const response = await fetch(AI_PROXY, {

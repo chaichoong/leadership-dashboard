@@ -25,6 +25,9 @@ FILE_TO_PAGE = {
     'os/tasks/index.html':  'tasks',
     'os/index.html':        'os-hub',
     'os/business-plan-builder/index.html': 'os-bplan',
+    'os/strategy/index.html': 'os-strategy',
+    'os/strategy/strategy.js': 'os-strategy',
+    'os/strategy/strategy.css': 'os-strategy',
 }
 
 CONFIG_FILE = 'js/config.js'

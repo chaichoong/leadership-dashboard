@@ -45,6 +45,7 @@
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('os-strategy')"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy OS</span></div>
             <div class="sidebar-item" onclick="switchTab('tasks')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Task and Project Management OS</span></div>
             <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids OS</span><span id="cfvSidebarBadges" style="margin-left:auto;display:flex;gap:4px"></span></div>
             <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices OS</span></div>
@@ -59,7 +60,6 @@
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.45)">Operating Systems</div>
             <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Operating Systems Hub</span></div>
             <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Launch Plan Builder OS</span></div>
-            <div class="sidebar-item" onclick="switchTab('os-strategy')"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy OS</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
@@ -447,7 +447,7 @@
 
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
-    <script src="js/config.js?v=13"></script>
+    <script src="js/config.js?v=14"></script>
     <script src="js/prompts/boardroom-mentor.js?v=1"></script>
     <script src="js/shared.js?v=12"></script>
     <script src="js/dashboard.js?v=11"></script>
@@ -458,6 +458,6 @@
     <script src="js/reconciliation.js?v=12"></script>
     <script src="js/cfv.js?v=11"></script>
     <script src="js/fintable.js?v=11"></script>
-    <script src="js/ai-assistant.js?v=11"></script>
+    <script src="js/ai-assistant.js?v=12"></script>
 </body>
 </html>
