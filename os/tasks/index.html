@@ -354,7 +354,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
-    <button class="btn" onclick="loadAllData()" title="Reload data from Airtable">Refresh</button>
+    <button class="btn" data-refresh-btn onclick="loadAllData()" title="Reload data from Airtable">Refresh</button>
     <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4" title="Undo last action (Cmd+Z) — Nothing to undo">
       <span>Undo</span><span id="undoBtnLabel" style="display:none"></span>
     </button>
@@ -406,7 +406,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <option value="Operations Director">Operations Director</option>
         <option value="Personal">Personal</option>
       </select>
-      <button class="btn btn-primary btn-sm" onclick="safeAutoSchedule()">Auto-Schedule</button>
+      <button class="btn btn-primary btn-sm" data-autosched-btn onclick="safeAutoSchedule()">Auto-Schedule</button>
       <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ Add Task</button>
     </div>
 
@@ -1959,11 +1959,13 @@ function renderMyDay(){
   const todayHrs=todayTasks.reduce((s,t)=>s+t.minutes,0)/60;
   const overdueHrs=overdueTasks.reduce((s,t)=>s+t.minutes,0)/60;
   const totalHrs=todayHrs+overdueHrs;
-  // Compute "true" task-only capacity = working hours minus routine minus meetings
+  // Denominator is YOUR configured task budget (Configure Routine > Max hrs).
+  // Routine blocks and meetings are shown on the timeline but don't affect
+  // this number — they're separate from the task budget you've set.
+  const availHrs=config.maxTaskHours;
   const workHrsCfg=config.endHour-config.startHour;
   const routineHrsCfg=getRoutineBlocks().reduce((s,b)=>s+b.duration,0)/60;
   const meetingHrsCfg=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?(en-st)/60:0)},0);
-  const availHrs=Math.max(0,workHrsCfg-routineHrsCfg-meetingHrsCfg);
   const capPct=availHrs>0?Math.min(150,(totalHrs/availHrs)*100):150;
   const capColor=capPct>100?'var(--danger)':capPct>80?'var(--warning)':'var(--success)';
 
@@ -1984,8 +1986,8 @@ function renderMyDay(){
   </div>`;
 
   html+=`<div class="myday-capacity">
-    <h3>Task Load Today <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px" title="Scheduled task hours vs the window of time left after routine blocks (${routineHrsCfg.toFixed(1)}h) and calendar meetings (${meetingHrsCfg.toFixed(1)}h) are removed from your ${workHrsCfg}h working day.">${totalHrs.toFixed(1)}h of ${availHrs.toFixed(1)}h free (tasks only)</span></h3>
-    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${todayHrs.toFixed(1)}h on today${overdueHrs>0?` &middot; ${overdueHrs.toFixed(1)}h overdue`:''} &middot; Working day ${workHrsCfg}h minus routine ${routineHrsCfg.toFixed(1)}h minus meetings ${meetingHrsCfg.toFixed(1)}h = ${availHrs.toFixed(1)}h available for tasks</div>
+    <h3>Task Load Today <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px" title="Your configured task budget (Configure Routine > Max hrs). Routine (${routineHrsCfg.toFixed(1)}h) and meetings (${meetingHrsCfg.toFixed(1)}h) are shown on the timeline but are separate from this budget.">${totalHrs.toFixed(1)}h of ${availHrs}h task budget</span></h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${todayHrs.toFixed(1)}h on today${overdueHrs>0?` &middot; ${overdueHrs.toFixed(1)}h overdue`:''} &middot; Budget: ${availHrs}h for tasks &middot; Routine ${routineHrsCfg.toFixed(1)}h &middot; Meetings ${meetingHrsCfg.toFixed(1)}h &middot; Working day ${workHrsCfg}h</div>
     <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100,capPct)}%;background:${capColor}"></div></div>
   </div>`;
 
@@ -1995,7 +1997,7 @@ function renderMyDay(){
 
   html+=`<div class="action-row" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
     <button class="btn btn-primary" onclick="openCreateTaskModal()" title="Create a new task">+ Add Task</button>
-    <button class="btn btn-primary" onclick="safeAutoSchedule()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
+    <button class="btn btn-primary" data-autosched-btn onclick="safeAutoSchedule()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
     <button class="btn" onclick="toggleRoutineConfig()" title="Edit your daily routine blocks (wake, lunch, focus blocks, etc.)">Configure Routine</button>
   </div>`;
 
@@ -2341,11 +2343,12 @@ function scheduleTasksAcrossDays(){
 
   console.log('[Scheduler] Step 2: get config');
   const config=getWorkConfig();
-  const routineMins=getRoutineBlocks().reduce((s,b)=>s+b.duration,0);
-  const workHrs=config.endHour-config.startHour;
-  const dailyCapMin=Math.max(0,workHrs*60-routineMins);
-  console.log('[Scheduler] dailyCapMin=',dailyCapMin,'routineMins=',routineMins);
-  if(dailyCapMin<=0)return{moves:[],warnings:['Daily capacity is 0 — reduce routine hours or increase working hours']};
+  // Daily task budget = user's configured maxTaskHours (the number they
+  // explicitly set in Configure Routine). Routine and meetings are
+  // scheduled separately on the timeline and don't eat into this budget.
+  const dailyCapMin=Math.max(0,(config.maxTaskHours||6)*60);
+  console.log('[Scheduler] dailyCapMin=',dailyCapMin,'(maxTaskHours=',config.maxTaskHours,')');
+  if(dailyCapMin<=0)return{moves:[],warnings:['Daily task budget is 0 — increase Max hrs in Configure Routine']};
 
   console.log('[Scheduler] Step 3: filter tasks');
   let tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
@@ -2476,8 +2479,7 @@ function updateAutoMoveDate(index,newDate){
     const member=TEAM.find(x=>x.key===activeTeam)||(currentUser?TEAM.find(x=>x.key===currentUser.key):null);
     if(!member)return;
     const config=getWorkConfig();
-    const routineMins=getRoutineBlocks().reduce((s,b)=>s+b.duration,0);
-    const dailyCapMin=Math.max(0,(config.endHour-config.startHour)*60-routineMins);
+    const dailyCapMin=Math.max(0,(config.maxTaskHours||6)*60);
     if(dailyCapMin<=0)return;
     const usage={};
     // seed with today's calendar
@@ -3297,8 +3299,16 @@ function renderAll(){
 // ======================================================
 // LOAD
 // ======================================================
+let _loadingInProgress=false;
 async function loadAllData(){
-  document.getElementById('loader').style.display='flex';
+  if(_loadingInProgress){toast('Already refreshing...');return}
+  _loadingInProgress=true;
+  const loader=document.getElementById('loader');if(loader)loader.style.display='flex';
+  // Visible button state: set all Refresh buttons to "Refreshing..."
+  const refreshBtns=document.querySelectorAll('[data-refresh-btn]');
+  refreshBtns.forEach(b=>{b._origText=b.textContent;b.textContent='Refreshing...';b.disabled=true;b.style.opacity='0.6'});
+  toast('Refreshing from Airtable...');
+  const startedAt=Date.now();
   try{
     await fetchBusinesses();
     const[rawTasks,rawProjects,cal]=await Promise.all([
@@ -3316,13 +3326,19 @@ async function loadAllData(){
     const r=await autoRescheduleOverdue();
     if(r.count>0)console.log(`Rescheduled ${r.count} overdue`);
 
-    document.getElementById('taskCount').textContent=`${allTasks.length} tasks, ${allProjects.length} projects${cal.length?`, ${cal.length} cal events`:''}`;
-    document.getElementById('lastSync').textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
-    document.getElementById('loader').style.display='none';
+    const tc=document.getElementById('taskCount');if(tc)tc.textContent=`${allTasks.length} tasks, ${allProjects.length} projects${cal.length?`, ${cal.length} cal events`:''}`;
+    const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
+    if(loader)loader.style.display='none';
     renderAll();
+    const ms=Date.now()-startedAt;
+    toast(`Refreshed ${allTasks.length} tasks, ${allProjects.length} projects in ${(ms/1000).toFixed(1)}s`);
   }catch(e){
     console.error(e);
-    document.getElementById('loader').innerHTML=`<span style="color:var(--danger)">Failed to load. ${escHtml(e.message)}</span>`;
+    if(loader)loader.innerHTML=`<span style="color:var(--danger)">Failed to load. ${escHtml(e.message)}</span>`;
+    toast('Refresh failed: '+(e.message||'unknown'),true);
+  } finally {
+    _loadingInProgress=false;
+    refreshBtns.forEach(b=>{if(b._origText)b.textContent=b._origText;b.disabled=false;b.style.opacity=''});
   }
 }
 
@@ -3359,7 +3375,21 @@ window.safeAutoSchedule=function(){
       console.error('runAutoSchedulePreview not defined on window');
       return;
     }
-    window.runAutoSchedulePreview();
+    // Set visible progress on all Auto-Schedule buttons
+    const btns=document.querySelectorAll('[data-autosched-btn]');
+    btns.forEach(b=>{b._origText=b.textContent;b.textContent='Calculating...';b.disabled=true;b.style.opacity='0.6'});
+    toast('Calculating auto-schedule...');
+    // Defer the heavy work one tick so the toast/button state paints first
+    setTimeout(()=>{
+      try{
+        window.runAutoSchedulePreview();
+      }catch(e){
+        alert('Auto-Schedule error: '+e.message);
+        console.error('[safeAutoSchedule] inner threw',e);
+      } finally {
+        btns.forEach(b=>{if(b._origText)b.textContent=b._origText;b.disabled=false;b.style.opacity=''});
+      }
+    },50);
   }catch(e){
     alert('Auto-Schedule error: '+e.message);
     console.error('[safeAutoSchedule] threw',e);
