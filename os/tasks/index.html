@@ -1959,8 +1959,12 @@ function renderMyDay(){
   const todayHrs=todayTasks.reduce((s,t)=>s+t.minutes,0)/60;
   const overdueHrs=overdueTasks.reduce((s,t)=>s+t.minutes,0)/60;
   const totalHrs=todayHrs+overdueHrs;
-  const availHrs=config.maxTaskHours;
-  const capPct=Math.min(150,(totalHrs/availHrs)*100);
+  // Compute "true" task-only capacity = working hours minus routine minus meetings
+  const workHrsCfg=config.endHour-config.startHour;
+  const routineHrsCfg=getRoutineBlocks().reduce((s,b)=>s+b.duration,0)/60;
+  const meetingHrsCfg=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?(en-st)/60:0)},0);
+  const availHrs=Math.max(0,workHrsCfg-routineHrsCfg-meetingHrsCfg);
+  const capPct=availHrs>0?Math.min(150,(totalHrs/availHrs)*100):150;
   const capColor=capPct>100?'var(--danger)':capPct>80?'var(--warning)':'var(--success)';
 
   let html=`<div class="myday-header"><h2>${dayName}</h2><div class="date-sub">${todayTasks.length} tasks today &middot; ${totalHrs.toFixed(1)} hrs &middot; ${calendarEvents.length} cal events &middot; ${overdueTasks.length} overdue</div></div>`;
@@ -1980,7 +1984,8 @@ function renderMyDay(){
   </div>`;
 
   html+=`<div class="myday-capacity">
-    <h3>Day Capacity <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px">${totalHrs.toFixed(1)}h of ${availHrs}h task capacity</span></h3>
+    <h3>Task Load Today <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px" title="Scheduled task hours vs the window of time left after routine blocks (${routineHrsCfg.toFixed(1)}h) and calendar meetings (${meetingHrsCfg.toFixed(1)}h) are removed from your ${workHrsCfg}h working day.">${totalHrs.toFixed(1)}h of ${availHrs.toFixed(1)}h free (tasks only)</span></h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${todayHrs.toFixed(1)}h on today${overdueHrs>0?` &middot; ${overdueHrs.toFixed(1)}h overdue`:''} &middot; Working day ${workHrsCfg}h minus routine ${routineHrsCfg.toFixed(1)}h minus meetings ${meetingHrsCfg.toFixed(1)}h = ${availHrs.toFixed(1)}h available for tasks</div>
     <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100,capPct)}%;background:${capColor}"></div></div>
   </div>`;
 
