@@ -362,15 +362,14 @@ function renderForm(fields) {
             const label = document.createElement('span');
             label.className = 'm-label';
             label.textContent = `M${m + 1}`;
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.dataset.fieldId = stoneFid;
-            input.value = fields[stoneFid] || '';
-            input.placeholder = `Month ${m + 1}`;
-            input.style.cssText = 'flex:1;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:12px;font-family:inherit;';
-            input.addEventListener('input', () => markDirty());
+            const ta = document.createElement('textarea');
+            ta.dataset.fieldId = stoneFid;
+            ta.value = fields[stoneFid] || '';
+            ta.placeholder = `Month ${m + 1} deliverable`;
+            ta.rows = 1;
+            ta.addEventListener('input', () => { markDirty(); autosize(ta); });
             row.appendChild(label);
-            row.appendChild(input);
+            row.appendChild(ta);
             stonesWrap.appendChild(row);
         });
         card.appendChild(stonesWrap);
@@ -407,30 +406,57 @@ function planDivider(title, sub) {
 }
 
 function undertakingsGrid(fields) {
-    const grid = document.createElement('div');
-    grid.className = 'grid-cols-2';
-    OBJSTRAT.undertakings.forEach((fid, i) => {
-        grid.appendChild(singleLineField(`Undertaking ${i + 1}`, fid, fields[fid] || ''));
-    });
-    return grid;
+    // Numbered cards in a responsive grid. Multi-line content — use textareas.
+    return cardGrid(OBJSTRAT.undertakings.map((fid, i) => numberedCard({
+        number: i + 1, fieldId: fid, value: fields[fid] || '',
+        placeholder: 'Undertaking text…',
+    })), { minColWidth: 260 });
 }
 
 function uspsGrid(fields) {
-    const grid = document.createElement('div');
-    grid.className = 'plan-form';
-    OBJSTRAT.usps.forEach((fid, i) => {
-        grid.appendChild(textareaField(`USP ${i + 1}`, fid, fields[fid] || ''));
-    });
-    return grid;
+    // 5 USPs — slightly wider cards look best.
+    return cardGrid(OBJSTRAT.usps.map((fid, i) => numberedCard({
+        number: i + 1, fieldId: fid, value: fields[fid] || '',
+        placeholder: 'USP text…',
+    })), { minColWidth: 300 });
 }
 
 function methodStepsGrid(fields) {
-    const grid = document.createElement('div');
-    grid.className = 'grid-cols-2';
-    OBJSTRAT.methodSteps.forEach((fid, i) => {
-        grid.appendChild(textareaField(`Step ${i + 1}`, fid, fields[fid] || ''));
+    // 10 method steps.
+    return cardGrid(OBJSTRAT.methodSteps.map((fid, i) => numberedCard({
+        number: i + 1, fieldId: fid, value: fields[fid] || '',
+        placeholder: 'Step text…',
+    })), { minColWidth: 280 });
+}
+
+// Build a responsive card grid. CSS Grid auto-fills columns; all items in the
+// same visual row end up the same height via CSS align-items: stretch + the
+// equaliseRowHeights() pass in autosizeAll.
+function cardGrid(cards, opts = {}) {
+    const g = document.createElement('div');
+    g.className = 'card-grid';
+    g.style.gridTemplateColumns = `repeat(auto-fill, minmax(${opts.minColWidth || 280}px, 1fr))`;
+    cards.forEach(c => g.appendChild(c));
+    return g;
+}
+
+function numberedCard({ number, fieldId, value, placeholder }) {
+    const card = document.createElement('div');
+    card.className = 'num-card';
+    if (!value) card.classList.add('is-empty');
+    card.innerHTML = `<div class="num-badge">${String(number).padStart(2, '0')}</div>`;
+    const ta = document.createElement('textarea');
+    ta.dataset.fieldId = fieldId;
+    ta.value = value || '';
+    ta.placeholder = placeholder || '';
+    ta.rows = 1;
+    ta.addEventListener('input', () => {
+        markDirty(); autosize(ta);
+        card.classList.toggle('is-empty', !ta.value.trim());
+        equaliseCardRow(card);
     });
-    return grid;
+    card.appendChild(ta);
+    return card;
 }
 
 function singleLineField(label, fieldId, value) {
@@ -513,9 +539,70 @@ function autosize(ta) {
     ta.style.height = Math.min(ta.scrollHeight + 2, max) + 'px';
 }
 
-// Re-size every textarea on the page — used after the form renders or wizard fills.
+// Re-size every textarea on the page, then equalise heights within each
+// visual row so grids look symmetric.
 function autosizeAll() {
     document.querySelectorAll('.plan-form textarea').forEach(autosize);
+    equaliseAllCardRows();
+    equaliseAllGridRows();
+}
+
+// Group cards within one .card-grid by their offsetTop (visual row) and set
+// every textarea in that row to the tallest height. Gives a clean symmetric
+// grid where no card ends shorter than its neighbours.
+function equaliseAllCardRows() {
+    document.querySelectorAll('.card-grid').forEach(grid => {
+        const cards = Array.from(grid.querySelectorAll('.num-card'));
+        if (!cards.length) return;
+        const rows = groupByTop(cards);
+        rows.forEach(row => {
+            const tas = row.map(c => c.querySelector('textarea')).filter(Boolean);
+            if (tas.length < 2) return;
+            const max = Math.max(...tas.map(t => t.offsetHeight));
+            tas.forEach(t => { t.style.height = max + 'px'; });
+        });
+    });
+}
+
+// Same pattern for the 3-col grids (Target Statement, Measurables).
+function equaliseAllGridRows() {
+    document.querySelectorAll('.grid-cols-2, .grid-cols-3').forEach(grid => {
+        const rows = grid.querySelectorAll('.field-row');
+        if (rows.length < 2) return;
+        const groups = groupByTop(Array.from(rows));
+        groups.forEach(group => {
+            const tas = group.map(r => r.querySelector('textarea')).filter(Boolean);
+            if (tas.length < 2) return;
+            const max = Math.max(...tas.map(t => t.offsetHeight));
+            tas.forEach(t => { t.style.height = max + 'px'; });
+        });
+    });
+}
+
+// Equalise a single row that contains the given card (called from the input
+// handler so typing in one card grows its row-mates).
+function equaliseCardRow(card) {
+    const grid = card.closest('.card-grid');
+    if (!grid) return;
+    const top = card.offsetTop;
+    const row = Array.from(grid.querySelectorAll('.num-card')).filter(c => c.offsetTop === top);
+    const tas = row.map(c => c.querySelector('textarea')).filter(Boolean);
+    if (tas.length < 2) return;
+    // Reset, measure natural heights, then apply max
+    tas.forEach(t => { t.style.height = 'auto'; });
+    tas.forEach(autosize);
+    const max = Math.max(...tas.map(t => t.offsetHeight));
+    tas.forEach(t => { t.style.height = max + 'px'; });
+}
+
+function groupByTop(els) {
+    const byTop = new Map();
+    els.forEach(el => {
+        const key = el.offsetTop;
+        if (!byTop.has(key)) byTop.set(key, []);
+        byTop.get(key).push(el);
+    });
+    return Array.from(byTop.values());
 }
 
 function gridOf(children) {

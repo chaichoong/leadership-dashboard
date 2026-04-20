@@ -186,23 +186,76 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
 .field-row input:focus, .field-row textarea:focus { border-color: var(--accent); outline: none; }
 .field-row .hint { font-size: 11px; color: var(--text-muted); }
 
-.grid-cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.grid-cols-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.grid-cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
+.grid-cols-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; align-items: stretch; }
+
+/* Card grid — responsive, equal-height rows. Used for Undertakings, USPs,
+   Method Steps. The grid-template-columns value comes from JS so each list
+   can pick its own minimum card width. */
+.card-grid {
+    display: grid;
+    gap: 12px;
+    align-items: stretch;
+    margin-top: 4px;
+}
+
+.num-card {
+    position: relative;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 34px 14px 12px;
+    transition: border-color .12s, background .12s;
+    display: flex; flex-direction: column;
+}
+.num-card:focus-within { border-color: var(--accent); background: var(--bg-surface); }
+.num-card.is-empty { background: transparent; border-style: dashed; }
+.num-card.is-empty .num-badge { opacity: 0.35; }
+.num-badge {
+    position: absolute; top: 10px; left: 12px;
+    width: 24px; height: 24px; border-radius: 6px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    letter-spacing: 0.5px;
+}
+.num-card textarea {
+    flex: 1;
+    width: 100%;
+    border: none; outline: none; background: transparent;
+    resize: none; overflow: hidden;
+    font-family: inherit; font-size: 13px; line-height: 1.5;
+    color: var(--text-primary);
+    padding: 0; min-height: 40px;
+}
+.num-card textarea::placeholder { color: var(--text-muted); font-style: italic; }
 
 /* Quarterly project cards */
 .qp-card {
     background: var(--bg-surface-2); border: 1px solid var(--border-default);
-    border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
 }
-.qp-card h4 { font-size: 14px; color: var(--accent); margin-bottom: 4px; }
+.qp-card h4 { font-size: 13px; color: var(--accent); margin-bottom: 2px; font-weight: 700; }
 .qp-stones { display: flex; flex-direction: column; gap: 8px; }
 .qp-stones .stone {
-    display: flex; gap: 8px; align-items: center;
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--bg-surface); border: 1px solid var(--border-subtle);
+    border-radius: 6px; padding: 8px 10px;
 }
+.qp-stones .stone:focus-within { border-color: var(--accent); }
 .qp-stones .stone .m-label {
-    font-size: 11px; font-weight: 600; color: var(--text-muted);
-    width: 44px; flex-shrink: 0;
+    font-size: 10px; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft); padding: 3px 8px; border-radius: 4px;
+    width: auto; flex-shrink: 0; letter-spacing: 0.5px; min-width: 34px; text-align: center;
+    margin-top: 1px;
 }
+.qp-stones .stone textarea {
+    flex: 1; border: none; outline: none; background: transparent;
+    resize: none; overflow: hidden;
+    font-family: inherit; font-size: 12px; line-height: 1.45;
+    color: var(--text-primary); padding: 0; min-height: 20px;
+}
+.qp-stones .stone textarea::placeholder { color: var(--text-muted); font-style: italic; }
 
 /* Empty state */
 .empty-state {
