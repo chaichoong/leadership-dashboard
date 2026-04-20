@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strategy Plan OS</title>
+    <link rel="stylesheet" href="../../css/tokens.css?v=1">
+    <script src="../../js/config.js?v=12"></script>
+    <script src="../../js/prompts/boardroom-mentor.js?v=1"></script>
+    <link rel="stylesheet" href="strategy.css?v=1">
+</head>
+<body>
+<div class="container">
+
+    <!-- Auth Screen -->
+    <div id="authScreen" class="auth-screen">
+        <div class="auth-box">
+            <h2>Strategy Plan OS</h2>
+            <p>Enter your Airtable Personal Access Token to load live data.</p>
+            <input type="password" id="patInput" class="auth-input" placeholder="pat...">
+            <button onclick="authenticate()" class="auth-btn">Connect</button>
+            <div id="authError" class="auth-error">Invalid token. Please check and try again.</div>
+            <div class="auth-note">Token is stored in your browser session only and never sent anywhere except Airtable.</div>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div style="font-size:14px;color:var(--text-muted);">Loading strategy data...</div>
+    </div>
+
+    <!-- App -->
+    <div id="app" style="display:none;">
+        <div class="header">
+            <h1>Strategy Plan</h1>
+            <div class="header-right">
+                <span class="refresh-dot"></span>
+                <span>Live · linked to Airtable</span>
+                <a href="#" onclick="loadRecord(); return false;">Refresh</a>
+                <a href="#" onclick="goToDashboard(); return false;">Back to Dashboard</a>
+            </div>
+        </div>
+
+        <!-- Context bar: business + quarter + year + actions -->
+        <div class="context-bar">
+            <div class="ctx-group">
+                <label>Business</label>
+                <select id="businessSel"></select>
+            </div>
+            <div class="ctx-group">
+                <label>Quarter</label>
+                <select id="quarterSel">
+                    <option value="">—</option>
+                    <option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option>
+                </select>
+            </div>
+            <div class="ctx-group">
+                <label>Year</label>
+                <select id="yearSel"></select>
+            </div>
+            <div class="ctx-actions">
+                <button id="saveBtn" class="btn btn-ghost" onclick="saveRecord()" disabled>Save changes</button>
+                <button id="wizardBtn" class="btn btn-primary" onclick="openWizard()">AI Wizard ▸</button>
+            </div>
+        </div>
+
+        <div id="statusBar" class="status-bar" style="display:none;"></div>
+
+        <div class="layout">
+            <!-- Main form area -->
+            <div id="planForm" class="plan-form"></div>
+
+            <!-- Wizard panel -->
+            <div id="wizardPanel" class="wizard-panel" style="display:none;">
+                <div class="wiz-head">
+                    <div>
+                        <div class="wiz-title">Boardroom Mentor</div>
+                        <div class="wiz-sub" id="wizStepLabel">—</div>
+                    </div>
+                    <button class="wiz-close" onclick="closeWizard()">✕</button>
+                </div>
+                <div id="wizMessages" class="wiz-messages"></div>
+                <div class="wiz-input-row">
+                    <textarea id="wizInput" class="wiz-input" placeholder="Type your answer…" rows="3"></textarea>
+                    <div class="wiz-btn-row">
+                        <button class="btn btn-ghost" onclick="wizSkip()">Skip</button>
+                        <button class="btn btn-primary" onclick="wizSend()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="strategy.js?v=1"></script>
+</body>
+</html>

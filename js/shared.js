@@ -296,7 +296,7 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', airtable: 'Contractor', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'launch-plan': 'Director Launch Plan' };
+        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', airtable: 'Contractor', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'os-strategy': 'Objective & Strategy', 'launch-plan': 'Director Launch Plan' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -360,6 +360,10 @@
         if (tabId === 'os-bplan') {
             const frame = document.getElementById('osBplanFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('business-plan')) frame.src = frame.dataset.src;
+        }
+        if (tabId === 'os-strategy') {
+            const frame = document.getElementById('osStrategyFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('strategy')) frame.src = frame.dataset.src;
         }
         // /OS-INTEGRATION: Lazy-load
 

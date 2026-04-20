@@ -59,6 +59,7 @@
             <div style="padding:4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.45)">Operating Systems</div>
             <div class="sidebar-item" onclick="switchTab('os-hub')"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Operating Systems Hub</span></div>
             <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Business Launch Plan Builder OS</span></div>
+            <div class="sidebar-item" onclick="switchTab('os-strategy')"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy OS</span></div>
         </div>
         <!-- /OS-INTEGRATION: Sidebar -->
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding:8px 0">
@@ -366,6 +367,9 @@
         <div class="tab-panel" id="tab-os-bplan">
             <iframe class="tab-panel-iframe" id="osBplanFrame" src="" data-src="os/business-plan-builder/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
+        <div class="tab-panel" id="tab-os-strategy">
+            <iframe class="tab-panel-iframe" id="osStrategyFrame" src="" data-src="os/strategy/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
         <!-- /OS-INTEGRATION: Tab Panels -->
 
         <!-- Tab 7: Site Map -->
@@ -443,8 +447,9 @@
 
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
-    <script src="js/config.js?v=11"></script>
-    <script src="js/shared.js?v=11"></script>
+    <script src="js/config.js?v=13"></script>
+    <script src="js/prompts/boardroom-mentor.js?v=1"></script>
+    <script src="js/shared.js?v=12"></script>
     <script src="js/dashboard.js?v=11"></script>
     <script src="js/cashflow.js?v=11"></script>
     <script src="js/sitemap.js?v=11"></script>

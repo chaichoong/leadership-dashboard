@@ -19,6 +19,7 @@
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
         { id: 'os-hub',    name: 'Operating Systems Hub',          icon: '⚙️', pageVer: '1.0', sopFile: 'os/index.html',               sopVer: '1.0', standalone: 'os/index.html' },
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.3', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
+        { id: 'os-strategy', name: 'Objective & Strategy OS',      icon: '🎯', pageVer: '1.0', sopFile: '',                                   sopVer: '1.0', standalone: 'os/strategy/index.html' },
         // /OS-INTEGRATION: PAGE_REGISTRY
         { id: 'fintable',  name: 'Fintable Sync Monitor',          icon: '🔌', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'sitemap',    name: 'Site Map & Links',              icon: '🔗', pageVer: '1.1', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
@@ -41,6 +42,9 @@
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
+        objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
+        mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
+        projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
     };
 
     // Dashboard Invoices field IDs (Airtable)
@@ -132,6 +136,79 @@
         txProperty:       'fldvp44VfF8uTTthp',  // Property (linked)
         txCost:           'fldGkpkVqSeiGvUGL',  // Costs (linked)
         txBusiness:       'fldX1aFlJyzpXGhbF',  // Business (For Reports) (linked)
+    };
+
+    // Objective & Strategy OS field IDs — maps the Airtable form fields shown in the
+    // Operations Director interface (Objective Plan + Strategy Plan screens).
+    // All fields live on table `objStrat`. One row per Business × Quarter × Year.
+    const OBJSTRAT = {
+        // Keys
+        business:       'fldLt6uDJ2xKCMlj2',  // link → businesses
+        businessName:   'fldzd28sBEghgt0mN',  // formula (display only)
+        quarter:        'fldQl2h3gCxYacE1k',  // singleSelect: Q1|Q2|Q3|Q4
+        year:           'fldARVrVpuCWxufQO',  // singleSelect
+        created:        'fldRreG5iDvyOFzPV',  // createdTime
+        // Objective page
+        objective:      'fldYgHiiw6acphydt',  // richText
+        targetWhat:     'fldjQXSVO7NRMAh3G',  // What we do
+        targetWho:      'fldxkPKMkdqMM1vbp',  // Who we do it for
+        targetHow:      'fldtXlnFTUotrbdSg',  // How we do it
+        customerProfile:'fld7H5Rq8cwmvpYpR',  // richText
+        enticement:     'fldkcHNdfJoK6kjN4',  // richText
+        // Undertakings 1–20 (singleLineText each) + rollup formula
+        undertakings: [
+            'fldMvrYLvhRTWUerX','fld32CDRhkJOjTBq7','fldSDqjnSAZ3stdQb','fldIgeNKX2guYYszV',
+            'flduKuWhOs7zlomms','fldwNocH22bQa9LB1','fld5mRnHYWdbvjLIS','fldVMWHoLTHljHxZb',
+            'fldwRtrRL3qCcrO9q','fld8whDbavzFNuRY4','fldyGXnRvocsk1jTV','fldqFY4hOBVBieTKA',
+            'fld9SKhpG433YIhgb','fldnJJBgt3lLlSfGB','fldotSquJccSH8SOj','fldYq0NdidT0NzzGt',
+            'fld7aPMenbDIhIBSt','fldb6A3vOQv2Js5Nw','fldyld465QsYr4fjA','fldF11iQAUiTCLqJu',
+        ],
+        undertakingsRollup: 'fldNrwHP8Mhn0qo9F', // formula
+        // USPs 1–5 + rollup
+        usps: [
+            'flda9n4I9qLENQ0Nr','fldv27HJQqw08jXXT','fld4R3dLs1n77RIgY','fldrESVKwXnCTd1oA','fldIO6AqnXjyo3Jbp',
+        ],
+        uspsRollup: 'fldzrM5OF7Ug933ye', // formula
+        // Main Method — two representations: linked-record slots (preferred, links to mainMethods table)
+        // plus plain-text step fields (used in the form screens) + a rollup formula.
+        mainMethodLinks: [
+            'fldqQIH0bU4hDSiL5','fldd6IJwHKPIb0CIl','fldAUbgvtC5lNXTdS','fldgYPzIjyt37wo6k',
+            'fldfw9UiUpzz4ndge','fldT6Lo73MJJ3xEPa','fld9bViCHPvZviENY','fld0TDbOBZ4JZVG2i',
+            'fldcUeyPErJIU8rvH','fldiWxDwMGyVuWMCr',
+        ],
+        methodSteps: [
+            'fldeUT30vYQ8UZ0LF','fldZPoyLCxSl43EvG','fldcBzIO63zGOYbMS','fld90iQaKfBhw925i',
+            'fldtRNL7C1GOsnfRO','fldy4hcD9lYV7YTwb','fldEgpGubfyRkB3wf','fld87YId2DxqVzk0M',
+            'fldmsugSqmNT1tS7g','fldS41sn0Nvypuyv6',
+        ],
+        methodStepsRollup: 'fldWSVBivNEzAaTmV', // formula
+        // Strategy page — 9/3/1-year targets + measurables
+        nineYearTarget:   'flduYqMW1Lq36fmL1',  // richText
+        threeYearTarget:  'fldd1kPbyy7chW1DF',  // richText
+        threeYearMeas:    ['flddkmWwi3d2Fbc26','fldj2bxU8eb6qwdY9','fldJKthrRxJuZ0GU7'],
+        oneYearTarget:    'fldFQ3s2fNKb248U0',  // richText
+        oneYearMeas:      ['fld3RZ5CEPdLMniSi','fldOEdOxwKDpuSJCI','fldxmn6Omfd7nJjDu'],
+        // Quarterly projects 1–3
+        quarterlyProjects: ['fldMRcqBdI6sixquu','fldzTGq0bsvSIch4v','fldWEzLxBkIptAqhq'],
+        // Monthly stepping stones — stored as "Q{n}. Month {m}" fields in the Airtable
+        // (Airtable field names mix "." and ":" — do not normalise, use the IDs).
+        // Access as monthlyStones[projectIndex][monthIndex], 0-based.
+        monthlyStones: [
+            ['fldA66Xm4zVoClUva','fldP91H4XWknwmlzo','fldglTQ9Ljyba0IqK'], // Project 1: M1, M2, M3
+            ['fldBcYzfU8zheE00j','fldr6WW4Xubhe2Vtm','fldqD4uHoPFIfR7Yi'], // Project 2: M1, M2, M3
+            ['fldayHcCRQlG3mLxe','fldp1YRY0eGzVJQqU','fldZ87UWBj2NYU9Jl'], // Project 3: M1, M2, M3
+        ],
+        // Embed URLs surfaced in the top of each page
+        strategyPlanEmbed: 'fldIRohvx2Hv6DQ4J',
+        orgChartEmbed:     'fldtiPGaxcpsGLP5t',
+        companyAdminEmbed: 'fld4wVQyI57SSNPH4',
+    };
+
+    // Main Methods table (reusable step library linked from OBJSTRAT.mainMethodLinks)
+    const MAIN_METHOD = {
+        name:         'fldRphzaAUzBqconG',  // Main Method (primary)
+        description:  'fldWDxL9EyS1iaGlf',  // multilineText
+        business1:    'fldi4uVOf2NgxiSKy',  // inverse link back to Objective & Strategy
     };
 
     // Key record IDs
