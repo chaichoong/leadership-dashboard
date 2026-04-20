@@ -85,13 +85,15 @@ function setStatus(kind, message) {
 }
 
 async function loadBusinesses() {
-    // Only Active businesses (field "Active?" — we don't filter server-side, just pull all and let user pick).
+    // Businesses table primary field is "Business Name" (singleLineText).
+    // "Business" is a lookup array — avoid it.
     const data = await airtableFetch(`${TABLES.businesses}?pageSize=100`);
-    allBusinessesLocal = data.records.map(r => ({
-        id: r.id,
-        name: r.fields['Business'] || r.fields['Business Name'] || r.fields['Name'] || '(unnamed)',
-    }));
-    allBusinessesLocal.sort((a, b) => a.name.localeCompare(b.name));
+    allBusinessesLocal = data.records.map(r => {
+        let raw = r.fields['Business Name'] ?? r.fields['Name'] ?? r.fields['Business'];
+        if (Array.isArray(raw)) raw = raw.join(', ');
+        return { id: r.id, name: raw ? String(raw) : '(unnamed)' };
+    });
+    allBusinessesLocal.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
 function populateContextBar() {
