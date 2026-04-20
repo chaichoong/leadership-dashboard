@@ -147,11 +147,18 @@ async function loadRecord() {
         renderEmptyState('Pick a business to begin.');
         return;
     }
+    if (!quarter || !year) {
+        renderEmptyState('Pick a quarter and year to load the plan.');
+        return;
+    }
     setStatus('info', 'Loading plan…');
     try {
-        // Search for existing record matching business + quarter + year
+        // Airtable link fields stringify to primary-field values (business names),
+        // not record IDs — so match on the "Business Name" formula field instead.
+        const business = allBusinessesLocal.find(b => b.id === businessId);
+        const businessName = (business?.name || '').replace(/"/g, '\\"');
         const params = new URLSearchParams({
-            filterByFormula: `AND(SEARCH("${businessId}", ARRAYJOIN({Business})), {Quarter} = "${quarter}", {Year} = "${year}")`,
+            filterByFormula: `AND({Business Name} = "${businessName}", {Quarter} = "${quarter}", {Year} = "${year}")`,
             maxRecords: '1',
         });
         const data = await airtableFetch(`${TABLES.objStrat}?${params.toString()}`);
@@ -567,8 +574,10 @@ async function loadPriorQuarter() {
     const priorQ = qIdx > 0 ? QUARTERS[qIdx - 1] : 'Q4';
     const priorY = qIdx > 0 ? year : String(parseInt(year, 10) - 1);
     try {
+        const business = allBusinessesLocal.find(b => b.id === businessId);
+        const businessName = (business?.name || '').replace(/"/g, '\\"');
         const params = new URLSearchParams({
-            filterByFormula: `AND(SEARCH("${businessId}", ARRAYJOIN({Business})), {Quarter} = "${priorQ}", {Year} = "${priorY}")`,
+            filterByFormula: `AND({Business Name} = "${businessName}", {Quarter} = "${priorQ}", {Year} = "${priorY}")`,
             maxRecords: '1',
         });
         const data = await airtableFetch(`${TABLES.objStrat}?${params.toString()}`);
