@@ -2768,8 +2768,9 @@ function renderProjects(){
     const linked=allTasks.filter(t=>t.projectIds.includes(p.id)||t.projectNames.includes(p.name));
     const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
 
+    const statusTip='Status is set manually in Airtable (or here). Options: Not Started / Off-Track / On-Track / On-Target / Completed.';
     html+=`<div class="project-card" onclick="toggleProject('${p.id}')">
-      <div class="project-head"><h3>${escHtml(p.name)}</h3><span class="project-status ${statusCls}">${escHtml(p.status||'Unknown')}</span></div>
+      <div class="project-head"><h3>${escHtml(p.name)}</h3><span class="project-status ${statusCls}">${escHtml(p.status||'Unknown')}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px">?</span></div>
       <div class="project-body">
         <div class="project-col">
           <h5>Business</h5><div class="val">${escHtml(p.business||'-')}</div>
@@ -2788,25 +2789,48 @@ function renderProjects(){
         </div>
       </div>`;
     if(isExp){
+      const PROJ_STATUS_OPTIONS=['Not Started','Off-Track','On-Track','On-Target','Completed'];
+      const taStyle='width:100%;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px;border-radius:4px;font-size:12px;min-height:60px;font-family:inherit';
       html+=`<div class="project-expanded" onclick="event.stopPropagation()">`;
-      html+=`<h4>Edit KPI</h4><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
-        <input type="text" placeholder="KPI name" value="${escHtml(p.kpiName)}" onblur="projEdit('${p.id}','kpiName',this.value)" class="inline-input">
-        <input type="number" placeholder="Current" value="${p.kpiCurrent}" onblur="projEdit('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input">
-        <input type="number" placeholder="Target" value="${p.kpiTarget}" onblur="projEdit('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input">
-        <select class="inline-select" onchange="projEdit('${p.id}','kpiUnit',this.value)"><option value="">unit</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+      // Details section
+      html+=`<h4>Details</h4><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px">
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Project Name</label><input type="text" value="${escHtml(p.name)}" onblur="updateProjectField('${p.id}','name',this.value)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Status</label><select class="inline-select" onchange="updateProjectField('${p.id}','status',this.value)" style="width:100%"><option value="">-</option>${PROJ_STATUS_OPTIONS.map(s=>`<option value="${s}" ${p.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Business</label><select class="inline-select" onchange="updateProjectField('${p.id}','business',this.value)" style="width:100%"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${p.business===b?'selected':''}>${b}</option>`).join('')}</select></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Start Date</label><input type="date" value="${p.start||''}" onchange="updateProjectField('${p.id}','start',this.value)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">End Date</label><input type="date" value="${p.end||''}" onchange="updateProjectField('${p.id}','end',this.value)" class="inline-input" style="width:100%"></div>
       </div>`;
-      html+=`<h4>Tracking Method</h4><textarea style="width:100%;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px;border-radius:4px;font-size:12px;min-height:50px;font-family:inherit" oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
-      if(p.deliverable)html+=`<h4 style="margin-top:10px">Deliverable</h4><div style="font-size:12px;white-space:pre-wrap">${escHtml(p.deliverable)}</div>`;
-      html+=`<h4 style="margin-top:10px">Linked Tasks (${linked.length})</h4>`;
+      // KPI section
+      html+=`<h4>KPI</h4><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
+        <input type="text" placeholder="KPI name" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input">
+        <input type="number" placeholder="Current" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input">
+        <input type="number" placeholder="Target" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input">
+        <select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)"><option value="">unit</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+      </div>
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Tracking Method</label>
+      <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
+      // Deliverable / DoD
+      html+=`<h4 style="margin-top:12px">Deliverable / Definition of Done</h4>
+        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Deliverable</label>
+        <textarea style="${taStyle};margin-bottom:8px" oninput="projEditDebounced('${p.id}','deliverable',this.value)">${escHtml(p.deliverable)}</textarea>
+        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Definition of Done</label>
+        <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','defOfDone',this.value)">${escHtml(p.defOfDone)}</textarea>`;
+      // Linked tasks
+      html+=`<h4 style="margin-top:12px">Linked Tasks (${linked.length})</h4>`;
       if(linked.length){
         html+=`<div class="project-task-list">`;
         linked.slice(0,20).forEach(t=>{
-          // DEDLINE compact row (click opens drawer, stop propagation so it doesn't toggle project)
           html+=`<div onclick="event.stopPropagation()">${renderDedlineRow(t)}</div>`;
         });
         if(linked.length>20)html+=`<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... ${linked.length-20} more</div>`;
         html+=`</div>`;
       }
+      // Sticky action row
+      const isComplete=p.status==='Completed';
+      html+=`<div style="position:sticky;bottom:0;background:var(--bg-surface);border-top:1px solid var(--border-default);margin-top:12px;padding:10px 0 2px 0;display:flex;gap:8px;justify-content:flex-end">
+        ${isComplete?'':`<button class="btn btn-primary" onclick="completeProject('${p.id}')">Mark Complete</button>`}
+        <button class="btn btn-danger" onclick="openDeleteProjectConfirm('${p.id}')">Delete Project</button>
+      </div>`;
       html+=`</div>`;
     }
     html+=`</div>`;
@@ -2816,19 +2840,84 @@ function renderProjects(){
 }
 function toggleProject(id){expandedProject=expandedProject===id?null:id;renderProjects()}
 
-async function projEdit(pid,fieldKey,val){
+async function updateProjectField(pid,fieldKey,val){
   const p=allProjects.find(x=>x.id===pid);if(!p)return;
-  const fid=PF[fieldKey];
+  const fid=PF[fieldKey];if(!fid){toast('Unknown field '+fieldKey,true);return}
   let payload={};
-  if(fieldKey==='kpiUnit'){payload[fid]=val?{name:val}:null;p.kpiUnit=val}
-  else{payload[fid]=val;p[fieldKey]=val}
-  try{const r=await patchProject(pid,payload);if(!r.ok)throw new Error('');toast('Saved')}catch(e){toast('Failed',true)}
+  if(fieldKey==='kpiUnit'){
+    // singleSelect — plain string with typecast (same fix as task status)
+    payload[fid]=val||null;p.kpiUnit=val;
+  }else if(fieldKey==='status'){
+    // singleSelect — send plain string per task-pattern
+    payload[fid]=val||null;p.status=val;
+  }else if(fieldKey==='business'){
+    if(val&&BUSINESS_MAP[val]){payload[fid]=[{id:BUSINESS_MAP[val]}];p.business=val}
+    else{payload[fid]=[];p.business=''}
+  }else if(fieldKey==='start'||fieldKey==='end'){
+    payload[fid]=val||null;p[fieldKey]=val||'';
+  }else if(fieldKey==='kpiCurrent'||fieldKey==='kpiTarget'){
+    const n=parseFloat(val)||0;payload[fid]=n;p[fieldKey]=n;
+  }else{
+    payload[fid]=val;p[fieldKey]=val;
+  }
+  try{
+    const r=await patchProject(pid,payload);
+    if(!r.ok){const t=await r.text();throw new Error(t)}
+    toast('Saved');
+    // Re-render so derived UI (e.g. status colour, completed filter) reflects change
+    if(['status','name','business'].includes(fieldKey))renderProjects();
+  }catch(e){console.error('[updateProjectField]',e);toast('Failed to save',true)}
 }
+// Backwards-compat alias
+async function projEdit(pid,fieldKey,val){return updateProjectField(pid,fieldKey,val)}
 const _pTimers={};
 function projEditDebounced(pid,fieldKey,val){
   const k=pid+':'+fieldKey;clearTimeout(_pTimers[k]);
-  _pTimers[k]=setTimeout(()=>projEdit(pid,fieldKey,val),500);
+  _pTimers[k]=setTimeout(()=>updateProjectField(pid,fieldKey,val),500);
 }
+
+async function completeProject(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  await updateProjectField(pid,'status','Completed');
+  toast('Project completed');
+  renderProjects();
+}
+
+function openDeleteProjectConfirm(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  const existing=document.getElementById('deleteProjectModal');if(existing)existing.remove();
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='deleteProjectModal';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML=`<div class="modal" style="max-width:460px">
+    <h2 style="margin-top:0">Delete project?</h2>
+    <p style="font-size:14px;color:var(--text-primary);margin:8px 0 6px 0"><strong>${escHtml(p.name)}</strong></p>
+    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 16px 0">This permanently deletes the project record from Airtable. Linked tasks will NOT be deleted &mdash; their project link will simply be removed.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('deleteProjectModal').remove()">Cancel</button>
+      <button class="btn btn-danger" id="confirmDeleteProjBtn">Delete</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('confirmDeleteProjBtn').onclick=()=>{overlay.remove();performDeleteProject(pid)};
+}
+
+async function performDeleteProject(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}/${pid}`,{
+      method:'DELETE',
+      headers:{'Authorization':`Bearer ${PAT}`}
+    });
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    allProjects=allProjects.filter(x=>x.id!==pid);
+    if(expandedProject===pid)expandedProject=null;
+    toast('Project deleted');
+    renderProjects();
+  }catch(e){console.error('[performDeleteProject]',e);toast('Failed to delete',true)}
+}
+
+async function deleteProject(pid){return openDeleteProjectConfirm(pid)}
 
 // ======================================================
 // CREATE TASK MODAL
@@ -3144,7 +3233,9 @@ if(initAuth()){checkIdentityAndLoad()}
 // Wrap each assignment in try/catch so one missing function doesn't halt the rest
 ['runAutoSchedulePreview','applyAutoSchedule','openCreateTaskModal','openCreateProjectModal',
  'openTaskDrawer','closeDrawer','deleteTask','completeTaskInline','loadAllData',
- 'doUndo','toggleRoutineConfig','updateTaskField','renderAll'].forEach(n=>{
+ 'doUndo','toggleRoutineConfig','updateTaskField','renderAll',
+ 'updateProjectField','projEdit','projEditDebounced','completeProject','deleteProject',
+ 'openDeleteProjectConfirm','performDeleteProject','toggleProject','renderProjects'].forEach(n=>{
   try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
 });
 
