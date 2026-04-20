@@ -198,6 +198,29 @@ function renderForm(fields) {
     const host = document.getElementById('planForm');
     host.innerHTML = '';
 
+    // Sticky top navigator — anchor links to every section divider/section.
+    const nav = document.createElement('div');
+    nav.className = 'section-nav';
+    nav.innerHTML = `<div class="section-nav-inner">
+        <span class="section-nav-label">Jump to</span>
+        <a href="#sec-objective">Objective</a>
+        <a href="#sec-target-statement">Target</a>
+        <a href="#sec-customer-profile">Customer</a>
+        <a href="#sec-undertakings">Undertakings</a>
+        <a href="#sec-original-selling-points">USPs</a>
+        <a href="#sec-main-method-step-by-step">Method</a>
+        <a href="#sec-enticement">Enticement</a>
+        <span class="section-nav-sep">•</span>
+        <a href="#sec-nine-year-target">9-yr</a>
+        <a href="#sec-three-year-target">3-yr</a>
+        <a href="#sec-one-year-target">1-yr</a>
+        <a href="#sec-quarterly-priority-projects">Quarterly</a>
+        <span class="section-nav-sep">•</span>
+        <a href="#" onclick="toggleAllSections(true); return false;" class="section-nav-action">Expand all</a>
+        <a href="#" onclick="toggleAllSections(false); return false;" class="section-nav-action">Collapse all</a>
+    </div>`;
+    host.appendChild(nav);
+
     // ────────────────────────────────────────────────────────────────
     // PLAN HEADER — one record, two plans stacked.
     // ────────────────────────────────────────────────────────────────
@@ -306,11 +329,15 @@ function renderForm(fields) {
         ],
     }));
 
-    // Quarterly Projects + Monthly Stepping Stones
-    const qpSection = document.createElement('div');
+    // Quarterly Projects + Monthly Stepping Stones (same collapsible pattern)
+    const qpSection = document.createElement('details');
     qpSection.className = 'section';
-    qpSection.innerHTML = `<h2>💼 Quarterly Priority Projects</h2>
-        <span class="section-sub">The three most important goals for the next 90 days. Each project breaks down into 3 monthly stepping stones.</span>`;
+    qpSection.id = 'sec-quarterly-priority-projects';
+    // Open by default if any quarterly project text exists
+    const qpHasContent = OBJSTRAT.quarterlyProjects.some(fid => (fields[fid] || '').trim());
+    qpSection.open = qpHasContent;
+    qpSection.innerHTML = `<summary><span class="section-title-row"><span class="section-title">💼 Quarterly Priority Projects</span><span class="section-chevron">▾</span></span></summary>
+        <div class="section-body"><span class="section-sub">The three most important goals for the next 90 days. Each project breaks down into 3 monthly stepping stones.</span></div>`;
 
     const qpGrid = document.createElement('div');
     qpGrid.className = 'grid-cols-3';
@@ -349,8 +376,25 @@ function renderForm(fields) {
         card.appendChild(stonesWrap);
         qpGrid.appendChild(card);
     }
-    qpSection.appendChild(qpGrid);
+    qpSection.querySelector('.section-body').appendChild(qpGrid);
     host.appendChild(qpSection);
+
+    // Auto-size every textarea to its content, now that the form is in the DOM.
+    // setTimeout(0) works even in hidden tabs; rAF does not.
+    setTimeout(autosizeAll, 0);
+
+    // Re-size a section's textareas when the user expands it (was 0 while hidden).
+    document.querySelectorAll('.plan-form details.section').forEach(d => {
+        d.addEventListener('toggle', () => {
+            if (d.open) setTimeout(() => d.querySelectorAll('textarea').forEach(autosize), 0);
+        });
+    });
+}
+
+// Called from the section nav "Expand all" / "Collapse all" links.
+function toggleAllSections(openAll) {
+    document.querySelectorAll('.plan-form details.section').forEach(d => { d.open = !!openAll; });
+    if (openAll) setTimeout(autosizeAll, 0);
 }
 
 // Helpers for form building
@@ -405,19 +449,43 @@ function singleLineField(label, fieldId, value) {
 }
 
 function richSection({ icon, title, hint, children }) {
-    const s = document.createElement('div');
-    s.className = 'section';
-    const h = document.createElement('h2');
-    h.innerHTML = `${icon ? escapeHtml(icon) + ' ' : ''}${escapeHtml(title)}`;
-    s.appendChild(h);
+    // Each section is a <details> so it can be folded.
+    // Default: open if any field inside has content, otherwise closed.
+    const d = document.createElement('details');
+    d.className = 'section';
+    d.open = childrenHaveContent(children);
+
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<span class="section-title-row"><span class="section-title">${icon ? escapeHtml(icon) + ' ' : ''}${escapeHtml(title)}</span><span class="section-chevron">▾</span></span>`;
+    d.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'section-body';
     if (hint) {
         const sub = document.createElement('span');
         sub.className = 'section-sub';
         sub.textContent = hint;
-        s.appendChild(sub);
+        body.appendChild(sub);
     }
-    children.forEach(c => s.appendChild(c));
-    return s;
+    children.forEach(c => body.appendChild(c));
+    d.appendChild(body);
+
+    // Give each section an id for nav anchoring
+    d.id = 'sec-' + slugify(title);
+    return d;
+}
+
+function childrenHaveContent(children) {
+    for (const c of children) {
+        if (!c) continue;
+        const fields = c.querySelectorAll ? c.querySelectorAll('[data-field-id]') : [];
+        for (const f of fields) if (f.value && String(f.value).trim()) return true;
+    }
+    return false;
+}
+
+function slugify(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 function textareaField(label, fieldId, value, sizeClass) {
@@ -429,10 +497,25 @@ function textareaField(label, fieldId, value, sizeClass) {
     ta.dataset.fieldId = fieldId;
     ta.value = value || '';
     if (sizeClass) ta.className = sizeClass;
-    ta.addEventListener('input', () => markDirty());
+    ta.rows = 1;
+    ta.addEventListener('input', () => { markDirty(); autosize(ta); });
     row.appendChild(lab);
     row.appendChild(ta);
     return row;
+    // Initial sizing handled by autosizeAll() at the end of renderForm.
+}
+
+// Grow a textarea to fit its content, up to a cap.
+function autosize(ta) {
+    if (!ta) return;
+    ta.style.height = 'auto';
+    const max = 600;
+    ta.style.height = Math.min(ta.scrollHeight + 2, max) + 'px';
+}
+
+// Re-size every textarea on the page — used after the form renders or wizard fills.
+function autosizeAll() {
+    document.querySelectorAll('.plan-form textarea').forEach(autosize);
 }
 
 function gridOf(children) {
@@ -586,6 +669,16 @@ async function loadPriorQuarter() {
         if (data.records.length) {
             wizardState.priorRecord = data.records[0];
             appendWizMessage('system', `Prior quarter loaded: ${priorQ} ${priorY}. I will reference it where useful.`);
+
+            // If no record exists for the current quarter yet, pre-fill the form
+            // with the prior quarter's values so the user can iterate on them rather
+            // than starting blank. Only touch fields that are currently empty.
+            if (!currentRecord) {
+                const priorFields = wizardState.priorRecord.fields || {};
+                renderForm(priorFields);
+                markDirty();
+                appendWizMessage('system', `Form pre-filled from ${priorQ} ${priorY}. I'll walk through each section so we can iterate.`);
+            }
         } else {
             appendWizMessage('system', `No prior quarter found (${priorQ} ${priorY}). Starting fresh.`);
         }
@@ -621,6 +714,25 @@ function askCurrentStep() {
     document.getElementById('wizStepLabel').textContent = step ? `Step ${wizardState.stepIndex + 1} of ${WIZARD_STEPS.length} · ${step.label}` : 'Complete';
     if (!step) return finaliseWizard();
     appendWizMessage('assistant', step.ask);
+
+    // Show the current/prior value inline so the user can iterate rather than retype.
+    if (step.targetFid) {
+        const fid = step.targetFid();
+        const existing = currentValueForField(fid);
+        if (existing) {
+            appendWizMessage('system', `Currently:\n\n${existing}\n\nType your iteration, or press Skip to keep as-is.`);
+        }
+    }
+}
+
+function currentValueForField(fid) {
+    // Prefer whatever is in the form (may have been pre-filled from prior quarter)
+    const el = document.querySelector(`[data-field-id="${fid}"]`);
+    if (el && el.value && el.value.trim()) return el.value.trim();
+    // Fall back to prior record
+    const f = wizardState?.priorRecord?.fields || {};
+    const v = f[fid];
+    return (v && typeof v === 'string' && v.trim()) ? v.trim() : '';
 }
 
 async function wizSend() {

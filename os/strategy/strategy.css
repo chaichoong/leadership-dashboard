@@ -104,15 +104,60 @@ body {
 .layout.with-wizard { grid-template-columns: 1fr 420px; }
 
 /* Plan form */
-.plan-form { display: flex; flex-direction: column; gap: 22px; }
+.plan-form { display: flex; flex-direction: column; gap: 14px; }
 .plan-divider {
-    margin-top: 8px; padding: 18px 20px;
+    margin-top: 8px; padding: 16px 20px;
     background: var(--bg-sidebar); color: #fff;
     border-radius: 10px; border: 1px solid var(--border-default);
 }
 .plan-divider:first-child { margin-top: 0; }
-.plan-divider h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; color: #fff; }
+.plan-divider h2 { font-size: 18px; font-weight: 700; margin-bottom: 4px; color: #fff; }
 .plan-divider p { font-size: 12px; opacity: 0.75; line-height: 1.5; }
+
+/* Sticky section nav */
+.section-nav {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--bg-app); margin: -8px -4px 8px;
+    padding: 10px 4px; border-bottom: 1px solid var(--border-subtle);
+}
+.section-nav-inner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+    font-size: 12px;
+}
+.section-nav-label {
+    color: var(--text-muted); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; font-size: 10px;
+}
+.section-nav a {
+    color: var(--text-secondary); text-decoration: none; padding: 2px 6px;
+    border-radius: 4px; transition: background .12s;
+}
+.section-nav a:hover { background: var(--accent-soft); color: var(--accent); }
+.section-nav-sep { color: var(--text-muted); }
+.section-nav-action { font-weight: 600; color: var(--accent) !important; }
+
+/* Collapsible sections */
+details.section {
+    background: var(--bg-surface); border: 1px solid var(--border-default);
+    border-radius: 10px; padding: 0; margin: 0;
+}
+details.section > summary {
+    list-style: none; cursor: pointer; padding: 14px 18px;
+    border-bottom: 1px solid transparent;
+    display: flex; align-items: center; justify-content: space-between;
+}
+details.section > summary::-webkit-details-marker { display: none; }
+details.section[open] > summary { border-bottom-color: var(--border-subtle); }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; }
+.section-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.section-chevron { color: var(--text-muted); transition: transform .15s; font-size: 12px; }
+details.section[open] .section-chevron { transform: rotate(180deg); }
+.section-body { padding: 14px 18px 16px; }
+.section-body .section-sub {
+    display: block; font-size: 12px; color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.section-body > .grid-cols-2, .section-body > .grid-cols-3 { margin-top: 6px; }
 .section {
     background: var(--bg-surface); border: 1px solid var(--border-default);
     border-radius: 10px; padding: 20px;
@@ -125,17 +170,19 @@ body {
     text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
 }
 
-.field-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .field-row label {
-    font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.03em;
 }
 .field-row input, .field-row textarea {
-    padding: 10px 12px; border: 1px solid var(--border-default);
+    padding: 9px 12px; border: 1px solid var(--border-default);
     border-radius: 6px; font-size: 13px; background: var(--bg-surface);
-    font-family: inherit; color: var(--text-primary); resize: vertical;
+    font-family: inherit; color: var(--text-primary); resize: none;
+    line-height: 1.5; overflow: hidden;
 }
-.field-row textarea { min-height: 80px; line-height: 1.5; }
-.field-row textarea.large { min-height: 140px; }
+/* Start at one line; JS autosize() grows to fit content up to 600px */
+.field-row textarea { min-height: 36px; }
 .field-row input:focus, .field-row textarea:focus { border-color: var(--accent); outline: none; }
 .field-row .hint { font-size: 11px; color: var(--text-muted); }
 
