@@ -3,14 +3,58 @@
 // ══════════════════════════════════════════
 
     // ── Stale-while-revalidate cache for instant reloads ──
+    // Uses IndexedDB, not localStorage: the full dataset is ~50MB (7000+ transactions)
+    // which blows through localStorage's 5-10MB quota and silently fails to save.
+    // IndexedDB handles hundreds of MB and stores objects directly (no JSON stringify).
     const DASH_CACHE_KEY = '_dlr_dashcache_v1';
     const DASH_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h — older than this, don't show stale
+    const IDB_DB_NAME = '_dlr_cache';
+    const IDB_STORE = 'kv';
 
-    function loadDashCache() {
+    let _idbPromise = null;
+    function _openIDB() {
+        if (_idbPromise) return _idbPromise;
+        _idbPromise = new Promise((resolve, reject) => {
+            if (!('indexedDB' in window)) { reject(new Error('IDB unsupported')); return; }
+            const req = indexedDB.open(IDB_DB_NAME, 1);
+            req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+            req.onblocked = () => reject(new Error('IDB open blocked'));
+        });
+        return _idbPromise;
+    }
+
+    function _idbGet(key) {
+        return _openIDB().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readonly');
+            const req = tx.objectStore(IDB_STORE).get(key);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        }));
+    }
+
+    function _idbSet(key, value) {
+        return _openIDB().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).put(value, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        }));
+    }
+
+    function _idbDel(key) {
+        return _openIDB().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).delete(key);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        }));
+    }
+
+    async function loadDashCache() {
         try {
-            const raw = localStorage.getItem(DASH_CACHE_KEY);
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
+            const parsed = await _idbGet(DASH_CACHE_KEY);
             if (!parsed || !parsed.savedAt || !parsed.data) return null;
             const ageMs = Date.now() - parsed.savedAt;
             if (ageMs > DASH_CACHE_MAX_AGE_MS) return null;
@@ -20,16 +64,18 @@
         }
     }
 
-    function saveDashCache(data) {
+    async function saveDashCache(data) {
         try {
-            localStorage.setItem(DASH_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }));
+            await _idbSet(DASH_CACHE_KEY, { savedAt: Date.now(), data });
         } catch (e) {
-            // Quota exceeded or storage disabled — clear and ignore
-            try { localStorage.removeItem(DASH_CACHE_KEY); } catch (_) {}
+            console.warn('Dashboard cache save failed:', e);
+            try { await _idbDel(DASH_CACHE_KEY); } catch (_) {}
         }
     }
 
-    function clearDashCache() {
+    async function clearDashCache() {
+        try { await _idbDel(DASH_CACHE_KEY); } catch (_) {}
+        // Also clear the old localStorage cache left over from pre-IDB versions
         try { localStorage.removeItem(DASH_CACHE_KEY); } catch (_) {}
     }
 
@@ -58,7 +104,7 @@
     // ── Dashboard Load ──
     async function loadDashboard() {
         // Try instant render from cache first
-        const cached = loadDashCache();
+        const cached = await loadDashCache();
         let renderedFromCache = false;
         if (cached) {
             try {

@@ -300,7 +300,7 @@
 
     function toggleCard(el) { el.classList.toggle('expanded'); }
 
-    function switchTab(tabId) {
+    async function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
         document.getElementById('tab-' + tabId).classList.add('active');
@@ -385,7 +385,7 @@
         // cache we just re-render from it; the 15-min smartRefresh handles background updates.
         const TAB_SWITCH_STALE_MS = 2 * 60 * 1000; // 2 min — aggressive enough to feel live, cheap enough to avoid churn
         if (PAT && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
-            const cached = typeof loadDashCache === 'function' ? loadDashCache() : null;
+            const cached = typeof loadDashCache === 'function' ? await loadDashCache() : null;
             if (!cached || cached.ageMs > TAB_SWITCH_STALE_MS) {
                 loadDashboard();
             }
