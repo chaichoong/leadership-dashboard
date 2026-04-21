@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="../../css/tokens.css?v=1">
     <script src="../../js/config.js?v=12"></script>
     <script src="../../js/prompts/boardroom-mentor.js?v=2"></script>
-    <link rel="stylesheet" href="strategy.css?v=5">
+    <link rel="stylesheet" href="strategy.css?v=6">
 </head>
 <body>
 <div class="container">
@@ -84,6 +84,7 @@
                 <div class="wiz-input-row">
                     <textarea id="wizInput" class="wiz-input" placeholder="Type your answer…" rows="3"></textarea>
                     <div class="wiz-btn-row">
+                        <button class="btn btn-ghost" onclick="wizBack()" title="Go back to the previous question to revise your answer">← Back</button>
                         <button class="btn btn-ghost" onclick="wizSkip()" title="Skip this step without answering — keep whatever's in the form">Move on →</button>
                         <button class="btn btn-primary" onclick="wizSend()">Send</button>
                     </div>
@@ -93,6 +94,6 @@
     </div>
 </div>
 
-<script src="strategy.js?v=11"></script>
+<script src="strategy.js?v=12"></script>
 </body>
 </html>

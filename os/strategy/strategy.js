@@ -385,6 +385,9 @@ function renderForm(fields) {
     setTimeout(autosizeAll, 0);
     setTimeout(autosizeAll, 120);
 
+    // Attach "✨ Revise with AI" buttons to every field with a matching wizard step.
+    attachReviseAffordances();
+
     // When a section is toggled open, its textareas couldn't be measured while
     // it was closed. Re-run the full equalise pass so rows inside it match.
     document.querySelectorAll('.plan-form details.section').forEach(d => {
@@ -805,26 +808,107 @@ const WIZARD_STEPS = [
 // Without this, a stubborn answer can loop forever.
 const MAX_PUSHBACKS_PER_STEP = 2;
 
-function openWizard() {
+// localStorage key for a wizard session, scoped to business × quarter × year.
+function wizSessionKey() {
+    const { businessId, quarter, year } = getSelection();
+    return `ostrat:wizard:${businessId}:${quarter}:${year}`;
+}
+
+// Save everything we'd need to resume a wizard — but NOT the DOM elements or
+// the full Airtable prior record (we re-fetch that on resume).
+function persistWizardState() {
+    if (!wizardState) return;
+    try {
+        localStorage.setItem(wizSessionKey(), JSON.stringify({
+            stepIndex: wizardState.stepIndex,
+            answers: wizardState.answers,
+            reflection: wizardState.reflection || '',
+            pushbackCount: wizardState.pushbackCount,
+            stepHistory: wizardState.stepHistory,
+            visibleMessages: wizardState.visibleMessages || [],
+            focusStepId: wizardState.focusStepId || null,
+            savedAt: Date.now(),
+        }));
+    } catch (e) { /* quota or disabled */ }
+}
+
+function clearWizardSession() {
+    try { localStorage.removeItem(wizSessionKey()); } catch (e) {}
+}
+
+function openWizard(opts = {}) {
     const { businessId, quarter, year } = getSelection();
     if (!businessId || !quarter || !year) {
         setStatus('warn', 'Pick a business, quarter and year first.');
         return;
     }
+    // Spot-edit: { focusStepId } jumps the wizard straight to one step.
+    const focusStepId = opts.focusStepId || null;
+
+    // Try to resume a saved session for this business/quarter/year.
+    let saved = null;
+    try {
+        const raw = localStorage.getItem(wizSessionKey());
+        if (raw) saved = JSON.parse(raw);
+    } catch (e) {}
+
     wizardState = {
         stepIndex: 0,
-        answers: {},       // { stepId: text }
-        priorRecord: null, // loaded below
+        answers: saved?.answers || {},
+        priorRecord: null,
         businessName: allBusinessesLocal.find(b => b.id === businessId)?.name || '',
-        stepHistory: [],   // [{role:'user'|'assistant', content}] for the CURRENT step
-        pushbackCount: 0,  // reset when we advance to the next step
+        stepHistory: [],
+        pushbackCount: 0,
+        reflection: saved?.reflection || '',
+        visibleMessages: [],
+        focusStepId,
     };
+
     document.getElementById('wizardPanel').style.display = 'flex';
     document.querySelector('.layout').classList.add('with-wizard');
     document.getElementById('wizMessages').innerHTML = '';
-    appendWizMessage('system', "Boardroom Mentor. UK English, direct, analytical. I'll challenge vague answers once or twice — after that I'll accept what you've given and move on. Use 'Move on →' any time to skip ahead.");
 
+    if (focusStepId) {
+        // Spot-edit — jump to one step only.
+        const idx = WIZARD_STEPS.findIndex(s => s.id === focusStepId);
+        wizardState.stepIndex = idx >= 0 ? idx : 0;
+        appendWizMessage('system', `Spot-edit mode — working on a single question. Hit ✕ when done.`);
+        loadPriorQuarter().then(() => askCurrentStep());
+        return;
+    }
+
+    if (saved && saved.visibleMessages?.length && typeof saved.stepIndex === 'number') {
+        // Resume — replay messages and pick up where we left off.
+        wizardState.stepIndex = saved.stepIndex;
+        wizardState.stepHistory = saved.stepHistory || [];
+        wizardState.pushbackCount = saved.pushbackCount || 0;
+        saved.visibleMessages.forEach(m => appendWizMessage(m.role, m.content, { skipPersist: true }));
+        appendWizMessage('system', `↻ Resumed from ${new Date(saved.savedAt).toLocaleTimeString()}. Step ${wizardState.stepIndex + 1}/${WIZARD_STEPS.length}. Reset session? Click 'Start over' below.`);
+        addResetButton();
+        loadPriorQuarter();
+        return;
+    }
+
+    // Fresh wizard.
+    appendWizMessage('system', "Boardroom Mentor. UK English, direct, analytical. I'll challenge vague answers once or twice — after that I accept and move on. Use '← Back' to revise a previous answer, 'Move on →' to skip, or ✕ to close.");
     loadPriorQuarter().then(() => askCurrentStep());
+}
+
+function addResetButton() {
+    // Add a one-shot "Start over" action under the last system message.
+    const host = document.getElementById('wizMessages');
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost';
+    btn.style.cssText = 'align-self:center;font-size:11px;padding:4px 10px';
+    btn.textContent = 'Start over';
+    btn.onclick = () => {
+        if (!confirm('Discard the current session and start the wizard from scratch?')) return;
+        clearWizardSession();
+        closeWizard();
+        setTimeout(() => openWizard(), 50);
+    };
+    host.appendChild(btn);
+    host.scrollTop = host.scrollHeight;
 }
 
 async function loadPriorQuarter() {
@@ -860,11 +944,11 @@ async function loadPriorQuarter() {
     } catch (e) { /* silent */ }
 }
 
-function closeWizard() {
+function closeWizard(opts = {}) {
     if (!wizardState) { hideWizardUI(); return; }
-    if (Object.keys(wizardState.answers).length > 0) {
-        if (!confirm('Close the wizard? Answers will be lost unless you apply them to the form first.')) return;
-    }
+    // Closing always keeps the session in localStorage — reopen picks up
+    // exactly where we left off. Pass keepSession:false to fully reset.
+    if (opts.keepSession === false) clearWizardSession();
     wizardState = null;
     hideWizardUI();
 }
@@ -981,18 +1065,48 @@ function wizSkip() {
     const step = currentStep();
     if (!step) return;
     appendWizMessage('user', '(moving on)');
-    // Keep whatever's already in the form for this step's target field.
+    // Spot-edit — one question only; close after the user moves on.
+    if (wizardState.focusStepId) { closeWizard({ keepSession: false }); return; }
     wizardState.stepIndex++;
     askCurrentStep();
+    persistWizardState();
 }
 
-function appendWizMessage(role, text) {
+// "← Back" — revise the previous question. Decrements the step and re-asks.
+function wizBack() {
+    if (!wizardState) return;
+    // Find the previous answerable step (skipping discovery-only ones that were
+    // auto-handled based on needsPrior).
+    let idx = wizardState.stepIndex - 1;
+    while (idx >= 0) {
+        const s = WIZARD_STEPS[idx];
+        if (!s.needsPrior || wizardState.priorRecord) break;
+        idx--;
+    }
+    if (idx < 0) {
+        appendWizMessage('system', "Already on the first question.");
+        return;
+    }
+    wizardState.stepIndex = idx;
+    wizardState.stepHistory = [];
+    wizardState.pushbackCount = 0;
+    appendWizMessage('system', `← Stepped back to "${WIZARD_STEPS[idx].label}". Your previous answer is still in the form; type a new one, or Move on to keep it.`);
+    askCurrentStep();
+    persistWizardState();
+}
+
+function appendWizMessage(role, text, opts = {}) {
     const host = document.getElementById('wizMessages');
     const el = document.createElement('div');
     el.className = 'msg ' + role;
     el.textContent = text;
     host.appendChild(el);
     host.scrollTop = host.scrollHeight;
+    // Track visible messages so we can replay on resume.
+    if (wizardState) {
+        (wizardState.visibleMessages = wizardState.visibleMessages || []).push({ role, content: text });
+        if (!opts.skipPersist) persistWizardState();
+    }
     return el;
 }
 
@@ -1086,7 +1200,55 @@ function extractCompactPrior(rec) {
 function finaliseWizard() {
     appendWizMessage('assistant', 'All sections captured. I have pre-filled the form. Review, then hit "Save changes" at the top. After saving, I will offer to push the three Quarterly Projects into Projects OS as real project records with linked monthly Tasks.');
     document.getElementById('wizStepLabel').textContent = 'Complete — review form';
+    // Wizard finished cleanly — drop the saved session so the next open starts fresh.
+    clearWizardSession();
 }
+
+// Add a "✨ Revise" button on each form field that opens the wizard jumped to
+// that specific step. Only attach for fields that have a matching wizard step.
+function attachReviseAffordances() {
+    const stepByFid = new Map();
+    for (const step of WIZARD_STEPS) {
+        if (!step.targetFid) continue;
+        try { stepByFid.set(step.targetFid(), step.id); } catch (e) {}
+    }
+    document.querySelectorAll('[data-field-id]').forEach(el => {
+        const fid = el.dataset.fieldId;
+        const stepId = stepByFid.get(fid);
+        if (!stepId) return;
+        if (el.dataset.reviseAttached) return;
+        el.dataset.reviseAttached = '1';
+        el.addEventListener('focus', () => showReviseButton(el, stepId));
+        el.addEventListener('blur', () => {
+            // Delay so clicking the button registers before blur hides it.
+            setTimeout(() => hideReviseButton(el), 150);
+        });
+    });
+}
+
+function showReviseButton(field, stepId) {
+    let btn = field.parentElement.querySelector('.revise-btn');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'revise-btn';
+        btn.textContent = '✨ Revise with AI';
+        btn.onmousedown = e => { e.preventDefault(); /* keep focus */ };
+        btn.onclick = () => { openWizard({ focusStepId: stepId }); };
+        field.parentElement.appendChild(btn);
+    }
+    btn.style.display = 'inline-flex';
+}
+
+function hideReviseButton(field) {
+    const btn = field.parentElement?.querySelector('.revise-btn');
+    if (btn) btn.style.display = 'none';
+}
+
+// Warn before unload if form has unsaved edits (or the wizard is mid-flow).
+window.addEventListener('beforeunload', e => {
+    if (isDirty) { e.preventDefault(); e.returnValue = ''; return ''; }
+});
 
 function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
