@@ -1195,11 +1195,11 @@ function showMergePicker(step, newText, existingText) {
     const host = document.getElementById('wizMessages');
     const wrap = document.createElement('div');
     wrap.className = 'msg system merge-picker';
-    wrap.innerHTML = `<div style="font-weight:600;color:var(--text-primary);margin-bottom:4px">The field already has content — how should this be applied?</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
-        <strong>Replace</strong>: drop the existing text, use only your new answer.<br>
-        <strong>Add</strong>: append your new answer to the existing text.<br>
-        <strong>Incorporate</strong>: Claude merges them intelligently.</div>`;
+    wrap.innerHTML = `<div style="font-weight:600;color:var(--text-primary);margin-bottom:6px">The field already has content — how should your answer be applied?</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.5">
+        <strong>Replace</strong> · Discard the existing text. AI writes your answer as the new value.<br>
+        <strong>Add</strong> · Keep the existing text. AI smooths your answer in as a clean addition (no duplicated facts).<br>
+        <strong>Incorporate with AI</strong> · Treat your answer as an instruction ("change 20k to 15k", "tighten this", "add a line about X") and let AI apply it to the existing text.</div>`;
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     const mk = (label, handler) => {
@@ -1211,7 +1211,11 @@ function showMergePicker(step, newText, existingText) {
         return b;
     };
     btnRow.appendChild(mk('Replace', () => resolveMerge(step, newText)));
-    btnRow.appendChild(mk('Add', () => resolveMerge(step, existingText.trimEnd() + '\n\n' + newText)));
+    btnRow.appendChild(mk('Add', async () => {
+        btnRow.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        const merged = await aiAddContent(existingText, newText, step);
+        resolveMerge(step, merged);
+    }));
     btnRow.appendChild(mk('Incorporate with AI', async () => {
         btnRow.querySelectorAll('button').forEach(b => { b.disabled = true; });
         const merged = await aiMerge(existingText, newText, step);
@@ -1459,6 +1463,47 @@ Return the JSON object ONLY. No commentary. No code fence.`
         const parsed = JSON.parse(match[0]);
         return Array.isArray(parsed.list) ? parsed.list.map(String) : null;
     } catch (e) { return null; }
+}
+
+// ADD mode — keep the existing content intact, append the founder's new
+// content so it flows naturally. AI only cleans up the seam and tidies
+// grammar; it does NOT modify the existing content and does NOT treat the
+// input as an instruction.
+async function aiAddContent(existing, addition, step) {
+    const system = buildCachedWizardSystem(
+        `Strategy Plan OS — ${wizardState.businessName}. Appending new content to an existing field.`,
+        `The founder has EXISTING text for "${step.label}" and NEW content they want added to it.
+
+Your job: return the full final text with the new content appended naturally.
+
+RULES:
+- Keep every word of the existing text UNCHANGED. Do not rephrase, condense, or edit it.
+- Append the new content beneath it. Add a blank line, a transition phrase, or a new bullet if that fits the structure; otherwise just a paragraph break.
+- Tidy only the new content for grammar and UK English. Do not touch the existing text.
+- Avoid duplicating facts already stated in the existing text — if the new content repeats a point verbatim, drop the duplicate.
+- Match the structure of the existing text: if it's bulleted, add as a new bullet; if paragraphs, add as a new paragraph.
+- Return the full final text ONLY. No explanation. No quotes. No markdown code fences.`
+    );
+    try {
+        const res = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 2000,
+                system,
+                messages: [
+                    { role: 'user', content: `EXISTING TEXT (keep exactly as-is):\n"""\n${existing}\n"""\n\nNEW CONTENT TO ADD (tidy and append):\n"""\n${addition}\n"""\n\nReturn the full final text only.` },
+                ],
+            }),
+        });
+        if (!res.ok) return existing.trimEnd() + '\n\n' + addition;
+        const data = await res.json();
+        let out = (data.content?.[0]?.text || '').trim();
+        out = out.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '');
+        out = out.replace(/^"""\n?|\n?"""$/g, '');
+        return out || (existing.trimEnd() + '\n\n' + addition);
+    } catch (e) { return existing.trimEnd() + '\n\n' + addition; }
 }
 
 async function aiMerge(existing, userInput, step) {
