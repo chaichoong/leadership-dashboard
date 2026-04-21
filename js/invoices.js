@@ -390,7 +390,7 @@
             input.style.opacity = '0.5';
             let saveOk = false;
             try {
-                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
                     method: 'PATCH',
                     headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fields: { [fieldId]: fieldValue } })
@@ -448,11 +448,12 @@
         if (suggRow) suggRow.style.display = 'none';
         // Persist rejection in Airtable so it doesn't reappear
         try {
-            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: { [INV.matchRejected]: true } })
             });
+            if (!resp.ok) throw new Error('Reject save failed: HTTP ' + resp.status);
             const inv = airtableInvoices.find(i => i.recordId === recordId);
             if (inv) inv.matchRejected = true;
         } catch (e) {
@@ -474,11 +475,15 @@
             if (txRecordId) {
                 paidFields[INV.matchedTx] = [{ id: txRecordId }];
             }
-            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}`, {
+            const paidResp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: paidFields })
             });
+            if (!paidResp.ok) {
+                const errBody = await paidResp.text();
+                throw new Error('Airtable mark-paid failed: HTTP ' + paidResp.status + ' ' + errBody);
+            }
 
             // 2. Move Gmail label from "3. to pay" to "4: paid"
             if (GMAIL_SCRIPT_URL && threadId) {
@@ -492,11 +497,12 @@
 
             // 3. Attach Gmail link to the Airtable transaction's "Invoice Data" field
             if (txRecordId && PAT) {
-                await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txRecordId}`, {
+                const txResp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txRecordId}?returnFieldsByFieldId=true`, {
                     method: 'PATCH',
                     headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fields: { [F.txInvoiceData]: gmailUrl } })
                 });
+                if (!txResp.ok) console.warn('Transaction link failed:', txResp.status);
             }
 
             btn.textContent = 'Done';
