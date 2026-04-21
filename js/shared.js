@@ -377,9 +377,16 @@
         }
         // /OS-INTEGRATION: Lazy-load
 
-        // Refresh data on tab switch (but don't interrupt if already loading)
+        // Refresh data on tab switch — but only if cache is stale.
+        // Re-fetching on every tab switch was hammering Airtable and causing the
+        // UI to flicker through "Refreshing…" state on every click. With a fresh
+        // cache we just re-render from it; the 15-min smartRefresh handles background updates.
+        const TAB_SWITCH_STALE_MS = 2 * 60 * 1000; // 2 min — aggressive enough to feel live, cheap enough to avoid churn
         if (PAT && !document.getElementById('loadingOverlay').style.display.includes('flex')) {
-            loadDashboard();
+            const cached = typeof loadDashCache === 'function' ? loadDashCache() : null;
+            if (!cached || cached.ageMs > TAB_SWITCH_STALE_MS) {
+                loadDashboard();
+            }
         }
     }
 
