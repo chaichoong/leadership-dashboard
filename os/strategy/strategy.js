@@ -1244,7 +1244,16 @@ If there's genuine weakness, push back ONCE with a specific, focused challenge. 
 IMPORTANT: Look at the full conversation above. If you've already pushed back on the same point, DO NOT repeat the same push-back. Either accept, or push on a different dimension. Repeating yourself blocks progress and is a failure on your part.
 
 Reply with a JSON object ONLY, nothing else. Shape:
-{"accept": true|false, "pushback"?: "one short paragraph (2–3 sentences max) in UK English, naming one specific thing to add or sharpen — never repeat a point you've already made", "refined"?: "your tightened version of their latest answer if you accept — otherwise omit", "note"?: "one short confirmation line after accept, optional"}
+{"accept": true|false, "pushback"?: "one short paragraph (2–3 sentences max) in UK English, naming one specific thing to add or sharpen — never repeat a point you've already made", "refined"?: "the founder's latest answer tidied for grammar, punctuation and flow — see rules below — MUST be included on every accept", "note"?: "one short confirmation line after accept, optional"}
+
+"refined" rules (REQUIRED on every accept):
+- Fix grammar, punctuation, capitalisation, and awkward phrasing.
+- Use UK English spelling.
+- Preserve the founder's own words and voice where they work. This is a polish, not a rewrite.
+- Preserve ALL substance — every number, name, claim, and nuance stays intact. Never add facts the founder didn't give you.
+- Keep the length in the same ballpark as the founder's input.
+- Keep bullet lists as bullet lists; keep paragraph structure.
+- If the input was already clean, you may return it verbatim.
 
 Do not accept pure platitudes. Do accept rough-but-usable answers, especially on attempt 2+. Prefer 'accept with refined tightening' over 'reject'.`
     );
