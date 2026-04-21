@@ -803,11 +803,134 @@ async function saveRecord() {
         isDirty = false;
         setStatus('success', `Saved ${quarter} ${year}.`);
         setTimeout(() => setStatus('', ''), 2500);
+        // After a successful save, offer to push Quarterly Projects to
+        // Projects OS as real project records. Shown as an inline banner —
+        // user can ignore and save again later without re-prompting within
+        // the same session.
+        offerProjectPush();
     } catch (e) {
         setStatus('error', `Save failed: ${e.message}`);
     } finally {
         updateSaveButton();
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PROJECTS OS SYNC — push each non-empty Quarterly Project as a record
+// in the Projects table, with all the fields we captured in the Strategy
+// OS (KPI Name/Unit/Tracking, Definition of Done, Business, Quarter bounds).
+// ═════════════════════════════════════════════════════════════════════
+
+// Projects table field IDs (matches os/tasks/index.html PF constants).
+const PROJ_F = {
+    name:        'fldiMZICg1KOORpte',
+    business:    'fldtdJTFkMtldxEVf',
+    startDate:   'fldGIlsn0cSEpnj18',
+    endDate:     'fldU0cJparnkvOUsV',
+    status:      'fldZ0SpReVaDS1VXb',
+    dod:         'fldgjzVEnfnZowrBD',
+    kpiName:     'fldABYFMf2yBKWdlD',
+    kpiUnit:     'fldrYZEghROXYf6w0',
+    kpiTracking: 'fld2wYB5ZEn9WRcjN',
+};
+
+let pushOfferDismissedForRecord = null;
+
+function offerProjectPush() {
+    if (!currentRecord) return;
+    if (pushOfferDismissedForRecord === currentRecord.id) return;
+    const { businessId, quarter, year } = getSelection();
+    if (!businessId) return;
+    const fields = currentRecord.fields || {};
+    const qps = OBJSTRAT.quarterlyProjects
+        .map((fid, i) => ({ i, text: (fields[fid] || '').trim() }))
+        .filter(q => q.text);
+    if (!qps.length) return;
+
+    const host = document.getElementById('statusBar');
+    host.className = 'status-bar';
+    host.style.display = 'block';
+    host.innerHTML = `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between">
+        <span>Push ${qps.length} Quarterly Project${qps.length === 1 ? '' : 's'} to Projects OS? This will create ${qps.length} linked project record${qps.length === 1 ? '' : 's'} in the Projects table for ${escapeHtml(quarter)} ${escapeHtml(year)}.</span>
+        <span style="display:flex;gap:6px">
+            <button class="btn btn-ghost" id="pushLaterBtn">Not now</button>
+            <button class="btn btn-primary" id="pushNowBtn">Push projects →</button>
+        </span>
+    </div>`;
+    document.getElementById('pushLaterBtn').onclick = () => {
+        pushOfferDismissedForRecord = currentRecord.id;
+        setStatus('', '');
+    };
+    document.getElementById('pushNowBtn').onclick = () => pushProjectsToOS(qps);
+}
+
+async function pushProjectsToOS(qps) {
+    const { businessId, quarter, year } = getSelection();
+    const fields = currentRecord.fields || {};
+    // Derive quarter bounds as YYYY-MM-DD.
+    const qIdx = QUARTERS.indexOf(quarter);
+    const yearNum = parseInt(year, 10);
+    const starts = [[1, 1], [4, 1], [7, 1], [10, 1]];           // [month, day] 1-indexed
+    const ends   = [[3, 31], [6, 30], [9, 30], [12, 31]];
+    const pad = n => String(n).padStart(2, '0');
+    const startISO = `${yearNum}-${pad(starts[qIdx][0])}-${pad(starts[qIdx][1])}`;
+    const endISO   = `${yearNum}-${pad(ends[qIdx][0])}-${pad(ends[qIdx][1])}`;
+
+    setStatus('info', `Creating ${qps.length} project record${qps.length === 1 ? '' : 's'}…`);
+
+    const results = { created: 0, failed: 0, errors: [] };
+    for (const qp of qps) {
+        const det = OBJSTRAT.qpDetails[qp.i];
+        const projectName = deriveProjectName(qp.text);
+        const body = { fields: {}, typecast: true };
+        body.fields[PROJ_F.name] = projectName;
+        body.fields[PROJ_F.business] = [businessId];
+        body.fields[PROJ_F.startDate] = startISO;
+        body.fields[PROJ_F.endDate] = endISO;
+        body.fields[PROJ_F.status] = 'Not Started';
+        // Full QP description goes into DoD alongside the per-QP DoD field we captured.
+        const qpText = qp.text;
+        const dod = (fields[det.dod] || '').trim();
+        body.fields[PROJ_F.dod] = dod || qpText;
+        // KPI fields
+        const kpiName = (fields[det.kpiName] || '').trim();
+        if (kpiName) body.fields[PROJ_F.kpiName] = kpiName;
+        const unit = extractSelectName(fields[det.kpiUnit]);
+        if (unit) body.fields[PROJ_F.kpiUnit] = unit;
+        const tracking = (fields[det.tracking] || '').trim();
+        if (tracking) body.fields[PROJ_F.kpiTracking] = tracking;
+
+        try {
+            await airtableFetch(TABLES.projects, {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+            results.created++;
+        } catch (e) {
+            console.error('[pushProjectsToOS]', e);
+            results.failed++;
+            results.errors.push(e.message || String(e));
+        }
+    }
+    if (results.failed === 0) {
+        setStatus('success', `✓ Pushed ${results.created} project${results.created === 1 ? '' : 's'} to Projects OS.`);
+        pushOfferDismissedForRecord = currentRecord.id;
+    } else {
+        setStatus('error', `Pushed ${results.created}/${qps.length} — ${results.failed} failed. ${results.errors[0] || ''}`);
+    }
+    setTimeout(() => setStatus('', ''), 5000);
+}
+
+// Derive a short project name from the QP textarea — first line, or first
+// sentence, up to ~80 chars. Many Strategy QP entries start with a title
+// then a description; grab the title.
+function deriveProjectName(text) {
+    const firstLine = text.split('\n').map(s => s.trim()).find(s => s) || '';
+    // Strip common "Project N:" prefixes so the Projects OS name is clean.
+    const stripped = firstLine.replace(/^project\s*\d+\s*[:\-–]\s*/i, '').trim();
+    const trimmed = stripped || firstLine;
+    if (trimmed.length <= 100) return trimmed;
+    return trimmed.slice(0, 97) + '…';
 }
 
 // ═════════════════════════════════════════════════════════════════════
