@@ -1046,6 +1046,8 @@
         updateBackupIndicator();
         checkAutoBackup();
         syncFromCloud();
+        refreshAccuracyFromCloud();
+        purgeOldAccuracyRecords();
     }
 
     // Labels that should show a count in the dropdown
@@ -2249,6 +2251,19 @@
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
 
+    // AI Accuracy log — shared across all team devices via Airtable.
+    // Rolling 60-day retention, trickle-purged from the client on load.
+    const AIRTABLE_ACCURACY_TABLE_ID = 'tblhibxhT8smNYGM3';
+    const AIRTABLE_ACCURACY_FIELDS = {
+        event: 'fldHSYNqj9nI4MDll',
+        loggedAt: 'fldVLESmk48Z2YChd',
+        suggested: 'fld73VXxxieQqtGDK',
+        applied: 'fld62OTiBp0cK3Hqb',
+        correct: 'fldsvgdSuFVof8bi8',
+        user: 'fldm7AsGkFkd84W0X'
+    };
+    const ACCURACY_RETENTION_DAYS = 60;
+
     function getAirtablePat() {
         return localStorage.getItem('airtable_pat') || '';
     }
@@ -3030,15 +3045,108 @@ Respond with ONLY valid JSON, no markdown.`;
     function logAiAccuracy(suggestedLabel, appliedLabel) {
         let log = [];
         try { log = JSON.parse(localStorage.getItem('ai_accuracy_log') || '[]'); } catch {}
-        log.push({
+        const entry = {
             date: new Date().toISOString(),
             suggested: suggestedLabel,
             applied: appliedLabel,
             correct: suggestedLabel === appliedLabel
-        });
-        // Keep last 500 entries
+        };
+        log.push(entry);
+        // Keep last 500 entries locally as a fast cache
         if (log.length > 500) log = log.slice(-500);
         localStorage.setItem('ai_accuracy_log', JSON.stringify(log));
+        // Fire-and-forget — Airtable is the team-wide source of truth
+        logAccuracyToAirtable(entry).catch(err => console.warn('Accuracy push failed:', err));
+    }
+
+    async function logAccuracyToAirtable(entry) {
+        const pat = getAirtablePat();
+        if (!pat) return;
+        const user = localStorage.getItem('sender_name') || '';
+        const record = {
+            fields: {
+                [AIRTABLE_ACCURACY_FIELDS.event]: `${user || 'Unknown'}: ${entry.suggested || '—'} → ${entry.applied || '—'}`,
+                [AIRTABLE_ACCURACY_FIELDS.loggedAt]: entry.date,
+                [AIRTABLE_ACCURACY_FIELDS.suggested]: entry.suggested || '',
+                [AIRTABLE_ACCURACY_FIELDS.applied]: entry.applied || '',
+                [AIRTABLE_ACCURACY_FIELDS.correct]: !!entry.correct,
+                [AIRTABLE_ACCURACY_FIELDS.user]: user
+            }
+        };
+        const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_ACCURACY_TABLE_ID}`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: [record] })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    }
+
+    async function refreshAccuracyFromCloud() {
+        const pat = getAirtablePat();
+        if (!pat) return;
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 30);
+        try {
+            const records = [];
+            let offset = '';
+            for (let page = 0; page < 10; page++) {
+                const url = new URL(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_ACCURACY_TABLE_ID}`);
+                url.searchParams.set('pageSize', '100');
+                url.searchParams.set('filterByFormula', `IS_AFTER({Logged At}, '${cutoff.toISOString()}')`);
+                if (offset) url.searchParams.set('offset', offset);
+                const resp = await fetch(url.toString(), { headers: { 'Authorization': 'Bearer ' + pat } });
+                if (!resp.ok) return;
+                const data = await resp.json();
+                records.push(...(data.records || []));
+                if (!data.offset) break;
+                offset = data.offset;
+            }
+            const log = records.map(r => ({
+                date: r.fields['Logged At'] || r.createdTime,
+                suggested: r.fields['Suggested Label'] || '',
+                applied: r.fields['Applied Label'] || '',
+                correct: !!r.fields['Correct']
+            }));
+            localStorage.setItem('ai_accuracy_log', JSON.stringify(log));
+            if (typeof allEmails !== 'undefined' && typeof updateInboxStats === 'function') {
+                updateInboxStats(allEmails.length, Object.keys(inboxSuggestions || {}).length);
+            }
+        } catch (err) {
+            console.warn('Accuracy refresh failed:', err);
+        }
+    }
+
+    async function purgeOldAccuracyRecords() {
+        const pat = getAirtablePat();
+        if (!pat) return;
+        // At most one purge per 24h across any device
+        const lastPurge = parseInt(localStorage.getItem('accuracy_last_purge') || '0');
+        if (Date.now() - lastPurge < 24 * 60 * 60 * 1000) return;
+        localStorage.setItem('accuracy_last_purge', Date.now().toString());
+
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - ACCURACY_RETENTION_DAYS);
+        try {
+            const listUrl = new URL(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_ACCURACY_TABLE_ID}`);
+            listUrl.searchParams.set('pageSize', '100');
+            listUrl.searchParams.set('filterByFormula', `IS_BEFORE({Logged At}, '${cutoff.toISOString()}')`);
+            listUrl.searchParams.append('fields[]', 'Logged At');
+            const resp = await fetch(listUrl.toString(), { headers: { 'Authorization': 'Bearer ' + pat } });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const ids = (data.records || []).map(r => r.id);
+            for (let i = 0; i < ids.length; i += 10) {
+                const batch = ids.slice(i, i + 10);
+                const delUrl = new URL(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_ACCURACY_TABLE_ID}`);
+                batch.forEach(id => delUrl.searchParams.append('records[]', id));
+                await fetch(delUrl.toString(), { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + pat } });
+            }
+            if (ids.length > 0) {
+                addAuditEntry('accuracy_purge', `Purged ${ids.length} accuracy records older than ${ACCURACY_RETENTION_DAYS} days`);
+            }
+        } catch (err) {
+            console.warn('Accuracy purge failed:', err);
+        }
     }
 
     function getAiAccuracy30Day() {
