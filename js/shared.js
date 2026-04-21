@@ -77,8 +77,10 @@
         document.getElementById('dashboard').style.display = 'none';
     }
 
-    // Check session on load — deferred to DOMContentLoaded so all JS modules are parsed
-    // and loadDashboard (defined in dashboard.js) is available before we call it.
+    // Check session on load — MUST wait for DOMContentLoaded so sibling deferred
+    // scripts (dashboard.js, invoices.js, etc.) have finished executing. When shared.js
+    // itself has `defer`, document.readyState is already 'interactive' here, so a naive
+    // check for 'loading' would skip the wait and call loadDashboard() before it exists.
     function _opsDirectorInit() {
         const saved = localStorage.getItem('_dlr_pat');
         if (saved) {
@@ -90,10 +92,10 @@
             if (e.key === 'Enter') authenticate();
         });
     }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _opsDirectorInit);
-    } else {
+    if (document.readyState === 'complete') {
         _opsDirectorInit();
+    } else {
+        document.addEventListener('DOMContentLoaded', _opsDirectorInit);
     }
 
     // ── Airtable API ──
