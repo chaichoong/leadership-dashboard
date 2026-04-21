@@ -418,21 +418,21 @@
                 // Confirmed CFV — can mark actioned
                 actionsHtml = `
                     <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
-                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else if (entry.reflagged) {
                 // CFV Actioned but re-flagged — confirm as CFV again or dismiss
                 actionsHtml = `
                     <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
-                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else {
                 // CFV Actioned — can return to In Payment or move back to CFV
                 actionsHtml = `
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
                     <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
-                    <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
 
@@ -694,8 +694,30 @@
         if (!text) return;
         input.disabled = true;
         await addTenancyComment(tenancyId, text);
-        // Reload comments
+        // Reload comments panel
         await cfvShowComments(tenancyId, surname, ref);
+        // Refresh the row's comment button label so the count updates live
+        refreshCommentBtnCount(tenancyId);
+    }
+
+    // Re-fetch the comment count for a single tenancy and update every
+    // matching button in the CFV table (selected by data-comment-btn attribute).
+    // Called after adding a comment so the "💬 N comments" label updates without
+    // a full table re-render.
+    async function refreshCommentBtnCount(tenancyId) {
+        if (!PAT) return;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${tenancyId}/comments`, {
+                headers: { 'Authorization': 'Bearer ' + PAT }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const cc = (data.comments || []).length;
+            const label = cc > 0 ? `💬 ${cc} comment${cc !== 1 ? 's' : ''}` : '💬 Comments';
+            document.querySelectorAll(`[data-comment-btn="${tenancyId}"]`).forEach(btn => {
+                btn.textContent = label;
+            });
+        } catch (e) { /* non-fatal — label will refresh on next render */ }
     }
 
 // test
