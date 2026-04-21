@@ -1461,10 +1461,38 @@ Return the JSON object ONLY. No commentary. No code fence.`
     } catch (e) { return null; }
 }
 
-async function aiMerge(existing, addition, step) {
+async function aiMerge(existing, userInput, step) {
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. Merging a new addition into an existing field.`,
-        `You have existing text for "${step.label}" and a new addition the founder wants incorporated. Return ONLY the merged text — no explanation, no commentary, no JSON. Preserve the structure and tone of the existing text. Incorporate the new material where it fits best, and tighten for coherence. Do not lose any substance from either side; if they conflict, prefer the newer content.`
+        `Strategy Plan OS — ${wizardState.businessName}. Applying a founder's instruction to an existing field.`,
+        `You have the EXISTING text for "${step.label}" and an INSTRUCTION from the founder. Your job is to return the full UPDATED text after applying the instruction.
+
+The instruction may be one of these kinds — figure out which before responding:
+
+1. EDIT — the founder wants a specific change to the existing text. Examples:
+   - "change 20–25k to 15–20k"
+   - "replace HMOs with serviced accommodation"
+   - "remove the bit about AI agents"
+   - "tighten the third paragraph"
+   → Apply the change to the existing text. Change ONLY what was requested. Everything else stays identical.
+
+2. ADDITION — the founder is adding a new sentence, bullet, or idea. Examples:
+   - "also include that we're expanding to Scotland"
+   - "add a line about equity partnerships"
+   → Incorporate it where it fits naturally. Do not rewrite surrounding material.
+
+3. REWRITE — the founder wants the whole thing recast. Examples:
+   - "make it punchier"
+   - "rewrite this in first person"
+   - "shorten to 3 bullets"
+   → Rewrite accordingly, preserving every number, name, and claim.
+
+RULES:
+- Return the full final text of the field. Not a diff. Not a "before/after". Not an explanation. Not JSON. Just the text.
+- UK English. Clean grammar and punctuation.
+- Preserve every specific number, date, and name that the founder did NOT explicitly ask you to change.
+- Keep the structure (bullets / paragraphs / headings) unless asked to change it.
+- Never invent new facts. If the instruction is ambiguous about what to keep, keep it.
+- Do not prepend any framing like "Here's the updated text:" — output the text directly.`
     );
     try {
         const res = await fetch(AI_PROXY, {
@@ -1472,17 +1500,21 @@ async function aiMerge(existing, addition, step) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: 'claude-haiku-4-5-20251001',
-                max_tokens: 1500,
+                max_tokens: 2000,
                 system,
                 messages: [
-                    { role: 'user', content: `EXISTING:\n${existing}\n\nNEW TO INCORPORATE:\n${addition}\n\nReturn the merged text only.` },
+                    { role: 'user', content: `EXISTING TEXT:\n"""\n${existing}\n"""\n\nFOUNDER'S INSTRUCTION:\n"""\n${userInput}\n"""\n\nReturn the full updated text only.` },
                 ],
             }),
         });
-        if (!res.ok) return existing.trimEnd() + '\n\n' + addition;
+        if (!res.ok) return existing.trimEnd() + '\n\n' + userInput;
         const data = await res.json();
-        return (data.content?.[0]?.text || '').trim() || (existing.trimEnd() + '\n\n' + addition);
-    } catch (e) { return existing.trimEnd() + '\n\n' + addition; }
+        let out = (data.content?.[0]?.text || '').trim();
+        // Strip any common wrappers the model might slip in despite instructions.
+        out = out.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '');
+        out = out.replace(/^"""\n?|\n?"""$/g, '');
+        return out || (existing.trimEnd() + '\n\n' + userInput);
+    } catch (e) { return existing.trimEnd() + '\n\n' + userInput; }
 }
 
 // "Move on →" — user wants to skip this step regardless of what's been said.
