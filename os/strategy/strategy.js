@@ -478,6 +478,14 @@ function numberedCard({ number, fieldId, value, placeholder }) {
         equaliseCardRow(card);
     });
     card.appendChild(ta);
+    // Click anywhere on the card (badge / padding / empty area) focuses the
+    // textarea and drops the cursor at the end.
+    card.addEventListener('click', e => {
+        if (e.target === ta || e.target.classList?.contains('revise-btn')) return;
+        ta.focus();
+        const len = ta.value.length;
+        try { ta.setSelectionRange(len, len); } catch (err) {}
+    });
     return card;
 }
 
@@ -753,20 +761,30 @@ const WIZARD_STEPS = [
     // ── Objective plan (top of the form — reviewed rarely, but important to
     //    set the frame before anything below it.)
     { id: 'reflection', label: 'Quarterly reflection', needsPrior: true,
-      ask: 'Looking back at last quarter: what hit, what missed, and why? I\'ll use this to set the bar for this quarter.',
+      ask: "Looking back at last quarter: what hit, what missed, and why?\n\nI'll use this to calibrate the bar for this quarter — specifically to make sure what slipped becomes a measurable here. One paragraph is plenty.",
       targetFid: null /* discovery — not saved */ },
     { id: 'objective', label: 'Objective', targetFid: () => OBJSTRAT.objective,
-      ask: 'The overarching objective of the business in one tight paragraph. Why does it exist, and what does it ultimately produce? Specific enough that a stranger could repeat it back.' },
+      ask: "The Objective is the single overarching statement of what this business exists to do. It sits at the top of the plan and every quarterly project should ladder back to it.\n\nAim for one tight paragraph covering:\n• What the business ultimately produces (an outcome, not an activity)\n• Who benefits\n• Why it matters\n\nExample shape: 'To [verb] [what] for [who], so that [outcome the world looks like].'" },
     { id: 'targetWhat', label: 'Target — What we do', targetFid: () => OBJSTRAT.targetWhat,
-      ask: 'What we do — one sentence. The product or service, in plain language. No adjectives unless they\'re doing real work.' },
+      ask: "Target Statement, part 1 of 3: WHAT we do.\n\nOne sentence describing the product or service in plain language. No marketing adjectives unless they're doing real work. If a stranger couldn't repeat it back, it's too vague." },
     { id: 'targetWho', label: 'Target — Who we do it for', targetFid: () => OBJSTRAT.targetWho,
-      ask: 'Who we do it for — the specific target customer. Segment, size, and what qualifies them as ideal.' },
+      ask: "Target Statement, part 2 of 3: WHO we do it for.\n\nOne sentence naming the specific target customer — segment, size, stage, and what makes them the ideal fit. 'Small businesses' is too vague; 'UK founder-owned businesses doing £100k–£5m, with one decision-maker' is sharp." },
     { id: 'targetHow', label: 'Target — How we do it', targetFid: () => OBJSTRAT.targetHow,
-      ask: 'How we do it — the method or approach in one sentence. What\'s distinctive about the way you deliver?' },
+      ask: "Target Statement, part 3 of 3: HOW we do it.\n\nOne sentence on your distinctive method — what's different about the way you deliver vs. anyone else a customer could buy from?" },
     { id: 'customerProfile', label: 'Customer Profile', targetFid: () => OBJSTRAT.customerProfile,
-      ask: 'Detailed customer profile. Who are you targeting, what do they look like (stage, size, budget, mindset), and what do you NOT target? Bullets are fine.' },
+      ask: "The detailed ideal customer profile — who you target and who you DON'T.\n\nBullets are ideal. Cover:\n• Stage / size / revenue band\n• Budget reality (cash-pay, equity-pay, both?)\n• Mindset (what they believe, what they're tired of)\n• Deal-breakers — who you refuse to take on and why\n\nThe sharper the 'not us' list, the less time you waste on bad-fit leads." },
     { id: 'enticement', label: 'Enticement', targetFid: () => OBJSTRAT.enticement,
-      ask: 'The enticement — the offer your target market cannot refuse. One paragraph. What makes it hard to say no?' },
+      ask: "The Enticement — the irresistible offer your target market cannot refuse.\n\nOne paragraph. What specifically makes it hard to say no? Pricing structure, risk reversal, outcome guarantee, turnaround, access — whatever your asymmetric advantage is." },
+    // ── List sections — one question each that gathers the whole list.
+    { id: 'undertakings', kind: 'list', label: 'Undertakings (team rules)', fieldIdsFn: () => OBJSTRAT.undertakings, maxItems: 20,
+      ask: "The Undertakings are the shared rules that every team member (and AI agent) follows day-to-day — your non-negotiables.\n\nExamples of good ones: 'Own the outcome — you deliver on time and to standard', 'Tell the truth even when uncomfortable', 'Never raise a problem without a proposed solution'.\n\nIf this is your first time: give me 10–15 rules in plain English, one per line. I'll tidy and number them.\n\nIf you already have some: tell me what to add, reword or remove — e.g. 'add one about routine discipline', 'reword #3 to say X', 'no changes'.",
+      descriptionForAI: "A list of non-negotiable team/culture rules for the business. Short title + 2–3 supporting bullets each." },
+    { id: 'usps', kind: 'list', label: 'Original Selling Points (USPs)', fieldIdsFn: () => OBJSTRAT.usps, maxItems: 5,
+      ask: "The Original Selling Points — why a customer chooses you over any alternative.\n\nUp to 5. Each should be a genuine, defensible differentiator (not marketing fluff). Name the advantage, then explain why it's true.\n\nIf first-time: give me as many as come to mind, I'll structure them.\n\nIf existing: say what to change, e.g. 'add one about our equity model', 'tighten #2', 'no changes'.",
+      descriptionForAI: "Unique selling points. Each item: a bold claim + a short paragraph backing it up." },
+    { id: 'mainMethod', kind: 'list', label: 'Main Method (step-by-step process)', fieldIdsFn: () => OBJSTRAT.methodSteps, maxItems: 10,
+      ask: "The Main Method — the proven process the business follows to deliver its outcome, step by step. Up to 10 steps.\n\nThink of it as the 'secret recipe' — the sequence a client moves through, or the way you systematically build the work. A well-known example is EOS's 'Vision / People / Data / Issues / Process / Traction', or your existing OPTIMISE framework.\n\nIf first-time: list the steps in order, one per line, with a short description each.\n\nIf existing: say what to change — e.g. 'add a step between 3 and 4 for X', 'reword step 5', 'no changes'.",
+      descriptionForAI: "Sequential steps of the main delivery method. Each item: a short step name + a one-sentence explanation." },
     // ── Strategy plan (quarterly cadence — where most of the iteration happens.)
     { id: 'nineYear', label: 'Nine-Year Target', targetFid: () => OBJSTRAT.nineYearTarget,
       ask: 'Paint the nine-year picture of this business. Be specific and visual — what does it look like, sound like, count like? If it is vague I will push back.' },
@@ -977,7 +995,23 @@ function askCurrentStep() {
     wizardState.pushbackCount = 0;
     appendWizMessage('assistant', step.ask);
 
-    // Show the current/prior value inline so the user can iterate rather than retype.
+    // List step: show the current list so the user can reference it when asking
+    // for changes. Falls through to the generic "Currently:" block below for
+    // single-field steps.
+    if (step.kind === 'list') {
+        const fids = step.fieldIdsFn();
+        const items = fids.map(fid => currentValueForField(fid)).filter(v => v && v.trim());
+        if (items.length) {
+            const preview = items.map((t, i) => `${i + 1}. ${t.split('\n')[0]}`).join('\n');
+            appendWizMessage('system', `Current list (${items.length} of ${step.maxItems}):\n\n${preview}\n\nType the changes you want, or 'no changes' / 'Move on →' to keep as-is.`);
+        } else {
+            appendWizMessage('system', `Nothing set yet. List them out and I'll structure them into the ${step.maxItems}-slot format.`);
+        }
+        return;
+    }
+
+    // Single-field step: show the current/prior value inline so the user can
+    // iterate rather than retype.
     if (step.targetFid) {
         const fid = step.targetFid();
         const existing = currentValueForField(fid);
@@ -1006,6 +1040,13 @@ async function wizSend() {
     if (!step) return;
     appendWizMessage('user', text);
     wizardState.stepHistory.push({ role: 'user', content: text });
+
+    // List step — special handling: AI produces a whole new list based on the
+    // current list + the user's change instruction.
+    if (step.kind === 'list') {
+        await handleListStep(step, text);
+        return;
+    }
 
     // Reflection / discovery steps have no target field — they're just context
     // gathering for the mentor. Accept without critique so the user can move on.
@@ -1123,6 +1164,122 @@ function resolveMerge(step, finalText) {
     applyFieldValueInUI(fid, finalText);
     wizardState.answers[step.id] = finalText;
     advanceStep();
+}
+
+// Handle a list-kind wizard step — ask Claude to produce the full new list
+// based on the current list + the founder's change instruction, show it as
+// a preview, and commit to all slots on confirmation.
+async function handleListStep(step, instruction) {
+    const fids = step.fieldIdsFn();
+    const current = fids.map(fid => currentValueForField(fid) || '');
+    const currentNonEmpty = current.filter(v => v.trim());
+
+    // If user says "no changes" / "skip" / similar, just advance without AI call.
+    if (/^(no changes?|none|skip|keep|same|pass|all good)$/i.test(instruction.trim())) {
+        appendWizMessage('assistant', 'Noted — no changes. Moving on.');
+        advanceStep();
+        return;
+    }
+
+    appendWizMessage('assistant', 'Restructuring the list… one moment.');
+    const newList = await boardroomListRewrite(step, currentNonEmpty, instruction);
+    if (!newList || !newList.length) {
+        appendWizMessage('assistant', "I didn't get a clean list back. Keeping the current list and moving on — you can edit inline in the form.");
+        advanceStep();
+        return;
+    }
+
+    // Preview + confirm before writing all slots.
+    showListPreview(step, newList, current);
+}
+
+function showListPreview(step, newList, previous) {
+    const host = document.getElementById('wizMessages');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg system';
+    const preview = newList.map((t, i) => `${i + 1}. ${t.split('\n')[0]}`).join('\n');
+    const text = `Proposed new list (${newList.length} item${newList.length === 1 ? '' : 's'}):\n\n${preview}\n\nApply to the form?`;
+    wrap.textContent = text;
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;flex-wrap:wrap';
+    const mk = (label, handler) => {
+        const b = document.createElement('button');
+        b.className = 'btn btn-ghost';
+        b.style.cssText = 'font-size:11px;padding:4px 10px';
+        b.textContent = label;
+        b.onclick = handler;
+        return b;
+    };
+    btnRow.appendChild(mk('Apply (replace)', () => applyListAndAdvance(step, newList)));
+    btnRow.appendChild(mk('Revise', () => {
+        appendWizMessage('assistant', 'OK — tell me what to change and I\'ll rework it.');
+    }));
+    btnRow.appendChild(mk('Keep existing', () => {
+        appendWizMessage('assistant', 'No changes applied. Moving on.');
+        advanceStep();
+    }));
+    wrap.appendChild(btnRow);
+    host.appendChild(wrap);
+    host.scrollTop = host.scrollHeight;
+    // Track the preview in the visible log.
+    if (wizardState) {
+        (wizardState.visibleMessages = wizardState.visibleMessages || []).push({ role: 'system', content: text + ' (pending choice)' });
+        persistWizardState();
+    }
+}
+
+function applyListAndAdvance(step, list) {
+    const fids = step.fieldIdsFn();
+    const sized = list.slice(0, step.maxItems);
+    fids.forEach((fid, i) => applyFieldValueInUI(fid, sized[i] || ''));
+    appendWizMessage('assistant', `Applied ${sized.length} item${sized.length === 1 ? '' : 's'} to the form.`);
+    advanceStep();
+}
+
+async function boardroomListRewrite(step, currentList, instruction) {
+    const system = buildCachedWizardSystem(
+        `Strategy Plan OS — ${wizardState.businessName}. Restructuring a list field.`,
+        `You are restructuring the "${step.label}" list for the business.
+
+Context: ${step.descriptionForAI || ''}
+Maximum items allowed: ${step.maxItems}
+
+Current list (JSON array, may be empty):
+${JSON.stringify(currentList)}
+
+Founder's change instruction (their own words):
+"${instruction}"
+
+Your task: return a JSON object {"list": ["item 1", "item 2", ...]} representing the FINAL list after applying the founder's instruction. Rules:
+- If the founder listed new items directly (first-time use), structure them into the list.
+- If they said "add", "reword", "remove", or similar, apply those edits to the current list.
+- If they gave a full new list, replace.
+- Preserve all substance from the current list that wasn't explicitly changed.
+- Tidy each item for grammar, punctuation, UK English, while keeping the founder's voice.
+- Each item can be a single sentence OR a title followed by bullets — preserve structure if the current list has structure.
+- Never exceed ${step.maxItems} items.
+
+Return the JSON object ONLY. No commentary. No code fence.`
+    );
+    try {
+        const res = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 3000,
+                system,
+                messages: [{ role: 'user', content: 'Return the restructured list now.' }],
+            }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const raw = (data.content?.[0]?.text || '').trim();
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        const parsed = JSON.parse(match[0]);
+        return Array.isArray(parsed.list) ? parsed.list.map(String) : null;
+    } catch (e) { return null; }
 }
 
 async function aiMerge(existing, addition, step) {
