@@ -955,7 +955,7 @@ async function boardroomCritique(step, answer) {
     const priorContext = wizardState.priorRecord
         ? `Prior quarter's record (for reference): ${JSON.stringify(extractCompactPrior(wizardState.priorRecord))}`
         : 'No prior quarter record — starting fresh.';
-    const system = buildWizardPrompt(
+    const system = buildCachedWizardSystem(
         `Strategy Plan OS — ${wizardState.businessName}. ${priorContext}`,
         `You are interviewing the founder to build this quarter's strategy plan, one field at a time. Section: "${step.label}". Question asked: "${step.ask}"
 

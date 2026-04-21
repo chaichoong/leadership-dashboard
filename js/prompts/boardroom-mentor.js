@@ -183,6 +183,27 @@ TASK:
 ${taskInstructions}`;
 }
 
+// Same as buildWizardPrompt but returns the structured-block format the Anthropic
+// API expects when using prompt caching. The mentor prompt block is marked
+// cache_control: ephemeral so Anthropic caches it for ~5 minutes — every call
+// after the first in that window pays ~10% of the input cost for that segment.
+//
+// Pass the return value directly as the "system" field in the Messages API.
+function buildCachedWizardSystem(pageContext, taskInstructions) {
+  return [
+    {
+      type: 'text',
+      text: BOARDROOM_MENTOR_PROMPT,
+      cache_control: { type: 'ephemeral' },
+    },
+    {
+      type: 'text',
+      text: `---\n\nCURRENT CONTEXT: ${pageContext}\n\nTASK:\n${taskInstructions}`,
+    },
+  ];
+}
+
 // Expose on window so every feature file can import without a module system.
 window.BOARDROOM_MENTOR_PROMPT = BOARDROOM_MENTOR_PROMPT;
 window.buildWizardPrompt = buildWizardPrompt;
+window.buildCachedWizardSystem = buildCachedWizardSystem;
