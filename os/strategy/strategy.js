@@ -898,11 +898,15 @@ function wizSessionKey() {
 
 // Save everything we'd need to resume a wizard — but NOT the DOM elements or
 // the full Airtable prior record (we re-fetch that on resume).
+// We save the current step's ID (not its numeric index) so resumes stay
+// correct even if the WIZARD_STEPS array changes order or gains/loses steps
+// between sessions.
 function persistWizardState() {
     if (!wizardState) return;
     try {
+        const currentId = WIZARD_STEPS[wizardState.stepIndex]?.id || null;
         localStorage.setItem(wizSessionKey(), JSON.stringify({
-            stepIndex: wizardState.stepIndex,
+            stepId: currentId,
             answers: wizardState.answers,
             reflection: wizardState.reflection || '',
             pushbackCount: wizardState.pushbackCount,
@@ -959,13 +963,23 @@ function openWizard(opts = {}) {
         return;
     }
 
-    if (saved && saved.visibleMessages?.length && typeof saved.stepIndex === 'number') {
+    if (saved && saved.visibleMessages?.length && (saved.stepId || typeof saved.stepIndex === 'number')) {
         // Resume — replay messages and pick up where we left off.
-        wizardState.stepIndex = saved.stepIndex;
+        // Prefer stepId (resilient to array changes); fall back to stepIndex
+        // for older sessions persisted before the stepId field existed.
+        let resumeIndex = 0;
+        if (saved.stepId) {
+            const idx = WIZARD_STEPS.findIndex(s => s.id === saved.stepId);
+            resumeIndex = idx >= 0 ? idx : 0;
+        } else if (typeof saved.stepIndex === 'number') {
+            resumeIndex = Math.min(saved.stepIndex, WIZARD_STEPS.length - 1);
+        }
+        wizardState.stepIndex = resumeIndex;
         wizardState.stepHistory = saved.stepHistory || [];
         wizardState.pushbackCount = saved.pushbackCount || 0;
         saved.visibleMessages.forEach(m => appendWizMessage(m.role, m.content, { skipPersist: true }));
-        appendWizMessage('system', `↻ Resumed from ${new Date(saved.savedAt).toLocaleTimeString()}. Step ${wizardState.stepIndex + 1}/${WIZARD_STEPS.length}. Reset session? Click 'Start over' below.`);
+        const currLabel = WIZARD_STEPS[resumeIndex]?.label || 'end';
+        appendWizMessage('system', `↻ Resumed from ${new Date(saved.savedAt).toLocaleTimeString()}. Step ${resumeIndex + 1}/${WIZARD_STEPS.length} · ${currLabel}. Reset session? Click 'Start over' below.`);
         addResetButton();
         loadPriorQuarter();
         return;
