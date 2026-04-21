@@ -871,6 +871,25 @@ function offerProjectPush() {
     document.getElementById('pushNowBtn').onclick = () => pushProjectsToOS(qps);
 }
 
+// Invoked from the "Push Projects →" button in the context bar. Loads the
+// current record fields, collects non-empty QPs, and pushes them. Always
+// available — doesn't depend on the save banner.
+async function pushProjectsManually() {
+    if (!currentRecord) {
+        setStatus('warn', 'Save the plan first, then push projects.');
+        return;
+    }
+    const fields = currentRecord.fields || {};
+    const qps = OBJSTRAT.quarterlyProjects
+        .map((fid, i) => ({ i, text: (fields[fid] || '').trim() }))
+        .filter(q => q.text);
+    if (!qps.length) {
+        setStatus('warn', 'No Quarterly Projects to push — add some text to Quarterly Project 1/2/3 first.');
+        return;
+    }
+    await pushProjectsToOS(qps);
+}
+
 async function pushProjectsToOS(qps) {
     const { businessId, quarter, year } = getSelection();
     const fields = currentRecord.fields || {};
@@ -883,6 +902,8 @@ async function pushProjectsToOS(qps) {
     const startISO = `${yearNum}-${pad(starts[qIdx][0])}-${pad(starts[qIdx][1])}`;
     const endISO   = `${yearNum}-${pad(ends[qIdx][0])}-${pad(ends[qIdx][1])}`;
 
+    const btn = document.getElementById('pushProjBtn');
+    if (btn) btn.disabled = true;
     setStatus('info', `Creating ${qps.length} project record${qps.length === 1 ? '' : 's'}…`);
 
     const results = { created: 0, failed: 0, errors: [] };
@@ -894,12 +915,12 @@ async function pushProjectsToOS(qps) {
         body.fields[PROJ_F.business] = [businessId];
         body.fields[PROJ_F.startDate] = startISO;
         body.fields[PROJ_F.endDate] = endISO;
-        body.fields[PROJ_F.status] = 'Not Started';
-        // Full QP description goes into DoD alongside the per-QP DoD field we captured.
+        // NOTE: Project Status is deliberately omitted — the Projects table
+        // singleSelect choices differ from session to session, so setting it
+        // here risks a 422. The Projects OS will show its configured default.
         const qpText = qp.text;
         const dod = (fields[det.dod] || '').trim();
         body.fields[PROJ_F.dod] = dod || qpText;
-        // KPI fields
         const kpiName = (fields[det.kpiName] || '').trim();
         if (kpiName) body.fields[PROJ_F.kpiName] = kpiName;
         const unit = extractSelectName(fields[det.kpiUnit]);
@@ -908,24 +929,37 @@ async function pushProjectsToOS(qps) {
         if (tracking) body.fields[PROJ_F.kpiTracking] = tracking;
 
         try {
-            await airtableFetch(TABLES.projects, {
+            const created = await airtableFetch(TABLES.projects, {
                 method: 'POST',
                 body: JSON.stringify(body),
             });
+            console.log('[pushProjectsToOS] created', created?.id, projectName);
             results.created++;
         } catch (e) {
-            console.error('[pushProjectsToOS]', e);
+            console.error('[pushProjectsToOS] failed for QP' + (qp.i + 1), e, 'body was:', body);
             results.failed++;
-            results.errors.push(e.message || String(e));
+            results.errors.push(`QP${qp.i + 1}: ${e.message || String(e)}`);
         }
     }
+    if (btn) btn.disabled = false;
+
     if (results.failed === 0) {
-        setStatus('success', `✓ Pushed ${results.created} project${results.created === 1 ? '' : 's'} to Projects OS.`);
+        setStatus('success', `✓ Pushed ${results.created} project${results.created === 1 ? '' : 's'} to Projects OS. Open Tasks & Projects OS to see them.`);
         pushOfferDismissedForRecord = currentRecord.id;
+        setTimeout(() => setStatus('', ''), 5000);
     } else {
-        setStatus('error', `Pushed ${results.created}/${qps.length} — ${results.failed} failed. ${results.errors[0] || ''}`);
+        // Keep errors visible — don't auto-clear. User needs to see what broke.
+        const bar = document.getElementById('statusBar');
+        bar.className = 'status-bar error';
+        bar.style.display = 'block';
+        bar.innerHTML = `<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;justify-content:space-between">
+            <div>
+                <div style="font-weight:600;margin-bottom:4px">Pushed ${results.created}/${qps.length} — ${results.failed} failed.</div>
+                <div style="font-size:12px;opacity:0.9;font-family:monospace">${results.errors.map(escapeHtml).join('<br>')}</div>
+            </div>
+            <button class="btn btn-ghost" onclick="setStatus('', '')" style="flex-shrink:0">Dismiss</button>
+        </div>`;
     }
-    setTimeout(() => setStatus('', ''), 5000);
 }
 
 // Derive a short project name from the QP textarea — first line, or first
