@@ -1207,11 +1207,36 @@ function applyFieldValueInUI(fid, value) {
     if (el) {
         el.value = value;
         markDirty();
+        resizeFieldAndRowMates(el);
     } else {
         // Record may not be rendered yet (empty state). Re-render with a stub.
         renderForm({});
         const el2 = document.querySelector(`[data-field-id="${fid}"]`);
-        if (el2) { el2.value = value; markDirty(); }
+        if (el2) {
+            el2.value = value;
+            markDirty();
+            resizeFieldAndRowMates(el2);
+        }
+    }
+}
+
+// After programmatically changing a field's value, re-size it to fit the new
+// content and re-run whichever row-equalize applies to its container. Keeps
+// adjacent columns in sync so a long answer pushes its row-mates down
+// together rather than leaving a ragged edge.
+function resizeFieldAndRowMates(el) {
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    autosize(el);
+    // Numbered card grid (Undertakings / USPs / Method Steps)
+    const card = el.closest('.num-card');
+    if (card) { equaliseCardRow(card); return; }
+    // Quarterly Projects — align Project field and each monthly stone across 3 cols
+    if (el.closest('.qp-card')) { equaliseQuarterlyProjects(); return; }
+    // Target Statement / Measurables — multi-col grid of field-rows
+    const fieldRow = el.closest('.field-row');
+    if (fieldRow?.parentElement?.classList.contains('grid-cols-2') ||
+        fieldRow?.parentElement?.classList.contains('grid-cols-3')) {
+        equaliseFieldRow(el);
     }
 }
 
