@@ -367,7 +367,9 @@ function renderForm(fields) {
             ta.value = fields[stoneFid] || '';
             ta.placeholder = `Month ${m + 1} deliverable`;
             ta.rows = 1;
-            ta.addEventListener('input', () => { markDirty(); autosize(ta); });
+            ta.addEventListener('input', () => {
+                markDirty(); autosize(ta); equaliseQuarterlyProjects();
+            });
             row.appendChild(label);
             row.appendChild(ta);
             stonesWrap.appendChild(row);
@@ -378,14 +380,22 @@ function renderForm(fields) {
     qpSection.querySelector('.section-body').appendChild(qpGrid);
     host.appendChild(qpSection);
 
-    // Auto-size every textarea to its content, now that the form is in the DOM.
-    // setTimeout(0) works even in hidden tabs; rAF does not.
+    // Auto-size every textarea to its content. Two passes — the first settles
+    // natural heights, the second captures any shifts (fonts loading, etc.).
     setTimeout(autosizeAll, 0);
+    setTimeout(autosizeAll, 120);
 
-    // Re-size a section's textareas when the user expands it (was 0 while hidden).
+    // When a section is toggled open, its textareas couldn't be measured while
+    // it was closed. Re-run the full equalise pass so rows inside it match.
     document.querySelectorAll('.plan-form details.section').forEach(d => {
         d.addEventListener('toggle', () => {
-            if (d.open) setTimeout(() => d.querySelectorAll('textarea').forEach(autosize), 0);
+            if (d.open) {
+                setTimeout(() => {
+                    d.querySelectorAll('textarea').forEach(autosize);
+                    equaliseAllCardRows();
+                    equaliseAllGridRows();
+                }, 0);
+            }
         });
     });
 }
@@ -393,8 +403,17 @@ function renderForm(fields) {
 // Called from the section nav "Expand all" / "Collapse all" links.
 function toggleAllSections(openAll) {
     document.querySelectorAll('.plan-form details.section').forEach(d => { d.open = !!openAll; });
-    if (openAll) setTimeout(autosizeAll, 0);
+    if (openAll) {
+        setTimeout(autosizeAll, 0);
+        setTimeout(autosizeAll, 120);
+    }
 }
+
+// Re-equalise on window resize (column count may change, breaking row groupings).
+window.addEventListener('resize', () => {
+    clearTimeout(window.__strategyResizeT);
+    window.__strategyResizeT = setTimeout(autosizeAll, 150);
+});
 
 // Helpers for form building
 
@@ -524,42 +543,84 @@ function textareaField(label, fieldId, value, sizeClass) {
     ta.value = value || '';
     if (sizeClass) ta.className = sizeClass;
     ta.rows = 1;
-    ta.addEventListener('input', () => { markDirty(); autosize(ta); });
+    ta.addEventListener('input', () => {
+        markDirty(); autosize(ta);
+        // If this textarea is inside a multi-column grid, re-equalise the row
+        // so its column-mates grow to match.
+        if (row.parentElement?.classList.contains('grid-cols-2') ||
+            row.parentElement?.classList.contains('grid-cols-3')) {
+            equaliseFieldRow(ta);
+        }
+        // If it's inside a Quarterly Project card, match the 3 Project
+        // textareas and keep the stepping stones aligned below.
+        if (row.closest('.qp-card')) equaliseQuarterlyProjects();
+    });
     row.appendChild(lab);
     row.appendChild(ta);
     return row;
     // Initial sizing handled by autosizeAll() at the end of renderForm.
 }
 
-// Grow a textarea to fit its content, up to a cap.
+// Grow a textarea to fit its content. No cap — if content is long, the textarea
+// is long. Clipping content is never acceptable.
 function autosize(ta) {
     if (!ta) return;
+    // Clear any min-height set by row-equalize so we measure natural height.
+    ta.style.minHeight = '';
     ta.style.height = 'auto';
-    const max = 600;
-    ta.style.height = Math.min(ta.scrollHeight + 2, max) + 'px';
+    ta.style.height = (ta.scrollHeight + 2) + 'px';
 }
 
 // Re-size every textarea on the page, then equalise heights within each
 // visual row so grids look symmetric.
 function autosizeAll() {
     document.querySelectorAll('.plan-form textarea').forEach(autosize);
+    // Measurement is only correct once layout settles — run equalize in a
+    // second pass to catch any shifts from the first one.
     equaliseAllCardRows();
     equaliseAllGridRows();
+    equaliseQuarterlyProjects();
+}
+
+// Lines up the 3 Quarterly Project columns: the Project description textarea
+// matches across columns, then M1 across, M2 across, M3 across. That way the
+// stepping stones in each card sit at the same y-position.
+function equaliseQuarterlyProjects() {
+    const cards = document.querySelectorAll('.qp-card');
+    if (cards.length !== 3) return;
+    const projectTAs = Array.from(cards).map(c => c.querySelector('.field-row textarea')).filter(Boolean);
+    equaliseTextareas(projectTAs);
+    for (let m = 0; m < 3; m++) {
+        const stoneTAs = Array.from(cards).map(c => c.querySelectorAll('.stone textarea')[m]).filter(Boolean);
+        equaliseTextareas(stoneTAs);
+    }
+}
+
+function equaliseTextareas(tas) {
+    if (tas.length < 2) return;
+    tas.forEach(t => { t.style.minHeight = ''; autosize(t); });
+    const max = Math.max(...tas.map(t => t.offsetHeight));
+    tas.forEach(t => { t.style.minHeight = max + 'px'; });
 }
 
 // Group cards within one .card-grid by their offsetTop (visual row) and set
-// every textarea in that row to the tallest height. Gives a clean symmetric
-// grid where no card ends shorter than its neighbours.
+// every textarea's min-height in that row to the tallest natural height.
+// Using min-height (not height) means symmetry never clips long content —
+// a cell taller than its neighbours wins, shorter ones match up to it.
 function equaliseAllCardRows() {
     document.querySelectorAll('.card-grid').forEach(grid => {
         const cards = Array.from(grid.querySelectorAll('.num-card'));
         if (!cards.length) return;
+        // Reset min-heights so measurements are natural.
+        cards.forEach(c => { const t = c.querySelector('textarea'); if (t) t.style.minHeight = ''; });
+        // Re-autosize in case something was pending.
+        cards.forEach(c => { const t = c.querySelector('textarea'); if (t) autosize(t); });
         const rows = groupByTop(cards);
         rows.forEach(row => {
             const tas = row.map(c => c.querySelector('textarea')).filter(Boolean);
             if (tas.length < 2) return;
             const max = Math.max(...tas.map(t => t.offsetHeight));
-            tas.forEach(t => { t.style.height = max + 'px'; });
+            tas.forEach(t => { t.style.minHeight = max + 'px'; });
         });
     });
 }
@@ -567,20 +628,21 @@ function equaliseAllCardRows() {
 // Same pattern for the 3-col grids (Target Statement, Measurables).
 function equaliseAllGridRows() {
     document.querySelectorAll('.grid-cols-2, .grid-cols-3').forEach(grid => {
-        const rows = grid.querySelectorAll('.field-row');
+        const rows = Array.from(grid.querySelectorAll('.field-row'));
         if (rows.length < 2) return;
-        const groups = groupByTop(Array.from(rows));
+        // Reset, re-measure, then equalise.
+        rows.forEach(r => { const t = r.querySelector('textarea'); if (t) { t.style.minHeight = ''; autosize(t); } });
+        const groups = groupByTop(rows);
         groups.forEach(group => {
             const tas = group.map(r => r.querySelector('textarea')).filter(Boolean);
             if (tas.length < 2) return;
             const max = Math.max(...tas.map(t => t.offsetHeight));
-            tas.forEach(t => { t.style.height = max + 'px'; });
+            tas.forEach(t => { t.style.minHeight = max + 'px'; });
         });
     });
 }
 
-// Equalise a single row that contains the given card (called from the input
-// handler so typing in one card grows its row-mates).
+// Equalise one row — called from the input handler so typing grows row-mates.
 function equaliseCardRow(card) {
     const grid = card.closest('.card-grid');
     if (!grid) return;
@@ -588,11 +650,16 @@ function equaliseCardRow(card) {
     const row = Array.from(grid.querySelectorAll('.num-card')).filter(c => c.offsetTop === top);
     const tas = row.map(c => c.querySelector('textarea')).filter(Boolean);
     if (tas.length < 2) return;
-    // Reset, measure natural heights, then apply max
-    tas.forEach(t => { t.style.height = 'auto'; });
-    tas.forEach(autosize);
+    tas.forEach(t => { t.style.minHeight = ''; autosize(t); });
     const max = Math.max(...tas.map(t => t.offsetHeight));
-    tas.forEach(t => { t.style.height = max + 'px'; });
+    tas.forEach(t => { t.style.minHeight = max + 'px'; });
+}
+
+// Called when any textarea outside a card grid grows/shrinks (e.g. Target
+// Statement, Measurables). Re-runs row-equalize across all 2/3-col grids.
+function equaliseFieldRow(ta) {
+    // Cheap enough to just re-do all grid rows — there are only a handful.
+    equaliseAllGridRows();
 }
 
 function groupByTop(els) {
