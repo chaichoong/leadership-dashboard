@@ -288,6 +288,17 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
 }
 .qp-stones .stone textarea::placeholder { color: var(--text-muted); font-style: italic; }
 
+/* KPI / Tracking / DoD block inside each Quarterly Project card */
+.kpi-subsection {
+    background: var(--bg-surface); border: 1px solid var(--border-subtle);
+    border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    margin-top: 4px;
+}
+.kpi-subsection-title {
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.04em;
+}
+
 /* Empty state */
 .empty-state {
     background: var(--bg-surface); border: 1px dashed var(--border-default);

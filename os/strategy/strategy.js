@@ -349,6 +349,15 @@ function renderForm(fields) {
         card.innerHTML = `<h4>⭐ Quarterly Project ${i + 1}</h4>`;
         card.appendChild(textareaField(`Project`, qpFid, fields[qpFid] || ''));
 
+        // KPI + Tracking + DoD — ports into Projects OS on sync.
+        const det = OBJSTRAT.qpDetails[i];
+        card.appendChild(kpiSubsection(`KPI for Project ${i + 1}`, {
+            kpiNameFid: det.kpiName,
+            kpiUnitFid: det.kpiUnit,
+            trackingFid: det.tracking,
+            dodFid: det.dod,
+        }, fields));
+
         const stonesWrap = document.createElement('div');
         stonesWrap.className = 'qp-stones';
         const stonesHead = document.createElement('div');
@@ -487,6 +496,55 @@ function numberedCard({ number, fieldId, value, placeholder }) {
         try { ta.setSelectionRange(len, len); } catch (err) {}
     });
     return card;
+}
+
+// Compact KPI + Tracking + DoD block for inside a Quarterly Project card.
+// Matches the Projects OS schema so values sync 1-to-1 on project creation.
+function kpiSubsection(title, fieldMap, fields) {
+    const box = document.createElement('div');
+    box.className = 'kpi-subsection';
+    const h = document.createElement('div');
+    h.className = 'kpi-subsection-title';
+    h.textContent = title;
+    box.appendChild(h);
+
+    // KPI Name + Unit side-by-side
+    const nameUnitRow = document.createElement('div');
+    nameUnitRow.style.cssText = 'display:grid;grid-template-columns:1fr 80px;gap:8px';
+    nameUnitRow.appendChild(singleLineField('KPI Name', fieldMap.kpiNameFid, fields[fieldMap.kpiNameFid] || ''));
+    // Unit select
+    const unitRow = document.createElement('div');
+    unitRow.className = 'field-row';
+    const unitLabel = document.createElement('label');
+    unitLabel.textContent = 'Unit';
+    const unitSel = document.createElement('select');
+    unitSel.dataset.fieldId = fieldMap.kpiUnitFid;
+    ['', '£', '%', 'count', 'days', 'items', 'hours'].forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u; opt.textContent = u || '—';
+        if (extractSelectName(fields[fieldMap.kpiUnitFid]) === u) opt.selected = true;
+        unitSel.appendChild(opt);
+    });
+    unitSel.style.cssText = 'padding:9px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:13px;background:var(--bg-surface);font-family:inherit;color:var(--text-primary)';
+    unitSel.addEventListener('change', () => markDirty());
+    unitRow.appendChild(unitLabel);
+    unitRow.appendChild(unitSel);
+    nameUnitRow.appendChild(unitRow);
+    box.appendChild(nameUnitRow);
+
+    box.appendChild(textareaField('Tracking Method', fieldMap.trackingFid, fields[fieldMap.trackingFid] || ''));
+    box.appendChild(textareaField('Definition of Done', fieldMap.dodFid, fields[fieldMap.dodFid] || ''));
+    return box;
+}
+
+// Airtable singleSelect values come back as either a plain string (when
+// queried with returnFieldsByFieldId on newer schemas) or an object like
+// { id, name, color }. Normalise to a string.
+function extractSelectName(v) {
+    if (!v) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object' && v.name) return v.name;
+    return '';
 }
 
 function singleLineField(label, fieldId, value) {
@@ -806,17 +864,23 @@ const WIZARD_STEPS = [
       ask: 'One-Year Measurable 3 (optional).' },
     { id: 'qp1', label: 'Quarterly Project 1', targetFid: () => OBJSTRAT.quarterlyProjects[0],
       ask: 'Quarterly Project 1 — the single most important 90-day project. Name + focus + what "done" looks like. The one that, if it slips, the quarter is a write-off.' },
+    { id: 'qp1det', label: 'QP1 — KPI / Tracking / Definition of Done', kind: 'projectDetails', qpIndex: 0,
+      ask: "For Quarterly Project 1, give me the metrics in one message:\n\n• KPI (the single number that proves progress) — name + unit, e.g. 'Monthly recurring revenue — £' or 'Void days — count'\n• Target (optional, a specific number) — e.g. '12000', '95', '30'\n• Tracking method — where/when/how it's measured, and who owns the check\n• Definition of Done — the concrete end state that means the project is complete\n\nType conversationally; I'll structure it into the four fields." },
     { id: 'qp1m1', label: 'QP1 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[0][0],
       ask: 'QP1 — Month 1 stepping stone. A concrete deliverable by end of month 1. If it is not testable/visible, rewrite.' },
     { id: 'qp1m2', label: 'QP1 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[0][1], ask: 'QP1 — Month 2 stepping stone.' },
     { id: 'qp1m3', label: 'QP1 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[0][2], ask: 'QP1 — Month 3 stepping stone (project complete state).' },
     { id: 'qp2', label: 'Quarterly Project 2', targetFid: () => OBJSTRAT.quarterlyProjects[1],
       ask: 'Quarterly Project 2. Different dimension from QP1 — do not duplicate.' },
+    { id: 'qp2det', label: 'QP2 — KPI / Tracking / Definition of Done', kind: 'projectDetails', qpIndex: 1,
+      ask: "For Quarterly Project 2, same four fields: KPI (name + unit), Tracking method, Definition of Done. Type conversationally." },
     { id: 'qp2m1', label: 'QP2 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[1][0], ask: 'QP2 — Month 1 stepping stone.' },
     { id: 'qp2m2', label: 'QP2 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[1][1], ask: 'QP2 — Month 2 stepping stone.' },
     { id: 'qp2m3', label: 'QP2 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[1][2], ask: 'QP2 — Month 3 stepping stone.' },
     { id: 'qp3', label: 'Quarterly Project 3', targetFid: () => OBJSTRAT.quarterlyProjects[2],
       ask: 'Quarterly Project 3. Optional — "skip" is a valid answer. Better three focused than four diluted.' },
+    { id: 'qp3det', label: 'QP3 — KPI / Tracking / Definition of Done', kind: 'projectDetails', qpIndex: 2,
+      ask: "For Quarterly Project 3 (if set), same four fields. Skip if no QP3." },
     { id: 'qp3m1', label: 'QP3 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[2][0], ask: 'QP3 — Month 1 (skip if no QP3).' },
     { id: 'qp3m2', label: 'QP3 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[2][1], ask: 'QP3 — Month 2.' },
     { id: 'qp3m3', label: 'QP3 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[2][2], ask: 'QP3 — Month 3.' },
@@ -1048,6 +1112,14 @@ async function wizSend() {
         return;
     }
 
+    // Project-details step — one bulk question that captures KPI name, unit,
+    // tracking method and definition of done. AI parses the free-form answer
+    // into structured JSON and writes to the four Airtable fields.
+    if (step.kind === 'projectDetails') {
+        await handleProjectDetailsStep(step, text);
+        return;
+    }
+
     // Reflection / discovery steps have no target field — they're just context
     // gathering for the mentor. Accept without critique so the user can move on.
     if (!step.targetFid) {
@@ -1164,6 +1236,113 @@ function resolveMerge(step, finalText) {
     applyFieldValueInUI(fid, finalText);
     wizardState.answers[step.id] = finalText;
     advanceStep();
+}
+
+// Handle a project-details wizard step — one question captures KPI name,
+// KPI unit, tracking method, definition of done. AI parses the free-form
+// answer into structured JSON and writes to the four target fields.
+async function handleProjectDetailsStep(step, answer) {
+    const det = OBJSTRAT.qpDetails[step.qpIndex];
+    if (/^(skip|none|pass|no)$/i.test(answer.trim())) {
+        appendWizMessage('assistant', 'Skipping project details.');
+        advanceStep();
+        return;
+    }
+    appendWizMessage('assistant', 'Structuring…');
+    const parsed = await boardroomParseProjectDetails(step, answer);
+    if (!parsed) {
+        appendWizMessage('assistant', "I couldn't structure that cleanly. Moving on — you can edit the KPI / Tracking / DoD inline in the form.");
+        advanceStep();
+        return;
+    }
+    const prev = {
+        kpiName: currentValueForField(det.kpiName),
+        kpiUnit: extractSelectName(document.querySelector(`[data-field-id="${det.kpiUnit}"]`)?.value) || '',
+        tracking: currentValueForField(det.tracking),
+        dod: currentValueForField(det.dod),
+    };
+    showProjectDetailsPreview(step, parsed, prev);
+}
+
+function showProjectDetailsPreview(step, parsed, previous) {
+    const det = OBJSTRAT.qpDetails[step.qpIndex];
+    const host = document.getElementById('wizMessages');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg system';
+    const preview = `Proposed for Project ${step.qpIndex + 1}:\n\n• KPI: ${parsed.kpiName || '—'}${parsed.kpiUnit ? ' (' + parsed.kpiUnit + ')' : ''}${parsed.kpiTarget ? ' · target ' + parsed.kpiTarget : ''}\n• Tracking: ${parsed.trackingMethod || '—'}\n• Definition of Done: ${parsed.definitionOfDone || '—'}`;
+    wrap.textContent = preview;
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;flex-wrap:wrap';
+    const mk = (label, handler) => {
+        const b = document.createElement('button');
+        b.className = 'btn btn-ghost';
+        b.style.cssText = 'font-size:11px;padding:4px 10px';
+        b.textContent = label;
+        b.onclick = handler;
+        return b;
+    };
+    btnRow.appendChild(mk('Apply', () => {
+        applyFieldValueInUI(det.kpiName, parsed.kpiName || '');
+        const unitEl = document.querySelector(`[data-field-id="${det.kpiUnit}"]`);
+        if (unitEl) { unitEl.value = parsed.kpiUnit || ''; markDirty(); }
+        applyFieldValueInUI(det.tracking, parsed.trackingMethod || '');
+        applyFieldValueInUI(det.dod, parsed.definitionOfDone || '');
+        appendWizMessage('assistant', 'Applied.');
+        advanceStep();
+    }));
+    btnRow.appendChild(mk('Revise', () => {
+        appendWizMessage('assistant', 'OK — tell me what to change and I\'ll rework it.');
+    }));
+    btnRow.appendChild(mk('Keep existing', () => {
+        appendWizMessage('assistant', 'No changes applied.');
+        advanceStep();
+    }));
+    wrap.appendChild(btnRow);
+    host.appendChild(wrap);
+    host.scrollTop = host.scrollHeight;
+    if (wizardState) {
+        (wizardState.visibleMessages = wizardState.visibleMessages || []).push({ role: 'system', content: preview + ' (pending choice)' });
+        persistWizardState();
+    }
+}
+
+async function boardroomParseProjectDetails(step, answer) {
+    const system = buildCachedWizardSystem(
+        `Strategy Plan OS — ${wizardState.businessName}. Parsing Project ${step.qpIndex + 1} metadata.`,
+        `Parse the founder's answer into structured project metadata.
+
+Return a JSON object ONLY — no commentary, no code fence:
+{
+  "kpiName": "short KPI name (e.g. 'Monthly recurring revenue')",
+  "kpiUnit": one of: "£", "%", "count", "days", "items", "hours" — pick the best match, or "" if none fits,
+  "kpiTarget": "optional — a specific numeric target mentioned, as a number. Omit if not given.",
+  "trackingMethod": "how it's tracked: source, frequency, owner — tidy the founder's wording, UK English",
+  "definitionOfDone": "the end state that means the project is done — tidy the founder's wording, UK English"
+}
+
+Rules:
+- Preserve every specific number, name, and claim the founder gave.
+- Tidy for grammar/flow. UK English.
+- If a field isn't addressed in the answer, return an empty string for it (not null).`
+    );
+    try {
+        const res = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 800,
+                system,
+                messages: [{ role: 'user', content: answer }],
+            }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const raw = (data.content?.[0]?.text || '').trim();
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        return JSON.parse(match[0]);
+    } catch (e) { return null; }
 }
 
 // Handle a list-kind wizard step — ask Claude to produce the full new list

@@ -2909,11 +2909,10 @@ function renderProjects(){
       </div>
       <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Tracking Method</label>
       <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
-      // Deliverable / DoD
-      html+=`<h4 style="margin-top:12px">Deliverable / Definition of Done</h4>
-        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Deliverable</label>
-        <textarea style="${taStyle};margin-bottom:8px" oninput="projEditDebounced('${p.id}','deliverable',this.value)">${escHtml(p.deliverable)}</textarea>
-        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Definition of Done</label>
+      // Definition of Done only — the separate "Deliverable" field was
+      // redundant with DoD and has been retired from the UI. The Airtable
+      // field is kept for now in case any legacy records contain content.
+      html+=`<h4 style="margin-top:12px">Definition of Done</h4>
         <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','defOfDone',this.value)">${escHtml(p.defOfDone)}</textarea>`;
       // Linked tasks
       html+=`<h4 style="margin-top:12px">Linked Tasks (${linked.length})</h4>`;
