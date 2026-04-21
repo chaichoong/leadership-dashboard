@@ -1164,8 +1164,8 @@ async function wizSend() {
 }
 
 // Decide whether to overwrite silently or ask the user how to combine with
-// existing content. Three choices: Replace, Add (append), or Incorporate
-// (AI merges intelligently).
+// existing content. Three choices: Replace, Add (append), or Amend with AI
+// (AI applies the founder's instruction to the existing text).
 function applyOrAskToMerge(step, newText) {
     if (!step.targetFid) {
         advanceStep();
@@ -1199,7 +1199,7 @@ function showMergePicker(step, newText, existingText) {
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;line-height:1.5">
         <strong>Replace</strong> · Discard the existing text. AI writes your answer as the new value.<br>
         <strong>Add</strong> · Keep the existing text. AI smooths your answer in as a clean addition (no duplicated facts).<br>
-        <strong>Incorporate with AI</strong> · Treat your answer as an instruction ("change 20k to 15k", "tighten this", "add a line about X") and let AI apply it to the existing text.</div>`;
+        <strong>Amend with AI</strong> · Treat your answer as an instruction ("change 20k to 15k", "tighten this", "add a line about X") and let AI apply it to the existing text.</div>`;
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     const mk = (label, handler) => {
@@ -1216,7 +1216,7 @@ function showMergePicker(step, newText, existingText) {
         const merged = await aiAddContent(existingText, newText, step);
         resolveMerge(step, merged);
     }));
-    btnRow.appendChild(mk('Incorporate with AI', async () => {
+    btnRow.appendChild(mk('Amend with AI', async () => {
         btnRow.querySelectorAll('button').forEach(b => { b.disabled = true; });
         const merged = await aiMerge(existingText, newText, step);
         resolveMerge(step, merged);
@@ -1228,7 +1228,7 @@ function showMergePicker(step, newText, existingText) {
     // the visible message log will replay the picker on resume.
     if (wizardState) {
         (wizardState.visibleMessages = wizardState.visibleMessages || []).push({
-            role: 'system', content: '(merge picker — Replace / Add / Incorporate was shown)'
+            role: 'system', content: '(merge picker — Replace / Add / Amend with AI was shown)'
         });
         persistWizardState();
     }
