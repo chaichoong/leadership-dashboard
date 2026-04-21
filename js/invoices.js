@@ -42,6 +42,11 @@
 
     async function fetchInvoicesFromAirtable() {
         if (!PAT) return;
+        // Show loading spinner, hide table
+        const spinner = document.getElementById('invoiceLoadingSpinner');
+        const table = document.getElementById('invoiceTable');
+        if (spinner) spinner.style.display = 'flex';
+        if (table) table.style.display = 'none';
         try {
             const params = new URLSearchParams({
                 'filterByFormula': "NOT({Status}='Paid')",
@@ -77,12 +82,18 @@
             invoiceRefreshedAt = new Date();
             invoiceTabRendered = false;
             updateInvoicesSidebarBadge();
+            // Hide spinner, show table
+            if (spinner) spinner.style.display = 'none';
+            if (table) table.style.display = '';
             if (document.getElementById('tab-invoices').classList.contains('active')) {
                 renderInvoiceTab();
             }
             fetchGmailLabelCount();
         } catch (e) {
             console.warn('Airtable invoice fetch failed:', e.message);
+            // Hide spinner on error too, show table with whatever we have
+            if (spinner) spinner.style.display = 'none';
+            if (table) table.style.display = '';
         }
     }
 

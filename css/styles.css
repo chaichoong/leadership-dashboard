@@ -248,6 +248,7 @@ body {
 .inv-approve-btn:hover { background: var(--success); color: #fff; }
 .inv-reject-btn { font-size: var(--fs-xs); font-weight: var(--fw-semibold); padding: 3px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-secondary); cursor: pointer; }
 .inv-reject-btn:hover { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+@keyframes inv-spin { to { transform: rotate(360deg); } }
 @keyframes inv-save-ok { 0% { background: var(--success-bg); } 100% { background: transparent; } }
 @keyframes inv-save-fail { 0% { background: var(--danger-bg); } 100% { background: transparent; } }
 .inv-flash-ok { animation: inv-save-ok 1.2s ease-out; }
