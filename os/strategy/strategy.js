@@ -1024,10 +1024,8 @@ async function wizSend() {
     // If we've already pushed back MAX times, auto-accept so we don't loop.
     if (wizardState.pushbackCount >= MAX_PUSHBACKS_PER_STEP) {
         wizardState.answers[step.id] = text;
-        applyFieldValueInUI(step.targetFid(), text);
         appendWizMessage('assistant', 'Accepted — moving on. You can sharpen this in the form later if you want.');
-        wizardState.stepIndex++;
-        askCurrentStep();
+        applyOrAskToMerge(step, text);
         return;
     }
 
@@ -1046,15 +1044,109 @@ async function wizSend() {
         return;
     }
     // Accept
-    wizardState.answers[step.id] = critique?.refined || text;
+    const accepted = critique?.refined || text;
+    wizardState.answers[step.id] = accepted;
     if (critique?.note) appendWizMessage('assistant', critique.note);
+    applyOrAskToMerge(step, accepted);
+}
 
-    if (step.targetFid) {
-        const fid = step.targetFid();
-        if (fid) applyFieldValueInUI(fid, wizardState.answers[step.id]);
+// Decide whether to overwrite silently or ask the user how to combine with
+// existing content. Three choices: Replace, Add (append), or Incorporate
+// (AI merges intelligently).
+function applyOrAskToMerge(step, newText) {
+    if (!step.targetFid) {
+        advanceStep();
+        return;
     }
+    const fid = step.targetFid();
+    const existing = currentValueForField(fid);
+    const newTrim = (newText || '').trim();
+    const existingTrim = (existing || '').trim();
+    // No prior content, or identical — just apply and move on.
+    if (!existingTrim || existingTrim === newTrim) {
+        applyFieldValueInUI(fid, newText);
+        advanceStep();
+        return;
+    }
+    showMergePicker(step, newText, existing);
+}
+
+function advanceStep() {
+    if (wizardState.focusStepId) { closeWizard({ keepSession: false }); return; }
     wizardState.stepIndex++;
     askCurrentStep();
+    persistWizardState();
+}
+
+function showMergePicker(step, newText, existingText) {
+    const host = document.getElementById('wizMessages');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg system merge-picker';
+    wrap.innerHTML = `<div style="font-weight:600;color:var(--text-primary);margin-bottom:4px">The field already has content — how should this be applied?</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
+        <strong>Replace</strong>: drop the existing text, use only your new answer.<br>
+        <strong>Add</strong>: append your new answer to the existing text.<br>
+        <strong>Incorporate</strong>: Claude merges them intelligently.</div>`;
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+    const mk = (label, handler) => {
+        const b = document.createElement('button');
+        b.className = 'btn btn-ghost';
+        b.style.cssText = 'font-size:11px;padding:4px 10px';
+        b.textContent = label;
+        b.onclick = handler;
+        return b;
+    };
+    btnRow.appendChild(mk('Replace', () => resolveMerge(step, newText)));
+    btnRow.appendChild(mk('Add', () => resolveMerge(step, existingText.trimEnd() + '\n\n' + newText)));
+    btnRow.appendChild(mk('Incorporate with AI', async () => {
+        btnRow.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        const merged = await aiMerge(existingText, newText, step);
+        resolveMerge(step, merged);
+    }));
+    wrap.appendChild(btnRow);
+    host.appendChild(wrap);
+    host.scrollTop = host.scrollHeight;
+    // Persist so a refresh mid-pick doesn't leave the wizard in a weird state —
+    // the visible message log will replay the picker on resume.
+    if (wizardState) {
+        (wizardState.visibleMessages = wizardState.visibleMessages || []).push({
+            role: 'system', content: '(merge picker — Replace / Add / Incorporate was shown)'
+        });
+        persistWizardState();
+    }
+}
+
+function resolveMerge(step, finalText) {
+    if (!wizardState) return;
+    const fid = step.targetFid();
+    applyFieldValueInUI(fid, finalText);
+    wizardState.answers[step.id] = finalText;
+    advanceStep();
+}
+
+async function aiMerge(existing, addition, step) {
+    const system = buildCachedWizardSystem(
+        `Strategy Plan OS — ${wizardState.businessName}. Merging a new addition into an existing field.`,
+        `You have existing text for "${step.label}" and a new addition the founder wants incorporated. Return ONLY the merged text — no explanation, no commentary, no JSON. Preserve the structure and tone of the existing text. Incorporate the new material where it fits best, and tighten for coherence. Do not lose any substance from either side; if they conflict, prefer the newer content.`
+    );
+    try {
+        const res = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 1500,
+                system,
+                messages: [
+                    { role: 'user', content: `EXISTING:\n${existing}\n\nNEW TO INCORPORATE:\n${addition}\n\nReturn the merged text only.` },
+                ],
+            }),
+        });
+        if (!res.ok) return existing.trimEnd() + '\n\n' + addition;
+        const data = await res.json();
+        return (data.content?.[0]?.text || '').trim() || (existing.trimEnd() + '\n\n' + addition);
+    } catch (e) { return existing.trimEnd() + '\n\n' + addition; }
 }
 
 // "Move on →" — user wants to skip this step regardless of what's been said.
