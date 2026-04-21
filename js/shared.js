@@ -32,6 +32,16 @@
     }
 
     function smartRefresh() {
+        // Don't refresh while the user is in an OS iframe (Strategy, Tasks,
+        // Launch Plan, etc.) — a dashboard reload blows through the loading
+        // overlay and drops any in-flight wizard/form state.
+        const activeTab = (window.location.hash || '#overview').slice(1);
+        const iframeTabs = ['os-strategy', 'os-hub', 'os-bplan', 'tasks', 'launch-plan', 'comms', 'compliance', 'airtable'];
+        if (iframeTabs.includes(activeTab)) {
+            refreshPending = true;
+            scheduleIdleRefresh();
+            return;
+        }
         const idleTime = Date.now() - lastUserActivity;
         if (idleTime >= IDLE_THRESHOLD || lastUserActivity === 0) {
             // User has been idle — refresh immediately

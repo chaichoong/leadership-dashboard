@@ -786,6 +786,10 @@ const WIZARD_STEPS = [
     { id: 'qp3m3', label: 'QP3 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[2][2], ask: 'QP3 — Month 3.' },
 ];
 
+// Max number of pushbacks the mentor is allowed per step before auto-accepting.
+// Without this, a stubborn answer can loop forever.
+const MAX_PUSHBACKS_PER_STEP = 2;
+
 function openWizard() {
     const { businessId, quarter, year } = getSelection();
     if (!businessId || !quarter || !year) {
@@ -797,11 +801,13 @@ function openWizard() {
         answers: {},       // { stepId: text }
         priorRecord: null, // loaded below
         businessName: allBusinessesLocal.find(b => b.id === businessId)?.name || '',
+        stepHistory: [],   // [{role:'user'|'assistant', content}] for the CURRENT step
+        pushbackCount: 0,  // reset when we advance to the next step
     };
     document.getElementById('wizardPanel').style.display = 'flex';
     document.querySelector('.layout').classList.add('with-wizard');
     document.getElementById('wizMessages').innerHTML = '';
-    appendWizMessage('system', 'Boardroom Mentor. UK English, direct, analytical. I will challenge anything vague.');
+    appendWizMessage('system', "Boardroom Mentor. UK English, direct, analytical. I'll challenge vague answers once or twice — after that I'll accept what you've given and move on. Use 'Move on →' any time to skip ahead.");
 
     loadPriorQuarter().then(() => askCurrentStep());
 }
@@ -867,6 +873,9 @@ function askCurrentStep() {
     const step = currentStep();
     document.getElementById('wizStepLabel').textContent = step ? `Step ${wizardState.stepIndex + 1} of ${WIZARD_STEPS.length} · ${step.label}` : 'Complete';
     if (!step) return finaliseWizard();
+    // Reset per-step critique history — new step starts with no memory of the old one.
+    wizardState.stepHistory = [];
+    wizardState.pushbackCount = 0;
     appendWizMessage('assistant', step.ask);
 
     // Show the current/prior value inline so the user can iterate rather than retype.
@@ -874,7 +883,7 @@ function askCurrentStep() {
         const fid = step.targetFid();
         const existing = currentValueForField(fid);
         if (existing) {
-            appendWizMessage('system', `Currently:\n\n${existing}\n\nType your iteration, or press Skip to keep as-is.`);
+            appendWizMessage('system', `Currently:\n\n${existing}\n\nType your iteration, or press 'Move on →' to keep as-is.`);
         }
     }
 }
@@ -897,12 +906,40 @@ async function wizSend() {
     const step = currentStep();
     if (!step) return;
     appendWizMessage('user', text);
+    wizardState.stepHistory.push({ role: 'user', content: text });
 
-    // Let Boardroom Mentor critique it before accepting.
-    const critique = await boardroomCritique(step, text);
+    // Reflection / discovery steps have no target field — they're just context
+    // gathering for the mentor. Accept without critique so the user can move on.
+    if (!step.targetFid) {
+        wizardState.answers[step.id] = text;
+        appendWizMessage('assistant', 'Noted — using this to set the bar for the rest of the session.');
+        wizardState.stepIndex++;
+        askCurrentStep();
+        return;
+    }
+
+    // If we've already pushed back MAX times, auto-accept so we don't loop.
+    if (wizardState.pushbackCount >= MAX_PUSHBACKS_PER_STEP) {
+        wizardState.answers[step.id] = text;
+        applyFieldValueInUI(step.targetFid(), text);
+        appendWizMessage('assistant', 'Accepted — moving on. You can sharpen this in the form later if you want.');
+        wizardState.stepIndex++;
+        askCurrentStep();
+        return;
+    }
+
+    // Let Boardroom Mentor critique it, with the full step history so it can
+    // see what has already been asked and answered and not repeat itself.
+    const critique = await boardroomCritique(step, wizardState.stepHistory);
     if (critique && critique.accept === false) {
-        appendWizMessage('assistant', critique.pushback);
-        // Wait for revised answer — do not advance step.
+        wizardState.pushbackCount++;
+        const pushback = critique.pushback || 'Can you be more specific?';
+        wizardState.stepHistory.push({ role: 'assistant', content: pushback });
+        const remaining = MAX_PUSHBACKS_PER_STEP - wizardState.pushbackCount;
+        const tail = remaining > 0
+            ? `\n\n(${remaining} more push-back before I auto-accept. Hit 'Move on →' any time to skip.)`
+            : "\n\n(I'll accept your next answer as-is and move on.)";
+        appendWizMessage('assistant', pushback + tail);
         return;
     }
     // Accept
@@ -917,11 +954,15 @@ async function wizSend() {
     askCurrentStep();
 }
 
+// "Move on →" — user wants to skip this step regardless of what's been said.
+// Commit whatever's already in the form field (pre-filled or last accepted)
+// so we don't blank it. If nothing is there, the field just stays empty.
 function wizSkip() {
     if (!wizardState) return;
     const step = currentStep();
     if (!step) return;
-    appendWizMessage('user', '(skipped)');
+    appendWizMessage('user', '(moving on)');
+    // Keep whatever's already in the form for this step's target field.
     wizardState.stepIndex++;
     askCurrentStep();
 }
@@ -949,25 +990,35 @@ function applyFieldValueInUI(fid, value) {
     }
 }
 
-async function boardroomCritique(step, answer) {
+async function boardroomCritique(step, history) {
     // Call Claude to critique. Return { accept: true/false, pushback?: "…", refined?: "…", note?: "…" }
-    // Cheap haiku for fast interaction.
+    // `history` is the full back-and-forth for THIS step so the mentor sees what
+    // it has already asked and doesn't repeat the same challenge verbatim.
     const priorContext = wizardState.priorRecord
         ? `Prior quarter's record (for reference): ${JSON.stringify(extractCompactPrior(wizardState.priorRecord))}`
         : 'No prior quarter record — starting fresh.';
+    const attemptCount = history.filter(m => m.role === 'user').length;
     const system = buildCachedWizardSystem(
         `Strategy Plan OS — ${wizardState.businessName}. ${priorContext}`,
-        `You are interviewing the founder to build this quarter's strategy plan, one field at a time. Section: "${step.label}". Question asked: "${step.ask}"
+        `You are interviewing the founder to build this quarter's strategy plan, one field at a time.
 
-Your job: critique the founder's answer against the standards you apply. An answer is ACCEPTABLE if it is:
-- Specific (numbers, dates, names, not vague adjectives)
-- Testable ("done" is observable)
-- Sized appropriately for the horizon (nine-year: visionary; quarterly project: 90 days of focus; monthly stepping stone: 30 days of deliverable work)
+Section: "${step.label}"
+Question you asked: "${step.ask}"
+This is the founder's attempt #${attemptCount} at answering.
+
+GUIDING PRINCIPLE — ACCEPT MORE THAN YOU REJECT. Your job is to help them think sharper, not block them. Accept any answer that is:
+- At least moderately specific (a concrete deliverable, number, or direction — doesn't need to be perfect)
+- Sized roughly right for the horizon (9-year = visionary, quarterly project = 90 days, monthly stone = 30 days of work)
+- Not pure motivational fluff ("be the best", "crush it")
+
+If there's genuine weakness, push back ONCE with a specific, focused challenge. After one push-back you should lean strongly toward accepting the next answer even if imperfect — the founder can refine in the form.
+
+IMPORTANT: Look at the full conversation above. If you've already pushed back on the same point, DO NOT repeat the same push-back. Either accept, or push on a different dimension. Repeating yourself blocks progress and is a failure on your part.
 
 Reply with a JSON object ONLY, nothing else. Shape:
-{"accept": true|false, "pushback"?: "one-paragraph challenge in UK English, ruthlessly direct, naming what is weak and what you want them to add/change", "refined"?: "your tightened version of their answer if you accept it and think it should be sharpened — otherwise omit", "note"?: "one short confirmation line after accept, optional"}
+{"accept": true|false, "pushback"?: "one short paragraph (2–3 sentences max) in UK English, naming one specific thing to add or sharpen — never repeat a point you've already made", "refined"?: "your tightened version of their latest answer if you accept — otherwise omit", "note"?: "one short confirmation line after accept, optional"}
 
-Do not accept vague motivational language. Do not ask more than one follow-up question in the pushback. If it is genuinely specific and testable, accept and optionally refine.`
+Do not accept pure platitudes. Do accept rough-but-usable answers, especially on attempt 2+. Prefer 'accept with refined tightening' over 'reject'.`
     );
     try {
         const res = await fetch(AI_PROXY, {
@@ -977,7 +1028,8 @@ Do not accept vague motivational language. Do not ask more than one follow-up qu
                 model: 'claude-haiku-4-5-20251001',
                 max_tokens: 600,
                 system,
-                messages: [{ role: 'user', content: `Founder's answer: ${answer}` }],
+                // Pass the full per-step conversation so the model sees what it's already asked.
+                messages: history.map(m => ({ role: m.role, content: m.content })),
             }),
         });
         if (!res.ok) return { accept: true }; // fail open
