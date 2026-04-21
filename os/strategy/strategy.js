@@ -747,9 +747,24 @@ async function saveRecord() {
 // ═════════════════════════════════════════════════════════════════════
 
 const WIZARD_STEPS = [
+    // ── Objective plan (top of the form — reviewed rarely, but important to
+    //    set the frame before anything below it.)
     { id: 'reflection', label: 'Quarterly reflection', needsPrior: true,
       ask: 'Looking back at last quarter: what hit, what missed, and why? I\'ll use this to set the bar for this quarter.',
-      targetFid: null /* not saved, just conversation context */ },
+      targetFid: null /* discovery — not saved */ },
+    { id: 'objective', label: 'Objective', targetFid: () => OBJSTRAT.objective,
+      ask: 'The overarching objective of the business in one tight paragraph. Why does it exist, and what does it ultimately produce? Specific enough that a stranger could repeat it back.' },
+    { id: 'targetWhat', label: 'Target — What we do', targetFid: () => OBJSTRAT.targetWhat,
+      ask: 'What we do — one sentence. The product or service, in plain language. No adjectives unless they\'re doing real work.' },
+    { id: 'targetWho', label: 'Target — Who we do it for', targetFid: () => OBJSTRAT.targetWho,
+      ask: 'Who we do it for — the specific target customer. Segment, size, and what qualifies them as ideal.' },
+    { id: 'targetHow', label: 'Target — How we do it', targetFid: () => OBJSTRAT.targetHow,
+      ask: 'How we do it — the method or approach in one sentence. What\'s distinctive about the way you deliver?' },
+    { id: 'customerProfile', label: 'Customer Profile', targetFid: () => OBJSTRAT.customerProfile,
+      ask: 'Detailed customer profile. Who are you targeting, what do they look like (stage, size, budget, mindset), and what do you NOT target? Bullets are fine.' },
+    { id: 'enticement', label: 'Enticement', targetFid: () => OBJSTRAT.enticement,
+      ask: 'The enticement — the offer your target market cannot refuse. One paragraph. What makes it hard to say no?' },
+    // ── Strategy plan (quarterly cadence — where most of the iteration happens.)
     { id: 'nineYear', label: 'Nine-Year Target', targetFid: () => OBJSTRAT.nineYearTarget,
       ask: 'Paint the nine-year picture of this business. Be specific and visual — what does it look like, sound like, count like? If it is vague I will push back.' },
     { id: 'threeYear', label: 'Three-Year Target', targetFid: () => OBJSTRAT.threeYearTarget,
@@ -912,7 +927,11 @@ async function wizSend() {
     // gathering for the mentor. Accept without critique so the user can move on.
     if (!step.targetFid) {
         wizardState.answers[step.id] = text;
-        appendWizMessage('assistant', 'Noted — using this to set the bar for the rest of the session.');
+        // Reflection feeds later steps: store it on the wizard state so every
+        // subsequent critique call includes it as context. This is how "what
+        // missed last quarter" actually shapes "this quarter's measurables."
+        if (step.id === 'reflection') wizardState.reflection = text;
+        appendWizMessage('assistant', 'Noted — I\'ll refer back to this as we work through the rest of the sections.');
         wizardState.stepIndex++;
         askCurrentStep();
         return;
@@ -997,9 +1016,12 @@ async function boardroomCritique(step, history) {
     const priorContext = wizardState.priorRecord
         ? `Prior quarter's record (for reference): ${JSON.stringify(extractCompactPrior(wizardState.priorRecord))}`
         : 'No prior quarter record — starting fresh.';
+    const reflectionContext = wizardState.reflection
+        ? `\n\nFOUNDER'S REFLECTION ON LAST QUARTER (their own words — reference when relevant so "what missed" shapes "what we commit to now"):\n"${wizardState.reflection}"`
+        : '';
     const attemptCount = history.filter(m => m.role === 'user').length;
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. ${priorContext}`,
+        `Strategy Plan OS — ${wizardState.businessName}. ${priorContext}${reflectionContext}`,
         `You are interviewing the founder to build this quarter's strategy plan, one field at a time.
 
 Section: "${step.label}"
