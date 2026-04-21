@@ -651,17 +651,24 @@ function autosizeAll() {
     equaliseQuarterlyProjects();
 }
 
-// Lines up the 3 Quarterly Project columns: the Project description textarea
-// matches across columns, then M1 across, M2 across, M3 across. That way the
-// stepping stones in each card sit at the same y-position.
+// Lines up the 3 Quarterly Project columns. Every QP card has the same
+// textarea structure in the same DOM order (Project, KPI Tracking, KPI DoD,
+// stone M1, stone M2, stone M3), so we match each textarea at position N
+// across all three cards and set min-height to the tallest. That way every
+// horizontal row of fields across the three columns sits at the same height.
 function equaliseQuarterlyProjects() {
     const cards = document.querySelectorAll('.qp-card');
     if (cards.length !== 3) return;
-    const projectTAs = Array.from(cards).map(c => c.querySelector('.field-row textarea')).filter(Boolean);
-    equaliseTextareas(projectTAs);
-    for (let m = 0; m < 3; m++) {
-        const stoneTAs = Array.from(cards).map(c => c.querySelectorAll('.stone textarea')[m]).filter(Boolean);
-        equaliseTextareas(stoneTAs);
+    const tasByCard = Array.from(cards).map(c => Array.from(c.querySelectorAll('textarea')));
+    // Reset + re-measure every textarea before we equalise, otherwise a prior
+    // min-height masks the true natural height of the tallest in the row.
+    tasByCard.flat().forEach(t => { t.style.minHeight = ''; autosize(t); });
+    const maxLen = Math.max(...tasByCard.map(arr => arr.length));
+    for (let pos = 0; pos < maxLen; pos++) {
+        const tas = tasByCard.map(arr => arr[pos]).filter(Boolean);
+        if (tas.length < 2) continue;
+        const max = Math.max(...tas.map(t => t.offsetHeight));
+        tas.forEach(t => { t.style.minHeight = max + 'px'; });
     }
 }
 
