@@ -240,13 +240,14 @@
             <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
-        <!-- Tab 2: Airtable View -->
+        <!-- Tab 2: Contractor Job List — filtered view of the Tasks OS (Maintenance Ticket = true) -->
         <div class="tab-panel" id="tab-airtable">
             <iframe class="tab-panel-iframe" id="airtableFrame"
                 src=""
-                data-src="https://airtable.com/embed/appnqjDpqDniH3IRl/shrFbO4lsRlSC6swt"
+                data-src="os/tasks/index.html?filter=maintenance"
                 loading="lazy"
-                allowfullscreen>
+                allowfullscreen
+                style="border:none">
             </iframe>
         </div>
 
@@ -454,7 +455,7 @@
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
     <script defer src="js/config.js?v=15"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
-    <script defer src="js/shared.js?v=16"></script>
+    <script defer src="js/shared.js?v=17"></script>
     <script defer src="js/dashboard.js?v=12"></script>
     <script defer src="js/cashflow.js?v=11"></script>
     <script defer src="js/sitemap.js?v=11"></script>
