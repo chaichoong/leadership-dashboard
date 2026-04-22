@@ -717,6 +717,13 @@ async function runSyncCheck(){
     const drift=[];
     const byId=new Map();
     fresh.forEach(r=>byId.set(r.id,r));
+    // parseTask injects "(Untitled)" for tasks with blank names; treat that
+    // placeholder as equivalent to blank so we don't get false-positive drifts
+    const norm=v=>{
+      const s=(v==null?'':String(v)).trim();
+      if(s==='(Untitled)'||s==='(Untitled Project)')return '';
+      return s;
+    };
     (allTasks||[]).forEach(t=>{
       const r=byId.get(t.id);if(!r)return;
       // Airtable REST returns field data under .fields when returnFieldsByFieldId
@@ -730,7 +737,7 @@ async function runSyncCheck(){
         ['description',t.description||'',c[F.description]||''],
       ];
       checks.forEach(([field,local,remote])=>{
-        if((local||'')!==(remote||''))drift.push({taskId:t.id,name:t.name,field,local,remote});
+        if(norm(local)!==norm(remote))drift.push({taskId:t.id,name:t.name,field,local,remote});
       });
     });
     if(!res)return;
