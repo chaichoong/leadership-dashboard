@@ -1282,7 +1282,7 @@ function renderCollaboratorsDrawer(t){
     return `<span class="collab-chip" title="Click x to remove" style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:12px;padding:2px 4px 2px 2px;font-size:11px;margin:0 4px 4px 0">
       <span class="avatar avatar-${k}" style="width:18px;height:18px;font-size:9px">${escHtml(init)}</span>
       ${escHtml(first)}
-      <button onclick="removeCollaborator('${taskId}','${safeEmail}')" title="Remove ${escHtml(nm)}" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;line-height:1;padding:1px 5px;border-radius:50%;transition:all .15s" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button>
+      <button type="button" onclick="removeCollaborator('${taskId}','${safeEmail}',event)" title="Remove ${escHtml(nm)}" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:16px;line-height:1;padding:2px 7px;border-radius:50%;transition:all .15s;font-weight:700" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button>
     </span>`;
   }).join('');
   let addBtn='';
@@ -1290,7 +1290,7 @@ function renderCollaboratorsDrawer(t){
     addBtn=`<span style="position:relative;display:inline-block">
       <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="toggleCollabMenu(event)">+ Add Collaborator</button>
       <div id="collabAddMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:10;min-width:200px">
-        ${available.map(m=>`<div onclick="addCollaborator('${taskId}','${m.email}')" style="padding:8px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:20px;height:20px;font-size:10px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
+        ${available.map(m=>`<div onclick="addCollaborator('${taskId}','${m.email}',event)" style="padding:8px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:20px;height:20px;font-size:10px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
       </div>
     </span>`;
   } else {
@@ -1335,14 +1335,22 @@ async function patchCollaborators(taskId,newList,label){
     toast('Failed to update collaborators',true);
   }
 }
-async function addCollaborator(taskId,email){
-  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+async function addCollaborator(taskId,email,ev){
+  if(ev){try{ev.stopPropagation();ev.preventDefault()}catch(_){}}
+  console.log('[addCollaborator]',taskId,email);
+  const task=allTasks.find(t=>t.id===taskId);
+  if(!task){console.warn('addCollaborator: task not found',taskId);toast('Could not find task',true);return}
+  // Close the add menu if open
+  const menu=document.getElementById('collabAddMenu');if(menu)menu.style.display='none';
   const next=[...(task.collaborators||[]),{email}];
   const m=TEAM.find(x=>x.email===email);
   await patchCollaborators(taskId,next,`Added ${m?m.name:email} as collaborator`);
 }
-async function removeCollaborator(taskId,email){
-  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+async function removeCollaborator(taskId,email,ev){
+  if(ev){try{ev.stopPropagation();ev.preventDefault()}catch(_){}}
+  console.log('[removeCollaborator]',taskId,email);
+  const task=allTasks.find(t=>t.id===taskId);
+  if(!task){console.warn('removeCollaborator: task not found',taskId);toast('Could not find task',true);return}
   const next=(task.collaborators||[]).filter(c=>(c.email||'').toLowerCase()!==(email||'').toLowerCase());
   const m=TEAM.find(x=>x.email===email);
   await patchCollaborators(taskId,next,`Removed ${m?m.name:email} as collaborator`);
