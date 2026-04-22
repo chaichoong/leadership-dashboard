@@ -357,7 +357,11 @@
         // Task Manager lazy-load
         if (tabId === 'tasks') {
             const frame = document.getElementById('tasksFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('tasks')) frame.src = frame.dataset.src;
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('tasks')) {
+                // Cache-bust so Pages deploys of os/tasks/index.html are picked up
+                // without the user having to clear their browser cache.
+                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+            }
         }
         // Launch Plan lazy-load
         if (tabId === 'launch-plan') {
