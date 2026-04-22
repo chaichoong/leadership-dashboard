@@ -2115,26 +2115,49 @@ async function exportPlanToPDF() {
         return;
     }
     if (typeof html2pdf === 'undefined') {
-        setStatus('error', 'PDF library failed to load. Check your connection.');
+        setStatus('error', 'PDF library failed to load. Check your connection and retry.');
         return;
     }
     const { businessId, quarter, year } = getSelection();
     const businessName = allBusinessesLocal.find(b => b.id === businessId)?.name || 'Business';
-    const doc = buildPrintableDocument(currentRecord.fields || {}, businessName, quarter, year);
-    // Offscreen staging container — html2pdf renders from it.
+    // Use the live form values (not currentRecord.fields) so the PDF reflects
+    // what's on screen — avoids any field-key / staleness issues.
+    const fieldData = readAllFormFields();
+    const doc = buildPrintableDocument(fieldData, businessName, quarter, year);
+
+    // Full-screen blocker so the founder doesn't see the staging element
+    // flash in and out of view while html2canvas is rendering.
+    const blocker = document.createElement('div');
+    blocker.id = 'pdf-blocker';
+    blocker.style.cssText = 'position:fixed;inset:0;background:rgba(28,36,34,0.75);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;gap:14px;font-family:Inter,system-ui,sans-serif';
+    blocker.innerHTML = '<div class="spinner" style="width:36px;height:36px;border:3px solid rgba(255,255,255,0.25);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite"></div><div>Building your PDF…</div>';
+    document.body.appendChild(blocker);
+
+    // Staging container — html2canvas requires the element to be in the
+    // viewport, so we position it top-left at z-index just below the blocker.
+    // Width 794px = A4 portrait at 96 DPI.
     const stage = document.createElement('div');
-    stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;color:#1C2422;font-family:Inter,system-ui,sans-serif';
+    stage.style.cssText = 'position:fixed;top:0;left:0;width:794px;background:#fff;color:#1C2422;font-family:Inter,system-ui,sans-serif;z-index:9999;overflow:visible';
     stage.appendChild(doc);
     document.body.appendChild(stage);
+
     try {
-        setStatus('info', 'Building PDF…');
         const fileName = `${slugify(businessName)}-${quarter}-${year}-plan.pdf`;
         await html2pdf()
             .set({
                 margin: [14, 14, 18, 14],
                 filename: fileName,
-                pagebreak: { mode: ['css', 'legacy'], avoid: ['.pdf-section', '.pdf-card', '.pdf-qp'] },
-                html2canvas: { scale: 2, useCORS: true, letterRendering: true, backgroundColor: '#FFFFFF' },
+                pagebreak: { mode: ['css', 'legacy'], avoid: ['.pdf-section', '.pdf-card', '.pdf-qp', '.num-row'] },
+                html2canvas: {
+                    scale: 2,
+                    useCORS: true,
+                    letterRendering: true,
+                    backgroundColor: '#FFFFFF',
+                    // Force a consistent rendering window so content doesn't clip.
+                    windowWidth: 794,
+                    scrollX: 0,
+                    scrollY: 0,
+                },
                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
             })
             .from(stage)
@@ -2143,9 +2166,10 @@ async function exportPlanToPDF() {
         setTimeout(() => setStatus('', ''), 3000);
     } catch (e) {
         console.error('[exportPlanToPDF]', e);
-        setStatus('error', `PDF export failed: ${e.message || e}`);
+        setStatus('error', `PDF export failed: ${e.message || e}. Check the console for details.`);
     } finally {
-        document.body.removeChild(stage);
+        if (stage.parentNode) stage.parentNode.removeChild(stage);
+        if (blocker.parentNode) blocker.parentNode.removeChild(blocker);
     }
 }
 
