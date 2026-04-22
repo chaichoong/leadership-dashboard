@@ -3012,7 +3012,7 @@ function renderProjects(){
       const curOwner=p.ownerKey||'';
       html+=`<h4>Details</h4><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px">
         <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Owner</label><select class="inline-select" onchange="updateProjectField('${p.id}','owner',this.value)" style="width:100%"><option value="" ${curOwner===''?'selected':''}>No owner</option>${TEAM.map(m=>`<option value="${m.key}" ${curOwner===m.key?'selected':''}>${m.name}</option>`).join('')}</select></div>
-        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Project Name</label><textarea onblur="updateProjectField('${p.id}','name',this.value)" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'" class="inline-input" style="width:100%;min-height:38px;resize:vertical;font-family:inherit;line-height:1.4;overflow-y:hidden;field-sizing:content" rows="${Math.max(1,Math.ceil((p.name||'').length/60))}">${escHtml(p.name)}</textarea></div>
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Project Name</label><textarea data-autosize onblur="updateProjectField('${p.id}','name',this.value)" oninput="autoSizeTextarea(this)" class="inline-input" style="width:100%;min-height:38px;resize:none;font-family:inherit;line-height:1.4;overflow:hidden;padding:8px">${escHtml(p.name)}</textarea></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Status</label><select class="inline-select" onchange="updateProjectField('${p.id}','status',this.value)" style="width:100%"><option value="">-</option>${PROJ_STATUS_OPTIONS.map(s=>`<option value="${s}" ${p.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Business</label><select class="inline-select" onchange="updateProjectField('${p.id}','business',this.value)" style="width:100%"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${p.business===b?'selected':''}>${b}</option>`).join('')}</select></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Start Date</label><input type="date" value="${p.start||''}" onchange="updateProjectField('${p.id}','start',this.value)" class="inline-input" style="width:100%"></div>
@@ -3115,7 +3115,17 @@ function renderProjects(){
   });
   html+=`</div>`;
   container.innerHTML=html;
+  // Auto-size all textareas flagged [data-autosize] so long project names wrap fully visible
+  requestAnimationFrame(()=>{
+    container.querySelectorAll('textarea[data-autosize]').forEach(autoSizeTextarea);
+  });
 }
+function autoSizeTextarea(el){
+  if(!el)return;
+  el.style.height='auto';
+  el.style.height=(el.scrollHeight+2)+'px';
+}
+window.autoSizeTextarea=autoSizeTextarea;
 function toggleProject(id){expandedProject=expandedProject===id?null:id;renderProjects()}
 
 async function updateProjectField(pid,fieldKey,val){
