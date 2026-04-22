@@ -101,10 +101,50 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Task table */
 .task-table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
 .task-table{width:100%;border-collapse:collapse;font-size:13px}
-.task-table th{background:var(--bg-surface-2);padding:10px 12px;text-align:left;font-weight:600;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1}
-.task-table td{padding:8px 12px;border-top:1px solid var(--border-default);vertical-align:middle}
-.task-table tbody tr:hover{background:var(--bg-surface-2)}
-.task-table tr.expanded{background:var(--bg-surface-2)}
+.task-table th{background:var(--bg-surface-2);padding:10px 12px;text-align:left;font-weight:700;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle)}
+.task-table th:last-child{border-right:none}
+.task-table td{padding:8px 10px;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);vertical-align:middle}
+.task-table td:last-child{border-right:none}
+/* Zebra striping — alternating row backgrounds */
+.task-table tbody tr:nth-child(even) td{background:var(--bg-surface-2)}
+.task-table tbody tr:hover td{background:var(--accent-soft)}
+.task-table tr.expanded td{background:var(--accent-soft)}
+
+/* Task name cell — slightly bolder, primary colour */
+.task-table .task-name{font-weight:600;color:var(--text-primary);font-size:13px;line-height:1.3}
+.task-table .task-name-cell{min-width:280px;max-width:380px}
+.task-table .task-desc{font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+
+/* Column-typed visual cues on inline selects */
+.task-table .inline-select[data-type="priority"][data-v="Project"]{border-color:var(--info);color:var(--info);background:var(--info-bg);font-weight:600}
+.task-table .inline-select[data-type="priority"][data-v="Urgent"]{border-color:var(--danger);color:var(--danger);background:var(--danger-bg);font-weight:600}
+.task-table .inline-select[data-type="priority"][data-v="Not Urgent"]{border-color:var(--success);color:var(--success);background:var(--success-bg)}
+.task-table .inline-select[data-type="priority"][data-v="High"]{border-color:var(--warning);color:var(--warning);background:var(--warning-bg)}
+.task-table .inline-select[data-type="status"][data-v="Today"]{border-color:var(--warning);color:var(--warning);background:var(--warning-bg);font-weight:600}
+.task-table .inline-select[data-type="status"][data-v="Upcoming"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.task-table .inline-select[data-type="status"][data-v="Approval"]{border-color:var(--info);color:var(--info);background:var(--info-bg)}
+.task-table .inline-select[data-type="status"][data-v="Overdue"]{border-color:var(--danger);color:var(--danger);background:var(--danger-bg);font-weight:600}
+.task-table .inline-select[data-type="status"][data-v="Completed"]{border-color:var(--success);color:var(--success);background:var(--success-bg)}
+.task-table .inline-select[data-type="business"][data-v="Real Estate"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.task-table .inline-select[data-type="business"][data-v="Operations Director"]{border-color:var(--info);color:var(--info);background:var(--info-bg)}
+.task-table .inline-select[data-type="business"][data-v="Personal"]{border-color:var(--text-secondary);color:var(--text-secondary);background:var(--bg-subtle)}
+
+/* Assignee cell with avatar inline */
+.task-table .assignee-inline{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
+.task-table .assignee-inline .avatar{width:22px;height:22px;font-size:10px;flex-shrink:0}
+
+/* Due date styling based on state */
+.task-table .due-today{color:var(--warning);font-weight:700}
+.task-table .due-overdue{color:var(--danger);font-weight:700}
+.task-table .due-normal input{color:var(--text-primary)}
+
+/* Hard deadline column — red flag when checked */
+.task-table .hard-cell input[type=checkbox]:checked{accent-color:var(--danger)}
+.task-table .hard-cell{text-align:center}
+
+/* Recurring pill */
+.task-table .recur-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
+.task-table .recur-pill.none{background:transparent;color:var(--text-muted);border-color:var(--border-subtle)}
 .task-name{font-weight:600;color:var(--text-primary);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-table .cb-cell{width:36px;text-align:center}
 .task-table .cb-cell input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--accent)}
@@ -2781,7 +2821,7 @@ function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
   // Preserve legacy values (e.g. priority="High") that are no longer offered
   const optList=current&&!options.includes(current)?[...options,current]:options;
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
-  return `<select class="inline-select" onchange="updateTaskField('${taskId}','${fieldKey}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
+  return `<select class="inline-select" data-type="${fieldKey}" data-v="${escHtml(current||'')}" onchange="updateTaskField('${taskId}','${fieldKey}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
 }
 // Inline project picker cell for the task list grid
 function inlineProjectPickerCell(t){
@@ -2809,14 +2849,21 @@ function renderTasks(){
     const checked=selectedTasks.has(t.id);
     const rowStyle=ov&&t.status!=='Overdue'?' style="border-left:3px solid var(--danger)"':'';
     const dispStatus=ov&&t.status!=='Overdue'&&t.status!=='Completed'?'Overdue':t.status;
-
+    const today=todayStr();
+    let dueCls='due-normal';
+    if(t.dueDate){
+      if(t.dueDate<today&&t.status!=='Completed')dueCls='due-overdue';
+      else if(t.dueDate===today)dueCls='due-today';
+    }
+    const k=teamKey(t.assigneeEmail);
+    const initials=t.assignee?t.assignee.split(' ').map(w=>w[0]).join('').slice(0,2):'';
     html+=`<tr${rowStyle}>
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
-      <td onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">${escHtml(t.description)}</div>`:''}</td>
-      <td onclick="event.stopPropagation()"><select class="inline-select" onchange="updateTaskField('${t.id}','assignee',this.value);renderTasks()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
-      <td onclick="event.stopPropagation()" style="text-align:center"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--danger)"></td>
+      <td class="task-name-cell" onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:''}</td>
+      <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value);renderTasks()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
+      <td class="${dueCls}" onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px;background:transparent;border-color:transparent;color:inherit;font-weight:inherit" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
+      <td class="hard-cell" onclick="event.stopPropagation()"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'timeEst',t.timeEst,['',...TIME_OPTIONS])}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'priority',t.priority,['',...PRIORITY_OPTIONS])}</td>
       <td onclick="event.stopPropagation()">${inlineProjectPickerCell(t)}</td>
