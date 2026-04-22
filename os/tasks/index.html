@@ -483,6 +483,7 @@ const F = {
   onHold:      'fldWib3IHh3jY9vBZ',
   business:    'fldLu1Y4GzyWcDoxr',
   projects:    'fldBg0rQy0FrOAkRN',
+  linkedProject:'fldppMqzKXckInLV7',  // alternate "Linked Project" field some clients may use
   origDueDate: 'fldS2OR7oQKC7T1to',
   hardDeadline:'fldZKzIxgyrQ8CG8a',
   someDay:     'fldmhkeRaDkiL3Ga4',
@@ -760,7 +761,11 @@ function parseTask(rec){
   const recurObj=gf(rec,F.recurring);
   const catObj=gf(rec,F.category);
   const businessLinks=gf(rec,F.business)||[];
-  const projectLinks=gf(rec,F.projects)||[];
+  // Merge BOTH "Projects" and "Linked Project" fields — some clients / automations
+  // populate the secondary field; we want tasks to show up either way.
+  const projectLinksA=gf(rec,F.projects)||[];
+  const projectLinksB=gf(rec,F.linkedProject)||[];
+  const projectLinks=[...(Array.isArray(projectLinksA)?projectLinksA:[]),...(Array.isArray(projectLinksB)?projectLinksB:[])];
   const timeDur=gf(rec,F.timeDur)||0;
   const timeEstName=selectName(timeEstObj);
   let minutes=0;
