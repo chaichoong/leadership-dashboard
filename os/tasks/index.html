@@ -484,8 +484,14 @@ const F = {
   hardDeadline:'fldZKzIxgyrQ8CG8a',
   someDay:     'fldmhkeRaDkiL3Ga4',
   collaborators:'fldcq3t6uAPgWSOP8',
+  maintenance: 'fldSEUvVA98as1HW6',
 };
 const TASK_FIELD_IDS = Object.values(F);
+
+// Optional URL filter: ?filter=maintenance narrows every view to tasks where
+// Maintenance Ticket = true. Used when the dashboard embeds this page as the
+// Contractor Job List tab.
+const MAINTENANCE_ONLY = new URLSearchParams(location.search).get('filter') === 'maintenance';
 
 const PF = {
   name:       'fldiMZICg1KOORpte',
@@ -795,6 +801,7 @@ function parseTask(rec){
     origDueDate:gf(rec,F.origDueDate)||'',
     hardDeadline:!!gf(rec,F.hardDeadline),
     someDay:!!gf(rec,F.someDay),
+    maintenance:!!gf(rec,F.maintenance),
     collaborators,
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
@@ -910,6 +917,8 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     // Clear persisted start time if task completes or moves to a different day
     if(fieldKey==='status'&&rawValue==='Completed'){
       const today=todayStr();saveStartTime(today,taskId,null);
+      // Bump completedTasks on any linked projects for live progress bar update
+      (task.projectIds||[]).forEach(pid=>{const p=allProjects.find(x=>x.id===pid);if(p)p.completedTasks=(p.completedTasks||0)+1});
     }
     if(fieldKey==='dueDate'){
       const today=todayStr();
@@ -1516,6 +1525,9 @@ async function applyProjectPick(taskId){
     task.projectIds=fresh.projectIds;
     task.projectNames=fresh.projectNames;
     if(setPriorityProject)task.priority='Project';
+    // Live delta update: adjust totalTasks count on affected projects immediately
+    // (rollup fields from Airtable would otherwise stay stale until next Refresh)
+    adjustProjectTaskCounts(oldProjectIds,task.projectIds);
     if(!_undoInProgress){
       pushUndo({type:'multi-patch',taskId,edits,label:projectId?`Linked project${setPriorityProject?' (priority -> Project)':''}`:'Unlinked project'});
     }
@@ -1526,6 +1538,17 @@ async function applyProjectPick(taskId){
     console.warn('project link failed',e);
     toast('Failed to link project',true);
   }
+}
+
+// Delta-update a project's task counts when a task's project links change.
+// Prevents the project card from showing stale rollup numbers until the next Refresh.
+function adjustProjectTaskCounts(oldProjectIds,newProjectIds){
+  const old=new Set(oldProjectIds||[]);
+  const nu=new Set(newProjectIds||[]);
+  // Projects losing the task
+  old.forEach(pid=>{if(!nu.has(pid)){const p=allProjects.find(x=>x.id===pid);if(p)p.totalTasks=Math.max(0,(p.totalTasks||0)-1)}});
+  // Projects gaining the task
+  nu.forEach(pid=>{if(!old.has(pid)){const p=allProjects.find(x=>x.id===pid);if(p)p.totalTasks=(p.totalTasks||0)+1}});
 }
 
 // ===== COMMENTS MODAL (CFV-style) =====
@@ -1673,6 +1696,8 @@ async function performDeleteTask(taskId){
       headers:{'Authorization':`Bearer ${PAT}`}
     });
     if(!res.ok)throw new Error('HTTP '+res.status);
+    // Decrement task counts on any linked projects before we lose the reference
+    adjustProjectTaskCounts(task.projectIds||[],[]);
     allTasks=allTasks.filter(t=>t.id!==taskId);
     if(drawerTaskId===taskId)closeDrawer();
     pushUndo({type:'delete',snapshot,label:`Deleted "${task.name}"`});
@@ -3316,6 +3341,7 @@ async function loadAllData(){
       fetchCalendarEvents(),
     ]);
     allTasks=rawTasks.map(parseTask);
+    if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);
     allProjects=rawProjects.map(parseProject);
     calendarEvents=cal;
 
