@@ -513,8 +513,7 @@ const F = {
   created:     'fldywB2EXESbXB7it',
   onHold:      'fldWib3IHh3jY9vBZ',
   business:    'fldLu1Y4GzyWcDoxr',
-  projects:    'fldBg0rQy0FrOAkRN',
-  linkedProject:'fldppMqzKXckInLV7',  // alternate "Linked Project" field some clients may use
+  projects:    'fldBg0rQy0FrOAkRN',  // single source of truth for task→project linking
   origDueDate: 'fldS2OR7oQKC7T1to',
   hardDeadline:'fldZKzIxgyrQ8CG8a',
   someDay:     'fldmhkeRaDkiL3Ga4',
@@ -835,11 +834,8 @@ function parseTask(rec){
   const recurObj=gf(rec,F.recurring);
   const catObj=gf(rec,F.category);
   const businessLinks=gf(rec,F.business)||[];
-  // Merge BOTH "Projects" and "Linked Project" fields — some clients / automations
-  // populate the secondary field; we want tasks to show up either way.
-  const projectLinksA=gf(rec,F.projects)||[];
-  const projectLinksB=gf(rec,F.linkedProject)||[];
-  const projectLinks=[...(Array.isArray(projectLinksA)?projectLinksA:[]),...(Array.isArray(projectLinksB)?projectLinksB:[])];
+  // Single source of truth for task→project linking: the Projects field
+  const projectLinks=gf(rec,F.projects)||[];
   const timeDur=gf(rec,F.timeDur)||0;
   const timeEstName=selectName(timeEstObj);
   let minutes=0;
@@ -1130,34 +1126,33 @@ function renderDedlineRow(t,opts){
 
 // Quick relink: change a task's linked project without opening the drawer
 async function quickRelinkProject(taskId,newProjectId){
-  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const task=allTasks.find(t=>t.id===taskId);if(!task)throw new Error('Task not found');
   const oldProjectIds=[...(task.projectIds||[])];
+  const oldProjectNames=[...(task.projectNames||[])];
   const oldPriority=task.priority;
   const payload={};
   payload[F.projects]=newProjectId?[{id:newProjectId}]:[];
-  const edits=[{fieldKey:'projects-link',oldRaw:{ids:oldProjectIds,names:[...(task.projectNames||[])]},newRaw:{projectId:newProjectId}}];
+  const edits=[{fieldKey:'projects-link',oldRaw:{ids:oldProjectIds,names:oldProjectNames},newRaw:{projectId:newProjectId}}];
   let setPriorityProject=false;
   if(newProjectId&&task.priority!=='Project'){
     payload[F.priority]='Project';
     setPriorityProject=true;
     edits.push({fieldKey:'priority',oldRaw:oldPriority,newRaw:'Project'});
   }
-  try{
-    const res=await patchTask(taskId,payload);
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const data=await res.json();
-    const fresh=parseTask(data);
-    task.projectIds=fresh.projectIds;
-    task.projectNames=fresh.projectNames;
-    if(setPriorityProject)task.priority='Project';
-    adjustProjectTaskCounts(oldProjectIds,task.projectIds);
-    if(!_undoInProgress)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
-    toast('Project updated');
-    renderAll();
-  }catch(e){
-    console.warn('quick relink failed',e);
-    toast('Failed: '+e.message,true);
+  const res=await patchTask(taskId,payload);
+  if(!res.ok){
+    let body='';try{body=await res.text()}catch(_){}
+    throw new Error('HTTP '+res.status+' '+body.slice(0,200));
   }
+  // Optimistic local update — do NOT parseTask() the response because the
+  // PATCH response is keyed by field NAME not field ID (parseTask reads IDs)
+  task.projectIds=newProjectId?[newProjectId]:[];
+  const newProj=newProjectId?allProjects.find(p=>p.id===newProjectId):null;
+  task.projectNames=newProj?[newProj.name]:[];
+  if(setPriorityProject)task.priority='Project';
+  adjustProjectTaskCounts(oldProjectIds,task.projectIds);
+  if(!_undoInProgress&&!_bulkOperation)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
+  if(!_bulkOperation){toast('Project updated');renderAll()}
 }
 window.quickRelinkProject=quickRelinkProject;
 
@@ -1240,7 +1235,7 @@ function openDrillDownTaskDetail(taskId){
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Linked Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
+    <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
     <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
       <button class="btn btn-success" onclick="completeTaskFromDrillModal('${t.id}')">Complete</button>
@@ -1664,21 +1659,19 @@ async function applyProjectPick(taskId){
   const edits=[{fieldKey:'projects-link',oldRaw:{ids:oldProjectIds,names:oldProjectNames},newRaw:{projectId}}];
   let setPriorityProject=false;
   if(projectId&&task.priority!=='Project'){
-    payload[F.priority]={name:'Project'};
+    payload[F.priority]='Project';  // singleSelect with typecast = plain string
     setPriorityProject=true;
     edits.push({fieldKey:'priority',oldRaw:oldPriority,newRaw:'Project'});
   }
   try{
     const res=await patchTask(taskId,payload);
-    if(!res.ok)throw new Error('HTTP '+res.status);
-    const data=await res.json();
-    // Update local task from response
-    const fresh=parseTask(data);
-    task.projectIds=fresh.projectIds;
-    task.projectNames=fresh.projectNames;
+    if(!res.ok){let body='';try{body=await res.text()}catch(_){};throw new Error('HTTP '+res.status+' '+body.slice(0,200))}
+    // Optimistic local update — don't parseTask() the response (it's name-keyed,
+    // parseTask reads field IDs so it'd silently give us empty projectIds).
+    task.projectIds=projectId?[projectId]:[];
+    const newProj=projectId?allProjects.find(p=>p.id===projectId):null;
+    task.projectNames=newProj?[newProj.name]:[];
     if(setPriorityProject)task.priority='Project';
-    // Live delta update: adjust totalTasks count on affected projects immediately
-    // (rollup fields from Airtable would otherwise stay stale until next Refresh)
     adjustProjectTaskCounts(oldProjectIds,task.projectIds);
     if(!_undoInProgress){
       pushUndo({type:'multi-patch',taskId,edits,label:projectId?`Linked project${setPriorityProject?' (priority -> Project)':''}`:'Unlinked project'});
@@ -2895,19 +2888,23 @@ async function bulkSetProject(projectId){
   const targetId=projectId==='__none__'?'':projectId;
   const ids=[...selectedTasks];
   _bulkOperation=true;
-  let done=0;
+  let done=0,failed=0;
+  const failures=[];
   progressToast(`Linking ${ids.length} tasks…`);
   try{
     for(let i=0;i<ids.length;i+=5){
       const chunk=ids.slice(i,i+5);
       progressToast(`Linking ${Math.min(i+chunk.length,ids.length)} of ${ids.length}…`);
-      await Promise.allSettled(chunk.map(async id=>{
-        await quickRelinkProject(id,targetId);
-        done++;
-      }));
+      const results=await Promise.allSettled(chunk.map(id=>quickRelinkProject(id,targetId)));
+      results.forEach((r,idx)=>{
+        if(r.status==='fulfilled')done++;
+        else{failed++;failures.push({id:chunk[idx],reason:r.reason&&r.reason.message})}
+      });
     }
   }finally{_bulkOperation=false;clearProgressToast()}
-  toast(`Project changed on ${done} tasks`);
+  if(failures.length)console.warn('[bulkSetProject] failures:',failures);
+  if(failed>0)toast(`Linked ${done} — ${failed} failed (see console)`,true);
+  else toast(`Linked ${done} tasks to project`);
   selectedTasks.clear();renderAll();
 }
 // Bulk delete — confirmation first, then DELETE each record
