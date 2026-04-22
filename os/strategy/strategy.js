@@ -986,73 +986,83 @@ const WIZARD_STEPS = [
       ask: "Looking back at last quarter: what hit, what missed, and why?\n\nI'll use this to calibrate the bar for this quarter — specifically to make sure what slipped becomes a measurable here. One paragraph is plenty.",
       targetFid: null /* discovery — not saved */ },
     { id: 'objective', label: 'Objective', targetFid: () => OBJSTRAT.objective,
-      ask: "The Objective is the single overarching statement of what this business exists to do. It sits at the top of the plan and every quarterly project should ladder back to it.\n\nAim for one tight paragraph covering:\n• What the business ultimately produces (an outcome, not an activity)\n• Who benefits\n• Why it matters\n\nExample shape: 'To [verb] [what] for [who], so that [outcome the world looks like].'" },
+      ask: "OBJECTIVE — the overarching reason the business exists.\n\nJust a few words on what you're ultimately trying to produce and for whom. Even one sentence is plenty. I'll turn it into a proper objective statement." },
     { id: 'targetWhat', label: 'Target — What we do', targetFid: () => OBJSTRAT.targetWhat,
-      ask: "Target Statement, part 1 of 3: WHAT we do.\n\nOne sentence describing the product or service in plain language. No marketing adjectives unless they're doing real work. If a stranger couldn't repeat it back, it's too vague." },
+      ask: "TARGET — WHAT we do.\n\nA few words on the product or service. I'll tighten it into a professional one-liner." },
     { id: 'targetWho', label: 'Target — Who we do it for', targetFid: () => OBJSTRAT.targetWho,
-      ask: "Target Statement, part 2 of 3: WHO we do it for.\n\nOne sentence naming the specific target customer — segment, size, stage, and what makes them the ideal fit. 'Small businesses' is too vague; 'UK founder-owned businesses doing £100k–£5m, with one decision-maker' is sharp." },
+      ask: "TARGET — WHO we do it for.\n\nJust the rough customer type — size, stage, anything distinctive. I'll sharpen it into a targeting statement." },
     { id: 'targetHow', label: 'Target — How we do it', targetFid: () => OBJSTRAT.targetHow,
-      ask: "Target Statement, part 3 of 3: HOW we do it.\n\nOne sentence on your distinctive method — what's different about the way you deliver vs. anyone else a customer could buy from?" },
+      ask: "TARGET — HOW we do it.\n\nA sentence or two on your delivery method — what's different about your approach? I'll write it up." },
     { id: 'customerProfile', label: 'Customer Profile', targetFid: () => OBJSTRAT.customerProfile,
-      ask: "Tell me about your ideal customer — who you target and who you DON'T.\n\nBullet points or conversational dictation are perfect, I'll structure it. Cover as many of these as you can:\n• Stage / size / revenue band\n• Budget reality (cash-pay, equity-pay, both?)\n• Mindset (what they believe, what they're tired of)\n• Deal-breakers — who you refuse to take on\n\nGive me the raw material and I'll write it up properly." },
+      ask: "CUSTOMER PROFILE — who you target and who you don't.\n\nJust give me the rough shape — anything like stage, size, budget, mindset, deal-breakers. A few bullet points will do. I'll flesh it out into a proper profile." },
     // ── List sections — one question each that gathers the whole list.
     { id: 'undertakings', kind: 'list', label: 'Undertakings (team rules)', fieldIdsFn: () => OBJSTRAT.undertakings, maxItems: 20,
-      ask: "The Undertakings — the shared rules every team member (and AI agent) follows day-to-day. Your non-negotiables.\n\nJust talk through them or list them as bullets — I'll structure and number them. E.g.: 'own the outcome', 'tell the truth', 'never raise a problem without a solution', 'data not drama'.\n\nIf you already have some set, tell me what to add, reword or remove — 'add one about routine discipline', 'reword #3', 'no changes'.",
+      ask: "UNDERTAKINGS — team non-negotiables.\n\nJust list them rough — 'own the outcome', 'tell the truth', 'data not drama', 'no drama'. Even 5–6 is fine, I'll fill in the obvious ones and structure them. If you have some set, tell me what to change ('add one about routine discipline', 'no changes').",
       descriptionForAI: "A list of non-negotiable team/culture rules for the business. Short title + 2–3 supporting bullets each." },
     { id: 'usps', kind: 'list', label: 'Original Selling Points (USPs)', fieldIdsFn: () => OBJSTRAT.usps, maxItems: 5,
-      ask: "The Original Selling Points — why a customer chooses you over any alternative. Up to 5.\n\nDictate or list them rough — e.g. 'done-for-you not coaching', 'we take equity', 'AI-first so cheaper', '20 years in the trade'. I'll turn them into defensible, well-worded differentiators using the mentor's playbook.",
+      ask: "USPs — why a customer chooses you over anyone else.\n\nJust the rough claims. 'Done-for-you not coaching', 'we take equity', 'AI-first'. I'll turn them into defensible differentiators.",
       descriptionForAI: "Unique selling points. Each item: a bold claim + a short paragraph backing it up." },
     { id: 'mainMethod', kind: 'list', label: 'Main Method (step-by-step process)', fieldIdsFn: () => OBJSTRAT.methodSteps, maxItems: 10,
-      ask: "The Main Method — the proven process you follow to deliver the outcome, step by step. Up to 10 steps.\n\nGive me the steps in order — a word or two each is fine. I'll flesh them out into a proper framework. E.g. 'Objective, Priorities, Team, Income, Methods, Intelligence, Scoreboards, Exit-ready' becomes a polished OPTIMISE framework with a clear description for each step.",
+      ask: "MAIN METHOD — the step-by-step process you follow.\n\nJust the step names in order, even one word each. I'll write the descriptions. E.g. 'Objective, Priorities, Team, Income, Methods, Intelligence, Scoreboards, Exit-ready'.",
       descriptionForAI: "Sequential steps of the main delivery method. Each item: a short step name + a one-sentence explanation." },
     { id: 'enticement', label: 'Enticement', targetFid: () => OBJSTRAT.enticement,
-      ask: "The Enticement — the irresistible offer your target market cannot refuse.\n\nTalk through the hook — pricing structure, risk reversal, outcome guarantee, equity model, turnaround time, anything asymmetric. Bullets are fine. I'll write it up as a proper irresistible-offer paragraph." },
+      ask: "ENTICEMENT — the irresistible offer.\n\nA few words on what makes your offer hard to say no to — pricing, risk reversal, equity model, guarantee, turnaround, anything asymmetric. I'll write it up." },
     // ── Strategy plan (quarterly cadence — where most of the iteration happens.)
     { id: 'nineYear', label: 'Nine-Year Target', targetFid: () => OBJSTRAT.nineYearTarget,
-      ask: 'Paint the nine-year picture of this business. Be specific and visual — what does it look like, sound like, count like? If it is vague I will push back.' },
+      ask: "NINE-YEAR TARGET — the long vision.\n\nJust a few key numbers / facts — income, size, level of founder involvement, any exit notes. I'll turn it into a proper vision statement with business model, portfolio, delivery, team, founder role, lifestyle." },
     { id: 'threeYear', label: 'Three-Year Target', targetFid: () => OBJSTRAT.threeYearTarget,
-      ask: 'What does the business look like in three years? Include size, structure, income, and delivery model. I will then ask you for three measurables separately.' },
+      ask: "THREE-YEAR TARGET — the mid-range vision.\n\nA few numbers and direction markers — income, clients/units, what's automated, what the founder still does. I'll fill in the structure." },
     { id: 'threeYearM1', label: 'Three-Year Measurable 1', targetFid: () => OBJSTRAT.threeYearMeas[0],
-      ask: 'Three-Year Measurable 1 — one concrete, numeric measurable. Net profit, revenue, occupancy rate, count of something. Target, how you measure it, formula if relevant.' },
+      ask: "THREE-YEAR MEASURABLE 1 — one numeric KPI.\n\nJust the number and what it measures. E.g. '£15k/month net profit', '95% occupancy', '5 equity partnerships'. I'll write up the full target + how-to-measure." },
     { id: 'threeYearM2', label: 'Three-Year Measurable 2', targetFid: () => OBJSTRAT.threeYearMeas[1],
-      ask: 'Three-Year Measurable 2 — a different dimension. If M1 was money, this should be a systems/operations measurable, or vice versa.' },
+      ask: "THREE-YEAR MEASURABLE 2 — a DIFFERENT dimension to M1.\n\nIf M1 was money, make this systems/ops. Just the number and what it is." },
     { id: 'threeYearM3', label: 'Three-Year Measurable 3', targetFid: () => OBJSTRAT.threeYearMeas[2],
-      ask: 'Three-Year Measurable 3 — optional. If you do not have a distinct third, say "skip".' },
+      ask: "THREE-YEAR MEASURABLE 3 — optional. Say 'skip' if you've got nothing distinct to add." },
     { id: 'oneYear', label: 'One-Year Target', targetFid: () => OBJSTRAT.oneYearTarget,
-      ask: 'One-year picture. What does the business look like in twelve months? Must be a plausible stepping stone to the three-year target, not a wish.' },
+      ask: "ONE-YEAR TARGET — what the business looks like in 12 months.\n\nA few numbers and direction — income, progress towards 3-year, what systems are live. I'll write it up as a proper stepping-stone target." },
     { id: 'oneYearM1', label: 'One-Year Measurable 1', targetFid: () => OBJSTRAT.oneYearMeas[0],
-      ask: 'One-Year Measurable 1 — numeric, tracked monthly. What and how measured?' },
+      ask: "ONE-YEAR MEASURABLE 1 — one number, tracked monthly.\n\nJust the KPI and the number. E.g. '£5k/month income from Operations Director'." },
     { id: 'oneYearM2', label: 'One-Year Measurable 2', targetFid: () => OBJSTRAT.oneYearMeas[1],
-      ask: 'One-Year Measurable 2.' },
+      ask: "ONE-YEAR MEASURABLE 2 — a different dimension. One number + what it is." },
     { id: 'oneYearM3', label: 'One-Year Measurable 3', targetFid: () => OBJSTRAT.oneYearMeas[2],
-      ask: 'One-Year Measurable 3 (optional).' },
+      ask: "ONE-YEAR MEASURABLE 3 — optional. Say 'skip' if nothing distinct." },
     { id: 'qp1', label: 'Quarterly Project 1', targetFid: () => OBJSTRAT.quarterlyProjects[0],
-      ask: 'Quarterly Project 1 — the single most important 90-day project. Name + focus + what "done" looks like. The one that, if it slips, the quarter is a write-off.' },
+      ask: "QUARTERLY PROJECT 1 — the #1 most important 90-day project.\n\nJust the project name + a word or two on the focus. I'll write up the full brief — deliverable, scope, success criteria — based on what you've said about the rest of the plan." },
     { id: 'qp1det', label: 'QP1 — KPI / Tracking / Definition of Done', kind: 'projectDetails', qpIndex: 0,
-      ask: "For Quarterly Project 1, give me the metrics in one message:\n\n• KPI (the single number that proves progress) — name + unit, e.g. 'Monthly recurring revenue — £' or 'Void days — count'\n• Target (optional, a specific number) — e.g. '12000', '95', '30'\n• Tracking method — where/when/how it's measured, and who owns the check\n• Definition of Done — the concrete end state that means the project is complete\n\nType conversationally; I'll structure it into the four fields." },
+      ask: "QP1 — the metrics.\n\nJust the rough KPI and what 'done' looks like. E.g. 'DOD v2 complete, deployed to one client' or 'occupancy 95%'. I'll structure it into KPI name, unit, tracking method, and a full definition of done." },
     { id: 'qp1m1', label: 'QP1 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[0][0],
-      ask: 'QP1 — Month 1 stepping stone. A concrete deliverable by end of month 1. If it is not testable/visible, rewrite.' },
-    { id: 'qp1m2', label: 'QP1 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[0][1], ask: 'QP1 — Month 2 stepping stone.' },
-    { id: 'qp1m3', label: 'QP1 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[0][2], ask: 'QP1 — Month 3 stepping stone (project complete state).' },
+      ask: "QP1 — Month 1 stepping stone.\n\nJust a word or two on what's tangibly done by end of month 1. I'll write the deliverable." },
+    { id: 'qp1m2', label: 'QP1 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[0][1],
+      ask: "QP1 — Month 2 stepping stone.\n\nWhat's done by end of month 2?" },
+    { id: 'qp1m3', label: 'QP1 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[0][2],
+      ask: "QP1 — Month 3 stepping stone (project complete state).\n\nWhat does 'done' look like?" },
     { id: 'qp2', label: 'Quarterly Project 2', targetFid: () => OBJSTRAT.quarterlyProjects[1],
-      ask: 'Quarterly Project 2. Different dimension from QP1 — do not duplicate.' },
+      ask: "QUARTERLY PROJECT 2 — different dimension to QP1.\n\nJust the name + a word on focus. I'll write up the full brief." },
     { id: 'qp2det', label: 'QP2 — KPI / Tracking / Definition of Done', kind: 'projectDetails', qpIndex: 1,
-      ask: "For Quarterly Project 2, same four fields: KPI (name + unit), Tracking method, Definition of Done. Type conversationally." },
-    { id: 'qp2m1', label: 'QP2 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[1][0], ask: 'QP2 — Month 1 stepping stone.' },
-    { id: 'qp2m2', label: 'QP2 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[1][1], ask: 'QP2 — Month 2 stepping stone.' },
-    { id: 'qp2m3', label: 'QP2 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[1][2], ask: 'QP2 — Month 3 stepping stone.' },
+      ask: "QP2 — the metrics. Rough KPI + what 'done' looks like. I'll structure the rest." },
+    { id: 'qp2m1', label: 'QP2 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[1][0],
+      ask: "QP2 — Month 1 stepping stone. A word or two." },
+    { id: 'qp2m2', label: 'QP2 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[1][1],
+      ask: "QP2 — Month 2 stepping stone." },
+    { id: 'qp2m3', label: 'QP2 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[1][2],
+      ask: "QP2 — Month 3 stepping stone (project complete)." },
     { id: 'qp3', label: 'Quarterly Project 3', targetFid: () => OBJSTRAT.quarterlyProjects[2],
-      ask: 'Quarterly Project 3. Optional — "skip" is a valid answer. Better three focused than four diluted.' },
+      ask: "QUARTERLY PROJECT 3 — optional. Say 'skip' if you'd rather only run two.\n\nOtherwise just the name + focus." },
     { id: 'qp3det', label: 'QP3 — KPI / Tracking / Definition of Done', kind: 'projectDetails', qpIndex: 2,
-      ask: "For Quarterly Project 3 (if set), same four fields. Skip if no QP3." },
-    { id: 'qp3m1', label: 'QP3 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[2][0], ask: 'QP3 — Month 1 (skip if no QP3).' },
-    { id: 'qp3m2', label: 'QP3 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[2][1], ask: 'QP3 — Month 2.' },
-    { id: 'qp3m3', label: 'QP3 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[2][2], ask: 'QP3 — Month 3.' },
+      ask: "QP3 — the metrics. Skip if no QP3. Otherwise rough KPI + 'done' state." },
+    { id: 'qp3m1', label: 'QP3 — Month 1', targetFid: () => OBJSTRAT.monthlyStones[2][0],
+      ask: "QP3 — Month 1 stepping stone. Skip if no QP3." },
+    { id: 'qp3m2', label: 'QP3 — Month 2', targetFid: () => OBJSTRAT.monthlyStones[2][1],
+      ask: "QP3 — Month 2 stepping stone." },
+    { id: 'qp3m3', label: 'QP3 — Month 3', targetFid: () => OBJSTRAT.monthlyStones[2][2],
+      ask: "QP3 — Month 3 stepping stone." },
 ];
 
 // Max number of pushbacks the mentor is allowed per step before auto-accepting.
-// Without this, a stubborn answer can loop forever.
-const MAX_PUSHBACKS_PER_STEP = 2;
+// Set to 1 by design — the wizard's job is to produce 90% output from 10%
+// input, not interrogate the founder. Push back only when there is zero
+// substance to work with.
+const MAX_PUSHBACKS_PER_STEP = 1;
 
 // localStorage key for a wizard session, scoped to business × quarter × year.
 function wizSessionKey() {
@@ -1150,7 +1160,7 @@ function openWizard(opts = {}) {
     }
 
     // Fresh wizard.
-    appendWizMessage('system', "Boardroom Mentor. UK English, direct, analytical. I'll challenge vague answers once or twice — after that I accept and move on. Use '← Back' to revise a previous answer, 'Move on →' to skip, or ✕ to close.");
+    appendWizMessage('system', "Boardroom Mentor here. Think of me as a strategic consultant — you give me 10% (a few words, rough bullets, key numbers) and I write the other 90% in the form. I won't interrogate you. Preview → approve → done. Use '← Back' to revise, 'Move on →' to skip, ✕ to close.");
     loadPriorQuarter().then(() => askCurrentStep());
 }
 
@@ -1904,14 +1914,21 @@ Section: "${step.label}"
 Question you asked: "${step.ask}"
 This is the founder's attempt #${attemptCount} at answering.
 
-GUIDING PRINCIPLE — ACCEPT MORE THAN YOU REJECT. Your job is to help them think sharper, not block them. Accept any answer that is:
-- At least moderately specific (a concrete deliverable, number, or direction — doesn't need to be perfect)
-- Sized roughly right for the horizon (9-year = visionary, quarterly project = 90 days, monthly stone = 30 days of work)
-- Not pure motivational fluff ("be the best", "crush it")
+CORE PHILOSOPHY — 10% INPUT, 90% OUTPUT.
+The founder is giving you 10%. Your job — as the Boardroom Mentor — is to produce the other 90%. Think of yourself as a top-tier strategic consultant who has been briefed on the business and is now drafting the plan document. The founder will approve or tweak what you write; your job is to write it, not to interrogate them. Draw on:
+- Their input in this step (the 10%)
+- The CURRENT PLAN STATE already filled in (everything else they've said this session)
+- The PRIOR QUARTER'S RECORD (for reflection, not for lifting content)
+- The FOUNDER'S REFLECTION if given
+- Your domain expertise in business operating systems, portfolio strategy, and the mentor playbook
 
-If there's genuine weakness, push back ONCE with a specific, focused challenge. After one push-back you should lean strongly toward accepting the next answer even if imperfect — the founder can refine in the form.
+GUIDING PRINCIPLE — ACCEPT AND EXPAND.
+Accept ANY answer that has any substance at all — even a single sentence, a few bullets, or a fragment is enough. Your refined output does the heavy lifting. Push back ONLY if the answer has literally zero substance — e.g. pure platitudes ("be amazing", "crush it") or a refusal. A terse one-liner with a real fact in it (a number, a name, a direction) is plenty. Expand it into a full professional section.
 
-IMPORTANT: Look at the full conversation above. If you've already pushed back on the same point, DO NOT repeat the same push-back. Either accept, or push on a different dimension. Repeating yourself blocks progress and is a failure on your part.
+MAX 1 PUSH-BACK.
+After one push-back (if any), ALWAYS accept and produce rich output from what you have. Do not ask for more.
+
+IMPORTANT: Look at the full conversation above. If you've already pushed back, DO NOT push back again. Accept and refine.
 
 Reply with a JSON object ONLY, nothing else. Shape:
 {"accept": true|false, "pushback"?: "one short paragraph (2–3 sentences max) in UK English, naming one specific thing to add or sharpen — never repeat a point you've already made", "refined"?: "a fully-developed, professional-quality version of the founder's answer — see rules below — MUST be included on every accept", "note"?: "one short confirmation line after accept, optional"}
