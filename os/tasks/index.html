@@ -681,6 +681,10 @@ function renderSaveFailureBanner(){
   el.innerHTML=`<div style="flex:1"><div>⚠ ${n} save${n===1?'':'s'} failed — these changes were NOT persisted:</div><div style="font-weight:400;margin-top:6px;font-size:11px;color:var(--text-primary)">${latest}${n>3?`<br>…and ${n-3} more`:''}</div></div><button onclick="dismissSaveFailures()" style="background:var(--danger);color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Dismiss</button>`;
 }
 window.dismissSaveFailures=dismissSaveFailures;
+// Flush any pending debounced saves before the tab is hidden/closed so
+// mid-typed edits don't get lost when the user switches tabs or closes.
+window.addEventListener('pagehide',()=>{try{flushPendingSaves()}catch(e){}});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){try{flushPendingSaves()}catch(e){}}});
 
 // ═══ Processing-indicator helpers (use around any async operation with a delay) ═══
 // setBusy(button, "Deleting…") -> disables + spinner + label; clearBusy restores
@@ -1168,7 +1172,23 @@ async function updateTaskField(taskId,fieldKey,rawValue){
 function debouncedSave(taskId,fieldKey,value){
   const k=taskId+':'+fieldKey;
   clearTimeout(saveDebounce[k]);
-  saveDebounce[k]=setTimeout(()=>updateTaskField(taskId,fieldKey,value),500);
+  saveDebounce[k]=setTimeout(()=>{delete saveDebounce[k];updateTaskField(taskId,fieldKey,value)},500);
+  // Remember the latest pending value so flushPendingSaves can fire it synchronously
+  if(!saveDebounce._pending)saveDebounce._pending={};
+  saveDebounce._pending[k]={taskId,fieldKey,value};
+}
+// Fire every pending debounced save for a given taskId (or all tasks if omitted) immediately.
+// Called before any action that might lose an in-flight edit (e.g. closing the drawer).
+function flushPendingSaves(taskId){
+  if(!saveDebounce._pending)return;
+  Object.keys(saveDebounce._pending).forEach(k=>{
+    const p=saveDebounce._pending[k];
+    if(taskId&&p.taskId!==taskId)return;
+    clearTimeout(saveDebounce[k]);
+    delete saveDebounce[k];
+    delete saveDebounce._pending[k];
+    updateTaskField(p.taskId,p.fieldKey,p.value);
+  });
 }
 
 // ===== SHARED RENDER HELPERS =====
@@ -1349,7 +1369,7 @@ function openDrillDownTaskDetail(taskId){
       <button class="btn" style="padding:4px 10px;font-size:12px" onclick="renderDrillDownList()">&larr; Back</button>
       <div style="font-size:10px;color:var(--text-secondary);font-weight:600;letter-spacing:1px;text-transform:uppercase">Task</div>
     </div>
-    <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)" style="margin-top:0">${escHtml(t.name)}</h2>
+    <h2 contenteditable="true" id="drwName" onblur="drwSaveText('${t.id}','name',this.innerText,true)" style="margin-top:0">${escHtml(t.name)}</h2>
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
     <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
@@ -1359,7 +1379,7 @@ function openDrillDownTaskDetail(taskId){
     <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
     <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
@@ -1367,7 +1387,7 @@ function openDrillDownTaskDetail(taskId){
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
       <button class="btn btn-success" onclick="completeTaskFromDrillModal('${t.id}')">Complete</button>
       <button class="btn btn-danger" onclick="deleteTaskFromDrillModal('${t.id}')">Delete</button>
-      <button class="btn" style="margin-left:auto" onclick="document.getElementById('drillModal').remove()">Close</button>
+      <button class="btn" style="margin-left:auto" onclick="flushPendingSaves('${t.id}');document.getElementById('drillModal').remove();drawerTaskId=null">Close</button>
     </div>`;
   inner.innerHTML=drawerInnerHtml;
 }
@@ -1432,7 +1452,7 @@ function openTaskDrawer(taskId){
     <div class="drawer-header">
       <div class="hdr-main">
         <div style="font-size:10px;color:var(--text-secondary);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">Task</div>
-        <h2 contenteditable="true" id="drwName" onblur="drwSaveText('name',this.innerText)">${escHtml(t.name)}</h2>
+        <h2 contenteditable="true" id="drwName" onblur="drwSaveText('${t.id}','name',this.innerText,true)">${escHtml(t.name)}</h2>
       </div>
       <button class="drawer-close" onclick="closeDrawer()">&times;</button>
     </div>
@@ -1448,7 +1468,7 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
       <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
@@ -1460,8 +1480,39 @@ function openTaskDrawer(taskId){
   </div>`;
   document.body.appendChild(overlay);
 }
-function closeDrawer(){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();drawerTaskId=null}
-function drwSaveText(fieldKey,val){if(!drawerTaskId)return;debouncedSave(drawerTaskId,fieldKey,val)}
+function closeDrawer(){
+  // Force blur on any focused editor inside the drawer so its onblur fires
+  // BEFORE we remove the overlay — otherwise contenteditable edits are lost.
+  try{
+    const ov=document.getElementById('drawerOverlay');
+    if(ov){
+      const focused=ov.querySelector('[contenteditable="true"]:focus, textarea:focus, input:focus');
+      if(focused&&typeof focused.blur==='function')focused.blur();
+    }
+  }catch(e){console.warn('drawer blur failed',e)}
+  // Flush any debounced saves for the drawer's task
+  if(drawerTaskId)flushPendingSaves(drawerTaskId);
+  const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();
+  drawerTaskId=null;
+}
+// drwSaveText now accepts explicit taskId so it works even after drawerTaskId
+// has been cleared (race: onblur fires as the drawer is being closed).
+// Pass immediate=true for discrete edits (name blur) so the save fires now
+// instead of waiting 500ms.
+function drwSaveText(taskId,fieldKey,val,immediate){
+  // Backwards-compatible: old call sites pass (fieldKey,val) with no taskId
+  if(typeof val==='undefined'&&typeof fieldKey!=='undefined'){val=fieldKey;fieldKey=taskId;taskId=drawerTaskId}
+  if(!taskId)return;
+  if(immediate){
+    // Clear any pending debounce for this field and save now
+    const k=taskId+':'+fieldKey;
+    if(saveDebounce[k]){clearTimeout(saveDebounce[k]);delete saveDebounce[k]}
+    if(saveDebounce._pending&&saveDebounce._pending[k])delete saveDebounce._pending[k];
+    updateTaskField(taskId,fieldKey,val);
+  } else {
+    debouncedSave(taskId,fieldKey,val);
+  }
+}
 
 // ======================================================
 // COLLABORATORS
