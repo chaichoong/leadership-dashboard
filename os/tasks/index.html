@@ -163,6 +163,18 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,10px);background:var(--bg-surface);border:1px solid var(--accent);border-radius:8px;padding:10px 18px;font-size:13px;color:var(--text-primary);box-shadow:var(--shadow-lg);z-index:10005;opacity:0;transition:all .2s;max-width:520px;word-break:break-word;font-weight:600}
+
+/* Busy state for any button mid-operation */
+.busy{pointer-events:none!important;opacity:0.65!important;position:relative}
+.busy::after{content:'';display:inline-block;width:11px;height:11px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;margin-left:6px;vertical-align:-1px;animation:busySpin 0.7s linear infinite}
+@keyframes busySpin{to{transform:rotate(360deg)}}
+
+/* Sticky progress toast for long operations — shows above regular toast */
+.progress-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--bg-surface);border:1px solid var(--accent);border-radius:8px;padding:10px 18px;font-size:13px;color:var(--text-primary);box-shadow:var(--shadow-lg);z-index:10006;font-weight:600;display:flex;align-items:center;gap:10px;max-width:520px}
+.progress-toast .mini-spinner{width:14px;height:14px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:busySpin 0.7s linear infinite;flex-shrink:0}
+
+/* Global busy cursor when any modal action is processing */
+body.app-busy,body.app-busy *{cursor:progress!important}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast.err{background:var(--danger-bg);border-color:var(--danger);color:var(--danger)}
 .toast.err{border-color:var(--danger)}
@@ -605,6 +617,49 @@ function todayStr(){const d=new Date();const y=d.getFullYear();const m=String(d.
 function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},err?6000:1800)}catch(e){console.warn('toast failed',e)}}
+
+// ═══ Processing-indicator helpers (use around any async operation with a delay) ═══
+// setBusy(button, "Deleting…") -> disables + spinner + label; clearBusy restores
+function setBusy(el,label){
+  if(!el)return;
+  try{
+    if(el._origText===undefined)el._origText=el.textContent;
+    if(el._origDisabled===undefined)el._origDisabled=!!el.disabled;
+    el.classList.add('busy');
+    el.disabled=true;
+    if(label)el.textContent=label;
+  }catch(e){console.warn('setBusy failed',e)}
+}
+function clearBusy(el){
+  if(!el)return;
+  try{
+    el.classList.remove('busy');
+    if(el._origText!==undefined){el.textContent=el._origText;delete el._origText}
+    if(el._origDisabled!==undefined){el.disabled=el._origDisabled;delete el._origDisabled}
+  }catch(e){console.warn('clearBusy failed',e)}
+}
+// progressToast(msg) creates or updates a sticky toast; clearProgressToast() removes it.
+// Use for any multi-step operation so user can see "Deleting 5 of 12…".
+function progressToast(msg){
+  let el=document.getElementById('progressToast');
+  if(!el){
+    el=document.createElement('div');
+    el.id='progressToast';
+    el.className='progress-toast';
+    document.body.appendChild(el);
+  }
+  el.innerHTML=`<div class="mini-spinner"></div><span>${escHtml(msg||'Working…')}</span>`;
+  document.body.classList.add('app-busy');
+  return el;
+}
+function clearProgressToast(){
+  const el=document.getElementById('progressToast');if(el)el.remove();
+  document.body.classList.remove('app-busy');
+}
+window.setBusy=setBusy;
+window.clearBusy=clearBusy;
+window.progressToast=progressToast;
+window.clearProgressToast=clearProgressToast;
 // Bulk-operation flag — suppresses per-call toast/undo during batch PATCH (auto-schedule etc.)
 let _bulkOperation=false;
 // Debounced renderAll for rapid inline field edits
@@ -2646,9 +2701,11 @@ async function applyAutoSchedule(){
   _bulkOperation=true;
   const applied=[]; // {taskId, fieldKey, oldRaw, newRaw}
   let failed=0;
+  progressToast(`Applying schedule to ${moves.length} tasks…`);
   try{
     for(let i=0;i<moves.length;i+=8){
       const chunk=moves.slice(i,i+8);
+      progressToast(`Rescheduling ${Math.min(i+chunk.length,moves.length)} of ${moves.length}…`);
       const results=await Promise.allSettled(chunk.map(m=>{
         const oldRaw=m.task.dueDate||null;
         return updateTaskField(m.task.id,'dueDate',m.to).then(()=>{
@@ -2673,6 +2730,7 @@ async function applyAutoSchedule(){
   }finally{
     _bulkOperation=false;
     window._pendingMoves=null;
+    clearProgressToast();
     try{renderAll()}catch(e){console.error(e)}
   }
 }
@@ -2811,18 +2869,20 @@ async function bulkSetField(fieldKey,val){
   const ids=[...selectedTasks];
   _bulkOperation=true;
   const applied=[];
+  progressToast(`Updating ${ids.length} tasks…`);
   try{
     for(let i=0;i<ids.length;i+=5){
       const chunk=ids.slice(i,i+5);
-      const results=await Promise.allSettled(chunk.map(async id=>{
+      progressToast(`Updating ${Math.min(i+chunk.length,ids.length)} of ${ids.length}…`);
+      await Promise.allSettled(chunk.map(async id=>{
         const task=allTasks.find(t=>t.id===id);
         if(!task)return;
-        const oldRaw=captureOldRaw?captureOldRaw(task,fieldKey):undefined;
+        const oldRaw=typeof captureOldRaw==='function'?captureOldRaw(task,fieldKey):undefined;
         await updateTaskField(id,fieldKey,val);
         applied.push({taskId:id,fieldKey,oldRaw,newRaw:val});
       }));
     }
-  }finally{_bulkOperation=false}
+  }finally{_bulkOperation=false;clearProgressToast()}
   if(!_undoInProgress&&applied.length){
     pushUndo({type:'multi-patch',edits:applied,label:`Bulk changed ${fieldKey} on ${applied.length} tasks`});
   }
@@ -2836,15 +2896,17 @@ async function bulkSetProject(projectId){
   const ids=[...selectedTasks];
   _bulkOperation=true;
   let done=0;
+  progressToast(`Linking ${ids.length} tasks…`);
   try{
     for(let i=0;i<ids.length;i+=5){
       const chunk=ids.slice(i,i+5);
+      progressToast(`Linking ${Math.min(i+chunk.length,ids.length)} of ${ids.length}…`);
       await Promise.allSettled(chunk.map(async id=>{
         await quickRelinkProject(id,targetId);
         done++;
       }));
     }
-  }finally{_bulkOperation=false}
+  }finally{_bulkOperation=false;clearProgressToast()}
   toast(`Project changed on ${done} tasks`);
   selectedTasks.clear();renderAll();
 }
@@ -2869,15 +2931,16 @@ async function performBulkDelete(){
   _bulkOperation=true;
   const snapshots=[]; // for undo
   let done=0,failed=0;
+  progressToast(`Deleting ${ids.length} tasks…`);
   try{
     for(let i=0;i<ids.length;i+=10){
       const chunk=ids.slice(i,i+10);
+      progressToast(`Deleting ${Math.min(i+chunk.length,ids.length)} of ${ids.length}…`);
       // Capture snapshots before delete
       chunk.forEach(id=>{const t=allTasks.find(x=>x.id===id);if(t&&typeof buildFieldsFromTask==='function')snapshots.push({taskRecord:buildFieldsFromTask(t),name:t.name})});
       const results=await Promise.allSettled(chunk.map(async id=>{
         const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${id}`,{method:'DELETE',headers:{'Authorization':`Bearer ${PAT}`}});
         if(!res.ok)throw new Error('HTTP '+res.status);
-        // decrement project counts
         const t=allTasks.find(x=>x.id===id);
         if(t&&typeof adjustProjectTaskCounts==='function')adjustProjectTaskCounts(t.projectIds||[],[]);
         allTasks=allTasks.filter(x=>x.id!==id);
@@ -2885,7 +2948,7 @@ async function performBulkDelete(){
       done+=results.filter(r=>r.status==='fulfilled').length;
       failed+=results.filter(r=>r.status==='rejected').length;
     }
-  }finally{_bulkOperation=false}
+  }finally{_bulkOperation=false;clearProgressToast()}
   if(!_undoInProgress&&snapshots.length){
     pushUndo({type:'bulk-delete',snapshots,label:`Bulk deleted ${done} tasks`});
   }
@@ -2898,18 +2961,34 @@ window.bulkDelete=bulkDelete;
 window.performBulkDelete=performBulkDelete;
 async function bulkComplete(){
   if(!selectedTasks.size)return;const ids=[...selectedTasks];
-  _undoInProgress=true;
-  try{await Promise.all(ids.map(id=>updateTaskField(id,'status','Completed')));}
-  finally{_undoInProgress=false;}
+  _bulkOperation=true;_undoInProgress=true;
+  progressToast(`Marking ${ids.length} tasks complete…`);
+  try{
+    for(let i=0;i<ids.length;i+=5){
+      const chunk=ids.slice(i,i+5);
+      progressToast(`Completing ${Math.min(i+chunk.length,ids.length)} of ${ids.length}…`);
+      await Promise.allSettled(chunk.map(id=>updateTaskField(id,'status','Completed')));
+    }
+  }finally{_bulkOperation=false;_undoInProgress=false;clearProgressToast()}
+  toast(`Completed ${ids.length} tasks`);
   selectedTasks.clear();renderAll();
 }
 async function bulkReschedule(){
   if(!selectedTasks.size)return;
-  const t=new Date();t.setDate(t.getDate()+1);const s=t.toISOString().slice(0,10);
+  const t=new Date();t.setDate(t.getDate()+1);
+  const y=t.getFullYear(),m=String(t.getMonth()+1).padStart(2,'0'),d=String(t.getDate()).padStart(2,'0');
+  const s=`${y}-${m}-${d}`;
   const ids=[...selectedTasks];
-  _undoInProgress=true;
-  try{await Promise.all(ids.map(id=>updateTaskField(id,'dueDate',s)));}
-  finally{_undoInProgress=false;}
+  _bulkOperation=true;_undoInProgress=true;
+  progressToast(`Rescheduling ${ids.length} tasks to tomorrow…`);
+  try{
+    for(let i=0;i<ids.length;i+=5){
+      const chunk=ids.slice(i,i+5);
+      progressToast(`Rescheduling ${Math.min(i+chunk.length,ids.length)} of ${ids.length}…`);
+      await Promise.allSettled(chunk.map(id=>updateTaskField(id,'dueDate',s)));
+    }
+  }finally{_bulkOperation=false;_undoInProgress=false;clearProgressToast()}
+  toast(`Rescheduled ${ids.length} tasks`);
   selectedTasks.clear();renderAll();
 }
 
