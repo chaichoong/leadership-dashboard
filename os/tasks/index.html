@@ -998,6 +998,16 @@ function businessPill(t){return t.business?`<span class="badge badge-business">$
 function renderDedlineRow(t,opts){
   opts=opts||{};
   const endResult=t.description?`<div class="ded-end" title="${escHtml(t.description)}">${escHtml(t.description)}</div>`:'';
+  // Inline project picker (only shown when explicitly requested, e.g. Projects expanded panel)
+  let projPicker='';
+  if(opts.showProjectPicker){
+    const currentPid=(t.projectIds&&t.projectIds[0])||'';
+    const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+    projPicker=`<select class="inline-select" onclick="event.stopPropagation()" onchange="event.stopPropagation();quickRelinkProject('${t.id}',this.value)" title="Change linked project" style="font-size:11px;padding:2px 4px;max-width:140px">
+      <option value="">(none)</option>
+      ${active.map(p=>`<option value="${p.id}" ${currentPid===p.id?'selected':''}>${escHtml(p.name.length>28?p.name.slice(0,28)+'…':p.name)}</option>`).join('')}
+    </select>`;
+  }
   return `<div class="ded-row" onclick="${opts.noClick?'':`openTaskDrawer('${t.id}')`}">
     <div class="ded-title">${escHtml(t.name)}${hardFlag(t)}</div>
     <div class="ded-meta">
@@ -1008,11 +1018,45 @@ function renderDedlineRow(t,opts){
       ${recurPill(t)}
       ${statusBadge(t.status)}
       ${businessPill(t)}
+      ${projPicker}
       ${rowActionsHtml(t.id)}
     </div>
     ${endResult}
   </div>`;
 }
+
+// Quick relink: change a task's linked project without opening the drawer
+async function quickRelinkProject(taskId,newProjectId){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const oldProjectIds=[...(task.projectIds||[])];
+  const oldPriority=task.priority;
+  const payload={};
+  payload[F.projects]=newProjectId?[{id:newProjectId}]:[];
+  const edits=[{fieldKey:'projects-link',oldRaw:{ids:oldProjectIds,names:[...(task.projectNames||[])]},newRaw:{projectId:newProjectId}}];
+  let setPriorityProject=false;
+  if(newProjectId&&task.priority!=='Project'){
+    payload[F.priority]='Project';
+    setPriorityProject=true;
+    edits.push({fieldKey:'priority',oldRaw:oldPriority,newRaw:'Project'});
+  }
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    const fresh=parseTask(data);
+    task.projectIds=fresh.projectIds;
+    task.projectNames=fresh.projectNames;
+    if(setPriorityProject)task.priority='Project';
+    adjustProjectTaskCounts(oldProjectIds,task.projectIds);
+    if(!_undoInProgress)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
+    toast('Project updated');
+    renderAll();
+  }catch(e){
+    console.warn('quick relink failed',e);
+    toast('Failed: '+e.message,true);
+  }
+}
+window.quickRelinkProject=quickRelinkProject;
 
 // Compact DEDLINE side card (My Day side panel) — 2-row layout
 function renderDedlineSideCard(t){
@@ -2925,26 +2969,27 @@ function renderProjects(){
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Start Date</label><input type="date" value="${p.start||''}" onchange="updateProjectField('${p.id}','start',this.value)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">End Date</label><input type="date" value="${p.end||''}" onchange="updateProjectField('${p.id}','end',this.value)" class="inline-input" style="width:100%"></div>
       </div>`;
-      // KPI section
-      html+=`<h4>KPI</h4><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
-        <input type="text" placeholder="KPI name" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input">
-        <input type="number" placeholder="Current" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input">
-        <input type="number" placeholder="Target" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input">
-        <select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)"><option value="">unit</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+      // KPI section — each field clearly labelled to avoid "two numeric" confusion
+      html+=`<h4>KPI (Key Performance Indicator)</h4>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="e.g. Monthly profit increase" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Target (goal)</label><input type="number" placeholder="4000" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Current (latest)</label><input type="number" placeholder="0" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Unit</label><select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)" style="width:100%"><option value="">-</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select></div>
       </div>
-      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Tracking Method</label>
-      <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Tracking Method (how you'll measure this — leave empty to auto-create a setup task)</label>
+      <textarea style="${taStyle}" placeholder="e.g. Monthly P&L, Airtable rollup from Transactions, manual weekly update..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
       // Definition of Done only — the separate "Deliverable" field was
       // redundant with DoD and has been retired from the UI. The Airtable
       // field is kept for now in case any legacy records contain content.
       html+=`<h4 style="margin-top:12px">Definition of Done</h4>
         <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','defOfDone',this.value)">${escHtml(p.defOfDone)}</textarea>`;
-      // Linked tasks
+      // Linked tasks — include inline project picker so you can move a task to a different project without opening the drawer
       html+=`<h4 style="margin-top:12px">Linked Tasks (${linked.length})</h4>`;
       if(linked.length){
         html+=`<div class="project-task-list">`;
         linked.slice(0,20).forEach(t=>{
-          html+=`<div onclick="event.stopPropagation()">${renderDedlineRow(t)}</div>`;
+          html+=`<div onclick="event.stopPropagation()">${renderDedlineRow(t,{showProjectPicker:true})}</div>`;
         });
         if(linked.length>20)html+=`<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... ${linked.length-20} more</div>`;
         html+=`</div>`;
