@@ -1048,6 +1048,25 @@
         syncFromCloud();
         refreshAccuracyFromCloud();
         purgeOldAccuracyRecords();
+        startCompletionSweep();
+    }
+
+    // Background sweep: move any email whose Airtable task has been marked
+    // Completed from label 8 → label 9, without requiring the user to open
+    // the "Task Created" view. Fires on startup, every 5 min, and whenever
+    // the tab regains focus.
+    let completionSweepTimer = null;
+    function startCompletionSweep() {
+        if (completionSweepTimer) clearInterval(completionSweepTimer);
+        sweepCompletedInboundTasks();
+        completionSweepTimer = setInterval(() => {
+            sweepCompletedInboundTasks();
+        }, 5 * 60 * 1000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                sweepCompletedInboundTasks();
+            }
+        });
     }
 
     // Labels that should show a count in the dropdown
@@ -2396,91 +2415,164 @@ Respond with ONLY the JSON object, no markdown.`;
         }
     }
 
-    async function checkCompletedAirtableTasks() {
+    // Fetch threadIds of all completed inbound tasks from Airtable.
+    // Returns Map<threadId, taskName>.
+    async function fetchCompletedInboundThreadIds() {
         const pat = getAirtablePat();
-        if (!pat) return; // Silently skip if not configured
-
-        // Only run when viewing label 8
-        if (!isTaskCreatedView()) return;
+        if (!pat) return new Map();
 
         try {
-            // Query Airtable for completed inbound tasks with Gmail links
             const formula = encodeURIComponent(
                 'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.status + '} = "Completed", {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
             );
-            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl].map(f => 'fields%5B%5D=' + f).join('&');
+            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl]
+                .map(f => 'fields%5B%5D=' + f).join('&');
             const resp = await fetch(
-                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=50`,
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=100`,
                 { headers: { 'Authorization': 'Bearer ' + pat } }
             );
-
-            if (!resp.ok) return;
+            if (!resp.ok) return new Map();
             const data = await resp.json();
-            if (!data.records || data.records.length === 0) return;
-
-            // Extract thread IDs from Airtable records
-            const completedThreadIds = new Map();
-            for (const rec of data.records) {
+            const map = new Map();
+            for (const rec of (data.records || [])) {
                 const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
                 const match = url.match(/#inbox\/([a-f0-9]+)$/i);
                 if (match) {
-                    completedThreadIds.set(match[1], rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task');
+                    map.set(match[1], rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task');
                 }
             }
+            return map;
+        } catch (err) {
+            console.warn('Failed to fetch completed threads from Airtable:', err);
+            return new Map();
+        }
+    }
 
-            if (completedThreadIds.size === 0) return;
+    // Foreground check — runs when user is on label 8. Updates the on-screen list.
+    async function checkCompletedAirtableTasks() {
+        const pat = getAirtablePat();
+        if (!pat) return;
+        if (!isTaskCreatedView()) return;
 
-            // Find label 9 (task completed)
-            const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
+        const completedThreadIds = await fetchCompletedInboundThreadIds();
+        if (completedThreadIds.size === 0) return;
+
+        const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
+        const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
+        if (!label9 || !label8) return;
+
+        const toMove = [];
+        for (const email of allEmails) {
+            if (completedThreadIds.has(email.threadId)) {
+                toMove.push({ email, taskName: completedThreadIds.get(email.threadId) });
+            }
+        }
+        if (toMove.length === 0) return;
+
+        let movedCount = 0;
+        for (const { email, taskName } of toMove) {
+            try {
+                for (let m = 0; m < email.msgIds.length; m++) {
+                    if (m > 0) await new Promise(r => setTimeout(r, 300));
+                    await gapi.client.gmail.users.messages.modify({
+                        userId: 'me',
+                        id: email.msgIds[m],
+                        resource: { addLabelIds: [label9.id], removeLabelIds: [label8.id] }
+                    });
+                }
+                movedCount++;
+                addAuditEntry('airtable_complete', `Auto-moved "${truncate(email.subject, 40)}" to Task Completed (Airtable task: "${truncate(taskName, 30)}")`);
+            } catch (err) {
+                console.error('Failed to move completed email:', err);
+            }
+        }
+
+        if (movedCount > 0) {
+            const movedIds = new Set(toMove.map(t => t.email.threadId));
+            allEmails = allEmails.filter(e => !movedIds.has(e.threadId));
+            if (filteredEmails) filteredEmails = getFilteredEmails();
+            renderEmailsWithPagination();
+            updateStats(allEmails);
+            scheduleLabelCountRefresh();
+            showSuccess(`${movedCount} completed task${movedCount > 1 ? 's' : ''} auto-moved to "Task Completed".`);
+        }
+    }
+
+    // Background sweep — runs regardless of current view.
+    // Fetches the current label-8 thread list from Gmail (not from the
+    // local allEmails cache), intersects with Airtable-completed threadIds,
+    // and moves each matching thread from label 8 to label 9.
+    let sweepInFlight = false;
+    async function sweepCompletedInboundTasks() {
+        if (sweepInFlight) return;
+        sweepInFlight = true;
+        try {
+            if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) return;
+            if (!getAirtablePat()) return;
+
+            // Make sure labels are loaded
+            if (!allLabelsRaw || allLabelsRaw.length === 0) {
+                try {
+                    const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
+                    allLabelsRaw = labelsResp.result.labels || [];
+                } catch (err) { return; }
+            }
             const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
-            if (!label9 || !label8) return;
+            const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
+            if (!label8 || !label9) return;
 
-            // Check which of our currently loaded emails have completed tasks
+            const completedMap = await fetchCompletedInboundThreadIds();
+            if (completedMap.size === 0) return;
+
+            // Pull the live list of label-8 threads from Gmail
+            let listResp;
+            try {
+                listResp = await gapi.client.gmail.users.messages.list({
+                    userId: 'me',
+                    labelIds: [label8.id],
+                    maxResults: 500
+                });
+            } catch (err) { return; }
+
+            const label8ThreadIds = new Set((listResp.result.messages || []).map(m => m.threadId));
+            if (label8ThreadIds.size === 0) return;
+
             const toMove = [];
-            for (const email of allEmails) {
-                if (completedThreadIds.has(email.threadId)) {
-                    toMove.push({ email, taskName: completedThreadIds.get(email.threadId) });
+            for (const threadId of label8ThreadIds) {
+                if (completedMap.has(threadId)) {
+                    toMove.push({ threadId, taskName: completedMap.get(threadId) });
                 }
             }
-
             if (toMove.length === 0) return;
 
-            // Move completed emails from label 8 to label 9
             let movedCount = 0;
-            for (const { email, taskName } of toMove) {
+            for (const { threadId, taskName } of toMove) {
                 try {
-                    for (let m = 0; m < email.msgIds.length; m++) {
-                        if (m > 0) await new Promise(r => setTimeout(r, 300));
-                        await gapi.client.gmail.users.messages.modify({
-                            userId: 'me',
-                            id: email.msgIds[m],
-                            resource: {
-                                addLabelIds: [label9.id],
-                                removeLabelIds: [label8.id]
-                            }
-                        });
-                    }
+                    await gapi.client.gmail.users.threads.modify({
+                        userId: 'me',
+                        id: threadId,
+                        resource: { addLabelIds: [label9.id], removeLabelIds: [label8.id] }
+                    });
                     movedCount++;
-                    addAuditEntry('airtable_complete', `Auto-moved "${truncate(email.subject, 40)}" to Task Completed (Airtable task: "${truncate(taskName, 30)}")`);
+                    addAuditEntry('airtable_complete_bg', `Background auto-moved thread to Task Completed (task: "${truncate(taskName, 30)}")`);
                 } catch (err) {
-                    console.error('Failed to move completed email:', err);
+                    console.warn('Background move failed for thread', threadId, err);
                 }
             }
 
             if (movedCount > 0) {
-                // Remove moved emails from current list
-                const movedIds = new Set(toMove.map(t => t.email.threadId));
-                allEmails = allEmails.filter(e => !movedIds.has(e.threadId));
-                if (filteredEmails) {
-                    filteredEmails = getFilteredEmails();
-                }
-                renderEmailsWithPagination();
-                updateStats(allEmails);
+                localStorage.setItem('last_completion_sweep', new Date().toISOString());
                 scheduleLabelCountRefresh();
-                showSuccess(`${movedCount} completed task${movedCount > 1 ? 's' : ''} auto-moved to "Task Completed".`);
+                // If we happen to be on label 8 right now, refresh the view
+                if (typeof isTaskCreatedView === 'function' && isTaskCreatedView()) {
+                    loadEmails();
+                }
+                console.log(`Completion sweep moved ${movedCount} thread(s) to Task Completed`);
             }
         } catch (err) {
-            console.error('Airtable completion check failed:', err);
+            console.error('Completion sweep failed:', err);
+        } finally {
+            sweepInFlight = false;
         }
     }
 
