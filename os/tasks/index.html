@@ -719,7 +719,9 @@ async function runSyncCheck(){
     fresh.forEach(r=>byId.set(r.id,r));
     (allTasks||[]).forEach(t=>{
       const r=byId.get(t.id);if(!r)return;
-      const c=r.cellValuesByFieldId||{};
+      // Airtable REST returns field data under .fields when returnFieldsByFieldId
+      // is set; .cellValuesByFieldId is the Blocks SDK shape. Fall back correctly.
+      const c=r.cellValuesByFieldId||r.fields||{};
       const checks=[
         ['name',t.name,c[F.name]||''],
         ['status',t.status,selectName(c[F.status])],
