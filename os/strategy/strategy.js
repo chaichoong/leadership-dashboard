@@ -989,9 +989,10 @@ function deriveProjectName(text) {
     const firstLine = text.split('\n').map(s => s.trim()).find(s => s) || '';
     // Strip common "Project N:" prefixes so the Projects OS name is clean.
     const stripped = firstLine.replace(/^project\s*\d+\s*[:\-–]\s*/i, '').trim();
-    const trimmed = stripped || firstLine;
-    if (trimmed.length <= 100) return trimmed;
-    return trimmed.slice(0, 97) + '…';
+    // Return the full name — the Task & Project Management OS renders project
+    // cards with word-wrapping now, so there's no UI reason to truncate here.
+    // (Previous 100-char cap was silently truncating real quarterly project names.)
+    return stripped || firstLine;
 }
 
 // ═════════════════════════════════════════════════════════════════════
