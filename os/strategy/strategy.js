@@ -1882,15 +1882,22 @@ async function boardroomCritique(step, history) {
     // Call Claude to critique. Return { accept: true/false, pushback?: "…", refined?: "…", note?: "…" }
     // `history` is the full back-and-forth for THIS step so the mentor sees what
     // it has already asked and doesn't repeat the same challenge verbatim.
+    // CURRENT PLAN — what's in the form RIGHT NOW (including any edits the
+    // founder has already made in this session). This is the source of truth
+    // for "this quarter's plan". The prior quarter is background only.
+    const currentPlanSnapshot = extractCurrentPlanFromForm();
+    const currentContext = Object.keys(currentPlanSnapshot).some(k => currentPlanSnapshot[k])
+        ? `\n\nCURRENT PLAN STATE (these are the founder's latest edits in this session — THIS is the source of truth for context, not the prior quarter): ${JSON.stringify(currentPlanSnapshot)}`
+        : '';
     const priorContext = wizardState.priorRecord
-        ? `Prior quarter's record (for reference): ${JSON.stringify(extractCompactPrior(wizardState.priorRecord))}`
-        : 'No prior quarter record — starting fresh.';
+        ? `\n\nPRIOR QUARTER'S RECORD (background reference only — use for reflection, but do NOT quote its numbers or claims unless the founder has confirmed them for this quarter too): ${JSON.stringify(extractCompactPrior(wizardState.priorRecord))}`
+        : '\n\nNo prior quarter record.';
     const reflectionContext = wizardState.reflection
-        ? `\n\nFOUNDER'S REFLECTION ON LAST QUARTER (their own words — reference when relevant so "what missed" shapes "what we commit to now"):\n"${wizardState.reflection}"`
+        ? `\n\nFOUNDER'S REFLECTION ON LAST QUARTER (their own words): "${wizardState.reflection}"`
         : '';
     const attemptCount = history.filter(m => m.role === 'user').length;
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. ${priorContext}${reflectionContext}`,
+        `Strategy Plan OS — ${wizardState.businessName}.${currentContext}${priorContext}${reflectionContext}`,
         `You are interviewing the founder to build this quarter's strategy plan, one field at a time.
 
 Section: "${step.label}"
@@ -1969,6 +1976,35 @@ function extractCompactPrior(rec) {
         qp1: f[OBJSTRAT.quarterlyProjects[0]],
         qp2: f[OBJSTRAT.quarterlyProjects[1]],
         qp3: f[OBJSTRAT.quarterlyProjects[2]],
+    };
+}
+
+// Snapshot the form fields the wizard might reference as context. Pulls from
+// the actual DOM inputs/textareas, so any edits the founder has made in this
+// session (whether via the wizard or typed directly into the form) are
+// reflected. Returns a compact object — only the fields the mentor needs for
+// cross-referencing, not the full 60+ field record.
+function extractCurrentPlanFromForm() {
+    const read = fid => {
+        const el = document.querySelector(`[data-field-id="${fid}"]`);
+        if (!el) return '';
+        const v = (el.value || '').trim();
+        return v || '';
+    };
+    return {
+        objective: read(OBJSTRAT.objective),
+        targetWhat: read(OBJSTRAT.targetWhat),
+        targetWho: read(OBJSTRAT.targetWho),
+        targetHow: read(OBJSTRAT.targetHow),
+        customerProfile: read(OBJSTRAT.customerProfile),
+        enticement: read(OBJSTRAT.enticement),
+        nineYearTarget: read(OBJSTRAT.nineYearTarget),
+        threeYearTarget: read(OBJSTRAT.threeYearTarget),
+        threeYearMeas: OBJSTRAT.threeYearMeas.map(read).filter(Boolean),
+        oneYearTarget: read(OBJSTRAT.oneYearTarget),
+        oneYearMeas: OBJSTRAT.oneYearMeas.map(read).filter(Boolean),
+        quarterlyProjects: OBJSTRAT.quarterlyProjects.map(read).filter(Boolean),
+        monthlyStones: OBJSTRAT.monthlyStones.map(stones => stones.map(read).filter(Boolean)),
     };
 }
 
