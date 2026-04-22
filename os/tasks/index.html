@@ -436,12 +436,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <th>Task</th>
             <th>Assignee</th>
             <th>Due Date</th>
+            <th style="width:60px" title="Hard deadline flag">Hard</th>
             <th>Time Estimate</th>
             <th>Priority</th>
-            <th>Recurring</th>
+            <th>Project</th>
             <th>Status</th>
             <th>Business</th>
-            <th>Project</th>
+            <th>Recurring</th>
             <th style="width:70px">Actions</th>
           </tr>
         </thead>
@@ -1262,18 +1263,15 @@ function openTaskDrawer(taskId){
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
       <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value)">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
-      <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;align-items:center;gap:10px">
-        <input type="date" style="flex:1" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)">
-        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
-      </div></div>
+      <div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></div></div>
+      <div class="field-row"><label>Hard Deadline</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--danger);font-weight:600;cursor:pointer"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;accent-color:var(--danger)">Flag as immovable (never auto-rescheduled)</label></div></div>
       <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value)"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value)"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
-      <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
-
+      <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value)">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value)"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
-      <div class="field-row"><label>Linked Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
+      <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value)">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'None'}</option>`).join('')}</select></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('description',this.value)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
       <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
@@ -2766,20 +2764,18 @@ function renderTasks(){
       <td style="color:var(--text-secondary)">${idx}</td>
       <td onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.description?`<div style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px">${escHtml(t.description)}</div>`:''}</td>
       <td onclick="event.stopPropagation()"><select class="inline-select" onchange="updateTaskField('${t.id}','assignee',this.value);renderTasks()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <input type="date" class="inline-input" style="width:130px;display:inline-block" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)">
-        <label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:var(--danger);margin-left:4px" title="Hard deadline"><input type="checkbox" style="width:13px;height:13px" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">!</label>
-      </td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
+      <td onclick="event.stopPropagation()" style="text-align:center"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--danger)"></td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'timeEst',t.timeEst,['',...TIME_OPTIONS])}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'priority',t.priority,['',...PRIORITY_OPTIONS])}</td>
-      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'recurring',t.recurring,RECUR_OPTIONS)}</td>
+      <td onclick="event.stopPropagation()">${inlineProjectPickerCell(t)}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'status',dispStatus,STATUS_OPTIONS)}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'business',t.business,['',...BUSINESS_OPTIONS])}</td>
-      <td onclick="event.stopPropagation()">${inlineProjectPickerCell(t)}</td>
+      <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'recurring',t.recurring,RECUR_OPTIONS)}</td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">${rowActionsHtml(t.id)}</td>
     </tr>`;
   });
-  if(!page.length)html=`<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
+  if(!page.length)html=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
 
   document.getElementById('taskBody').innerHTML=html;
   document.getElementById('showingCount').textContent=`Showing ${page.length} of ${tasks.length}`;
