@@ -2934,7 +2934,8 @@ function renderProjects(){
     const displayHealth=computedHealth||'Unknown';
     const statusCls=displayHealth.toLowerCase().replace(/\s+/g,'-');
     const isExp=expandedProject===p.id;
-    const linked=allTasks.filter(t=>t.projectIds.includes(p.id)||t.projectNames.includes(p.name));
+    // Linked tasks — exclude Completed so the count + list reflect only active work
+    const linked=allTasks.filter(t=>(t.projectIds.includes(p.id)||t.projectNames.includes(p.name))&&t.status!=='Completed');
     const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
 
     const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed or Not Started manually in the edit panel to override.';
