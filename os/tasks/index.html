@@ -1022,6 +1022,18 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       payload[fid]=rawValue||null;
       task[fieldKey]=rawValue;
       if(fieldKey==='timeEst')task.minutes=TIME_MINUTES[rawValue]||task.minutes;
+      // AUTOMATION PORT #1: Task Completion Date
+      // When status flips to Completed, stamp completion; when it flips away, clear it.
+      if(fieldKey==='status'){
+        if(rawValue==='Completed'){
+          const stamp=new Date().toISOString();
+          payload[F.completion]=stamp;
+          task.completion=stamp;
+        } else if(task.completion){
+          payload[F.completion]=null;
+          task.completion='';
+        }
+      }
     } else if(fieldKey==='business'){
       if(rawValue&&BUSINESS_MAP[rawValue]){
         payload[fid]=[{id:BUSINESS_MAP[rawValue]}];
@@ -1062,6 +1074,36 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     if(fieldKey==='dueDate'){
       const today=todayStr();
       if(rawValue!==today)saveStartTime(today,taskId,null);
+      // AUTOMATION PORT #2: When Due Date is updated, adjust Status
+      // Mirror the Airtable automation: status reflects due-date state
+      // (skip Completed / Approval — those are manual terminal states).
+      if(task.status!=='Completed'&&task.status!=='Approval'){
+        let newStatus=task.status;
+        if(!rawValue){newStatus='Upcoming'}
+        else if(rawValue<today)newStatus='Overdue';
+        else if(rawValue===today)newStatus='Today';
+        else newStatus='Upcoming';
+        if(newStatus&&newStatus!==task.status){
+          try{
+            const r=await patchTask(taskId,{[F.status]:newStatus});
+            if(r.ok){task.status=newStatus}
+          }catch(e){console.warn('auto-status patch failed',e)}
+        }
+      }
+    }
+    // AUTOMATION PORT #3: When assignee changes, add them as collaborator
+    if(fieldKey==='assignee'){
+      const member=TEAM.find(m=>m.key===rawValue);
+      if(member){
+        const already=(task.collaborators||[]).some(c=>(c.email||'').toLowerCase()===member.email.toLowerCase());
+        if(!already){
+          const next=[...(task.collaborators||[]),{email:member.email,name:member.name}];
+          try{
+            const r=await patchTask(taskId,{[F.collaborators]:next.map(c=>({email:c.email}))});
+            if(r.ok)task.collaborators=next;
+          }catch(e){console.warn('auto-collab patch failed',e)}
+        }
+      }
     }
     // Push undo entry (skip if this call is itself an undo or part of bulk op)
     if(!_undoInProgress&&!_bulkOperation){
