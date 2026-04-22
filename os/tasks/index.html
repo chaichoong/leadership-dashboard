@@ -2944,13 +2944,15 @@ function getFilteredTasks(){
   const bf=document.getElementById('filterBusiness').value;if(bf)tasks=tasks.filter(t=>t.business===bf);
   const q=document.getElementById('searchBox').value.toLowerCase().trim();
   if(q)tasks=tasks.filter(t=>t.name.toLowerCase().includes(q)||(t.assignee||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q)||(t.business||'').toLowerCase().includes(q));
-  // Sort: priority group (Project, Urgent, High, Not Urgent), then due date
+  // Sort: due date (ascending; blanks last), then priority group
   tasks.sort((a,b)=>{
+    if(a.dueDate&&b.dueDate){
+      const c=a.dueDate.localeCompare(b.dueDate);
+      if(c!==0)return c;
+    } else if(a.dueDate&&!b.dueDate)return -1;
+    else if(!a.dueDate&&b.dueDate)return 1;
     const pa=PRIORITY_ORDER[a.priority]??99,pb=PRIORITY_ORDER[b.priority]??99;
-    if(pa!==pb)return pa-pb;
-    if(!a.dueDate&&!b.dueDate)return 0;
-    if(!a.dueDate)return 1;if(!b.dueDate)return -1;
-    return a.dueDate.localeCompare(b.dueDate);
+    return pa-pb;
   });
   return tasks;
 }
