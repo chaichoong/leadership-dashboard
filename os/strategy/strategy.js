@@ -994,19 +994,19 @@ const WIZARD_STEPS = [
     { id: 'targetHow', label: 'Target — How we do it', targetFid: () => OBJSTRAT.targetHow,
       ask: "Target Statement, part 3 of 3: HOW we do it.\n\nOne sentence on your distinctive method — what's different about the way you deliver vs. anyone else a customer could buy from?" },
     { id: 'customerProfile', label: 'Customer Profile', targetFid: () => OBJSTRAT.customerProfile,
-      ask: "The detailed ideal customer profile — who you target and who you DON'T.\n\nBullets are ideal. Cover:\n• Stage / size / revenue band\n• Budget reality (cash-pay, equity-pay, both?)\n• Mindset (what they believe, what they're tired of)\n• Deal-breakers — who you refuse to take on and why\n\nThe sharper the 'not us' list, the less time you waste on bad-fit leads." },
-    { id: 'enticement', label: 'Enticement', targetFid: () => OBJSTRAT.enticement,
-      ask: "The Enticement — the irresistible offer your target market cannot refuse.\n\nOne paragraph. What specifically makes it hard to say no? Pricing structure, risk reversal, outcome guarantee, turnaround, access — whatever your asymmetric advantage is." },
+      ask: "Tell me about your ideal customer — who you target and who you DON'T.\n\nBullet points or conversational dictation are perfect, I'll structure it. Cover as many of these as you can:\n• Stage / size / revenue band\n• Budget reality (cash-pay, equity-pay, both?)\n• Mindset (what they believe, what they're tired of)\n• Deal-breakers — who you refuse to take on\n\nGive me the raw material and I'll write it up properly." },
     // ── List sections — one question each that gathers the whole list.
     { id: 'undertakings', kind: 'list', label: 'Undertakings (team rules)', fieldIdsFn: () => OBJSTRAT.undertakings, maxItems: 20,
-      ask: "The Undertakings are the shared rules that every team member (and AI agent) follows day-to-day — your non-negotiables.\n\nExamples of good ones: 'Own the outcome — you deliver on time and to standard', 'Tell the truth even when uncomfortable', 'Never raise a problem without a proposed solution'.\n\nIf this is your first time: give me 10–15 rules in plain English, one per line. I'll tidy and number them.\n\nIf you already have some: tell me what to add, reword or remove — e.g. 'add one about routine discipline', 'reword #3 to say X', 'no changes'.",
+      ask: "The Undertakings — the shared rules every team member (and AI agent) follows day-to-day. Your non-negotiables.\n\nJust talk through them or list them as bullets — I'll structure and number them. E.g.: 'own the outcome', 'tell the truth', 'never raise a problem without a solution', 'data not drama'.\n\nIf you already have some set, tell me what to add, reword or remove — 'add one about routine discipline', 'reword #3', 'no changes'.",
       descriptionForAI: "A list of non-negotiable team/culture rules for the business. Short title + 2–3 supporting bullets each." },
     { id: 'usps', kind: 'list', label: 'Original Selling Points (USPs)', fieldIdsFn: () => OBJSTRAT.usps, maxItems: 5,
-      ask: "The Original Selling Points — why a customer chooses you over any alternative.\n\nUp to 5. Each should be a genuine, defensible differentiator (not marketing fluff). Name the advantage, then explain why it's true.\n\nIf first-time: give me as many as come to mind, I'll structure them.\n\nIf existing: say what to change, e.g. 'add one about our equity model', 'tighten #2', 'no changes'.",
+      ask: "The Original Selling Points — why a customer chooses you over any alternative. Up to 5.\n\nDictate or list them rough — e.g. 'done-for-you not coaching', 'we take equity', 'AI-first so cheaper', '20 years in the trade'. I'll turn them into defensible, well-worded differentiators using the mentor's playbook.",
       descriptionForAI: "Unique selling points. Each item: a bold claim + a short paragraph backing it up." },
     { id: 'mainMethod', kind: 'list', label: 'Main Method (step-by-step process)', fieldIdsFn: () => OBJSTRAT.methodSteps, maxItems: 10,
-      ask: "The Main Method — the proven process the business follows to deliver its outcome, step by step. Up to 10 steps.\n\nThink of it as the 'secret recipe' — the sequence a client moves through, or the way you systematically build the work. A well-known example is EOS's 'Vision / People / Data / Issues / Process / Traction', or your existing OPTIMISE framework.\n\nIf first-time: list the steps in order, one per line, with a short description each.\n\nIf existing: say what to change — e.g. 'add a step between 3 and 4 for X', 'reword step 5', 'no changes'.",
+      ask: "The Main Method — the proven process you follow to deliver the outcome, step by step. Up to 10 steps.\n\nGive me the steps in order — a word or two each is fine. I'll flesh them out into a proper framework. E.g. 'Objective, Priorities, Team, Income, Methods, Intelligence, Scoreboards, Exit-ready' becomes a polished OPTIMISE framework with a clear description for each step.",
       descriptionForAI: "Sequential steps of the main delivery method. Each item: a short step name + a one-sentence explanation." },
+    { id: 'enticement', label: 'Enticement', targetFid: () => OBJSTRAT.enticement,
+      ask: "The Enticement — the irresistible offer your target market cannot refuse.\n\nTalk through the hook — pricing structure, risk reversal, outcome guarantee, equity model, turnaround time, anything asymmetric. Bullets are fine. I'll write it up as a proper irresistible-offer paragraph." },
     // ── Strategy plan (quarterly cadence — where most of the iteration happens.)
     { id: 'nineYear', label: 'Nine-Year Target', targetFid: () => OBJSTRAT.nineYearTarget,
       ask: 'Paint the nine-year picture of this business. Be specific and visual — what does it look like, sound like, count like? If it is vague I will push back.' },
@@ -1341,9 +1341,11 @@ async function wizSend() {
     applyOrAskToMerge(step, accepted);
 }
 
-// Decide whether to overwrite silently or ask the user how to combine with
-// existing content. Three choices: Replace, Add (append), or Amend with AI
-// (AI applies the founder's instruction to the existing text).
+// After an accepted answer we show a preview of the AI-refined text and let
+// the founder approve, tweak, or write their own. Only after approval does
+// it actually get written to the form.
+// • Empty field: show approval preview, then apply on Use.
+// • Non-empty field: show merge picker (Replace / Add / Amend with AI).
 function applyOrAskToMerge(step, newText) {
     if (!step.targetFid) {
         advanceStep();
@@ -1353,13 +1355,58 @@ function applyOrAskToMerge(step, newText) {
     const existing = currentValueForField(fid);
     const newTrim = (newText || '').trim();
     const existingTrim = (existing || '').trim();
-    // No prior content, or identical — just apply and move on.
-    if (!existingTrim || existingTrim === newTrim) {
-        applyFieldValueInUI(fid, newText);
-        advanceStep();
+    // Non-empty (and not identical) → merge picker
+    if (existingTrim && existingTrim !== newTrim) {
+        showMergePicker(step, newText, existing);
         return;
     }
-    showMergePicker(step, newText, existing);
+    // Empty field → show approval preview so the founder can approve / tweak
+    // the AI-expanded version before it populates the form.
+    showApprovalPreview(step, newText);
+}
+
+function showApprovalPreview(step, proposedText) {
+    const host = document.getElementById('wizMessages');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg system approval-preview';
+    const label = 'Here\'s what I\'d write into the form:';
+    wrap.innerHTML = `<div style="font-weight:600;color:var(--text-primary);margin-bottom:6px">${escapeHtml(label)}</div>
+        <div style="white-space:pre-wrap;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:13px;line-height:1.55">${escapeHtml(proposedText)}</div>`;
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+    const mk = (label, handler) => {
+        const b = document.createElement('button');
+        b.className = 'btn btn-ghost';
+        b.style.cssText = 'font-size:11px;padding:4px 10px';
+        b.textContent = label;
+        b.onclick = handler;
+        return b;
+    };
+    btnRow.appendChild(mk('Use this', () => {
+        const fid = step.targetFid();
+        applyFieldValueInUI(fid, proposedText);
+        wizardState.answers[step.id] = proposedText;
+        advanceStep();
+    }));
+    btnRow.appendChild(mk('Tweak it', () => {
+        appendWizMessage('assistant', "OK — tell me what to change. I'll redo it.");
+        // stepIndex stays put; user's next Send triggers another critique/refine
+    }));
+    btnRow.appendChild(mk('I\'ll write it myself', () => {
+        const ta = document.getElementById('wizInput');
+        ta.value = proposedText;
+        ta.focus();
+        appendWizMessage('assistant', "Edit in the input box and hit Send when you're happy. I'll accept it as-is.");
+    }));
+    wrap.appendChild(btnRow);
+    host.appendChild(wrap);
+    host.scrollTop = host.scrollHeight;
+    if (wizardState) {
+        (wizardState.visibleMessages = wizardState.visibleMessages || []).push({
+            role: 'system', content: '[Approval preview] ' + proposedText + ' (Use / Tweak / Write own)'
+        });
+        persistWizardState();
+    }
 }
 
 function advanceStep() {
@@ -1860,18 +1907,25 @@ If there's genuine weakness, push back ONCE with a specific, focused challenge. 
 IMPORTANT: Look at the full conversation above. If you've already pushed back on the same point, DO NOT repeat the same push-back. Either accept, or push on a different dimension. Repeating yourself blocks progress and is a failure on your part.
 
 Reply with a JSON object ONLY, nothing else. Shape:
-{"accept": true|false, "pushback"?: "one short paragraph (2–3 sentences max) in UK English, naming one specific thing to add or sharpen — never repeat a point you've already made", "refined"?: "the founder's latest answer tidied for grammar, punctuation and flow — see rules below — MUST be included on every accept", "note"?: "one short confirmation line after accept, optional"}
+{"accept": true|false, "pushback"?: "one short paragraph (2–3 sentences max) in UK English, naming one specific thing to add or sharpen — never repeat a point you've already made", "refined"?: "a fully-developed, professional-quality version of the founder's answer — see rules below — MUST be included on every accept", "note"?: "one short confirmation line after accept, optional"}
 
-"refined" rules (REQUIRED on every accept):
-- Fix grammar, punctuation, capitalisation, and awkward phrasing.
-- Use UK English spelling.
-- Preserve the founder's own words and voice where they work. This is a polish, not a rewrite.
-- Preserve ALL substance — every number, name, claim, and nuance stays intact. Never add facts the founder didn't give you.
-- Keep the length in the same ballpark as the founder's input.
-- Keep bullet lists as bullet lists; keep paragraph structure.
-- If the input was already clean, you may return it verbatim.
+"refined" RULES (REQUIRED on every accept) — this is the heart of the tool. The founder is likely dictating or bullet-pointing; your job is to turn that raw material into something they'd be proud to put in a strategic plan document.
 
-Do not accept pure platitudes. Do accept rough-but-usable answers, especially on attempt 2+. Prefer 'accept with refined tightening' over 'reject'.`
+1. EXPAND rough input. If the founder gave bullets, a rough paragraph, or conversational dictation, write it up as proper prose or a structured list with headings/bullets — whatever fits the section. Don't just tidy commas.
+2. APPLY your expertise. Frame the answer the way the Boardroom Mentor would — bringing the right business-planning structure (mission vs vision vs target, outcome vs activity, input vs output metric, etc.). Give it the weight a professional plan deserves.
+3. PRESERVE every specific fact. Every number, currency, percentage, count, name, product, timeframe, person, and place the founder gave you MUST appear in the refined version unchanged. You may re-word around them; you may not alter or drop them.
+4. NEVER invent facts. If the founder didn't say a specific number or name, don't add one. If they said "20–25k", don't write "£22k". If they said "a few clients", don't write "5 clients". Use their own numbers verbatim.
+5. UK English spelling, grammar, punctuation.
+6. Match the expected shape of the field:
+   - Nine-year / three-year / one-year Target: paragraph + bullet-structured sub-sections (Business Model, Portfolio, Delivery, Team, Founder Role, etc.) when the founder gave enough substance for that.
+   - Measurables: tight numeric target + "how we measure it" line.
+   - Objective / Customer Profile / Enticement: one well-crafted paragraph.
+   - Target Statement parts: one tight sentence each.
+   - Quarterly Projects: name + focus + success criteria, 2–4 short lines.
+   - Monthly stepping stones: one concrete deliverable per month, one sentence each.
+7. If the founder's answer was already polished and professional, return it verbatim.
+
+Do not accept pure platitudes ('be the best', 'crush it'). DO accept rough or terse answers if they have any real substance — your job is to build them up, not reject them. Prefer 'accept with a good refined expansion' over 'reject'. Push back only when the answer has no substance at all.`
     );
     try {
         const res = await fetch(AI_PROXY, {
