@@ -657,6 +657,31 @@ function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'ot
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},err?6000:1800)}catch(e){console.warn('toast failed',e)}}
 
+// ═══ Persistent save-failure banner ═══
+// Errors flash past in a toast too easily to notice. Every PATCH failure
+// lands here as a persistent banner that sticks until the user dismisses
+// it — so "it said saved but reverted on refresh" becomes visible.
+let _saveFailures=[];
+function recordSaveFailure(taskId,fieldKey,errMsg){
+  const task=(allTasks||[]).find(t=>t.id===taskId);
+  _saveFailures.push({taskId,fieldKey,errMsg,taskName:task?task.name:taskId,when:new Date()});
+  renderSaveFailureBanner();
+}
+function dismissSaveFailures(){_saveFailures=[];renderSaveFailureBanner()}
+function renderSaveFailureBanner(){
+  let el=document.getElementById('saveFailBanner');
+  if(!_saveFailures.length){if(el)el.remove();return}
+  if(!el){
+    el=document.createElement('div');el.id='saveFailBanner';
+    el.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--danger-bg);border:2px solid var(--danger);color:var(--danger);padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:var(--shadow-lg);z-index:10000;max-width:640px;display:flex;align-items:flex-start;gap:12px';
+    document.body.appendChild(el);
+  }
+  const n=_saveFailures.length;
+  const latest=_saveFailures.slice(-3).map(f=>`• ${escHtml(f.taskName.slice(0,60))} — ${escHtml(f.fieldKey)} (${escHtml(f.errMsg)})`).join('<br>');
+  el.innerHTML=`<div style="flex:1"><div>⚠ ${n} save${n===1?'':'s'} failed — these changes were NOT persisted:</div><div style="font-weight:400;margin-top:6px;font-size:11px;color:var(--text-primary)">${latest}${n>3?`<br>…and ${n-3} more`:''}</div></div><button onclick="dismissSaveFailures()" style="background:var(--danger);color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Dismiss</button>`;
+}
+window.dismissSaveFailures=dismissSaveFailures;
+
 // ═══ Processing-indicator helpers (use around any async operation with a delay) ═══
 // setBusy(button, "Deleting…") -> disables + spinner + label; clearBusy restores
 function setBusy(el,label){
@@ -972,21 +997,39 @@ function parseProject(rec){
 }
 
 // ===== PATCH =====
+// Airtable allows 5 req/sec per base. A burst of edits (especially with
+// the auto-follow-up PATCHes for due-date→status and assignee→collab)
+// can easily exceed that and return 429. We retry 429/5xx with backoff
+// so user edits don't silently revert on hard refresh.
+async function patchWithRetry(url,fields){
+  const body=JSON.stringify({fields,typecast:true});
+  const delays=[300,900,2000]; // up to 3 retries
+  let lastRes=null;
+  for(let attempt=0;attempt<=delays.length;attempt++){
+    const res=await fetch(url,{
+      method:'PATCH',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body
+    });
+    if(res.ok)return res;
+    // Retry on rate-limit or transient server errors only
+    if((res.status===429||res.status>=500)&&attempt<delays.length){
+      const retryAfter=parseInt(res.headers.get('Retry-After')||'0',10);
+      const wait=retryAfter>0?retryAfter*1000:delays[attempt];
+      console.warn(`[patch] ${res.status} — retrying in ${wait}ms (attempt ${attempt+1})`);
+      await new Promise(r=>setTimeout(r,wait));
+      lastRes=res;
+      continue;
+    }
+    return res;
+  }
+  return lastRes; // exhausted retries
+}
 async function patchTask(taskId,fields){
-  const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,{
-    method:'PATCH',
-    headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
-    body:JSON.stringify({fields,typecast:true})
-  });
-  return res;
+  return patchWithRetry(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,fields);
 }
 async function patchProject(pid,fields){
-  const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}/${pid}`,{
-    method:'PATCH',
-    headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
-    body:JSON.stringify({fields,typecast:true})
-  });
-  return res;
+  return patchWithRetry(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}/${pid}`,fields);
 }
 
 // Capture the current "raw" value for a task field — same shape that updateTaskField expects as rawValue
@@ -1113,7 +1156,9 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     if(!_bulkOperation)toast('Saved');
   }catch(e){
     Object.assign(task,prev);
-    if(!_bulkOperation)toast('Failed to save: '+((e&&e.message)||'unknown error'),true);
+    const msg=(e&&e.message)||'unknown error';
+    recordSaveFailure(taskId,fieldKey,msg);
+    if(!_bulkOperation)toast('Failed to save: '+msg,true);
     console.warn('patch failed',e);
     if(_bulkOperation)throw e;
   }
