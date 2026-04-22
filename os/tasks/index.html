@@ -1131,10 +1131,18 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         else if(rawValue===today)newStatus='Today';
         else newStatus='Upcoming';
         if(newStatus&&newStatus!==task.status){
+          // Optimistic local update so the grid re-renders with the new
+          // status on the next paint — don't wait for the PATCH round-trip.
+          task.status=newStatus;
           try{
             const r=await patchTask(taskId,{[F.status]:newStatus});
-            if(r.ok){task.status=newStatus}
-          }catch(e){console.warn('auto-status patch failed',e)}
+            if(!r.ok){
+              console.warn('auto-status patch non-ok',r.status);
+              recordSaveFailure(taskId,'status','auto-status patch '+r.status);
+            }
+          }catch(e){console.warn('auto-status patch failed',e);recordSaveFailure(taskId,'status',(e&&e.message)||'auto-status patch failed')}
+          // Re-render so the new status is visible immediately in the grid / drawer
+          try{if(typeof renderAll==='function')renderAll();else if(typeof renderTasks==='function')renderTasks()}catch(e){}
         }
       }
     }
