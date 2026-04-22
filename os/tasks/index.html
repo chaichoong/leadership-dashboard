@@ -2972,7 +2972,15 @@ function renderProjects(){
     const statusCls=displayHealth.toLowerCase().replace(/\s+/g,'-');
     const isExp=expandedProject===p.id;
     // Linked tasks — exclude Completed so the count + list reflect only active work
+    // Linked tasks — read from BOTH project-link fields (merged in parseTask) AND
+    // compute counts client-side so they don't depend on stale Airtable rollups.
     const linked=allTasks.filter(t=>(t.projectIds.includes(p.id)||t.projectNames.includes(p.name))&&t.status!=='Completed');
+    // Client-side active count (excludes completed since completed aren't fetched).
+    // Use max of client-side count and rollup so both are represented.
+    const liveActive=linked.length;
+    const liveTotal=Math.max(liveActive,p.totalTasks||0);
+    const liveCompleted=Math.max(0,liveTotal-liveActive);
+    const liveOverdue=linked.filter(t=>isOverdue(t)).length;
     const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
 
     const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed or Not Started manually in the edit panel to override.';
@@ -2986,7 +2994,7 @@ function renderProjects(){
       ownerHeader=`<div style="font-size:12px;color:var(--text-muted);margin-top:2px">No owner</div>`;
     }
     html+=`<div class="project-card" onclick="toggleProject('${p.id}')">
-      <div class="project-head" style="align-items:flex-start"><div style="flex:1"><h3>${escHtml(p.name)}</h3>${ownerHeader}</div><span class="project-status ${statusCls}">${escHtml(displayHealth)}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px">?</span></div>
+      <div class="project-head" style="align-items:flex-start"><div style="flex:1;min-width:0"><h3 style="word-break:break-word;overflow-wrap:anywhere;white-space:normal">${escHtml(p.name)}</h3>${ownerHeader}</div><span class="project-status ${statusCls}" style="flex-shrink:0">${escHtml(displayHealth)}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px;flex-shrink:0">?</span></div>
       <div class="project-body">
         <div class="project-col">
           <h5>Business</h5><div class="val">${escHtml(p.business||'-')}</div>
@@ -2999,7 +3007,7 @@ function renderProjects(){
           <div style="font-size:11px;color:var(--text-secondary)">${kpiPct.toFixed(0)}%</div>
         </div>
         <div class="project-col">
-          <h5>Tasks</h5><div class="val">${p.completedTasks||0} / ${p.totalTasks||0} done${p.overdue?` &middot; <span style="color:var(--danger)">${p.overdue} overdue</span>`:''}</div>
+          <h5>Tasks</h5><div class="val">${liveCompleted} / ${liveTotal} done${liveOverdue?` &middot; <span style="color:var(--danger)">${liveOverdue} overdue</span>`:''}${liveActive?` &middot; <span style="color:var(--text-secondary);font-size:11px">${liveActive} active</span>`:''}</div>
           <div class="kpi-bar"><div class="kpi-bar-inner" style="width:${barW}%"></div></div>
           <div style="font-size:11px;color:var(--text-secondary)">${(pct*100).toFixed(0)}% complete</div>
         </div>
