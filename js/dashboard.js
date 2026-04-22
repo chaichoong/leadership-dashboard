@@ -101,6 +101,178 @@
         return Math.round(hrs / 24) + 'd ago';
     }
 
+    // ── Strategic KPIs (from Projects table) ──
+    // The Projects table lives in the same base as the Task OS. Fields below mirror
+    // the PF constant in os/tasks/index.html. Kept as local constants so this file
+    // stays independent — if you change field IDs, update both.
+    const STRAT_PROJECTS_TABLE = 'tblHrpTMd5LNYn8v1';
+    const STRAT_PF = {
+        name:            'fldiMZICg1KOORpte',
+        status:          'fldZ0SpReVaDS1VXb',
+        start:           'fldGIlsn0cSEpnj18',
+        end:             'fldU0cJparnkvOUsV',
+        completed:       'fldliObR7TdTdjht7',
+        kpiName:         'fldABYFMf2yBKWdlD',
+        kpiTarget:       'fldaI0voHia91SYZz',
+        kpiCurrent:      'fldB1QJDUsukxKzjQ',
+        kpiUnit:         'fldrYZEghROXYf6w0',
+        business:        'fldtdJTFkMtldxEVf',
+        owner:           'fldXUAPrpStGwc2V9',
+        kpiAutomated:    'fldU7tTf8aRgG60wI',
+        kpiSource:       'fldic3mgIRLLu2Sre',
+        kpiLastUpdated:  'fldNk2U74jBxZ6esJ',
+        kpiLastUpdatedBy:'fldIgmO8OqA3a7K5o',
+        totalTasks:      'fldtw6NQZ8CSF3RXi',
+        completedTasks:  'fld7IDjY0xB4JGBfn',
+    };
+    const STRAT_TEAM_KEYS = {
+        'kevin@runpreneur.org.uk':'kevin',
+        'micaa.work@gmail.com':'mica',
+        'atentaerica@gmail.com':'erica',
+    };
+    let strategicKpiFilter = 'all';
+    let _strategicKpiProjects = [];
+    let _strategicBusinessIdToName = {};
+
+    function _stratSelName(v){if(!v)return '';if(typeof v==='string')return v;if(typeof v==='object'&&v.name)return v.name;return ''}
+    function _stratDaysAgo(iso){if(!iso)return null;const ms=Date.now()-new Date(iso).getTime();return Math.floor(ms/86400000)}
+    function _stratComputeHealth(p){
+        if(p.completed||p.status==='Completed')return'Completed';
+        if(p.status==='Not Started')return'Not Started';
+        if(!p.start||!p.end)return p.status||'Unknown';
+        const today=new Date();today.setHours(0,0,0,0);
+        const s=new Date(p.start+'T00:00:00'),e=new Date(p.end+'T00:00:00');
+        if(e<s)return p.status||'Unknown';
+        if(e<today)return'Off-Track';
+        const total=e-s,elapsed=Math.max(0,today-s);
+        const timePct=total>0?(elapsed/total)*100:0;
+        let progPct=null;
+        if(p.kpiTarget>0&&p.kpiCurrent>=0)progPct=(p.kpiCurrent/p.kpiTarget)*100;
+        else if(p.totalTasks>0)progPct=((p.completedTasks||0)/p.totalTasks)*100;
+        if(progPct===null)return p.status||'Unknown';
+        if(timePct<5)return'Not Started';
+        const ratio=timePct>0?(progPct/timePct)*100:100;
+        if(ratio>=100)return'On-Target';
+        if(ratio>=85)return'On-Track';
+        return'Off-Track';
+    }
+    function _stratHealthColour(h){
+        if(h==='On-Target'||h==='Completed')return'#16a34a';
+        if(h==='On-Track')return'#16a34a';
+        if(h==='Off-Track')return'#dc2626';
+        if(h==='Not Started')return'#64748b';
+        return'#d97706';
+    }
+
+    async function loadStrategicKpis(){
+        try{
+            // Build business ID→name map from already-loaded businesses
+            // Business name field ID is fldbbRqVxLxUdHwIR (same as used in pnl.js)
+            _strategicBusinessIdToName={};
+            (allBusinesses||[]).forEach(b=>{
+                const name=getField(b,'fldbbRqVxLxUdHwIR');
+                if(name)_strategicBusinessIdToName[b.id]=typeof name==='string'?name:(name.name||'');
+            });
+            const records=await airtableFetch(STRAT_PROJECTS_TABLE);
+            _strategicKpiProjects=records.map(r=>{
+                const ownerObj=getField(r,STRAT_PF.owner);
+                const businessLinks=getField(r,STRAT_PF.business)||[];
+                let businessName='';
+                if(Array.isArray(businessLinks)&&businessLinks[0]){
+                    const b=businessLinks[0];
+                    if(typeof b==='object'&&b.name)businessName=b.name;
+                    else if(typeof b==='string')businessName=_strategicBusinessIdToName[b]||'';
+                }
+                return {
+                    id:r.id,
+                    name:getField(r,STRAT_PF.name)||'(Untitled)',
+                    status:_stratSelName(getField(r,STRAT_PF.status)),
+                    start:getField(r,STRAT_PF.start)||'',
+                    end:getField(r,STRAT_PF.end)||'',
+                    completed:!!getField(r,STRAT_PF.completed),
+                    kpiName:getField(r,STRAT_PF.kpiName)||'',
+                    kpiTarget:Number(getField(r,STRAT_PF.kpiTarget))||0,
+                    kpiCurrent:Number(getField(r,STRAT_PF.kpiCurrent))||0,
+                    kpiUnit:_stratSelName(getField(r,STRAT_PF.kpiUnit)),
+                    business:businessName,
+                    owner:ownerObj?{name:ownerObj.name||'',email:ownerObj.email||''}:null,
+                    kpiAutomated:!!getField(r,STRAT_PF.kpiAutomated),
+                    kpiSource:getField(r,STRAT_PF.kpiSource)||'',
+                    kpiLastUpdated:getField(r,STRAT_PF.kpiLastUpdated)||'',
+                    kpiLastUpdatedBy:getField(r,STRAT_PF.kpiLastUpdatedBy)||'',
+                    totalTasks:Number(getField(r,STRAT_PF.totalTasks))||0,
+                    completedTasks:Number(getField(r,STRAT_PF.completedTasks))||0,
+                };
+            });
+            renderStrategicKpis();
+        }catch(e){console.warn('[loadStrategicKpis] failed',e)}
+    }
+
+    function renderStrategicKpis(){
+        const section=document.getElementById('strategicKpiSection');
+        const list=document.getElementById('strategicKpiList');
+        const pills=document.getElementById('strategicKpiPills');
+        const countEl=document.getElementById('strategicKpiCount');
+        if(!section||!list||!pills)return;
+        const active=_strategicKpiProjects.filter(p=>p.kpiName&&!p.completed&&p.status!=='Completed');
+        if(!active.length){section.style.display='none';return}
+        section.style.display='block';
+
+        const filters=['all','Real Estate','Operations Director','Personal'];
+        pills.innerHTML=filters.map(f=>{
+            const label=f==='all'?'All':f;
+            const isActive=strategicKpiFilter===f;
+            const bg=isActive?'var(--accent, #2C6E49)':'#fff';
+            const color=isActive?'#fff':'#475569';
+            const border=isActive?'var(--accent, #2C6E49)':'#cbd5e1';
+            return `<button onclick="setStrategicKpiFilter('${f.replace(/'/g,"\\'")}')" style="padding:6px 14px;border-radius:20px;border:1px solid ${border};background:${bg};color:${color};font-size:12px;font-weight:600;cursor:pointer">${escHtml(label)}</button>`;
+        }).join('');
+
+        let filtered=active.slice();
+        if(strategicKpiFilter!=='all')filtered=filtered.filter(p=>p.business===strategicKpiFilter);
+        countEl.textContent=`· ${filtered.length} active KPI${filtered.length!==1?'s':''}`;
+
+        if(!filtered.length){list.innerHTML=`<div style="padding:20px;text-align:center;color:#64748b;background:#fff;border:1px solid #e2e8f0;border-radius:8px">No active KPIs for this business.</div>`;return}
+
+        list.innerHTML=filtered.map(p=>{
+            const health=_stratComputeHealth(p);
+            const healthColor=_stratHealthColour(health);
+            const pct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
+            const unitPrefix=p.kpiUnit==='£'?'£':'';
+            const unitSuffix=['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:'';
+            const ownerChip=(()=>{
+                if(!p.owner||!p.owner.email)return '<span style="font-size:11px;color:#94a3b8">No owner</span>';
+                const k=STRAT_TEAM_KEYS[p.owner.email]||'';
+                const initials=(p.owner.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2);
+                return `<span class="avatar avatar-${k}" style="width:22px;height:22px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%">${escHtml(initials)}</span>`;
+            })();
+            // Staleness / auto indicator
+            let stamp='';
+            if(p.kpiAutomated){
+                stamp=`<span style="font-size:10px;font-weight:600;color:#2C6E49;background:#DDE8DF;padding:2px 6px;border-radius:4px">Auto</span>`;
+            }else{
+                const days=_stratDaysAgo(p.kpiLastUpdated);
+                if(days===null)stamp=`<span style="font-size:11px;color:#dc2626;font-weight:600">Never updated</span>`;
+                else if(days>7)stamp=`<span style="font-size:11px;color:#dc2626;font-weight:600">${days}d stale</span>`;
+                else stamp=`<span style="font-size:11px;color:#64748b">${days<1?'today':days===1?'1d ago':days+'d ago'}</span>`;
+            }
+            return `<a href="#tasks" onclick="try{switchTab('tasks')}catch(e){}" style="display:grid;grid-template-columns:2fr 28px 2fr 1.3fr 110px 90px 80px;gap:10px;align-items:center;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-bottom:none;text-decoration:none;color:inherit;font-size:13px" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+                <div style="font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
+                <div style="text-align:center">${ownerChip}</div>
+                <div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.kpiName)}">${escHtml(p.kpiName)}</div>
+                <div style="color:#1e293b;font-variant-numeric:tabular-nums">${unitPrefix}${p.kpiCurrent.toLocaleString('en-GB')}${unitSuffix} <span style="color:#94a3b8">/ ${unitPrefix}${p.kpiTarget.toLocaleString('en-GB')}${unitSuffix}</span></div>
+                <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${healthColor};border-radius:4px"></div></div>
+                <div style="font-size:11px;font-weight:600;color:${healthColor};text-align:center">${escHtml(health)}</div>
+                <div style="text-align:right">${stamp}</div>
+            </a>`;
+        }).join('')+`<div style="height:1px;background:#e2e8f0"></div>`;
+        // Give the list container a nice rounded corner wrapper
+        list.style.cssText='border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;border-top:none';
+    }
+
+    function setStrategicKpiFilter(f){strategicKpiFilter=f;renderStrategicKpis()}
+    window.setStrategicKpiFilter=setStrategicKpiFilter;
+
     // ── Dashboard Load ──
     async function loadDashboard() {
         // Try instant render from cache first
@@ -121,6 +293,8 @@
                 document.getElementById('loadingOverlay').style.display = 'none';
                 setRefreshingIndicator(true, cached.ageMs);
                 renderedFromCache = true;
+                // Load strategic KPIs in the background while the fresh refresh runs
+                loadStrategicKpis();
             } catch (e) {
                 console.warn('Cache render failed, falling back to full load:', e);
                 clearDashCache();
@@ -196,6 +370,9 @@
             // Schedule smart refresh — defers if user is actively interacting
             if (refreshTimer) clearInterval(refreshTimer);
             refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
+
+            // Fetch strategic KPIs from the Projects table (non-blocking)
+            loadStrategicKpis();
         } catch (e) {
             if (e.message === 'Auth failed') { clearDashCache(); return; }
             console.error(e);

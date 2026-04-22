@@ -511,6 +511,11 @@ const PF = {
   kpiUnit:    'fldrYZEghROXYf6w0',
   kpiTracking:'fld2wYB5ZEn9WRcjN',
   business:   'fldtdJTFkMtldxEVf',
+  owner:          'fldXUAPrpStGwc2V9',
+  kpiAutomated:   'fldU7tTf8aRgG60wI',
+  kpiSource:      'fldic3mgIRLLu2Sre',
+  kpiLastUpdated: 'fldNk2U74jBxZ6esJ',
+  kpiLastUpdatedBy:'fldIgmO8OqA3a7K5o',
 };
 const PROJECT_FIELD_IDS = Object.values(PF);
 
@@ -811,11 +816,14 @@ function parseProject(rec){
   const statusObj=gf(rec,PF.status);
   const kpiUnitObj=gf(rec,PF.kpiUnit);
   const businessLinks=gf(rec,PF.business)||[];
-  let businessName='';
+  let businessName='',businessId='';
   if(Array.isArray(businessLinks)&&businessLinks[0]){
     const b=businessLinks[0];
-    if(typeof b==='object'&&b.name)businessName=b.name;
+    if(typeof b==='object'){businessName=b.name||'';businessId=b.id||''}
+    else if(typeof b==='string'){businessId=b;businessName=(typeof BUSINESS_ID_TO_NAME!=='undefined'&&BUSINESS_ID_TO_NAME[b])||''}
   }
+  const ownerObj=gf(rec,PF.owner);
+  const owner=ownerObj?{name:ownerObj.name||'',email:ownerObj.email||'',id:ownerObj.id||''}:null;
   return {
     id:rec.id,
     name:gf(rec,PF.name)||'(Untitled Project)',
@@ -835,6 +843,13 @@ function parseProject(rec){
     kpiUnit:selectName(kpiUnitObj),
     kpiTracking:gf(rec,PF.kpiTracking)||'',
     business:businessName,
+    businessId,
+    owner,
+    ownerKey: owner?(TEAM.find(m=>m.email===owner.email)||{}).key||'':'',
+    kpiAutomated:!!gf(rec,PF.kpiAutomated),
+    kpiSource:gf(rec,PF.kpiSource)||'',
+    kpiLastUpdated:gf(rec,PF.kpiLastUpdated)||'',
+    kpiLastUpdatedBy:gf(rec,PF.kpiLastUpdatedBy)||'',
   };
 }
 
@@ -919,6 +934,12 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       const today=todayStr();saveStartTime(today,taskId,null);
       // Bump completedTasks on any linked projects for live progress bar update
       (task.projectIds||[]).forEach(pid=>{const p=allProjects.find(x=>x.id===pid);if(p)p.completedTasks=(p.completedTasks||0)+1});
+      // Stamp local completion date so catch-up sweep can see it immediately
+      if(!task.completion)task.completion=new Date().toISOString();
+      // Web-app recurring: spawn next cycle (replaces Airtable automation)
+      if(task.recurring&&RECUR_OPTIONS.includes(task.recurring)&&!_bulkOperation){
+        try{await spawnRecurringNext(task);}catch(e){console.warn('spawn recurring next failed',e)}
+      }
     }
     if(fieldKey==='dueDate'){
       const today=todayStr();
@@ -2939,8 +2960,17 @@ function renderProjects(){
     const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
 
     const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed or Not Started manually in the edit panel to override.';
+    // Owner header chip — avatar + name under project title
+    let ownerHeader='';
+    if(p.owner&&p.owner.email){
+      const ok=p.ownerKey||teamKey(p.owner.email);
+      const initials=(p.owner.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2);
+      ownerHeader=`<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);margin-top:2px"><span class="avatar avatar-${ok}" style="width:20px;height:20px;font-size:10px">${escHtml(initials)}</span>${escHtml((p.owner.name||'').split(' ')[0]||p.owner.email)}</div>`;
+    }else{
+      ownerHeader=`<div style="font-size:12px;color:var(--text-muted);margin-top:2px">No owner</div>`;
+    }
     html+=`<div class="project-card" onclick="toggleProject('${p.id}')">
-      <div class="project-head"><h3>${escHtml(p.name)}</h3><span class="project-status ${statusCls}">${escHtml(displayHealth)}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px">?</span></div>
+      <div class="project-head" style="align-items:flex-start"><div style="flex:1"><h3>${escHtml(p.name)}</h3>${ownerHeader}</div><span class="project-status ${statusCls}">${escHtml(displayHealth)}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px">?</span></div>
       <div class="project-body">
         <div class="project-col">
           <h5>Business</h5><div class="val">${escHtml(p.business||'-')}</div>
@@ -2963,23 +2993,50 @@ function renderProjects(){
       const taStyle='width:100%;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px;border-radius:4px;font-size:12px;min-height:60px;font-family:inherit';
       html+=`<div class="project-expanded" onclick="event.stopPropagation()">`;
       // Details section
+      const curOwner=p.ownerKey||'';
       html+=`<h4>Details</h4><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px">
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Owner</label><select class="inline-select" onchange="updateProjectField('${p.id}','owner',this.value)" style="width:100%"><option value="" ${curOwner===''?'selected':''}>No owner</option>${TEAM.map(m=>`<option value="${m.key}" ${curOwner===m.key?'selected':''}>${m.name}</option>`).join('')}</select></div>
         <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Project Name</label><input type="text" value="${escHtml(p.name)}" onblur="updateProjectField('${p.id}','name',this.value)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Status</label><select class="inline-select" onchange="updateProjectField('${p.id}','status',this.value)" style="width:100%"><option value="">-</option>${PROJ_STATUS_OPTIONS.map(s=>`<option value="${s}" ${p.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Business</label><select class="inline-select" onchange="updateProjectField('${p.id}','business',this.value)" style="width:100%"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${p.business===b?'selected':''}>${b}</option>`).join('')}</select></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Start Date</label><input type="date" value="${p.start||''}" onchange="updateProjectField('${p.id}','start',this.value)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">End Date</label><input type="date" value="${p.end||''}" onchange="updateProjectField('${p.id}','end',this.value)" class="inline-input" style="width:100%"></div>
       </div>`;
-      // KPI section — each field clearly labelled to avoid "two numeric" confusion
+      // KPI section — restructured: Current is read-only when automated, editable when manual.
+      const isAuto=!!p.kpiAutomated;
+      const curReadOnly=isAuto?'disabled':'';
+      const autoBadge=isAuto?'<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:4px">Auto</span>':'';
+      // Human-readable "last updated" line
+      let lastUpdatedLine='';
+      if(!isAuto){
+        if(p.kpiLastUpdated){
+          const diffMs=Date.now()-new Date(p.kpiLastUpdated).getTime();
+          const diffDays=Math.floor(diffMs/86400000);
+          const ago=diffDays<1?'today':diffDays===1?'yesterday':`${diffDays} days ago`;
+          const stale=diffDays>7;
+          lastUpdatedLine=`<div style="font-size:11px;color:${stale?'var(--danger)':'var(--text-secondary)'};margin-top:4px">Last updated: ${ago} by ${escHtml(p.kpiLastUpdatedBy||'?')}${stale?' — overdue for review':''}</div>`;
+        }else{
+          lastUpdatedLine=`<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Never updated</div>`;
+        }
+      }else if(p.kpiSource){
+        lastUpdatedLine=`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Tracking via: ${escHtml(p.kpiSource.split('\n')[0])}</div>`;
+      }
       html+=`<h4>KPI (Key Performance Indicator)</h4>
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="e.g. Monthly profit increase" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Target (goal)</label><input type="number" placeholder="4000" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
-        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Current (latest)</label><input type="number" placeholder="0" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Current (latest)${autoBadge}</label><input type="number" ${curReadOnly} placeholder="0" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input" style="width:100%${isAuto?';background:var(--bg-subtle);color:var(--text-secondary)':''}"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Unit</label><select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)" style="width:100%"><option value="">-</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select></div>
       </div>
-      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Tracking Method (how you'll measure this — leave empty to auto-create a setup task)</label>
-      <textarea style="${taStyle}" placeholder="e.g. Monthly P&L, Airtable rollup from Transactions, manual weekly update..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-primary);margin:4px 0 6px 0;cursor:pointer">
+        <input type="checkbox" ${isAuto?'checked':''} onchange="updateProjectField('${p.id}','kpiAutomated',this.checked)">
+        Automated <span style="font-size:11px;color:var(--text-secondary)">(check if the Current value is pulled from a data source)</span>
+      </label>
+      ${isAuto?`<label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Source (where the Current value comes from)</label>
+      <textarea style="${taStyle}" placeholder="e.g. Airtable rollup on Transactions (sum of rent received), Stripe API, Dashboard metric X..." oninput="projEditDebounced('${p.id}','kpiSource',this.value)">${escHtml(p.kpiSource)}</textarea>`:''}
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (how you'll measure this — leave empty to auto-create a setup task)</label>
+      <textarea style="${taStyle}" placeholder="e.g. Monthly P&L, Airtable rollup from Transactions, manual weekly update..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>
+      ${lastUpdatedLine}`;
       // Definition of Done only — the separate "Deliverable" field was
       // redundant with DoD and has been retired from the UI. The Airtable
       // field is kept for now in case any legacy records contain content.
@@ -3023,10 +3080,26 @@ async function updateProjectField(pid,fieldKey,val){
   }else if(fieldKey==='business'){
     if(val&&BUSINESS_MAP[val]){payload[fid]=[{id:BUSINESS_MAP[val]}];p.business=val}
     else{payload[fid]=[];p.business=''}
+  }else if(fieldKey==='owner'){
+    // singleCollaborator — same shape as task assignee: {email: "..."}
+    const member=TEAM.find(m=>m.key===val);
+    if(member){payload[fid]={email:member.email};p.owner={name:member.name,email:member.email,id:''};p.ownerKey=member.key}
+    else{payload[fid]=null;p.owner=null;p.ownerKey=''}
+  }else if(fieldKey==='kpiAutomated'){
+    payload[fid]=!!val;p.kpiAutomated=!!val;
   }else if(fieldKey==='start'||fieldKey==='end'){
     payload[fid]=val||null;p[fieldKey]=val||'';
   }else if(fieldKey==='kpiCurrent'||fieldKey==='kpiTarget'){
     const n=parseFloat(val)||0;payload[fid]=n;p[fieldKey]=n;
+    if(fieldKey==='kpiCurrent'){
+      // Stamp last-updated metadata in the same PATCH
+      const nowIso=new Date().toISOString();
+      const by=(currentUser&&(currentUser.email||currentUser.name))||'';
+      payload[PF.kpiLastUpdated]=nowIso;
+      payload[PF.kpiLastUpdatedBy]=by;
+      p.kpiLastUpdated=nowIso;
+      p.kpiLastUpdatedBy=by;
+    }
   }else{
     payload[fid]=val;p[fieldKey]=val;
   }
@@ -3034,9 +3107,183 @@ async function updateProjectField(pid,fieldKey,val){
     const r=await patchProject(pid,payload);
     if(!r.ok){const t=await r.text();throw new Error(t)}
     toast('Saved');
+    // After a successful save, run post-save automations (KPI setup task spawning, etc.)
+    try{maybeSpawnKpiSetupTask(p,fieldKey);}catch(e){console.warn('kpi setup spawn failed',e)}
     // Re-render so derived UI (e.g. status colour, completed filter) reflects change
-    if(['status','name','business'].includes(fieldKey))renderProjects();
+    if(['status','name','business','owner','kpiAutomated','kpiCurrent','kpiName'].includes(fieldKey))renderProjects();
   }catch(e){console.error('[updateProjectField]',e);toast('Failed to save',true)}
+}
+
+// Spawn a "Set up KPI tracking" task when KPI is flagged Automated but Source is still empty,
+// or a weekly "Review KPI" recurring task when KPI is Manual and no review task exists yet.
+async function maybeSpawnKpiSetupTask(p,triggeringField){
+  if(!p||!p.kpiName)return;
+  // Only react to changes that plausibly flip the automated/source/name state
+  if(!['kpiAutomated','kpiSource','kpiName'].includes(triggeringField))return;
+  // Helper: find an open task on this project matching a name substring
+  function hasOpenTaskMatching(re){
+    return allTasks.some(t=>t.status!=='Completed'&&(t.projectIds||[]).includes(p.id)&&re.test(t.name||''));
+  }
+  const ownerKey=p.ownerKey||'kevin';
+  const ownerMember=TEAM.find(m=>m.key===ownerKey)||TEAM[0];
+  if(p.kpiAutomated && !p.kpiSource){
+    if(!hasOpenTaskMatching(/KPI setup|Set up KPI/i)){
+      await createSimpleTask({
+        name:`Set up KPI tracking for ${p.name}`,
+        description:`The KPI "${p.kpiName}" is marked as Automated but no KPI Source is configured.\n\nAction: decide where this KPI's Current value will be pulled from (Airtable rollup, dashboard metric, external API, etc.) and fill the KPI Source field on the project.`,
+        assigneeEmail:ownerMember.email,
+        priority:'Project',
+        projectIds:[p.id],
+      });
+    }
+  } else if(!p.kpiAutomated){
+    if(!hasOpenTaskMatching(/^Review KPI:/i)){
+      await createSimpleTask({
+        name:`Review KPI: ${p.kpiName} — ${p.name}`,
+        description:`Weekly review of the manual KPI "${p.kpiName}".\n\nAction: update the Current value on the project from the latest data source.`,
+        assigneeEmail:ownerMember.email,
+        priority:'Not Urgent',
+        recurring:'Weekly',
+        projectIds:[p.id],
+      });
+    }
+  }
+}
+
+// Thin POST wrapper used by KPI spawning + recurring cycle spawning
+async function createSimpleTask(opts){
+  const fields={};
+  fields[F.name]=opts.name;
+  if(opts.description)fields[F.description]=opts.description;
+  if(opts.assigneeEmail)fields[F.assignee]={email:opts.assigneeEmail};
+  if(opts.priority)fields[F.priority]=opts.priority;
+  if(opts.timeEst)fields[F.timeEst]=opts.timeEst;
+  if(opts.recurring)fields[F.recurring]=opts.recurring;
+  if(opts.dueDate)fields[F.dueDate]=opts.dueDate;
+  if(opts.status)fields[F.status]=opts.status;
+  if(opts.hardDeadline)fields[F.hardDeadline]=!!opts.hardDeadline;
+  if(opts.notes)fields[F.notes]=opts.notes;
+  if(opts.businessId)fields[F.business]=[{id:opts.businessId}];
+  if(opts.projectIds&&opts.projectIds.length)fields[F.projects]=opts.projectIds.map(id=>({id}));
+  if(opts.collaborators&&opts.collaborators.length)fields[F.collaborators]=opts.collaborators.map(c=>({email:c.email}));
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({fields,typecast:true})
+    });
+    if(!res.ok){const t=await res.text();throw new Error('HTTP '+res.status+' '+t)}
+    const data=await res.json();
+    const parsed=parseTask(data);
+    allTasks.push(parsed);
+    return parsed;
+  }catch(e){console.warn('[createSimpleTask] failed',e);return null}
+}
+
+async function postTaskComment(taskId,text){
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({text})
+    });
+    return res.ok;
+  }catch(e){console.warn('[postTaskComment] failed',e);return false}
+}
+
+// Add N months to a YYYY-MM-DD date string, clamping day-of-month to the
+// last valid day of the target month (so 2026-01-31 + 1mo = 2026-02-28).
+function addMonths(dateStr,n){
+  if(!dateStr)return '';
+  const p=dateStr.split('-').map(Number);
+  const y=p[0],m=p[1]-1,day=p[2];
+  const target=new Date(y,m+n,1);
+  // Last day of target month
+  const last=new Date(target.getFullYear(),target.getMonth()+1,0).getDate();
+  const useDay=Math.min(day,last);
+  const d=new Date(target.getFullYear(),target.getMonth(),useDay);
+  const yy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+const RECUR_INTERVAL_DAYS = {
+  'Daily':1,'Weekly':7,'Fortnightly':14,
+  'Monthly':null,'Quarterly':null,'Bi-Annually':null,'Annually':null,
+};
+function nextRecurringDate(fromDate,cadence){
+  if(!fromDate||!cadence)return '';
+  if(RECUR_INTERVAL_DAYS[cadence])return addDays(fromDate,RECUR_INTERVAL_DAYS[cadence]);
+  if(cadence==='Monthly')return addMonths(fromDate,1);
+  if(cadence==='Quarterly')return addMonths(fromDate,3);
+  if(cadence==='Bi-Annually')return addMonths(fromDate,6);
+  if(cadence==='Annually')return addMonths(fromDate,12);
+  return '';
+}
+
+// After a recurring task is completed, spawn the next cycle in the web app
+// (replaces the now-disabled Airtable "Recurring Tasks" automation).
+async function spawnRecurringNext(task,opts){
+  opts=opts||{};
+  const cadence=task.recurring;
+  if(!cadence||!RECUR_OPTIONS.includes(cadence))return null;
+  const baseDue=task.dueDate||todayStr();
+  const newDue=nextRecurringDate(baseDue,cadence);
+  if(!newDue)return null;
+  const next=await createSimpleTask({
+    name:task.name,
+    description:task.description,
+    notes:task.notes,
+    assigneeEmail:task.assigneeEmail,
+    priority:task.priority,
+    timeEst:task.timeEst,
+    recurring:cadence,
+    dueDate:newDue,
+    status:'Upcoming',
+    hardDeadline:task.hardDeadline,
+    businessId:task.businessId,
+    projectIds:task.projectIds&&task.projectIds.length?task.projectIds:undefined,
+    collaborators:task.collaborators,
+  });
+  if(next){
+    const who=(currentUser&&(currentUser.name||currentUser.email))||'web app';
+    const when=new Date().toLocaleString('en-GB');
+    postTaskComment(next.id,`Recurring cycle spawned from previous occurrence completed on ${when} by ${who}`);
+    if(!opts.silent){
+      const label=new Date(newDue+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+      toast(`Completed · next cycle scheduled for ${label}`);
+    }
+  }
+  return next;
+}
+
+// Sweep once on load: for each of *my* recently-completed recurring tasks, if
+// no newer sibling exists, spawn the next cycle. Covers cases where the page
+// was closed before the auto-spawn could run.
+async function catchUpRecurringTasks(){
+  if(!currentUser||!currentUser.email)return;
+  const meEmail=currentUser.email;
+  // The main data fetch excludes Completed tasks, so pull completed-recurring
+  // ones for the current user separately (90-day window).
+  try{
+    const cutoffMs=Date.now()-90*86400000;
+    // Airtable field names aren't stable enough to filter by date here, so pull
+    // completed+recurring and filter client-side.
+    const formula=`AND({Status}="Completed",NOT({Recurring}=""))`;
+    const completedRaw=await fetchTable(TASKS_TABLE,TASK_FIELD_IDS,formula);
+    const completed=completedRaw.map(parseTask).filter(t=>{
+      if(t.assigneeEmail!==meEmail||!t.recurring)return false;
+      if(!t.completion)return false;
+      return new Date(t.completion).getTime()>=cutoffMs;
+    });
+    let spawned=0;
+    for(const t of completed){
+      const hasSibling=allTasks.some(s=>s.name===t.name&&s.assigneeEmail===t.assigneeEmail&&s.status!=='Completed');
+      if(hasSibling)continue;
+      const next=await spawnRecurringNext(t,{silent:true});
+      if(next)spawned++;
+    }
+    if(spawned>0){console.log(`[catchUpRecurringTasks] spawned ${spawned} next-cycle task(s)`);renderAll();}
+  }catch(e){console.warn('[catchUpRecurringTasks] fetch failed',e)}
 }
 // Backwards-compat alias
 async function projEdit(pid,fieldKey,val){return updateProjectField(pid,fieldKey,val)}
@@ -3288,7 +3535,7 @@ function renderRecurring(){
   const totalMins=active.reduce((s,t)=>s+t.minutes,0);
 
   let html=`<div style="background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px">
-    <strong>How recurring tasks work:</strong> Recurring tasks are spawned automatically by Airtable's built-in automation whenever a recurring task is marked Completed. This list just shows which tasks have a recurring cadence set. No need to create the next occurrence manually.
+    <strong>How recurring tasks work:</strong> When you mark a task with a recurring cadence as Completed, this app automatically spawns the next occurrence with the due date moved forward by the cadence. A catch-up sweep on page load also fills in any missed cycles (last 90 days, current user only). This list shows which tasks have a cadence set.
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
     <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${recurring.length}</div><div class="label">Total Recurring</div></div>
@@ -3403,6 +3650,9 @@ async function loadAllData(){
     renderAll();
     const ms=Date.now()-startedAt;
     toast(`Refreshed ${allTasks.length} tasks, ${allProjects.length} projects in ${(ms/1000).toFixed(1)}s`);
+    // Fire catch-up sweep for recurring tasks (replaces Airtable automation).
+    // Runs once per page load; errors are logged but do not block the UI.
+    try{catchUpRecurringTasks();}catch(e){console.warn('catchUpRecurringTasks failed',e)}
   }catch(e){
     console.error(e);
     if(loader)loader.innerHTML=`<span style="color:var(--danger)">Failed to load. ${escHtml(e.message)}</span>`;
