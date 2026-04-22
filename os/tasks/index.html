@@ -524,9 +524,9 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
 <div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
 <div class="toast" id="toast"></div>
-<!-- Sync-state pill (top-right, always visible) -->
-<div id="syncPill" style="position:fixed;top:10px;right:14px;z-index:9997;font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;background:var(--success-bg);color:var(--success);border:1px solid var(--success);cursor:pointer;box-shadow:var(--shadow-sm);user-select:none" title="Click to run a sync check">✓ All saved</div>
-<div id="syncPopover" style="display:none;position:fixed;top:44px;right:14px;z-index:9997;width:360px;max-height:60vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px;font-size:12px;box-shadow:var(--shadow-lg)"></div>
+<!-- Sync-state pill (bottom-left, out of the way of toasts and action buttons) -->
+<div id="syncPill" style="position:fixed;bottom:16px;left:16px;z-index:9997;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--success-bg);color:var(--success);border:1px solid var(--success);cursor:pointer;box-shadow:var(--shadow-sm);user-select:none;opacity:.85" title="Click to run a sync check" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.85'">✓ Saved</div>
+<div id="syncPopover" style="display:none;position:fixed;bottom:50px;left:16px;z-index:9997;width:360px;max-height:60vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px;font-size:12px;box-shadow:var(--shadow-lg)"></div>
 
 <!-- KPI Source Registry: template library for project KPIs (loaded before the main inline script so window.KPI_SOURCES is ready) -->
 <script src="../../js/kpi-sources.js?v=1"></script>
@@ -668,15 +668,16 @@ function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_
 function renderSyncPill(){
   const pill=document.getElementById('syncPill');if(!pill)return;
   if(_saveState.pending>0){
-    pill.textContent=`⟳ Saving ${_saveState.pending}…`;
+    pill.textContent=`⟳ ${_saveState.pending}`;
     pill.style.background='var(--warning-bg)';pill.style.color='var(--warning)';pill.style.borderColor='var(--warning)';
   } else if(_saveState.failed>0){
-    pill.textContent=`⚠ ${_saveState.failed} failed · click`;
+    pill.textContent=`⚠ ${_saveState.failed}`;
     pill.style.background='var(--danger-bg)';pill.style.color='var(--danger)';pill.style.borderColor='var(--danger)';
   } else {
-    pill.textContent=`✓ All saved${_saveState.ok>0?' ('+_saveState.ok+')':''}`;
+    pill.textContent='✓';
     pill.style.background='var(--success-bg)';pill.style.color='var(--success)';pill.style.borderColor='var(--success)';
   }
+  pill.title=_saveState.pending>0?`Saving ${_saveState.pending} change(s)`:_saveState.failed>0?`${_saveState.failed} save failure(s) — click for details`:`All saved (${_saveState.ok} this session) — click for sync check`;
 }
 function syncPillClick(){
   const pop=document.getElementById('syncPopover');if(!pop)return;
