@@ -1559,8 +1559,8 @@ Rules:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 800,
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1500,
                 system,
                 messages: [{ role: 'user', content: answer }],
             }),
@@ -1674,7 +1674,7 @@ Return the JSON object ONLY. No commentary. No code fence.`
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
+                model: 'claude-sonnet-4-20250514',
                 max_tokens: 3000,
                 system,
                 messages: [{ role: 'user', content: 'Return the restructured list now.' }],
@@ -1714,7 +1714,7 @@ RULES:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
+                model: 'claude-sonnet-4-20250514',
                 max_tokens: 2000,
                 system,
                 messages: [
@@ -1769,7 +1769,7 @@ RULES:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
+                model: 'claude-sonnet-4-20250514',
                 max_tokens: 2000,
                 system,
                 messages: [
@@ -1925,6 +1925,8 @@ Reply with a JSON object ONLY, nothing else. Shape:
    - Monthly stepping stones: one concrete deliverable per month, one sentence each.
 7. If the founder's answer was already polished and professional, return it verbatim.
 
+CONTEXT: The founder is likely dictating on a phone or typing rough bullets. Treat the input as raw material. Do not penalise them for informal phrasing, missing capitalisation, or incomplete sentences — that's the RAW INPUT. Your job is to turn it into publication-quality output.
+
 Do not accept pure platitudes ('be the best', 'crush it'). DO accept rough or terse answers if they have any real substance — your job is to build them up, not reject them. Prefer 'accept with a good refined expansion' over 'reject'. Push back only when the answer has no substance at all.`
     );
     try {
@@ -1932,8 +1934,8 @@ Do not accept pure platitudes ('be the best', 'crush it'). DO accept rough or te
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 600,
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 2500,
                 system,
                 // Pass the full per-step conversation so the model sees what it's already asked.
                 messages: history.map(m => ({ role: m.role, content: m.content })),
@@ -2023,4 +2025,237 @@ window.addEventListener('beforeunload', e => {
 
 function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// PDF EXPORT — build a purpose-made printable layout from the loaded
+// record (not a screenshot of the form) so the output is professional,
+// branded, and doesn't include nav chrome or wizard panels. Uses
+// html2pdf.js from CDN.
+// ═════════════════════════════════════════════════════════════════════
+
+async function exportPlanToPDF() {
+    if (!currentRecord) {
+        setStatus('warn', 'Save the plan first, then export.');
+        return;
+    }
+    if (typeof html2pdf === 'undefined') {
+        setStatus('error', 'PDF library failed to load. Check your connection.');
+        return;
+    }
+    const { businessId, quarter, year } = getSelection();
+    const businessName = allBusinessesLocal.find(b => b.id === businessId)?.name || 'Business';
+    const doc = buildPrintableDocument(currentRecord.fields || {}, businessName, quarter, year);
+    // Offscreen staging container — html2pdf renders from it.
+    const stage = document.createElement('div');
+    stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;background:#fff;color:#1C2422;font-family:Inter,system-ui,sans-serif';
+    stage.appendChild(doc);
+    document.body.appendChild(stage);
+    try {
+        setStatus('info', 'Building PDF…');
+        const fileName = `${slugify(businessName)}-${quarter}-${year}-plan.pdf`;
+        await html2pdf()
+            .set({
+                margin: [14, 14, 18, 14],
+                filename: fileName,
+                pagebreak: { mode: ['css', 'legacy'], avoid: ['.pdf-section', '.pdf-card', '.pdf-qp'] },
+                html2canvas: { scale: 2, useCORS: true, letterRendering: true, backgroundColor: '#FFFFFF' },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            })
+            .from(stage)
+            .save();
+        setStatus('success', `✓ ${fileName} downloaded.`);
+        setTimeout(() => setStatus('', ''), 3000);
+    } catch (e) {
+        console.error('[exportPlanToPDF]', e);
+        setStatus('error', `PDF export failed: ${e.message || e}`);
+    } finally {
+        document.body.removeChild(stage);
+    }
+}
+
+function buildPrintableDocument(f, businessName, quarter, year) {
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    // Helpers
+    const esc = escapeHtml;
+    const para = v => (v || '').trim();
+    const nonEmpty = v => !!(v && String(v).trim());
+    const readSel = v => (v && typeof v === 'object') ? (v.name || '') : (v || '');
+    const mdToHtml = md => {
+        // Render line-breaks + very light markdown (bold, bullets, headers) to nice HTML.
+        const lines = String(md || '').split('\n');
+        const out = [];
+        let inList = false;
+        for (let raw of lines) {
+            let line = raw.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            const isBullet = /^[•\-*]\s+/.test(line) || /^\d+\.\s+/.test(line);
+            if (isBullet) {
+                if (!inList) { out.push('<ul>'); inList = true; }
+                out.push('<li>' + line.replace(/^[•\-*]\s+/, '').replace(/^\d+\.\s+/, '') + '</li>');
+            } else {
+                if (inList) { out.push('</ul>'); inList = false; }
+                if (line.trim()) out.push('<p>' + line + '</p>');
+            }
+        }
+        if (inList) out.push('</ul>');
+        return out.join('');
+    };
+
+    const root = document.createElement('div');
+    root.className = 'pdf-root';
+    root.innerHTML = `
+<style>
+.pdf-root { padding: 16px 20px; }
+.pdf-root * { box-sizing: border-box; }
+.pdf-cover { text-align: left; padding: 28px 20px 40px; border-bottom: 4px solid #2C6E49; margin-bottom: 30px; }
+.pdf-cover .eyebrow { font-size: 11px; letter-spacing: 3px; color: #5A6660; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
+.pdf-cover h1 { font-size: 36px; font-weight: 800; margin-bottom: 4px; color: #1C2422; letter-spacing: -0.5px; }
+.pdf-cover .subtitle { font-size: 18px; color: #5A6660; margin-bottom: 18px; font-weight: 500; }
+.pdf-cover .meta { display: flex; gap: 28px; font-size: 12px; color: #5A6660; }
+.pdf-cover .meta strong { display: block; font-size: 15px; color: #1C2422; font-weight: 700; }
+.pdf-section { margin-bottom: 22px; page-break-inside: avoid; }
+.pdf-section h2 { font-size: 17px; font-weight: 700; color: #2C6E49; border-bottom: 2px solid #DDE8DF; padding-bottom: 4px; margin-bottom: 12px; }
+.pdf-section h3 { font-size: 13px; font-weight: 700; color: #1C2422; margin-top: 10px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.pdf-card { background: #FBFBF9; border: 1px solid #DDE1D9; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; page-break-inside: avoid; }
+.pdf-card .card-label { font-size: 10px; color: #8A928C; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; margin-bottom: 4px; }
+.pdf-card .card-value { font-size: 12px; color: #1C2422; line-height: 1.55; }
+.pdf-card .card-value p { margin-bottom: 6px; }
+.pdf-card .card-value p:last-child { margin-bottom: 0; }
+.pdf-card .card-value ul { margin-left: 16px; margin-bottom: 4px; }
+.pdf-card .card-value li { margin-bottom: 2px; }
+.pdf-cols-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.pdf-qp { background: #FBFBF9; border: 1px solid #DDE1D9; border-radius: 8px; padding: 12px; page-break-inside: avoid; }
+.pdf-qp h3 { font-size: 12px; color: #2C6E49; margin-top: 0; margin-bottom: 6px; }
+.pdf-qp .qp-body { font-size: 11px; line-height: 1.5; color: #1C2422; margin-bottom: 8px; }
+.pdf-qp .qp-meta { font-size: 10px; color: #5A6660; margin-bottom: 6px; }
+.pdf-qp .qp-meta strong { color: #1C2422; }
+.pdf-qp .qp-stones { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #DDE1D9; }
+.pdf-qp .qp-stones .stone-row { display: flex; gap: 6px; margin-bottom: 3px; font-size: 10px; }
+.pdf-qp .qp-stones .stone-m { font-weight: 700; color: #2C6E49; min-width: 26px; }
+.pdf-num-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pdf-num-list .num-row { background: #FBFBF9; border: 1px solid #DDE1D9; border-radius: 6px; padding: 6px 10px; font-size: 11px; line-height: 1.45; page-break-inside: avoid; }
+.pdf-num-list .num-row .n { font-weight: 700; color: #2C6E49; margin-right: 6px; }
+.pdf-footer { margin-top: 26px; padding-top: 10px; border-top: 1px solid #DDE1D9; font-size: 10px; color: #8A928C; text-align: center; }
+.page-break { page-break-after: always; }
+</style>
+
+<div class="pdf-cover">
+  <div class="eyebrow">Objective &amp; Strategy Plan</div>
+  <h1>${esc(businessName)}</h1>
+  <div class="subtitle">${esc(quarter)} ${esc(year)}</div>
+  <div class="meta">
+    <div><strong>${esc(quarter)}</strong>Quarter</div>
+    <div><strong>${esc(year)}</strong>Year</div>
+    <div><strong>${esc(today)}</strong>Generated</div>
+  </div>
+</div>
+
+${nonEmpty(f[OBJSTRAT.objective]) ? `
+<div class="pdf-section">
+  <h2>Objective</h2>
+  <div class="pdf-card"><div class="card-value">${mdToHtml(f[OBJSTRAT.objective])}</div></div>
+</div>` : ''}
+
+${(nonEmpty(f[OBJSTRAT.targetWhat]) || nonEmpty(f[OBJSTRAT.targetWho]) || nonEmpty(f[OBJSTRAT.targetHow])) ? `
+<div class="pdf-section">
+  <h2>Target Statement</h2>
+  <div class="pdf-cols-3">
+    <div class="pdf-card"><div class="card-label">What we do</div><div class="card-value">${mdToHtml(f[OBJSTRAT.targetWhat])}</div></div>
+    <div class="pdf-card"><div class="card-label">Who we do it for</div><div class="card-value">${mdToHtml(f[OBJSTRAT.targetWho])}</div></div>
+    <div class="pdf-card"><div class="card-label">How we do it</div><div class="card-value">${mdToHtml(f[OBJSTRAT.targetHow])}</div></div>
+  </div>
+</div>` : ''}
+
+${nonEmpty(f[OBJSTRAT.customerProfile]) ? `
+<div class="pdf-section">
+  <h2>Customer Profile</h2>
+  <div class="pdf-card"><div class="card-value">${mdToHtml(f[OBJSTRAT.customerProfile])}</div></div>
+</div>` : ''}
+
+${(() => {
+    const items = OBJSTRAT.undertakings.map(fid => f[fid]).filter(nonEmpty);
+    if (!items.length) return '';
+    return `<div class="pdf-section"><h2>Undertakings</h2><div class="pdf-num-list">${items.map((t, i) =>
+        `<div class="num-row"><span class="n">${String(i + 1).padStart(2, '0')}</span>${mdToHtml(t)}</div>`
+    ).join('')}</div></div>`;
+})()}
+
+${(() => {
+    const items = OBJSTRAT.usps.map(fid => f[fid]).filter(nonEmpty);
+    if (!items.length) return '';
+    return `<div class="pdf-section"><h2>Original Selling Points</h2><div class="pdf-num-list">${items.map((t, i) =>
+        `<div class="num-row"><span class="n">${String(i + 1).padStart(2, '0')}</span>${mdToHtml(t)}</div>`
+    ).join('')}</div></div>`;
+})()}
+
+${(() => {
+    const items = OBJSTRAT.methodSteps.map(fid => f[fid]).filter(nonEmpty);
+    if (!items.length) return '';
+    return `<div class="pdf-section"><h2>Main Method</h2><div class="pdf-num-list">${items.map((t, i) =>
+        `<div class="num-row"><span class="n">${String(i + 1).padStart(2, '0')}</span>${mdToHtml(t)}</div>`
+    ).join('')}</div></div>`;
+})()}
+
+${nonEmpty(f[OBJSTRAT.enticement]) ? `
+<div class="pdf-section">
+  <h2>Enticement</h2>
+  <div class="pdf-card"><div class="card-value">${mdToHtml(f[OBJSTRAT.enticement])}</div></div>
+</div>` : ''}
+
+<div class="page-break"></div>
+
+${nonEmpty(f[OBJSTRAT.nineYearTarget]) ? `
+<div class="pdf-section">
+  <h2>Nine-Year Target</h2>
+  <div class="pdf-card"><div class="card-value">${mdToHtml(f[OBJSTRAT.nineYearTarget])}</div></div>
+</div>` : ''}
+
+${nonEmpty(f[OBJSTRAT.threeYearTarget]) ? `
+<div class="pdf-section">
+  <h2>Three-Year Target</h2>
+  <div class="pdf-card"><div class="card-value">${mdToHtml(f[OBJSTRAT.threeYearTarget])}</div></div>
+  <div class="pdf-cols-3">
+    ${OBJSTRAT.threeYearMeas.map((fid, i) => nonEmpty(f[fid]) ?
+      `<div class="pdf-card"><div class="card-label">Measurable ${i + 1}</div><div class="card-value">${mdToHtml(f[fid])}</div></div>` : ''
+    ).join('')}
+  </div>
+</div>` : ''}
+
+${nonEmpty(f[OBJSTRAT.oneYearTarget]) ? `
+<div class="pdf-section">
+  <h2>One-Year Target</h2>
+  <div class="pdf-card"><div class="card-value">${mdToHtml(f[OBJSTRAT.oneYearTarget])}</div></div>
+  <div class="pdf-cols-3">
+    ${OBJSTRAT.oneYearMeas.map((fid, i) => nonEmpty(f[fid]) ?
+      `<div class="pdf-card"><div class="card-label">Measurable ${i + 1}</div><div class="card-value">${mdToHtml(f[fid])}</div></div>` : ''
+    ).join('')}
+  </div>
+</div>` : ''}
+
+${(() => {
+    const qps = OBJSTRAT.quarterlyProjects.map((fid, i) => ({ i, text: f[fid] })).filter(q => nonEmpty(q.text));
+    if (!qps.length) return '';
+    return `<div class="pdf-section"><h2>Quarterly Priority Projects</h2><div class="pdf-cols-3">${qps.map(q => {
+        const d = OBJSTRAT.qpDetails[q.i];
+        const stones = OBJSTRAT.monthlyStones[q.i];
+        const unit = readSel(f[d.kpiUnit]);
+        return `<div class="pdf-qp">
+            <h3>⭐ Project ${q.i + 1}</h3>
+            <div class="qp-body">${mdToHtml(q.text)}</div>
+            ${nonEmpty(f[d.kpiName]) ? `<div class="qp-meta"><strong>KPI:</strong> ${esc(f[d.kpiName])}${unit ? ' (' + esc(unit) + ')' : ''}</div>` : ''}
+            ${nonEmpty(f[d.tracking]) ? `<div class="qp-meta"><strong>Tracking:</strong> ${esc(f[d.tracking])}</div>` : ''}
+            ${nonEmpty(f[d.dod]) ? `<div class="qp-meta"><strong>Definition of Done:</strong> ${esc(f[d.dod])}</div>` : ''}
+            <div class="qp-stones">
+                ${stones.map((sFid, m) => nonEmpty(f[sFid]) ?
+                    `<div class="stone-row"><span class="stone-m">M${m + 1}</span><span>${esc(f[sFid])}</span></div>` : ''
+                ).join('')}
+            </div>
+        </div>`;
+    }).join('')}</div></div>`;
+})()}
+
+<div class="pdf-footer">
+  Generated ${esc(today)} · Objective &amp; Strategy Plan · ${esc(businessName)} · ${esc(quarter)} ${esc(year)}
+</div>`;
+    return root;
 }
