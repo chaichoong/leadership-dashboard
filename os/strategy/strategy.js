@@ -792,16 +792,20 @@ async function saveRecord() {
     fields[OBJSTRAT.business] = [businessId];
 
     try {
+        // returnFieldsByFieldId=true so the response has fields keyed by field
+        // ID (same shape as loadRecord). Without this, later code that reads
+        // currentRecord.fields[fieldId] fails silently (e.g. pushProjectsManually
+        // couldn't find QP text and reported "no quarterly projects").
         if (currentRecord) {
             // Update
-            const res = await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}`, {
+            const res = await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}?returnFieldsByFieldId=true`, {
                 method: 'PATCH',
                 body: JSON.stringify({ fields, typecast: true }),
             });
             currentRecord = res;
         } else {
             // Create
-            const res = await airtableFetch(TABLES.objStrat, {
+            const res = await airtableFetch(`${TABLES.objStrat}?returnFieldsByFieldId=true`, {
                 method: 'POST',
                 body: JSON.stringify({ fields, typecast: true }),
             });
@@ -848,7 +852,9 @@ function offerProjectPush() {
     if (pushOfferDismissedForRecord === currentRecord.id) return;
     const { businessId, quarter, year } = getSelection();
     if (!businessId) return;
-    const fields = currentRecord.fields || {};
+    // Read from the form so we see whatever the founder just typed, not
+    // whatever shape the Airtable response came back in.
+    const fields = readAllFormFields();
     const qps = OBJSTRAT.quarterlyProjects
         .map((fid, i) => ({ i, text: (fields[fid] || '').trim() }))
         .filter(q => q.text);
@@ -868,31 +874,45 @@ function offerProjectPush() {
         pushOfferDismissedForRecord = currentRecord.id;
         setStatus('', '');
     };
-    document.getElementById('pushNowBtn').onclick = () => pushProjectsToOS(qps);
+    document.getElementById('pushNowBtn').onclick = () => pushProjectsToOS(qps, fields);
 }
 
-// Invoked from the "Push Projects →" button in the context bar. Loads the
-// current record fields, collects non-empty QPs, and pushes them. Always
-// available — doesn't depend on the save banner.
+// Invoked from the "Push Projects →" button in the context bar. Reads the
+// live form values (always the current state — immune to Airtable field-key
+// ambiguity), collects non-empty QPs, and pushes them.
 async function pushProjectsManually() {
     if (!currentRecord) {
         setStatus('warn', 'Save the plan first, then push projects.');
         return;
     }
-    const fields = currentRecord.fields || {};
+    const fields = readAllFormFields();
     const qps = OBJSTRAT.quarterlyProjects
         .map((fid, i) => ({ i, text: (fields[fid] || '').trim() }))
         .filter(q => q.text);
     if (!qps.length) {
-        setStatus('warn', 'No Quarterly Projects to push — add some text to Quarterly Project 1/2/3 first.');
+        setStatus('warn', 'No Quarterly Projects to push — add some text to Quarterly Project 1/2/3 first, then Save changes, then try again.');
         return;
     }
-    await pushProjectsToOS(qps);
+    await pushProjectsToOS(qps, fields);
 }
 
-async function pushProjectsToOS(qps) {
+// Snapshot every form field by its data-field-id into a { fid: value } map.
+// This is the single source of truth for what's currently on screen. Used
+// when we need to operate on current form state (save/push) independently of
+// whatever the last Airtable response looked like.
+function readAllFormFields() {
+    const out = {};
+    document.querySelectorAll('[data-field-id]').forEach(el => {
+        out[el.dataset.fieldId] = el.value || '';
+    });
+    return out;
+}
+
+async function pushProjectsToOS(qps, formFields) {
     const { businessId, quarter, year } = getSelection();
-    const fields = currentRecord.fields || {};
+    // Prefer the form snapshot (current on-screen state). Fall back to the
+    // loaded Airtable record if not provided.
+    const fields = formFields || currentRecord.fields || {};
     // Derive quarter bounds as YYYY-MM-DD.
     const qIdx = QUARTERS.indexOf(quarter);
     const yearNum = parseInt(year, 10);
