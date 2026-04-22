@@ -454,6 +454,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
 <div class="toast" id="toast"></div>
 
+<!-- KPI Source Registry: template library for project KPIs (loaded before the main inline script so window.KPI_SOURCES is ready) -->
+<script src="../../js/kpi-sources.js?v=1"></script>
+
 <script>
 // CONFIG
 const BASE_ID = 'appnqjDpqDniH3IRl';
@@ -3021,20 +3024,55 @@ function renderProjects(){
       }else if(p.kpiSource){
         lastUpdatedLine=`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Tracking via: ${escHtml(p.kpiSource.split('\n')[0])}</div>`;
       }
+      // Resolve registry entry (if any) so we can render template-aware UI
+      const kpiSrc = (typeof getKpiSource==='function')?getKpiSource(p.kpiSource):null;
+      const isCustom = !!p.kpiSource && !kpiSrc;
+      const selectedKey = kpiSrc ? kpiSrc.key : (isCustom ? '__custom__' : '');
+      const grouped = (typeof getKpiSourcesByCategory==='function')?getKpiSourcesByCategory():{Financial:[],SaaS:[],'Task & Project':[]};
+      function _optsFor(list){
+        return list.map(s=>{
+          const tag = s.automated?'auto':'manual';
+          return `<option value="${s.key}" ${selectedKey===s.key?'selected':''}>${escHtml(s.label)} (${s.unit} &middot; ${tag})</option>`;
+        }).join('');
+      }
+      const tmplSelect = `<select class="inline-select" onchange="changeKpiTemplate('${p.id}',this.value)" style="width:100%">
+        <option value="">&mdash; Select a template or choose Custom &mdash;</option>
+        <optgroup label="Financial">${_optsFor(grouped['Financial']||[])}</optgroup>
+        <optgroup label="SaaS">${_optsFor(grouped['SaaS']||[])}</optgroup>
+        <optgroup label="Task &amp; Project">${_optsFor(grouped['Task & Project']||[])}</optgroup>
+        <option value="__custom__" ${selectedKey==='__custom__'?'selected':''}>&mdash; Custom (define your own) &mdash;</option>
+      </select>`;
+      let tmplBanner = '';
+      if(kpiSrc){
+        const modeLabel = kpiSrc.automated
+          ? '<span style="color:var(--accent);font-weight:600">Automated</span> &mdash; recomputed from app data on every page load'
+          : '<span style="color:var(--text-primary);font-weight:600">Manual</span> &mdash; update the Current value yourself each cycle';
+        tmplBanner = `<div style="font-size:11px;color:var(--text-secondary);background:var(--bg-subtle);padding:6px 8px;border-radius:6px;margin:6px 0">This template is: ${modeLabel}</div>`;
+      }
+      let customAutoRow = '';
+      if(selectedKey==='__custom__'){
+        customAutoRow = `<div style="margin-top:6px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-primary);cursor:pointer">
+            <input type="checkbox" ${isAuto?'checked':''} onchange="updateProjectField('${p.id}','kpiAutomated',this.checked)">
+            Can this be calculated automatically?
+          </label>
+          ${isAuto?`<div style="margin-top:6px"><button class="btn" onclick="openKpiRequestModal('${p.id}')">Request Custom Source</button><div style="font-size:11px;color:var(--text-secondary);margin-top:4px">We'll build a bespoke automated source and create a support task.</div></div>`:''}
+        </div>`;
+      }
       html+=`<h4>KPI (Key Performance Indicator)</h4>
+      <div style="margin-bottom:8px">
+        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Pick a template (or describe your own)</label>
+        ${tmplSelect}
+      </div>
+      ${tmplBanner}
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="e.g. Monthly profit increase" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="${kpiSrc?escHtml(kpiSrc.label):'e.g. Monthly profit increase'}" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Target (goal)</label><input type="number" placeholder="4000" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Current (latest)${autoBadge}</label><input type="number" ${curReadOnly} placeholder="0" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input" style="width:100%${isAuto?';background:var(--bg-subtle);color:var(--text-secondary)':''}"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Unit</label><select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)" style="width:100%"><option value="">-</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select></div>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-primary);margin:4px 0 6px 0;cursor:pointer">
-        <input type="checkbox" ${isAuto?'checked':''} onchange="updateProjectField('${p.id}','kpiAutomated',this.checked)">
-        Automated <span style="font-size:11px;color:var(--text-secondary)">(check if the Current value is pulled from a data source)</span>
-      </label>
-      ${isAuto?`<label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Source (where the Current value comes from)</label>
-      <textarea style="${taStyle}" placeholder="e.g. Airtable rollup on Transactions (sum of rent received), Stripe API, Dashboard metric X..." oninput="projEditDebounced('${p.id}','kpiSource',this.value)">${escHtml(p.kpiSource)}</textarea>`:''}
-      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (how you'll measure this — leave empty to auto-create a setup task)</label>
+      ${customAutoRow}
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (optional notes on how you'll measure this)</label>
       <textarea style="${taStyle}" placeholder="e.g. Monthly P&L, Airtable rollup from Transactions, manual weekly update..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>
       ${lastUpdatedLine}`;
       // Definition of Done only — the separate "Deliverable" field was
@@ -3110,8 +3148,197 @@ async function updateProjectField(pid,fieldKey,val){
     // After a successful save, run post-save automations (KPI setup task spawning, etc.)
     try{maybeSpawnKpiSetupTask(p,fieldKey);}catch(e){console.warn('kpi setup spawn failed',e)}
     // Re-render so derived UI (e.g. status colour, completed filter) reflects change
-    if(['status','name','business','owner','kpiAutomated','kpiCurrent','kpiName'].includes(fieldKey))renderProjects();
+    if(['status','name','business','owner','kpiAutomated','kpiCurrent','kpiName','kpiSource','kpiUnit'].includes(fieldKey))renderProjects();
   }catch(e){console.error('[updateProjectField]',e);toast('Failed to save',true)}
+}
+
+// Called from the KPI template dropdown in the project expand panel.
+// Writes the chosen template key into kpiSource and mirrors unit+automated flags.
+async function changeKpiTemplate(pid,key){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  if(!key){
+    // Cleared — remove source/unit/automated marker
+    const payload={};
+    payload[PF.kpiSource]='';payload[PF.kpiAutomated]=false;
+    p.kpiSource='';p.kpiAutomated=false;
+    try{const r=await patchProject(pid,payload);if(!r.ok)throw new Error(await r.text());toast('KPI template cleared');renderProjects()}catch(e){console.error(e);toast('Failed',true)}
+    return;
+  }
+  if(key==='__custom__'){
+    // Custom: clear any registry key and let the user fill name/target/unit themselves
+    const payload={};
+    payload[PF.kpiSource]='';payload[PF.kpiAutomated]=false;
+    p.kpiSource='';p.kpiAutomated=false;
+    try{const r=await patchProject(pid,payload);if(!r.ok)throw new Error(await r.text());renderProjects()}catch(e){console.error(e);toast('Failed',true)}
+    return;
+  }
+  const src=(typeof getKpiSource==='function')?getKpiSource(key):null;
+  if(!src){toast('Unknown template',true);return}
+  const payload={};
+  payload[PF.kpiSource]=src.key;
+  payload[PF.kpiUnit]=src.unit||null;
+  payload[PF.kpiAutomated]=!!src.automated;
+  // If the project has no KPI name yet, seed it from the template label
+  if(!p.kpiName){payload[PF.kpiName]=src.label;p.kpiName=src.label}
+  p.kpiSource=src.key;p.kpiUnit=src.unit||'';p.kpiAutomated=!!src.automated;
+  try{
+    const r=await patchProject(pid,payload);
+    if(!r.ok)throw new Error(await r.text());
+    toast(`KPI template: ${src.label}`);
+    // If it's automated, compute a first value immediately
+    if(src.automated && typeof src.compute==='function'){
+      try{
+        const v=src.compute(p,{allTasks,todayStr:todayStr()});
+        if(typeof v==='number' && !isNaN(v)){
+          const rounded=Math.round(v*100)/100;
+          const by=(currentUser&&(currentUser.email||currentUser.name))||'system';
+          const nowIso=new Date().toISOString();
+          const p2={};
+          p2[PF.kpiCurrent]=rounded;p2[PF.kpiLastUpdated]=nowIso;p2[PF.kpiLastUpdatedBy]=by;
+          const r2=await patchProject(pid,p2);
+          if(r2.ok){p.kpiCurrent=rounded;p.kpiLastUpdated=nowIso;p.kpiLastUpdatedBy=by}
+        }
+      }catch(e){console.warn('[KPI] initial compute failed',e)}
+    }
+    renderProjects();
+  }catch(e){console.error('[changeKpiTemplate]',e);toast('Failed to save template',true)}
+}
+
+// Page-load sweep: recompute all automated KPI values and PATCH any that changed.
+async function refreshAutomatedKpis(){
+  if(!window.KPI_SOURCES||!Array.isArray(allProjects))return;
+  const today=todayStr();
+  const ctx={allTasks,todayStr:today};
+  const projectsToUpdate=[];
+  for(const p of allProjects){
+    if(!p.kpiAutomated)continue;
+    const src=(typeof getKpiSource==='function')?getKpiSource(p.kpiSource):null;
+    if(!src||!src.automated||typeof src.compute!=='function')continue;
+    try{
+      const newValue=src.compute(p,ctx);
+      if(typeof newValue!=='number'||isNaN(newValue))continue;
+      const rounded=Math.round(newValue*100)/100;
+      if(rounded!==p.kpiCurrent)projectsToUpdate.push({project:p,newValue:rounded});
+    }catch(e){console.warn('[KPI] compute failed for',p.name,p.kpiSource,e)}
+  }
+  if(projectsToUpdate.length===0)return;
+  console.log(`[KPI] Refreshing ${projectsToUpdate.length} automated KPIs`);
+  _bulkOperation=true;
+  try{
+    for(const {project,newValue} of projectsToUpdate){
+      const payload={};
+      payload[PF.kpiCurrent]=newValue;
+      payload[PF.kpiLastUpdated]=new Date().toISOString();
+      payload[PF.kpiLastUpdatedBy]=(currentUser&&(currentUser.email||currentUser.name))||'system';
+      try{
+        const res=await patchProject(project.id,payload);
+        if(res.ok){
+          project.kpiCurrent=newValue;
+          project.kpiLastUpdated=payload[PF.kpiLastUpdated];
+          project.kpiLastUpdatedBy=payload[PF.kpiLastUpdatedBy];
+        }
+      }catch(e){console.warn('[KPI] PATCH failed',e)}
+    }
+  }finally{
+    _bulkOperation=false;
+  }
+  if(currentView==='projects')renderProjects();
+}
+
+// ----- Custom KPI Source request modal -----
+function openKpiRequestModal(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p){toast('Project not found',true);return}
+  // Remove any existing instance
+  const existing=document.getElementById('kpiReqModal');if(existing)existing.remove();
+  const wrap=document.createElement('div');
+  wrap.id='kpiReqModal';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  wrap.innerHTML=`<div style="background:var(--bg-surface);border-radius:12px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:var(--shadow-lg)">
+    <h3 style="margin-top:0">Request a custom automated KPI source</h3>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">This creates a support task so we can build the automation for you.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label style="font-size:11px;color:var(--text-secondary);display:block">Source name</label><input id="kpiReq_name" class="inline-input" style="width:100%" placeholder="e.g. Weekly signups"></div>
+      <div><label style="font-size:11px;color:var(--text-secondary);display:block">Unit</label><select id="kpiReq_unit" class="inline-select" style="width:100%">${['£','%','count','days','items','hours'].map(u=>`<option value="${u}">${u}</option>`).join('')}</select></div>
+    </div>
+    <div style="margin-top:10px"><label style="font-size:11px;color:var(--text-secondary);display:block">Category</label>
+      <select id="kpiReq_cat" class="inline-select" style="width:100%">
+        <option>Financial</option><option>SaaS</option><option>Operational</option><option>Other</option>
+      </select>
+    </div>
+    <div style="margin-top:10px"><label style="font-size:11px;color:var(--text-secondary);display:block">What does this measure? (1-2 sentences)</label>
+      <textarea id="kpiReq_what" style="width:100%;min-height:60px" class="inline-input"></textarea>
+    </div>
+    <div style="margin-top:10px"><label style="font-size:11px;color:var(--text-secondary);display:block">How should it be computed? (plain English)</label>
+      <textarea id="kpiReq_how" style="width:100%;min-height:80px" class="inline-input"></textarea>
+    </div>
+    <div style="margin-top:10px"><label style="font-size:11px;color:var(--text-secondary);display:block">Data needed (tables / integrations)</label>
+      <textarea id="kpiReq_data" style="width:100%;min-height:60px" class="inline-input"></textarea>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px">Update frequency</label>
+      <label style="margin-right:10px"><input type="radio" name="kpiReq_freq" value="Every page load" checked> Every page load</label>
+      <label style="margin-right:10px"><input type="radio" name="kpiReq_freq" value="Weekly"> Weekly</label>
+      <label><input type="radio" name="kpiReq_freq" value="Monthly"> Monthly</label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn" onclick="document.getElementById('kpiReqModal').remove()">Cancel</button>
+      <button class="btn btn-primary" id="kpiReq_submit">Submit Request</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  document.getElementById('kpiReq_submit').onclick=async()=>{
+    const name=document.getElementById('kpiReq_name').value.trim();
+    if(!name){toast('Source name is required',true);return}
+    const unit=document.getElementById('kpiReq_unit').value;
+    const cat=document.getElementById('kpiReq_cat').value;
+    const what=document.getElementById('kpiReq_what').value.trim();
+    const how=document.getElementById('kpiReq_how').value.trim();
+    const data=document.getElementById('kpiReq_data').value.trim();
+    const freq=(document.querySelector('input[name="kpiReq_freq"]:checked')||{}).value||'Every page load';
+    const ownerKey=p.ownerKey||'kevin';
+    const ownerMember=TEAM.find(m=>m.key===ownerKey)||TEAM[0];
+    const requestedBy=(currentUser&&(currentUser.name||currentUser.email))||'web app';
+    const description=[
+      `Client has requested a bespoke automated KPI source.`,
+      ``,
+      `Project: ${p.name}`,
+      `Requested by: ${requestedBy}`,
+      ``,
+      `Source name: ${name}`,
+      `Category: ${cat}`,
+      `Unit: ${unit}`,
+      `Update frequency: ${freq}`,
+      ``,
+      `What this measures:`,
+      what||'(not provided)',
+      ``,
+      `How it should be computed:`,
+      how||'(not provided)',
+      ``,
+      `Data needed:`,
+      data||'(not provided)',
+      ``,
+      `Action: add this source to js/kpi-sources.js with the compute() above, and update the dropdown options in the project KPI panel.`
+    ].join('\n');
+    const btn=document.getElementById('kpiReq_submit');btn.disabled=true;btn.textContent='Submitting...';
+    try{
+      const created=await createSimpleTask({
+        name:`Implement KPI source: ${name}`,
+        description,
+        assigneeEmail:ownerMember.email,
+        priority:'Project',
+        status:'Upcoming',
+        projectIds:[p.id],
+      });
+      if(!created)throw new Error('Task creation returned null');
+      toast('Request submitted — implementation task created');
+      const m=document.getElementById('kpiReqModal');if(m)m.remove();
+    }catch(e){
+      console.error('[openKpiRequestModal] submit failed',e);
+      toast('Failed to submit request: '+((e&&e.message)||'unknown'),true);
+      btn.disabled=false;btn.textContent='Submit Request';
+    }
+  };
 }
 
 // Spawn a "Set up KPI tracking" task when KPI is flagged Automated but Source is still empty,
@@ -3641,6 +3868,9 @@ async function loadAllData(){
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
     allTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
 
+    // Recompute automated KPI values from fresh task/project data
+    try{await refreshAutomatedKpis()}catch(e){console.warn('refreshAutomatedKpis failed',e)}
+
     const r=await autoRescheduleOverdue();
     if(r.count>0)console.log(`Rescheduled ${r.count} overdue`);
 
@@ -3674,6 +3904,7 @@ if(initAuth()){checkIdentityAndLoad()}
  'doUndo','toggleRoutineConfig','updateTaskField','renderAll',
  'updateProjectField','projEdit','projEditDebounced','completeProject','deleteProject',
  'openDeleteProjectConfirm','performDeleteProject','toggleProject','renderProjects',
+ 'changeKpiTemplate','openKpiRequestModal','refreshAutomatedKpis',
  'setKanbanMode','kanbanMonthsNav','kanbanMonthsToday','kanbanNav','dropKanbanMonthCard','dropKanbanCard','dragKanbanCard','renderKanban'].forEach(n=>{
   try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
 });
