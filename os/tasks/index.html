@@ -378,10 +378,27 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   <div id="view-myday"></div>
 
   <div id="view-list" style="display:none">
-    <div id="bulkBar" class="bulk-bar" style="display:none">
+    <div id="bulkBar" class="bulk-bar" style="display:none;flex-wrap:wrap;gap:8px;align-items:center">
       <span class="selected-count"><span id="bulkCount">0</span> selected</span>
-      <button class="btn btn-sm btn-primary" onclick="bulkComplete()">Complete Selected</button>
-      <button class="btn btn-sm" onclick="bulkReschedule()">Reschedule Selected</button>
+      <button class="btn btn-sm btn-primary" onclick="bulkComplete()" title="Mark all selected as Completed">Complete</button>
+      <select class="filter-select" id="bulkStatusSel" onchange="bulkSetField('status',this.value);this.selectedIndex=0" title="Change status of all selected">
+        <option value="">Change status…</option><option value="Today">Today</option><option value="Upcoming">Upcoming</option><option value="Approval">Approval</option><option value="Overdue">Overdue</option>
+      </select>
+      <select class="filter-select" id="bulkPriSel" onchange="bulkSetField('priority',this.value);this.selectedIndex=0" title="Change priority of all selected">
+        <option value="">Change priority…</option><option value="Project">Project</option><option value="Urgent">Urgent</option><option value="Not Urgent">Not Urgent</option>
+      </select>
+      <select class="filter-select" id="bulkAsgSel" onchange="bulkSetField('assignee',this.value);this.selectedIndex=0" title="Change assignee of all selected">
+        <option value="">Change assignee…</option>${typeof TEAM!=='undefined'?TEAM.map(m=>`<option value="${m.key}">${m.name.split(' ')[0]}</option>`).join(''):''}
+      </select>
+      <select class="filter-select" id="bulkBizSel" onchange="bulkSetField('business',this.value);this.selectedIndex=0" title="Change business of all selected">
+        <option value="">Change business…</option><option value="Real Estate">Real Estate</option><option value="Operations Director">Operations Director</option><option value="Personal">Personal</option>
+      </select>
+      <select class="filter-select" id="bulkProjSel" onchange="bulkSetProject(this.value);this.selectedIndex=0" title="Link all selected to a project">
+        <option value="">Change project…</option>
+      </select>
+      <input type="date" class="inline-input" id="bulkDateInp" onchange="bulkSetField('dueDate',this.value)" title="Reschedule all selected to this date" style="padding:2px 6px">
+      <button class="btn btn-sm" onclick="bulkReschedule()" title="Reschedule selected to tomorrow">+ Tomorrow</button>
+      <button class="btn btn-sm btn-danger" onclick="bulkDelete()" title="Delete all selected (with confirmation)">Delete</button>
       <button class="btn btn-sm" onclick="clearSelection()">Clear</button>
     </div>
     <div class="controls">
@@ -424,6 +441,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
             <th>Recurring</th>
             <th>Status</th>
             <th>Business</th>
+            <th>Project</th>
             <th style="width:70px">Actions</th>
           </tr>
         </thead>
@@ -2716,6 +2734,17 @@ function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
   return `<select class="inline-select" onchange="updateTaskField('${taskId}','${fieldKey}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
 }
+// Inline project picker cell for the task list grid
+function inlineProjectPickerCell(t){
+  const currentPid=(t.projectIds&&t.projectIds[0])||'';
+  const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+  const opts=['<option value="">(none)</option>',
+    ...active.map(p=>{
+      const label=p.name.length>40?p.name.slice(0,40)+'…':p.name;
+      return `<option value="${p.id}" ${currentPid===p.id?'selected':''}>${escHtml(label)}</option>`;
+    })].join('');
+  return `<select class="inline-select" style="max-width:180px" onchange="quickRelinkProject('${t.id}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
+}
 
 function renderTasks(){
   const tasks=getFilteredTasks();
@@ -2746,10 +2775,11 @@ function renderTasks(){
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'recurring',t.recurring,RECUR_OPTIONS)}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'status',dispStatus,STATUS_OPTIONS)}</td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'business',t.business,['',...BUSINESS_OPTIONS])}</td>
+      <td onclick="event.stopPropagation()">${inlineProjectPickerCell(t)}</td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">${rowActionsHtml(t.id)}</td>
     </tr>`;
   });
-  if(!page.length)html=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
+  if(!page.length)html=`<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
 
   document.getElementById('taskBody').innerHTML=html;
   document.getElementById('showingCount').textContent=`Showing ${page.length} of ${tasks.length}`;
@@ -2764,7 +2794,112 @@ function changePage(d){currentPage+=d;renderTasks();document.querySelector('.tas
 function toggleTaskSelect(id,c){if(c)selectedTasks.add(id);else selectedTasks.delete(id);updateBulkBar()}
 function toggleSelectAll(c){const tasks=getFilteredTasks();const s=(currentPage-1)*PAGE_SIZE;tasks.slice(s,s+PAGE_SIZE).forEach(t=>{if(c)selectedTasks.add(t.id);else selectedTasks.delete(t.id)});renderTasks()}
 function clearSelection(){selectedTasks.clear();const sa=document.getElementById('selectAll');if(sa)sa.checked=false;renderTasks()}
-function updateBulkBar(){const bar=document.getElementById('bulkBar');if(selectedTasks.size>0){bar.style.display='flex';document.getElementById('bulkCount').textContent=selectedTasks.size}else bar.style.display='none'}
+function updateBulkBar(){
+  const bar=document.getElementById('bulkBar');
+  if(selectedTasks.size>0){
+    bar.style.display='flex';
+    document.getElementById('bulkCount').textContent=selectedTasks.size;
+    // Populate project dropdown each open (projects may have changed)
+    const sel=document.getElementById('bulkProjSel');
+    if(sel){
+      const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+      sel.innerHTML=`<option value="">Change project…</option><option value="__none__">(remove project link)</option>`+active.map(p=>{const lbl=p.name.length>50?p.name.slice(0,50)+'…':p.name;return `<option value="${p.id}">${escHtml(lbl)}</option>`}).join('');
+    }
+  } else {
+    bar.style.display='none';
+  }
+}
+// Bulk field setter — applies to all selected tasks via updateTaskField
+async function bulkSetField(fieldKey,val){
+  if(!selectedTasks.size||!val)return;
+  const ids=[...selectedTasks];
+  _bulkOperation=true;
+  const applied=[];
+  try{
+    for(let i=0;i<ids.length;i+=5){
+      const chunk=ids.slice(i,i+5);
+      const results=await Promise.allSettled(chunk.map(async id=>{
+        const task=allTasks.find(t=>t.id===id);
+        if(!task)return;
+        const oldRaw=captureOldRaw?captureOldRaw(task,fieldKey):undefined;
+        await updateTaskField(id,fieldKey,val);
+        applied.push({taskId:id,fieldKey,oldRaw,newRaw:val});
+      }));
+    }
+  }finally{_bulkOperation=false}
+  if(!_undoInProgress&&applied.length){
+    pushUndo({type:'multi-patch',edits:applied,label:`Bulk changed ${fieldKey} on ${applied.length} tasks`});
+  }
+  toast(`Updated ${applied.length} tasks`);
+  selectedTasks.clear();renderAll();
+}
+// Bulk project link — handles the "(remove project link)" sentinel
+async function bulkSetProject(projectId){
+  if(!selectedTasks.size||!projectId)return;
+  const targetId=projectId==='__none__'?'':projectId;
+  const ids=[...selectedTasks];
+  _bulkOperation=true;
+  let done=0;
+  try{
+    for(let i=0;i<ids.length;i+=5){
+      const chunk=ids.slice(i,i+5);
+      await Promise.allSettled(chunk.map(async id=>{
+        await quickRelinkProject(id,targetId);
+        done++;
+      }));
+    }
+  }finally{_bulkOperation=false}
+  toast(`Project changed on ${done} tasks`);
+  selectedTasks.clear();renderAll();
+}
+// Bulk delete — confirmation first, then DELETE each record
+function bulkDelete(){
+  if(!selectedTasks.size)return;
+  const count=selectedTasks.size;
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='bulkDeleteConfirm';
+  overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML=`<div class="modal"><h2>Delete ${count} task${count!==1?'s':''}?</h2>
+    <p style="font-size:13px;color:var(--text-primary);margin:8px 0 6px 0">This permanently deletes <strong>${count}</strong> record${count!==1?'s':''} from Airtable. Cannot be undone from Airtable itself — but you can undo within this session.</p>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('bulkDeleteConfirm').remove()">Cancel</button>
+      <button class="btn btn-danger" onclick="document.getElementById('bulkDeleteConfirm').remove();performBulkDelete()">Delete ${count}</button>
+    </div></div>`;
+  document.body.appendChild(overlay);
+}
+async function performBulkDelete(){
+  if(!selectedTasks.size)return;
+  const ids=[...selectedTasks];
+  _bulkOperation=true;
+  const snapshots=[]; // for undo
+  let done=0,failed=0;
+  try{
+    for(let i=0;i<ids.length;i+=10){
+      const chunk=ids.slice(i,i+10);
+      // Capture snapshots before delete
+      chunk.forEach(id=>{const t=allTasks.find(x=>x.id===id);if(t&&typeof buildFieldsFromTask==='function')snapshots.push({taskRecord:buildFieldsFromTask(t),name:t.name})});
+      const results=await Promise.allSettled(chunk.map(async id=>{
+        const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${id}`,{method:'DELETE',headers:{'Authorization':`Bearer ${PAT}`}});
+        if(!res.ok)throw new Error('HTTP '+res.status);
+        // decrement project counts
+        const t=allTasks.find(x=>x.id===id);
+        if(t&&typeof adjustProjectTaskCounts==='function')adjustProjectTaskCounts(t.projectIds||[],[]);
+        allTasks=allTasks.filter(x=>x.id!==id);
+      }));
+      done+=results.filter(r=>r.status==='fulfilled').length;
+      failed+=results.filter(r=>r.status==='rejected').length;
+    }
+  }finally{_bulkOperation=false}
+  if(!_undoInProgress&&snapshots.length){
+    pushUndo({type:'bulk-delete',snapshots,label:`Bulk deleted ${done} tasks`});
+  }
+  toast(failed?`Deleted ${done} (${failed} failed)`:`Deleted ${done} tasks`,!!failed);
+  selectedTasks.clear();renderAll();
+}
+window.bulkSetField=bulkSetField;
+window.bulkSetProject=bulkSetProject;
+window.bulkDelete=bulkDelete;
+window.performBulkDelete=performBulkDelete;
 async function bulkComplete(){
   if(!selectedTasks.size)return;const ids=[...selectedTasks];
   _undoInProgress=true;
