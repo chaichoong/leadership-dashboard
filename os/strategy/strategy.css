@@ -367,16 +367,29 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
     position: absolute; left: 0; color: var(--accent);
     font-size: 14px; line-height: 1.4;
 }
-.push-project-skipped {
-    opacity: 0.6;
-    border-style: dashed;
+.push-project-existing {
+    border-color: var(--info);
+    background: var(--info-bg);
 }
-.push-skip-badge {
+.push-exists-badge {
     margin-left: auto;
     font-size: 10px; font-weight: 700;
-    background: var(--warning-bg); color: var(--warning);
+    background: var(--info); color: #fff;
     padding: 3px 8px; border-radius: 4px;
     letter-spacing: 0.03em; text-transform: uppercase;
+}
+.push-task-list li.task-existing {
+    color: var(--text-muted);
+    text-decoration: line-through;
+    display: flex; align-items: baseline; gap: 8px;
+}
+.push-task-list li.task-existing::before { opacity: 0.4; }
+.task-existing-badge {
+    font-size: 9px; font-weight: 700;
+    background: var(--bg-subtle); color: var(--text-secondary);
+    padding: 2px 6px; border-radius: 3px;
+    letter-spacing: 0.03em; text-transform: uppercase;
+    text-decoration: none;
 }
 
 /* KPI / Tracking / DoD block inside each Quarterly Project card */
