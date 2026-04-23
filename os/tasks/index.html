@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1930</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1941</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4010,29 +4010,25 @@ function renderProjects(){
         lastUpdatedLine=`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Last computed: ${ago}</div>`;
       }
       const hasCode=!!(p.kpiComputeCode&&p.kpiComputeCode.trim());
-      const currentDisplay=hasCode
-        ? `<div style="font-size:18px;font-weight:600;color:var(--text-primary)">${p.kpiUnit==='£'?'£':''}${p.kpiCurrent||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}</div>`
-        : `<div style="font-size:12px;color:var(--text-muted);font-style:italic">Not yet computed — use the wizard to generate a compute function</div>`;
-      const wizardBtnLabel=hasCode?'🪄 Regenerate with AI':'🪄 Generate with AI';
+      // If we've hand-built a compute function for this client, Current is
+      // auto-computed + read-only. Otherwise it's a manual entry field.
+      const currentBlock=hasCode
+        ? `<div style="padding:10px;background:var(--bg-surface-2);border-radius:8px">
+            <div style="font-size:10px;color:var(--text-muted);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Current (auto-computed)</div>
+            <div style="font-size:18px;font-weight:600;color:var(--text-primary)">${p.kpiUnit==='£'?'£':''}${p.kpiCurrent||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}</div>
+            ${lastUpdatedLine}
+            <button class="btn btn-sm" style="margin-top:6px" onclick="recomputeKpi('${p.id}')">Recompute now</button>
+          </div>`
+        : `<div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Current (latest value — update manually each cycle)</label><input type="number" placeholder="0" value="${p.kpiCurrent||0}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input" style="width:100%">${lastUpdatedLine}</div>`;
       html+=`<h4>KPI (Key Performance Indicator)</h4>
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:8px">
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="e.g. Monthly profit increase" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Target</label><input type="number" placeholder="4000" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Unit</label><select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)" style="width:100%"><option value="">-</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select></div>
       </div>
-      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (how this KPI should be measured — the more detail, the better the wizard does)</label>
-      <textarea style="${taStyle}" placeholder="e.g. Sum of Transactions where Category = Rent and Status = Actual, between Start Date and End Date of this quarter..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-top:10px;padding:10px;background:var(--bg-surface-2);border-radius:8px">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:10px;color:var(--text-muted);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Current value</div>
-          ${currentDisplay}
-          ${lastUpdatedLine}
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <button class="btn btn-primary btn-sm" onclick="openKpiWizard('${p.id}')">${wizardBtnLabel}</button>
-          ${hasCode?`<button class="btn btn-sm" onclick="recomputeKpi('${p.id}')">Recompute now</button>`:''}
-        </div>
-      </div>`;
+      <div style="margin-top:8px">${currentBlock}</div>
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (notes for how this KPI is measured — provides context when we build automated compute for you)</label>
+      <textarea style="${taStyle}" placeholder="e.g. Sum of monthly P&L rent income minus costs, for Real Estate business only..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>`;
       // Definition of Done only — the separate "Deliverable" field was
       // redundant with DoD and has been retired from the UI. The Airtable
       // field is kept for now in case any legacy records contain content.
@@ -4241,40 +4237,16 @@ async function recomputeAllKpis(){
 }
 window.recomputeAllKpis=recomputeAllKpis;
 
-// ─── Wizard modal ──────────────────────────────────────────────────────
-// A chat-style modal that turns the project's KPI Name + Target + Unit +
-// Tracking notes into a compute function. Uses the existing Claude proxy.
-// The LLM is primed with:
-//   - the KPI fields
-//   - a schema summary (what's in ctx)
-//   - a target output format ("return a single JS expression or block")
-// and iterates with the user if it needs clarification.
+// ─── Wizard modal (retained but not currently wired to a button) ──────
+// Kevin's decision 2026-04-23: build client KPI compute functions as a
+// support service rather than a client-facing wizard. The wizard code
+// below is commented out; the sandboxed compute runner + Airtable
+// KPI Compute Code field stays in place so a hand-written compute
+// body pasted into Airtable still auto-updates the Current value.
+/* WIZARD MODAL REMOVED — ctrl+F "OPTION A KPI" to find the compute
+   runner / buildKpiContext / recomputeKpi which remain active.
 const CLAUDE_PROXY_URL='https://claude-proxy.kevinbrittain.workers.dev';
-const KPI_WIZARD_SYSTEM_PROMPT=`You are an expert at writing JavaScript compute functions for business KPIs.
-
-Your task: given a KPI definition and a data context, output ONLY a JavaScript function body that returns a NUMBER.
-
-The function body will be executed as: new Function('ctx', yourBody)(ctx)
-
-The ctx object you receive has:
-- ctx.project: { id, name, start, end, business, owner } — the current project
-- ctx.today: ISO date string for today
-- ctx.tasks: [{ id, name, status, priority, dueDate, completion, assignee, minutes, business, projectIds, recurring, hardDeadline }]
-- ctx.projects: [{ id, name, status, business, start, end, kpiCurrent, kpiTarget }]
-- ctx.completions: [{ taskId, taskName, completedBy, completedAt, minutes, business, project, cadence }]
-- ctx.between(dateIso, startIso, endIso) → boolean
-- ctx.sumBy(arr, fn), ctx.countWhere(arr, fn)
-
-Rules:
-1. Output ONLY the function body, nothing else. No markdown, no explanation.
-2. Return a number with a \`return\` statement.
-3. If something is ambiguous, ask ONE clarifying question and stop. The caller will send user reply and expect you to then produce the function body.
-4. Use ctx.project.start / ctx.project.end as the default date range for "this quarter" / "this period" metrics.
-5. Handle empty arrays gracefully. Return 0 when there's no data, never null or NaN.
-6. Prefer simple, readable code over clever one-liners.
-
-When you output the final function body, wrap it in <code>...</code> tags so it's unambiguous.`;
-
+const KPI_WIZARD_SYSTEM_PROMPT='(removed)';
 let _kpiWizardState=null;
 function openKpiWizard(pid){
   const p=allProjects.find(x=>x.id===pid);if(!p){toast('Project not found',true);return}
@@ -4426,6 +4398,7 @@ async function kpiWizardSaveCode(){
   }catch(e){console.error('[kpiWizardSaveCode]',e);toast('Save failed: '+((e&&e.message)||'unknown'),true)}
 }
 window.kpiWizardSaveCode=kpiWizardSaveCode;
+*/ // end of wizard-removed block
 
 // Toggle a team member on/off as a Project Collaborator. Projects.ProjectCollaborators
 // is a multipleRecordLinks to Team Members — we send the full array of member
