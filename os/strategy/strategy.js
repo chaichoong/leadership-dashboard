@@ -845,6 +845,23 @@ const PROJ_F = {
     kpiTracking: 'fld2wYB5ZEn9WRcjN',
 };
 
+// Tasks table field IDs (matches os/tasks/index.html F constants).
+const TASK_F = {
+    name:      'fldgFjGBw6bTKJFCD',
+    dueDate:   'fld7XP8w8kbxfETV4',
+    status:    'fldx4qCw17UfrKpaN',
+    assignee:  'fldELMncVJYPDRJNc',
+    priority:  'fldS21RwmwOqt71LI',
+    time:      'flduPjY0p7MmQzDvH',
+    desc:      'fldRGhBQViKZKtkQ6',
+    business:  'fldLu1Y4GzyWcDoxr',
+    projects:  'fldBg0rQy0FrOAkRN',
+};
+
+// Kevin's Airtable collaborator email — Assignee is a singleCollaborator.
+const KEVIN_EMAIL = 'kevin@runpreneur.org.uk';
+const DEFAULT_TASK_DURATION_SECONDS = 15 * 60;   // 15 minutes as seconds
+
 let pushOfferDismissedForRecord = null;
 
 function offerProjectPush() {
@@ -874,12 +891,26 @@ function offerProjectPush() {
         pushOfferDismissedForRecord = currentRecord.id;
         setStatus('', '');
     };
-    document.getElementById('pushNowBtn').onclick = () => pushProjectsToOS(qps, fields);
+    document.getElementById('pushNowBtn').onclick = async () => {
+        // Route through the preview modal so tasks-from-stones get the same approval flow.
+        const btn = document.getElementById('pushNowBtn');
+        if (btn) btn.disabled = true;
+        setStatus('info', 'Building preview…');
+        try {
+            const proposal = await buildPushProposal(qps, fields);
+            setStatus('', '');
+            showPushApprovalModal(proposal, fields);
+        } catch (e) {
+            console.error('[post-save push preview]', e);
+            setStatus('error', `Couldn't build preview: ${e.message || e}`);
+        }
+        if (btn) btn.disabled = false;
+    };
 }
 
-// Invoked from the "Push Projects →" button in the context bar. Reads the
-// live form values (always the current state — immune to Airtable field-key
-// ambiguity), collects non-empty QPs, and pushes them.
+// Invoked from the "Push Projects →" button. Builds a proposal (projects +
+// AI-extracted tasks from monthly stepping stones) and shows an approval
+// modal before anything is written to Airtable.
 async function pushProjectsManually() {
     if (!currentRecord) {
         setStatus('warn', 'Save the plan first, then push projects.');
@@ -893,7 +924,23 @@ async function pushProjectsManually() {
         setStatus('warn', 'No Quarterly Projects to push — add some text to Quarterly Project 1/2/3 first, then Save changes, then try again.');
         return;
     }
-    await pushProjectsToOS(qps, fields);
+
+    const btn = document.getElementById('pushProjBtn');
+    if (btn) btn.disabled = true;
+    setStatus('info', 'Building preview (extracting tasks from monthly stones)…');
+
+    let proposal;
+    try {
+        proposal = await buildPushProposal(qps, fields);
+    } catch (e) {
+        console.error('[pushProjectsManually] buildPushProposal', e);
+        setStatus('error', `Couldn't build task preview: ${e.message || e}`);
+        if (btn) btn.disabled = false;
+        return;
+    }
+    setStatus('', '');
+    if (btn) btn.disabled = false;
+    showPushApprovalModal(proposal, fields);
 }
 
 // Snapshot every form field by its data-field-id into a { fid: value } map.
@@ -908,74 +955,242 @@ function readAllFormFields() {
     return out;
 }
 
-async function pushProjectsToOS(qps, formFields) {
-    const { businessId, quarter, year } = getSelection();
-    // Prefer the form snapshot (current on-screen state). Fall back to the
-    // loaded Airtable record if not provided.
-    const fields = formFields || currentRecord.fields || {};
-    // Derive quarter bounds as YYYY-MM-DD.
+// Build a preview of what the push will create — projects + AI-extracted
+// tasks from each monthly stepping stone. No Airtable writes here; we're
+// just shaping the data and running one AI call per non-empty stone.
+async function buildPushProposal(qps, fields) {
+    const { quarter, year } = getSelection();
     const qIdx = QUARTERS.indexOf(quarter);
     const yearNum = parseInt(year, 10);
-    const starts = [[1, 1], [4, 1], [7, 1], [10, 1]];           // [month, day] 1-indexed
+    const starts = [[1, 1], [4, 1], [7, 1], [10, 1]];
     const ends   = [[3, 31], [6, 30], [9, 30], [12, 31]];
     const pad = n => String(n).padStart(2, '0');
-    const startISO = `${yearNum}-${pad(starts[qIdx][0])}-${pad(starts[qIdx][1])}`;
-    const endISO   = `${yearNum}-${pad(ends[qIdx][0])}-${pad(ends[qIdx][1])}`;
+    const qStartISO = `${yearNum}-${pad(starts[qIdx][0])}-${pad(starts[qIdx][1])}`;
+    const qEndISO   = `${yearNum}-${pad(ends[qIdx][0])}-${pad(ends[qIdx][1])}`;
+    // Per-month due dates: last day of M1/M2/M3 within the quarter.
+    const monthEndsInQuarter = [0, 1, 2].map(m => {
+        const mo = starts[qIdx][0] + m;                      // 1-indexed month
+        const lastDay = new Date(yearNum, mo, 0).getDate();   // day 0 of next month = last day of this
+        return `${yearNum}-${pad(mo)}-${pad(lastDay)}`;
+    });
 
-    const btn = document.getElementById('pushProjBtn');
-    if (btn) btn.disabled = true;
-    setStatus('info', `Creating ${qps.length} project record${qps.length === 1 ? '' : 's'}…`);
-
-    const results = { created: 0, failed: 0, errors: [] };
+    const proposal = { quarter, year, qStartISO, qEndISO, projects: [] };
     for (const qp of qps) {
         const det = OBJSTRAT.qpDetails[qp.i];
         const projectName = deriveProjectName(qp.text);
-        const body = { fields: {}, typecast: true };
-        body.fields[PROJ_F.name] = projectName;
-        body.fields[PROJ_F.business] = [businessId];
-        body.fields[PROJ_F.startDate] = startISO;
-        body.fields[PROJ_F.endDate] = endISO;
-        // NOTE: Project Status is deliberately omitted — the Projects table
-        // singleSelect choices differ from session to session, so setting it
-        // here risks a 422. The Projects OS will show its configured default.
-        const qpText = qp.text;
-        const dod = (fields[det.dod] || '').trim();
-        body.fields[PROJ_F.dod] = dod || qpText;
-        const kpiName = (fields[det.kpiName] || '').trim();
-        if (kpiName) body.fields[PROJ_F.kpiName] = kpiName;
-        const unit = extractSelectName(fields[det.kpiUnit]);
-        if (unit) body.fields[PROJ_F.kpiUnit] = unit;
-        const tracking = (fields[det.tracking] || '').trim();
-        if (tracking) body.fields[PROJ_F.kpiTracking] = tracking;
+        const stones = OBJSTRAT.monthlyStones[qp.i].map(sFid => (fields[sFid] || '').trim());
+        const tasksByMonth = [[], [], []];
+        for (let m = 0; m < 3; m++) {
+            const stone = stones[m];
+            if (!stone || /^(n\/?a|tbc|skip|none|-|—|…)$/i.test(stone)) continue;
+            const extracted = await extractTasksFromStone(stone, qp.i + 1, m + 1, projectName);
+            tasksByMonth[m] = extracted.map(name => ({ name, dueISO: monthEndsInQuarter[m], month: m + 1 }));
+        }
+        proposal.projects.push({
+            qp,
+            projectName,
+            qpText: qp.text,
+            dod: (fields[det.dod] || '').trim(),
+            kpiName: (fields[det.kpiName] || '').trim(),
+            kpiUnit: extractSelectName(fields[det.kpiUnit]) || '',
+            tracking: (fields[det.tracking] || '').trim(),
+            stones,
+            tasksByMonth,
+        });
+    }
+    return proposal;
+}
 
+// Ask Sonnet to break a monthly stepping stone into discrete, actionable
+// tasks. A stone like "Website finalised with call booking and Stripe
+// integrated for product sales" becomes two tasks. A stone like "Complete
+// 5 Woodcock renovation" stays a single task.
+async function extractTasksFromStone(stoneText, projectNumber, monthNumber, projectName) {
+    const system = buildCachedWizardSystem(
+        `Strategy Plan OS — extracting tasks from a monthly stepping stone.`,
+        `You are breaking down a monthly stepping stone into discrete, actionable tasks for a task management system.
+
+Context:
+- Quarterly Project: "${projectName}"
+- Month: ${monthNumber} of 3 in this quarter
+- Stepping stone text: "${stoneText}"
+
+Your job: extract the discrete tasks implied by the stepping stone. If the stone reads as a single deliverable, return one task. If it contains multiple distinct deliverables joined by "and", commas, or similar, split them into separate tasks.
+
+RULES:
+- Return a JSON object {"tasks": ["task 1", "task 2", ...]} — nothing else.
+- Each task name: short, imperative, 3–10 words. E.g. "Finalise website" not "Website will be finalised".
+- Preserve specific names, numbers, and products the founder used.
+- Don't invent tasks that aren't implied by the stone.
+- Don't split a single deliverable into sub-steps — each task should match one bullet-point-sized deliverable.
+- UK English.`
+    );
+    try {
+        const res = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 800,
+                system,
+                messages: [{ role: 'user', content: `Stone: "${stoneText}"\n\nReturn the JSON task list now.` }],
+            }),
+        });
+        if (!res.ok) return [stoneText];  // fail open — keep the stone as one task
+        const data = await res.json();
+        const raw = (data.content?.[0]?.text || '').trim();
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) return [stoneText];
+        const parsed = JSON.parse(match[0]);
+        const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.map(t => String(t).trim()).filter(Boolean) : [];
+        return tasks.length ? tasks : [stoneText];
+    } catch (e) {
+        console.warn('[extractTasksFromStone] falling back to single task', e);
+        return [stoneText];
+    }
+}
+
+// Approval modal — shows the full proposal (projects + tasks per month) and
+// lets the user approve everything, approve projects only, or cancel.
+function showPushApprovalModal(proposal, fields) {
+    // Remove any existing modal first
+    document.getElementById('pushModal')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pushModal';
+    overlay.className = 'push-modal-overlay';
+
+    const totalTasks = proposal.projects.reduce((n, p) =>
+        n + p.tasksByMonth.reduce((nn, m) => nn + m.length, 0), 0);
+
+    const projectsHtml = proposal.projects.map((p, i) => {
+        const monthsHtml = p.tasksByMonth.map((tasks, m) => {
+            if (!tasks.length) return '';
+            const header = `<div class="push-month-label">Month ${m + 1} — due ${tasks[0].dueISO}</div>`;
+            const items = tasks.map(t => `<li>${escapeHtml(t.name)}</li>`).join('');
+            return `${header}<ul class="push-task-list">${items}</ul>`;
+        }).join('');
+        return `
+        <div class="push-project">
+            <div class="push-project-head">
+                <span class="push-project-num">QP${p.qp.i + 1}</span>
+                <span class="push-project-name">${escapeHtml(p.projectName)}</span>
+            </div>
+            ${p.kpiName ? `<div class="push-project-meta"><strong>KPI:</strong> ${escapeHtml(p.kpiName)}${p.kpiUnit ? ' (' + escapeHtml(p.kpiUnit) + ')' : ''}</div>` : ''}
+            ${p.dod ? `<div class="push-project-meta"><strong>Definition of Done:</strong> ${escapeHtml(p.dod)}</div>` : ''}
+            <div class="push-project-tasks">
+                ${monthsHtml || '<div style="font-size:12px;color:var(--text-muted);font-style:italic">No monthly stepping stones to convert to tasks.</div>'}
+            </div>
+        </div>`;
+    }).join('');
+
+    overlay.innerHTML = `
+    <div class="push-modal">
+        <div class="push-modal-head">
+            <div>
+                <div class="push-modal-title">Push to Projects &amp; Tasks OS</div>
+                <div class="push-modal-sub">${proposal.projects.length} project${proposal.projects.length === 1 ? '' : 's'} · ${totalTasks} task${totalTasks === 1 ? '' : 's'} extracted from monthly stepping stones · ${escapeHtml(proposal.quarter)} ${escapeHtml(proposal.year)}</div>
+            </div>
+            <button class="push-modal-close" type="button">&times;</button>
+        </div>
+        <div class="push-modal-body">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Each task will be assigned to Kevin, priority <strong>Project</strong>, duration <strong>15 min</strong>, linked to the project + business, due by end of its month. Review and approve.</div>
+            ${projectsHtml}
+        </div>
+        <div class="push-modal-foot">
+            <button class="btn btn-ghost" type="button" id="pushCancelBtn">Cancel</button>
+            <button class="btn btn-ghost" type="button" id="pushProjOnlyBtn">Projects only (no tasks)</button>
+            <button class="btn btn-primary" type="button" id="pushApproveBtn">Approve · create ${proposal.projects.length + totalTasks} records</button>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('.push-modal-close').onclick = close;
+    overlay.querySelector('#pushCancelBtn').onclick = close;
+    overlay.querySelector('#pushProjOnlyBtn').onclick = () => { close(); executePush(proposal, fields, { tasks: false }); };
+    overlay.querySelector('#pushApproveBtn').onclick = () => { close(); executePush(proposal, fields, { tasks: true }); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+}
+
+// Actually create the Airtable records. Runs after user approves the preview.
+async function executePush(proposal, fields, opts) {
+    const { businessId } = getSelection();
+    const btn = document.getElementById('pushProjBtn');
+    if (btn) btn.disabled = true;
+
+    const totalPlannedTasks = opts.tasks
+        ? proposal.projects.reduce((n, p) => n + p.tasksByMonth.reduce((nn, m) => nn + m.length, 0), 0)
+        : 0;
+    setStatus('info', `Creating ${proposal.projects.length} project${proposal.projects.length === 1 ? '' : 's'}${opts.tasks ? ` + ${totalPlannedTasks} task${totalPlannedTasks === 1 ? '' : 's'}` : ''}…`);
+
+    const results = { projectsCreated: 0, tasksCreated: 0, failed: 0, errors: [] };
+
+    for (const p of proposal.projects) {
+        // 1. Project record
+        const projBody = { fields: {}, typecast: true };
+        projBody.fields[PROJ_F.name] = p.projectName;
+        projBody.fields[PROJ_F.business] = [businessId];
+        projBody.fields[PROJ_F.startDate] = proposal.qStartISO;
+        projBody.fields[PROJ_F.endDate] = proposal.qEndISO;
+        projBody.fields[PROJ_F.dod] = p.dod || p.qpText;
+        if (p.kpiName) projBody.fields[PROJ_F.kpiName] = p.kpiName;
+        if (p.kpiUnit) projBody.fields[PROJ_F.kpiUnit] = p.kpiUnit;
+        if (p.tracking) projBody.fields[PROJ_F.kpiTracking] = p.tracking;
+
+        let projectId = null;
         try {
-            const created = await airtableFetch(TABLES.projects, {
-                method: 'POST',
-                body: JSON.stringify(body),
-            });
-            console.log('[pushProjectsToOS] created', created?.id, projectName);
-            results.created++;
+            const created = await airtableFetch(TABLES.projects, { method: 'POST', body: JSON.stringify(projBody) });
+            projectId = created.id;
+            results.projectsCreated++;
+            console.log('[executePush] project created', projectId, p.projectName);
         } catch (e) {
-            console.error('[pushProjectsToOS] failed for QP' + (qp.i + 1), e, 'body was:', body);
+            console.error('[executePush] project failed QP' + (p.qp.i + 1), e, projBody);
             results.failed++;
-            results.errors.push(`QP${qp.i + 1}: ${e.message || String(e)}`);
+            results.errors.push(`QP${p.qp.i + 1} project: ${e.message || String(e)}`);
+            continue;   // no project → no tasks
+        }
+
+        // 2. Tasks — one per extracted item, linked to the project.
+        if (!opts.tasks) continue;
+        for (const month of p.tasksByMonth) {
+            for (const t of month) {
+                const taskBody = { fields: {}, typecast: true };
+                taskBody.fields[TASK_F.name] = t.name;
+                taskBody.fields[TASK_F.dueDate] = t.dueISO;
+                taskBody.fields[TASK_F.status] = 'Upcoming';
+                taskBody.fields[TASK_F.priority] = 'Project';
+                taskBody.fields[TASK_F.assignee] = { email: KEVIN_EMAIL };
+                taskBody.fields[TASK_F.time] = DEFAULT_TASK_DURATION_SECONDS;
+                taskBody.fields[TASK_F.business] = [businessId];
+                taskBody.fields[TASK_F.projects] = [projectId];
+                taskBody.fields[TASK_F.desc] = `From ${proposal.quarter} ${proposal.year} Month ${t.month} stepping stone of "${p.projectName}".`;
+                try {
+                    await airtableFetch(TABLES.tasks, { method: 'POST', body: JSON.stringify(taskBody) });
+                    results.tasksCreated++;
+                } catch (e) {
+                    console.error('[executePush] task failed', t.name, e, taskBody);
+                    results.failed++;
+                    results.errors.push(`Task "${t.name}": ${e.message || String(e)}`);
+                }
+            }
         }
     }
     if (btn) btn.disabled = false;
 
     if (results.failed === 0) {
-        setStatus('success', `✓ Pushed ${results.created} project${results.created === 1 ? '' : 's'} to Projects OS. Open Tasks & Projects OS to see them.`);
+        const taskSummary = opts.tasks ? ` and ${results.tasksCreated} task${results.tasksCreated === 1 ? '' : 's'}` : '';
+        setStatus('success', `✓ Created ${results.projectsCreated} project${results.projectsCreated === 1 ? '' : 's'}${taskSummary} in Tasks & Projects OS.`);
         pushOfferDismissedForRecord = currentRecord.id;
-        setTimeout(() => setStatus('', ''), 5000);
+        setTimeout(() => setStatus('', ''), 6000);
     } else {
-        // Keep errors visible — don't auto-clear. User needs to see what broke.
         const bar = document.getElementById('statusBar');
         bar.className = 'status-bar error';
         bar.style.display = 'block';
         bar.innerHTML = `<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;justify-content:space-between">
             <div>
-                <div style="font-weight:600;margin-bottom:4px">Pushed ${results.created}/${qps.length} — ${results.failed} failed.</div>
-                <div style="font-size:12px;opacity:0.9;font-family:monospace">${results.errors.map(escapeHtml).join('<br>')}</div>
+                <div style="font-weight:600;margin-bottom:4px">Created ${results.projectsCreated} project${results.projectsCreated === 1 ? '' : 's'}, ${results.tasksCreated} task${results.tasksCreated === 1 ? '' : 's'}. ${results.failed} failed.</div>
+                <div style="font-size:12px;opacity:0.9;font-family:monospace;max-height:200px;overflow-y:auto">${results.errors.map(escapeHtml).join('<br>')}</div>
             </div>
             <button class="btn btn-ghost" onclick="setStatus('', '')" style="flex-shrink:0">Dismiss</button>
         </div>`;
