@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0746</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0753</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1284,7 +1284,14 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         };
         if(norm(sent)!==norm(returned)){
           console.warn('[PATCH verify] drift on',sentFid,'— sent',sent,'got',returned);
-          throw new Error('Airtable accepted the request but field did not persist. Sent '+JSON.stringify(sent).slice(0,80)+', got '+JSON.stringify(returned).slice(0,80));
+          // When a multipleRecordLinks field silently drops the ID, the cause
+          // is almost always a viewIdForRecordSelection restriction on the
+          // field in Airtable — i.e. the linked record isn't visible in the
+          // view the field is filtered to. Surface that hint so Kevin doesn't
+          // have to ask.
+          const sentIsLinks=Array.isArray(sent)&&sent.some(x=>x&&x.id);
+          const hint=sentIsLinks?' — This usually means the Airtable field has a view restriction that excludes the target record. Edit the field → "Linked records selection" → switch to "All records".':'';
+          throw new Error('Airtable accepted the request but field did not persist. Sent '+JSON.stringify(sent).slice(0,80)+', got '+JSON.stringify(returned).slice(0,80)+hint);
         }
       });
     }catch(verifyErr){
