@@ -24,13 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Detect changed pages and bump versions
         run: |
           python3 scripts/pre-commit-action.py
         env:
-          CHANGED_FILES: ${{ join(github.event.commits.*.modified, ' ') }} ${{ join(github.event.commits.*.added, ' ') }}
+          GITHUB_BEFORE_SHA: ${{ github.event.before }}
 
       - name: Commit and push if changed
         run: |

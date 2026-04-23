@@ -34,10 +34,34 @@ CONFIG_FILE = 'js/config.js'
 
 
 def get_changed_files():
-    """Get changed files from environment (GitHub Action) or git staging (local hook)."""
+    """Get changed files.
+
+    Modes:
+    1. GitHub Action push event — diff GITHUB_BEFORE_SHA..HEAD.
+       (Set fetch-depth: 0 on the checkout so full history is present.)
+    2. Legacy CHANGED_FILES env — kept for back-compat but unreliable because
+       GitHub's join() on commits.*.modified produces JSON-literal tokens
+       like ["js/foo.js","js/bar.js"] instead of bare filenames.
+       We parse those tokens here so existing runs don't silently no-op.
+    3. Local pre-commit hook — diff staged files.
+    """
+    before_sha = os.environ.get('GITHUB_BEFORE_SHA', '').strip()
+    if before_sha and before_sha != '0000000000000000000000000000000000000000':
+        result = subprocess.run(
+            ['git', 'diff', '--name-only', f'{before_sha}..HEAD'],
+            capture_output=True, text=True
+        )
+        files = [l.strip() for l in result.stdout.splitlines() if l.strip()]
+        print(f"📂 {len(files)} files changed since {before_sha[:7]}:")
+        for f in files:
+            print(f"   - {f}")
+        return files
+
     env_files = os.environ.get('CHANGED_FILES', '').strip()
     if env_files:
-        return env_files.split()
+        # Strip JSON-literal noise: [ ] " , and split on whitespace/commas.
+        cleaned = re.sub(r'[\[\]"]', '', env_files).replace(',', ' ')
+        return [tok for tok in cleaned.split() if tok]
 
     # Fallback: local pre-commit hook mode
     result = subprocess.run(
@@ -92,8 +116,11 @@ def main():
     if modified:
         with open(CONFIG_FILE, 'w') as f:
             f.write(content)
-        # If running as local hook, re-stage config.js
-        if not os.environ.get('CHANGED_FILES'):
+        # If running as a local pre-commit hook, re-stage config.js so the
+        # bump goes into the same commit. In CI we let the workflow's
+        # "Commit and push if changed" step handle it.
+        in_ci = bool(os.environ.get('GITHUB_BEFORE_SHA') or os.environ.get('CHANGED_FILES') or os.environ.get('GITHUB_ACTIONS'))
+        if not in_ci:
             subprocess.run(['git', 'add', CONFIG_FILE])
 
     return 0
