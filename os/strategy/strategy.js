@@ -1267,8 +1267,24 @@ async function executePush(proposal, fields, opts) {
                 taskBody.fields[TASK_F.projects] = [projectId];
                 taskBody.fields[TASK_F.desc] = `From ${proposal.quarter} ${proposal.year} Month ${t.month} stepping stone of "${p.projectName}".`;
                 try {
-                    await airtableFetch(TABLES.tasks, { method: 'POST', body: JSON.stringify(taskBody) });
+                    const created = await airtableFetch(TABLES.tasks, { method: 'POST', body: JSON.stringify(taskBody) });
                     results.tasksCreated++;
+                    // Kevin's Tasks table has an Airtable automation that fires on
+                    // task create and sets Due Date to today + Time to 15 min
+                    // regardless of what we send. Re-assert our values via a
+                    // follow-up PATCH so our month-end dates win. Time also
+                    // re-set defensively in case the automation clears it.
+                    try {
+                        await airtableFetch(`${TABLES.tasks}/${created.id}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ fields: {
+                                [TASK_F.dueDate]: t.dueISO,
+                                [TASK_F.time]: DEFAULT_TASK_DURATION_SECONDS,
+                            }, typecast: true }),
+                        });
+                    } catch (patchErr) {
+                        console.warn('[executePush] post-create PATCH failed for', t.name, patchErr);
+                    }
                 } catch (e) {
                     console.error('[executePush] task failed', t.name, e, taskBody);
                     results.failed++;
