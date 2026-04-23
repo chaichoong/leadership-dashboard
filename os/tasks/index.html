@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1419</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1434</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2750,8 +2750,10 @@ function renderMyDay(){
   html+=`<div class="tl-wrap">
     <div class="tl-header"><h3>Daily Timeline ${config.startHour}:00 - ${config.endHour}:00</h3><span style="font-size:11px;color:var(--text-secondary)">Drag to move &middot; drag bottom edge to resize</span></div>
     <div class="tl-canvas" id="tlCanvas" style="height:${tlHeight}px"
+         title="Double-click an empty slot to add a task at that time"
          ondragover="event.preventDefault()"
-         ondrop="dropOnTimeline(event)">`;
+         ondrop="dropOnTimeline(event)"
+         ondblclick="tlDoubleClickAddTask(event)">`;
   // hour lines
   for(let h=config.startHour;h<=config.endHour;h++){
     const y=(h*60-plan.dayStart)*PIXELS_PER_MIN;
@@ -2836,6 +2838,25 @@ function dragSideTask(e,taskId){
   e.dataTransfer.setData('text/plain',JSON.stringify({kind:'sideschedule',taskId}));
   e.dataTransfer.effectAllowed='move';
 }
+// Double-click an empty slot in the My Day timeline to create a task
+// already pre-scheduled to that start time. Saves the extra step of
+// Add Task → drag onto timeline.
+function tlDoubleClickAddTask(e){
+  // Ignore double-clicks that land on an existing block (task/event/routine)
+  const target=e.target;
+  if(target&&target.closest&&target.closest('.tl-block'))return;
+  const canvas=document.getElementById('tlCanvas');if(!canvas)return;
+  const rect=canvas.getBoundingClientRect();
+  const config=getWorkConfig();
+  const y=e.clientY-rect.top;
+  let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
+  minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
+  // Remember the slot so the modal can schedule the new task at this time
+  window._pendingCreateStartMin=minOfDay;
+  openCreateTaskModal();
+}
+window.tlDoubleClickAddTask=tlDoubleClickAddTask;
+
 function dropOnTimeline(e){
   e.preventDefault();
   removeTlTooltip();
@@ -4702,7 +4723,7 @@ function openCreateTaskModal(){
     <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3" placeholder="Describe the task or the end result..."></textarea></div>
     <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('createTaskModal').remove()">Cancel</button>
+      <button class="btn" onclick="window._pendingCreateStartMin=null;document.getElementById('createTaskModal').remove()">Cancel</button>
       <button class="btn btn-primary" onclick="submitCreateTask()">Add Task</button>
     </div></div>`;
   document.body.appendChild(overlay);
@@ -4746,6 +4767,14 @@ async function submitCreateTask(){
     const parsed=parseTask(data);
     allTasks.push(parsed);
     pushUndo({type:'create',taskId:parsed.id,label:`Created "${parsed.name}"`});
+    // If the user kicked off this creation by double-clicking the timeline,
+    // pin the new task to the clicked start time so it lands in that slot.
+    try{
+      if(window._pendingCreateStartMin!=null && parsed.dueDate===todayStr()){
+        saveStartTime(todayStr(),parsed.id,window._pendingCreateStartMin);
+      }
+    }catch(e){console.warn('pin start time failed',e)}
+    window._pendingCreateStartMin=null;
     document.getElementById('createTaskModal').remove();
     toast('Task added');
     renderAll();
