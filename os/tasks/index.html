@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0840</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0850</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4098,7 +4098,14 @@ async function createSimpleTask(opts){
   if(opts.projectIds&&opts.projectIds.length)fields[F.projects]=opts.projectIds.map(id=>({id}));
   if(opts.collaborators&&opts.collaborators.length)fields[F.collaborators]=opts.collaborators.map(c=>({email:c.email}));
   try{
-    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}`,{
+    // IMPORTANT: request field-ID keyed response so parseTask (which reads
+    // field IDs) can populate the new record correctly. Without this, the
+    // response comes back keyed by field NAMES and every field on the new
+    // task lands as empty locally — which then looks like "the task
+    // reverted" when the user hard-refreshes and sees a task with the same
+    // name as the one they just completed (it's actually a spawned
+    // recurring cycle, not a reverted completion).
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}?returnFieldsByFieldId=true`,{
       method:'POST',
       headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
       body:JSON.stringify({fields,typecast:true})
@@ -4313,7 +4320,8 @@ async function submitCreateTask(){
   fields[F.hardDeadline]=document.getElementById('ctHard').checked;
 
   try{
-    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}`,{
+    // Request field-ID keyed response so parseTask populates correctly.
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}?returnFieldsByFieldId=true`,{
       method:'POST',
       headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
       body:JSON.stringify({fields,typecast:true})
@@ -4378,7 +4386,7 @@ async function submitCreateProject(){
   const ktr=document.getElementById('cpKpiTracking').value;if(ktr)fields[PF.kpiTracking]=ktr;
 
   try{
-    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}`,{method:'POST',headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},body:JSON.stringify({fields,typecast:true})});
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${PROJECTS_TABLE}?returnFieldsByFieldId=true`,{method:'POST',headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},body:JSON.stringify({fields,typecast:true})});
     if(!res.ok)throw new Error('HTTP '+res.status);
     const data=await res.json();
     allProjects.push(parseProject(data));
