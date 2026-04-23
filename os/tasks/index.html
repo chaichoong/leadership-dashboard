@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0826</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0840</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -721,6 +721,12 @@ function renderSyncPill(){
     pill.style.background='var(--success-bg)';pill.style.color='var(--success)';pill.style.borderColor='var(--success)';
   }
   pill.title=_saveState.pending>0?`Saving ${_saveState.pending} change(s)`:_saveState.failed>0?`${_saveState.failed} save failure(s) — click for details`:`All saved (${_saveState.ok} this session) — click for sync check`;
+  // If the popover is currently open, re-render its body so counts/log stay live
+  try{const pop=document.getElementById('syncPopover');if(pop&&pop.style.display==='block'){
+    const sr=document.getElementById('syncCheckResult');const preserved=sr?sr.innerHTML:'';
+    syncPillClick();syncPillClick(); // close and reopen to rebuild
+    const newSr=document.getElementById('syncCheckResult');if(newSr&&preserved)newSr.innerHTML=preserved;
+  }}catch(e){}
 }
 function syncPillClick(){
   const pop=document.getElementById('syncPopover');if(!pop)return;
