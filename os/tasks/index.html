@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1407</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1419</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1617,12 +1617,11 @@ async function quickRelinkProject(taskId,newProjectId){
         cascadedBusinessId=newProj.businessId;
         edits.push({fieldKey:'business',oldRaw:task.business,newRaw:selectName(newProj.business)||newProj.business});
       }
-      // Collaborators — inherit from project
-      const memberIds=newProj.collaboratorIds||[];
-      const emails=memberIds.map(mid=>{const m=(allTeamMembers||[]).find(x=>x.id===mid);return m&&m.email}).filter(Boolean);
-      if(emails.length){
-        payload[F.collaborators]=emails.map(e=>({email:e}));
-        cascadedCollaborators=emails;
+      // Collaborators — inherit from project (names resolved from team members)
+      const resolvedCollabs=resolveTeamMemberCollabs(newProj.collaboratorIds);
+      if(resolvedCollabs.length){
+        payload[F.collaborators]=resolvedCollabs.map(r=>({email:r.email}));
+        cascadedCollaborators=resolvedCollabs;
       }
     }
   }
@@ -1659,7 +1658,8 @@ async function quickRelinkProject(taskId,newProjectId){
       task.business=selectName(newProj.business)||newProj.business||BUSINESS_ID_TO_NAME[cascadedBusinessId]||task.business;
     }
     if(cascadedCollaborators){
-      task.collaborators=cascadedCollaborators.map(e=>({email:e,name:''}));
+      // cascadedCollaborators is already [{email,name}] from resolveTeamMemberCollabs
+      task.collaborators=cascadedCollaborators.slice();
     }
     adjustProjectTaskCounts(oldProjectIds,task.projectIds);
     if(!_undoInProgress&&!_bulkOperation)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
@@ -4083,6 +4083,18 @@ async function toggleProjectCollaborator(pid,memberId,on){
   }
 }
 
+// Helper: resolve a list of team-member record IDs into
+// { email, name } pairs, looking up display names from allTeamMembers
+// so task-level collaborator chips show "Mica" rather than the email.
+function resolveTeamMemberCollabs(memberIds){
+  if(!Array.isArray(memberIds)||!memberIds.length)return [];
+  return memberIds.map(mid=>{
+    const m=(allTeamMembers||[]).find(x=>x.id===mid);
+    if(!m||!m.email)return null;
+    return {email:m.email,name:m.name||m.email};
+  }).filter(Boolean);
+}
+
 // Helper: push the project's current collaborators (by email) to every
 // task linked to the project. Called both on toggleProjectCollaborator
 // and on quickRelinkProject (new link) so tasks always reflect the
@@ -4090,17 +4102,16 @@ async function toggleProjectCollaborator(pid,memberId,on){
 async function cascadeProjectCollaboratorsToTasks(pid,opts){
   opts=opts||{};
   const p=allProjects.find(x=>x.id===pid);if(!p)return;
-  const memberIds=p.collaboratorIds||[];
-  const emails=memberIds.map(mid=>{const m=(allTeamMembers||[]).find(x=>x.id===mid);return m&&m.email}).filter(Boolean);
+  const resolved=resolveTeamMemberCollabs(p.collaboratorIds);
   const linked=allTasks.filter(t=>Array.isArray(t.projectIds)&&t.projectIds.includes(pid));
   if(!linked.length)return;
   let ok=0,fail=0;
   for(const t of linked){
     const payload={};
-    payload[F.collaborators]=emails.map(e=>({email:e}));
+    payload[F.collaborators]=resolved.map(r=>({email:r.email}));
     try{
       const r=await patchTask(t.id,payload);
-      if(r&&r.ok){t.collaborators=emails.map(e=>({email:e,name:''}));ok++}
+      if(r&&r.ok){t.collaborators=resolved.slice();ok++}
       else{fail++}
     }catch(e){fail++;console.warn('[cascade] failed for',t.id,e)}
   }
@@ -4112,25 +4123,22 @@ async function cascadeProjectCollaboratorsToTasks(pid,opts){
 // user emails). Fires when Kevin clicks "Sync to N linked tasks".
 async function syncCollaboratorsToTasks(pid){
   const p=allProjects.find(x=>x.id===pid);if(!p)return;
-  const memberIds=p.collaboratorIds||[];
-  if(!memberIds.length){toast('No collaborators on this project to sync',true);return}
-  // Resolve Team Member record IDs → collaborator emails
-  const emails=memberIds.map(mid=>allTeamMembers.find(m=>m.id===mid)?.email).filter(Boolean);
-  if(!emails.length){toast('Team Members have no emails set',true);return}
+  const resolved=resolveTeamMemberCollabs(p.collaboratorIds);
+  if(!resolved.length){toast('No collaborators on this project to sync (or Team Members missing emails)',true);return}
   const linked=allTasks.filter(t=>Array.isArray(t.projectIds)&&t.projectIds.includes(pid));
   if(!linked.length){toast('No linked tasks to sync',true);return}
-  if(!confirm(`Apply ${emails.length} collaborator${emails.length===1?'':'s'} to ${linked.length} linked task${linked.length===1?'':'s'}?`))return;
+  if(!confirm(`Apply ${resolved.length} collaborator${resolved.length===1?'':'s'} to ${linked.length} linked task${linked.length===1?'':'s'}?`))return;
   toast(`Syncing ${linked.length} tasks…`);
   let ok=0,fail=0;
   for(const t of linked){
     try{
-      const body={fields:{[F.collaborators]:emails.map(e=>({email:e}))},typecast:true};
+      const body={fields:{[F.collaborators]:resolved.map(r=>({email:r.email}))},typecast:true};
       const resp=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${t.id}`,{
         method:'PATCH',
         headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
         body:JSON.stringify(body),
       });
-      if(resp.ok){ok++;t.collaborators=emails.map(e=>({email:e,name:''}));}
+      if(resp.ok){ok++;t.collaborators=resolved.slice()}
       else{fail++;console.warn('[syncCollaboratorsToTasks] failed for',t.id,await resp.text().catch(()=>'' ));}
     }catch(e){fail++;console.error('[syncCollaboratorsToTasks] task',t.id,e)}
   }
