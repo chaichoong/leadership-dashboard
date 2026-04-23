@@ -405,7 +405,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1051</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1102</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -678,7 +678,7 @@ const DEFAULT_ROUTINE = [
   { name:'Lunch',     duration:30, preferred:'midday', fixed:false, order:2, rule:'before-run-2h' },
   { name:'Run',       duration:60, preferred:'afternoon', fixed:false, order:3 },
 ];
-const DEFAULT_WORK_CONFIG = { startHour:8, endHour:18, maxTaskHours:6 };
+const DEFAULT_WORK_CONFIG = { startHour:8, endHour:18, maxTaskHours:6, autoSchedulePullInDays:14 };
 
 function getRoutineBlocks(){try{const s=localStorage.getItem('_task_routine');if(s)return JSON.parse(s)}catch(e){}return DEFAULT_ROUTINE}
 function getWorkConfig(){try{const s=localStorage.getItem('_task_workconfig');if(s)return JSON.parse(s)}catch(e){}return DEFAULT_WORK_CONFIG}
@@ -2936,6 +2936,7 @@ function renderRoutineConfigPanel(routineBlocks,config){
         <label>Start: <input type="number" id="cfgStartHour" value="${config.startHour}" min="5" max="12" style="width:50px"></label>
         <label>End: <input type="number" id="cfgEndHour" value="${config.endHour}" min="14" max="22" style="width:50px"></label>
         <label>Max hrs: <input type="number" id="cfgMaxHrs" value="${config.maxTaskHours}" min="2" max="12" style="width:50px"></label>
+        <label title="Auto-schedule ignores tasks due more than this many days away — stops them being pulled back into today.">Pull-in horizon: <input type="number" id="cfgPullIn" value="${config.autoSchedulePullInDays||14}" min="1" max="180" style="width:60px"> days</label>
       </div></div>
     <div style="font-size:12px;font-weight:600;margin-bottom:6px">Routine Blocks</div>
     <div id="routineBlockRows">`;
@@ -2973,7 +2974,7 @@ function saveRoutineConfig(){
     preferred:r.querySelector('[data-field="preferred"]').value||'morning',
     rule:r.querySelector('[data-field="rule"]').value||'',fixed:false,order:i+1}));
   saveRoutineBlocks(blocks);
-  saveWorkConfig({startHour:parseInt(document.getElementById('cfgStartHour').value)||8,endHour:parseInt(document.getElementById('cfgEndHour').value)||18,maxTaskHours:parseInt(document.getElementById('cfgMaxHrs').value)||6});
+  saveWorkConfig({startHour:parseInt(document.getElementById('cfgStartHour').value)||8,endHour:parseInt(document.getElementById('cfgEndHour').value)||18,maxTaskHours:parseInt(document.getElementById('cfgMaxHrs').value)||6,autoSchedulePullInDays:parseInt(document.getElementById('cfgPullIn').value)||14});
   showRoutineConfig=false;renderMyDay();
 }
 function resetRoutineConfig(){localStorage.removeItem('_task_routine');localStorage.removeItem('_task_workconfig');showRoutineConfig=false;renderMyDay()}
@@ -3003,8 +3004,13 @@ function scheduleTasksAcrossDays(){
   if(tasks.length>500){console.warn('[Scheduler] task count too large, aborting');return{moves:[],warnings:['Too many tasks to schedule ('+tasks.length+'); reduce task count first']}}
 
   console.log('[Scheduler] Step 4: sort');
+  // Order: hard deadlines first (so their capacity is reserved before any
+  // movement happens), then soonest due date, then priority as a tiebreak.
   tasks.sort((a,b)=>{
     if(a.hardDeadline!==b.hardDeadline)return a.hardDeadline?-1:1;
+    const da=a.dueDate||'9999-12-31';
+    const db=b.dueDate||'9999-12-31';
+    if(da!==db)return da.localeCompare(db);
     return (PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99);
   });
 
@@ -3023,14 +3029,30 @@ function scheduleTasksAcrossDays(){
     return x;
   }
   if(isWeekend(cursorDay))cursorDay=nextWorkDay(cursorDay);
+  // Horizon beyond which non-hard tasks are left alone (user intentionally
+  // pushed them out — don't pull them back in just because there's capacity).
+  const PULL_IN_DAYS=Math.max(1,(config.autoSchedulePullInDays||14));
+  const horizonDate=addDays(today,PULL_IN_DAYS);
 
-  console.log('[Scheduler] Step 6: process',tasks.length,'tasks');
+  console.log('[Scheduler] Step 6: process',tasks.length,'tasks  (horizon:',PULL_IN_DAYS,'days)');
   let processed=0;
+  let skippedFarFuture=0;
+  let skippedHard=0;
   for(let i=0;i<tasks.length;i++){
     const task=tasks[i];
     const mins=task.minutes||30;
+    // HARD DEADLINE — never moved (forward or backward). Reserve its capacity
+    // on its existing due date so nothing else overloads that day.
     if(task.hardDeadline){
       if(task.dueDate){usage[task.dueDate]=(usage[task.dueDate]||0)+mins}
+      skippedHard++;
+      processed++;
+      continue;
+    }
+    // FAR-FUTURE — task due beyond the pull-in horizon. Leave it alone.
+    if(task.dueDate&&task.dueDate>horizonDate){
+      usage[task.dueDate]=(usage[task.dueDate]||0)+mins;
+      skippedFarFuture++;
       processed++;
       continue;
     }
@@ -3052,6 +3074,7 @@ function scheduleTasksAcrossDays(){
     processed++;
     if(processed%25===0)console.log('[Scheduler] processed',processed,'/',tasks.length);
   }
+  console.log('[Scheduler] skipped hard-deadline:',skippedHard,'skipped far-future:',skippedFarFuture);
   console.log('[Scheduler] DONE. moves=',moves.length,'warnings=',warnings.length);
 
   return{moves,warnings};
