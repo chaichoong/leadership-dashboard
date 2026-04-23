@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1459</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1611</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2887,9 +2887,32 @@ function tlDoubleClickAddTask(e){
     }catch(err){console.error('[tlInlineAdd] exception',err)}
     if(created&&created.id){
       saveStartTime(todayStr(),created.id,minOfDay);
-      console.log('[tlInlineAdd] created task',created.id,'pinned at',minOfDay);
+      // DEFENSIVE: The POST response sometimes returns fields partially —
+      // force the local task's critical fields to match what we submitted
+      // so it definitely passes the MyDay filter (assignee + dueDate).
+      const t=allTasks.find(x=>x.id===created.id);
+      if(t){
+        if(!t.assigneeEmail&&currentUser&&currentUser.email){
+          t.assigneeEmail=currentUser.email;
+          t.assignee=currentUser.name||currentUser.email;
+        }
+        if(!t.dueDate)t.dueDate=todayStr();
+        if(!t.status)t.status='Today';
+        if(!t.minutes||t.minutes===0)t.minutes=15;
+        if(!t.timeEst)t.timeEst='15 min';
+        if(!t.priority)t.priority='Not Urgent';
+      }
+      console.log('[tlInlineAdd] created task',created.id,'pinned at',minOfDay,'local task:',t);
       // Render every view so the task shows up on timeline + list + kanban + capacity
       try{renderAll()}catch(e){console.warn('renderAll failed',e)}
+      // Sanity check: did the task block actually end up rendered?
+      requestAnimationFrame(()=>{
+        const block=document.querySelector(`.tl-block.task[data-task-id="${created.id}"]`);
+        if(!block){
+          console.error('[tlInlineAdd] Task',created.id,'created but not rendered on timeline. task state:',allTasks.find(x=>x.id===created.id));
+          toast('Task saved but not visible on timeline — check console',true);
+        }
+      });
       // Flash the new block green so it's obvious WHERE the task landed.
       // renderAll() has wiped our placeholder wrap; find the rendered block by task id.
       requestAnimationFrame(()=>{
