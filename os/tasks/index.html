@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0915</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0922</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4623,9 +4623,12 @@ async function loadAllData(){
     renderAll();
     const ms=Date.now()-startedAt;
     toast(`Refreshed ${allTasks.length} tasks, ${allProjects.length} projects in ${(ms/1000).toFixed(1)}s`);
-    // Fire catch-up sweep for recurring tasks (replaces Airtable automation).
-    // Runs once per page load; errors are logged but do not block the UI.
-    try{catchUpRecurringTasks();}catch(e){console.warn('catchUpRecurringTasks failed',e)}
+    // Catch-up recurring sweep DISABLED — was resurrecting tasks the user
+    // had deliberately deleted. Spawning happens exclusively on explicit
+    // task completion via updateTaskField's 'status=Completed' branch. If
+    // a missed cycle is ever needed, user can re-complete the prior task
+    // or duplicate it manually.
+    // try{catchUpRecurringTasks();}catch(e){console.warn('catchUpRecurringTasks failed',e)}
   }catch(e){
     console.error(e);
     if(loader)loader.innerHTML=`<span style="color:var(--danger)">Failed to load. ${escHtml(e.message)}</span>`;
