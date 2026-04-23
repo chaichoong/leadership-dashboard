@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0820</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0826</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -752,25 +752,43 @@ function syncPillClick(){
     <div>${rows||'<div style="color:var(--text-muted);font-style:italic">No saves yet</div>'}</div>`;
   pop.style.display='block';
 }
-// Sync check: pull fresh Task records from Airtable, compare against local state for a handful of fields
+// Sync check: pull fresh Task records from Airtable and cross-check against
+// the persisted save log + current in-memory state.
 async function runSyncCheck(){
   const res=document.getElementById('syncCheckResult');if(res)res.innerHTML='⟳ Fetching fresh data from Airtable…';
   try{
-    const fresh=await fetchTable(TASKS_TABLE,[F.name,F.status,F.priority,F.dueDate,F.business,F.description],`AND(NOT({Status}='Completed'))`);
-    const drift=[];
-    const byId=new Map();
-    fresh.forEach(r=>byId.set(r.id,r));
-    // parseTask injects "(Untitled)" for tasks with blank names; treat that
-    // placeholder as equivalent to blank so we don't get false-positive drifts
+    // IMPORTANT: no filter — we need completed tasks too, because the most
+    // common "reverted" case is "I marked X Completed, it came back as not
+    // Completed". Fetch every task by ID referenced in the persisted log OR
+    // currently in local state.
+    const fresh=await fetchTable(TASKS_TABLE,[F.name,F.status,F.priority,F.dueDate,F.business,F.description,F.projects,F.recurring,F.hardDeadline,F.timeEst],``);
     const norm=v=>{
       const s=(v==null?'':String(v)).trim();
       if(s==='(Untitled)'||s==='(Untitled Project)')return '';
       return s;
     };
+    const byId=new Map();
+    fresh.forEach(r=>byId.set(r.id,r));
+    // --- Persisted log cross-check (catches silent reverts across reloads) ---
+    const persisted=_loadPersistedLog().filter(l=>l.status==='ok');
+    const reverted=[];
+    persisted.forEach(p=>{
+      const r=byId.get(p.taskId);if(!r)return;
+      const c=r.cellValuesByFieldId||r.fields||{};
+      const fid=F[p.fieldKey];if(!fid)return;
+      let remote=c[fid];
+      if(remote&&typeof remote==='object'&&!Array.isArray(remote)&&remote.name)remote=remote.name;
+      if(Array.isArray(remote))remote=remote.map(x=>x&&x.id?x.id:x).sort().join(',');
+      let expected=p.value;
+      if(Array.isArray(expected))expected=expected.join(',');
+      if(norm(expected)!==norm(remote)){
+        reverted.push({...p,remote});
+      }
+    });
+    // --- Local vs remote drift (for things we did that weren't in persisted log) ---
+    const drift=[];
     (allTasks||[]).forEach(t=>{
       const r=byId.get(t.id);if(!r)return;
-      // Airtable REST returns field data under .fields when returnFieldsByFieldId
-      // is set; .cellValuesByFieldId is the Blocks SDK shape. Fall back correctly.
       const c=r.cellValuesByFieldId||r.fields||{};
       const checks=[
         ['name',t.name,c[F.name]||''],
@@ -784,19 +802,12 @@ async function runSyncCheck(){
       });
     });
     if(!res)return;
-    // Cross-check against persisted save log: any 'ok' save whose field
-    // now differs from Airtable is a silent drop we must flag loudly.
-    try{
-      const persisted=_loadPersistedLog().filter(l=>l.status==='ok');
-      const driftSet=new Set(drift.map(d=>d.taskId+':'+d.field));
-      const ghosted=persisted.filter(l=>driftSet.has(l.taskId+':'+l.fieldKey));
-      if(ghosted.length&&res){
-        const head=`<div style="color:var(--danger);font-weight:700;margin-bottom:6px">⚠ ${ghosted.length} save(s) we previously marked OK did NOT land in Airtable:</div>`;
-        const rows=ghosted.slice(0,10).map(g=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml((g.taskName||g.taskId||'').slice(0,40))}</b> — ${escHtml(g.fieldKey)}</div>`).join('');
-        res.innerHTML=head+rows;
-        return;
-      }
-    }catch(e){console.warn(e)}
+    if(reverted.length){
+      const head=`<div style="color:var(--danger);font-weight:700;margin-bottom:6px">⚠ ${reverted.length} save(s) we confirmed OK have REVERTED in Airtable:</div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Almost certainly an Airtable automation is overwriting our PATCH milliseconds later. Check Automations in Airtable and disable any that watch the fields below.</div>`;
+      const rows=reverted.slice(0,20).map(g=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml((g.taskName||g.taskId||'').slice(0,40))}</b><div style="font-size:11px;color:var(--text-secondary)">${escHtml(g.fieldKey)}: you saved <b>${escHtml(String(g.value||'(empty)').slice(0,30))}</b>, Airtable now shows <b>${escHtml(String(g.remote||'(empty)').slice(0,30))}</b></div></div>`).join('');
+      res.innerHTML=head+rows+(reverted.length>20?`<div style="color:var(--text-muted);font-size:11px;margin-top:6px">…and ${reverted.length-20} more</div>`:'');
+      return;
+    }
     if(!drift.length){res.innerHTML='<span style="color:var(--success);font-weight:600">✓ In sync — no drift detected across '+fresh.length+' tasks</span>';return}
     res.innerHTML=`<div style="color:var(--danger);font-weight:600;margin-bottom:6px">⚠ ${drift.length} drift${drift.length===1?'':'s'} found (local ≠ Airtable):</div>`+
       drift.slice(0,15).map(d=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml(d.name.slice(0,40))}</b><div style="font-size:11px;color:var(--text-secondary)">${escHtml(d.field)}: local <b>${escHtml(String(d.local||'(empty)').slice(0,30))}</b> vs Airtable <b>${escHtml(String(d.remote||'(empty)').slice(0,30))}</b></div></div>`).join('')+
