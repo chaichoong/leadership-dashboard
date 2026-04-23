@@ -845,6 +845,33 @@ const PROJ_F = {
     kpiTracking: 'fld2wYB5ZEn9WRcjN',
 };
 
+// Projects table extra field IDs for reading collaborators during push.
+// (PROJ_F above is the write-side map; this is the read-side extension.)
+const PROJ_F_READ = { projCollabs: 'fldN5l2H4WCsM0S3x' };
+
+// Team Members table — used to resolve Project Collaborator record IDs to
+// the Airtable user emails that Task.Collaborators (multipleCollaborators)
+// needs. Loaded lazily on first push.
+const TEAM_MEMBERS_TABLE = 'tblco0p2OnlLQVAX7';
+const TM_F = { name: 'flds7xoRFQhcRTnbB', member: 'fldh16yvEgBy8uLKQ' };
+let teamMembersCache = null; // { recId: { name, email } }
+
+async function ensureTeamMembersLoaded() {
+    if (teamMembersCache) return teamMembersCache;
+    teamMembersCache = {};
+    try {
+        const data = await airtableFetch(`${TEAM_MEMBERS_TABLE}?returnFieldsByFieldId=true&pageSize=100`);
+        (data.records || []).forEach(r => {
+            const memberObj = r.fields?.[TM_F.member];
+            const email = memberObj?.email || '';
+            if (email) teamMembersCache[r.id] = { name: r.fields?.[TM_F.name] || '', email };
+        });
+    } catch (e) {
+        console.warn('[ensureTeamMembersLoaded] failed', e);
+    }
+    return teamMembersCache;
+}
+
 // Tasks table field IDs (matches os/tasks/index.html F constants).
 // Note the Tasks table has TWO time fields that must be kept in sync:
 //   - timeEst (singleSelect, "15 min" / "30 min" / …) — what the UI renders
@@ -852,16 +879,17 @@ const PROJ_F = {
 // An Airtable automation used to sync them on create; Kevin turned it off,
 // so the web app now writes both directly.
 const TASK_F = {
-    name:      'fldgFjGBw6bTKJFCD',
-    dueDate:   'fld7XP8w8kbxfETV4',
-    status:    'fldx4qCw17UfrKpaN',
-    assignee:  'fldELMncVJYPDRJNc',
-    priority:  'fldS21RwmwOqt71LI',
-    timeEst:   'fld10VzzbiNNgRmIi', // singleSelect: '15 min', '30 min', ...
-    timeDur:   'flduPjY0p7MmQzDvH', // duration in seconds
-    desc:      'fldRGhBQViKZKtkQ6',
-    business:  'fldLu1Y4GzyWcDoxr',
-    projects:  'fldBg0rQy0FrOAkRN',
+    name:         'fldgFjGBw6bTKJFCD',
+    dueDate:      'fld7XP8w8kbxfETV4',
+    status:       'fldx4qCw17UfrKpaN',
+    assignee:     'fldELMncVJYPDRJNc',
+    priority:     'fldS21RwmwOqt71LI',
+    timeEst:      'fld10VzzbiNNgRmIi', // singleSelect: '15 min', '30 min', ...
+    timeDur:      'flduPjY0p7MmQzDvH', // duration in seconds
+    desc:         'fldRGhBQViKZKtkQ6',
+    business:     'fldLu1Y4GzyWcDoxr',
+    projects:     'fldBg0rQy0FrOAkRN',
+    collaborators:'fldcq3t6uAPgWSOP8', // multipleCollaborators — mirrored from project
 };
 
 // Kevin's Airtable collaborator email — Assignee is a singleCollaborator.
@@ -981,10 +1009,12 @@ async function buildPushProposal(qps, fields) {
         return `${yearNum}-${pad(mo)}-${pad(lastDay)}`;
     });
 
-    // Dedup: build a map of existing project NAME (lowercased) → record ID
-    // for every project on this Business whose Start Date = quarter start.
-    // We'll reuse the record ID when linking tasks to existing projects.
-    let existingByName = new Map();
+    // Dedup: build a map of existing project NAME (lowercased) → record info
+    // (id + collaborator team-member IDs) for every project on this Business
+    // whose Start Date = quarter start. We'll reuse the record ID when
+    // linking tasks to existing projects, and inherit their collaborators
+    // onto newly-created tasks.
+    let existingByName = new Map();   // name → { id, collaboratorIds }
     try {
         const business = allBusinessesLocal.find(b => b.id === businessId);
         const businessName = (business?.name || '').replace(/"/g, '\\"');
@@ -1000,20 +1030,37 @@ async function buildPushProposal(qps, fields) {
         const data = await airtableFetch(`${TABLES.projects}?${params.toString()}`);
         (data.records || []).forEach(r => {
             const n = r.fields?.[PROJ_F.name];
-            if (n) existingByName.set(String(n).trim().toLowerCase(), r.id);
+            if (!n) return;
+            const collabLinks = r.fields?.[PROJ_F_READ.projCollabs] || [];
+            const collaboratorIds = Array.isArray(collabLinks)
+                ? collabLinks.map(c => typeof c === 'object' ? c.id : c).filter(Boolean)
+                : [];
+            existingByName.set(String(n).trim().toLowerCase(), { id: r.id, collaboratorIds });
         });
         console.log('[buildPushProposal] existing projects for dedup:', Array.from(existingByName.entries()));
     } catch (e) {
         console.warn('[buildPushProposal] project dedup check failed — will still allow push', e);
     }
 
+    // Load Team Members once so we can resolve Project Collaborator record
+    // IDs → emails for Task.Collaborators writes later.
+    await ensureTeamMembersLoaded();
+
     const proposal = { quarter, year, qStartISO, qEndISO, projects: [] };
     for (const qp of qps) {
         const det = OBJSTRAT.qpDetails[qp.i];
         const projectName = deriveProjectName(qp.text);
         const nameKey = projectName.trim().toLowerCase();
-        const alreadyExists = existingByName.has(nameKey);
-        const existingProjectId = alreadyExists ? existingByName.get(nameKey) : null;
+        const existingInfo = existingByName.get(nameKey);
+        const alreadyExists = !!existingInfo;
+        const existingProjectId = existingInfo ? existingInfo.id : null;
+        // Resolve the existing project's collaborators to Airtable user emails
+        // so we can mirror them onto new tasks linked to this project.
+        const inheritedCollabEmails = existingInfo && existingInfo.collaboratorIds
+            ? existingInfo.collaboratorIds
+                .map(mid => teamMembersCache?.[mid]?.email)
+                .filter(Boolean)
+            : [];
 
         // For existing projects, fetch the tasks already linked to them so we
         // can dedup tasks on name. For new projects, nothing to fetch yet.
@@ -1064,6 +1111,7 @@ async function buildPushProposal(qps, fields) {
             tasksByMonth,
             alreadyExists,
             existingProjectId,
+            inheritedCollabEmails,
         });
     }
     return proposal;
@@ -1274,6 +1322,12 @@ async function executePush(proposal, fields, opts) {
                 taskBody.fields[TASK_F.business] = [businessId];
                 taskBody.fields[TASK_F.projects] = [projectId];
                 taskBody.fields[TASK_F.desc] = `From ${proposal.quarter} ${proposal.year} Month ${t.month} stepping stone of "${p.projectName}".`;
+                // Inherit the project's collaborators onto the task so the right
+                // people see it in their queue. Only for existing projects — new
+                // ones have no collaborators until the user adds them.
+                if (p.inheritedCollabEmails && p.inheritedCollabEmails.length) {
+                    taskBody.fields[TASK_F.collaborators] = p.inheritedCollabEmails.map(email => ({ email }));
+                }
                 try {
                     const created = await airtableFetch(TABLES.tasks, { method: 'POST', body: JSON.stringify(taskBody) });
                     results.tasksCreated++;

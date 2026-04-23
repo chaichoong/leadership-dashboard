@@ -649,8 +649,21 @@ const PF = {
   kpiSource:      'fldic3mgIRLLu2Sre',
   kpiLastUpdated: 'fldNk2U74jBxZ6esJ',
   kpiLastUpdatedBy:'fldIgmO8OqA3a7K5o',
+  projCollabs: 'fldN5l2H4WCsM0S3x',  // Project Collaborators — links to Team Members
 };
 const PROJECT_FIELD_IDS = Object.values(PF);
+
+// Team Members table — used for the Project Collaborators picker.
+// Project.ProjectCollaborators links to Team Member records; each Team Member
+// has a Member field (singleCollaborator) holding the Airtable user + email.
+// We load the table once on refresh and cache id → {name, email} for the
+// picker UI and for syncing collaborators to Task.Collaborators.
+const TEAM_MEMBERS_TABLE = 'tblco0p2OnlLQVAX7';
+const TM = {
+  name:   'flds7xoRFQhcRTnbB',  // formula — display name
+  member: 'fldh16yvEgBy8uLKQ',  // singleCollaborator — Airtable user
+};
+let allTeamMembers = [];
 
 const TEAM = [
   { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
@@ -1158,6 +1171,11 @@ function parseProject(rec){
   }
   const ownerObj=gf(rec,PF.owner);
   const owner=ownerObj?{name:ownerObj.name||'',email:ownerObj.email||'',id:ownerObj.id||''}:null;
+  // Project Collaborators — multipleRecordLinks to Team Members.
+  // API returns [{id:'rec...', name:'Kevin Brittain'}, ...] (name is the
+  // Team Members primary field). We only need the record IDs here.
+  const collabLinks=gf(rec,PF.projCollabs)||[];
+  const collaboratorIds=Array.isArray(collabLinks)?collabLinks.map(c=>typeof c==='object'?c.id:c).filter(Boolean):[];
   return {
     id:rec.id,
     name:gf(rec,PF.name)||'(Untitled Project)',
@@ -1184,6 +1202,7 @@ function parseProject(rec){
     kpiSource:gf(rec,PF.kpiSource)||'',
     kpiLastUpdated:gf(rec,PF.kpiLastUpdated)||'',
     kpiLastUpdatedBy:gf(rec,PF.kpiLastUpdatedBy)||'',
+    collaboratorIds,
   };
 }
 
@@ -3863,6 +3882,23 @@ function renderProjects(){
       // field is kept for now in case any legacy records contain content.
       html+=`<h4 style="margin-top:12px">Definition of Done</h4>
         <textarea style="${taStyle}" oninput="projEditDebounced('${p.id}','defOfDone',this.value)">${escHtml(p.defOfDone)}</textarea>`;
+      // Project Collaborators — writes to Projects table, inherited onto
+      // every Task created with this project link.
+      const pCollabIds=new Set(p.collaboratorIds||[]);
+      const collabChips=allTeamMembers.map(m=>{
+        const on=pCollabIds.has(m.id);
+        return `<label style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:14px;border:1px solid ${on?'var(--accent)':'var(--border-default)'};background:${on?'var(--accent-soft)':'var(--bg-surface)'};cursor:pointer;font-size:12px;user-select:none">
+          <input type="checkbox" ${on?'checked':''} onchange="toggleProjectCollaborator('${p.id}','${m.id}',this.checked)" style="margin:0">
+          ${escHtml(m.name)}
+        </label>`;
+      }).join('');
+      const syncBtn=pCollabIds.size>0
+        ? `<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="syncCollaboratorsToTasks('${p.id}')">Sync to ${linked.length} linked task${linked.length===1?'':'s'}</button>`
+        : '';
+      html+=`<h4 style="margin-top:12px">Project Collaborators</h4>
+        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">Team members involved on this project. New tasks linked here inherit these collaborators automatically.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${collabChips || '<span style="font-size:12px;color:var(--text-muted);font-style:italic">No team members loaded.</span>'}</div>
+        ${syncBtn}`;
       // Linked tasks — include inline project picker so you can move a task to a different project without opening the drawer
       html+=`<h4 style="margin-top:12px">Linked Tasks (${linked.length})</h4>`;
       if(linked.length){
@@ -3943,6 +3979,57 @@ async function updateProjectField(pid,fieldKey,val){
     // Re-render so derived UI (e.g. status colour, completed filter) reflects change
     if(['status','name','business','owner','kpiAutomated','kpiCurrent','kpiName','kpiSource','kpiUnit'].includes(fieldKey))renderProjects();
   }catch(e){console.error('[updateProjectField]',e);toast('Failed to save',true)}
+}
+
+// Toggle a team member on/off as a Project Collaborator. Projects.ProjectCollaborators
+// is a multipleRecordLinks to Team Members — we send the full array of member
+// record IDs on each toggle.
+async function toggleProjectCollaborator(pid,memberId,on){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  const set=new Set(p.collaboratorIds||[]);
+  if(on)set.add(memberId);else set.delete(memberId);
+  const newIds=Array.from(set);
+  p.collaboratorIds=newIds;
+  const payload={};payload[PF.projCollabs]=newIds.map(id=>({id}));
+  try{
+    const r=await patchProject(pid,payload);
+    if(!r.ok){const t=await r.text();throw new Error(t)}
+    toast('Collaborators updated');renderProjects();
+  }catch(e){
+    console.error('[toggleProjectCollaborator]',e);
+    toast('Failed to save',true);
+  }
+}
+
+// One-off retrofit: for every Task linked to this project, set its
+// Collaborators field to the project's Collaborators (resolved to Airtable
+// user emails). Fires when Kevin clicks "Sync to N linked tasks".
+async function syncCollaboratorsToTasks(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  const memberIds=p.collaboratorIds||[];
+  if(!memberIds.length){toast('No collaborators on this project to sync',true);return}
+  // Resolve Team Member record IDs → collaborator emails
+  const emails=memberIds.map(mid=>allTeamMembers.find(m=>m.id===mid)?.email).filter(Boolean);
+  if(!emails.length){toast('Team Members have no emails set',true);return}
+  const linked=allTasks.filter(t=>Array.isArray(t.projectIds)&&t.projectIds.includes(pid));
+  if(!linked.length){toast('No linked tasks to sync',true);return}
+  if(!confirm(`Apply ${emails.length} collaborator${emails.length===1?'':'s'} to ${linked.length} linked task${linked.length===1?'':'s'}?`))return;
+  toast(`Syncing ${linked.length} tasks…`);
+  let ok=0,fail=0;
+  for(const t of linked){
+    try{
+      const body={fields:{[F.collaborators]:emails.map(e=>({email:e}))},typecast:true};
+      const resp=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${t.id}`,{
+        method:'PATCH',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body:JSON.stringify(body),
+      });
+      if(resp.ok){ok++;t.collaborators=emails.map(e=>({email:e,name:''}));}
+      else{fail++;console.warn('[syncCollaboratorsToTasks] failed for',t.id,await resp.text().catch(()=>'' ));}
+    }catch(e){fail++;console.error('[syncCollaboratorsToTasks] task',t.id,e)}
+  }
+  toast(fail?`Synced ${ok}/${linked.length} (${fail} failed)`:`Synced ${ok} task${ok===1?'':'s'}`,fail>0);
+  renderAll();
 }
 
 // Called from the KPI template dropdown in the project expand panel.
@@ -4216,7 +4303,24 @@ async function createSimpleTask(opts){
   }
   if(bizId)fields[F.business]=[bizId];
   if(opts.projectIds&&opts.projectIds.length)fields[F.projects]=opts.projectIds.slice();
-  if(opts.collaborators&&opts.collaborators.length)fields[F.collaborators]=opts.collaborators.map(c=>({email:c.email}));
+  // Collaborators: explicit opts win, otherwise inherit from the first linked
+  // project so "every new task with a project link pulls the business + the
+  // collaborators from the project" (Kevin's rule).
+  let taskCollabs=opts.collaborators;
+  if((!taskCollabs||!taskCollabs.length)&&opts.projectIds&&opts.projectIds.length){
+    const proj=allProjects.find(x=>x.id===opts.projectIds[0]);
+    if(proj&&proj.collaboratorIds&&proj.collaboratorIds.length){
+      taskCollabs=proj.collaboratorIds
+        .map(mid=>allTeamMembers.find(m=>m.id===mid))
+        .filter(Boolean)
+        .map(m=>({email:m.email,name:m.name}));
+    }
+    // Also inherit Business from the project if not explicitly set.
+    if((!bizId||bizId===BUSINESS_MAP?.['Real Estate'])&&proj&&proj.businessId){
+      bizId=proj.businessId;fields[F.business]=[bizId];
+    }
+  }
+  if(taskCollabs&&taskCollabs.length)fields[F.collaborators]=taskCollabs.map(c=>({email:c.email}));
   try{
     // IMPORTANT: request field-ID keyed response so parseTask (which reads
     // field IDs) can populate the new record correctly. Without this, the
@@ -4784,15 +4888,20 @@ async function loadAllData(){
   const startedAt=Date.now();
   try{
     await fetchBusinesses();
-    const[rawTasks,rawProjects,cal]=await Promise.all([
+    const[rawTasks,rawProjects,cal,rawTeam]=await Promise.all([
       fetchTable(TASKS_TABLE,TASK_FIELD_IDS,`AND({Status}!="Completed",{Some Day}=FALSE())`),
       fetchTable(PROJECTS_TABLE,PROJECT_FIELD_IDS,''),
       fetchCalendarEvents(),
+      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member],'').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
     ]);
     allTasks=rawTasks.map(parseTask);
     if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);
     allProjects=rawProjects.map(parseProject);
     calendarEvents=cal;
+    allTeamMembers=(rawTeam||[]).map(r=>{
+      const m=r.fields?.[TM.member];
+      return{id:r.id,name:r.fields?.[TM.name]||'(Unknown)',email:m?.email||''};
+    }).filter(m=>m.email);
     try{populateProjectFilterOptions()}catch(e){}
 
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
