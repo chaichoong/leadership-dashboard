@@ -123,6 +123,7 @@
         kpiLastUpdated:  'fldNk2U74jBxZ6esJ',
         kpiLastUpdatedBy:'fldIgmO8OqA3a7K5o',
         kpiComputeCode:  'fldA7vPiLnbgEoKh1',
+        kpiDetailJson:   'fldeGDKEg6HEXCUh4',
         totalTasks:      'fldtw6NQZ8CSF3RXi',
         completedTasks:  'fld7IDjY0xB4JGBfn',
     };
@@ -157,12 +158,12 @@
         if(ratio>=85)return'On-Track';
         return'Off-Track';
     }
+    // Returns a CSS value — uses design tokens so the colour set always stays on-brand.
     function _stratHealthColour(h){
-        if(h==='On-Target'||h==='Completed')return'#16a34a';
-        if(h==='On-Track')return'#16a34a';
-        if(h==='Off-Track')return'#dc2626';
-        if(h==='Not Started')return'#64748b';
-        return'#d97706';
+        if(h==='On-Target'||h==='Completed'||h==='On-Track')return'var(--success)';
+        if(h==='Off-Track')return'var(--danger)';
+        if(h==='Not Started')return'var(--text-muted)';
+        return'var(--warning)';
     }
 
     async function loadStrategicKpis(){
@@ -398,6 +399,14 @@
                     payload[STRAT_PF.kpiCurrent]=rounded;
                     payload[STRAT_PF.kpiLastUpdated]=local.kpiLastUpdated;
                     payload[STRAT_PF.kpiLastUpdatedBy]=local.kpiLastUpdatedBy;
+                    // Serialize the full compute return (months + detail) so
+                    // the Task OS can read the same drilldown without having
+                    // to re-fetch transactions. Cap at ~50KB to stay well
+                    // under Airtable's long-text field limits.
+                    try{
+                        const json=JSON.stringify(ctx._lastKpiDetail||{});
+                        payload[STRAT_PF.kpiDetailJson]=json.length>50000?json.slice(0,50000):json;
+                    }catch(e){console.warn('[runAutomatedKpis] stringify failed',e)}
                     const url=`https://api.airtable.com/v0/${BASE_ID}/${STRAT_PROJECTS_TABLE}/${rec.id}?returnFieldsByFieldId=true`;
                     const resp=await fetch(url,{
                         method:'PATCH',
