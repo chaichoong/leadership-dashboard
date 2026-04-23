@@ -284,14 +284,25 @@
         // User must confirm before status changes in Airtable
 
         // Filter out dismissed potential CFVs (user clicked "Not a CFV")
-        // Dismissals auto-expire after the due day passes next month (re-checks monthly)
+        // Dismissal holds until the NEXT due day (plus tolerance) has passed —
+        // i.e. the start of the next rent cycle. A fixed 25-day expiry was
+        // wrong because it could expire within the same month (e.g. dismiss
+        // on the 3rd, expire on the 28th — well before next month's due day).
         const filteredList = cfvList.filter(entry => {
             if (entry.status === 'potential') {
                 const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
                 if (!dismissedAt) return true;
-                // Auto-expire: if dismissed more than 25 days ago, re-check
                 const dismissDate = new Date(dismissedAt);
-                if (Date.now() - dismissDate.getTime() > 25 * 86400000) {
+                const dueDay = entry.dueDay || 1;
+                // Find the next due day strictly after the dismissal date.
+                // If this month's due day is on/before the dismissal, roll to next month.
+                let nextDueDate = new Date(dismissDate.getFullYear(), dismissDate.getMonth(), dueDay);
+                if (nextDueDate <= dismissDate) {
+                    nextDueDate = new Date(dismissDate.getFullYear(), dismissDate.getMonth() + 1, dueDay);
+                }
+                // Re-check only once the next due day + tolerance has elapsed
+                const expiryTime = nextDueDate.getTime() + CFV_TOLERANCE_DAYS * 86400000;
+                if (Date.now() >= expiryTime) {
                     localStorage.removeItem('cfv_dismissed_' + entry.tenancyId);
                     return true;
                 }
