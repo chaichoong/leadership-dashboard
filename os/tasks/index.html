@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1016</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1022</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -576,6 +576,19 @@ const BASE_ID = 'appnqjDpqDniH3IRl';
 const TASKS_TABLE = 'tblqB8b22hKBL4PF1';
 const PROJECTS_TABLE = 'tblHrpTMd5LNYn8v1';
 const BUSINESSES_TABLE = 'tblpqkvWJJo8Uu25q';
+const COMPLETIONS_TABLE = 'tblxnBxgD9pzLlvgl'; // Task Completions log — see Option A design
+const CF = { // Completions field IDs
+  completionId: 'fldy1KLx3SaB1kyhM',
+  task:         'fldHDYbN6OGRgTXJe',
+  completedBy:  'fld79W0aWikDpz14p',
+  completedAt:  'fldgXYahqxBhEBWbK',
+  taskName:     'fldmD73Jp5lhw0WGj',
+  timeEst:      'fld03eN4H0rB3nZH7',
+  minutes:      'fldBdmHiRMfLvQ4ZE',
+  business:     'fldthW4i7551wOXa1',
+  project:      'fld889If2Y3EvrLiL',
+  cadence:      'fld35384OFUdorE0U',
+};
 
 const F = {
   name:        'fldgFjGBw6bTKJFCD',
@@ -1326,17 +1339,21 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       (task.projectIds||[]).forEach(pid=>{const p=allProjects.find(x=>x.id===pid);if(p)p.completedTasks=(p.completedTasks||0)+1});
       // Stamp local completion date so catch-up sweep can see it immediately
       if(!task.completion)task.completion=new Date().toISOString();
-      // RECURRING AUTO-SPAWN DISABLED (2026-04-23) — was creating new task
-      // records on every completion, which looked like "deleted tasks coming
-      // back" because each spawn is a separate Airtable record sharing only
-      // the name with the original. Nuclear option until a proper "series"
-      // model is designed: complete = complete, delete = delete, no
-      // background record creation. To spawn a next cycle manually, the user
-      // can duplicate the task (forthcoming feature) or re-create it by hand.
-      //
-      // if(task.recurring&&RECUR_OPTIONS.includes(task.recurring)&&!_bulkOperation){
-      //   try{await spawnRecurringNext(task);}catch(e){console.warn('spawn recurring next failed',e)}
-      // }
+      // RECURRING — Option A: rolling single-record model.
+      // When a recurring task is marked Completed:
+      //   1. Log this completion to the Task Completions table (immutable audit)
+      //   2. Roll the task's dueDate forward by its cadence
+      //   3. Flip its status back to Upcoming (NOT Completed) so it stays in the active list
+      // This gives us one task = one record (clean delete semantics), a
+      // durable productivity log (survives rolls), and natural capacity
+      // projection from cadence + window.
+      if(task.recurring&&task.recurring!==''&&task.recurring!=='None'&&RECUR_OPTIONS.includes(task.recurring)){
+        // Recurring: roll the due date and log the completion (log happens inside roll)
+        try{await rollRecurringTask(task);}catch(e){console.warn('roll recurring failed',e)}
+      } else {
+        // Non-recurring: just log the completion so productivity reporting counts it
+        try{await logTaskCompletion(task);}catch(e){console.warn('log completion failed',e)}
+      }
     }
     if(fieldKey==='dueDate'){
       const today=todayStr();
@@ -4196,8 +4213,69 @@ function nextRecurringDate(fromDate,cadence){
   return '';
 }
 
-// After a recurring task is completed, spawn the next cycle in the web app
-// (replaces the now-disabled Airtable "Recurring Tasks" automation).
+// OPTION A — write one row to the Task Completions log table.
+// Safe to call for both recurring and non-recurring completions; it's fire
+// and forget — if the POST fails we warn but don't block the UI.
+async function logTaskCompletion(task){
+  if(!task)return null;
+  const who=(currentUser&&(currentUser.name||currentUser.email))||'web app';
+  const when=new Date().toISOString();
+  const projectName=(task.projectNames&&task.projectNames[0])||'';
+  const fields={};
+  fields[CF.completionId]=`${task.id}-${Date.now()}`;
+  fields[CF.task]=[{id:task.id}];
+  fields[CF.completedBy]=who;
+  fields[CF.completedAt]=when;
+  fields[CF.taskName]=task.name||'';
+  fields[CF.timeEst]=task.timeEst||'';
+  fields[CF.minutes]=task.minutes||0;
+  fields[CF.business]=task.business||'';
+  fields[CF.project]=projectName;
+  fields[CF.cadence]=task.recurring||'';
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${COMPLETIONS_TABLE}?returnFieldsByFieldId=true`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({fields,typecast:true})
+    });
+    if(!res.ok){console.warn('[logTaskCompletion] failed',res.status,await res.text().catch(()=>''));return null}
+    return await res.json();
+  }catch(e){console.warn('[logTaskCompletion] error',e);return null}
+}
+
+// OPTION A — roll a recurring task's dueDate forward by its cadence, stamp
+// a completion log entry, and flip its status back to Upcoming so it stays
+// in the active list as the next cycle. No new Airtable record created.
+async function rollRecurringTask(task){
+  if(!task||!task.recurring)return null;
+  const cadence=task.recurring;
+  const baseDue=task.dueDate||todayStr();
+  const newDue=nextRecurringDate(baseDue,cadence);
+  if(!newDue){console.warn('[rollRecurring] no next date computable',cadence,baseDue);return null}
+  // 1. Log completion first (atomic-ish: if this fails, we don't roll)
+  const logged=await logTaskCompletion(task);
+  if(!logged){toast('Completion logged locally but could not sync to log table',true)}
+  // 2. Roll dueDate + reset status on the same record (single PATCH)
+  const payload={};
+  payload[F.dueDate]=newDue;
+  payload[F.status]='Upcoming';
+  payload[F.completion]=null; // clear the parent record's completion stamp so next roll works
+  try{
+    const res=await patchTask(task.id,payload);
+    if(!res.ok){console.warn('[rollRecurring] PATCH failed',res.status);return null}
+    task.dueDate=newDue;
+    task.status='Upcoming';
+    task.completion='';
+    const label=new Date(newDue+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    if(!_bulkOperation)toast(`Completed · next cycle scheduled for ${label}`);
+    try{renderAll()}catch(e){}
+    return task;
+  }catch(e){console.warn('[rollRecurring] error',e);return null}
+}
+
+// LEGACY — after a recurring task is completed, spawn the next cycle as a
+// new Airtable record. REPLACED by rollRecurringTask on 2026-04-23 (Option
+// A). Kept for reference; no code path should call it now.
 async function spawnRecurringNext(task,opts){
   opts=opts||{};
   const cadence=task.recurring;
@@ -4446,13 +4524,33 @@ async function submitCreateProject(){
 // ======================================================
 // CAPACITY
 // ======================================================
+// Expected occurrences per week for each recurring cadence. Used by capacity
+// view to multiply a task's per-cycle time estimate across the weekly window.
+// Non-recurring tasks get a multiplier of 1 (counted once in the window).
+const RECUR_WEEKLY_FACTOR = {
+  'Daily':5,        // 5 working days per week
+  'Weekly':1,
+  'Fortnightly':0.5,
+  'Monthly':1/4.33, // avg weeks per month
+  'Quarterly':1/13,
+  'Bi-Annually':1/26,
+  'Annually':1/52,
+};
+// Return effective weekly minutes for a task: recurring × per-week factor,
+// non-recurring is the task's minutes (counted once).
+function effectiveWeeklyMinutes(t){
+  if(!t||typeof t.minutes!=='number')return 0;
+  const f=t.recurring&&RECUR_WEEKLY_FACTOR[t.recurring];
+  return t.minutes*(f||1);
+}
+
 function renderCapacity(){
   const members=activeTeam==='all'?TEAM:TEAM.filter(m=>m.key===activeTeam);
   let html='';
 
   if(activeTeam==='all'){
     const allActive=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
-    const totalTeamHrs=allActive.reduce((s,t)=>s+t.minutes,0)/60;
+    const totalTeamHrs=allActive.reduce((s,t)=>s+effectiveWeeklyMinutes(t),0)/60;
     const teamCap=TEAM.reduce((s,m)=>s+getPersonCapacity(m.key),0);
     const teamPct=Math.min(100,(totalTeamHrs/teamCap)*100);
     html+=`<div class="capacity-card" style="grid-column:1/-1;border-color:var(--accent)">
@@ -4469,13 +4567,13 @@ function renderCapacity(){
 
   members.forEach(member=>{
     const tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
-    const totalHrs=tasks.reduce((s,t)=>s+t.minutes,0)/60;
+    const totalHrs=tasks.reduce((s,t)=>s+effectiveWeeklyMinutes(t),0)/60;
     const cap=getPersonCapacity(member.key);
     const pct=Math.min(100,(totalHrs/cap)*100);
     const color=pct>90?'var(--danger)':pct>70?'var(--warning)':'var(--success)';
-    const priBreak={};tasks.forEach(t=>{const p=t.priority||'Unset';priBreak[p]=(priBreak[p]||0)+t.minutes});
-    const statBreak={};tasks.forEach(t=>{const s=t.status||'Unset';statBreak[s]=(statBreak[s]||0)+t.minutes});
-    const totalMin=tasks.reduce((s,t)=>s+t.minutes,0);
+    const priBreak={};tasks.forEach(t=>{const p=t.priority||'Unset';priBreak[p]=(priBreak[p]||0)+effectiveWeeklyMinutes(t)});
+    const statBreak={};tasks.forEach(t=>{const s=t.status||'Unset';statBreak[s]=(statBreak[s]||0)+effectiveWeeklyMinutes(t)});
+    const totalMin=tasks.reduce((s,t)=>s+effectiveWeeklyMinutes(t),0);
     const priColors={Urgent:'var(--danger)',High:'var(--info)',Project:'var(--accent)','Not Urgent':'var(--success)',Unset:'var(--text-muted)'};
     const statColors={Today:'var(--warning)',Overdue:'var(--danger)',Upcoming:'var(--accent)',Approval:'var(--accent-gold)',Unset:'var(--text-muted)'};
 
