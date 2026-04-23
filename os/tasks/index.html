@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0739</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0746</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1086,7 +1086,7 @@ function parseTask(rec){
     priority:selectName(priorityObj),
     timeEst:timeEstName,
     minutes,
-    recurring:selectName(recurObj),
+    recurring:(selectName(recurObj)==='None'?'':selectName(recurObj)),
     recurFlag:!!gf(rec,F.recurFlag),
     description:gf(rec,F.description)||'',
     notes:gf(rec,F.notes)||'',
@@ -1221,6 +1221,9 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'){
       // Airtable singleSelect with typecast=true expects plain string,
       // not {name: ...} — that format is rejected with INVALID_VALUE_FOR_COLUMN.
+      // "None" is a legacy recurring value — normalise to empty so both the
+      // grid and Airtable reflect a blank recurring field.
+      if(fieldKey==='recurring'&&rawValue==='None')rawValue='';
       payload[fid]=rawValue||null;
       task[fieldKey]=rawValue;
       if(fieldKey==='timeEst')task.minutes=TIME_MINUTES[rawValue]||task.minutes;
