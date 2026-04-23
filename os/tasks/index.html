@@ -694,7 +694,12 @@ function toast(msg, err){const el=document.getElementById('toast');if(!el)return
 // Every PATCH increments _saveState.pending; on settle it increments ok/failed.
 // The pill in the top-right reflects current state and shows a log on click.
 const _saveState={pending:0,ok:0,failed:0,log:[]};
-function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_saveState.log.length>100)_saveState.log.length=100}
+// Persist the last N PATCHes across page reloads so a post-refresh sync
+// check can verify what WE thought saved actually landed in Airtable.
+const _SAVE_LOG_KEY='_task_save_log_v1';
+function _loadPersistedLog(){try{const s=localStorage.getItem(_SAVE_LOG_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr}}catch(e){}return []}
+function _persistSaveLog(){try{const slim=_saveState.log.slice(0,50).map(l=>({taskId:l.taskId,taskName:l.taskName,fieldKey:l.fieldKey,value:l.value,status:l.status,error:l.error,when:l.when}));localStorage.setItem(_SAVE_LOG_KEY,JSON.stringify(slim))}catch(e){}}
+function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_saveState.log.length>100)_saveState.log.length=100;try{_persistSaveLog()}catch(e){}}
 function renderSyncPill(){
   const pill=document.getElementById('syncPill');if(!pill)return;
   if(_saveState.pending>0){
@@ -771,6 +776,19 @@ async function runSyncCheck(){
       });
     });
     if(!res)return;
+    // Cross-check against persisted save log: any 'ok' save whose field
+    // now differs from Airtable is a silent drop we must flag loudly.
+    try{
+      const persisted=_loadPersistedLog().filter(l=>l.status==='ok');
+      const driftSet=new Set(drift.map(d=>d.taskId+':'+d.field));
+      const ghosted=persisted.filter(l=>driftSet.has(l.taskId+':'+l.fieldKey));
+      if(ghosted.length&&res){
+        const head=`<div style="color:var(--danger);font-weight:700;margin-bottom:6px">⚠ ${ghosted.length} save(s) we previously marked OK did NOT land in Airtable:</div>`;
+        const rows=ghosted.slice(0,10).map(g=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml((g.taskName||g.taskId||'').slice(0,40))}</b> — ${escHtml(g.fieldKey)}</div>`).join('');
+        res.innerHTML=head+rows;
+        return;
+      }
+    }catch(e){console.warn(e)}
     if(!drift.length){res.innerHTML='<span style="color:var(--success);font-weight:600">✓ In sync — no drift detected across '+fresh.length+' tasks</span>';return}
     res.innerHTML=`<div style="color:var(--danger);font-weight:600;margin-bottom:6px">⚠ ${drift.length} drift${drift.length===1?'':'s'} found (local ≠ Airtable):</div>`+
       drift.slice(0,15).map(d=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml(d.name.slice(0,40))}</b><div style="font-size:11px;color:var(--text-secondary)">${escHtml(d.field)}: local <b>${escHtml(String(d.local||'(empty)').slice(0,30))}</b> vs Airtable <b>${escHtml(String(d.remote||'(empty)').slice(0,30))}</b></div></div>`).join('')+
@@ -1132,6 +1150,10 @@ function parseProject(rec){
 // can easily exceed that and return 429. We retry 429/5xx with backoff
 // so user edits don't silently revert on hard refresh.
 async function patchWithRetry(url,fields){
+  // Force the response to be keyed by field ID, so verification code can
+  // compare without guessing the human-readable field names.
+  const sep=url.includes('?')?'&':'?';
+  url=url+sep+'returnFieldsByFieldId=true';
   const body=JSON.stringify({fields,typecast:true});
   const delays=[300,900,2000]; // up to 3 retries
   let lastRes=null;
@@ -1236,32 +1258,29 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       throw new Error(String(shortErr));
     }
     // Post-PATCH verification: Airtable sometimes returns 200 but silently
-    // drops a field (e.g. computed/lookup field writes). Parse the response
-    // and confirm the field we sent actually landed. If not, treat as
-    // failure so the user sees it instead of a silent drop.
+    // drops a field (e.g. computed/lookup fields, permissions issues, or
+    // bad link-record payloads). The PATCH now requests field-id keying,
+    // so we can compare by field ID directly — no name guessing.
     try{
       const body=await res.clone().json();
       const got=(body&&body.fields)||{};
-      // PATCH response uses field NAMES, not IDs. Look up by name where possible.
-      const nameMap={[F.name]:'Name',[F.dueDate]:'Due Date',[F.status]:'Status',[F.priority]:'Priority',[F.description]:'Description',[F.timeEst]:'Time Estimate',[F.recurring]:'Recurring',[F.business]:'Business',[F.projects]:'Projects',[F.hardDeadline]:'Hard Deadline'};
-      const fname=nameMap[fid];
-      if(fname&&Object.prototype.hasOwnProperty.call(got,fname)){
-        const returned=got[fname];
-        let sent=payload[fid];
-        // Normalise linked-record arrays to id lists for comparison
+      // Only verify fields we actually sent in this payload
+      Object.keys(payload).forEach(sentFid=>{
+        if(!Object.prototype.hasOwnProperty.call(got,sentFid))return; // field not returned → can't verify
+        const returned=got[sentFid];
+        const sent=payload[sentFid];
         const norm=v=>{
-          if(v==null)return '';
+          if(v==null||v==='')return '';
           if(Array.isArray(v))return v.map(x=>x&&x.id?x.id:x).sort().join(',');
-          if(typeof v==='object'&&v.name)return v.name;
+          if(typeof v==='object'){if(v.id)return v.id;if(v.name)return v.name;if(v.email)return v.email}
           return String(v);
         };
         if(norm(sent)!==norm(returned)){
-          console.warn('[PATCH verify] drift — sent',sent,'got',returned);
-          throw new Error('Airtable accepted the request but the field value differs. Sent '+JSON.stringify(sent).slice(0,60)+', got '+JSON.stringify(returned).slice(0,60));
+          console.warn('[PATCH verify] drift on',sentFid,'— sent',sent,'got',returned);
+          throw new Error('Airtable accepted the request but field did not persist. Sent '+JSON.stringify(sent).slice(0,80)+', got '+JSON.stringify(returned).slice(0,80));
         }
-      }
+      });
     }catch(verifyErr){
-      // Only throw if it was OUR verification mismatch, not JSON parse failure
       if(verifyErr&&verifyErr.message&&verifyErr.message.indexOf('Airtable accepted')===0)throw verifyErr;
     }
     // Clear persisted start time if task completes or moves to a different day
@@ -1457,20 +1476,49 @@ async function quickRelinkProject(taskId,newProjectId){
     setPriorityProject=true;
     edits.push({fieldKey:'priority',oldRaw:oldPriority,newRaw:'Project'});
   }
-  const res=await patchTask(taskId,payload);
-  if(!res.ok){
-    let body='';try{body=await res.text()}catch(_){}
-    throw new Error('HTTP '+res.status+' '+body.slice(0,200));
+  // Register in save-state so the sync pill and failure banner catch silent drops
+  _saveState.pending++;renderSyncPill();
+  const saveEntry={taskId,taskName:task.name,fieldKey:'project',value:newProjectId||'(none)',status:'pending'};
+  _saveLog(saveEntry);
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok){
+      let body='';try{body=await res.text()}catch(_){}
+      throw new Error('HTTP '+res.status+' '+body.slice(0,200));
+    }
+    // Post-PATCH verification (response is keyed by field ID because patchWithRetry forces returnFieldsByFieldId)
+    try{
+      const bod=await res.clone().json();
+      const got=(bod&&bod.fields)||{};
+      const returned=got[F.projects];
+      const expected=newProjectId?[newProjectId]:[];
+      const gotIds=Array.isArray(returned)?returned.map(x=>x&&x.id?x.id:x).sort():[];
+      if(gotIds.sort().join(',')!==expected.sort().join(',')){
+        throw new Error('Airtable accepted project update but value did not persist. Expected '+JSON.stringify(expected)+', got '+JSON.stringify(gotIds));
+      }
+    }catch(ve){
+      if(ve&&ve.message&&ve.message.indexOf('Airtable accepted')===0)throw ve;
+    }
+    // Optimistic local update
+    task.projectIds=newProjectId?[newProjectId]:[];
+    const newProj=newProjectId?allProjects.find(p=>p.id===newProjectId):null;
+    task.projectNames=newProj?[newProj.name]:[];
+    if(setPriorityProject)task.priority='Project';
+    adjustProjectTaskCounts(oldProjectIds,task.projectIds);
+    if(!_undoInProgress&&!_bulkOperation)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
+    if(!_bulkOperation){toast('Project updated');renderAll()}
+    _saveState.ok++;saveEntry.status='ok';
+  } catch(e){
+    const msg=(e&&e.message)||'unknown error';
+    recordSaveFailure(taskId,'project',msg);
+    _saveState.failed++;saveEntry.status='fail';saveEntry.error=msg;
+    console.warn('quickRelinkProject failed',e);
+    if(!_bulkOperation)toast('Project update failed: '+msg,true);
+    if(_bulkOperation)throw e;
+  } finally {
+    _saveState.pending=Math.max(0,_saveState.pending-1);
+    renderSyncPill();
   }
-  // Optimistic local update — do NOT parseTask() the response because the
-  // PATCH response is keyed by field NAME not field ID (parseTask reads IDs)
-  task.projectIds=newProjectId?[newProjectId]:[];
-  const newProj=newProjectId?allProjects.find(p=>p.id===newProjectId):null;
-  task.projectNames=newProj?[newProj.name]:[];
-  if(setPriorityProject)task.priority='Project';
-  adjustProjectTaskCounts(oldProjectIds,task.projectIds);
-  if(!_undoInProgress&&!_bulkOperation)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
-  if(!_bulkOperation){toast('Project updated');renderAll()}
 }
 window.quickRelinkProject=quickRelinkProject;
 
