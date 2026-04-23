@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1611</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1838</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2887,11 +2887,15 @@ function tlDoubleClickAddTask(e){
     }catch(err){console.error('[tlInlineAdd] exception',err)}
     if(created&&created.id){
       saveStartTime(todayStr(),created.id,minOfDay);
-      // DEFENSIVE: The POST response sometimes returns fields partially —
-      // force the local task's critical fields to match what we submitted
-      // so it definitely passes the MyDay filter (assignee + dueDate).
+      // DEFENSIVE: parseTask may replace a missing name with "(Untitled)",
+      // or miss other fields from the POST response. Force the local task
+      // to match what the user submitted so the grid / timeline / drawer
+      // display the correct values immediately. Next data refresh will
+      // reconcile with Airtable.
       const t=allTasks.find(x=>x.id===created.id);
       if(t){
+        // Name — always overwrite with what the user typed (Airtable saved this)
+        t.name=name;
         if(!t.assigneeEmail&&currentUser&&currentUser.email){
           t.assigneeEmail=currentUser.email;
           t.assignee=currentUser.name||currentUser.email;
@@ -2901,6 +2905,10 @@ function tlDoubleClickAddTask(e){
         if(!t.minutes||t.minutes===0)t.minutes=15;
         if(!t.timeEst)t.timeEst='15 min';
         if(!t.priority)t.priority='Not Urgent';
+        if(!t.business&&BUSINESS_MAP&&BUSINESS_MAP['Real Estate']){
+          t.business='Real Estate';
+          t.businessId=BUSINESS_MAP['Real Estate'];
+        }
       }
       console.log('[tlInlineAdd] created task',created.id,'pinned at',minOfDay,'local task:',t);
       // Render every view so the task shows up on timeline + list + kanban + capacity
