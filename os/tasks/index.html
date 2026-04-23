@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1444</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1447</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2875,15 +2875,22 @@ function tlDoubleClickAddTask(e){
     const name=input.value.trim();
     if(!name){wrap.remove();return}
     wrap.style.opacity='0.6';input.disabled=true;
+    let created=null;
     try{
-      const created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min'});
-      if(created&&created.id){
-        saveStartTime(todayStr(),created.id,minOfDay);
-        toast(`Added "${name}" at ${minutesToTime(minOfDay)}`);
-      }
-    }catch(err){toast('Create failed: '+(err&&err.message||'unknown'),true)}
+      created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min'});
+    }catch(err){console.error('[tlInlineAdd] exception',err)}
+    if(created&&created.id){
+      saveStartTime(todayStr(),created.id,minOfDay);
+      toast(`Added "${name}" at ${minutesToTime(minOfDay)}`);
+      console.log('[tlInlineAdd] created task',created.id,'pinned at',minOfDay);
+    } else {
+      toast('Failed to create task — check console',true);
+      console.error('[tlInlineAdd] createSimpleTask returned null');
+    }
     wrap.remove();
-    try{renderMyDay()}catch(e){}
+    // Render every view so the task shows up in Task List, My Day timeline,
+    // Kanban (if Project priority), capacity counts, etc. Also refresh KPIs.
+    try{renderAll()}catch(e){console.warn('renderAll failed',e)}
   };
   const cancel=()=>{if(!settled){settled=true;wrap.remove()}};
   input.addEventListener('keydown',(ev)=>{
