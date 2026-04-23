@@ -837,25 +837,39 @@ async function saveRecord() {
 // Project record's Name if it has changed. Makes rename-in-Strategy-OS
 // flow through to Projects OS automatically.
 async function propagateQpNamesToLinkedProjects(savedFields) {
-    if (!currentRecord || !currentRecord.fields) return;
+    if (!currentRecord || !currentRecord.fields) {
+        console.log('[propagate] no currentRecord — skipping');
+        return;
+    }
     for (let i = 0; i < OBJSTRAT.qpDetails.length; i++) {
         const det = OBJSTRAT.qpDetails[i];
         const linkArr = currentRecord.fields[det.linkedProject];
         const linkedId = Array.isArray(linkArr) && linkArr[0]
             ? (typeof linkArr[0] === 'object' ? linkArr[0].id : linkArr[0])
             : null;
-        if (!linkedId) continue;
+        if (!linkedId) {
+            console.log(`[propagate] QP${i + 1}: no linked project — skipping`);
+            continue;
+        }
         const qpText = (savedFields[OBJSTRAT.quarterlyProjects[i]] || '').trim();
-        if (!qpText) continue;
+        if (!qpText) {
+            console.log(`[propagate] QP${i + 1}: empty text — skipping`);
+            continue;
+        }
         const newName = deriveProjectName(qpText);
-        if (!newName) continue;
+        if (!newName) {
+            console.log(`[propagate] QP${i + 1}: empty derived name — skipping`);
+            continue;
+        }
+        console.log(`[propagate] QP${i + 1}: renaming project ${linkedId} → "${newName.slice(0, 60)}…"`);
         try {
             await airtableFetch(`${TABLES.projects}/${linkedId}`, {
                 method: 'PATCH',
                 body: JSON.stringify({ fields: { [PROJ_F.name]: newName }, typecast: true }),
             });
+            console.log(`[propagate] QP${i + 1}: ✓ renamed`);
         } catch (e) {
-            console.warn('[propagateQpNamesToLinkedProjects] QP' + (i + 1) + ' failed', e);
+            console.warn(`[propagate] QP${i + 1}: PATCH failed`, e);
         }
     }
 }
