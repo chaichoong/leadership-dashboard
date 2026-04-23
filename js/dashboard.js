@@ -261,10 +261,13 @@
             const reconciled=!!getField(tx,'fldxKX1IbIFcAOnn5');
             const vendor=getField(tx,'fld0Xr8sboQ0ekJQJ')||'';
             const description=getField(tx,'fldsbuAJCTsXHug4C')||'';
+            // Tenancy link (for rental income rows) — show the tenancy's name/primary-field value
+            const tenLinks=getField(tx,'fldPmAMmxwqs4SdPa')||[];
+            const tenancyNames=(Array.isArray(tenLinks)?tenLinks:[]).map(x=>typeof x==='object'?(x.name||x.id||''):x).filter(Boolean);
             return {
                 id:tx.id,
                 date:(date||'').slice(0,10),
-                amount:reportAmount,
+                amount:reportAmount, // SIGNED: +ve = money in, −ve = money out
                 reconciled,
                 vendor: typeof vendor==='string'?vendor:(vendor&&vendor.name)||'',
                 description: typeof description==='string'?description:'',
@@ -273,6 +276,7 @@
                 subCategories:subNames,
                 costIds,
                 hasCost:costIds.length>0,
+                tenancies:tenancyNames,
             };
         });
         return {
@@ -495,25 +499,37 @@
         if(!detail){el.style.display='none';return}
         const unitPrefix=p.kpiUnit==='£'?'£':'';
         const fmtAmt=n=>`${unitPrefix}${(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-        const txTable=(title,list,color)=>{
+        const fmtSigned=n=>{
+            const num=Number(n)||0;
+            const abs=Math.abs(num);
+            const str=`${unitPrefix}${abs.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+            return num<0?`<span style="color:#991b1b">−${str}</span>`:str;
+        };
+        const txTable=(title,list,color,kind)=>{
+            // kind: 'revenue' -> show tenancy column; 'costs' -> show cost column
+            const primaryHeader=kind==='revenue'?'Tenancy':'Cost';
+            const primaryKey=kind==='revenue'?'tenancy':'cost';
             if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;color:#94a3b8;font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
-            const rows=list.map(t=>`<tr style="border-top:1px solid #f1f5f9">
-                <td style="padding:6px 8px;white-space:nowrap;color:#64748b;font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>
-                <td style="padding:6px 8px;color:#1e293b">${escHtml(t.vendor||'-')}</td>
-                <td style="padding:6px 8px;color:#64748b;font-size:11px">${escHtml((t.description||'').slice(0,80))}</td>
-                <td style="padding:6px 8px;color:#475569;font-size:11px;white-space:nowrap">${escHtml(t.subCategory||'')}</td>
-                <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#1e293b">${fmtAmt(Math.abs(t.amount||0))}</td>
-            </tr>`).join('');
+            const rows=list.map(t=>{
+                const isReversal=kind==='revenue'?t.amount<0:t.amount>0;
+                const rowBg=isReversal?'background:#fef9c3':'';
+                const reversalTag=isReversal?'<span style="font-size:10px;color:#a16207;background:#fde68a;padding:1px 5px;border-radius:3px;margin-right:4px">REVERSAL</span>':'';
+                return `<tr style="border-top:1px solid #f1f5f9;${rowBg}">
+                    <td style="padding:6px 8px;white-space:nowrap;color:#64748b;font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>
+                    <td style="padding:6px 8px;color:#1e293b">${reversalTag}${escHtml(t[primaryKey]||t.vendor||'-')}</td>
+                    <td style="padding:6px 8px;color:#64748b;font-size:11px">${escHtml((t.description||'').slice(0,80))}</td>
+                    <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#1e293b">${fmtSigned(t.amount)}</td>
+                </tr>`;
+            }).join('');
             return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-                    <div style="font-weight:600;color:${color}">${title} · ${list.length} tx</div>
+                    <div style="font-weight:600;color:${color}">${title} · ${list.length} tx · Net ${fmtAmt(kind==='revenue'?(list.reduce((s,t)=>s+(Number(t.amount)||0),0)):(list.reduce((s,t)=>s+(-Number(t.amount)||0),0)))}</div>
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:12px">
                     <thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.5px">
                         <th style="padding:4px 8px;text-align:left">Date</th>
-                        <th style="padding:4px 8px;text-align:left">Vendor</th>
+                        <th style="padding:4px 8px;text-align:left">${primaryHeader}</th>
                         <th style="padding:4px 8px;text-align:left">Description</th>
-                        <th style="padding:4px 8px;text-align:left">Sub-Category</th>
                         <th style="padding:4px 8px;text-align:right">Amount</th>
                     </tr></thead>
                     <tbody>${rows}</tbody>
@@ -529,8 +545,8 @@
                 <div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:#991b1b">${fmtAmt(detail.costs)}</div></div>
                 <div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'#14532d':'#991b1b'}">${fmtAmt(detail.net)}</div></div>
             </div>
-            ${txTable('Revenue', detail.revTxs, '#14532d')}
-            ${txTable('Fixed Costs', detail.costTxs, '#991b1b')}`;
+            ${txTable('Revenue', detail.revTxs, '#14532d', 'revenue')}
+            ${txTable('Fixed Costs', detail.costTxs, '#991b1b', 'costs')}`;
         el.style.display='block';
         el.setAttribute('data-expanded',bucket);
     }
