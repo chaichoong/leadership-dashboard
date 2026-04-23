@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1447</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1459</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2874,23 +2874,44 @@ function tlDoubleClickAddTask(e){
     if(settled)return;settled=true;
     const name=input.value.trim();
     if(!name){wrap.remove();return}
-    wrap.style.opacity='0.6';input.disabled=true;
+    // Show explicit "Saving" state INSIDE the placeholder so the user
+    // sees the same block stay put while the POST round-trips
+    input.disabled=true;input.blur();
+    wrap.style.background='var(--accent-soft)';
+    wrap.style.borderStyle='solid';
+    wrap.style.borderColor='var(--accent)';
+    const hdr=wrap.querySelector('div');if(hdr)hdr.innerHTML=`<span style="color:var(--accent);font-weight:600">⟳ Saving at ${timeLabel}…</span>`;
     let created=null;
     try{
       created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min'});
     }catch(err){console.error('[tlInlineAdd] exception',err)}
     if(created&&created.id){
       saveStartTime(todayStr(),created.id,minOfDay);
-      toast(`Added "${name}" at ${minutesToTime(minOfDay)}`);
       console.log('[tlInlineAdd] created task',created.id,'pinned at',minOfDay);
+      // Render every view so the task shows up on timeline + list + kanban + capacity
+      try{renderAll()}catch(e){console.warn('renderAll failed',e)}
+      // Flash the new block green so it's obvious WHERE the task landed.
+      // renderAll() has wiped our placeholder wrap; find the rendered block by task id.
+      requestAnimationFrame(()=>{
+        const block=document.querySelector(`.tl-block.task[data-task-id="${created.id}"]`);
+        if(block){
+          block.style.transition='box-shadow .3s, transform .3s';
+          block.style.boxShadow='0 0 0 3px var(--success)';
+          block.style.transform='scale(1.01)';
+          block.scrollIntoView({behavior:'smooth',block:'center'});
+          setTimeout(()=>{block.style.boxShadow='';block.style.transform=''},1500);
+        }
+      });
+      toast(`Added "${name}" — also showing in Task List`);
     } else {
+      // Failure: keep the placeholder red so the user knows it didn't save
+      wrap.style.background='var(--danger-bg)';
+      wrap.style.borderColor='var(--danger)';
+      if(hdr)hdr.innerHTML=`<span style="color:var(--danger);font-weight:600">✗ Failed — click to retry</span>`;
+      wrap.onclick=()=>{settled=false;input.disabled=false;input.focus();wrap.style.background='var(--bg-surface)';wrap.style.borderColor='var(--accent)';wrap.style.borderStyle='dashed';if(hdr)hdr.innerHTML=`<div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">+ Add at ${timeLabel}</div>`};
       toast('Failed to create task — check console',true);
       console.error('[tlInlineAdd] createSimpleTask returned null');
     }
-    wrap.remove();
-    // Render every view so the task shows up in Task List, My Day timeline,
-    // Kanban (if Project priority), capacity counts, etc. Also refresh KPIs.
-    try{renderAll()}catch(e){console.warn('renderAll failed',e)}
   };
   const cancel=()=>{if(!settled){settled=true;wrap.remove()}};
   input.addEventListener('keydown',(ev)=>{
