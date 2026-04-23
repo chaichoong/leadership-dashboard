@@ -259,11 +259,15 @@
             const reportAmount=Number(getField(tx,'fldot7iisZeL3WrdR'))||0;
             const date=getField(tx,'fldoyQ6Rr9cHp3bgQ')||'';
             const reconciled=!!getField(tx,'fldxKX1IbIFcAOnn5');
+            const vendor=getField(tx,'fld0Xr8sboQ0ekJQJ')||'';
+            const description=getField(tx,'fldsbuAJCTsXHug4C')||'';
             return {
                 id:tx.id,
                 date:(date||'').slice(0,10),
                 amount:reportAmount,
                 reconciled,
+                vendor: typeof vendor==='string'?vendor:(vendor&&vendor.name)||'',
+                description: typeof description==='string'?description:'',
                 businesses:bizNames,
                 categories:catNames,
                 subCategories:subNames,
@@ -359,6 +363,9 @@
                 const rounded=Math.round(value*100)/100;
                 // Update local and PATCH back to Airtable
                 local.kpiCurrent=rounded;
+                // Stash the full returned object on the project so the
+                // Strategic KPIs drilldown can show the transaction breakdown.
+                local.kpiReturn=ctx._lastKpiDetail||null;
                 local.kpiDetail=ctx._lastKpiDetail||null;
                 local.kpiLastUpdated=new Date().toISOString();
                 local.kpiLastUpdatedBy=(currentUser&&(currentUser.name||currentUser.email))||'dashboard auto';
@@ -427,20 +434,30 @@
                 else if(days>7)stamp=`<span style="font-size:11px;color:#dc2626;font-weight:600">${days}d stale</span>`;
                 else stamp=`<span style="font-size:11px;color:#64748b">${days<1?'today':days===1?'1d ago':days+'d ago'}</span>`;
             }
-            // Optional month-by-month breakdown from kpiDetail (auto-populated
-            // by the compute runner when the function returns {months:{...}})
+            // Optional month-by-month breakdown from kpiReturn.months (auto-
+            // populated by the compute runner when the function returns that shape)
+            const kRet=p.kpiReturn||p.kpiDetail||null;
+            const hasMonths=!!(kRet&&kRet.months&&Object.keys(kRet.months).length);
+            const hasDetail=!!(kRet&&kRet.detail);
             let monthsRow='';
-            if(p.kpiDetail&&p.kpiDetail.months&&Object.keys(p.kpiDetail.months).length){
+            if(hasMonths){
                 const monthNames={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-                const cells=Object.keys(p.kpiDetail.months).sort().map(k=>{
+                const cells=Object.keys(kRet.months).sort().map(k=>{
                     const [,mm]=k.split('-');const label=monthNames[mm]||k;
-                    const v=p.kpiDetail.months[k];
+                    const v=kRet.months[k];
                     const hit=p.kpiTarget>0&&v>=p.kpiTarget;
-                    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${hit?'#DDE8DF':'#f1f5f9'};color:${hit?'#2C6E49':'#475569'};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums"><b>${label}</b> ${unitPrefix}${(v||0).toLocaleString('en-GB')}${unitSuffix}</span>`;
+                    const clickable=hasDetail&&kRet.detail.monthsDetail&&kRet.detail.monthsDetail[k];
+                    const onclick=clickable?`onclick="toggleStratKpiDrill('${p.id}','${k}');event.stopPropagation();event.preventDefault();return false"`:'';
+                    const cursor=clickable?'cursor:pointer;':'';
+                    return `<span ${onclick} style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${hit?'#DDE8DF':'#f1f5f9'};color:${hit?'#2C6E49':'#475569'};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${cursor}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPrefix}${(v||0).toLocaleString('en-GB')}${unitSuffix}</span>`;
                 }).join(' ');
-                monthsRow=`<div style="grid-column:1/-1;padding:0 14px 8px 14px;background:#fff;border:1px solid #e2e8f0;border-top:none;border-bottom:none;font-size:11px;color:#64748b"><span style="margin-right:6px;color:#94a3b8">Per month:</span>${cells}</div>`;
+                const totalClick=hasDetail?`<button onclick="toggleStratKpiDrill('${p.id}','rolling');event.stopPropagation();event.preventDefault();return false" style="background:none;border:1px solid #cbd5e1;color:#475569;padding:2px 8px;border-radius:10px;font-size:11px;cursor:pointer;margin-left:6px">Rolling 31d ▾</button>`:'';
+                monthsRow=`<div style="grid-column:1/-1;padding:0 14px 8px 14px;background:#fff;border:1px solid #e2e8f0;border-top:none;border-bottom:none;font-size:11px;color:#64748b"><span style="margin-right:6px;color:#94a3b8">Per month:</span>${cells}${totalClick}</div>`;
             }
-            return `<a href="#tasks" onclick="try{switchTab('tasks')}catch(e){}" style="display:grid;grid-template-columns:2fr 28px 2fr 1.3fr 110px 90px 80px;gap:10px;align-items:center;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-bottom:none;text-decoration:none;color:inherit;font-size:13px" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+            // Drilldown container (hidden until toggled)
+            const drillId=`stratKpiDrill-${p.id}`;
+            const drillRow=`<div id="${drillId}" data-expanded="" style="display:none;grid-column:1/-1;padding:14px;background:#fafafa;border:1px solid #e2e8f0;border-top:none;border-bottom:none;font-size:12px"></div>`;
+            return `<div class="strat-kpi-row" data-project-id="${p.id}" style="display:grid;grid-template-columns:2fr 28px 2fr 1.3fr 110px 90px 80px;gap:10px;align-items:center;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-bottom:none;font-size:13px;${hasDetail?'cursor:pointer':''}" ${hasDetail?`onclick="toggleStratKpiDrill('${p.id}','rolling')"`:''} onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
                 <div style="font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
                 <div style="text-align:center">${ownerChip}</div>
                 <div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.kpiName)}">${escHtml(p.kpiName)}</div>
@@ -448,7 +465,7 @@
                 <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${healthColor};border-radius:4px"></div></div>
                 <div style="font-size:11px;font-weight:600;color:${healthColor};text-align:center">${escHtml(health)}</div>
                 <div style="text-align:right">${stamp}</div>
-            </a>${monthsRow}`;
+            </div>${monthsRow}${drillRow}`;
         }).join('')+`<div style="height:1px;background:#e2e8f0"></div>`;
         // Give the list container a nice rounded corner wrapper
         list.style.cssText='border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;border-top:none';
@@ -456,6 +473,68 @@
 
     function setStrategicKpiFilter(f){strategicKpiFilter=f;renderStrategicKpis()}
     window.setStrategicKpiFilter=setStrategicKpiFilter;
+
+    // Expand/collapse a project's KPI drilldown showing the transactions
+    // that made up the calculation. bucket = 'rolling' | 'YYYY-MM'
+    function toggleStratKpiDrill(pid, bucket){
+        const p=_strategicKpiProjects.find(x=>x.id===pid);if(!p)return;
+        const kRet=p.kpiReturn||p.kpiDetail;
+        if(!kRet||!kRet.detail)return;
+        const el=document.getElementById(`stratKpiDrill-${pid}`);if(!el)return;
+        const currentKey=el.getAttribute('data-expanded');
+        const newKey=(currentKey===bucket)?'':bucket;
+        if(!newKey){el.style.display='none';el.setAttribute('data-expanded','');return}
+        let detail=null, label='';
+        if(bucket==='rolling'){detail=kRet.detail.rolling;label='Rolling 31 days'}
+        else if(kRet.detail.monthsDetail&&kRet.detail.monthsDetail[bucket]){
+            detail=kRet.detail.monthsDetail[bucket];
+            const [y,m]=bucket.split('-');
+            const monthNames={'01':'January','02':'February','03':'March','04':'April','05':'May','06':'June','07':'July','08':'August','09':'September','10':'October','11':'November','12':'December'};
+            label=`${monthNames[m]||m} ${y}`;
+        }
+        if(!detail){el.style.display='none';return}
+        const unitPrefix=p.kpiUnit==='£'?'£':'';
+        const fmtAmt=n=>`${unitPrefix}${(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+        const txTable=(title,list,color)=>{
+            if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;color:#94a3b8;font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
+            const rows=list.map(t=>`<tr style="border-top:1px solid #f1f5f9">
+                <td style="padding:6px 8px;white-space:nowrap;color:#64748b;font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>
+                <td style="padding:6px 8px;color:#1e293b">${escHtml(t.vendor||'-')}</td>
+                <td style="padding:6px 8px;color:#64748b;font-size:11px">${escHtml((t.description||'').slice(0,80))}</td>
+                <td style="padding:6px 8px;color:#475569;font-size:11px;white-space:nowrap">${escHtml(t.subCategory||'')}</td>
+                <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#1e293b">${fmtAmt(Math.abs(t.amount||0))}</td>
+            </tr>`).join('');
+            return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+                    <div style="font-weight:600;color:${color}">${title} · ${list.length} tx</div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.5px">
+                        <th style="padding:4px 8px;text-align:left">Date</th>
+                        <th style="padding:4px 8px;text-align:left">Vendor</th>
+                        <th style="padding:4px 8px;text-align:left">Description</th>
+                        <th style="padding:4px 8px;text-align:left">Sub-Category</th>
+                        <th style="padding:4px 8px;text-align:right">Amount</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+        };
+        el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div><strong>${escHtml(label)}</strong> · Window: ${escHtml(detail.windowStart||'-')} → ${escHtml(detail.windowEnd||'-')}</div>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid #cbd5e1;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+                <div style="padding:10px;background:#f0fdf4;border-radius:6px"><div style="font-size:10px;color:#14532d;font-weight:600;text-transform:uppercase">Revenue</div><div style="font-size:16px;font-weight:700;color:#14532d">${fmtAmt(detail.revenue)}</div></div>
+                <div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:#991b1b">${fmtAmt(detail.costs)}</div></div>
+                <div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'#14532d':'#991b1b'}">${fmtAmt(detail.net)}</div></div>
+            </div>
+            ${txTable('Revenue', detail.revTxs, '#14532d')}
+            ${txTable('Fixed Costs', detail.costTxs, '#991b1b')}`;
+        el.style.display='block';
+        el.setAttribute('data-expanded',bucket);
+    }
+    window.toggleStratKpiDrill=toggleStratKpiDrill;
 
     // ── Dashboard Load ──
     async function loadDashboard() {
