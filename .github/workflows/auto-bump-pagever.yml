@@ -16,13 +16,16 @@ on:
       - 'os/index.html'
       - 'os/business-plan-builder/index.html'
 
+permissions:
+  contents: write  # needed so the job can push its auto-bump commit back to main
+
 jobs:
   bump:
     runs-on: ubuntu-latest
     # Skip if this commit was made by the action itself (prevent infinite loop)
     if: "!contains(github.event.head_commit.message, '[auto-bump]')"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
