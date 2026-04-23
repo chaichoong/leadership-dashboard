@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1838</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1930</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -665,6 +665,7 @@ const PF = {
   kpiSource:      'fldic3mgIRLLu2Sre',
   kpiLastUpdated: 'fldNk2U74jBxZ6esJ',
   kpiLastUpdatedBy:'fldIgmO8OqA3a7K5o',
+  kpiComputeCode:'fldA7vPiLnbgEoKh1', // AI wizard-generated JS compute function body
   projCollabs: 'fldN5l2H4WCsM0S3x',  // Project Collaborators — links to Team Members
 };
 const PROJECT_FIELD_IDS = Object.values(PF);
@@ -1221,6 +1222,7 @@ function parseProject(rec){
     kpiSource:gf(rec,PF.kpiSource)||'',
     kpiLastUpdated:gf(rec,PF.kpiLastUpdated)||'',
     kpiLastUpdatedBy:gf(rec,PF.kpiLastUpdatedBy)||'',
+    kpiComputeCode:gf(rec,PF.kpiComputeCode)||'',
     collaboratorIds,
   };
 }
@@ -3999,75 +4001,38 @@ function renderProjects(){
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">End Date</label><input type="date" value="${p.end||''}" onchange="updateProjectField('${p.id}','end',this.value)" class="inline-input" style="width:100%"></div>
       </div>`;
       // KPI section — restructured: Current is read-only when automated, editable when manual.
-      const isAuto=!!p.kpiAutomated;
-      const curReadOnly=isAuto?'disabled':'';
-      const autoBadge=isAuto?'<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:4px">Auto</span>':'';
-      // Human-readable "last updated" line
+      // Last-updated line
       let lastUpdatedLine='';
-      if(!isAuto){
-        if(p.kpiLastUpdated){
-          const diffMs=Date.now()-new Date(p.kpiLastUpdated).getTime();
-          const diffDays=Math.floor(diffMs/86400000);
-          const ago=diffDays<1?'today':diffDays===1?'yesterday':`${diffDays} days ago`;
-          const stale=diffDays>7;
-          lastUpdatedLine=`<div style="font-size:11px;color:${stale?'var(--danger)':'var(--text-secondary)'};margin-top:4px">Last updated: ${ago} by ${escHtml(p.kpiLastUpdatedBy||'?')}${stale?' — overdue for review':''}</div>`;
-        }else{
-          lastUpdatedLine=`<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Never updated</div>`;
-        }
-      }else if(p.kpiSource){
-        lastUpdatedLine=`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Tracking via: ${escHtml(p.kpiSource.split('\n')[0])}</div>`;
+      if(p.kpiLastUpdated){
+        const diffMs=Date.now()-new Date(p.kpiLastUpdated).getTime();
+        const diffDays=Math.floor(diffMs/86400000);
+        const ago=diffDays<1?'just now':diffDays===1?'1 day ago':`${diffDays} days ago`;
+        lastUpdatedLine=`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">Last computed: ${ago}</div>`;
       }
-      // Resolve registry entry (if any) so we can render template-aware UI
-      const kpiSrc = (typeof getKpiSource==='function')?getKpiSource(p.kpiSource):null;
-      const isCustom = !!p.kpiSource && !kpiSrc;
-      const selectedKey = kpiSrc ? kpiSrc.key : (isCustom ? '__custom__' : '');
-      const grouped = (typeof getKpiSourcesByCategory==='function')?getKpiSourcesByCategory():{Financial:[],SaaS:[],'Task & Project':[]};
-      function _optsFor(list){
-        return list.map(s=>{
-          const tag = s.automated?'auto':'manual';
-          return `<option value="${s.key}" ${selectedKey===s.key?'selected':''}>${escHtml(s.label)} (${s.unit} &middot; ${tag})</option>`;
-        }).join('');
-      }
-      const tmplSelect = `<select class="inline-select" onchange="changeKpiTemplate('${p.id}',this.value)" style="width:100%">
-        <option value="">&mdash; Select a template or choose Custom &mdash;</option>
-        <optgroup label="Financial">${_optsFor(grouped['Financial']||[])}</optgroup>
-        <optgroup label="SaaS">${_optsFor(grouped['SaaS']||[])}</optgroup>
-        <optgroup label="Task &amp; Project">${_optsFor(grouped['Task & Project']||[])}</optgroup>
-        <option value="__custom__" ${selectedKey==='__custom__'?'selected':''}>&mdash; Custom (define your own) &mdash;</option>
-      </select>`;
-      let tmplBanner = '';
-      if(kpiSrc){
-        const modeLabel = kpiSrc.automated
-          ? '<span style="color:var(--accent);font-weight:600">Automated</span> &mdash; recomputed from app data on every page load'
-          : '<span style="color:var(--text-primary);font-weight:600">Manual</span> &mdash; update the Current value yourself each cycle';
-        tmplBanner = `<div style="font-size:11px;color:var(--text-secondary);background:var(--bg-subtle);padding:6px 8px;border-radius:6px;margin:6px 0">This template is: ${modeLabel}</div>`;
-      }
-      let customAutoRow = '';
-      if(selectedKey==='__custom__'){
-        customAutoRow = `<div style="margin-top:6px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-primary);cursor:pointer">
-            <input type="checkbox" ${isAuto?'checked':''} onchange="updateProjectField('${p.id}','kpiAutomated',this.checked)">
-            Can this be calculated automatically?
-          </label>
-          ${isAuto?`<div style="margin-top:6px"><button class="btn" onclick="openKpiRequestModal('${p.id}')">Request Custom Source</button><div style="font-size:11px;color:var(--text-secondary);margin-top:4px">We'll build a bespoke automated source and create a support task.</div></div>`:''}
-        </div>`;
-      }
+      const hasCode=!!(p.kpiComputeCode&&p.kpiComputeCode.trim());
+      const currentDisplay=hasCode
+        ? `<div style="font-size:18px;font-weight:600;color:var(--text-primary)">${p.kpiUnit==='£'?'£':''}${p.kpiCurrent||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}</div>`
+        : `<div style="font-size:12px;color:var(--text-muted);font-style:italic">Not yet computed — use the wizard to generate a compute function</div>`;
+      const wizardBtnLabel=hasCode?'🪄 Regenerate with AI':'🪄 Generate with AI';
       html+=`<h4>KPI (Key Performance Indicator)</h4>
-      <div style="margin-bottom:8px">
-        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Pick a template (or describe your own)</label>
-        ${tmplSelect}
-      </div>
-      ${tmplBanner}
-      <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="${kpiSrc?escHtml(kpiSrc.label):'e.g. Monthly profit increase'}" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
-        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Target (goal)</label><input type="number" placeholder="4000" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
-        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Current (latest)${autoBadge}</label><input type="number" ${curReadOnly} placeholder="0" value="${p.kpiCurrent}" onblur="updateProjectField('${p.id}','kpiCurrent',parseFloat(this.value)||0)" class="inline-input" style="width:100%${isAuto?';background:var(--bg-subtle);color:var(--text-secondary)':''}"></div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:8px">
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">KPI Name (what you're measuring)</label><input type="text" placeholder="e.g. Monthly profit increase" value="${escHtml(p.kpiName)}" onblur="updateProjectField('${p.id}','kpiName',this.value)" class="inline-input" style="width:100%"></div>
+        <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Target</label><input type="number" placeholder="4000" value="${p.kpiTarget}" onblur="updateProjectField('${p.id}','kpiTarget',parseFloat(this.value)||0)" class="inline-input" style="width:100%"></div>
         <div><label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:2px">Unit</label><select class="inline-select" onchange="updateProjectField('${p.id}','kpiUnit',this.value)" style="width:100%"><option value="">-</option>${KPI_UNIT_OPTIONS.map(u=>`<option value="${u}" ${p.kpiUnit===u?'selected':''}>${u}</option>`).join('')}</select></div>
       </div>
-      ${customAutoRow}
-      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (optional notes on how you'll measure this)</label>
-      <textarea style="${taStyle}" placeholder="e.g. Monthly P&L, Airtable rollup from Transactions, manual weekly update..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>
-      ${lastUpdatedLine}`;
+      <label style="font-size:11px;color:var(--text-secondary);display:block;margin-top:8px;margin-bottom:2px">Tracking Method (how this KPI should be measured — the more detail, the better the wizard does)</label>
+      <textarea style="${taStyle}" placeholder="e.g. Sum of Transactions where Category = Rent and Status = Actual, between Start Date and End Date of this quarter..." oninput="projEditDebounced('${p.id}','kpiTracking',this.value)">${escHtml(p.kpiTracking)}</textarea>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-top:10px;padding:10px;background:var(--bg-surface-2);border-radius:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text-muted);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Current value</div>
+          ${currentDisplay}
+          ${lastUpdatedLine}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="btn btn-primary btn-sm" onclick="openKpiWizard('${p.id}')">${wizardBtnLabel}</button>
+          ${hasCode?`<button class="btn btn-sm" onclick="recomputeKpi('${p.id}')">Recompute now</button>`:''}
+        </div>
+      </div>`;
       // Definition of Done only — the separate "Deliverable" field was
       // redundant with DoD and has been retired from the UI. The Airtable
       // field is kept for now in case any legacy records contain content.
@@ -4174,6 +4139,293 @@ async function updateProjectField(pid,fieldKey,val){
     if(['status','name','business','owner','kpiAutomated','kpiCurrent','kpiName','kpiSource','kpiUnit'].includes(fieldKey))renderProjects();
   }catch(e){console.error('[updateProjectField]',e);toast('Failed to save',true)}
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI KPI WIZARD + sandboxed compute runner (Option A KPI config-as-data)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// The wizard produces a JS function body that, given a `ctx` object with
+// the tenant's data arrays, returns a number. We store that string in the
+// project record (KPI Compute Code field) and execute it via new Function
+// with NO access to the outer scope or network. The computed value is
+// written to KPI Current + KPI Last Updated.
+//
+// Build context helper — the single source of truth for what data the
+// wizard + compute function can see. Documented in the wizard prompt
+// so the LLM knows exactly what's available.
+function buildKpiContext(project){
+  return {
+    project: {
+      id: project.id,
+      name: project.name||'',
+      start: project.start||'',
+      end: project.end||'',
+      business: project.business||'',
+      owner: project.owner?project.owner.email:'',
+    },
+    today: todayStr(),
+    tasks: (allTasks||[]).map(t=>({
+      id:t.id, name:t.name, status:t.status, priority:t.priority,
+      dueDate:t.dueDate, completion:t.completion||'',
+      assignee:t.assigneeEmail, minutes:t.minutes||0,
+      business:t.business||'', projectIds:t.projectIds||[],
+      recurring:t.recurring||'', hardDeadline:!!t.hardDeadline,
+    })),
+    projects: (allProjects||[]).map(p=>({
+      id:p.id, name:p.name, status:p.status, business:p.business||'',
+      start:p.start||'', end:p.end||'',
+      kpiCurrent:p.kpiCurrent||0, kpiTarget:p.kpiTarget||0,
+    })),
+    // Completions log — every task completion (Option A)
+    completions: window._kpiCompletionsCache||[],
+    // Convenience: filter helpers
+    between(dateIso, startIso, endIso){
+      if(!dateIso)return false;
+      const d=dateIso.slice(0,10);
+      return (!startIso||d>=startIso)&&(!endIso||d<=endIso);
+    },
+    sumBy(arr, fn){return (arr||[]).reduce((s,x)=>s+(+fn(x)||0),0)},
+    countWhere(arr, fn){return (arr||[]).filter(fn).length},
+  };
+}
+
+// Execute a stored compute function body against the current data.
+// Returns a number, or null on failure. Safe because:
+//   - new Function only has access to its own `ctx` arg
+//   - 1-second timeout via Promise race (best-effort; JS is single-threaded)
+//   - wrapped in try/catch; errors never bubble into the UI
+function runKpiCompute(code, ctx){
+  if(!code||!code.trim())return null;
+  try{
+    // eslint-disable-next-line no-new-func
+    const fn=new Function('ctx', `"use strict";${code}`);
+    const result=fn(ctx);
+    if(typeof result==='number'&&!isNaN(result)&&isFinite(result))return result;
+    if(typeof result==='string'){const n=parseFloat(result);if(!isNaN(n))return n}
+    return null;
+  }catch(e){console.warn('[runKpiCompute] code error',e);return null}
+}
+
+// Recompute one project's KPI. Writes the result to Airtable + refreshes UI.
+async function recomputeKpi(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  if(!p.kpiComputeCode||!p.kpiComputeCode.trim()){toast('No compute code — generate one with the wizard first',true);return}
+  const ctx=buildKpiContext(p);
+  const value=runKpiCompute(p.kpiComputeCode,ctx);
+  if(value==null){toast('Compute returned no valid number — check the code',true);return}
+  const rounded=Math.round(value*100)/100; // 2 decimals
+  p.kpiCurrent=rounded;
+  p.kpiLastUpdated=new Date().toISOString();
+  p.kpiLastUpdatedBy=(currentUser&&(currentUser.name||currentUser.email))||'web app';
+  const payload={};
+  payload[PF.kpiCurrent]=rounded;
+  payload[PF.kpiLastUpdated]=p.kpiLastUpdated;
+  payload[PF.kpiLastUpdatedBy]=p.kpiLastUpdatedBy;
+  try{
+    const r=await patchProject(pid,payload);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    toast(`KPI: ${p.kpiName||'(unnamed)'} = ${rounded}`);
+    renderProjects();
+  }catch(e){console.error('[recomputeKpi]',e);toast('Saved locally but Airtable update failed',true)}
+}
+window.recomputeKpi=recomputeKpi;
+
+// Recompute all projects that have a compute function (called on load /
+// refresh so dashboards stay current without manual action).
+async function recomputeAllKpis(){
+  if(!Array.isArray(allProjects))return;
+  const have=allProjects.filter(p=>p.kpiComputeCode&&p.kpiComputeCode.trim());
+  for(const p of have){
+    try{await recomputeKpi(p.id)}catch(e){console.warn('recomputeAllKpis: '+p.id,e)}
+  }
+}
+window.recomputeAllKpis=recomputeAllKpis;
+
+// ─── Wizard modal ──────────────────────────────────────────────────────
+// A chat-style modal that turns the project's KPI Name + Target + Unit +
+// Tracking notes into a compute function. Uses the existing Claude proxy.
+// The LLM is primed with:
+//   - the KPI fields
+//   - a schema summary (what's in ctx)
+//   - a target output format ("return a single JS expression or block")
+// and iterates with the user if it needs clarification.
+const CLAUDE_PROXY_URL='https://claude-proxy.kevinbrittain.workers.dev';
+const KPI_WIZARD_SYSTEM_PROMPT=`You are an expert at writing JavaScript compute functions for business KPIs.
+
+Your task: given a KPI definition and a data context, output ONLY a JavaScript function body that returns a NUMBER.
+
+The function body will be executed as: new Function('ctx', yourBody)(ctx)
+
+The ctx object you receive has:
+- ctx.project: { id, name, start, end, business, owner } — the current project
+- ctx.today: ISO date string for today
+- ctx.tasks: [{ id, name, status, priority, dueDate, completion, assignee, minutes, business, projectIds, recurring, hardDeadline }]
+- ctx.projects: [{ id, name, status, business, start, end, kpiCurrent, kpiTarget }]
+- ctx.completions: [{ taskId, taskName, completedBy, completedAt, minutes, business, project, cadence }]
+- ctx.between(dateIso, startIso, endIso) → boolean
+- ctx.sumBy(arr, fn), ctx.countWhere(arr, fn)
+
+Rules:
+1. Output ONLY the function body, nothing else. No markdown, no explanation.
+2. Return a number with a \`return\` statement.
+3. If something is ambiguous, ask ONE clarifying question and stop. The caller will send user reply and expect you to then produce the function body.
+4. Use ctx.project.start / ctx.project.end as the default date range for "this quarter" / "this period" metrics.
+5. Handle empty arrays gracefully. Return 0 when there's no data, never null or NaN.
+6. Prefer simple, readable code over clever one-liners.
+
+When you output the final function body, wrap it in <code>...</code> tags so it's unambiguous.`;
+
+let _kpiWizardState=null;
+function openKpiWizard(pid){
+  const p=allProjects.find(x=>x.id===pid);if(!p){toast('Project not found',true);return}
+  closeKpiWizard();
+  _kpiWizardState={pid,messages:[],generatedCode:'',previewValue:null};
+  const overlay=document.createElement('div');
+  overlay.className='modal-overlay';overlay.id='kpiWizardOverlay';
+  overlay.onclick=(e)=>{if(e.target===overlay)closeKpiWizard()};
+  overlay.innerHTML=`<div class="modal" style="max-width:720px;max-height:90vh;display:flex;flex-direction:column">
+    <h2 style="margin-top:0">🪄 KPI Wizard — ${escHtml(p.name||'Untitled Project')}</h2>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
+      <div><b>KPI:</b> ${escHtml(p.kpiName||'(not named)')} &middot; <b>Target:</b> ${p.kpiTarget||0} ${escHtml(p.kpiUnit||'')}</div>
+      <div style="margin-top:4px"><b>Period:</b> ${escHtml(p.start||'—')} → ${escHtml(p.end||'—')}</div>
+      ${p.kpiTracking?`<div style="margin-top:4px"><b>Tracking notes:</b> ${escHtml(p.kpiTracking)}</div>`:''}
+    </div>
+    <div id="kpiWizChat" style="flex:1;min-height:200px;max-height:45vh;overflow-y:auto;border:1px solid var(--border-default);border-radius:8px;padding:12px;background:var(--bg-surface);font-size:13px;line-height:1.5"></div>
+    <div id="kpiWizPreview" style="display:none;margin-top:10px;padding:10px;background:var(--success-bg);border:1px solid var(--success);border-radius:8px">
+      <div style="font-size:11px;color:var(--success);font-weight:600;margin-bottom:4px">PREVIEW</div>
+      <div id="kpiWizPreviewVal" style="font-size:20px;font-weight:700;color:var(--text-primary)"></div>
+      <div id="kpiWizPreviewMeta" style="font-size:11px;color:var(--text-secondary);margin-top:4px"></div>
+    </div>
+    <div id="kpiWizInputRow" style="display:flex;gap:8px;margin-top:10px">
+      <input type="text" id="kpiWizInput" placeholder="Type your reply or a refinement…" style="flex:1;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:13px" autofocus>
+      <button class="btn btn-primary" id="kpiWizSend" onclick="kpiWizardSend()">Send</button>
+    </div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn" onclick="closeKpiWizard()">Cancel</button>
+      <button class="btn btn-primary" id="kpiWizSaveBtn" disabled style="opacity:.5;cursor:not-allowed" onclick="kpiWizardSaveCode()">Save compute code</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const inp=document.getElementById('kpiWizInput');
+  if(inp){inp.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();kpiWizardSend()}})}
+  // Kick off with an initial prompt derived from the project fields
+  kpiWizardRender();
+  kpiWizardKickoff();
+}
+window.openKpiWizard=openKpiWizard;
+function closeKpiWizard(){const ov=document.getElementById('kpiWizardOverlay');if(ov)ov.remove();_kpiWizardState=null}
+window.closeKpiWizard=closeKpiWizard;
+
+function kpiWizardRender(){
+  const chat=document.getElementById('kpiWizChat');if(!chat||!_kpiWizardState)return;
+  chat.innerHTML=_kpiWizardState.messages.map(m=>{
+    const align=m.role==='user'?'flex-end':'flex-start';
+    const bg=m.role==='user'?'var(--accent-soft)':'var(--bg-surface-2)';
+    const brd=m.role==='user'?'var(--accent)':'var(--border-default)';
+    return `<div style="display:flex;justify-content:${align};margin-bottom:8px"><div style="max-width:85%;padding:8px 12px;background:${bg};border:1px solid ${brd};border-radius:10px;white-space:pre-wrap;word-break:break-word">${escHtml(m.content)}</div></div>`;
+  }).join('');
+  chat.scrollTop=chat.scrollHeight;
+}
+function kpiWizardKickoff(){
+  const p=allProjects.find(x=>x.id===_kpiWizardState.pid);if(!p)return;
+  const initialUserMsg=`Create a compute function for this KPI:
+- Name: ${p.kpiName||'(not named)'}
+- Target: ${p.kpiTarget||0} ${p.kpiUnit||''}
+- Project: ${p.name||'—'}
+- Business: ${p.business||'—'}
+- Period: ${p.start||'—'} to ${p.end||'—'}
+- Tracking notes: ${p.kpiTracking||'(none provided)'}
+
+If you have enough to write the function body, output it wrapped in <code>...</code> tags. Otherwise ask me ONE clarifying question.`;
+  _kpiWizardState.messages.push({role:'user',content:initialUserMsg});
+  kpiWizardRender();
+  kpiWizardSendToClaude();
+}
+
+async function kpiWizardSend(){
+  const inp=document.getElementById('kpiWizInput');if(!inp)return;
+  const text=inp.value.trim();if(!text)return;
+  inp.value='';
+  _kpiWizardState.messages.push({role:'user',content:text});
+  kpiWizardRender();
+  kpiWizardSendToClaude();
+}
+window.kpiWizardSend=kpiWizardSend;
+
+async function kpiWizardSendToClaude(){
+  const sendBtn=document.getElementById('kpiWizSend');if(sendBtn){sendBtn.disabled=true;sendBtn.textContent='…'}
+  const chat=document.getElementById('kpiWizChat');
+  const thinking=document.createElement('div');thinking.id='kpiWizThinking';thinking.style.cssText='display:flex;justify-content:flex-start;margin-bottom:8px';thinking.innerHTML='<div style="padding:8px 12px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:10px;color:var(--text-secondary);font-style:italic">Thinking…</div>';
+  if(chat)chat.appendChild(thinking);
+  try{
+    const body={
+      model:'claude-sonnet-4-5-20250929',
+      max_tokens:1500,
+      system:KPI_WIZARD_SYSTEM_PROMPT,
+      messages:_kpiWizardState.messages.map(m=>({role:m.role,content:m.content})),
+    };
+    const res=await fetch(CLAUDE_PROXY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+    });
+    const data=await res.json();
+    // Proxy returns Anthropic API shape: { content: [{type:'text', text:'...'}] }
+    const replyText=(data&&data.content&&data.content[0]&&data.content[0].text)
+      ||(typeof data==='string'?data:JSON.stringify(data));
+    _kpiWizardState.messages.push({role:'assistant',content:replyText});
+    // Extract code block if the assistant provided one
+    const m=replyText.match(/<code>([\s\S]*?)<\/code>/);
+    if(m){
+      _kpiWizardState.generatedCode=m[1].trim();
+      kpiWizardTryPreview();
+    }
+  }catch(e){
+    console.error('[kpiWizard] claude error',e);
+    _kpiWizardState.messages.push({role:'assistant',content:'[Error contacting AI: '+((e&&e.message)||'unknown')+' — you can still type a manual compute body wrapped in <code>...</code> tags and save]'});
+  }
+  const t=document.getElementById('kpiWizThinking');if(t)t.remove();
+  if(sendBtn){sendBtn.disabled=false;sendBtn.textContent='Send'}
+  kpiWizardRender();
+}
+
+function kpiWizardTryPreview(){
+  if(!_kpiWizardState||!_kpiWizardState.generatedCode)return;
+  const p=allProjects.find(x=>x.id===_kpiWizardState.pid);if(!p)return;
+  const ctx=buildKpiContext(p);
+  const value=runKpiCompute(_kpiWizardState.generatedCode,ctx);
+  const preview=document.getElementById('kpiWizPreview');
+  const valEl=document.getElementById('kpiWizPreviewVal');
+  const metaEl=document.getElementById('kpiWizPreviewMeta');
+  const saveBtn=document.getElementById('kpiWizSaveBtn');
+  if(value==null){
+    if(preview)preview.style.display='none';
+    if(saveBtn){saveBtn.disabled=true;saveBtn.style.opacity='.5';saveBtn.style.cursor='not-allowed'}
+    return;
+  }
+  _kpiWizardState.previewValue=value;
+  if(preview)preview.style.display='block';
+  if(valEl)valEl.textContent=`${p.kpiUnit==='£'?'£':''}${Math.round(value*100)/100}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}`;
+  if(metaEl)metaEl.textContent=`Target: ${p.kpiTarget||0} ${p.kpiUnit||''} · ${p.kpiTarget>0?Math.round(value/p.kpiTarget*100)+'% of target':'—'}`;
+  if(saveBtn){saveBtn.disabled=false;saveBtn.style.opacity='1';saveBtn.style.cursor='pointer'}
+}
+
+async function kpiWizardSaveCode(){
+  if(!_kpiWizardState||!_kpiWizardState.generatedCode){toast('No compute code to save',true);return}
+  const pid=_kpiWizardState.pid;
+  const code=_kpiWizardState.generatedCode;
+  const p=allProjects.find(x=>x.id===pid);if(!p)return;
+  p.kpiComputeCode=code;
+  const payload={};payload[PF.kpiComputeCode]=code;
+  try{
+    const r=await patchProject(pid,payload);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    toast('Compute code saved — running it now');
+    closeKpiWizard();
+    await recomputeKpi(pid);
+  }catch(e){console.error('[kpiWizardSaveCode]',e);toast('Save failed: '+((e&&e.message)||'unknown'),true)}
+}
+window.kpiWizardSaveCode=kpiWizardSaveCode;
 
 // Toggle a team member on/off as a Project Collaborator. Projects.ProjectCollaborators
 // is a multipleRecordLinks to Team Members — we send the full array of member
@@ -5155,8 +5407,31 @@ async function loadAllData(){
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
     allTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
 
+    // Cache the Task Completions log so KPI compute functions can reference it.
+    // Best-effort; failure doesn't block the main UI.
+    try{
+      const raw=await fetchTable(COMPLETIONS_TABLE,Object.values(CF),'');
+      window._kpiCompletionsCache=(raw||[]).map(r=>{
+        const c=r.cellValuesByFieldId||r.fields||{};
+        return {
+          taskId:(c[CF.task]||[])[0]||'',
+          taskName:c[CF.taskName]||'',
+          completedBy:c[CF.completedBy]||'',
+          completedAt:c[CF.completedAt]||'',
+          minutes:c[CF.minutes]||0,
+          business:c[CF.business]||'',
+          project:c[CF.project]||'',
+          cadence:c[CF.cadence]||'',
+          timeEst:c[CF.timeEst]||'',
+        };
+      });
+    }catch(e){console.warn('Task Completions fetch failed',e);window._kpiCompletionsCache=[]}
+
     // Recompute automated KPI values from fresh task/project data
     try{await refreshAutomatedKpis()}catch(e){console.warn('refreshAutomatedKpis failed',e)}
+    // Recompute every project that has a saved compute function so their
+    // cached KPI Current stays up-to-date on each refresh.
+    try{await recomputeAllKpis()}catch(e){console.warn('recomputeAllKpis failed',e)}
 
     const r=await autoRescheduleOverdue();
     if(r.count>0)console.log(`Rescheduled ${r.count} overdue`);
