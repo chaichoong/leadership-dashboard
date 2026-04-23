@@ -258,10 +258,12 @@
             const costIds=(Array.isArray(costLinks)?costLinks:[]).map(x=>typeof x==='object'?x.id:x).filter(Boolean);
             const reportAmount=Number(getField(tx,'fldot7iisZeL3WrdR'))||0;
             const date=getField(tx,'fldoyQ6Rr9cHp3bgQ')||'';
+            const reconciled=!!getField(tx,'fldxKX1IbIFcAOnn5');
             return {
                 id:tx.id,
                 date:(date||'').slice(0,10),
                 amount:reportAmount,
+                reconciled,
                 businesses:bizNames,
                 categories:catNames,
                 subCategories:subNames,
