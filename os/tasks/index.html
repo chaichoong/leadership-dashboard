@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0850</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0900</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4214,9 +4214,18 @@ async function catchUpRecurringTasks(){
       return new Date(t.completion).getTime()>=cutoffMs;
     });
     let spawned=0;
+    // Also scan ALL known tasks (not just the completed window) for same-series
+    // matches. If the user has explicitly cleared recurring on any task in the
+    // series (completed or active), treat that as a STOP signal and don't
+    // respawn — otherwise you can never actually turn off a recurring series.
+    const allKnown=allTasks.concat(completed);
     for(const t of completed){
       const hasSibling=allTasks.some(s=>s.name===t.name&&s.assigneeEmail===t.assigneeEmail&&s.status!=='Completed');
       if(hasSibling)continue;
+      // User-stop check: any task in this series with recurring cleared means
+      // the user turned the series off. Respect that decision.
+      const userStopped=allKnown.some(s=>s.name===t.name&&s.assigneeEmail===t.assigneeEmail&&(!s.recurring||s.recurring===''||s.recurring==='None'));
+      if(userStopped){console.log('[catchUp] series stopped by user, skipping spawn for',t.name);continue}
       const next=await spawnRecurringNext(t,{silent:true});
       if(next)spawned++;
     }
