@@ -975,14 +975,20 @@ async function buildPushProposal(qps, fields) {
     });
 
     // Dedup check — pull every project on this business whose start date
-    // is the quarter-start we'd be writing. If a project with the same name
-    // already exists, we'll skip it on approve.
+    // falls in this quarter. If a project with the same name already exists,
+    // we'll skip it on approve.
+    // Airtable date-field equality via `= "YYYY-MM-DD"` is unreliable, so
+    // normalise via DATETIME_FORMAT and match on a range.
     let existingNames = new Set();
     try {
         const business = allBusinessesLocal.find(b => b.id === businessId);
         const businessName = (business?.name || '').replace(/"/g, '\\"');
+        const filter = `AND(` +
+            `FIND("${businessName}", ARRAYJOIN({Business}))>0, ` +
+            `DATETIME_FORMAT({Start Date}, "YYYY-MM-DD") = "${qStartISO}"` +
+        `)`;
         const params = new URLSearchParams({
-            filterByFormula: `AND(FIND("${businessName}", ARRAYJOIN({Business})), {Start Date} = "${qStartISO}")`,
+            filterByFormula: filter,
             returnFieldsByFieldId: 'true',
             pageSize: '100',
         });
@@ -991,6 +997,7 @@ async function buildPushProposal(qps, fields) {
             const n = r.fields?.[PROJ_F.name];
             if (n) existingNames.add(String(n).trim().toLowerCase());
         });
+        console.log('[buildPushProposal] existing names for dedup:', Array.from(existingNames));
     } catch (e) {
         console.warn('[buildPushProposal] dedup check failed — will still allow push', e);
     }
