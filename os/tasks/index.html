@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0922</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0931</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1325,10 +1325,17 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       (task.projectIds||[]).forEach(pid=>{const p=allProjects.find(x=>x.id===pid);if(p)p.completedTasks=(p.completedTasks||0)+1});
       // Stamp local completion date so catch-up sweep can see it immediately
       if(!task.completion)task.completion=new Date().toISOString();
-      // Web-app recurring: spawn next cycle (replaces Airtable automation)
-      if(task.recurring&&RECUR_OPTIONS.includes(task.recurring)&&!_bulkOperation){
-        try{await spawnRecurringNext(task);}catch(e){console.warn('spawn recurring next failed',e)}
-      }
+      // RECURRING AUTO-SPAWN DISABLED (2026-04-23) — was creating new task
+      // records on every completion, which looked like "deleted tasks coming
+      // back" because each spawn is a separate Airtable record sharing only
+      // the name with the original. Nuclear option until a proper "series"
+      // model is designed: complete = complete, delete = delete, no
+      // background record creation. To spawn a next cycle manually, the user
+      // can duplicate the task (forthcoming feature) or re-create it by hand.
+      //
+      // if(task.recurring&&RECUR_OPTIONS.includes(task.recurring)&&!_bulkOperation){
+      //   try{await spawnRecurringNext(task);}catch(e){console.warn('spawn recurring next failed',e)}
+      // }
     }
     if(fieldKey==='dueDate'){
       const today=todayStr();
