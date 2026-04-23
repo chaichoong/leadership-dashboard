@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2239</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2249</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4021,7 +4021,7 @@ function renderProjects(){
       let drillHolder='';
       let kpiDetail=null;
       if(hasCode&&p.kpiDetailJson){
-        try{kpiDetail=JSON.parse(p.kpiDetailJson)}catch(e){console.warn('[kpi detail parse]',e)}
+        try{kpiDetail=JSON.parse(p.kpiDetailJson)}catch(e){console.warn('[kpi detail parse] failed for',p.id,'— the stored JSON may have been truncated. Length:',p.kpiDetailJson.length,'Error:',e)}
       }
       if(kpiDetail&&kpiDetail.months&&Object.keys(kpiDetail.months).length){
         const monthNames={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};

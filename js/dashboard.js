@@ -409,8 +409,36 @@
                     // to re-fetch transactions. Cap at ~50KB to stay well
                     // under Airtable's long-text field limits.
                     try{
-                        const json=JSON.stringify(ctx._lastKpiDetail||{});
-                        payload[STRAT_PF.kpiDetailJson]=json.length>50000?json.slice(0,50000):json;
+                        let json=JSON.stringify(ctx._lastKpiDetail||{});
+                        // Airtable long-text field caps at 100,000 chars. If the
+                        // compute returned more than ~95KB of detail, progressively
+                        // drop the tx lists so the stored JSON is always parseable.
+                        const CAP=95000;
+                        if(json.length>CAP){
+                            const obj=ctx._lastKpiDetail||{};
+                            if(obj.detail){
+                                // Trim tx arrays to progressively smaller caps until it fits
+                                for(const size of [40,25,15,5]){
+                                    if(obj.detail.rolling){
+                                        obj.detail.rolling.revTxs=(obj.detail.rolling.revTxs||[]).slice(0,size);
+                                        obj.detail.rolling.costTxs=(obj.detail.rolling.costTxs||[]).slice(0,size);
+                                    }
+                                    if(obj.detail.monthsDetail){
+                                        Object.keys(obj.detail.monthsDetail).forEach(k=>{
+                                            obj.detail.monthsDetail[k].revTxs=(obj.detail.monthsDetail[k].revTxs||[]).slice(0,size);
+                                            obj.detail.monthsDetail[k].costTxs=(obj.detail.monthsDetail[k].costTxs||[]).slice(0,size);
+                                        });
+                                    }
+                                    json=JSON.stringify(obj);
+                                    if(json.length<=CAP)break;
+                                }
+                            }
+                            if(json.length>CAP){
+                                // Last resort: keep summary numbers, drop tx detail entirely
+                                json=JSON.stringify({value:obj.value,rolling:obj.rolling,months:obj.months});
+                            }
+                        }
+                        payload[STRAT_PF.kpiDetailJson]=json;
                     }catch(e){console.warn('[runAutomatedKpis] stringify failed',e)}
                     const url=`https://api.airtable.com/v0/${BASE_ID}/${STRAT_PROJECTS_TABLE}/${rec.id}?returnFieldsByFieldId=true`;
                     const resp=await fetch(url,{
