@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0931</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1016</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -514,6 +514,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <option value="Bi-Annually">Bi-Annually</option>
         <option value="Annually">Annually</option>
       </select>
+      <button class="btn btn-sm" id="clearFiltersBtn" onclick="clearAllFilters()" title="Reset all filters and search">Clear Filters</button>
       <button class="btn btn-primary btn-sm" data-autosched-btn onclick="safeAutoSchedule()">Auto-Schedule</button>
       <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ Add Task</button>
     </div>
@@ -3302,6 +3303,15 @@ function renderTasks(){
   updateBulkBar();
 }
 function changePage(d){currentPage+=d;renderTasks();document.querySelector('.task-table-wrap').scrollTop=0}
+// Reset every filter + search back to default
+function clearAllFilters(){
+  const ids=['filterStatus','filterPriority','filterBusiness','filterProject','filterRecurring','filterHard'];
+  ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
+  const sb=document.getElementById('searchBox');if(sb)sb.value='';
+  currentPage=1;
+  renderTasks();
+}
+window.clearAllFilters=clearAllFilters;
 
 // Bulk
 function toggleTaskSelect(id,c){if(c)selectedTasks.add(id);else selectedTasks.delete(id);updateBulkBar()}
