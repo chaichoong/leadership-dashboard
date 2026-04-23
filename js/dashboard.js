@@ -393,7 +393,12 @@
                 local.kpiReturn=ctx._lastKpiDetail||null;
                 local.kpiDetail=ctx._lastKpiDetail||null;
                 local.kpiLastUpdated=new Date().toISOString();
-                local.kpiLastUpdatedBy=(currentUser&&(currentUser.name||currentUser.email))||'dashboard auto';
+                // 'currentUser' is a Task OS concept; on the dashboard it may
+                // not be defined. Fall back to a generic label so the PATCH
+                // never aborts with a ReferenceError.
+                let who='Leadership Dashboard';
+                try{if(typeof currentUser!=='undefined'&&currentUser&&(currentUser.name||currentUser.email))who=currentUser.name||currentUser.email}catch(e){}
+                local.kpiLastUpdatedBy=who;
                 try{
                     const payload={};
                     payload[STRAT_PF.kpiCurrent]=rounded;

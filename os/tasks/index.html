@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2151</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2239</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -5493,9 +5493,12 @@ async function loadAllData(){
 
     // Recompute automated KPI values from fresh task/project data
     try{await refreshAutomatedKpis()}catch(e){console.warn('refreshAutomatedKpis failed',e)}
-    // Recompute every project that has a saved compute function so their
-    // cached KPI Current stays up-to-date on each refresh.
-    try{await recomputeAllKpis()}catch(e){console.warn('recomputeAllKpis failed',e)}
+    // NOTE: recomputeAllKpis() is intentionally NOT called here — the
+    // Task OS doesn't load transactions/costs/tenancies, so finance
+    // compute functions would fail with 'ctx.addDays is not a function'
+    // or data-missing errors. The Leadership Dashboard is the single
+    // authority for running compute; Task OS reads the pre-computed
+    // values + JSON from Airtable.
 
     const r=await autoRescheduleOverdue();
     if(r.count>0)console.log(`Rescheduled ${r.count} overdue`);
