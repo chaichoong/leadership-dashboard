@@ -440,7 +440,7 @@
                     <p style="font-size:11px;color:#64748b;margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
                 </div>
                 <div style="display:flex;gap:6px">
-                    <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Matches</button>
+                    <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Transactions</button>
                     <button onclick="closeReconPanel()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
                 </div>
             </div>
@@ -620,34 +620,174 @@
     }
 
     // ── AI Reconciliation Accuracy Tracking ──
-    function logReconAccuracy(txId, wasAccurate) {
-        const log = JSON.parse(localStorage.getItem('_recon_accuracy_log') || '[]');
-        // Prevent duplicate entries for same transaction
-        if (log.some(e => e.txId === txId)) return;
-        log.push({ date: new Date().toISOString().slice(0, 10), txId, wasAccurate });
-        // Keep max 200 entries to avoid unbounded growth
-        if (log.length > 200) log.splice(0, log.length - 200);
-        localStorage.setItem('_recon_accuracy_log', JSON.stringify(log));
+    // Persistent audit log lives in the Airtable "AI Recon Audit" table (TABLES.reconAudit).
+    // Design for performance as the data accumulates:
+    //   - Every write auto-prunes rows older than 35 days, so the table never grows past ~1 month.
+    //   - Every read uses server-side filterByFormula (last 31 days), so the response is always small.
+    //   - Last-known stats are mirrored to localStorage for instant page paints; background refresh
+    //     reconciles with Airtable and updates the card in place.
+    // The dashboard used to store this log in localStorage only — the data was wiped on Apr 2026
+    // when the browser cleared site storage. Moving to Airtable makes it survive browser resets
+    // and available across devices.
+
+    const RECON_CACHE_KEY = '_recon_accuracy_cache';
+    let _reconStatsCache = null; // in-memory mirror of cache (saves one JSON.parse on refresh)
+
+    // Shared markup for the "AI Reconciliation Accuracy" KPI card. Used by both the initial
+    // cached render in dashboard.js and the async refresh that swaps in fresh data — single
+    // source of truth so the two paths can never drift.
+    function buildAccuracyKPIHtml(stats) {
+        if (!stats) return '';
+        return `
+            <div class="kpi-card">
+                <div class="kpi-card-label">AI Reconciliation Accuracy</div>
+                <div class="kpi-card-value" style="color:${stats.colour}">${stats.pct}%</div>
+                <div class="kpi-card-sub">${stats.accurate}/${stats.total} correct — last 31 days</div>
+                <div style="margin-top:8px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
+                    <div style="height:100%;width:${stats.pct}%;background:${stats.colour};border-radius:3px;transition:width 0.3s"></div>
+                </div>
+                <div style="margin-top:6px;font-size:10px;color:#94a3b8">Target: ≥90% <span style="color:#16a34a">●</span> 75–89% <span style="color:#d97706">●</span> &lt;75% <span style="color:#ef4444">●</span></div>
+            </div>`;
     }
 
+    // Synchronous — returns cached stats for an instant render. Call refreshReconAccuracyStats()
+    // in the background to update.
     function getReconAccuracyStats() {
-        const log = JSON.parse(localStorage.getItem('_recon_accuracy_log') || '[]');
-        if (log.length === 0) return null;
-        // Filter to last 31 days
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - 31);
-        const cutoffStr = cutoff.toISOString().slice(0, 10);
-        let recent = log.filter(e => e.date >= cutoffStr);
-        // Use last 100 if more than 100 in the window
-        if (recent.length > 100) recent = recent.slice(-100);
-        // If fewer than 5 in last 31 days, use last 100 overall
-        if (recent.length < 5) recent = log.slice(-100);
-        const total = recent.length;
-        const accurate = recent.filter(e => e.wasAccurate).length;
-        const pct = Math.round((accurate / total) * 100);
-        const colour = pct >= 90 ? '#16a34a' : pct >= 75 ? '#d97706' : '#ef4444';
-        const label = pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red';
-        return { total, accurate, pct, colour, label };
+        if (_reconStatsCache) return _reconStatsCache;
+        try {
+            const raw = localStorage.getItem(RECON_CACHE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.stats) {
+                _reconStatsCache = parsed.stats;
+                return parsed.stats;
+            }
+        } catch {}
+        return null;
+    }
+
+    // Fetch the last 31 days of audit rows from Airtable, recompute stats, update the cache.
+    // Returns the fresh stats (or null when there are no recent rows).
+    async function refreshReconAccuracyStats() {
+        if (typeof PAT === 'undefined' || !PAT) return _reconStatsCache; // not authed yet
+        try {
+            // Server-side: only rows where Date is within the last 31 days. Payload stays tiny.
+            const formula = encodeURIComponent(`IS_AFTER({Date}, DATEADD(TODAY(), -31, 'days'))`);
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}?pageSize=100&filterByFormula=${formula}&returnFieldsByFieldId=true`;
+            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+            if (!resp.ok) return _reconStatsCache;
+            const data = await resp.json();
+            const records = data.records || [];
+            if (records.length === 0) {
+                _reconStatsCache = null;
+                localStorage.removeItem(RECON_CACHE_KEY);
+                return null;
+            }
+            const total = records.length;
+            const accurate = records.filter(r => r.fields && r.fields[RECAUDIT.wasAccurate]).length;
+            const pct = Math.round((accurate / total) * 100);
+            const colour = pct >= 90 ? '#16a34a' : pct >= 75 ? '#d97706' : '#ef4444';
+            const label = pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red';
+            const stats = { total, accurate, pct, colour, label };
+            _reconStatsCache = stats;
+            try { localStorage.setItem(RECON_CACHE_KEY, JSON.stringify({ ts: Date.now(), stats })); } catch {}
+            return stats;
+        } catch (e) {
+            console.warn('refreshReconAccuracyStats failed:', e);
+            return _reconStatsCache;
+        }
+    }
+
+    // Write one audit row. Fire-and-forget from the caller — errors are logged but don't block
+    // the approval flow. Also kicks off a prune of rows older than 35 days so the table self-cleans.
+    async function logReconAccuracy(txId, wasAccurate) {
+        if (typeof PAT === 'undefined' || !PAT) return;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: {
+                    [RECAUDIT.txId]: txId,
+                    [RECAUDIT.date]: new Date().toISOString().slice(0, 10),
+                    [RECAUDIT.wasAccurate]: !!wasAccurate,
+                }}),
+            });
+            if (!resp.ok) {
+                console.warn('logReconAccuracy write failed:', resp.status);
+                return;
+            }
+            // Background housekeeping — don't await, don't block
+            pruneStaleAudit().catch(() => {});
+            refreshReconAccuracyStats().catch(() => {});
+        } catch (e) {
+            console.warn('logReconAccuracy exception:', e);
+        }
+    }
+
+    // Delete audit rows older than 35 days. Keeps the table small so reads stay fast.
+    // Runs in batches of 10 (Airtable's max per delete request).
+    async function pruneStaleAudit() {
+        if (typeof PAT === 'undefined' || !PAT) return;
+        try {
+            const formula = encodeURIComponent(`IS_BEFORE({Date}, DATEADD(TODAY(), -35, 'days'))`);
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}?pageSize=100&filterByFormula=${formula}`;
+            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const ids = (data.records || []).map(r => r.id);
+            if (ids.length === 0) return;
+            for (let i = 0; i < ids.length; i += 10) {
+                const batch = ids.slice(i, i + 10);
+                const params = new URLSearchParams();
+                batch.forEach(id => params.append('records[]', id));
+                await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}?${params.toString()}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + PAT },
+                });
+            }
+        } catch (e) {
+            console.warn('pruneStaleAudit failed:', e);
+        }
+    }
+
+    // One-shot migration from the legacy localStorage log ("_recon_accuracy_log") to Airtable.
+    // Runs on first dashboard load after this code ships; flips a flag once complete so we never
+    // re-run it. Safe to call repeatedly — no-op after the flag is set.
+    async function migrateLocalReconLog() {
+        if (localStorage.getItem('_recon_audit_migrated') === '1') return;
+        if (typeof PAT === 'undefined' || !PAT) return;
+        let old;
+        try { old = JSON.parse(localStorage.getItem('_recon_accuracy_log') || '[]'); } catch { old = []; }
+        if (!Array.isArray(old) || old.length === 0) {
+            localStorage.setItem('_recon_audit_migrated', '1');
+            localStorage.removeItem('_recon_accuracy_log');
+            return;
+        }
+        try {
+            for (let i = 0; i < old.length; i += 10) {
+                const batch = old.slice(i, i + 10);
+                const records = batch
+                    .filter(e => e && e.txId)
+                    .map(e => ({ fields: {
+                        [RECAUDIT.txId]: String(e.txId),
+                        [RECAUDIT.date]: e.date || new Date().toISOString().slice(0, 10),
+                        [RECAUDIT.wasAccurate]: !!e.wasAccurate,
+                    }}));
+                if (records.length === 0) continue;
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.reconAudit}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records }),
+                });
+                if (!resp.ok) throw new Error('Migration batch failed: HTTP ' + resp.status);
+            }
+            localStorage.setItem('_recon_audit_migrated', '1');
+            localStorage.removeItem('_recon_accuracy_log');
+            refreshReconAccuracyStats().catch(() => {});
+        } catch (e) {
+            // Don't set the flag — will retry next load
+            console.warn('migrateLocalReconLog failed, will retry next load:', e);
+        }
     }
 
     async function approveRecon(idx) {
@@ -744,16 +884,36 @@
 
     async function approveAllRecon() {
         const results = window._reconResults || [];
-        const toApprove = results.filter(r => r.status === 'suggestion');
-        if (toApprove.length === 0) { alert('No suggestions to approve.'); return; }
-        if (!confirm(`Approve all ${toApprove.length} matched suggestions? This will mark them as reconciled in Airtable.`)) return;
+
+        // A row is approveable if it's not already done AND has at least one field filled in
+        // (either an AI suggestion OR a manually-picked dropdown value).
+        // This stops "Approve All" from silently skipping rows the user filled in by hand.
+        const rowHasData = (i) =>
+            !!(resolveDropdownId('recon-cat-' + i) ||
+               resolveDropdownId('recon-subcat-' + i) ||
+               resolveDropdownId('recon-business-' + i) ||
+               resolveDropdownId('recon-tenant-' + i) ||
+               resolveDropdownId('recon-tenancy-' + i) ||
+               resolveDropdownId('recon-unit-' + i) ||
+               resolveDropdownId('recon-property-' + i) ||
+               resolveDropdownId('recon-cost-' + i));
+
+        const approveIdxs = [];
+        for (let i = 0; i < results.length; i++) {
+            if (results[i].status === 'approved') continue;
+            if (results[i].status === 'suggestion' || rowHasData(i)) approveIdxs.push(i);
+        }
+        const skipped = results.filter(r => r.status !== 'approved').length - approveIdxs.length;
+
+        if (approveIdxs.length === 0) { alert('No transactions to approve. Fill in at least one field on a row first.'); return; }
+        const skipMsg = skipped > 0 ? ` (${skipped} empty row${skipped === 1 ? '' : 's'} will be skipped — fill in a field to include them)` : '';
+        if (!confirm(`Approve ${approveIdxs.length} transaction${approveIdxs.length === 1 ? '' : 's'}? This will mark them as reconciled in Airtable.${skipMsg}`)) return;
 
         let successCount = 0;
         let failCount = 0;
         const statusEl = document.getElementById('reconStatus');
-        for (let i = 0; i < results.length; i++) {
-            if (results[i].status !== 'suggestion') continue;
-            if (statusEl) statusEl.textContent = `Processing ${successCount + failCount + 1} of ${toApprove.length}...`;
+        for (const i of approveIdxs) {
+            if (statusEl) statusEl.textContent = `Processing ${successCount + failCount + 1} of ${approveIdxs.length}...`;
 
             // Try up to 3 attempts per transaction
             let succeeded = false;

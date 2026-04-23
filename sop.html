@@ -325,14 +325,14 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <td>Click to expand — shows per-cost breakdown sorted by due day</td>
         </tr>
         <tr>
-          <td><strong>Monthly Gross Profit</strong></td>
-          <td>Two figures: <span style="color:var(--warning)"><strong>amber</strong></span> = In Payment income minus costs; <span style="color:var(--success)"><strong>green</strong></span> = (In Payment + CFV Actioned) minus costs</td>
-          <td>Range reflects uncertainty from CFV Actioned tenancies</td>
+          <td><strong>Monthly Operating Cushion</strong></td>
+          <td>Monthly income minus monthly fixed costs. Two figures: <span style="color:var(--warning)"><strong>amber</strong></span> = In Payment income minus costs; <span style="color:var(--success)"><strong>green</strong></span> = (In Payment + CFV Actioned) minus costs</td>
+          <td>Range reflects uncertainty from CFV Actioned tenancies. Distinct from <em>gross profit</em> (revenue − COGS) and <em>operating profit</em> (revenue − fixed − variable costs).</td>
         </tr>
         <tr>
-          <td><strong>Gross Margin</strong></td>
-          <td>Gross Profit &divide; Monthly Income &times; 100, shown as a % range (amber to green)</td>
-          <td>Calculated independently for low and high gross profit figures</td>
+          <td><strong>Operating Cushion Margin</strong></td>
+          <td>Operating Cushion &divide; Monthly Income &times; 100, shown as a % range (amber to green)</td>
+          <td>Calculated independently for low and high operating cushion figures</td>
         </tr>
       </tbody>
     </table>
@@ -353,7 +353,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tr><td><code>CFV_TARGET_GBP</code></td><td><strong>&pound;1,500/month</strong></td><td>CFV exposure allowance</td></tr>
         <tr><td><code>CLEAR_PROFIT_TARGET</code></td><td><strong>&pound;10,000/month</strong></td><td>Target clear profit after all variable costs</td></tr>
         <tr><td><code>variableCostReserve</code></td><td><strong>&pound;6,000/month</strong></td><td>Sum of maintenance + wages + CFV budgets (calculated)</td></tr>
-        <tr><td><code>requiredGrossProfit</code></td><td><strong>&pound;16,000/month</strong></td><td>Clear profit target + variable cost reserve (calculated)</td></tr>
+        <tr><td><code>requiredOperatingCushion</code></td><td><strong>&pound;16,000/month</strong></td><td>Clear profit target + variable cost reserve (calculated)</td></tr>
         <tr><td><code>SANTANDER_CC_LIMIT</code></td><td><strong>&pound;5,500</strong></td><td>Santander credit card limit (owed = limit minus available balance)</td></tr>
       </tbody>
     </table>
@@ -373,7 +373,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </ol>
     <div class="info-box info">
       <span class="ib-icon">&#x1F4BE;</span>
-      <div>The accuracy log is stored in <code>localStorage</code> under <code>_recon_accuracy_log</code>. The <code>getReconAccuracyStats()</code> function uses the last 31 days of data, or the last 100 entries if fewer than 5 exist in the 31-day window. If no log entries exist, the accuracy card is not shown.</div>
+      <div>The accuracy log is stored in the Airtable <strong>AI Recon Audit</strong> table (<code>TABLES.reconAudit</code>), one row per approved transaction where the AI made a suggestion. <code>getReconAccuracyStats()</code> returns a cached copy for an instant paint; <code>refreshReconAccuracyStats()</code> runs in the background on every dashboard load and pulls rows from the last 31 days only (server-side <code>filterByFormula</code>, so the payload stays small). Each write calls <code>pruneStaleAudit()</code> which deletes rows older than 35 days &mdash; this keeps the table ~1 month of data so reads never slow down. On first load after this change ships, <code>migrateLocalReconLog()</code> copies any historical entries from the legacy <code>_recon_accuracy_log</code> localStorage key into Airtable and then clears it.</div>
     </div>
   </div>
 </div>
@@ -455,9 +455,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <td>Same traffic light logic</td>
         </tr>
         <tr>
-          <td><strong>Target Gross Profit</strong></td>
-          <td>Best-case gross profit (In Payment + CFV Actioned income minus costs) vs required &pound;16,000</td>
-          <td><strong>&pound;16,000</strong> (<code>requiredGrossProfit</code>)</td>
+          <td><strong>Target Operating Cushion</strong></td>
+          <td>Best-case operating cushion (In Payment + CFV Actioned income minus fixed costs) vs required &pound;16,000</td>
+          <td><strong>&pound;16,000</strong> (<code>requiredOperatingCushion</code>)</td>
           <td>Green if actual &ge; target, amber if below</td>
         </tr>
       </tbody>
@@ -468,7 +468,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="info-box tip">
       <span class="ib-icon">&#x1F4A1;</span>
-      <div><strong>Target Gross Profit breakdown:</strong> Expanding the Target Gross Profit card shows: maintenance budget (&pound;3,000), wages budget (&pound;1,500), CFV allowance (&pound;1,500), variable cost reserve (&pound;6,000), clear profit target (&pound;10,000), and required gross profit (&pound;16,000).</div>
+      <div><strong>Target Operating Cushion breakdown:</strong> Expanding the Target Operating Cushion card shows: maintenance budget (&pound;3,000), wages budget (&pound;1,500), CFV allowance (&pound;1,500), variable cost reserve (&pound;6,000), clear profit target (&pound;10,000), and required operating cushion (&pound;16,000). The operating cushion must be large enough to absorb all variable costs and still leave the clear profit target behind &mdash; this becomes the <em>operating profit</em>.</div>
     </div>
   </div>
 </div>

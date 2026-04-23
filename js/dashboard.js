@@ -434,31 +434,23 @@
         const activeCosts = costs.filter(r => isCostActive(r));
         const monthlyCosts = activeCosts.reduce((s, r) => s + (Number(getField(r, F.costExpected)) || 0), 0);
 
-        // Profit & margin ranges: low = In Payment only minus costs, high = full income minus costs
-        const grossProfitLow = inPaymentIncome - monthlyCosts;
-        const grossProfitHigh = monthlyIncome - monthlyCosts;
-        const grossMarginLow = inPaymentIncome > 0 ? (grossProfitLow / inPaymentIncome * 100).toFixed(2) : '0.00';
-        const grossMarginHigh = monthlyIncome > 0 ? (grossProfitHigh / monthlyIncome * 100).toFixed(2) : '0.00';
-        // Keep single values for backward compat in other sections
-        const grossProfit = grossProfitHigh;
-        const grossMargin = grossMarginHigh;
+        // Operating cushion = revenue − fixed costs. (Distinct from gross profit = revenue − COGS,
+        // and from operating profit = revenue − fixed − variable costs, which we'll compute elsewhere.)
+        // Low = In Payment only minus costs; High = (In Payment + CFV Actioned) income minus costs.
+        const operatingCushionLow = inPaymentIncome - monthlyCosts;
+        const operatingCushionHigh = monthlyIncome - monthlyCosts;
+        const operatingCushionMarginLow = inPaymentIncome > 0 ? (operatingCushionLow / inPaymentIncome * 100).toFixed(2) : '0.00';
+        const operatingCushionMarginHigh = monthlyIncome > 0 ? (operatingCushionHigh / monthlyIncome * 100).toFixed(2) : '0.00';
 
         // Sort income tenancies by due day asc, costs by due day asc
         const incSorted = [...incTenancies].sort((a, b) => (getNumVal(a, F.tenDueDay, 99)) - (getNumVal(b, F.tenDueDay, 99)));
         const costSorted = [...activeCosts].sort((a, b) => (getNumVal(a, F.costDueDay, 99)) - (getNumVal(b, F.costDueDay, 99)));
 
         // Unreconciled transactions bar (above Financial Overview, alongside Balance Calculator)
-        const accStats = getReconAccuracyStats();
-        const accCard = accStats ? `
-            <div class="kpi-card">
-                <div class="kpi-card-label">AI Reconciliation Accuracy</div>
-                <div class="kpi-card-value" style="color:${accStats.colour}">${accStats.pct}%</div>
-                <div class="kpi-card-sub">${accStats.accurate}/${accStats.total} correct — last ${accStats.total >= 100 ? '100' : '31 days'}</div>
-                <div style="margin-top:8px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
-                    <div style="height:100%;width:${accStats.pct}%;background:${accStats.colour};border-radius:3px;transition:width 0.3s"></div>
-                </div>
-                <div style="margin-top:6px;font-size:10px;color:#94a3b8">Target: ≥90% <span style="color:#16a34a">●</span> 75–89% <span style="color:#d97706">●</span> &lt;75% <span style="color:#ef4444">●</span></div>
-            </div>` : '';
+        // Accuracy stats now live in Airtable (TABLES.reconAudit). getReconAccuracyStats() returns
+        // cached values for an instant paint; the async refresh below rehydrates from Airtable and
+        // swaps in fresh HTML without disturbing the Unreconciled card next to it.
+        const accCard = buildAccuracyKPIHtml(getReconAccuracyStats());
         document.getElementById('reconBar').innerHTML = `
             ${expandableCard('Unreconciled Transactions', unreconciledTx.length, `Santander + TNT Mgt Zempler`,
                 (unreconciledTx.length === 0
@@ -469,8 +461,18 @@
                     <span style="font-size:11px;color:#94a3b8" id="reconStatus"></span>
                 </div>`
             )}
-            ${accCard}
+            <div id="accuracyKpiCard">${accCard}</div>
         `;
+        // Background: migrate legacy localStorage log → Airtable (one-shot, no-op after first run),
+        // then refresh from Airtable and swap in the up-to-date card.
+        (async () => {
+            try { await migrateLocalReconLog(); } catch {}
+            try {
+                const fresh = await refreshReconAccuracyStats();
+                const host = document.getElementById('accuracyKpiCard');
+                if (host) host.innerHTML = buildAccuracyKPIHtml(fresh);
+            } catch {}
+        })();
 
         document.getElementById('financialCards').innerHTML = `
             <div class="kpi-card">
@@ -506,14 +508,14 @@
                 'text-red'
             )}
             <div class="kpi-card">
-                <div class="kpi-card-label">Monthly Gross Profit</div>
-                <div class="kpi-card-value"><span style="color:#d97706">£${Math.floor(grossProfitLow).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">£${Math.floor(grossProfitHigh).toLocaleString('en-GB')}</span></div>
-                <div class="kpi-card-sub">In Payment only → incl. CFV Actioned</div>
+                <div class="kpi-card-label">Monthly Operating Cushion</div>
+                <div class="kpi-card-value"><span style="color:#d97706">£${Math.floor(operatingCushionLow).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span></div>
+                <div class="kpi-card-sub">Monthly income minus monthly fixed costs — In Payment only → incl. CFV Actioned</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label">Gross Margin</div>
-                <div class="kpi-card-value"><span style="color:#d97706">${grossMarginLow}%</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">${grossMarginHigh}%</span></div>
-                <div class="kpi-card-sub">In Payment only → incl. CFV Actioned</div>
+                <div class="kpi-card-label">Operating Cushion Margin</div>
+                <div class="kpi-card-value"><span style="color:#d97706">${operatingCushionMarginLow}%</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">${operatingCushionMarginHigh}%</span></div>
+                <div class="kpi-card-sub">Operating Cushion ÷ Monthly Income — In Payment only → incl. CFV Actioned</div>
             </div>
         `;
 
@@ -715,8 +717,10 @@
 
         // Variable cost reserve (sum of budgets)
         const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £6,000
-        // Required gross profit = clear profit target + variable cost budgets
-        const requiredGrossProfit = CLEAR_PROFIT_TARGET + variableCostReserve; // £16,000
+        // Required operating cushion = clear profit target + variable cost budgets.
+        // The operating cushion must be big enough to absorb variable costs AND still leave the
+        // clear profit target behind — anything less means we're eating into the profit target.
+        const requiredOperatingCushion = CLEAR_PROFIT_TARGET + variableCostReserve; // £16,000
 
         // Traffic light uses £ targets now (actual vs budget)
         const maintNum = maintSpend;
@@ -734,9 +738,9 @@
             </div>`;
         }
 
-        // Gross profit progress towards target
-        const gpProgressPct = requiredGrossProfit > 0 ? Math.min(grossProfitHigh / requiredGrossProfit * 100, 150).toFixed(1) : '0.0';
-        const gpOnTrack = grossProfitHigh >= requiredGrossProfit;
+        // Operating cushion progress towards target
+        const ocProgressPct = requiredOperatingCushion > 0 ? Math.min(operatingCushionHigh / requiredOperatingCushion * 100, 150).toFixed(1) : '0.0';
+        const ocOnTrack = operatingCushionHigh >= requiredOperatingCushion;
 
         document.getElementById('operationalCards').innerHTML = `
             ${expandableCard('Rental Income (31d)', fmt(rentalInc30), 'Actual from transactions',
@@ -768,11 +772,11 @@
                 targetProgressBarGBP(cfvNum, CFV_TARGET_GBP)
             )}
             <div class="kpi-card clickable" onclick="toggleCard(this)">
-                <div class="kpi-card-label">Target Gross Profit <span class="chevron">▸</span></div>
-                <div class="kpi-card-value"><span class="${gpOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(grossProfitHigh).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">/</span><span style="color:#1e293b">£${Math.floor(requiredGrossProfit).toLocaleString('en-GB')}</span></div>
-                <div class="kpi-card-sub">${gpProgressPct}% of target | ${gpOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredGrossProfit - grossProfitHigh)}</span>`}</div>
+                <div class="kpi-card-label">Target Operating Cushion <span class="chevron">▸</span></div>
+                <div class="kpi-card-value"><span class="${ocOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">/</span><span style="color:#1e293b">£${Math.floor(requiredOperatingCushion).toLocaleString('en-GB')}</span></div>
+                <div class="kpi-card-sub">${ocProgressPct}% of target | ${ocOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredOperatingCushion - operatingCushionHigh)}</span>`}</div>
                 <div class="progress-bar" style="position:relative">
-                    <div class="progress-bar-fill ${gpOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(gpProgressPct), 100)}%"></div>
+                    <div class="progress-bar-fill ${ocOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(ocProgressPct), 100)}%"></div>
                 </div>
                 <div class="kpi-card-detail">
                     <div style="font-size:12px;color:#64748b">
@@ -781,7 +785,7 @@
                         <div style="display:flex;justify-content:space-between;padding:3px 0"><span>CFV allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
                         <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
                         <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px;font-weight:600;color:#1e293b"><span>Required gross profit</span><span>${fmt(requiredGrossProfit)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px;font-weight:600;color:#1e293b"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
                     </div>
                 </div>
             </div>
@@ -1029,10 +1033,10 @@
 
         document.getElementById('aiCommentary').innerHTML = `
             <h3 style="color:#1e293b;font-size:15px;margin:0 0 8px">Financial Health</h3>
-            <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the gross margin ranges from ${grossMarginLow}% to ${grossMarginHigh}%. ${Number(grossMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
+            <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
 
-            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Profit Targets</h3>
-            <p>Target gross profit: ${fmt(requiredGrossProfit)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case gross profit is ${fmt(grossProfitHigh)} — ${gpOnTrack ? `a surplus of ${fmt(grossProfitHigh - requiredGrossProfit)} above target. You are on track.` : `a shortfall of ${fmt(requiredGrossProfit - grossProfitHigh)} (${gpProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
+            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Operating Cushion Target</h3>
+            <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
 
             <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
             <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
@@ -1081,7 +1085,7 @@
             updateDashboardState({
                 openingBalance, santBal, zempBal,
                 monthlyIncome, inPaymentIncome, monthlyCosts,
-                grossProfitHigh, grossProfitLow, grossMarginHigh, grossMarginLow,
+                operatingCushionHigh, operatingCushionLow, operatingCushionMarginHigh, operatingCushionMarginLow,
                 activeTenanciesCount: activeTenancies.length,
                 inPaymentCount: inPaymentTenancies.length,
                 cfvCount: cfvTenancies.length,

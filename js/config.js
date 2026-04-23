@@ -45,6 +45,14 @@
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
+        reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
+    };
+
+    // AI Recon Audit field IDs
+    const RECAUDIT = {
+        txId:        'fld1n4hxZ0XD5FaR9',  // singleLineText — Airtable record ID of reconciled tx
+        date:        'fldJC9UcHCaXAaxKV',  // date (ISO) — when logged
+        wasAccurate: 'fld9n62GxQijQWqSA',  // checkbox — AI suggestion matched final values
     };
 
     // Dashboard Invoices field IDs (Airtable)

@@ -17,7 +17,7 @@
     // Quick actions — rotate based on active tab
     const AI_ACTIONS = {
         overview: [
-            { label: 'Summarise Financial Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Give me a concise summary of the current financial health based on the dashboard data. Include opening balance, income vs costs, gross profit, and any concerns.' },
+            { label: 'Summarise Financial Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Give me a concise summary of the current financial health based on the dashboard data. Include opening balance, income vs costs, operating cushion (revenue minus fixed costs), and any concerns.' },
             { label: 'Cash Flow Report', model: 'claude-sonnet-4-20250514', maxTokens: 2000, prompt: 'Generate a detailed 31-day cash flow forecast report. Include the daily projections, highlight risk dates where the balance drops low, and suggest actions to maintain positive cash flow.' },
             { label: 'Compare vs Budget', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Compare actual spending against budget targets for maintenance, wages, and CFV. Identify which are over/under budget and by how much. Suggest corrective actions.' },
             { label: 'Weekly Briefing', model: 'claude-sonnet-4-20250514', maxTokens: 3000, prompt: 'Generate a professional weekly briefing I can share with stakeholders. Cover financial position, operational metrics, key risks, and recommended actions. Format with clear headers.' },

@@ -50,13 +50,19 @@
         }
 
         // Extract keywords from a label (e.g. "Smith – Unit 6, Duckworth Building")
-        // Returns words of 3+ chars, lowercased, excluding common stop words
+        // Returns words of 3+ chars, lowercased, excluding common stop words.
+        // Dedupes: labels like "Collins – COLLINS – UNIT 1 – 82 DEVON STREET" (surname + ref where
+        // ref starts with surname) would otherwise emit "collins" twice, which inflated
+        // keywordMatchCount and mis-triggered the "2+ keyword = strong match" clearing rule —
+        // e.g. a Collins-Eleventh-Street payment would clear a Collins-Devon-Street forecast
+        // because "collins" appearing in the tx description counted for both label tokens.
         const STOP_WORDS = new Set(['the','and','for','unit','from','with','payment','rent','rental','income','cost','ltd','limited']);
         function extractKeywords(label) {
-            return label.toLowerCase()
+            const words = label.toLowerCase()
                 .replace(/[^a-z0-9\s]/g, ' ')
                 .split(/\s+/)
                 .filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+            return [...new Set(words)];
         }
 
         // Count how many keywords from a label appear in the transaction text
@@ -84,11 +90,18 @@
             if (reportAmt <= 0 && rawAmt <= 0) return;
             const searchText = txSearchText(r);
 
+            // Pull the tx's explicit Tenancy link(s) so we can prefer definitive matches over
+            // keyword heuristics. Field returns [{id,name},...] or [] — normalise to an array of IDs.
+            const linkedTen = getField(r, F.txTenancy);
+            const tenancyIds = Array.isArray(linkedTen)
+                ? linkedTen.map(x => (x && typeof x === 'object') ? x.id : x).filter(Boolean)
+                : (linkedTen ? [(typeof linkedTen === 'object') ? linkedTen.id : linkedTen] : []);
+
             if (isIncome) {
                 // Handle split transactions (e.g. Serco bulk payment)
                 const count = rawAmt > reportAmt + 0.01 ? Math.round(rawAmt / reportAmt) : 1;
                 for (let i = 0; i < count; i++) {
-                    reconciledInflows.push({ amount: reportAmt, searchText, used: false });
+                    reconciledInflows.push({ amount: reportAmt, searchText, tenancyIds, used: false });
                 }
             } else if (!isExcludedOutflow) {
                 // Only include in outflow pool if NOT a Transfer or other excluded category
@@ -102,7 +115,31 @@
         });
 
         // Multi-factor match: does any unused reconciled inflow match this projected item?
-        function isInflowAlreadyCleared(amount, label) {
+        //
+        // Priority 1 — EXPLICIT link on the reconciled transaction. If the tx's Tenancy linked
+        // field contains this tenancy, that's definitive: stop looking. Also, any tx whose link
+        // points to a DIFFERENT tenancy is never allowed to clear this forecast (it belongs
+        // elsewhere) — this stops Lettings-Unit-5's paid rent silently clearing Unit-6's forecast
+        // when a letting agent uses one bank reference for a multi-unit building.
+        //
+        // Priority 2 — KEYWORD match between tenancy label and tx vendor/description. Every path
+        // requires at least 1 keyword overlap: amount alone is NOT enough. Many tenancies share
+        // the same rent figure (e.g. £897.52) and silently clearing a forecast by amount hid the
+        // Mayes tenancy forecast in Apr 2026 when unrelated Pinder / Murcutt payments came in.
+        function isInflowAlreadyCleared(amount, label, forecastTenancyId) {
+            // Priority 1: explicit tenancy link
+            if (forecastTenancyId) {
+                for (let i = 0; i < reconciledInflows.length; i++) {
+                    if (reconciledInflows[i].used) continue;
+                    if ((reconciledInflows[i].tenancyIds || []).includes(forecastTenancyId)) {
+                        reconciledInflows[i].used = true;
+                        return true;
+                    }
+                }
+            }
+
+            // Priority 2: keyword + amount heuristic (for txs without a link, or where the link
+            // points to this tenancy but P1 didn't find it for some reason).
             const keywords = extractKeywords(label);
             let bestIdx = -1;
             let bestScore = 0;
@@ -110,6 +147,9 @@
             for (let i = 0; i < reconciledInflows.length; i++) {
                 if (reconciledInflows[i].used) continue;
                 const tx = reconciledInflows[i];
+                // Skip txs whose Tenancy link points to a DIFFERENT tenancy — they genuinely
+                // belong elsewhere and must not be allowed to cross-clear.
+                if (forecastTenancyId && (tx.tenancyIds || []).length > 0 && !tx.tenancyIds.includes(forecastTenancyId)) continue;
                 const kwCount = keywordMatchCount(tx.searchText, keywords);
                 const amtClose = Math.abs(tx.amount - amount) < 0.05;
                 const amtWithin30 = amount > 0 && Math.abs(tx.amount - amount) / amount < 0.30;
@@ -119,16 +159,17 @@
                     bestIdx = i;
                     break;
                 }
-                // Good match: 1 keyword + amount within 30%
+                // Solid match: 1 keyword + exact amount (within 5p)
+                if (kwCount >= 1 && amtClose && 2.5 > bestScore) {
+                    bestIdx = i;
+                    bestScore = 2.5;
+                }
+                // Acceptable match: 1 keyword + amount within 30% (handles letting agent deductions)
                 if (kwCount >= 1 && amtWithin30 && kwCount + 1 > bestScore) {
                     bestIdx = i;
                     bestScore = kwCount + 1;
                 }
-                // Exact amount match (original behaviour)
-                if (amtClose && bestIdx === -1) {
-                    bestIdx = i;
-                    bestScore = 0.5;
-                }
+                // No amount-only fallback — a matching amount alone is not evidence the same tenant paid.
             }
             if (bestIdx >= 0) { reconciledInflows[bestIdx].used = true; return true; }
             return false;
@@ -201,7 +242,7 @@
 
             projectDates(today, dueDay, freq, getField(r, F.tenDueDay), null).forEach(dk => {
                 if (dayMap[dk]) {
-                    if (isInReconWindow(dk) && isInflowAlreadyCleared(rent, label)) return;
+                    if (isInReconWindow(dk) && isInflowAlreadyCleared(rent, label, r.id)) return;
                     const isUC = tenancyIsUC[r.id] || false;
                     dayMap[dk].inflows.push({ name: label, amount: rent, isUC, tenancyId: r.id, tenantId, unitId, dueDate: dk });
                 }
