@@ -837,13 +837,26 @@ async function saveRecord() {
 // Project record's Name if it has changed. Makes rename-in-Strategy-OS
 // flow through to Projects OS automatically.
 async function propagateQpNamesToLinkedProjects(savedFields) {
-    if (!currentRecord || !currentRecord.fields) {
+    if (!currentRecord || !currentRecord.id) {
         console.log('[propagate] no currentRecord — skipping');
         return;
     }
+    // Airtable's PATCH response may not include fields that weren't in the
+    // request body, which is why the linkedProject fields look empty here
+    // after saveRecord. Do a fresh GET with returnFieldsByFieldId so we
+    // always have the complete record before propagating.
+    let recordFields = currentRecord.fields || {};
+    try {
+        const fresh = await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}?returnFieldsByFieldId=true`);
+        recordFields = fresh.fields || recordFields;
+        currentRecord.fields = recordFields;
+        console.log('[propagate] fresh record fetched, field count:', Object.keys(recordFields).length);
+    } catch (e) {
+        console.warn('[propagate] fresh fetch failed, falling back to cached record', e);
+    }
     for (let i = 0; i < OBJSTRAT.qpDetails.length; i++) {
         const det = OBJSTRAT.qpDetails[i];
-        const linkArr = currentRecord.fields[det.linkedProject];
+        const linkArr = recordFields[det.linkedProject];
         const linkedId = Array.isArray(linkArr) && linkArr[0]
             ? (typeof linkArr[0] === 'object' ? linkArr[0].id : linkArr[0])
             : null;
