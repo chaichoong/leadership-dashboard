@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1434</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1444</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2839,21 +2839,58 @@ function dragSideTask(e,taskId){
   e.dataTransfer.effectAllowed='move';
 }
 // Double-click an empty slot in the My Day timeline to create a task
-// already pre-scheduled to that start time. Saves the extra step of
-// Add Task → drag onto timeline.
+// INLINE at that start time. Shows a compact name input right on the
+// timeline; Enter creates the task with today's defaults (15 min,
+// Not Urgent, Real Estate, current user) pinned to the clicked slot.
+// Shift+Enter / Escape = cancel. Click-away = cancel.
 function tlDoubleClickAddTask(e){
-  // Ignore double-clicks that land on an existing block (task/event/routine)
   const target=e.target;
   if(target&&target.closest&&target.closest('.tl-block'))return;
   const canvas=document.getElementById('tlCanvas');if(!canvas)return;
+  // Remove any existing inline input
+  const old=document.getElementById('tlInlineAdd');if(old)old.remove();
   const rect=canvas.getBoundingClientRect();
   const config=getWorkConfig();
   const y=e.clientY-rect.top;
   let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
   minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
-  // Remember the slot so the modal can schedule the new task at this time
-  window._pendingCreateStartMin=minOfDay;
-  openCreateTaskModal();
+  const top=(minOfDay-config.startHour*60)*PIXELS_PER_MIN;
+  // Default 15-minute slot height
+  const defaultMins=15;
+  const height=Math.max(26,defaultMins*PIXELS_PER_MIN);
+  const timeLabel=minutesToTime(minOfDay)+'–'+minutesToTime(minOfDay+defaultMins);
+  const wrap=document.createElement('div');
+  wrap.id='tlInlineAdd';
+  wrap.className='tl-block task';
+  wrap.style.cssText=`top:${top}px;height:${height}px;background:var(--bg-surface);border:1.5px dashed var(--accent);display:flex;flex-direction:column;justify-content:center;padding:4px 8px;z-index:5`;
+  wrap.innerHTML=`
+    <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">+ Add at ${timeLabel}</div>
+    <input id="tlInlineInput" type="text" placeholder="Task name (Enter to save · Esc to cancel)" style="width:100%;border:none;outline:none;background:transparent;font-size:13px;font-weight:600;color:var(--text-primary);padding:0" />`;
+  canvas.appendChild(wrap);
+  const input=document.getElementById('tlInlineInput');
+  input.focus();
+  let settled=false;
+  const commit=async()=>{
+    if(settled)return;settled=true;
+    const name=input.value.trim();
+    if(!name){wrap.remove();return}
+    wrap.style.opacity='0.6';input.disabled=true;
+    try{
+      const created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min'});
+      if(created&&created.id){
+        saveStartTime(todayStr(),created.id,minOfDay);
+        toast(`Added "${name}" at ${minutesToTime(minOfDay)}`);
+      }
+    }catch(err){toast('Create failed: '+(err&&err.message||'unknown'),true)}
+    wrap.remove();
+    try{renderMyDay()}catch(e){}
+  };
+  const cancel=()=>{if(!settled){settled=true;wrap.remove()}};
+  input.addEventListener('keydown',(ev)=>{
+    if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();commit()}
+    else if(ev.key==='Escape'){ev.preventDefault();cancel()}
+  });
+  input.addEventListener('blur',()=>{setTimeout(()=>{if(!settled)cancel()},150)});
 }
 window.tlDoubleClickAddTask=tlDoubleClickAddTask;
 
