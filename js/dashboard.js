@@ -246,6 +246,22 @@
             costIdToBiz[co.id]=bizNames;
             costIdToInactive[co.id]=!!getField(co,'fldQJPGLFMbwVelsW');
         });
+        // Tenancy ID → friendly label. Primary field on Tenancies isn't
+        // human-readable, so build "Unit-Ref — Surname" using tenRef +
+        // tenSurname (e.g. "34CR — Smith"). Falls back to whichever is
+        // present, then to the ID.
+        const tenIdToLabel={};
+        const getTenField=(r,fid)=>{
+            const v=r&&r.fields?r.fields[fid]:undefined;
+            if(Array.isArray(v))return v[0]||'';
+            return v||'';
+        };
+        (allTenancies||[]).forEach(tn=>{
+            const ref=String(getTenField(tn,'fldyNVvFn4x8GY14q')||'').trim();
+            const surname=String(getTenField(tn,'fldOXazTqBWieEOK2')||'').trim();
+            let label=ref && surname ? `${ref} — ${surname}` : (ref||surname||'');
+            tenIdToLabel[tn.id]=label||tn.id;
+        });
         // Simplify transactions into a flat shape the compute function can reason over
         const txs=(allTransactions||[]).map(tx=>{
             const bizLinks=getField(tx,'fldX1aFlJyzpXGhbF')||[];
@@ -261,9 +277,13 @@
             const reconciled=!!getField(tx,'fldxKX1IbIFcAOnn5');
             const vendor=getField(tx,'fld0Xr8sboQ0ekJQJ')||'';
             const description=getField(tx,'fldsbuAJCTsXHug4C')||'';
-            // Tenancy link (for rental income rows) — show the tenancy's name/primary-field value
+            // Tenancy link (for rental income rows). Resolve each linked-record
+            // id to the friendly "Unit Ref — Surname" label built above.
             const tenLinks=getField(tx,'fldPmAMmxwqs4SdPa')||[];
-            const tenancyNames=(Array.isArray(tenLinks)?tenLinks:[]).map(x=>typeof x==='object'?(x.name||x.id||''):x).filter(Boolean);
+            const tenancyNames=(Array.isArray(tenLinks)?tenLinks:[]).map(x=>{
+                const id=typeof x==='object'?x.id:x;
+                return tenIdToLabel[id]||(typeof x==='object'?(x.name||x.id):x)||'';
+            }).filter(Boolean);
             return {
                 id:tx.id,
                 date:(date||'').slice(0,10),
