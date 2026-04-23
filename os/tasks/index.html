@@ -660,9 +660,11 @@ const PROJECT_FIELD_IDS = Object.values(PF);
 // picker UI and for syncing collaborators to Task.Collaborators.
 const TEAM_MEMBERS_TABLE = 'tblco0p2OnlLQVAX7';
 const TM = {
-  name:   'flds7xoRFQhcRTnbB',  // formula — display name
-  member: 'fldh16yvEgBy8uLKQ',  // singleCollaborator — Airtable user
-  active: 'fld2YLfcPqSe6b60u',  // checkbox — only Active members appear in the UI
+  name:          'flds7xoRFQhcRTnbB', // formula primary — often the Airtable profile display name
+  member:        'fldh16yvEgBy8uLKQ', // singleCollaborator — Airtable user
+  active:        'fld2YLfcPqSe6b60u', // checkbox — only Active members appear in the UI
+  preferredName: 'fldFyTZu3vu1a7X3a', // singleLineText — friendly name override
+  fullLegalName: 'fld1DYEbtyVsO2GVP', // singleLineText — fallback when preferred is blank
 };
 let allTeamMembers = [];
 
@@ -4895,7 +4897,7 @@ async function loadAllData(){
       fetchCalendarEvents(),
       // Only fetch team members flagged Active — keeps retired / legacy
       // collaborators out of the picker without deleting historical records.
-      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member,TM.active],'{Active}=TRUE()').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
+      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member,TM.active,TM.preferredName,TM.fullLegalName],'{Active}=TRUE()').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
     ]);
     allTasks=rawTasks.map(parseTask);
     if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);
@@ -4903,7 +4905,14 @@ async function loadAllData(){
     calendarEvents=cal;
     allTeamMembers=(rawTeam||[]).map(r=>{
       const m=r.fields?.[TM.member];
-      return{id:r.id,name:r.fields?.[TM.name]||'(Unknown)',email:m?.email||''};
+      // Preferred Name → Full Legal Name → Airtable profile Name. Handles
+      // cases where a collaborator's Airtable user-name is not the friendly
+      // display name we want (e.g. "Robert jackson" → "Rob Jackson").
+      const displayName=(r.fields?.[TM.preferredName]||'').trim()
+        ||(r.fields?.[TM.fullLegalName]||'').trim()
+        ||(r.fields?.[TM.name]||'').trim()
+        ||'(Unknown)';
+      return{id:r.id,name:displayName,email:m?.email||''};
     }).filter(m=>m.email);
     try{populateProjectFilterOptions()}catch(e){}
 

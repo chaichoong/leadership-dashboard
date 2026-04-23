@@ -853,7 +853,13 @@ const PROJ_F_READ = { projCollabs: 'fldN5l2H4WCsM0S3x' };
 // the Airtable user emails that Task.Collaborators (multipleCollaborators)
 // needs. Loaded lazily on first push.
 const TEAM_MEMBERS_TABLE = 'tblco0p2OnlLQVAX7';
-const TM_F = { name: 'flds7xoRFQhcRTnbB', member: 'fldh16yvEgBy8uLKQ', active: 'fld2YLfcPqSe6b60u' };
+const TM_F = {
+    name:          'flds7xoRFQhcRTnbB',
+    member:        'fldh16yvEgBy8uLKQ',
+    active:        'fld2YLfcPqSe6b60u',
+    preferredName: 'fldFyTZu3vu1a7X3a',
+    fullLegalName: 'fld1DYEbtyVsO2GVP',
+};
 let teamMembersCache = null; // { recId: { name, email } }
 
 async function ensureTeamMembersLoaded() {
@@ -872,7 +878,12 @@ async function ensureTeamMembersLoaded() {
         (data.records || []).forEach(r => {
             const memberObj = r.fields?.[TM_F.member];
             const email = memberObj?.email || '';
-            if (email) teamMembersCache[r.id] = { name: r.fields?.[TM_F.name] || '', email };
+            if (!email) return;
+            const name = (r.fields?.[TM_F.preferredName] || '').trim()
+                || (r.fields?.[TM_F.fullLegalName] || '').trim()
+                || (r.fields?.[TM_F.name] || '').trim()
+                || '';
+            teamMembersCache[r.id] = { name, email };
         });
     } catch (e) {
         console.warn('[ensureTeamMembersLoaded] failed', e);
