@@ -367,6 +367,17 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
     position: absolute; left: 0; color: var(--accent);
     font-size: 14px; line-height: 1.4;
 }
+.push-project-skipped {
+    opacity: 0.6;
+    border-style: dashed;
+}
+.push-skip-badge {
+    margin-left: auto;
+    font-size: 10px; font-weight: 700;
+    background: var(--warning-bg); color: var(--warning);
+    padding: 3px 8px; border-radius: 4px;
+    letter-spacing: 0.03em; text-transform: uppercase;
+}
 
 /* KPI / Tracking / DoD block inside each Quarterly Project card */
 .kpi-subsection {

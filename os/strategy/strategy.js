@@ -956,10 +956,11 @@ function readAllFormFields() {
 }
 
 // Build a preview of what the push will create — projects + AI-extracted
-// tasks from each monthly stepping stone. No Airtable writes here; we're
-// just shaping the data and running one AI call per non-empty stone.
+// tasks from each monthly stepping stone. Also checks which projects already
+// exist in Projects OS for this business/quarter so we can flag duplicates
+// and skip them on write.
 async function buildPushProposal(qps, fields) {
-    const { quarter, year } = getSelection();
+    const { businessId, quarter, year } = getSelection();
     const qIdx = QUARTERS.indexOf(quarter);
     const yearNum = parseInt(year, 10);
     const starts = [[1, 1], [4, 1], [7, 1], [10, 1]];
@@ -967,24 +968,49 @@ async function buildPushProposal(qps, fields) {
     const pad = n => String(n).padStart(2, '0');
     const qStartISO = `${yearNum}-${pad(starts[qIdx][0])}-${pad(starts[qIdx][1])}`;
     const qEndISO   = `${yearNum}-${pad(ends[qIdx][0])}-${pad(ends[qIdx][1])}`;
-    // Per-month due dates: last day of M1/M2/M3 within the quarter.
     const monthEndsInQuarter = [0, 1, 2].map(m => {
-        const mo = starts[qIdx][0] + m;                      // 1-indexed month
-        const lastDay = new Date(yearNum, mo, 0).getDate();   // day 0 of next month = last day of this
+        const mo = starts[qIdx][0] + m;
+        const lastDay = new Date(yearNum, mo, 0).getDate();
         return `${yearNum}-${pad(mo)}-${pad(lastDay)}`;
     });
+
+    // Dedup check — pull every project on this business whose start date
+    // is the quarter-start we'd be writing. If a project with the same name
+    // already exists, we'll skip it on approve.
+    let existingNames = new Set();
+    try {
+        const business = allBusinessesLocal.find(b => b.id === businessId);
+        const businessName = (business?.name || '').replace(/"/g, '\\"');
+        const params = new URLSearchParams({
+            filterByFormula: `AND(FIND("${businessName}", ARRAYJOIN({Business})), {Start Date} = "${qStartISO}")`,
+            returnFieldsByFieldId: 'true',
+            pageSize: '100',
+        });
+        const data = await airtableFetch(`${TABLES.projects}?${params.toString()}`);
+        (data.records || []).forEach(r => {
+            const n = r.fields?.[PROJ_F.name];
+            if (n) existingNames.add(String(n).trim().toLowerCase());
+        });
+    } catch (e) {
+        console.warn('[buildPushProposal] dedup check failed — will still allow push', e);
+    }
 
     const proposal = { quarter, year, qStartISO, qEndISO, projects: [] };
     for (const qp of qps) {
         const det = OBJSTRAT.qpDetails[qp.i];
         const projectName = deriveProjectName(qp.text);
+        const alreadyExists = existingNames.has(projectName.trim().toLowerCase());
         const stones = OBJSTRAT.monthlyStones[qp.i].map(sFid => (fields[sFid] || '').trim());
         const tasksByMonth = [[], [], []];
-        for (let m = 0; m < 3; m++) {
-            const stone = stones[m];
-            if (!stone || /^(n\/?a|tbc|skip|none|-|—|…)$/i.test(stone)) continue;
-            const extracted = await extractTasksFromStone(stone, qp.i + 1, m + 1, projectName);
-            tasksByMonth[m] = extracted.map(name => ({ name, dueISO: monthEndsInQuarter[m], month: m + 1 }));
+        // Skip the AI task extraction for already-existing projects — we won't
+        // create them anyway, no need to burn tokens.
+        if (!alreadyExists) {
+            for (let m = 0; m < 3; m++) {
+                const stone = stones[m];
+                if (!stone || /^(n\/?a|tbc|skip|none|-|—|…)$/i.test(stone)) continue;
+                const extracted = await extractTasksFromStone(stone, qp.i + 1, m + 1, projectName);
+                tasksByMonth[m] = extracted.map(name => ({ name, dueISO: monthEndsInQuarter[m], month: m + 1 }));
+            }
         }
         proposal.projects.push({
             qp,
@@ -996,6 +1022,7 @@ async function buildPushProposal(qps, fields) {
             tracking: (fields[det.tracking] || '').trim(),
             stones,
             tasksByMonth,
+            alreadyExists,
         });
     }
     return proposal;
@@ -1060,10 +1087,23 @@ function showPushApprovalModal(proposal, fields) {
     overlay.id = 'pushModal';
     overlay.className = 'push-modal-overlay';
 
-    const totalTasks = proposal.projects.reduce((n, p) =>
+    const newProjects = proposal.projects.filter(p => !p.alreadyExists);
+    const skippedProjects = proposal.projects.filter(p => p.alreadyExists);
+    const totalTasks = newProjects.reduce((n, p) =>
         n + p.tasksByMonth.reduce((nn, m) => nn + m.length, 0), 0);
 
     const projectsHtml = proposal.projects.map((p, i) => {
+        if (p.alreadyExists) {
+            return `
+            <div class="push-project push-project-skipped">
+                <div class="push-project-head">
+                    <span class="push-project-num">QP${p.qp.i + 1}</span>
+                    <span class="push-project-name">${escapeHtml(p.projectName)}</span>
+                    <span class="push-skip-badge">Already exists — will be skipped</span>
+                </div>
+                <div class="push-project-meta" style="font-size:11px;color:var(--text-muted)">A project with this name is already in Projects OS for ${escapeHtml(proposal.quarter)} ${escapeHtml(proposal.year)}. Nothing will be created for this QP.</div>
+            </div>`;
+        }
         const monthsHtml = p.tasksByMonth.map((tasks, m) => {
             if (!tasks.length) return '';
             const header = `<div class="push-month-label">Month ${m + 1} — due ${tasks[0].dueISO}</div>`;
@@ -1084,23 +1124,31 @@ function showPushApprovalModal(proposal, fields) {
         </div>`;
     }).join('');
 
+    const skippedNote = skippedProjects.length
+        ? `<div style="font-size:12px;color:var(--warning);margin-bottom:12px;padding:8px 12px;background:var(--warning-bg);border-radius:6px;border:1px solid var(--warning-bg)"><strong>${skippedProjects.length} project${skippedProjects.length === 1 ? '' : 's'}</strong> already ${skippedProjects.length === 1 ? 'exists' : 'exist'} in Projects OS for this quarter — will be skipped to avoid duplicates. Only <strong>${newProjects.length}</strong> will be created.</div>`
+        : '';
+    const approveLabel = newProjects.length === 0
+        ? 'Nothing to create'
+        : `Approve · create ${newProjects.length + totalTasks} new record${newProjects.length + totalTasks === 1 ? '' : 's'}`;
+
     overlay.innerHTML = `
     <div class="push-modal">
         <div class="push-modal-head">
             <div>
                 <div class="push-modal-title">Push to Projects &amp; Tasks OS</div>
-                <div class="push-modal-sub">${proposal.projects.length} project${proposal.projects.length === 1 ? '' : 's'} · ${totalTasks} task${totalTasks === 1 ? '' : 's'} extracted from monthly stepping stones · ${escapeHtml(proposal.quarter)} ${escapeHtml(proposal.year)}</div>
+                <div class="push-modal-sub">${newProjects.length} new project${newProjects.length === 1 ? '' : 's'} · ${totalTasks} task${totalTasks === 1 ? '' : 's'} · ${skippedProjects.length} skipped (already exists) · ${escapeHtml(proposal.quarter)} ${escapeHtml(proposal.year)}</div>
             </div>
             <button class="push-modal-close" type="button">&times;</button>
         </div>
         <div class="push-modal-body">
+            ${skippedNote}
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Each task will be assigned to Kevin, priority <strong>Project</strong>, duration <strong>15 min</strong>, linked to the project + business, due by end of its month. Review and approve.</div>
             ${projectsHtml}
         </div>
         <div class="push-modal-foot">
             <button class="btn btn-ghost" type="button" id="pushCancelBtn">Cancel</button>
-            <button class="btn btn-ghost" type="button" id="pushProjOnlyBtn">Projects only (no tasks)</button>
-            <button class="btn btn-primary" type="button" id="pushApproveBtn">Approve · create ${proposal.projects.length + totalTasks} records</button>
+            <button class="btn btn-ghost" type="button" id="pushProjOnlyBtn"${newProjects.length === 0 ? ' disabled' : ''}>Projects only (no tasks)</button>
+            <button class="btn btn-primary" type="button" id="pushApproveBtn"${newProjects.length === 0 ? ' disabled' : ''}>${approveLabel}</button>
         </div>
     </div>`;
 
@@ -1119,14 +1167,15 @@ async function executePush(proposal, fields, opts) {
     const btn = document.getElementById('pushProjBtn');
     if (btn) btn.disabled = true;
 
+    const newProjects = proposal.projects.filter(p => !p.alreadyExists);
     const totalPlannedTasks = opts.tasks
-        ? proposal.projects.reduce((n, p) => n + p.tasksByMonth.reduce((nn, m) => nn + m.length, 0), 0)
+        ? newProjects.reduce((n, p) => n + p.tasksByMonth.reduce((nn, m) => nn + m.length, 0), 0)
         : 0;
-    setStatus('info', `Creating ${proposal.projects.length} project${proposal.projects.length === 1 ? '' : 's'}${opts.tasks ? ` + ${totalPlannedTasks} task${totalPlannedTasks === 1 ? '' : 's'}` : ''}…`);
+    setStatus('info', `Creating ${newProjects.length} project${newProjects.length === 1 ? '' : 's'}${opts.tasks ? ` + ${totalPlannedTasks} task${totalPlannedTasks === 1 ? '' : 's'}` : ''}…`);
 
-    const results = { projectsCreated: 0, tasksCreated: 0, failed: 0, errors: [] };
+    const results = { projectsCreated: 0, tasksCreated: 0, skipped: proposal.projects.length - newProjects.length, failed: 0, errors: [] };
 
-    for (const p of proposal.projects) {
+    for (const p of newProjects) {
         // 1. Project record
         const projBody = { fields: {}, typecast: true };
         projBody.fields[PROJ_F.name] = p.projectName;
@@ -1180,7 +1229,8 @@ async function executePush(proposal, fields, opts) {
 
     if (results.failed === 0) {
         const taskSummary = opts.tasks ? ` and ${results.tasksCreated} task${results.tasksCreated === 1 ? '' : 's'}` : '';
-        setStatus('success', `✓ Created ${results.projectsCreated} project${results.projectsCreated === 1 ? '' : 's'}${taskSummary} in Tasks & Projects OS.`);
+        const skipSummary = results.skipped ? ` (${results.skipped} skipped as duplicate${results.skipped === 1 ? '' : 's'})` : '';
+        setStatus('success', `✓ Created ${results.projectsCreated} project${results.projectsCreated === 1 ? '' : 's'}${taskSummary} in Tasks & Projects OS${skipSummary}.`);
         pushOfferDismissedForRecord = currentRecord.id;
         setTimeout(() => setStatus('', ''), 6000);
     } else {
