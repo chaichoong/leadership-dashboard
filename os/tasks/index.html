@@ -111,8 +111,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .task-table tr.expanded td{background:var(--accent-soft)}
 
 /* Task name cell — slightly bolder, primary colour */
-.task-table .task-name{font-weight:600;color:var(--text-primary);font-size:13px;line-height:1.3}
+.task-table .task-name{font-weight:600;color:var(--text-primary);font-size:13px;line-height:1.3;cursor:text;padding:2px 4px;border-radius:4px;outline:none;min-height:18px}
+.task-table .task-name:hover{background:var(--bg-surface)}
+.task-table .task-name:focus{background:var(--bg-surface);box-shadow:0 0 0 1px var(--accent)}
 .task-table .task-name-cell{min-width:280px;max-width:380px}
+.task-table .task-open-link:hover{color:var(--accent)!important;text-decoration:underline}
 .task-table .task-desc{font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 
 /* Column-typed visual cues on inline selects */
@@ -401,7 +404,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1031</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1043</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1787,7 +1790,11 @@ function drwSaveText(taskId,fieldKey,val,immediate){
     const k=taskId+':'+fieldKey;
     if(saveDebounce[k]){clearTimeout(saveDebounce[k]);delete saveDebounce[k]}
     if(saveDebounce._pending&&saveDebounce._pending[k])delete saveDebounce._pending[k];
-    updateTaskField(taskId,fieldKey,val);
+    // Kick off the save, then re-render so the grid reflects the new name
+    // (or other field) without waiting for the user to close the drawer.
+    Promise.resolve(updateTaskField(taskId,fieldKey,val)).finally(()=>{
+      try{if(typeof renderAll==='function')renderAll();else if(typeof renderTasks==='function')renderTasks()}catch(e){}
+    });
   } else {
     debouncedSave(taskId,fieldKey,val);
   }
@@ -3297,7 +3304,7 @@ function renderTasks(){
     html+=`<tr${rowStyle}>
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
-      <td class="task-name-cell" onclick="openTaskDrawer('${t.id}')"><div class="task-name">${escHtml(t.name)}${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}</div>${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:''}</td>
+      <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur()}else if(event.key==='Enter'&&event.shiftKey){event.preventDefault();this.blur();openTaskDrawer('${t.id}')}" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${t.description?`<div class="task-desc" onclick="openTaskDrawer('${t.id}')">${escHtml(t.description)}</div>`:'<div class="task-open-link" onclick="openTaskDrawer('+"'"+t.id+"'"+')" style="font-size:10px;color:var(--text-muted);cursor:pointer;margin-top:2px">Open details ›</div>'}</td>
       <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value);renderTasks()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
       <td class="${dueCls}" onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px;background:transparent;border-color:transparent;color:inherit;font-weight:inherit" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
       <td class="hard-cell" onclick="event.stopPropagation()"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
