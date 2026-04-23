@@ -405,7 +405,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1102</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1143</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4170,20 +4170,51 @@ async function maybeSpawnKpiSetupTask(p,triggeringField){
   }
 }
 
-// Thin POST wrapper used by KPI spawning + recurring cycle spawning
+// Thin POST wrapper used by KPI spawning + recurring cycle spawning + any
+// Claude-assisted task creation. Applies sensible defaults for any field
+// the caller didn't specify:
+//   assignee  → current logged-in user
+//   dueDate   → today
+//   timeEst   → 15 min
+//   priority  → Not Urgent
+//   recurring → blank (no cadence)
+//   business  → Real Estate
+//   status    → derived from dueDate (Overdue/Today/Upcoming)
 async function createSimpleTask(opts){
+  opts=opts||{};
   const fields={};
   fields[F.name]=opts.name;
   if(opts.description)fields[F.description]=opts.description;
-  if(opts.assigneeEmail)fields[F.assignee]={email:opts.assigneeEmail};
-  if(opts.priority)fields[F.priority]=opts.priority;
-  if(opts.timeEst)fields[F.timeEst]=opts.timeEst;
-  if(opts.recurring)fields[F.recurring]=opts.recurring;
-  if(opts.dueDate)fields[F.dueDate]=opts.dueDate;
-  if(opts.status)fields[F.status]=opts.status;
+  // Assignee defaults to logged-in user
+  const assigneeEmail=opts.assigneeEmail||(currentUser&&currentUser.email);
+  if(assigneeEmail)fields[F.assignee]={email:assigneeEmail};
+  // Priority defaults to Not Urgent
+  fields[F.priority]=opts.priority||'Not Urgent';
+  // Time estimate defaults to 15 min
+  fields[F.timeEst]=opts.timeEst||'15 min';
+  // Recurring only written if explicitly set (blank means non-recurring)
+  if(opts.recurring&&opts.recurring!=='None'&&opts.recurring!=='')fields[F.recurring]=opts.recurring;
+  // Due date defaults to today
+  const dueDate=opts.dueDate||todayStr();
+  fields[F.dueDate]=dueDate;
+  // Status derived from due date unless caller overrode
+  let status=opts.status;
+  if(!status){
+    const todayS=todayStr();
+    if(dueDate<todayS)status='Overdue';
+    else if(dueDate===todayS)status='Today';
+    else status='Upcoming';
+  }
+  fields[F.status]=status;
   if(opts.hardDeadline)fields[F.hardDeadline]=!!opts.hardDeadline;
   if(opts.notes)fields[F.notes]=opts.notes;
-  if(opts.businessId)fields[F.business]=[opts.businessId];
+  // Business defaults to Real Estate if not specified
+  let bizId=opts.businessId;
+  if(!bizId){
+    const defaultBizId=BUSINESS_MAP&&BUSINESS_MAP['Real Estate'];
+    if(defaultBizId)bizId=defaultBizId;
+  }
+  if(bizId)fields[F.business]=[bizId];
   if(opts.projectIds&&opts.projectIds.length)fields[F.projects]=opts.projectIds.slice();
   if(opts.collaborators&&opts.collaborators.length)fields[F.collaborators]=opts.collaborators.map(c=>({email:c.email}));
   try{
@@ -4447,13 +4478,11 @@ function openCreateTaskModal(){
     <div class="field-row"><label>Task</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
     <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
     <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard Deadline</label></div></div>
-    <div class="field-row"><label>Time Estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='30 min'?'selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Time Estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='15 min'?'selected':''}>${o}</option>`).join('')}</select></div>
     <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Recurring</label><select id="ctRecur">${['None','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option>${r}</option>`).join('')}</select></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3" placeholder="Describe the task or the end result..."></textarea></div>
-    <div style="border-top:1px solid var(--border-default);margin:8px 0;padding-top:4px;font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px">Additional</div>
-    <div class="field-row"><label>Status</label><select id="ctStatus"><option>Today</option><option selected>Upcoming</option><option>Approval</option></select></div>
+    <div class="field-row"><label>Recurring</label><select id="ctRecur"><option value="" selected>-</option>${['Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
     <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3" placeholder="Describe the task or the end result..."></textarea></div>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('createTaskModal').remove()">Cancel</button>
       <button class="btn btn-primary" onclick="submitCreateTask()">Add Task</button>
@@ -4466,14 +4495,23 @@ async function submitCreateTask(){
   const fields={};
   fields[F.name]=name;
   const due=document.getElementById('ctDue').value;if(due)fields[F.dueDate]=due;
-  const status=document.getElementById('ctStatus').value;if(status)fields[F.status]=status;
+  // Status is derived from due date — not manually picked. Keeps
+  // getMyDayTasks / filters consistent without asking the user to remember.
+  const todayStrVal=todayStr();
+  let computedStatus='Upcoming';
+  if(due){
+    if(due<todayStrVal)computedStatus='Overdue';
+    else if(due===todayStrVal)computedStatus='Today';
+    else computedStatus='Upcoming';
+  }
+  fields[F.status]=computedStatus;
   const assigneeKey=document.getElementById('ctAssignee').value;
   const member=TEAM.find(m=>m.key===assigneeKey);
   if(member)fields[F.assignee]={email:member.email};
   const priority=document.getElementById('ctPriority').value;if(priority)fields[F.priority]=priority;
   const timeEst=document.getElementById('ctTimeEst').value;if(timeEst)fields[F.timeEst]=timeEst;
   const desc=document.getElementById('ctDesc').value;if(desc)fields[F.description]=desc;
-  const recur=document.getElementById('ctRecur').value;if(recur&&recur!=='None')fields[F.recurring]=recur;
+  const recur=document.getElementById('ctRecur').value;if(recur&&recur!=='None'&&recur!=='')fields[F.recurring]=recur;
   const biz=document.getElementById('ctBusiness').value;
   if(biz&&BUSINESS_MAP[biz])fields[F.business]=[BUSINESS_MAP[biz]];
   fields[F.hardDeadline]=document.getElementById('ctHard').checked;
