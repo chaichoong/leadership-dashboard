@@ -846,13 +846,19 @@ const PROJ_F = {
 };
 
 // Tasks table field IDs (matches os/tasks/index.html F constants).
+// Note the Tasks table has TWO time fields that must be kept in sync:
+//   - timeEst (singleSelect, "15 min" / "30 min" / …) — what the UI renders
+//   - timeDur (duration, seconds)                    — used by calendar/auto-schedule
+// An Airtable automation used to sync them on create; Kevin turned it off,
+// so the web app now writes both directly.
 const TASK_F = {
     name:      'fldgFjGBw6bTKJFCD',
     dueDate:   'fld7XP8w8kbxfETV4',
     status:    'fldx4qCw17UfrKpaN',
     assignee:  'fldELMncVJYPDRJNc',
     priority:  'fldS21RwmwOqt71LI',
-    time:      'flduPjY0p7MmQzDvH',
+    timeEst:   'fld10VzzbiNNgRmIi', // singleSelect: '15 min', '30 min', ...
+    timeDur:   'flduPjY0p7MmQzDvH', // duration in seconds
     desc:      'fldRGhBQViKZKtkQ6',
     business:  'fldLu1Y4GzyWcDoxr',
     projects:  'fldBg0rQy0FrOAkRN',
@@ -860,7 +866,8 @@ const TASK_F = {
 
 // Kevin's Airtable collaborator email — Assignee is a singleCollaborator.
 const KEVIN_EMAIL = 'kevin@runpreneur.org.uk';
-const DEFAULT_TASK_DURATION_SECONDS = 15 * 60;   // 15 minutes as seconds
+const DEFAULT_TASK_TIME_EST = '15 min';                // singleSelect display value
+const DEFAULT_TASK_DURATION_SECONDS = 15 * 60;         // 900s — same duration, numeric form
 
 let pushOfferDismissedForRecord = null;
 
@@ -1262,7 +1269,8 @@ async function executePush(proposal, fields, opts) {
                 taskBody.fields[TASK_F.status] = 'Upcoming';
                 taskBody.fields[TASK_F.priority] = 'Project';
                 taskBody.fields[TASK_F.assignee] = { email: KEVIN_EMAIL };
-                taskBody.fields[TASK_F.time] = DEFAULT_TASK_DURATION_SECONDS;
+                taskBody.fields[TASK_F.timeEst] = DEFAULT_TASK_TIME_EST;
+                taskBody.fields[TASK_F.timeDur] = DEFAULT_TASK_DURATION_SECONDS;
                 taskBody.fields[TASK_F.business] = [businessId];
                 taskBody.fields[TASK_F.projects] = [projectId];
                 taskBody.fields[TASK_F.desc] = `From ${proposal.quarter} ${proposal.year} Month ${t.month} stepping stone of "${p.projectName}".`;
@@ -1279,7 +1287,8 @@ async function executePush(proposal, fields, opts) {
                             method: 'PATCH',
                             body: JSON.stringify({ fields: {
                                 [TASK_F.dueDate]: t.dueISO,
-                                [TASK_F.time]: DEFAULT_TASK_DURATION_SECONDS,
+                                [TASK_F.timeEst]: DEFAULT_TASK_TIME_EST,
+                                [TASK_F.timeDur]: DEFAULT_TASK_DURATION_SECONDS,
                             }, typecast: true }),
                         });
                     } catch (patchErr) {
