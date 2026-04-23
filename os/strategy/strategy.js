@@ -814,6 +814,12 @@ async function saveRecord() {
         isDirty = false;
         setStatus('success', `Saved ${quarter} ${year}.`);
         setTimeout(() => setStatus('', ''), 2500);
+        // Propagate QP name edits to any linked Project records. If the
+        // founder renamed a Quarterly Project here, its downstream Project
+        // record (in Projects OS) should rename too. We rely on
+        // `linkedProject` (multipleRecordLinks → Projects) on the O&S record
+        // to find the right target.
+        try { await propagateQpNamesToLinkedProjects(fields); } catch (e) { console.warn('[saveRecord] propagate failed', e); }
         // After a successful save, offer to push Quarterly Projects to
         // Projects OS as real project records. Shown as an inline banner —
         // user can ignore and save again later without re-prompting within
@@ -823,6 +829,34 @@ async function saveRecord() {
         setStatus('error', `Save failed: ${e.message}`);
     } finally {
         updateSaveButton();
+    }
+}
+
+// After the O&S record saves, for each QP that has a linkedProject,
+// re-derive the project name from the QP's current text and PATCH the
+// Project record's Name if it has changed. Makes rename-in-Strategy-OS
+// flow through to Projects OS automatically.
+async function propagateQpNamesToLinkedProjects(savedFields) {
+    if (!currentRecord || !currentRecord.fields) return;
+    for (let i = 0; i < OBJSTRAT.qpDetails.length; i++) {
+        const det = OBJSTRAT.qpDetails[i];
+        const linkArr = currentRecord.fields[det.linkedProject];
+        const linkedId = Array.isArray(linkArr) && linkArr[0]
+            ? (typeof linkArr[0] === 'object' ? linkArr[0].id : linkArr[0])
+            : null;
+        if (!linkedId) continue;
+        const qpText = (savedFields[OBJSTRAT.quarterlyProjects[i]] || '').trim();
+        if (!qpText) continue;
+        const newName = deriveProjectName(qpText);
+        if (!newName) continue;
+        try {
+            await airtableFetch(`${TABLES.projects}/${linkedId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ fields: { [PROJ_F.name]: newName }, typecast: true }),
+            });
+        } catch (e) {
+            console.warn('[propagateQpNamesToLinkedProjects] QP' + (i + 1) + ' failed', e);
+        }
     }
 }
 
@@ -1028,11 +1062,44 @@ async function buildPushProposal(qps, fields) {
         return `${yearNum}-${pad(mo)}-${pad(lastDay)}`;
     });
 
-    // Dedup: build a map of existing project NAME (lowercased) → record info
-    // (id + collaborator team-member IDs) for every project on this Business
-    // whose Start Date = quarter start. We'll reuse the record ID when
-    // linking tasks to existing projects, and inherit their collaborators
-    // onto newly-created tasks.
+    // Dedup signal #1 — direct record-ID link from the O&S record. This is
+    // the authoritative way to identify an existing Project for a given QP;
+    // it survives renames on either side.
+    const linkedProjectIds = [null, null, null];
+    if (currentRecord && currentRecord.fields) {
+        OBJSTRAT.qpDetails.forEach((det, i) => {
+            const link = currentRecord.fields[det.linkedProject];
+            if (Array.isArray(link) && link[0]) {
+                linkedProjectIds[i] = typeof link[0] === 'object' ? link[0].id : link[0];
+            }
+        });
+    }
+    // Fetch the linked Project records so we can read their current
+    // collaborators (for inheritance onto new tasks).
+    const linkedProjectsById = {};
+    const idsToFetch = linkedProjectIds.filter(Boolean);
+    if (idsToFetch.length) {
+        try {
+            const orClauses = idsToFetch.map(id => `RECORD_ID()="${id}"`).join(',');
+            const filter = idsToFetch.length === 1 ? orClauses : `OR(${orClauses})`;
+            const params = new URLSearchParams({
+                filterByFormula: filter,
+                returnFieldsByFieldId: 'true',
+                pageSize: String(Math.max(1, idsToFetch.length)),
+            });
+            const data = await airtableFetch(`${TABLES.projects}?${params.toString()}`);
+            (data.records || []).forEach(r => {
+                const collabLinks = r.fields?.[PROJ_F_READ.projCollabs] || [];
+                const collaboratorIds = Array.isArray(collabLinks)
+                    ? collabLinks.map(c => typeof c === 'object' ? c.id : c).filter(Boolean)
+                    : [];
+                linkedProjectsById[r.id] = { id: r.id, collaboratorIds };
+            });
+        } catch (e) { console.warn('[buildPushProposal] linked project fetch failed', e); }
+    }
+
+    // Dedup signal #2 — name + start-date match, used as a fallback for O&S
+    // records that don't have a linkedProject yet (pre-migration records).
     let existingByName = new Map();   // name → { id, collaboratorIds }
     try {
         const business = allBusinessesLocal.find(b => b.id === businessId);
@@ -1069,8 +1136,13 @@ async function buildPushProposal(qps, fields) {
     for (const qp of qps) {
         const det = OBJSTRAT.qpDetails[qp.i];
         const projectName = deriveProjectName(qp.text);
-        const nameKey = projectName.trim().toLowerCase();
-        const existingInfo = existingByName.get(nameKey);
+        // Prefer the direct record-ID link; fall back to name match.
+        const linkedId = linkedProjectIds[qp.i];
+        let existingInfo = linkedId ? linkedProjectsById[linkedId] : null;
+        if (!existingInfo) {
+            const nameKey = projectName.trim().toLowerCase();
+            existingInfo = existingByName.get(nameKey);
+        }
         const alreadyExists = !!existingInfo;
         const existingProjectId = existingInfo ? existingInfo.id : null;
         // Resolve the existing project's collaborators to Airtable user emails
@@ -1315,6 +1387,21 @@ async function executePush(proposal, fields, opts) {
                 projectId = created.id;
                 results.projectsCreated++;
                 console.log('[executePush] project created', projectId, p.projectName);
+                // Write the new Project's record ID back onto the O&S record's
+                // QP{n} Project field, so future pushes dedup by link and
+                // renames are safe.
+                if (currentRecord && currentRecord.id) {
+                    const det = OBJSTRAT.qpDetails[p.qp.i];
+                    try {
+                        await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}?returnFieldsByFieldId=true`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ fields: { [det.linkedProject]: [projectId] }, typecast: true }),
+                        });
+                        if (currentRecord.fields) currentRecord.fields[det.linkedProject] = [{ id: projectId }];
+                    } catch (linkErr) {
+                        console.warn('[executePush] failed to write back linkedProject for QP' + (p.qp.i + 1), linkErr);
+                    }
+                }
             } catch (e) {
                 console.error('[executePush] project failed QP' + (p.qp.i + 1), e, projBody);
                 results.failed++;

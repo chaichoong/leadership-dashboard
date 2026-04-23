@@ -200,10 +200,13 @@
         quarterlyProjects: ['fldMRcqBdI6sixquu','fldzTGq0bsvSIch4v','fldWEzLxBkIptAqhq'],
         // Per-QP details that port into Projects OS on sync. Shape matches
         // the Projects table KPI + DoD schema so it's a 1-to-1 map.
+        // `linkedProject` (multipleRecordLinks → Projects table) stores a
+        // direct reference to the Project record created from this QP, so
+        // renames + dedup work by record ID rather than by name matching.
         qpDetails: [
-            { kpiName: 'fldqDPdwM8eJDZgD6', kpiUnit: 'fldqtYFUdx2eAYHsh', tracking: 'fld1761Yhl833yC6S', dod: 'fldrepCn9UzSxZYL3' },
-            { kpiName: 'fld9Hh5qXyDluw3vh', kpiUnit: 'fldqxZcM4gLnV1omM', tracking: 'flduqlQ82atGIYo4c', dod: 'fldSA0ZNWdK2NBSjB' },
-            { kpiName: 'fldYLzoc9Iir6jUvC', kpiUnit: 'fldGJBh9UWZHpvSLT', tracking: 'fldOCQ0WaBvvqiiOc', dod: 'fld3g1grdMSieW8zk' },
+            { kpiName: 'fldqDPdwM8eJDZgD6', kpiUnit: 'fldqtYFUdx2eAYHsh', tracking: 'fld1761Yhl833yC6S', dod: 'fldrepCn9UzSxZYL3', linkedProject: 'fldtBMn2nwhMBEtwh' },
+            { kpiName: 'fld9Hh5qXyDluw3vh', kpiUnit: 'fldqxZcM4gLnV1omM', tracking: 'flduqlQ82atGIYo4c', dod: 'fldSA0ZNWdK2NBSjB', linkedProject: 'fldEdCkinxZZuDVw8' },
+            { kpiName: 'fldYLzoc9Iir6jUvC', kpiUnit: 'fldGJBh9UWZHpvSLT', tracking: 'fldOCQ0WaBvvqiiOc', dod: 'fld3g1grdMSieW8zk', linkedProject: 'fldtQWnYYi9X1dah9' },
         ],
         // Monthly stepping stones — stored as "Q{n}. Month {m}" fields in the Airtable
         // (Airtable field names mix "." and ":" — do not normalise, use the IDs).
