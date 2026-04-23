@@ -29,7 +29,14 @@
         if (!path) return null;
         const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${encodeURIComponent(path)}&per_page=1`;
         const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`GitHub API ${resp.status} for ${path}`);
+        if (resp.status === 403 || resp.status === 429) {
+            // Rate limit exceeded — include remaining budget in error
+            const remaining = resp.headers.get('x-ratelimit-remaining');
+            const reset = resp.headers.get('x-ratelimit-reset');
+            const resetIn = reset ? Math.max(0, Math.round((+reset * 1000 - Date.now()) / 60000)) : '?';
+            throw new Error(`rate-limited (resets in ${resetIn}m, remaining=${remaining})`);
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         if (!Array.isArray(data) || data.length === 0) return null;
         return {
@@ -62,15 +69,27 @@
                 if (p.sopFile) paths.add(p.sopFile);
             }
             // Fetch sequentially to be nice to the 60/hr rate limit, but fast-ish
+            let rateLimited = false;
             for (const path of paths) {
+                if (rateLimited) {
+                    results[path] = { error: 'skipped: rate limit hit earlier in run' };
+                    continue;
+                }
                 try {
                     results[path] = await fetchLastCommit(path);
                 } catch (e) {
                     results[path] = { error: e.message };
+                    if (/rate-limited/.test(e.message)) rateLimited = true;
                 }
             }
-            gitSyncData = { fetchedAt: Date.now(), results };
-            localStorage.setItem(GIT_SYNC_CACHE_KEY, JSON.stringify(gitSyncData));
+            // Count how many genuinely succeeded (got a date OR returned null cleanly)
+            const successCount = Object.values(results).filter(r => r === null || (r && r.date)).length;
+            const errorCount = Object.values(results).filter(r => r && r.error).length;
+            gitSyncData = { fetchedAt: Date.now(), results, successCount, errorCount, rateLimited };
+            // Only cache if most calls succeeded — don't poison the cache with a mostly-failed run
+            if (successCount >= paths.size / 2) {
+                localStorage.setItem(GIT_SYNC_CACHE_KEY, JSON.stringify(gitSyncData));
+            }
             renderSiteMap();
         } catch (e) {
             alert('Git sync check failed: ' + e.message);
@@ -96,22 +115,43 @@
         return d.toLocaleDateString();
     }
 
-    // Return { pageDate, sopDate, stale } for a given PAGE_REGISTRY entry
+    // Return { pageDate, sopDate, stale, state, errors } for a given PAGE_REGISTRY entry.
+    // state is one of: 'stale' | 'current' | 'unknown' | 'no-source' | 'no-sop'
     function getGitStatus(p) {
         if (!gitSyncData) return null;
         const srcFiles = PAGE_SOURCE_FILES[p.id] || [];
+        const errors = [];
         // Latest page source date across all tracked files for this page
         let pageDate = null;
+        let pageHadAnyFetch = false;
         for (const f of srcFiles) {
             const r = gitSyncData.results[f];
-            if (r && r.date && (!pageDate || r.date > pageDate)) pageDate = r.date;
+            if (!r) continue;
+            pageHadAnyFetch = true;
+            if (r.error) { errors.push(`${f}: ${r.error}`); continue; }
+            if (r.date && (!pageDate || r.date > pageDate)) pageDate = r.date;
         }
         const sopRec = p.sopFile ? gitSyncData.results[p.sopFile] : null;
-        const sopDate = sopRec && sopRec.date ? sopRec.date : null;
-        let stale = false;
-        if (pageDate && sopDate) stale = pageDate > sopDate;
-        else if (pageDate && !sopDate && p.sopFile) stale = true; // page has source but SOP missing
-        return { pageDate, sopDate, stale };
+        let sopDate = null;
+        if (sopRec) {
+            if (sopRec.error) errors.push(`${p.sopFile}: ${sopRec.error}`);
+            else if (sopRec.date) sopDate = sopRec.date;
+        }
+        // Determine state
+        let state, stale = false;
+        if (srcFiles.length === 0) {
+            state = 'no-source';           // page has no tracked source file (e.g. Contractor Job List)
+        } else if (!p.sopFile) {
+            state = 'no-sop';              // page has source but no SOP to compare
+        } else if (!pageDate && !sopDate) {
+            state = 'unknown';             // both API calls failed (rate limit or network)
+        } else if (!pageDate || !sopDate) {
+            state = 'unknown';             // partial data — can't make a call
+        } else {
+            stale = pageDate > sopDate;
+            state = stale ? 'stale' : 'current';
+        }
+        return { pageDate, sopDate, stale, state, errors };
     }
 
     // ── Site Map Renderer ──
@@ -132,8 +172,11 @@
 
         let matched = 0;
         let gitStale = 0;
+        let gitUnknown = 0;
+        let gitCurrent = 0;
         const outOfSync = [];
         const gitStalePages = [];
+        const gitUnknownPages = [];
         tbody.innerHTML = PAGE_REGISTRY.map((p, i) => {
             const versionMatch = p.pageVer === p.sopVer;
             if (versionMatch) matched++;
@@ -141,7 +184,11 @@
 
             // Git sync status (only if data has been fetched)
             const gs = getGitStatus(p);
-            if (gs && gs.stale) { gitStale++; gitStalePages.push(p); }
+            if (gs) {
+                if (gs.state === 'stale') { gitStale++; gitStalePages.push(p); }
+                else if (gs.state === 'current') gitCurrent++;
+                else if (gs.state === 'unknown') { gitUnknown++; gitUnknownPages.push(p); }
+            }
 
             const statusHtml = versionMatch
                 ? '<span style="color:var(--success);font-weight:600">✓ In sync</span>'
@@ -151,11 +198,21 @@
             if (!gs) {
                 gitCell = '<span style="color:var(--text-muted);font-size:11px">Not checked</span>';
             } else {
-                const pageStr = gs.pageDate ? fmtRelative(gs.pageDate) : '—';
-                const sopStr = gs.sopDate ? fmtRelative(gs.sopDate) : (p.sopFile ? '—' : 'n/a');
-                const label = gs.stale
-                    ? `<span style="color:var(--danger);font-weight:600">⚠ SOP stale</span>`
-                    : `<span style="color:var(--success);font-weight:600">✓ SOP current</span>`;
+                const pageStr = gs.pageDate ? fmtRelative(gs.pageDate) : (gs.state === 'no-source' ? 'no source tracked' : '—');
+                const sopStr = gs.sopDate ? fmtRelative(gs.sopDate) : (gs.state === 'no-sop' ? 'no SOP' : '—');
+                let label;
+                if (gs.state === 'stale') {
+                    label = `<span style="color:var(--danger);font-weight:600">⚠ SOP stale</span>`;
+                } else if (gs.state === 'current') {
+                    label = `<span style="color:var(--success);font-weight:600">✓ SOP current</span>`;
+                } else if (gs.state === 'unknown') {
+                    const errTip = gs.errors.length ? ' title="' + escHtml(gs.errors.join(' | ')) + '"' : '';
+                    label = `<span style="color:var(--warning);font-weight:600"${errTip}>? Unknown (API error)</span>`;
+                } else if (gs.state === 'no-source') {
+                    label = `<span style="color:var(--text-muted);font-weight:500">— no tracked source</span>`;
+                } else if (gs.state === 'no-sop') {
+                    label = `<span style="color:var(--text-muted);font-weight:500">— no SOP</span>`;
+                }
                 gitCell = `<div style="font-size:11px;line-height:1.4">
                     ${label}<br>
                     <span style="color:var(--text-secondary)">Page: ${pageStr}</span><br>
@@ -200,24 +257,39 @@
             // Git sync KPI card + button
             let gitCard, gitBtn;
             if (!gitSyncData) {
-                gitCard = `<div class="kpi-card" style="flex:1;min-width:200px;padding:12px 16px">
-                    <div class="kpi-card-label">Git Sync</div>
-                    <div style="font-size:13px;font-weight:600;color:var(--text-muted)">Not checked yet</div>
+                gitCard = `<div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
+                    <div class="kpi-card-label">Git Sync (real)</div>
+                    <div style="font-size:20px;font-weight:700;color:var(--text-muted)">—</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">Not checked yet</div>
                 </div>`;
                 gitBtn = `<button class="cfv-action-btn primary" onclick="runGitSyncCheck(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Check Git Sync</button>`;
             } else {
-                const gitGood = gitStale === 0;
                 const fetchedRel = fmtRelative(new Date(gitSyncData.fetchedAt).toISOString());
-                gitCard = `<div class="kpi-card" style="flex:1;min-width:200px;padding:12px 16px">
+                // Headline numeric (matches other cards' 20px), detail line under it
+                let colour, bigNum, subline;
+                if (gitUnknown > 0) {
+                    colour = 'var(--warning)';
+                    bigNum = `${gitCurrent}/${total} ?`;
+                    subline = `${gitUnknown} unknown · ${gitStale} stale`;
+                } else if (gitStale > 0) {
+                    colour = 'var(--danger)';
+                    bigNum = `${gitCurrent}/${total} ⚠`;
+                    subline = `${gitStale} stale`;
+                } else {
+                    colour = 'var(--success)';
+                    bigNum = `${gitCurrent}/${total} ✓`;
+                    subline = 'all current';
+                }
+                gitCard = `<div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                     <div class="kpi-card-label">Git Sync (real)</div>
-                    <div style="font-size:20px;font-weight:700;color:${gitGood ? 'var(--success)' : 'var(--danger)'}">${total - gitStale}/${total} ${gitGood ? '✓' : '⚠'}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">Checked ${fetchedRel}</div>
+                    <div style="font-size:20px;font-weight:700;color:${colour}">${bigNum}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${subline} · checked ${fetchedRel}${gitSyncData.rateLimited ? ' · <strong style="color:var(--warning)">rate-limited</strong>' : ''}</div>
                 </div>`;
                 gitBtn = `<button class="cfv-action-btn" onclick="clearGitSyncCache();runGitSyncCheck(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Re-check Git Sync</button>`;
             }
 
             integrity.innerHTML = `
-                <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+                <div style="display:flex;gap:16px;align-items:stretch;flex-wrap:wrap">
                     <div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                         <div class="kpi-card-label">Pages</div>
                         <div style="font-size:20px;font-weight:700">${total}</div>
@@ -238,6 +310,9 @@
                 </div>
                 ${gitSyncData && gitStale > 0 ? `<div style="margin-top:8px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px;font-size:12px;color:var(--danger)">
                     <strong>⚠ ${gitStale} SOP${gitStale === 1 ? '' : 's'} stale in git:</strong> ${gitStalePages.map(p => escHtml(p.name)).join(', ')}. The page source file has been edited since the SOP was last written.
+                </div>` : ''}
+                ${gitSyncData && gitUnknown > 0 ? `<div style="margin-top:8px;padding:10px 12px;background:var(--warning-bg);border:1px solid var(--warning);border-radius:6px;font-size:12px;color:var(--warning)">
+                    <strong>? ${gitUnknown} page${gitUnknown === 1 ? '' : 's'} unknown:</strong> ${gitUnknownPages.map(p => escHtml(p.name)).join(', ')}. GitHub API ${gitSyncData.rateLimited ? 'rate-limited this run — wait ~1h or hit Re-check later.' : 'returned no data for at least one of these files.'}
                 </div>` : ''}
             `;
         }
