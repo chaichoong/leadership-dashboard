@@ -322,7 +322,23 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 .kpi-bar-inner{height:100%;background:var(--success);border-radius:5px;transition:width .4s}
 .project-expanded{margin-top:14px;border-top:1px solid var(--border-default);padding-top:12px}
 .project-expanded h4{font-size:11px;color:var(--text-secondary);text-transform:uppercase;margin-bottom:6px}
-.project-task-list{font-size:12px}
+.project-task-list{font-size:12px;border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;background:var(--bg-surface)}
+.project-task-list-head,
+.project-task-list .ptl-row{display:grid;grid-template-columns:minmax(160px,1fr) 44px 80px 58px 80px 90px 140px 44px;gap:8px;align-items:center;padding:7px 10px}
+.project-task-list-head{background:var(--bg-surface-2);border-bottom:1px solid var(--border-subtle);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--text-muted);padding:6px 10px}
+.project-task-list .ptl-row{cursor:pointer;border-bottom:1px solid var(--border-subtle)}
+.project-task-list .ptl-row:last-child{border-bottom:none}
+.project-task-list .ptl-row:hover{background:var(--bg-surface-2)}
+.project-task-list .ptl-row .gc-title{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary);display:flex;align-items:center;gap:6px}
+.project-task-list .ptl-row .gc-who,
+.project-task-list .ptl-row .gc-due,
+.project-task-list .ptl-row .gc-time,
+.project-task-list .ptl-row .gc-pri,
+.project-task-list .ptl-row .gc-status,
+.project-task-list .ptl-row .gc-proj,
+.project-task-list .ptl-row .gc-act{min-width:0;overflow:hidden}
+.project-task-list .ptl-row .gc-proj select{width:100%;max-width:100%}
+.project-task-list .ptl-row .gc-desc{grid-column:1 / -1;font-size:11px;color:var(--text-secondary);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .project-task-item{padding:6px 0;border-bottom:1px solid var(--border-default);display:flex;align-items:center;gap:8px;cursor:pointer}
 .project-task-item:hover{background:var(--bg-surface-2)}
 
@@ -1544,6 +1560,31 @@ function renderDedlineRow(t,opts){
       ${rowActionsHtml(t.id)}
     </div>
     ${endResult}
+  </div>`;
+}
+
+// Linked-tasks row for the Project drawer — grid-aligned cells so every
+// row lines up under the fixed column headers. Keeps the layout crisp
+// regardless of which pills are empty for a particular task.
+function renderLinkedTaskRow(t){
+  const currentPid=(t.projectIds&&t.projectIds[0])||'';
+  const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+  const projPicker=`<select class="inline-select" onclick="event.stopPropagation()" onchange="event.stopPropagation();quickRelinkProject('${t.id}',this.value)" title="Change linked project" style="font-size:11px;padding:2px 4px">
+    <option value="">-</option>
+    ${active.map(p=>`<option value="${p.id}" ${currentPid===p.id?'selected':''}>${escHtml(p.name.length>28?p.name.slice(0,28)+'…':p.name)}</option>`).join('')}
+  </select>`;
+  const who=t.assignee?avatarSmall(t):'<span style="color:var(--text-muted)">-</span>';
+  const desc=t.description?`<div class="gc-desc" title="${escHtml(t.description)}">${escHtml(t.description)}</div>`:'';
+  return `<div class="ptl-row" onclick="openTaskDrawer('${t.id}')">
+    <div class="gc-title">${escHtml(t.name)}${hardFlag(t)}</div>
+    <div class="gc-who">${who}</div>
+    <div class="gc-due">${dueDateShort(t.dueDate)}</div>
+    <div class="gc-time">${t.timeEst||formatMins(t.minutes)||'-'}</div>
+    <div class="gc-pri">${priorityBadge(t.priority)}</div>
+    <div class="gc-status">${statusBadge(t.status)}</div>
+    <div class="gc-proj">${projPicker}</div>
+    <div class="gc-act">${rowActionsHtml(t.id)}</div>
+    ${desc}
   </div>`;
 }
 
@@ -3905,11 +3946,14 @@ function renderProjects(){
       // Linked tasks — include inline project picker so you can move a task to a different project without opening the drawer
       html+=`<h4 style="margin-top:12px">Linked Tasks (${linked.length})</h4>`;
       if(linked.length){
-        html+=`<div class="project-task-list">`;
+        html+=`<div class="project-task-list">
+          <div class="project-task-list-head">
+            <div>Task</div><div>Who</div><div>Due</div><div>Time</div><div>Priority</div><div>Status</div><div>Project</div><div>Actions</div>
+          </div>`;
         linked.slice(0,20).forEach(t=>{
-          html+=`<div onclick="event.stopPropagation()">${renderDedlineRow(t,{showProjectPicker:true})}</div>`;
+          html+=renderLinkedTaskRow(t);
         });
-        if(linked.length>20)html+=`<div style="padding:6px 0;color:var(--text-secondary);font-size:11px">... ${linked.length-20} more</div>`;
+        if(linked.length>20)html+=`<div style="padding:6px 10px;color:var(--text-secondary);font-size:11px">... ${linked.length-20} more</div>`;
         html+=`</div>`;
       }
       // Sticky action row
