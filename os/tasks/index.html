@@ -401,7 +401,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0900</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-0915</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2267,12 +2267,15 @@ async function performDeleteTask(taskId){
   if(!task)return;
   // Snapshot full field payload for undo (so we can re-create a new record)
   const snapshot=buildFieldsFromTask(task);
+  _saveState.pending++;renderSyncPill();
+  const entry={taskId,taskName:task.name,fieldKey:'delete',value:'(deleted)',status:'pending'};
+  _saveLog(entry);
   try{
     const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,{
       method:'DELETE',
       headers:{'Authorization':`Bearer ${PAT}`}
     });
-    if(!res.ok)throw new Error('HTTP '+res.status);
+    if(!res.ok){let body='';try{body=await res.text()}catch(_){}throw new Error('HTTP '+res.status+' '+body.slice(0,120))}
     // Decrement task counts on any linked projects before we lose the reference
     adjustProjectTaskCounts(task.projectIds||[],[]);
     allTasks=allTasks.filter(t=>t.id!==taskId);
@@ -2281,9 +2284,14 @@ async function performDeleteTask(taskId){
     toast('Task deleted');
     renderAll();
     if(document.getElementById('drillModal')&&drillDownState)renderDrillDownList();
+    _saveState.ok++;entry.status='ok';
   }catch(e){
-    toast('Failed to delete',true);
+    _saveState.failed++;entry.status='fail';entry.error=(e&&e.message)||'delete failed';
+    recordSaveFailure(taskId,'delete',entry.error);
+    toast('Failed to delete: '+entry.error,true);
     console.warn('delete failed',e);
+  }finally{
+    _saveState.pending=Math.max(0,_saveState.pending-1);renderSyncPill();
   }
 }
 
@@ -3402,11 +3410,24 @@ async function performBulkDelete(){
       // Capture snapshots before delete
       chunk.forEach(id=>{const t=allTasks.find(x=>x.id===id);if(t&&typeof buildFieldsFromTask==='function')snapshots.push({taskRecord:buildFieldsFromTask(t),name:t.name})});
       const results=await Promise.allSettled(chunk.map(async id=>{
-        const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${id}`,{method:'DELETE',headers:{'Authorization':`Bearer ${PAT}`}});
-        if(!res.ok)throw new Error('HTTP '+res.status);
         const t=allTasks.find(x=>x.id===id);
-        if(t&&typeof adjustProjectTaskCounts==='function')adjustProjectTaskCounts(t.projectIds||[],[]);
-        allTasks=allTasks.filter(x=>x.id!==id);
+        const taskName=t?t.name:id;
+        _saveState.pending++;renderSyncPill();
+        const entry={taskId:id,taskName,fieldKey:'delete',value:'(deleted)',status:'pending'};
+        _saveLog(entry);
+        try{
+          const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${id}`,{method:'DELETE',headers:{'Authorization':`Bearer ${PAT}`}});
+          if(!res.ok){let body='';try{body=await res.text()}catch(_){}throw new Error('HTTP '+res.status+' '+body.slice(0,120))}
+          if(t&&typeof adjustProjectTaskCounts==='function')adjustProjectTaskCounts(t.projectIds||[],[]);
+          allTasks=allTasks.filter(x=>x.id!==id);
+          _saveState.ok++;entry.status='ok';
+        }catch(e){
+          _saveState.failed++;entry.status='fail';entry.error=(e&&e.message)||'delete failed';
+          recordSaveFailure(id,'delete',entry.error);
+          throw e;
+        }finally{
+          _saveState.pending=Math.max(0,_saveState.pending-1);renderSyncPill();
+        }
       }));
       done+=results.filter(r=>r.status==='fulfilled').length;
       failed+=results.filter(r=>r.status==='rejected').length;
