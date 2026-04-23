@@ -429,22 +429,25 @@
         if(!active.length){section.style.display='none';return}
         section.style.display='block';
 
+        // Filter pills — match the sage-executive token palette used on the rest of the page.
         const filters=['all','Real Estate','Operations Director','Personal'];
         pills.innerHTML=filters.map(f=>{
             const label=f==='all'?'All':f;
             const isActive=strategicKpiFilter===f;
-            const bg=isActive?'var(--accent, #2C6E49)':'#fff';
-            const color=isActive?'#fff':'#475569';
-            const border=isActive?'var(--accent, #2C6E49)':'#cbd5e1';
-            return `<button onclick="setStrategicKpiFilter('${f.replace(/'/g,"\\'")}')" style="padding:6px 14px;border-radius:20px;border:1px solid ${border};background:${bg};color:${color};font-size:12px;font-weight:600;cursor:pointer">${escHtml(label)}</button>`;
+            const bg=isActive?'var(--accent)':'var(--bg-surface)';
+            const color=isActive?'var(--accent-on)':'var(--text-secondary)';
+            const border=isActive?'var(--accent)':'var(--border-default)';
+            return `<button onclick="setStrategicKpiFilter('${f.replace(/'/g,"\\'")}')" style="padding:6px 14px;border-radius:var(--radius-full);border:1px solid ${border};background:${bg};color:${color};font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer;transition:background var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)">${escHtml(label)}</button>`;
         }).join('');
 
         let filtered=active.slice();
         if(strategicKpiFilter!=='all')filtered=filtered.filter(p=>p.business===strategicKpiFilter);
         countEl.textContent=`· ${filtered.length} active KPI${filtered.length!==1?'s':''}`;
 
-        if(!filtered.length){list.innerHTML=`<div style="padding:20px;text-align:center;color:#64748b;background:#fff;border:1px solid #e2e8f0;border-radius:8px">No active KPIs for this business.</div>`;return}
+        if(!filtered.length){list.innerHTML=`<div style="padding:20px;text-align:center;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg)">No active KPIs for this business.</div>`;list.style.cssText='';return}
 
+        // Row layout: Project+Business | Owner | KPI | Current / Target | Progress | Status | Updated
+        // Project name can wrap to two lines; the business pill sits underneath it for at-a-glance context.
         list.innerHTML=filtered.map(p=>{
             const health=_stratComputeHealth(p);
             const healthColor=_stratHealthColour(health);
@@ -452,23 +455,26 @@
             const unitPrefix=p.kpiUnit==='£'?'£':'';
             const unitSuffix=['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:'';
             const ownerChip=(()=>{
-                if(!p.owner||!p.owner.email)return '<span style="font-size:11px;color:#94a3b8">No owner</span>';
+                if(!p.owner||!p.owner.email)return '<span style="font-size:var(--fs-xs);color:var(--text-muted)">No owner</span>';
                 const k=STRAT_TEAM_KEYS[p.owner.email]||'';
                 const initials=(p.owner.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2);
-                return `<span class="avatar avatar-${k}" style="width:22px;height:22px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%">${escHtml(initials)}</span>`;
+                return `<span class="avatar avatar-${k}" style="width:22px;height:22px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%" title="${escHtml(p.owner.name||'')}">${escHtml(initials)}</span>`;
             })();
-            // Staleness / auto indicator
+            // Business pill — sits under the project name, same spirit as category chips elsewhere.
+            const businessPill=p.business
+                ? `<span style="display:inline-block;font-size:var(--fs-xs);font-weight:var(--fw-medium);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full);letter-spacing:0.01em">${escHtml(p.business)}</span>`
+                : `<span style="display:inline-block;font-size:var(--fs-xs);color:var(--text-muted);font-style:italic">No business</span>`;
+            // Staleness / auto indicator — now uses success/danger/text tokens.
             let stamp='';
             if(p.kpiAutomated){
-                stamp=`<span style="font-size:10px;font-weight:600;color:#2C6E49;background:#DDE8DF;padding:2px 6px;border-radius:4px">Auto</span>`;
+                stamp=`<span style="font-size:10px;font-weight:var(--fw-semibold);color:var(--accent);background:var(--accent-soft);padding:2px 6px;border-radius:var(--radius-sm)">Auto</span>`;
             }else{
                 const days=_stratDaysAgo(p.kpiLastUpdated);
-                if(days===null)stamp=`<span style="font-size:11px;color:#dc2626;font-weight:600">Never updated</span>`;
-                else if(days>7)stamp=`<span style="font-size:11px;color:#dc2626;font-weight:600">${days}d stale</span>`;
-                else stamp=`<span style="font-size:11px;color:#64748b">${days<1?'today':days===1?'1d ago':days+'d ago'}</span>`;
+                if(days===null)stamp=`<span style="font-size:var(--fs-xs);color:var(--danger);font-weight:var(--fw-semibold)">Never updated</span>`;
+                else if(days>7)stamp=`<span style="font-size:var(--fs-xs);color:var(--danger);font-weight:var(--fw-semibold)">${days}d stale</span>`;
+                else stamp=`<span style="font-size:var(--fs-xs);color:var(--text-secondary)">${days<1?'today':days===1?'1d ago':days+'d ago'}</span>`;
             }
-            // Optional month-by-month breakdown from kpiReturn.months (auto-
-            // populated by the compute runner when the function returns that shape)
+            // Optional month-by-month breakdown from kpiReturn.months.
             const kRet=p.kpiReturn||p.kpiDetail||null;
             const hasMonths=!!(kRet&&kRet.months&&Object.keys(kRet.months).length);
             const hasDetail=!!(kRet&&kRet.detail);
@@ -482,26 +488,31 @@
                     const clickable=hasDetail&&kRet.detail.monthsDetail&&kRet.detail.monthsDetail[k];
                     const onclick=clickable?`onclick="toggleStratKpiDrill('${p.id}','${k}');event.stopPropagation();event.preventDefault();return false"`:'';
                     const cursor=clickable?'cursor:pointer;':'';
-                    return `<span ${onclick} style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${hit?'#DDE8DF':'#f1f5f9'};color:${hit?'#2C6E49':'#475569'};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${cursor}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPrefix}${(v||0).toLocaleString('en-GB')}${unitSuffix}</span>`;
+                    const hitBg=hit?'var(--success-bg)':'var(--bg-surface-2)';
+                    const hitColor=hit?'var(--success)':'var(--text-secondary)';
+                    return `<span ${onclick} style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${hitBg};color:${hitColor};border-radius:var(--radius-full);font-size:var(--fs-xs);font-variant-numeric:tabular-nums;${cursor}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPrefix}${(v||0).toLocaleString('en-GB')}${unitSuffix}</span>`;
                 }).join(' ');
-                const totalClick=hasDetail?`<button onclick="toggleStratKpiDrill('${p.id}','rolling');event.stopPropagation();event.preventDefault();return false" style="background:none;border:1px solid #cbd5e1;color:#475569;padding:2px 8px;border-radius:10px;font-size:11px;cursor:pointer;margin-left:6px">Rolling 31d ▾</button>`:'';
-                monthsRow=`<div style="grid-column:1/-1;padding:0 14px 8px 14px;background:#fff;border:1px solid #e2e8f0;border-top:none;border-bottom:none;font-size:11px;color:#64748b"><span style="margin-right:6px;color:#94a3b8">Per month:</span>${cells}${totalClick}</div>`;
+                const totalClick=hasDetail?`<button onclick="toggleStratKpiDrill('${p.id}','rolling');event.stopPropagation();event.preventDefault();return false" style="background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-secondary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--fs-xs);cursor:pointer;margin-left:6px">Rolling 31d ▾</button>`:'';
+                monthsRow=`<div style="grid-column:1/-1;padding:0 14px 10px 14px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-top:none;border-bottom:none;font-size:var(--fs-xs);color:var(--text-secondary)"><span style="margin-right:6px;color:var(--text-muted)">Per month:</span>${cells}${totalClick}</div>`;
             }
             // Drilldown container (hidden until toggled)
             const drillId=`stratKpiDrill-${p.id}`;
-            const drillRow=`<div id="${drillId}" data-expanded="" style="display:none;grid-column:1/-1;padding:14px;background:#fafafa;border:1px solid #e2e8f0;border-top:none;border-bottom:none;font-size:12px"></div>`;
-            return `<div class="strat-kpi-row" data-project-id="${p.id}" style="display:grid;grid-template-columns:2fr 28px 2fr 1.3fr 110px 90px 80px;gap:10px;align-items:center;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-bottom:none;font-size:13px;${hasDetail?'cursor:pointer':''}" ${hasDetail?`onclick="toggleStratKpiDrill('${p.id}','rolling')"`:''} onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
-                <div style="font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
-                <div style="text-align:center">${ownerChip}</div>
-                <div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.kpiName)}">${escHtml(p.kpiName)}</div>
-                <div style="color:#1e293b;font-variant-numeric:tabular-nums">${unitPrefix}${p.kpiCurrent.toLocaleString('en-GB')}${unitSuffix} <span style="color:#94a3b8">/ ${unitPrefix}${p.kpiTarget.toLocaleString('en-GB')}${unitSuffix}</span></div>
-                <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${healthColor};border-radius:4px"></div></div>
-                <div style="font-size:11px;font-weight:600;color:${healthColor};text-align:center">${escHtml(health)}</div>
-                <div style="text-align:right">${stamp}</div>
+            const drillRow=`<div id="${drillId}" data-expanded="" style="display:none;grid-column:1/-1;padding:14px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-top:none;border-bottom:none;font-size:var(--fs-sm)"></div>`;
+            return `<div class="strat-kpi-row" data-project-id="${p.id}" style="display:grid;grid-template-columns:2.2fr 32px 2fr 1.3fr 110px 96px 96px;gap:12px;align-items:start;padding:12px 14px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-bottom:none;font-size:var(--fs-base);${hasDetail?'cursor:pointer':''};transition:background var(--dur-fast) var(--ease)" ${hasDetail?`onclick="toggleStratKpiDrill('${p.id}','rolling')"`:''} onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='var(--bg-surface)'">
+                <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                    <div style="font-weight:var(--fw-semibold);color:var(--text-primary);line-height:1.35;word-break:break-word">${escHtml(p.name)}</div>
+                    ${businessPill}
+                </div>
+                <div style="text-align:center;padding-top:2px">${ownerChip}</div>
+                <div style="color:var(--text-secondary);line-height:1.35;word-break:break-word;padding-top:2px" title="${escHtml(p.kpiName)}">${escHtml(p.kpiName)}</div>
+                <div style="color:var(--text-primary);font-variant-numeric:tabular-nums;padding-top:2px">${unitPrefix}${p.kpiCurrent.toLocaleString('en-GB')}${unitSuffix} <span style="color:var(--text-muted)">/ ${unitPrefix}${p.kpiTarget.toLocaleString('en-GB')}${unitSuffix}</span></div>
+                <div style="height:8px;background:var(--bg-subtle);border-radius:var(--radius-sm);overflow:hidden;margin-top:6px"><div style="height:100%;width:${pct}%;background:${healthColor};border-radius:var(--radius-sm);transition:width var(--dur-slow) var(--ease)"></div></div>
+                <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:${healthColor};text-align:center;padding-top:2px">${escHtml(health)}</div>
+                <div style="text-align:right;padding-top:2px">${stamp}</div>
             </div>${monthsRow}${drillRow}`;
-        }).join('')+`<div style="height:1px;background:#e2e8f0"></div>`;
-        // Give the list container a nice rounded corner wrapper
-        list.style.cssText='border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;border-top:none';
+        }).join('')+`<div style="height:1px;background:var(--border-subtle)"></div>`;
+        // Rounded wrapper around the whole stack.
+        list.style.cssText='border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border-default);box-shadow:var(--shadow-sm)';
     }
 
     function setStrategicKpiFilter(f){strategicKpiFilter=f;renderStrategicKpis()}
