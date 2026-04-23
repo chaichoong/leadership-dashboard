@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2249</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2309</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -738,6 +738,10 @@ let kanbanMonthStart = (function(){const d=new Date();d.setDate(1);return d})();
 let kanbanProjectFilter = '';
 let projectFilter = 'active';
 let expandedProject = null;
+// Which KPI period the user has selected per project (e.g. 'rolling', '2026-04').
+// Defaults to 'rolling' when not set. Updated by clicking month pills / rolling
+// button so the project-card header reflects the chosen period.
+const _projectKpiPeriod = {};
 let currentUser = null;
 let calendarEvents = [];
 let showRoutineConfig = false;
@@ -3957,7 +3961,25 @@ function renderProjects(){
     const liveTotal=Math.max(liveActive,p.totalTasks||0);
     const liveCompleted=Math.max(0,liveTotal-liveActive);
     const liveOverdue=linked.filter(t=>isOverdue(t)).length;
-    const kpiPct=p.kpiTarget>0?Math.min(100,(p.kpiCurrent/p.kpiTarget)*100):0;
+    // Which period is the user currently viewing for this project's KPI?
+    // If we have detail JSON, we can swap to any month. Default: rolling.
+    let headerKpiDetail=null;
+    if(p.kpiDetailJson){try{headerKpiDetail=JSON.parse(p.kpiDetailJson)}catch(e){}}
+    const selectedPeriod=_projectKpiPeriod[p.id]||'rolling';
+    const monthNamesLong={'01':'January','02':'February','03':'March','04':'April','05':'May','06':'June','07':'July','08':'August','09':'September','10':'October','11':'November','12':'December'};
+    let headerValue=p.kpiCurrent||0;
+    let headerPeriodLabel='Rolling 31 days';
+    if(headerKpiDetail){
+      if(selectedPeriod==='rolling'){
+        headerValue=(headerKpiDetail.rolling??headerKpiDetail.value??p.kpiCurrent)||0;
+        headerPeriodLabel='Rolling 31 days';
+      } else if(headerKpiDetail.months&&selectedPeriod in headerKpiDetail.months){
+        headerValue=headerKpiDetail.months[selectedPeriod]||0;
+        const [y,mm]=selectedPeriod.split('-');
+        headerPeriodLabel=`${monthNamesLong[mm]||mm} ${y}`;
+      }
+    }
+    const kpiPct=p.kpiTarget>0?Math.min(100,(headerValue/p.kpiTarget)*100):0;
 
     const statusTip='Health is auto-calculated from KPI progress vs time elapsed (or task completion if no KPI). Ratios: ≥100% On-Target, 85-100% On-Track, <85% Off-Track. Set status to Completed or Not Started manually in the edit panel to override.';
     // Owner header chip — avatar + name under project title
@@ -3978,7 +4000,8 @@ function renderProjects(){
         </div>
         <div class="project-col">
           <h5>KPI: ${escHtml(p.kpiName||'None')}</h5>
-          <div class="val">${p.kpiUnit==='£'?'£':''}${p.kpiCurrent||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''} / ${p.kpiUnit==='£'?'£':''}${p.kpiTarget||0}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}</div>
+          ${headerKpiDetail?`<div style="font-size:10px;color:var(--text-muted);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-bottom:2px">Showing: ${escHtml(headerPeriodLabel)}</div>`:''}
+          <div class="val">${p.kpiUnit==='£'?'£':''}${(headerValue||0).toLocaleString('en-GB')}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''} / ${p.kpiUnit==='£'?'£':''}${(p.kpiTarget||0).toLocaleString('en-GB')}${['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:''}</div>
           <div class="kpi-bar"><div class="kpi-bar-inner" style="width:${kpiPct}%"></div></div>
           <div style="font-size:11px;color:var(--text-secondary)">${kpiPct.toFixed(0)}%</div>
         </div>
@@ -4027,14 +4050,22 @@ function renderProjects(){
         const monthNames={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
         const unitPre=p.kpiUnit==='£'?'£':'';
         const unitSuf=['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:'';
+        const activePeriod=_projectKpiPeriod[p.id]||'rolling';
+        // Rolling button (active state = solid accent)
+        const isRollingActive=activePeriod==='rolling';
+        const rollingBtn=kpiDetail.detail?`<button class="btn btn-sm" style="padding:2px 10px;font-size:11px;${isRollingActive?'background:var(--accent);color:#fff;border-color:var(--accent)':''}" onclick="setProjectKpiPeriod('${p.id}','rolling');toggleProjKpiDrill('${p.id}','rolling')">Rolling 31d${isRollingActive?' •':' ▾'}</button>`:'';
         const cells=Object.keys(kpiDetail.months).sort().map(k=>{
           const [,mm]=k.split('-');const label=monthNames[mm]||k;
           const v=kpiDetail.months[k];
           const hit=p.kpiTarget>0&&v>=p.kpiTarget;
           const clickable=!!(kpiDetail.detail&&kpiDetail.detail.monthsDetail&&kpiDetail.detail.monthsDetail[k]);
-          return `<span ${clickable?`onclick="toggleProjKpiDrill('${p.id}','${k}')"`:''} style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:${hit?'var(--success-bg)':'var(--bg-subtle)'};color:${hit?'var(--success)':'var(--text-secondary)'};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${clickable?'cursor:pointer;':''}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPre}${(v||0).toLocaleString('en-GB')}${unitSuf}</span>`;
+          const isActive=activePeriod===k;
+          const bg=isActive?'var(--accent)':(hit?'var(--success-bg)':'var(--bg-subtle)');
+          const color=isActive?'#fff':(hit?'var(--success)':'var(--text-secondary)');
+          const border=isActive?'1px solid var(--accent)':'1px solid transparent';
+          return `<span ${clickable?`onclick="setProjectKpiPeriod('${p.id}','${k}');toggleProjKpiDrill('${p.id}','${k}')"`:''} style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:${bg};color:${color};border:${border};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${clickable?'cursor:pointer;':''}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPre}${(v||0).toLocaleString('en-GB')}${unitSuf}</span>`;
         }).join(' ');
-        monthsPills=`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-muted)">Per month:</span> ${cells}${kpiDetail.detail?`<button class="btn btn-sm" style="padding:2px 10px;font-size:11px" onclick="toggleProjKpiDrill('${p.id}','rolling')">Rolling 31d ▾</button>`:''}</div>`;
+        monthsPills=`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-muted)">Per month:</span> ${cells}${rollingBtn}</div>`;
         drillHolder=`<div id="projKpiDrill-${p.id}" data-expanded="" style="display:none;margin-top:10px;padding:12px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px"></div>`;
       }
       const currentBlock=hasCode
@@ -4262,6 +4293,14 @@ async function recomputeAllKpis(){
   }
 }
 window.recomputeAllKpis=recomputeAllKpis;
+
+// Set which period drives the project card's header KPI block and
+// re-render projects so the header reflects the selection.
+function setProjectKpiPeriod(pid,bucket){
+  _projectKpiPeriod[pid]=bucket;
+  try{renderProjects()}catch(e){}
+}
+window.setProjectKpiPeriod=setProjectKpiPeriod;
 
 // Drilldown renderer for the Projects-tab KPI panel. Reads the JSON
 // written by the Leadership Dashboard's compute runner.
