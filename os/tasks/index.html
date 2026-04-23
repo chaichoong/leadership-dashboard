@@ -165,8 +165,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .badge-completed{background:var(--success-bg);color:var(--success)}
 .badge-approval{background:var(--accent-soft);color:var(--accent)}
 .badge-urgent{background:var(--danger-bg);color:var(--danger)}
-.badge-high{background:var(--info-bg);color:var(--info)}
-.badge-project{background:var(--accent-soft);color:var(--accent)}
+.badge-high{background:var(--warning-bg);color:var(--warning)}
+.badge-project{background:var(--info-bg);color:var(--info)}
 .badge-not-urgent{background:var(--success-bg);color:var(--success)}
 .badge-recurring{background:var(--accent-soft);color:var(--accent);font-size:10px}
 .badge-business{background:var(--accent-soft);color:var(--accent);font-size:10px;margin-left:4px}
@@ -246,10 +246,11 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 .tl-block .tb-meta{font-size:10px;opacity:.85;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .tl-block.event{background:var(--info-bg);border-color:var(--info-border);color:var(--info)}
 .tl-block.routine{background:var(--warning-bg);border-color:var(--warning-bg);color:var(--warning)}
-.tl-block.task{background:var(--accent-soft);border-color:var(--accent);color:var(--text-primary)}
+.tl-block.task{background:var(--bg-surface-2);border-color:var(--border-default);color:var(--text-primary)}
 .tl-block.task.p-Urgent{background:var(--danger-bg);border-color:var(--danger)}
-.tl-block.task.p-High{background:var(--info-bg);border-color:var(--info)}
-.tl-block.task.p-Project{background:var(--accent-soft);border-color:var(--accent)}
+.tl-block.task.p-High{background:var(--warning-bg);border-color:var(--warning)}
+.tl-block.task.p-Project{background:var(--info-bg);border-color:var(--info)}
+.tl-block.task.p-NotUrgent{background:var(--success-bg);border-color:var(--success)}
 .tl-block.dragging{opacity:.5}
 .tl-block .resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:linear-gradient(to bottom, transparent, rgba(0,0,0,0.08))}
 
@@ -404,7 +405,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1043</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-1051</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2475,11 +2476,14 @@ function rowActionsHtml(taskId){
 // MY DAY — interactive timeline
 // ======================================================
 function getMyDayTasks(){
+  // Purely dueDate-driven so moving a task's date on Task List immediately
+  // removes it from My Day — no reliance on the stored Status field which
+  // can lag behind the due-date change and cause stale appearances.
   const today=todayStr();
   let tasks=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
   if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
-  const todayTasks=tasks.filter(t=>t.status==='Today'||t.dueDate===today);
-  const overdueTasks=tasks.filter(t=>(t.status==='Overdue'||isOverdue(t))&&t.dueDate!==today&&t.status!=='Today');
+  const todayTasks=tasks.filter(t=>t.dueDate===today);
+  const overdueTasks=tasks.filter(t=>t.dueDate&&t.dueDate<today);
   const other=tasks.filter(t=>!todayTasks.includes(t)&&!overdueTasks.includes(t));
   return{todayTasks,overdueTasks,other};
 }
