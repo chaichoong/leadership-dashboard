@@ -451,6 +451,18 @@ body.app-busy,body.app-busy *{cursor:progress!important}
       </select>
       <input type="date" class="inline-input" id="bulkDateInp" onchange="bulkSetField('dueDate',this.value)" title="Reschedule all selected to this date" style="padding:2px 6px">
       <button class="btn btn-sm" onclick="bulkReschedule()" title="Reschedule selected to tomorrow">+ Tomorrow</button>
+      <select class="filter-select" id="bulkTimeSel" onchange="bulkSetField('timeEst',this.value);this.selectedIndex=0" title="Set time estimate for all selected">
+        <option value="">Change time est…</option>
+        <option value="15 min">15 min</option><option value="30 min">30 min</option><option value="1 hr">1 hr</option><option value="2 hr">2 hr</option><option value="4 hr">4 hr</option><option value="Full day">Full day</option>
+      </select>
+      <select class="filter-select" id="bulkRecSel" onchange="bulkSetField('recurring',this.value);this.selectedIndex=0" title="Set recurring cadence for all selected">
+        <option value="">Change recurring…</option>
+        <option value="None">None</option><option value="Daily">Daily</option><option value="Weekly">Weekly</option><option value="Monthly">Monthly</option><option value="Quarterly">Quarterly</option>
+      </select>
+      <select class="filter-select" id="bulkHardSel" onchange="bulkSetField('hardDeadline',this.value==='true');this.selectedIndex=0" title="Toggle hard deadline for all selected">
+        <option value="">Change hard…</option>
+        <option value="true">Hard deadline</option><option value="false">Soft deadline</option>
+      </select>
       <button class="btn btn-sm btn-danger" onclick="bulkDelete()" title="Delete all selected (with confirmation)">Delete</button>
       <button class="btn btn-sm" onclick="clearSelection()">Clear</button>
     </div>
@@ -475,6 +487,24 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <option value="Real Estate">Real Estate</option>
         <option value="Operations Director">Operations Director</option>
         <option value="Personal">Personal</option>
+      </select>
+      <select class="filter-select" id="filterProject" onchange="renderTasks()">
+        <option value="">All Projects</option>
+        <option value="__none">No project</option>
+      </select>
+      <select class="filter-select" id="filterRecurring" onchange="renderTasks()">
+        <option value="">All Recurring</option>
+        <option value="__any">Any recurring</option>
+        <option value="__none">Not recurring</option>
+        <option value="Daily">Daily</option>
+        <option value="Weekly">Weekly</option>
+        <option value="Monthly">Monthly</option>
+        <option value="Quarterly">Quarterly</option>
+      </select>
+      <select class="filter-select" id="filterHard" onchange="renderTasks()">
+        <option value="">All Deadlines</option>
+        <option value="hard">Hard only</option>
+        <option value="soft">Soft only</option>
       </select>
       <button class="btn btn-primary btn-sm" data-autosched-btn onclick="safeAutoSchedule()">Auto-Schedule</button>
       <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ Add Task</button>
@@ -1391,7 +1421,7 @@ function renderDedlineRow(t,opts){
     const currentPid=(t.projectIds&&t.projectIds[0])||'';
     const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
     projPicker=`<select class="inline-select" onclick="event.stopPropagation()" onchange="event.stopPropagation();quickRelinkProject('${t.id}',this.value)" title="Change linked project" style="font-size:11px;padding:2px 4px;max-width:140px">
-      <option value="">(none)</option>
+      <option value="">—</option>
       ${active.map(p=>`<option value="${p.id}" ${currentPid===p.id?'selected':''}>${escHtml(p.name.length>28?p.name.slice(0,28)+'…':p.name)}</option>`).join('')}
     </select>`;
   }
@@ -1948,7 +1978,7 @@ async function doDeleteComment(taskId,commentId){
 
 // ===== PROJECT PICKER (drawer) =====
 function renderProjectPicker(t){
-  const current=t.projectNames.length?escHtml(t.projectNames.join(', ')):'<span style="color:var(--text-secondary)">(none)</span>';
+  const current=t.projectNames.length?escHtml(t.projectNames.join(', ')):'<span style="color:var(--text-muted)">—</span>';
   return `<div id="drwProjectInner" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span style="font-size:12px">${current}</span>
     <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showProjectPickerMenu('${t.id}')">Change</button>
@@ -1957,7 +1987,7 @@ function renderProjectPicker(t){
 function showProjectPickerMenu(taskId){
   const wrap=document.getElementById('drwProjectWrap');if(!wrap)return;
   const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
-  let html=`<select id="drwProjectSelect" style="max-width:260px"><option value="">(none)</option>`;
+  let html=`<select id="drwProjectSelect" style="max-width:260px"><option value="">—</option>`;
   active.forEach(p=>{html+=`<option value="${p.id}">${escHtml(p.name)}</option>`});
   html+=`</select> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="applyProjectPick('${taskId}')">Save</button> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="cancelProjectPick('${taskId}')">Cancel</button>`;
   wrap.innerHTML=html;
@@ -3083,6 +3113,16 @@ function getFilteredTasks(){
   }
   const pf=document.getElementById('filterPriority').value;if(pf)tasks=tasks.filter(t=>t.priority===pf);
   const bf=document.getElementById('filterBusiness').value;if(bf)tasks=tasks.filter(t=>t.business===bf);
+  const prjEl=document.getElementById('filterProject');const prjf=prjEl?prjEl.value:'';
+  if(prjf==='__none')tasks=tasks.filter(t=>!t.projectIds||t.projectIds.length===0);
+  else if(prjf)tasks=tasks.filter(t=>(t.projectIds||[]).includes(prjf));
+  const recEl=document.getElementById('filterRecurring');const recf=recEl?recEl.value:'';
+  if(recf==='__any')tasks=tasks.filter(t=>t.recurring&&t.recurring!=='None');
+  else if(recf==='__none')tasks=tasks.filter(t=>!t.recurring||t.recurring==='None');
+  else if(recf)tasks=tasks.filter(t=>t.recurring===recf);
+  const hardEl=document.getElementById('filterHard');const hardf=hardEl?hardEl.value:'';
+  if(hardf==='hard')tasks=tasks.filter(t=>!!t.hardDeadline);
+  else if(hardf==='soft')tasks=tasks.filter(t=>!t.hardDeadline);
   const q=document.getElementById('searchBox').value.toLowerCase().trim();
   if(q)tasks=tasks.filter(t=>t.name.toLowerCase().includes(q)||(t.assignee||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q)||(t.business||'').toLowerCase().includes(q));
   // Sort: due date (ascending; blanks last), then priority group
@@ -3108,7 +3148,7 @@ function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
 function inlineProjectPickerCell(t){
   const currentPid=(t.projectIds&&t.projectIds[0])||'';
   const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
-  const opts=['<option value="">(none)</option>',
+  const opts=['<option value="">—</option>',
     ...active.map(p=>{
       const label=p.name.length>40?p.name.slice(0,40)+'…':p.name;
       return `<option value="${p.id}" ${currentPid===p.id?'selected':''}>${escHtml(label)}</option>`;
@@ -3184,9 +3224,21 @@ function updateBulkBar(){
     bar.style.display='none';
   }
 }
+// Populate the Task List project filter dropdown (called after projects load)
+function populateProjectFilterOptions(){
+  const el=document.getElementById('filterProject');if(!el)return;
+  const keep=el.value;
+  const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
+  el.innerHTML=`<option value="">All Projects</option><option value="__none">No project</option>`+active.map(p=>{const lbl=p.name.length>50?p.name.slice(0,50)+'…':p.name;return `<option value="${p.id}">${escHtml(lbl)}</option>`}).join('');
+  // Preserve selection if still valid
+  if(keep&&[...el.options].some(o=>o.value===keep))el.value=keep;
+}
+window.populateProjectFilterOptions=populateProjectFilterOptions;
 // Bulk field setter — applies to all selected tasks via updateTaskField
 async function bulkSetField(fieldKey,val){
-  if(!selectedTasks.size||!val)return;
+  // Allow explicit boolean false (e.g. "Soft deadline") to pass through
+  if(!selectedTasks.size)return;
+  if(val===''||val==null)return;
   const ids=[...selectedTasks];
   _bulkOperation=true;
   const applied=[];
@@ -4430,6 +4482,7 @@ async function loadAllData(){
     if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);
     allProjects=rawProjects.map(parseProject);
     calendarEvents=cal;
+    try{populateProjectFilterOptions()}catch(e){}
 
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
     allTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
