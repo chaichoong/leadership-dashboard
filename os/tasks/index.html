@@ -662,6 +662,7 @@ const TEAM_MEMBERS_TABLE = 'tblco0p2OnlLQVAX7';
 const TM = {
   name:   'flds7xoRFQhcRTnbB',  // formula — display name
   member: 'fldh16yvEgBy8uLKQ',  // singleCollaborator — Airtable user
+  active: 'fld2YLfcPqSe6b60u',  // checkbox — only Active members appear in the UI
 };
 let allTeamMembers = [];
 
@@ -4892,7 +4893,9 @@ async function loadAllData(){
       fetchTable(TASKS_TABLE,TASK_FIELD_IDS,`AND({Status}!="Completed",{Some Day}=FALSE())`),
       fetchTable(PROJECTS_TABLE,PROJECT_FIELD_IDS,''),
       fetchCalendarEvents(),
-      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member],'').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
+      // Only fetch team members flagged Active — keeps retired / legacy
+      // collaborators out of the picker without deleting historical records.
+      fetchTable(TEAM_MEMBERS_TABLE,[TM.name,TM.member,TM.active],'{Active}=TRUE()').catch(e=>{console.warn('Team Members fetch failed',e);return[]}),
     ]);
     allTasks=rawTasks.map(parseTask);
     if(MAINTENANCE_ONLY)allTasks=allTasks.filter(t=>t.maintenance);

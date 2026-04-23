@@ -853,14 +853,22 @@ const PROJ_F_READ = { projCollabs: 'fldN5l2H4WCsM0S3x' };
 // the Airtable user emails that Task.Collaborators (multipleCollaborators)
 // needs. Loaded lazily on first push.
 const TEAM_MEMBERS_TABLE = 'tblco0p2OnlLQVAX7';
-const TM_F = { name: 'flds7xoRFQhcRTnbB', member: 'fldh16yvEgBy8uLKQ' };
+const TM_F = { name: 'flds7xoRFQhcRTnbB', member: 'fldh16yvEgBy8uLKQ', active: 'fld2YLfcPqSe6b60u' };
 let teamMembersCache = null; // { recId: { name, email } }
 
 async function ensureTeamMembersLoaded() {
     if (teamMembersCache) return teamMembersCache;
     teamMembersCache = {};
     try {
-        const data = await airtableFetch(`${TEAM_MEMBERS_TABLE}?returnFieldsByFieldId=true&pageSize=100`);
+        // Only Active team members. Historical inactive records still exist
+        // in Airtable (preserving linked data), but they don't appear here
+        // and therefore don't inherit onto newly-pushed tasks.
+        const params = new URLSearchParams({
+            filterByFormula: '{Active}=TRUE()',
+            returnFieldsByFieldId: 'true',
+            pageSize: '100',
+        });
+        const data = await airtableFetch(`${TEAM_MEMBERS_TABLE}?${params.toString()}`);
         (data.records || []).forEach(r => {
             const memberObj = r.fields?.[TM_F.member];
             const email = memberObj?.email || '';
