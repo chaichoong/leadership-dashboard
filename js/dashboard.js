@@ -122,6 +122,7 @@
         kpiSource:       'fldic3mgIRLLu2Sre',
         kpiLastUpdated:  'fldNk2U74jBxZ6esJ',
         kpiLastUpdatedBy:'fldIgmO8OqA3a7K5o',
+        kpiComputeCode:  'fldA7vPiLnbgEoKh1',
         totalTasks:      'fldtw6NQZ8CSF3RXi',
         completedTasks:  'fld7IDjY0xB4JGBfn',
     };
@@ -204,8 +205,176 @@
                     completedTasks:Number(getField(r,STRAT_PF.completedTasks))||0,
                 };
             });
+            // Run hand-built KPI compute functions for any project with code.
+            // Writes results back to Airtable so the Task OS project panel
+            // sees the updated kpiCurrent too.
+            try{await runAutomatedKpis(records)}catch(e){console.warn('[runAutomatedKpis] failed',e)}
             renderStrategicKpis();
         }catch(e){console.warn('[loadStrategicKpis] failed',e)}
+    }
+
+    // ─── Automated KPI compute runner (dashboard-side) ──────────────────
+    // Projects with a hand-written compute function body in the
+    // "KPI Compute Code" field get recomputed every time the dashboard
+    // loads. The compute receives a rich ctx including all finance data
+    // (transactions, costs, categories, businesses) so the function can
+    // reason over the whole chart of accounts without fetching anything
+    // itself. Result is PATCHed back to kpiCurrent + kpiLastUpdated on
+    // the project record so both the dashboard and Task OS see it.
+    function buildAutomatedKpiContext(project){
+        // Build ID → name maps from the already-loaded global arrays
+        const bizIdToName={};
+        (allBusinesses||[]).forEach(b=>{
+            const n=getField(b,'fldbbRqVxLxUdHwIR');
+            if(n)bizIdToName[b.id]=typeof n==='string'?n:(n.name||'');
+        });
+        const catIdToName={};
+        (allCategories||[]).forEach(c=>{
+            const n=getField(c,'fldii4oUzSfmplihO');
+            if(n)catIdToName[c.id]=typeof n==='string'?n:(n.name||'');
+        });
+        const subCatIdToName={};
+        (allSubCategories||[]).forEach(sc=>{
+            const n=getField(sc,'fldO4BTJhFv5EsN6i');
+            if(n)subCatIdToName[sc.id]=typeof n==='string'?n:(n.name||'');
+        });
+        const costIdToBiz={};
+        const costIdToInactive={};
+        (allCosts||[]).forEach(co=>{
+            const bizLinks=getField(co,'fldrPjvdFPCKWqeyd')||[];
+            const bizNames=(Array.isArray(bizLinks)?bizLinks:[]).map(x=>typeof x==='object'?x.name||bizIdToName[x.id]||'':bizIdToName[x]||'').filter(Boolean);
+            costIdToBiz[co.id]=bizNames;
+            costIdToInactive[co.id]=!!getField(co,'fldQJPGLFMbwVelsW');
+        });
+        // Simplify transactions into a flat shape the compute function can reason over
+        const txs=(allTransactions||[]).map(tx=>{
+            const bizLinks=getField(tx,'fldX1aFlJyzpXGhbF')||[];
+            const bizNames=(Array.isArray(bizLinks)?bizLinks:[]).map(x=>typeof x==='object'?x.name||bizIdToName[x.id]||'':bizIdToName[x]||'').filter(Boolean);
+            const catLinks=getField(tx,'fldFPmNixqHPQy4D6')||[];
+            const catNames=(Array.isArray(catLinks)?catLinks:[]).map(x=>typeof x==='object'?x.name||catIdToName[x.id]||'':catIdToName[x]||'').filter(Boolean);
+            const subLinks=getField(tx,'fldMRjSVzZVYeHb0A')||[];
+            const subNames=(Array.isArray(subLinks)?subLinks:[]).map(x=>typeof x==='object'?x.name||subCatIdToName[x.id]||'':subCatIdToName[x]||'').filter(Boolean);
+            const costLinks=getField(tx,'fldGkpkVqSeiGvUGL')||[];
+            const costIds=(Array.isArray(costLinks)?costLinks:[]).map(x=>typeof x==='object'?x.id:x).filter(Boolean);
+            const reportAmount=Number(getField(tx,'fldot7iisZeL3WrdR'))||0;
+            const date=getField(tx,'fldoyQ6Rr9cHp3bgQ')||'';
+            return {
+                id:tx.id,
+                date:(date||'').slice(0,10),
+                amount:reportAmount,
+                businesses:bizNames,
+                categories:catNames,
+                subCategories:subNames,
+                costIds,
+                hasCost:costIds.length>0,
+            };
+        });
+        return {
+            today:new Date().toISOString().slice(0,10),
+            project:{
+                id:project.id,
+                name:project.name||'',
+                start:project.start||'',
+                end:project.end||'',
+                business:project.business||'',
+                kpiTarget:project.kpiTarget||0,
+                kpiUnit:project.kpiUnit||'',
+            },
+            transactions:txs,
+            costs:(allCosts||[]).map(co=>({
+                id:co.id,
+                name:getField(co,'fldS6FYfpkhu6tJG0')||'',
+                businesses:costIdToBiz[co.id]||[],
+                inactive:!!costIdToInactive[co.id],
+            })),
+            // Helpers
+            between(iso, startIso, endIso){
+                if(!iso)return false;
+                const d=String(iso).slice(0,10);
+                return (!startIso||d>=startIso)&&(!endIso||d<=endIso);
+            },
+            addDays(iso, days){
+                if(!iso)return '';
+                const [y,m,d]=iso.slice(0,10).split('-').map(Number);
+                const dt=new Date(Date.UTC(y,m-1,d+days));
+                return dt.toISOString().slice(0,10);
+            },
+            monthRange(iso){
+                const d=(iso||new Date().toISOString()).slice(0,10);
+                const [y,m]=d.split('-').map(Number);
+                const start=`${y}-${String(m).padStart(2,'0')}-01`;
+                const lastDay=new Date(Date.UTC(y,m,0)).getUTCDate();
+                const end=`${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+                return {start,end};
+            },
+            sumBy(arr,fn){return (arr||[]).reduce((s,x)=>s+(+fn(x)||0),0)},
+            countWhere(arr,fn){return (arr||[]).filter(fn).length},
+        };
+    }
+
+    function runKpiComputeCode(code, ctx){
+        if(!code||!String(code).trim())return null;
+        try{
+            // eslint-disable-next-line no-new-func
+            const fn=new Function('ctx','"use strict";'+code);
+            const v=fn(ctx);
+            if(typeof v==='number'&&isFinite(v))return v;
+            if(typeof v==='string'){const n=parseFloat(v);if(!isNaN(n))return n}
+            // If the function returns an object (e.g. { rolling, months }), stash it
+            // on the project record so renderStrategicKpis can pick a specific value
+            // for display. Return the primary value field for kpiCurrent.
+            if(v&&typeof v==='object'){
+                ctx._lastKpiDetail=v;
+                const primary=v.value??v.primary??v.rolling??v.current??null;
+                if(typeof primary==='number'&&isFinite(primary))return primary;
+            }
+            return null;
+        }catch(e){console.warn('[runKpiComputeCode] error',e);return null}
+    }
+
+    async function runAutomatedKpis(projectRecords){
+        if(!Array.isArray(projectRecords))return;
+        const withCode=projectRecords.filter(r=>{
+            const code=getField(r,STRAT_PF.kpiComputeCode);
+            return code && String(code).trim();
+        });
+        if(!withCode.length)return;
+        for(const rec of withCode){
+            try{
+                const code=getField(rec,STRAT_PF.kpiComputeCode);
+                // Find the parsed local version for ctx.project fields
+                const local=_strategicKpiProjects.find(p=>p.id===rec.id)||{
+                    id:rec.id,
+                    name:getField(rec,STRAT_PF.name)||'',
+                    start:getField(rec,STRAT_PF.start)||'',
+                    end:getField(rec,STRAT_PF.end)||'',
+                    kpiTarget:Number(getField(rec,STRAT_PF.kpiTarget))||0,
+                    kpiUnit:_stratSelName(getField(rec,STRAT_PF.kpiUnit)),
+                };
+                const ctx=buildAutomatedKpiContext(local);
+                const value=runKpiComputeCode(code,ctx);
+                if(value==null)continue;
+                const rounded=Math.round(value*100)/100;
+                // Update local and PATCH back to Airtable
+                local.kpiCurrent=rounded;
+                local.kpiDetail=ctx._lastKpiDetail||null;
+                local.kpiLastUpdated=new Date().toISOString();
+                local.kpiLastUpdatedBy=(currentUser&&(currentUser.name||currentUser.email))||'dashboard auto';
+                try{
+                    const payload={};
+                    payload[STRAT_PF.kpiCurrent]=rounded;
+                    payload[STRAT_PF.kpiLastUpdated]=local.kpiLastUpdated;
+                    payload[STRAT_PF.kpiLastUpdatedBy]=local.kpiLastUpdatedBy;
+                    const url=`https://api.airtable.com/v0/${BASE_ID}/${STRAT_PROJECTS_TABLE}/${rec.id}?returnFieldsByFieldId=true`;
+                    const resp=await fetch(url,{
+                        method:'PATCH',
+                        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+                        body:JSON.stringify({fields:payload,typecast:true}),
+                    });
+                    if(!resp.ok)console.warn('[runAutomatedKpis] PATCH',rec.id,'returned',resp.status);
+                }catch(e){console.warn('[runAutomatedKpis] PATCH failed for',rec.id,e)}
+            }catch(e){console.warn('[runAutomatedKpis] per-project error',e)}
+        }
     }
 
     function renderStrategicKpis(){
@@ -256,6 +425,19 @@
                 else if(days>7)stamp=`<span style="font-size:11px;color:#dc2626;font-weight:600">${days}d stale</span>`;
                 else stamp=`<span style="font-size:11px;color:#64748b">${days<1?'today':days===1?'1d ago':days+'d ago'}</span>`;
             }
+            // Optional month-by-month breakdown from kpiDetail (auto-populated
+            // by the compute runner when the function returns {months:{...}})
+            let monthsRow='';
+            if(p.kpiDetail&&p.kpiDetail.months&&Object.keys(p.kpiDetail.months).length){
+                const monthNames={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+                const cells=Object.keys(p.kpiDetail.months).sort().map(k=>{
+                    const [,mm]=k.split('-');const label=monthNames[mm]||k;
+                    const v=p.kpiDetail.months[k];
+                    const hit=p.kpiTarget>0&&v>=p.kpiTarget;
+                    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${hit?'#DDE8DF':'#f1f5f9'};color:${hit?'#2C6E49':'#475569'};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums"><b>${label}</b> ${unitPrefix}${(v||0).toLocaleString('en-GB')}${unitSuffix}</span>`;
+                }).join(' ');
+                monthsRow=`<div style="grid-column:1/-1;padding:0 14px 8px 14px;background:#fff;border:1px solid #e2e8f0;border-top:none;border-bottom:none;font-size:11px;color:#64748b"><span style="margin-right:6px;color:#94a3b8">Per month:</span>${cells}</div>`;
+            }
             return `<a href="#tasks" onclick="try{switchTab('tasks')}catch(e){}" style="display:grid;grid-template-columns:2fr 28px 2fr 1.3fr 110px 90px 80px;gap:10px;align-items:center;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-bottom:none;text-decoration:none;color:inherit;font-size:13px" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
                 <div style="font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.name)}">${escHtml(p.name)}</div>
                 <div style="text-align:center">${ownerChip}</div>
@@ -264,7 +446,7 @@
                 <div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${healthColor};border-radius:4px"></div></div>
                 <div style="font-size:11px;font-weight:600;color:${healthColor};text-align:center">${escHtml(health)}</div>
                 <div style="text-align:right">${stamp}</div>
-            </a>`;
+            </a>${monthsRow}`;
         }).join('')+`<div style="height:1px;background:#e2e8f0"></div>`;
         // Give the list container a nice rounded corner wrapper
         list.style.cssText='border-radius:8px;overflow:hidden;border:1px solid #e2e8f0;border-top:none';
