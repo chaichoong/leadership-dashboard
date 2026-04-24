@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-2345 task-kpi-drill</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0030 kpi-autoopen</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4426,7 +4426,26 @@ function autoSizeTextarea(el){
   el.style.height=(el.scrollHeight+2)+'px';
 }
 window.autoSizeTextarea=autoSizeTextarea;
-function toggleProject(id){expandedProject=expandedProject===id?null:id;renderProjects()}
+function toggleProject(id){
+  const opening=expandedProject!==id;
+  expandedProject=expandedProject===id?null:id;
+  renderProjects();
+  // Auto-open the KPI drill on first expand if the project has rolling
+  // detail data. Saves a second click to find the breakdown. No-op when
+  // the project has no computed detail (manual KPIs, etc.).
+  if(opening){
+    const proj=allProjects.find(x=>x.id===id);
+    if(proj&&proj.kpiDetailJson){
+      try{
+        const d=JSON.parse(proj.kpiDetailJson);
+        if(d&&d.detail&&d.detail.rolling){
+          _projectKpiPeriod[id]=_projectKpiPeriod[id]||'rolling';
+          setTimeout(()=>renderProjKpiDrill(id,_projectKpiPeriod[id]||'rolling'),0);
+        }
+      }catch(e){}
+    }
+  }
+}
 
 async function updateProjectField(pid,fieldKey,val){
   const p=allProjects.find(x=>x.id===pid);if(!p)return;
