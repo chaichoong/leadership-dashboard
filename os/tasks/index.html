@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-23-2309</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0732</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4323,20 +4323,29 @@ function toggleProjKpiDrill(pid,bucket){
   const unitPre=p.kpiUnit==='£'?'£':'';
   const fmtAmt=n=>`${unitPre}${(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   const fmtSigned=n=>{const num=Number(n)||0;const abs=Math.abs(num);const s=`${unitPre}${abs.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;return num<0?`<span style="color:var(--danger)">−${s}</span>`:s};
+  const displayHint=(data&&data.display)||{};
   const txTable=(title,list,color,kind)=>{
-    const primaryHeader=kind==='revenue'?'Tenancy':'Cost';
-    const primaryKey=kind==='revenue'?'tenancy':'cost';
+    const columns=(kind==='revenue'&&displayHint.revenueColumns)
+      ? displayHint.revenueColumns
+      : ['date', kind==='revenue'?'tenancy':'cost', 'description', 'amount'];
+    const headerFor={date:'Date',tenancy:'Tenancy',cost:'Cost',description:'Description',amount:'Amount'};
     if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;color:var(--text-muted);font-style:italic">No ${title.toLowerCase()} transactions</div>`;
     const rows=list.map(t=>{
       const isReversal=kind==='revenue'?t.amount<0:t.amount>0;
       const rowBg=isReversal?'background:var(--warning-bg)':'';
       const reversalTag=isReversal?'<span style="font-size:10px;color:var(--warning);background:var(--warning-bg);padding:1px 5px;border-radius:3px;margin-right:4px;font-weight:600;border:1px solid var(--warning)">REVERSAL</span>':'';
-      return `<tr style="border-top:1px solid var(--border-subtle);${rowBg}">
-        <td style="padding:6px 8px;white-space:nowrap;color:var(--text-secondary);font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>
-        <td style="padding:6px 8px;color:var(--text-primary)">${reversalTag}${escHtml(t[primaryKey]||t.vendor||'-')}</td>
-        <td style="padding:6px 8px;color:var(--text-secondary);font-size:11px">${escHtml((t.description||'').slice(0,80))}</td>
-        <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-primary)">${fmtSigned(t.amount)}</td>
-      </tr>`;
+      const cellFor=(col,isFirstText)=>{
+        const tag=isFirstText?reversalTag:'';
+        if(col==='date')return `<td style="padding:6px 8px;white-space:nowrap;color:var(--text-secondary);font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>`;
+        if(col==='tenancy')return `<td style="padding:6px 8px;color:var(--text-primary)">${tag}${escHtml(t.tenancy||t.vendor||'-')}</td>`;
+        if(col==='cost')return `<td style="padding:6px 8px;color:var(--text-primary)">${tag}${escHtml(t.cost||t.vendor||'-')}</td>`;
+        if(col==='description')return `<td style="padding:6px 8px;color:var(--text-primary)">${tag}${escHtml((t.description||'').slice(0,120))}</td>`;
+        if(col==='amount')return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-primary)">${fmtSigned(t.amount)}</td>`;
+        return '<td></td>';
+      };
+      // Reversal badge goes on the first non-date, non-amount cell
+      const firstTextIdx=columns.findIndex(c=>c!=='date'&&c!=='amount');
+      return `<tr style="border-top:1px solid var(--border-subtle);${rowBg}">${columns.map((c,i)=>cellFor(c,i===firstTextIdx)).join('')}</tr>`;
     }).join('');
     const netTotal=kind==='revenue'?(list.reduce((s,t)=>s+(Number(t.amount)||0),0)):(list.reduce((s,t)=>s+(-Number(t.amount)||0),0));
     return `<div style="margin-top:8px;padding:10px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px">
@@ -4345,10 +4354,7 @@ function toggleProjKpiDrill(pid,bucket){
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">
-          <th style="padding:4px 8px;text-align:left">Date</th>
-          <th style="padding:4px 8px;text-align:left">${primaryHeader}</th>
-          <th style="padding:4px 8px;text-align:left">Description</th>
-          <th style="padding:4px 8px;text-align:right">Amount</th>
+          ${columns.map(c=>`<th style="padding:4px 8px;text-align:${c==='amount'?'right':'left'}">${headerFor[c]||c}</th>`).join('')}
         </tr></thead><tbody>${rows}</tbody>
       </table></div>`;
   };
@@ -4356,13 +4362,13 @@ function toggleProjKpiDrill(pid,bucket){
       <div><strong>${escHtml(label)}</strong> · Window: ${escHtml(detail.windowStart||'-')} → ${escHtml(detail.windowEnd||'-')}</div>
       <button onclick="toggleProjKpiDrill('${pid}','${bucket}')" class="btn btn-sm">Close ▴</button>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
-      <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">Revenue</div><div style="font-size:16px;font-weight:700;color:var(--success)">${fmtAmt(detail.revenue)}</div></div>
-      <div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${fmtAmt(detail.costs)}</div></div>
-      <div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'var(--success)':'var(--danger)'}">${fmtAmt(detail.net)}</div></div>
+    <div style="display:grid;grid-template-columns:${displayHint.hideCosts?'1fr':'1fr 1fr 1fr'};gap:10px;margin-bottom:10px">
+      <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:var(--success)">${fmtAmt(detail.revenue)}</div></div>
+      ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${fmtAmt(detail.costs)}</div></div>`}
+      ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'var(--success)':'var(--danger)'}">${fmtAmt(detail.net)}</div></div>`}
     </div>
-    ${txTable('Revenue',detail.revTxs,'var(--success)','revenue')}
-    ${txTable('Fixed Costs',detail.costTxs,'var(--danger)','costs')}`;
+    ${txTable(displayHint.revenueLabel||'Revenue',detail.revTxs,'var(--success)','revenue')}
+    ${displayHint.hideCosts?'':txTable('Fixed Costs',detail.costTxs,'var(--danger)','costs')}`;
   el.style.display='block';el.setAttribute('data-expanded',bucket);
 }
 window.toggleProjKpiDrill=toggleProjKpiDrill;

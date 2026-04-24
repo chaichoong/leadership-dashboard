@@ -578,21 +578,31 @@
             const str=`${unitPrefix}${abs.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
             return num<0?`<span style="color:#991b1b">−${str}</span>`:str;
         };
+        // Determine column layout for revenue rows from the compute output's
+        // display hint (if any). Default: Date / Tenancy / Description / Amount.
+        // For MRR-style KPIs the compute can set display.revenueColumns to
+        // ['date','description','amount'] to drop the Tenancy column.
+        const displayHint=(kRet&&kRet.display)||{};
         const txTable=(title,list,color,kind)=>{
-            // kind: 'revenue' -> show tenancy column; 'costs' -> show cost column
-            const primaryHeader=kind==='revenue'?'Tenancy':'Cost';
-            const primaryKey=kind==='revenue'?'tenancy':'cost';
+            const columns=(kind==='revenue'&&displayHint.revenueColumns)
+                ? displayHint.revenueColumns
+                : ['date', kind==='revenue'?'tenancy':'cost', 'description', 'amount'];
+            const headerFor={date:'Date',tenancy:'Tenancy',cost:'Cost',description:'Description',amount:'Amount'};
             if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;color:#94a3b8;font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
             const rows=list.map(t=>{
                 const isReversal=kind==='revenue'?t.amount<0:t.amount>0;
                 const rowBg=isReversal?'background:#fef9c3':'';
                 const reversalTag=isReversal?'<span style="font-size:10px;color:#a16207;background:#fde68a;padding:1px 5px;border-radius:3px;margin-right:4px">REVERSAL</span>':'';
-                return `<tr style="border-top:1px solid #f1f5f9;${rowBg}">
-                    <td style="padding:6px 8px;white-space:nowrap;color:#64748b;font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>
-                    <td style="padding:6px 8px;color:#1e293b">${reversalTag}${escHtml(t[primaryKey]||t.vendor||'-')}</td>
-                    <td style="padding:6px 8px;color:#64748b;font-size:11px">${escHtml((t.description||'').slice(0,80))}</td>
-                    <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#1e293b">${fmtSigned(t.amount)}</td>
-                </tr>`;
+                const cellFor=(col,isFirst)=>{
+                    const tag=isFirst?reversalTag:'';
+                    if(col==='date')return `<td style="padding:6px 8px;white-space:nowrap;color:#64748b;font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>`;
+                    if(col==='tenancy')return `<td style="padding:6px 8px;color:#1e293b">${tag}${escHtml(t.tenancy||t.vendor||'-')}</td>`;
+                    if(col==='cost')return `<td style="padding:6px 8px;color:#1e293b">${tag}${escHtml(t.cost||t.vendor||'-')}</td>`;
+                    if(col==='description')return `<td style="padding:6px 8px;color:#1e293b">${tag}${escHtml((t.description||'').slice(0,120))}</td>`;
+                    if(col==='amount')return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#1e293b">${fmtSigned(t.amount)}</td>`;
+                    return '<td></td>';
+                };
+                return `<tr style="border-top:1px solid #f1f5f9;${rowBg}">${columns.map((c,i)=>cellFor(c,i===1)).join('')}</tr>`;
             }).join('');
             return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
@@ -600,10 +610,7 @@
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:12px">
                     <thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.5px">
-                        <th style="padding:4px 8px;text-align:left">Date</th>
-                        <th style="padding:4px 8px;text-align:left">${primaryHeader}</th>
-                        <th style="padding:4px 8px;text-align:left">Description</th>
-                        <th style="padding:4px 8px;text-align:right">Amount</th>
+                        ${columns.map(c=>`<th style="padding:4px 8px;text-align:${c==='amount'?'right':'left'}">${headerFor[c]||c}</th>`).join('')}
                     </tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
@@ -613,13 +620,13 @@
                 <div><strong>${escHtml(label)}</strong> · Window: ${escHtml(detail.windowStart||'-')} → ${escHtml(detail.windowEnd||'-')}</div>
                 <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid #cbd5e1;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
-                <div style="padding:10px;background:#f0fdf4;border-radius:6px"><div style="font-size:10px;color:#14532d;font-weight:600;text-transform:uppercase">Revenue</div><div style="font-size:16px;font-weight:700;color:#14532d">${fmtAmt(detail.revenue)}</div></div>
-                <div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:#991b1b">${fmtAmt(detail.costs)}</div></div>
-                <div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'#14532d':'#991b1b'}">${fmtAmt(detail.net)}</div></div>
+            <div style="display:grid;grid-template-columns:${displayHint.hideCosts?'1fr':'1fr 1fr 1fr'};gap:10px;margin-bottom:10px">
+                <div style="padding:10px;background:#f0fdf4;border-radius:6px"><div style="font-size:10px;color:#14532d;font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:#14532d">${fmtAmt(detail.revenue)}</div></div>
+                ${displayHint.hideCosts?'':`<div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:#991b1b">${fmtAmt(detail.costs)}</div></div>`}
+                ${displayHint.hideCosts?'':`<div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'#14532d':'#991b1b'}">${fmtAmt(detail.net)}</div></div>`}
             </div>
-            ${txTable('Revenue', detail.revTxs, '#14532d', 'revenue')}
-            ${txTable('Fixed Costs', detail.costTxs, '#991b1b', 'costs')}`;
+            ${txTable(displayHint.revenueLabel||'Revenue', detail.revTxs, '#14532d', 'revenue')}
+            ${displayHint.hideCosts?'':txTable('Fixed Costs', detail.costTxs, '#991b1b', 'costs')}`;
         el.style.display='block';
         el.setAttribute('data-expanded',bucket);
     }
