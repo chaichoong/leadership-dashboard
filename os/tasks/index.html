@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-2315 render-first</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-2345 task-kpi-drill</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4321,26 +4321,33 @@ function renderProjects(){
       if(hasCode&&p.kpiDetailJson){
         try{kpiDetail=JSON.parse(p.kpiDetailJson)}catch(e){console.warn('[kpi detail parse] failed for',p.id,'— the stored JSON may have been truncated. Length:',p.kpiDetailJson.length,'Error:',e)}
       }
-      if(kpiDetail&&kpiDetail.months&&Object.keys(kpiDetail.months).length){
+      const hasMonths=!!(kpiDetail&&kpiDetail.months&&Object.keys(kpiDetail.months).length);
+      const hasRollingDetail=!!(kpiDetail&&kpiDetail.detail&&kpiDetail.detail.rolling);
+      if(hasMonths||hasRollingDetail){
         const monthNames={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
         const unitPre=p.kpiUnit==='£'?'£':'';
         const unitSuf=['%','count','days','items','hours'].includes(p.kpiUnit)?' '+p.kpiUnit:'';
         const activePeriod=_projectKpiPeriod[p.id]||'rolling';
-        // Rolling button (active state = solid accent)
         const isRollingActive=activePeriod==='rolling';
-        const rollingBtn=kpiDetail.detail?`<button class="btn btn-sm" style="padding:2px 10px;font-size:11px;${isRollingActive?'background:var(--accent);color:#fff;border-color:var(--accent)':''}" onclick="selectProjectKpiPeriod('${p.id}','rolling')">Rolling 31d${isRollingActive?' •':' ▾'}</button>`:'';
-        const cells=Object.keys(kpiDetail.months).sort().map(k=>{
-          const [,mm]=k.split('-');const label=monthNames[mm]||k;
-          const v=kpiDetail.months[k];
-          const hit=p.kpiTarget>0&&v>=p.kpiTarget;
-          const clickable=!!(kpiDetail.detail&&kpiDetail.detail.monthsDetail&&kpiDetail.detail.monthsDetail[k]);
-          const isActive=activePeriod===k;
-          const bg=isActive?'var(--accent)':(hit?'var(--success-bg)':'var(--bg-subtle)');
-          const color=isActive?'#fff':(hit?'var(--success)':'var(--text-secondary)');
-          const border=isActive?'1px solid var(--accent)':'1px solid transparent';
-          return `<span ${clickable?`onclick="selectProjectKpiPeriod('${p.id}','${k}')"`:''} style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:${bg};color:${color};border:${border};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${clickable?'cursor:pointer;':''}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPre}${(v||0).toLocaleString('en-GB')}${unitSuf}</span>`;
-        }).join(' ');
-        monthsPills=`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-muted)">Per month:</span> ${cells}${rollingBtn}</div>`;
+        const displayHint=(kpiDetail&&kpiDetail.display)||{};
+        const rollingLabel=displayHint.kind==='taskCompletion'?'View task breakdown':'Rolling 31d';
+        const rollingBtn=hasRollingDetail?`<button class="btn btn-sm" style="padding:2px 10px;font-size:11px;${isRollingActive?'background:var(--accent);color:#fff;border-color:var(--accent)':''}" onclick="selectProjectKpiPeriod('${p.id}','rolling')">${rollingLabel}${isRollingActive?' •':' ▾'}</button>`:'';
+        let cells='';
+        if(hasMonths){
+          cells=Object.keys(kpiDetail.months).sort().map(k=>{
+            const [,mm]=k.split('-');const label=monthNames[mm]||k;
+            const v=kpiDetail.months[k];
+            const hit=p.kpiTarget>0&&v>=p.kpiTarget;
+            const clickable=!!(kpiDetail.detail&&kpiDetail.detail.monthsDetail&&kpiDetail.detail.monthsDetail[k]);
+            const isActive=activePeriod===k;
+            const bg=isActive?'var(--accent)':(hit?'var(--success-bg)':'var(--bg-subtle)');
+            const color=isActive?'#fff':(hit?'var(--success)':'var(--text-secondary)');
+            const border=isActive?'1px solid var(--accent)':'1px solid transparent';
+            return `<span ${clickable?`onclick="selectProjectKpiPeriod('${p.id}','${k}')"`:''} style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:${bg};color:${color};border:${border};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${clickable?'cursor:pointer;':''}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPre}${(v||0).toLocaleString('en-GB')}${unitSuf}</span>`;
+          }).join(' ');
+        }
+        const lead=hasMonths?'<span style="font-size:11px;color:var(--text-muted)">Per month:</span> ':'';
+        monthsPills=`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">${lead}${cells}${rollingBtn}</div>`;
         drillHolder=`<div id="projKpiDrill-${p.id}" data-expanded="" style="display:none;margin-top:10px;padding:12px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px"></div>`;
       }
       const currentBlock=hasCode
