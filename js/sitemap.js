@@ -21,6 +21,39 @@
     const GITHUB_REPO = 'chaichoong/leadership-dashboard';
     const GIT_SYNC_CACHE_KEY = '_git_sync_cache';
     const GIT_SYNC_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+    const GITHUB_PAT_KEY = '_github_pat';
+    // Authenticated requests on public repos get 5,000/hr instead of 60/hr.
+    // Any classic token (no scopes needed) or fine-grained token with
+    // "Contents: read" on this repo works.
+
+    function githubAuthHeaders() {
+        const pat = localStorage.getItem(GITHUB_PAT_KEY);
+        return pat ? { 'Authorization': 'Bearer ' + pat } : {};
+    }
+
+    function setGitHubToken() {
+        const current = localStorage.getItem(GITHUB_PAT_KEY);
+        const input = prompt(
+            'Paste a GitHub personal access token to raise the rate limit from 60/hr to 5,000/hr.\n\n' +
+            'Any classic token with no scopes works (repo is public). Clear the field and OK to remove an existing token.',
+            current || ''
+        );
+        if (input === null) return; // cancelled
+        const trimmed = input.trim();
+        if (!trimmed) {
+            localStorage.removeItem(GITHUB_PAT_KEY);
+            alert('GitHub token removed. Reverting to 60/hr unauthenticated limit.');
+        } else if (!/^gh[pous]_[A-Za-z0-9]{20,}$|^github_pat_[A-Za-z0-9_]{20,}$/.test(trimmed)) {
+            if (!confirm('That doesn\'t look like a standard GitHub token (ghp_… or github_pat_…). Save anyway?')) return;
+            localStorage.setItem(GITHUB_PAT_KEY, trimmed);
+        } else {
+            localStorage.setItem(GITHUB_PAT_KEY, trimmed);
+        }
+        // Clear cached data and re-render so the new auth state shows
+        localStorage.removeItem(GIT_SYNC_CACHE_KEY);
+        gitSyncData = null;
+        renderSiteMap();
+    }
 
     // Holds the fetched git data between renderSiteMap calls. null = not checked yet.
     let gitSyncData = null;
@@ -38,7 +71,12 @@
     async function fetchLastCommit(path) {
         if (!path) return null;
         const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${encodeURIComponent(path)}&per_page=1`;
-        const resp = await fetch(url);
+        const resp = await fetch(url, { headers: githubAuthHeaders() });
+        if (resp.status === 401) {
+            // Token invalid — wipe it so the user isn't stuck
+            localStorage.removeItem(GITHUB_PAT_KEY);
+            throw new Error('GitHub token rejected (401) — token cleared, falling back to unauthenticated');
+        }
         if (resp.status === 403 || resp.status === 429) {
             // Rate limit exceeded — include remaining budget in error
             const remaining = resp.headers.get('x-ratelimit-remaining');
@@ -63,7 +101,10 @@
     async function fetchCommitsSince(path, sinceIso) {
         if (!path || !sinceIso) return null;
         const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${encodeURIComponent(path)}&since=${encodeURIComponent(sinceIso)}&per_page=1`;
-        const resp = await fetch(url);
+        const resp = await fetch(url, { headers: githubAuthHeaders() });
+        if (resp.status === 403 || resp.status === 429) {
+            throw new Error('rate-limited');
+        }
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         if (!Array.isArray(data)) return 0;
@@ -379,6 +420,11 @@
                     updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${outOfSync.length})</button>`;
                 }
             }
+            // Auth state for the GitHub API (affects rate limit)
+            const gitHubAuthed = !!localStorage.getItem(GITHUB_PAT_KEY);
+            const authBtn = gitHubAuthed
+                ? `<button class="cfv-action-btn" onclick="setGitHubToken()" style="font-size:11px;padding:8px 16px;margin-top:8px;color:var(--success);border-color:var(--success)" title="Change or remove the stored GitHub token">🔑 Authenticated · 5k/hr</button>`
+                : `<button class="cfv-action-btn" onclick="setGitHubToken()" style="font-size:11px;padding:8px 16px;margin-top:8px" title="Store a GitHub token to raise the rate limit from 60/hr to 5,000/hr">🔑 Set GitHub token (60→5k/hr)</button>`;
             // Git sync KPI card + button
             let gitCard, gitBtn;
             if (!gitSyncData) {
@@ -405,10 +451,11 @@
                     bigNum = `${gitCurrent}/${total} ✓`;
                     subline = 'all current';
                 }
+                const authSuffix = gitHubAuthed ? ' · 🔑 auth' : '';
                 gitCard = `<div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                     <div class="kpi-card-label">Git Sync (real)</div>
                     <div style="font-size:20px;font-weight:700;color:${colour}">${bigNum}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${subline} · checked ${fetchedRel}${gitSyncData.rateLimited ? ' · <strong style="color:var(--warning)">rate-limited</strong>' : ''}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${subline} · checked ${fetchedRel}${gitSyncData.rateLimited ? ' · <strong style="color:var(--warning)">rate-limited</strong>' : ''}${authSuffix}</div>
                 </div>`;
                 gitBtn = `<button class="cfv-action-btn" onclick="clearGitSyncCache();runGitSyncCheck(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Re-check Git Sync</button>`;
             }
@@ -431,6 +478,7 @@
                 </div>
                 <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
                     ${gitBtn}
+                    ${authBtn}
                     ${updateAllBtn}
                 </div>
                 ${gitSyncData && gitStale > 0 ? `<div style="margin-top:8px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px;font-size:12px;color:var(--danger)">
