@@ -206,11 +206,14 @@
                     completedTasks:Number(getField(r,STRAT_PF.completedTasks))||0,
                 };
             });
-            // Run hand-built KPI compute functions for any project with code.
-            // Writes results back to Airtable so the Task OS project panel
-            // sees the updated kpiCurrent too.
-            try{await runAutomatedKpis(records)}catch(e){console.warn('[runAutomatedKpis] failed',e)}
+            // Render immediately with the values already on each project so
+            // the section never disappears while compute runs. Compute writes
+            // back to Airtable in the background and re-renders on completion.
             renderStrategicKpis();
+            try{
+                await runAutomatedKpis(records);
+                renderStrategicKpis();
+            }catch(e){console.warn('[runAutomatedKpis] failed',e)}
         }catch(e){console.warn('[loadStrategicKpis] failed',e)}
     }
 
