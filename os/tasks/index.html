@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1900 drift-fix</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-2030 add-task-strat</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -3969,7 +3969,15 @@ function getKanbanTasks(){
 function renderKanban(){
   const container=document.getElementById('view-kanban');
   const tasks=getKanbanTasks();
-  const projSet=new Set();allTasks.filter(t=>t.priority==='Project').forEach(t=>t.projectNames.forEach(n=>projSet.add(n)));
+  // Only list projects that are still active — skip any project marked
+  // Completed (either the checkbox or the status). Prevents retired
+  // projects like "Banking Set Up | Creditor Management | Legal Plan"
+  // from cluttering the filter dropdown.
+  const completedProjectNames=new Set((allProjects||[]).filter(p=>p.completed||p.status==='Completed').map(p=>p.name));
+  const projSet=new Set();
+  allTasks.filter(t=>t.priority==='Project').forEach(t=>{
+    t.projectNames.forEach(n=>{if(n&&!completedProjectNames.has(n))projSet.add(n)});
+  });
   const projOpts=[...projSet].sort();
 
   let navHtml;
@@ -5433,14 +5441,19 @@ function openCreateTaskModal(){
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   const today=todayStr();
   const defaultKey=(currentUser&&currentUser.key)||'kevin';
+  // Active project options for the Project dropdown (matches the task grid's
+  // inline project picker — excludes completed projects).
+  const activeProjs=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
   overlay.innerHTML=`<div class="modal"><h2>Add Task</h2>
-    <div class="field-row"><label>Task</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Task</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
     <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
     <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard Deadline</label></div></div>
     <div class="field-row"><label>Time Estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='15 min'?'selected':''}>${o}</option>`).join('')}</select></div>
     <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Recurring</label><select id="ctRecur"><option value="" selected>-</option>${['Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Project</label><select id="ctProject"><option value="">—</option>${activeProjs.map(p=>`<option value="${p.id}">${escHtml(p.name.length>60?p.name.slice(0,60)+'…':p.name)}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Status</label><select id="ctStatus">${STATUS_OPTIONS.map(s=>`<option ${s==='Upcoming'?'selected':''}>${s}</option>`).join('')}</select><span style="margin-left:8px;font-size:10px;color:var(--text-muted)">auto-derived from due date unless you pick manually</span></div>
     <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Recurring</label><select id="ctRecur"><option value="" selected>-</option>${['Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3" placeholder="Describe the task or the end result..."></textarea></div>
     <div class="modal-actions">
       <button class="btn" onclick="window._pendingCreateStartMin=null;document.getElementById('createTaskModal').remove()">Cancel</button>
@@ -5454,16 +5467,21 @@ async function submitCreateTask(){
   const fields={};
   fields[F.name]=name;
   const due=document.getElementById('ctDue').value;if(due)fields[F.dueDate]=due;
-  // Status is derived from due date — not manually picked. Keeps
-  // getMyDayTasks / filters consistent without asking the user to remember.
+  // Status defaults to the derived status from due date, but the dropdown
+  // lets the user pick something deliberate (e.g. Approval) at creation time.
   const todayStrVal=todayStr();
-  let computedStatus='Upcoming';
+  let derivedStatus='Upcoming';
   if(due){
-    if(due<todayStrVal)computedStatus='Overdue';
-    else if(due===todayStrVal)computedStatus='Today';
-    else computedStatus='Upcoming';
+    if(due<todayStrVal)derivedStatus='Overdue';
+    else if(due===todayStrVal)derivedStatus='Today';
+    else derivedStatus='Upcoming';
   }
-  fields[F.status]=computedStatus;
+  const pickedStatus=(document.getElementById('ctStatus')||{}).value||'';
+  fields[F.status]=pickedStatus||derivedStatus;
+  // Optional project link — picker shows active projects only (matches grid)
+  const ctProjEl=document.getElementById('ctProject');
+  const pickedProj=ctProjEl?ctProjEl.value:'';
+  if(pickedProj)fields[F.projects]=[pickedProj];
   const assigneeKey=document.getElementById('ctAssignee').value;
   const member=TEAM.find(m=>m.key===assigneeKey);
   if(member)fields[F.assignee]={email:member.email};

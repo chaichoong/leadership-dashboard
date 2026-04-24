@@ -216,6 +216,21 @@ function renderForm(fields) {
     const host = document.getElementById('planForm');
     host.innerHTML = '';
 
+    // Populate the Owner dropdown options for kpiSubsection. Uses the
+    // same Team Members cache the push logic loads. Fire-and-forget —
+    // kpiSubsection reads window.__stratOwnerOptions synchronously so we
+    // trigger a re-render once ready if the cache wasn't warm.
+    if (!window.__stratOwnerOptions) {
+        ensureTeamMembersLoaded().then(cache => {
+            window.__stratOwnerOptions = Object.values(cache || {})
+                .filter(m => m && m.email)
+                .map(m => ({ name: m.name || m.email, email: m.email }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+            // Re-render to pick up owner options without a hard refresh.
+            if (currentRecord && currentRecord.fields) renderForm(currentRecord.fields);
+        }).catch(() => {});
+    }
+
     // Sticky top navigator — anchor links to every section divider/section.
     const nav = document.createElement('div');
     nav.className = 'section-nav';
@@ -372,6 +387,8 @@ function renderForm(fields) {
         card.appendChild(kpiSubsection(`KPI for Project ${i + 1}`, {
             kpiNameFid: det.kpiName,
             kpiUnitFid: det.kpiUnit,
+            kpiTargetFid: det.kpiTarget,
+            ownerFid: det.owner,
             trackingFid: det.tracking,
             dodFid: det.dod,
         }, fields));
@@ -549,6 +566,62 @@ function kpiSubsection(title, fieldMap, fields) {
     unitRow.appendChild(unitSel);
     nameUnitRow.appendChild(unitRow);
     box.appendChild(nameUnitRow);
+
+    // KPI Target (number) + Project Owner (collaborator) on one row so
+    // they stay visible without pushing the bigger textareas further down.
+    if (fieldMap.kpiTargetFid || fieldMap.ownerFid) {
+        const targetOwnerRow = document.createElement('div');
+        targetOwnerRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px';
+        if (fieldMap.kpiTargetFid) {
+            const tRow = document.createElement('div');
+            tRow.className = 'field-row';
+            const tLab = document.createElement('label'); tLab.textContent = 'KPI Target';
+            const tInp = document.createElement('input');
+            tInp.type = 'number'; tInp.step = 'any';
+            tInp.dataset.fieldId = fieldMap.kpiTargetFid;
+            const raw = fields[fieldMap.kpiTargetFid];
+            tInp.value = (raw === 0 || raw) ? raw : '';
+            tInp.placeholder = 'e.g. 4000';
+            tInp.style.cssText = 'padding:9px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:13px;background:var(--bg-surface);font-family:inherit;color:var(--text-primary);width:100%';
+            tInp.addEventListener('input', () => markDirty());
+            tRow.appendChild(tLab); tRow.appendChild(tInp);
+            targetOwnerRow.appendChild(tRow);
+        }
+        if (fieldMap.ownerFid) {
+            const oRow = document.createElement('div');
+            oRow.className = 'field-row';
+            const oLab = document.createElement('label'); oLab.textContent = 'Owner';
+            // singleCollaborator stores as { id, email, name } — display email,
+            // let the user type/paste an email from a team member.
+            const current = fields[fieldMap.ownerFid] || {};
+            const currentEmail = typeof current === 'object' ? (current.email || '') : (current || '');
+            const oSel = document.createElement('select');
+            oSel.dataset.fieldId = fieldMap.ownerFid;
+            oSel.dataset.type = 'collaborator';
+            oSel.style.cssText = 'padding:9px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:13px;background:var(--bg-surface);font-family:inherit;color:var(--text-primary);width:100%';
+            const emptyOpt = document.createElement('option'); emptyOpt.value = ''; emptyOpt.textContent = '—';
+            oSel.appendChild(emptyOpt);
+            // Team options from in-memory cache (filled lazily on first form render).
+            (window.__stratOwnerOptions || []).forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.email; opt.textContent = m.name;
+                if (m.email === currentEmail) opt.selected = true;
+                oSel.appendChild(opt);
+            });
+            // If the current value isn't in the list (e.g. inactive member),
+            // add it so we don't silently drop the selection.
+            if (currentEmail && !Array.from(oSel.options).some(o => o.value === currentEmail)) {
+                const opt = document.createElement('option');
+                opt.value = currentEmail; opt.textContent = currentEmail;
+                opt.selected = true;
+                oSel.appendChild(opt);
+            }
+            oSel.addEventListener('change', () => markDirty());
+            oRow.appendChild(oLab); oRow.appendChild(oSel);
+            targetOwnerRow.appendChild(oRow);
+        }
+        box.appendChild(targetOwnerRow);
+    }
 
     box.appendChild(textareaField('Tracking Method', fieldMap.trackingFid, fields[fieldMap.trackingFid] || ''));
     box.appendChild(textareaField('Definition of Done', fieldMap.dodFid, fields[fieldMap.dodFid] || ''));
@@ -921,7 +994,9 @@ const PROJ_F = {
     dod:         'fldgjzVEnfnZowrBD',
     kpiName:     'fldABYFMf2yBKWdlD',
     kpiUnit:     'fldrYZEghROXYf6w0',
+    kpiTarget:   'fldaI0voHia91SYZz',
     kpiTracking: 'fld2wYB5ZEn9WRcjN',
+    owner:       'fldXUAPrpStGwc2V9',
 };
 
 // Projects table extra field IDs for reading collaborators during push.
@@ -1105,7 +1180,22 @@ function showProgressOverlay(initialMsg) {
 function readAllFormFields() {
     const out = {};
     document.querySelectorAll('[data-field-id]').forEach(el => {
-        out[el.dataset.fieldId] = el.value || '';
+        const fid = el.dataset.fieldId;
+        const raw = el.value;
+        // Number inputs — coerce empty to null so Airtable clears the cell
+        // rather than rejecting "".
+        if (el.type === 'number') {
+            if (raw === '' || raw == null) { out[fid] = null; return; }
+            const n = Number(raw);
+            out[fid] = isNaN(n) ? null : n;
+            return;
+        }
+        // singleCollaborator — Airtable expects { email: ... } or null.
+        if (el.dataset.type === 'collaborator') {
+            out[fid] = raw ? { email: raw } : null;
+            return;
+        }
+        out[fid] = raw || '';
     });
     return out;
 }
@@ -1268,6 +1358,24 @@ async function buildPushProposal(qps, fields, onProgress) {
             }
         }
 
+        // Resolve KPI Target (number field — raw or coerced) and Owner
+        // (singleCollaborator → { email }) from the strategy record. These
+        // port into the Projects table on push.
+        let kpiTarget = null;
+        if (det.kpiTarget) {
+            const tv = fields[det.kpiTarget];
+            if (tv !== undefined && tv !== null && tv !== '') {
+                const n = Number(tv);
+                if (!isNaN(n)) kpiTarget = n;
+            }
+        }
+        let ownerEmail = '';
+        if (det.owner) {
+            const ov = fields[det.owner];
+            if (ov && typeof ov === 'object') ownerEmail = ov.email || '';
+            else if (typeof ov === 'string') ownerEmail = ov;
+        }
+
         proposal.projects.push({
             qp,
             projectName,
@@ -1275,6 +1383,8 @@ async function buildPushProposal(qps, fields, onProgress) {
             dod: (fields[det.dod] || '').trim(),
             kpiName: (fields[det.kpiName] || '').trim(),
             kpiUnit: extractSelectName(fields[det.kpiUnit]) || '',
+            kpiTarget,
+            ownerEmail,
             tracking: (fields[det.tracking] || '').trim(),
             stones,
             tasksByMonth,
@@ -1470,7 +1580,9 @@ async function executePush(proposal, fields, opts) {
             projBody.fields[PROJ_F.dod] = p.dod || p.qpText;
             if (p.kpiName) projBody.fields[PROJ_F.kpiName] = p.kpiName;
             if (p.kpiUnit) projBody.fields[PROJ_F.kpiUnit] = p.kpiUnit;
+            if (p.kpiTarget != null) projBody.fields[PROJ_F.kpiTarget] = p.kpiTarget;
             if (p.tracking) projBody.fields[PROJ_F.kpiTracking] = p.tracking;
+            if (p.ownerEmail) projBody.fields[PROJ_F.owner] = { email: p.ownerEmail };
             try {
                 const created = await airtableFetch(TABLES.projects, { method: 'POST', body: JSON.stringify(projBody) });
                 projectId = created.id;
