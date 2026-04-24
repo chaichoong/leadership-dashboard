@@ -12,7 +12,7 @@
         'pnl':         ['js/pnl.js'],
         'comms':       ['follow-up.html'],
         'compliance':  ['compliance.html'],
-        'airtable':    [],                               // UI embedded in index.html — no isolatable source
+        'airtable':    ['os/tasks/index.html'],           // shares the Tasks page — filtered view via ?filter=maintenance
         'launch-plan': ['os/launch-plan.html'],
         'os-hub':      ['os/index.html'],
         'os-bplan':    ['os/business-plan-builder/index.html'],
@@ -301,9 +301,11 @@
         let gitStale = 0;
         let gitUnknown = 0;
         let gitCurrent = 0;
+        let gitMissingSop = 0;
         const outOfSync = [];
         const gitStalePages = [];
         const gitUnknownPages = [];
+        const gitMissingSopPages = [];
         tbody.innerHTML = PAGE_REGISTRY.map((p, i) => {
             const versionMatch = p.pageVer === p.sopVer;
             if (versionMatch) matched++;
@@ -315,6 +317,7 @@
                 if (gs.state === 'stale') { gitStale++; gitStalePages.push(p); }
                 else if (gs.state === 'current') gitCurrent++;
                 else if (gs.state === 'unknown') { gitUnknown++; gitUnknownPages.push(p); }
+                else if (gs.state === 'no-sop') { gitMissingSop++; gitMissingSopPages.push(p); }
             }
 
             // Status: prefer git truth when we have it; fall back to declared-version match
@@ -325,7 +328,10 @@
                 statusHtml = '<span style="color:var(--success);font-weight:600">✓ In sync</span>';
             } else if (gs && gs.state === 'unknown') {
                 statusHtml = '<span style="color:var(--warning);font-weight:600">? Unknown</span>';
-            } else if (gs && (gs.state === 'no-source' || gs.state === 'no-sop')) {
+            } else if (gs && gs.state === 'no-sop') {
+                // Page has source but no SOP — an SOP needs to be created
+                statusHtml = '<span style="color:var(--danger);font-weight:600">⚠ SOP needed</span>';
+            } else if (gs && gs.state === 'no-source') {
                 statusHtml = '<span style="color:var(--text-muted);font-weight:500">—</span>';
             } else {
                 // No git data yet — fall back to declared-version comparison
@@ -351,7 +357,7 @@
                 } else if (gs.state === 'no-source') {
                     label = `<span style="color:var(--text-muted);font-weight:500">— no tracked source</span>`;
                 } else if (gs.state === 'no-sop') {
-                    label = `<span style="color:var(--text-muted);font-weight:500">— no SOP</span>`;
+                    label = `<span style="color:var(--danger);font-weight:600">⚠ SOP needed</span>`;
                 }
                 gitCell = `<div style="font-size:11px;line-height:1.4">
                     ${label}<br>
@@ -405,7 +411,7 @@
                 if (gs && gs.sopDate) {
                     lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">${fmtRelative(gs.sopDate)}</div>`;
                 } else if (gs && !p.sopFile) {
-                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">no SOP</div>`;
+                    lines += `<div style="font-size:10px;color:var(--danger);font-weight:600;margin-top:1px">needs SOP</div>`;
                 } else if (gs && gs.errors.length && !gs.sopDate) {
                     lines += `<div style="font-size:10px;color:var(--warning);margin-top:1px">? unknown</div>`;
                 }
@@ -428,9 +434,12 @@
         if (integrity) {
             const total = PAGE_REGISTRY.length;
             const allGood = matched === total;
-            // Prefer git-stale list when we have git data; otherwise fall back to the
-            // declared-version mismatch list so the button still works pre-sync.
-            const effectiveStalePages = gitSyncData ? gitStalePages : outOfSync;
+            // Pages that need SOP attention = git-stale (SOP behind page) PLUS
+            // pages with source but no SOP file yet (need one creating). If we
+            // have no git data yet, fall back to declared-version mismatch.
+            const effectiveStalePages = gitSyncData
+                ? [...gitStalePages, ...gitMissingSopPages]
+                : outOfSync;
             let sopRequested = localStorage.getItem('_sop_update_requested');
             // Clear the requested flag if everything is now in sync OR if it's older than 24 hours
             if (sopRequested) {
@@ -516,6 +525,9 @@
                 ${gitSyncData && gitUnknown > 0 ? `<div style="margin-top:8px;padding:10px 12px;background:var(--warning-bg);border:1px solid var(--warning);border-radius:6px;font-size:12px;color:var(--warning)">
                     <strong>? ${gitUnknown} page${gitUnknown === 1 ? '' : 's'} unknown:</strong> ${gitUnknownPages.map(p => escHtml(p.name)).join(', ')}. GitHub API ${gitSyncData.rateLimited ? 'rate-limited this run — wait ~1h or hit Re-check later.' : 'returned no data for at least one of these files.'}
                 </div>` : ''}
+                ${gitSyncData && gitMissingSop > 0 ? `<div style="margin-top:8px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px;font-size:12px;color:var(--danger)">
+                    <strong>⚠ ${gitMissingSop} page${gitMissingSop === 1 ? '' : 's'} missing an SOP:</strong> ${gitMissingSopPages.map(p => escHtml(p.name)).join(', ')}. A new SOP needs to be created for ${gitMissingSop === 1 ? 'this page' : 'these pages'}.
+                </div>` : ''}
             `;
         }
     }
@@ -524,13 +536,18 @@
         if (!PAT) { alert('No Airtable token'); return; }
         btn.textContent = 'Requesting...';
         btn.disabled = true;
+        // If sopFile is empty, this is a "create new SOP" request, not a regeneration.
+        const isNew = !sopFile;
+        const requestLabel = isNew
+            ? `CREATE NEW ${pageName} SOP (page v${pageVer})`
+            : `Update ${pageName} SOP to v${pageVer}`;
         try {
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${SOP_QUEUE_TABLE}`, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: {
-                    [SOP_QUEUE_FIELDS.request]: `Update ${pageName} SOP to v${pageVer}`,
-                    [SOP_QUEUE_FIELDS.sopFile]: sopFile,
+                    [SOP_QUEUE_FIELDS.request]: requestLabel,
+                    [SOP_QUEUE_FIELDS.sopFile]: sopFile || '(new)',
                     [SOP_QUEUE_FIELDS.pageVersion]: pageVer,
                     [SOP_QUEUE_FIELDS.status]: 'Pending',
                     [SOP_QUEUE_FIELDS.pageId]: pageId,
@@ -557,16 +574,16 @@
     }
 
     async function requestAllSOPUpdates(btn) {
-        // Build the list of pages to update. If git sync data is loaded, use
-        // git-stale truth (page committed after SOP). Otherwise fall back to
-        // the declared-version mismatch (pageVer !== sopVer) from config.js.
+        // Build the list of pages needing SOP attention:
+        //   - git-stale: SOP exists but page has been edited since it was last written → regenerate
+        //   - no-sop: page has source but no SOP file yet → create new SOP
+        // Pre-sync fallback: declared-version mismatch (pageVer !== sopVer).
         const stalePages = [];
         for (const p of PAGE_REGISTRY) {
-            if (!p.sopFile) continue; // can't update a SOP that doesn't exist
             const gs = getGitStatus(p);
             if (gs) {
-                if (gs.state === 'stale') stalePages.push(p);
-            } else if (p.pageVer !== p.sopVer) {
+                if (gs.state === 'stale' || gs.state === 'no-sop') stalePages.push(p);
+            } else if (p.sopFile && p.pageVer !== p.sopVer) {
                 stalePages.push(p);
             }
         }
