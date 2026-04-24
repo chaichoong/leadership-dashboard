@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0732</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0759</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4053,7 +4053,7 @@ function renderProjects(){
         const activePeriod=_projectKpiPeriod[p.id]||'rolling';
         // Rolling button (active state = solid accent)
         const isRollingActive=activePeriod==='rolling';
-        const rollingBtn=kpiDetail.detail?`<button class="btn btn-sm" style="padding:2px 10px;font-size:11px;${isRollingActive?'background:var(--accent);color:#fff;border-color:var(--accent)':''}" onclick="setProjectKpiPeriod('${p.id}','rolling');toggleProjKpiDrill('${p.id}','rolling')">Rolling 31d${isRollingActive?' •':' ▾'}</button>`:'';
+        const rollingBtn=kpiDetail.detail?`<button class="btn btn-sm" style="padding:2px 10px;font-size:11px;${isRollingActive?'background:var(--accent);color:#fff;border-color:var(--accent)':''}" onclick="selectProjectKpiPeriod('${p.id}','rolling')">Rolling 31d${isRollingActive?' •':' ▾'}</button>`:'';
         const cells=Object.keys(kpiDetail.months).sort().map(k=>{
           const [,mm]=k.split('-');const label=monthNames[mm]||k;
           const v=kpiDetail.months[k];
@@ -4063,7 +4063,7 @@ function renderProjects(){
           const bg=isActive?'var(--accent)':(hit?'var(--success-bg)':'var(--bg-subtle)');
           const color=isActive?'#fff':(hit?'var(--success)':'var(--text-secondary)');
           const border=isActive?'1px solid var(--accent)':'1px solid transparent';
-          return `<span ${clickable?`onclick="setProjectKpiPeriod('${p.id}','${k}');toggleProjKpiDrill('${p.id}','${k}')"`:''} style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:${bg};color:${color};border:${border};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${clickable?'cursor:pointer;':''}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPre}${(v||0).toLocaleString('en-GB')}${unitSuf}</span>`;
+          return `<span ${clickable?`onclick="selectProjectKpiPeriod('${p.id}','${k}')"`:''} style="display:inline-flex;align-items:center;gap:4px;padding:2px 10px;background:${bg};color:${color};border:${border};border-radius:10px;font-size:11px;font-variant-numeric:tabular-nums;${clickable?'cursor:pointer;':''}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPre}${(v||0).toLocaleString('en-GB')}${unitSuf}</span>`;
         }).join(' ');
         monthsPills=`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-muted)">Per month:</span> ${cells}${rollingBtn}</div>`;
         drillHolder=`<div id="projKpiDrill-${p.id}" data-expanded="" style="display:none;margin-top:10px;padding:12px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px"></div>`;
@@ -4294,23 +4294,43 @@ async function recomputeAllKpis(){
 }
 window.recomputeAllKpis=recomputeAllKpis;
 
-// Set which period drives the project card's header KPI block and
-// re-render projects so the header reflects the selection.
-function setProjectKpiPeriod(pid,bucket){
+// Combined handler for clicking the Rolling 31d button or any month pill
+// in the Task OS project KPI panel. In one pass:
+//  1. Sets _projectKpiPeriod[pid] (so the header's "Showing:" label +
+//     progress bar reflect the chosen period after next render)
+//  2. Toggles the drilldown panel:
+//     - If already open with this same bucket → close it
+//     - Otherwise open it with the clicked bucket (switching if needed)
+//  3. Updates the header by re-rendering. This runs AFTER the toggle so
+//     the drill's data-expanded state survives the re-render.
+function selectProjectKpiPeriod(pid, bucket){
+  // Decide whether this click should close the drill (same bucket clicked
+  // while already open) or open/switch it.
+  const el=document.getElementById(`projKpiDrill-${pid}`);
+  const currentKey=el?el.getAttribute('data-expanded'):'';
+  const shouldClose=(currentKey===bucket);
+  // Keep the selected period so the header's "Showing:" label sticks
   _projectKpiPeriod[pid]=bucket;
+  // Re-render project cards first — this refreshes the header + active pill
+  // styling + recreates a fresh drill panel with data-expanded="" display:none
   try{renderProjects()}catch(e){}
+  // Then either open the drill on the new DOM, or leave it closed
+  if(!shouldClose){
+    renderProjKpiDrill(pid, bucket);
+  }
 }
-window.setProjectKpiPeriod=setProjectKpiPeriod;
+window.selectProjectKpiPeriod=selectProjectKpiPeriod;
 
-// Drilldown renderer for the Projects-tab KPI panel. Reads the JSON
-// written by the Leadership Dashboard's compute runner.
-function toggleProjKpiDrill(pid,bucket){
+// Backward compat + explicit renderer
+function toggleProjKpiDrill(pid,bucket){ selectProjectKpiPeriod(pid, bucket); }
+window.toggleProjKpiDrill=toggleProjKpiDrill;
+
+// The actual drill-rendering function (no toggle logic, just renders).
+function renderProjKpiDrill(pid,bucket){
   const p=allProjects.find(x=>x.id===pid);if(!p||!p.kpiDetailJson)return;
   let data;try{data=JSON.parse(p.kpiDetailJson)}catch(e){return}
   if(!data||!data.detail)return;
   const el=document.getElementById(`projKpiDrill-${pid}`);if(!el)return;
-  const currentKey=el.getAttribute('data-expanded');
-  if(currentKey===bucket){el.style.display='none';el.setAttribute('data-expanded','');return}
   let detail=null,label='';
   if(bucket==='rolling'){detail=data.detail.rolling;label='Rolling 31 days'}
   else if(data.detail.monthsDetail&&data.detail.monthsDetail[bucket]){
