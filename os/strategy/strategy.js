@@ -1248,7 +1248,6 @@ async function buildPushProposal(qps, fields, onProgress) {
 
         const stones = OBJSTRAT.monthlyStones[qp.i].map(sFid => (fields[sFid] || '').trim());
         const tasksByMonth = [[], [], []];
-        const existingTaskCount = existingTaskNames.size;
         // Existing projects: skip task extraction entirely. AI task names are
         // not deterministic between runs, so even a "dedup by name" approach
         // would re-push near-identical tasks. Kevin's rule: if a project is
