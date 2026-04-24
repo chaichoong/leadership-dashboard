@@ -52,7 +52,6 @@
             <div class="sidebar-item" onclick="switchTab('pnl')"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss OS</span></div>
             <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms OS</span></div>
             <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance OS</span></div>
-            <div class="sidebar-item" onclick="switchTab('airtable')"><span class="sidebar-icon">&#x1F527;</span><span class="sidebar-label">Contractor Job List OS</span></div>
             <div class="sidebar-item" onclick="switchTab('launch-plan')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Operations Director Launch Plan OS</span></div>
         </nav>
         <!-- OS-INTEGRATION: Sidebar — DO NOT REMOVE (see MEMORY.md) -->
@@ -112,7 +111,6 @@
         <!-- Tabs Navigation (hidden — replaced by sidebar) -->
         <div class="tabs-nav">
             <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard OS</button>
-            <button class="tab-btn" onclick="switchTab('airtable')">Contractor Job List OS</button>
             <button class="tab-btn" onclick="switchTab('invoices')">Invoices OS</button>
             <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids OS</button>
         </div>
@@ -247,16 +245,6 @@
             <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
-        <!-- Tab 2: Contractor Job List — filtered view of the Tasks OS (Maintenance Ticket = true) -->
-        <div class="tab-panel" id="tab-airtable">
-            <iframe class="tab-panel-iframe" id="airtableFrame"
-                src=""
-                data-src="os/tasks/index.html?filter=maintenance"
-                loading="lazy"
-                allowfullscreen
-                style="border:none">
-            </iframe>
-        </div>
 
         <!-- Tab 3: Invoices -->
         <div class="tab-panel" id="tab-invoices">

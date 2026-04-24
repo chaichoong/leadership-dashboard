@@ -12,7 +12,6 @@
         'pnl':         ['js/pnl.js'],
         'comms':       ['follow-up.html'],
         'compliance':  ['compliance.html'],
-        'airtable':    ['os/tasks/index.html'],           // shares the Tasks page — filtered view via ?filter=maintenance
         'launch-plan': ['os/launch-plan.html'],
         'os-hub':      ['os/index.html'],
         'os-bplan':    ['os/business-plan-builder/index.html'],

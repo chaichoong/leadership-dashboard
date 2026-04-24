@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-hub', 'os-bplan', 'tasks', 'launch-plan', 'comms', 'compliance', 'airtable'];
+        const iframeTabs = ['os-strategy', 'os-hub', 'os-bplan', 'tasks', 'launch-plan', 'comms', 'compliance'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -308,25 +308,20 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', airtable: 'Contractor', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'os-strategy': 'Objective & Strategy', 'launch-plan': 'Director Launch Plan' };
+        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'os-strategy': 'Objective & Strategy', 'launch-plan': 'Director Launch Plan' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
         // Also highlight old tab buttons (if visible)
         document.querySelectorAll('.tab-btn').forEach(b => {
             if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
-                (tabId === 'airtable' && b.textContent.includes('Contractor')) ||
                 (tabId === 'invoices' && b.textContent.includes('Invoices')) ||
                 (tabId === 'cfv' && b.textContent.includes('Cash Flow Voids'))) {
                 b.classList.add('active');
             }
         });
         // Lazy-load iframes on first switch
-        if (tabId === 'airtable') {
-            const frame = document.getElementById('airtableFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('airtable.com')) frame.src = frame.dataset.src;
-        }
-        if (tabId === 'comms') {
+if (tabId === 'comms') {
             const frame = document.getElementById('commsFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('follow-up')) frame.src = frame.dataset.src;
         }
