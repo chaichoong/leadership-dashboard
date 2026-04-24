@@ -136,6 +136,20 @@
     let _strategicKpiProjects = [];
     let _strategicBusinessIdToName = {};
 
+    // Readiness signal for the main dashboard data tables (allTransactions,
+    // allTenancies, allCosts, allBusinesses, allCategories, allSubCategories).
+    // loadStrategicKpis now fires at the top of loadDashboard — BEFORE those
+    // globals are populated — so its Projects fetch + initial render can race
+    // against the main 9-table fetch. But runAutomatedKpis needs those globals
+    // to compute values, so it waits on this promise before starting. Resolved
+    // by markMainDataReady() once either the cache-hit path or the fresh-fetch
+    // path has finished populating the globals.
+    let _mainDataReadyResolve = null;
+    const _mainDataReadyPromise = new Promise(r => { _mainDataReadyResolve = r; });
+    function markMainDataReady() {
+        if (_mainDataReadyResolve) { _mainDataReadyResolve(); _mainDataReadyResolve = null; }
+    }
+
     function _stratSelName(v){if(!v)return '';if(typeof v==='string')return v;if(typeof v==='object'&&v.name)return v.name;return ''}
     function _stratDaysAgo(iso){if(!iso)return null;const ms=Date.now()-new Date(iso).getTime();return Math.floor(ms/86400000)}
     function _stratComputeHealth(p){
@@ -403,12 +417,22 @@
             return code && String(code).trim();
         });
         if(!withCode.length)return;
+        // The compute code reads from allTransactions / allTenancies / allCosts
+        // / allBusinesses / allCategories / allSubCategories. Wait for those to
+        // be populated before computing (they're set by either the cache-hit
+        // render or the fresh-fetch success path in loadDashboard).
+        await _mainDataReadyPromise;
         // Fetch the task list once for any project KPI that needs it.
         const tasksForKpi=await fetchTasksForKpi();
+        // Run all computes synchronously, updating local state per project so the
+        // caller can renderStrategicKpis() with fresh values right away. PATCHes
+        // to Airtable fire in the background (fire-and-forget) — they used to be
+        // awaited sequentially, costing N × ~500ms on the critical path for data
+        // the UI already had locally. Persisting to Airtable is housekeeping so
+        // the next session's initial (pre-compute) render shows today's numbers.
         for(const rec of withCode){
             try{
                 const code=getField(rec,STRAT_PF.kpiComputeCode);
-                // Find the parsed local version for ctx.project fields
                 const local=_strategicKpiProjects.find(p=>p.id===rec.id)||{
                     id:rec.id,
                     name:getField(rec,STRAT_PF.name)||'',
@@ -418,74 +442,65 @@
                     kpiUnit:_stratSelName(getField(rec,STRAT_PF.kpiUnit)),
                 };
                 const ctx=buildAutomatedKpiContext(local);
-                // Attach the pre-fetched task list so task-completion KPIs
-                // can simply filter ctx.tasks by ctx.project.id.
                 ctx.tasks=tasksForKpi;
                 const value=runKpiComputeCode(code,ctx);
                 if(value==null)continue;
                 const rounded=Math.round(value*100)/100;
-                // Update local and PATCH back to Airtable
                 local.kpiCurrent=rounded;
-                // Stash the full returned object on the project so the
-                // Strategic KPIs drilldown can show the transaction breakdown.
                 local.kpiReturn=ctx._lastKpiDetail||null;
                 local.kpiDetail=ctx._lastKpiDetail||null;
                 local.kpiLastUpdated=new Date().toISOString();
-                // 'currentUser' is a Task OS concept; on the dashboard it may
-                // not be defined. Fall back to a generic label so the PATCH
-                // never aborts with a ReferenceError.
                 let who='Leadership Dashboard';
                 try{if(typeof currentUser!=='undefined'&&currentUser&&(currentUser.name||currentUser.email))who=currentUser.name||currentUser.email}catch(e){}
                 local.kpiLastUpdatedBy=who;
-                try{
-                    const payload={};
-                    payload[STRAT_PF.kpiCurrent]=rounded;
-                    payload[STRAT_PF.kpiLastUpdated]=local.kpiLastUpdated;
-                    payload[STRAT_PF.kpiLastUpdatedBy]=local.kpiLastUpdatedBy;
-                    // Serialize the full compute return (months + detail) so
-                    // the Task OS can read the same drilldown without having
-                    // to re-fetch transactions. Cap at ~50KB to stay well
-                    // under Airtable's long-text field limits.
+
+                // Fire-and-forget Airtable persist.
+                (async ()=>{
                     try{
-                        let json=JSON.stringify(ctx._lastKpiDetail||{});
-                        // Airtable long-text field caps at 100,000 chars. If the
-                        // compute returned more than ~95KB of detail, progressively
-                        // drop the tx lists so the stored JSON is always parseable.
-                        const CAP=95000;
-                        if(json.length>CAP){
-                            const obj=ctx._lastKpiDetail||{};
-                            if(obj.detail){
-                                // Trim tx arrays to progressively smaller caps until it fits
-                                for(const size of [40,25,15,5]){
-                                    if(obj.detail.rolling){
-                                        obj.detail.rolling.revTxs=(obj.detail.rolling.revTxs||[]).slice(0,size);
-                                        obj.detail.rolling.costTxs=(obj.detail.rolling.costTxs||[]).slice(0,size);
+                        const payload={};
+                        payload[STRAT_PF.kpiCurrent]=rounded;
+                        payload[STRAT_PF.kpiLastUpdated]=local.kpiLastUpdated;
+                        payload[STRAT_PF.kpiLastUpdatedBy]=local.kpiLastUpdatedBy;
+                        // Serialize the full compute return (months + detail) so
+                        // the Task OS can read the same drilldown without re-
+                        // fetching transactions. Cap at ~95KB to stay under
+                        // Airtable's 100,000-char long-text limit.
+                        try{
+                            let json=JSON.stringify(ctx._lastKpiDetail||{});
+                            const CAP=95000;
+                            if(json.length>CAP){
+                                const obj=ctx._lastKpiDetail||{};
+                                if(obj.detail){
+                                    for(const size of [40,25,15,5]){
+                                        if(obj.detail.rolling){
+                                            obj.detail.rolling.revTxs=(obj.detail.rolling.revTxs||[]).slice(0,size);
+                                            obj.detail.rolling.costTxs=(obj.detail.rolling.costTxs||[]).slice(0,size);
+                                        }
+                                        if(obj.detail.monthsDetail){
+                                            Object.keys(obj.detail.monthsDetail).forEach(k=>{
+                                                obj.detail.monthsDetail[k].revTxs=(obj.detail.monthsDetail[k].revTxs||[]).slice(0,size);
+                                                obj.detail.monthsDetail[k].costTxs=(obj.detail.monthsDetail[k].costTxs||[]).slice(0,size);
+                                            });
+                                        }
+                                        json=JSON.stringify(obj);
+                                        if(json.length<=CAP)break;
                                     }
-                                    if(obj.detail.monthsDetail){
-                                        Object.keys(obj.detail.monthsDetail).forEach(k=>{
-                                            obj.detail.monthsDetail[k].revTxs=(obj.detail.monthsDetail[k].revTxs||[]).slice(0,size);
-                                            obj.detail.monthsDetail[k].costTxs=(obj.detail.monthsDetail[k].costTxs||[]).slice(0,size);
-                                        });
-                                    }
-                                    json=JSON.stringify(obj);
-                                    if(json.length<=CAP)break;
+                                }
+                                if(json.length>CAP){
+                                    json=JSON.stringify({value:obj.value,rolling:obj.rolling,months:obj.months});
                                 }
                             }
-                            if(json.length>CAP){
-                                // Last resort: keep summary numbers, drop tx detail entirely
-                                json=JSON.stringify({value:obj.value,rolling:obj.rolling,months:obj.months});
-                            }
-                        }
-                        payload[STRAT_PF.kpiDetailJson]=json;
-                    }catch(e){console.warn('[runAutomatedKpis] stringify failed',e)}
-                    const url=`https://api.airtable.com/v0/${BASE_ID}/${STRAT_PROJECTS_TABLE}/${rec.id}?returnFieldsByFieldId=true`;
-                    const resp=await fetch(url,{
-                        method:'PATCH',
-                        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
-                        body:JSON.stringify({fields:payload,typecast:true}),
-                    });
-                    if(!resp.ok)console.warn('[runAutomatedKpis] PATCH',rec.id,'returned',resp.status);
-                }catch(e){console.warn('[runAutomatedKpis] PATCH failed for',rec.id,e)}
+                            payload[STRAT_PF.kpiDetailJson]=json;
+                        }catch(e){console.warn('[runAutomatedKpis] stringify failed',e)}
+                        const url=`https://api.airtable.com/v0/${BASE_ID}/${STRAT_PROJECTS_TABLE}/${rec.id}?returnFieldsByFieldId=true`;
+                        const resp=await fetch(url,{
+                            method:'PATCH',
+                            headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+                            body:JSON.stringify({fields:payload,typecast:true}),
+                        });
+                        if(!resp.ok)console.warn('[runAutomatedKpis] PATCH',rec.id,'returned',resp.status);
+                    }catch(e){console.warn('[runAutomatedKpis] PATCH failed for',rec.id,e)}
+                })();
             }catch(e){console.warn('[runAutomatedKpis] per-project error',e)}
         }
     }
@@ -696,6 +711,14 @@
 
     // ── Dashboard Load ──
     async function loadDashboard() {
+        // Kick off Strategic KPIs loading IMMEDIATELY — parallel with everything
+        // below. It used to fire AFTER the main 9-table fetch landed (transactions
+        // alone is ~7k rows paginated) which pushed the KPIs section to ~60s on
+        // cold loads, AND it was also firing a second time after cache render,
+        // doubling the compute work. Now: one call, as early as possible, racing
+        // against the main fetch instead of queueing behind it.
+        loadStrategicKpis();
+
         // Try instant render from cache first
         const cached = await loadDashCache();
         let renderedFromCache = false;
@@ -709,13 +732,13 @@
                 allCategories  = d.categories;
                 allSubCategories = d.subCategories;
                 allBusinesses  = d.businesses;
+                // Let runAutomatedKpis (fired via loadStrategicKpis at top) proceed.
+                markMainDataReady();
                 renderDashboard(d.accounts, d.costs, d.tenancies, d.transactions, d.rentalUnits, d.tenants);
                 document.getElementById('dashboard').style.display = 'block';
                 document.getElementById('loadingOverlay').style.display = 'none';
                 setRefreshingIndicator(true, cached.ageMs);
                 renderedFromCache = true;
-                // Load strategic KPIs in the background while the fresh refresh runs
-                loadStrategicKpis();
             } catch (e) {
                 console.warn('Cache render failed, falling back to full load:', e);
                 clearDashCache();
@@ -756,6 +779,9 @@
             allCategories = categories;
             allSubCategories = subCategories;
             allBusinesses = businesses;
+            // Signal to runAutomatedKpis that the globals it depends on are now
+            // populated. (No-op if cache-hit already resolved it.)
+            markMainDataReady();
 
             // Clear stale "returned" flags — if Airtable now shows In Payment, the flag is no longer needed
             tenancies.forEach(t => {
@@ -791,9 +817,8 @@
             // Schedule smart refresh — defers if user is actively interacting
             if (refreshTimer) clearInterval(refreshTimer);
             refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
-
-            // Fetch strategic KPIs from the Projects table (non-blocking)
-            loadStrategicKpis();
+            // (Strategic KPIs already loading — fired at the top of loadDashboard so
+            // they render in parallel with the main fetch instead of behind it.)
         } catch (e) {
             if (e.message === 'Auth failed') { clearDashCache(); return; }
             console.error(e);
