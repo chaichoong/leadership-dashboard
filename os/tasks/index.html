@@ -178,6 +178,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
 .avatar-kevin{background:#6366f1}.avatar-mica{background:#ec4899}
 .avatar-erica{background:#f59e0b}.avatar-may{background:#22c55e}
+.avatar-gary{background:#0ea5e9}.avatar-rob{background:#a855f7}.avatar-roy{background:#14b8a6}
 .avatar-other{background:#64748b}
 .assignee-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
 
@@ -424,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0848</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0913</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -500,6 +501,11 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <option value="">All Deadlines</option>
         <option value="hard">Hard only</option>
         <option value="soft">Soft only</option>
+      </select>
+      <select class="filter-select" id="filterTimeEst" onchange="renderTasks()" title="Filter tasks by whether a Time Estimate is set. Maintenance / contractor tasks typically have none.">
+        <option value="">All Time Est.</option>
+        <option value="none">No estimate (maintenance)</option>
+        <option value="any">Has estimate</option>
       </select>
       <select class="filter-select" id="filterPriority" onchange="renderTasks()">
         <option value="">All Priorities</option>
@@ -693,6 +699,9 @@ const TEAM = [
   { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
   { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
   { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
+  { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
+  { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
+  { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
 ];
 
 const STATUS_OPTIONS = ['Today','Upcoming','Approval','Completed','Overdue'];
@@ -3553,6 +3562,9 @@ function getFilteredTasks(){
   const hardEl=document.getElementById('filterHard');const hardf=hardEl?hardEl.value:'';
   if(hardf==='hard')tasks=tasks.filter(t=>!!t.hardDeadline);
   else if(hardf==='soft')tasks=tasks.filter(t=>!t.hardDeadline);
+  const teEl=document.getElementById('filterTimeEst');const tef=teEl?teEl.value:'';
+  if(tef==='none')tasks=tasks.filter(t=>!t.timeEst||(!t.minutes||t.minutes===0));
+  else if(tef==='any')tasks=tasks.filter(t=>!!t.timeEst&&t.minutes>0);
   const q=document.getElementById('searchBox').value.toLowerCase().trim();
   if(q)tasks=tasks.filter(t=>t.name.toLowerCase().includes(q)||(t.assignee||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q)||(t.business||'').toLowerCase().includes(q));
   // Sort: due date (ascending; blanks last), then priority group
@@ -3636,7 +3648,7 @@ function renderTasks(){
 function changePage(d){currentPage+=d;renderTasks();document.querySelector('.task-table-wrap').scrollTop=0}
 // Reset every filter + search back to default
 function clearAllFilters(){
-  const ids=['filterStatus','filterPriority','filterBusiness','filterProject','filterRecurring','filterHard'];
+  const ids=['filterStatus','filterPriority','filterBusiness','filterProject','filterRecurring','filterHard','filterTimeEst'];
   ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
   const sb=document.getElementById('searchBox');if(sb)sb.value='';
   currentPage=1;
