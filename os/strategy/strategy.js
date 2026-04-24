@@ -869,12 +869,15 @@ async function saveRecord() {
     btn.disabled = true;
     setStatus('info', 'Saving…');
 
-    // Collect values from all inputs/textareas with data-field-id
-    const fields = {};
-    document.querySelectorAll('[data-field-id]').forEach(el => {
-        const fid = el.dataset.fieldId;
-        const v = el.value.trim();
-        fields[fid] = v;
+    // Collect values from all inputs/textareas with data-field-id.
+    // Uses readAllFormFields so number fields coerce to numbers and
+    // singleCollaborator fields serialise as { email: ... } — plain
+    // strings are rejected by Airtable even with typecast:true.
+    const fields = readAllFormFields();
+    // Trim string values (readAllFormFields keeps raw — the form assumed
+    // trimmed strings historically so preserve that for textareas etc).
+    Object.keys(fields).forEach(fid => {
+        if (typeof fields[fid] === 'string') fields[fid] = fields[fid].trim();
     });
 
     // Quarter/year/business are always required
