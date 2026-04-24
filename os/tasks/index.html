@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1700 property-headers</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1800 kanban-rolling</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -751,8 +751,17 @@ const PAGE_SIZE = 50;
 let expandedTask = null;
 let selectedTasks = new Set();
 let kanbanMonth = new Date();
-let kanbanViewMode = 'weeks';
+let kanbanViewMode = 'weeks4';
 let kanbanMonthStart = (function(){const d=new Date();d.setDate(1);return d})();
+// Monday anchor used by the rolling 4-week and 12-week views.
+let kanbanWeeksStart = (function(){
+  const d=new Date();
+  const day=d.getDay(); // 0=Sun..6=Sat
+  const diff=day===0?-6:1-day; // shift back to Monday
+  d.setDate(d.getDate()+diff);
+  d.setHours(0,0,0,0);
+  return d;
+})();
 let kanbanProjectFilter = '';
 let projectFilter = 'active';
 let expandedProject = null;
@@ -3916,9 +3925,8 @@ function renderKanban(){
   const projSet=new Set();allTasks.filter(t=>t.priority==='Project').forEach(t=>t.projectNames.forEach(n=>projSet.add(n)));
   const projOpts=[...projSet].sort();
 
-  const isMonths=kanbanViewMode==='months';
   let navHtml;
-  if(isMonths){
+  if(kanbanViewMode==='months'){
     const startLabel=kanbanMonthStart.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
     const endD=new Date(kanbanMonthStart);endD.setMonth(endD.getMonth()+11);
     const endLabel=endD.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
@@ -3928,15 +3936,33 @@ function renderKanban(){
       <button class="btn btn-sm" onclick="kanbanMonthsNav(6)">&raquo;</button>
       <button class="btn btn-sm" onclick="kanbanMonthsToday()">Today</button>
     </div>`;
-  }else{
-    const monthName=kanbanMonth.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
-    navHtml=`<div class="kanban-month-nav"><button class="btn btn-sm" onclick="kanbanNav(-1)">&laquo;</button><span>${monthName}</span><button class="btn btn-sm" onclick="kanbanNav(1)">&raquo;</button></div>`;
+  }else if(kanbanViewMode==='weeks12'){
+    const endD=new Date(kanbanWeeksStart);endD.setDate(endD.getDate()+7*12-1);
+    const startLabel=kanbanWeeksStart.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const endLabel=endD.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+    navHtml=`<div class="kanban-month-nav">
+      <button class="btn btn-sm" onclick="kanbanWeeksNav(-4)" title="Shift back 4 weeks">&laquo;</button>
+      <span>${startLabel} &mdash; ${endLabel}</span>
+      <button class="btn btn-sm" onclick="kanbanWeeksNav(4)" title="Shift forward 4 weeks">&raquo;</button>
+      <button class="btn btn-sm" onclick="kanbanWeeksToday()">This Week</button>
+    </div>`;
+  }else{ // weeks4
+    const endD=new Date(kanbanWeeksStart);endD.setDate(endD.getDate()+7*4-1);
+    const startLabel=kanbanWeeksStart.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+    const endLabel=endD.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+    navHtml=`<div class="kanban-month-nav">
+      <button class="btn btn-sm" onclick="kanbanWeeksNav(-1)" title="Shift back 1 week">&laquo;</button>
+      <span>${startLabel} &mdash; ${endLabel}</span>
+      <button class="btn btn-sm" onclick="kanbanWeeksNav(1)" title="Shift forward 1 week">&raquo;</button>
+      <button class="btn btn-sm" onclick="kanbanWeeksToday()">This Week</button>
+    </div>`;
   }
 
   let html=`<div class="kanban-controls">
     ${navHtml}
     <div style="display:flex;gap:4px">
-      <button class="${kanbanViewMode==='weeks'?'btn btn-primary':'btn'} btn-sm" onclick="setKanbanMode('weeks')">4 Weeks</button>
+      <button class="${kanbanViewMode==='weeks4'?'btn btn-primary':'btn'} btn-sm" onclick="setKanbanMode('weeks4')">4 Weeks</button>
+      <button class="${kanbanViewMode==='weeks12'?'btn btn-primary':'btn'} btn-sm" onclick="setKanbanMode('weeks12')">12 Weeks</button>
       <button class="${kanbanViewMode==='months'?'btn btn-primary':'btn'} btn-sm" onclick="setKanbanMode('months')">12 Months</button>
     </div>
     <select class="filter-select" onchange="kanbanProjectFilter=this.value;renderKanban()">
@@ -3945,8 +3971,53 @@ function renderKanban(){
     </select>
     <span style="font-size:12px;color:var(--text-secondary)">${tasks.length} tasks</span>
   </div>`;
-  html+=isMonths?renderKanbanMonths(tasks):renderKanbanWeeks(tasks);
+  if(kanbanViewMode==='months')html+=renderKanbanMonths(tasks);
+  else if(kanbanViewMode==='weeks12')html+=renderKanbanRollingWeeks(tasks,12);
+  else html+=renderKanbanRollingWeeks(tasks,4);
   container.innerHTML=html;
+}
+// Rolling weeks view — N columns, Monday-anchored from kanbanWeeksStart.
+// Used by both the 4-week and 12-week modes; 12-week mode gets horizontal
+// scroll via a narrower min-width.
+function renderKanbanRollingWeeks(tasks,numWeeks){
+  const DAY_MS=86400000;
+  const cols=[];
+  for(let i=0;i<numWeeks;i++){
+    const s=new Date(kanbanWeeksStart);s.setDate(s.getDate()+i*7);
+    const e=new Date(s);e.setDate(e.getDate()+6);
+    const toISO=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    cols.push({index:i,startDate:s,endDate:e,startStr:toISO(s),endStr:toISO(e),
+      label:`Week ${i+1}`,range:`${s.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} - ${e.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}`});
+  }
+  const colMinWidth=numWeeks<=4?'220px':'170px';
+  let html=`<div class="kanban-board" style="display:grid;grid-template-columns:repeat(${numWeeks},minmax(${colMinWidth},1fr));gap:8px;overflow-x:auto">`;
+  cols.forEach(c=>{
+    const wt=tasks.filter(t=>{if(!t.dueDate)return c.index===0;return t.dueDate>=c.startStr&&t.dueDate<=c.endStr}).sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
+    const wh=wt.reduce((s,t)=>s+t.minutes,0)/60;
+    html+=`<div class="kanban-col" style="min-height:400px">
+      <div class="kanban-col-header">${c.label}<span class="week-range">${c.range}</span><span class="week-hours">${wh.toFixed(1)}h</span></div>
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanRollingCard(event,${c.index})">`;
+    wt.forEach(t=>{html+=renderKanbanCardHtml(t)});
+    if(!wt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
+    html+=`</div></div>`;
+  });
+  html+=`</div>`;
+  return html;
+}
+function dropKanbanRollingCard(e,wi){
+  e.preventDefault();e.currentTarget.classList.remove('drag-over');
+  if(!draggedTaskId)return;
+  const s=new Date(kanbanWeeksStart);s.setDate(s.getDate()+wi*7);
+  // Drop to Monday of that week, preserving weekend skip
+  const iso=`${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
+  updateTaskField(draggedTaskId,'dueDate',iso).then(()=>renderKanban());
+  draggedTaskId=null;
+}
+function kanbanWeeksNav(n){kanbanWeeksStart.setDate(kanbanWeeksStart.getDate()+n*7);renderKanban()}
+function kanbanWeeksToday(){
+  const d=new Date();const day=d.getDay();const diff=day===0?-6:1-day;
+  d.setDate(d.getDate()+diff);d.setHours(0,0,0,0);
+  kanbanWeeksStart=d;renderKanban();
 }
 function renderKanbanCardHtml(t){
   const pn=t.projectNames[0]||'';
