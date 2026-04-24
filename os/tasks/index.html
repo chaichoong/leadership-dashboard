@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0913</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1100 jobs-view</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -450,6 +450,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     <button class="view-tab" data-view="projects" onclick="switchView('projects')">Projects</button>
     <button class="view-tab" data-view="capacity" onclick="switchView('capacity')">Capacity</button>
     <button class="view-tab" data-view="recurring" onclick="switchView('recurring')">Recurring</button>
+    <button class="view-tab" data-view="jobs" onclick="switchView('jobs')">Contractor Jobs</button>
   </div>
 
   <div id="view-myday"></div>
@@ -589,6 +590,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     </div>
     <div id="recurringContent"></div>
   </div>
+  <div id="view-jobs" style="display:none"></div>
 </div>
 
 <div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
@@ -643,6 +645,10 @@ const F = {
   someDay:     'fldmhkeRaDkiL3Ga4',
   collaborators:'fldcq3t6uAPgWSOP8',
   maintenance: 'fldSEUvVA98as1HW6',
+  contractor:  'fldgmzcr3jHALsdYD',  // singleSelect: Gary Marsh / Rob Jackson / Roy Lavin
+  priorityLvl: 'fldSsspLUGqzDqJYz',  // singleSelect: High Priority / Low Priority
+  property:    'fldZKFvEpJ6NZeFKz',  // multipleRecordLinks to Rental Units
+  createdDate: 'fldRpwiBGqEVaN20H',  // date
 };
 const TASK_FIELD_IDS = Object.values(F);
 
@@ -1218,6 +1224,11 @@ function parseTask(rec){
     hardDeadline:!!gf(rec,F.hardDeadline),
     someDay:!!gf(rec,F.someDay),
     maintenance:!!gf(rec,F.maintenance),
+    contractor:selectName(gf(rec,F.contractor)),
+    priorityLevel:selectName(gf(rec,F.priorityLvl)),
+    property:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>typeof x==='object'?(x.name||''):'').filter(Boolean):[]})(),
+    propertyIds:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>typeof x==='object'?(x.id||''):x).filter(Boolean):[]})(),
+    createdDate:gf(rec,F.createdDate)||gf(rec,F.created)||'',
     collaborators,
     _startMin:null, // scheduled start minute of day (for My Day timeline)
   };
@@ -1342,7 +1353,13 @@ async function updateTaskField(taskId,fieldKey,rawValue){
   let saveEntry={taskId,taskName:task.name,fieldKey,value:rawValue,status:'pending'};
   _saveLog(saveEntry);
   try{
-    if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'){
+    if(fieldKey==='priorityLevel'){
+      payload[F.priorityLvl]=rawValue||null;
+      task.priorityLevel=rawValue;
+    } else if(fieldKey==='contractor'){
+      payload[F.contractor]=rawValue||null;
+      task.contractor=rawValue;
+    } else if(fieldKey==='status'||fieldKey==='priority'||fieldKey==='timeEst'||fieldKey==='recurring'){
       // Airtable singleSelect with typecast=true expects plain string,
       // not {name: ...} — that format is rejected with INVALID_VALUE_FOR_COLUMN.
       // "None" is a legacy recurring value — normalise to empty so both the
@@ -5541,12 +5558,118 @@ function renderRecurring(){
 }
 
 // ======================================================
+// CONTRACTOR JOB LIST
+// ======================================================
+// Replicates the old Airtable Contractor Job List interface:
+//   - Tabs switch between Gary Marsh / Rob Jackson / Roy Lavin
+//   - Grouped by Property (linked record name)
+//   - Columns: Task Name · Description · Created Date · Priority Level · Status · Attachments
+//   - Sorted within each group by Priority Level (High first) then oldest Created Date first
+//   - Filters on the `Contractor` singleSelect field on the Tasks table
+//     (already populated correctly — Kevin's Assignee is ignored here).
+let activeContractor='Gary Marsh';
+function setActiveContractor(name){activeContractor=name;renderJobs()}
+function jobsSelectCell(taskId,fieldKey,current,options){
+  const optList=current&&!options.includes(current)?[...options,current]:options;
+  const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
+  return `<select class="inline-select" onchange="updateTaskField('${taskId}','${fieldKey}',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
+}
+function renderJobs(){
+  const container=document.getElementById('view-jobs');if(!container)return;
+  const CONTRACTORS=[
+    {name:'Gary Marsh',  key:'gary', colour:'#0ea5e9'},
+    {name:'Rob Jackson', key:'rob',  colour:'#a855f7'},
+    {name:'Roy Lavin',   key:'roy',  colour:'#14b8a6'},
+  ];
+  // Pool = all open maintenance tasks with a contractor assigned.
+  const pool=allTasks.filter(t=>t.status!=='Completed'&&t.contractor);
+  // Header tabs with counts
+  let tabs=CONTRACTORS.map(c=>{
+    const n=pool.filter(t=>t.contractor===c.name).length;
+    const active=activeContractor===c.name;
+    return `<button class="view-tab ${active?'active':''}" onclick="setActiveContractor('${c.name}')" style="${active?`border-bottom:2px solid ${c.colour};`:''}">
+      <span class="avatar avatar-${c.key}" style="width:20px;height:20px;font-size:11px;margin-right:6px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff">${c.name[0]}</span>${escHtml(c.name)} <span style="color:var(--text-secondary);font-weight:400">(${n})</span>
+    </button>`;
+  }).join('');
+  const list=pool.filter(t=>t.contractor===activeContractor);
+  // Group by property (first linked property if multiple)
+  const groups={};
+  list.forEach(t=>{
+    const prop=(t.property&&t.property[0])||'(No property)';
+    (groups[prop]=groups[prop]||[]).push(t);
+  });
+  // Sort within each: High Priority first, then oldest createdDate first
+  const priRank=p=>p==='High Priority'?0:p==='Low Priority'?2:1;
+  Object.keys(groups).forEach(k=>{
+    groups[k].sort((a,b)=>{
+      const pr=priRank(a.priorityLevel)-priRank(b.priorityLevel);
+      if(pr!==0)return pr;
+      const da=a.createdDate||'9999';const db=b.createdDate||'9999';
+      return da<db?-1:da>db?1:0; // oldest first
+    });
+  });
+  const groupNames=Object.keys(groups).sort();
+  const fmtCreated=iso=>{if(!iso)return'-';const d=new Date(iso);if(isNaN(d))return'-';return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})};
+  const priBadge=p=>{
+    if(p==='High Priority')return `<span class="badge" style="background:var(--danger-bg);color:var(--danger);font-weight:600">High</span>`;
+    if(p==='Low Priority')return `<span class="badge" style="background:var(--success-bg);color:var(--success)">Low</span>`;
+    return `<span class="badge" style="background:var(--bg-subtle);color:var(--text-secondary)">-</span>`;
+  };
+  const attThumbs=t=>{
+    const arr=t.attachments||[];if(!arr.length)return '<span style="color:var(--text-muted);font-size:11px">-</span>';
+    return arr.slice(0,3).map(a=>{
+      const thumb=a.thumbnails&&a.thumbnails.small&&a.thumbnails.small.url;
+      if(thumb)return `<a href="${a.url}" target="_blank" title="${escHtml(a.filename||'')}"><img src="${thumb}" style="width:32px;height:32px;border-radius:4px;object-fit:cover;border:1px solid var(--border-default)"></a>`;
+      return `<a href="${a.url}" target="_blank" style="font-size:11px;color:var(--accent)" title="${escHtml(a.filename||'')}">📎</a>`;
+    }).join(' ')+(arr.length>3?`<span style="font-size:10px;color:var(--text-secondary);margin-left:4px">+${arr.length-3}</span>`:'');
+  };
+  let body='';
+  if(!groupNames.length){
+    body=`<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-secondary)"><p>No open maintenance jobs for ${escHtml(activeContractor)}.</p></div>`;
+  } else {
+    groupNames.forEach(prop=>{
+      const g=groups[prop];
+      body+=`<div class="person-section" style="margin-bottom:24px">
+        <h3 style="font-size:14px;border-bottom:1px solid var(--border-default);padding-bottom:6px;margin-bottom:8px">🏠 ${escHtml(prop)} <span style="font-weight:400;color:var(--text-secondary);font-size:12px">(${g.length} job${g.length===1?'':'s'})</span></h3>
+        <table class="task-table" style="width:100%;font-size:13px">
+          <thead><tr>
+            <th style="width:22%">Task</th>
+            <th style="width:32%">Description</th>
+            <th style="width:10%">Created</th>
+            <th style="width:10%">Priority</th>
+            <th style="width:12%">Status</th>
+            <th style="width:14%">Attachments</th>
+          </tr></thead>
+          <tbody>`;
+      g.forEach(t=>{
+        body+=`<tr onclick="openTaskDrawer('${t.id}')" style="cursor:pointer">
+          <td><strong>${escHtml(t.name)}</strong></td>
+          <td style="color:var(--text-secondary);max-width:400px">${escHtml((t.description||'').slice(0,160))}${(t.description||'').length>160?'…':''}</td>
+          <td>${fmtCreated(t.createdDate)}</td>
+          <td onclick="event.stopPropagation()">${jobsSelectCell(t.id,'priorityLevel',t.priorityLevel||'',['High Priority','Low Priority'])}</td>
+          <td onclick="event.stopPropagation()">${jobsSelectCell(t.id,'status',t.status||'',STATUS_OPTIONS)}</td>
+          <td>${attThumbs(t)}</td>
+        </tr>`;
+      });
+      body+='</tbody></table></div>';
+    });
+  }
+  container.innerHTML=`
+    <div style="margin-bottom:12px;padding:12px 14px;background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;font-size:13px">
+      <strong>Contractor Jobs.</strong> Open maintenance tickets grouped by property. Sorted High priority first, then oldest created first. Click a row to open the task drawer.
+    </div>
+    <div class="view-tabs" style="margin-bottom:16px;position:static">${tabs}</div>
+    ${body}
+  `;
+}
+
+// ======================================================
 // VIEW SWITCH
 // ======================================================
 function switchView(view){
   currentView=view;
   document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  ['myday','list','kanban','projects','capacity','recurring'].forEach(v=>{
+  ['myday','list','kanban','projects','capacity','recurring','jobs'].forEach(v=>{
     const el=document.getElementById('view-'+v);if(el)el.style.display=v===view?'':'none';
   });
   if(view==='myday')renderMyDay();
@@ -5555,6 +5678,7 @@ function switchView(view){
   if(view==='projects')renderProjects();
   if(view==='capacity')renderCapacity();
   if(view==='recurring')renderRecurring();
+  if(view==='jobs')renderJobs();
 }
 function setTeam(key){activeTeam=key;currentPage=1;expandedTask=null;selectedTasks.clear();renderAll()}
 function renderAll(){
@@ -5565,6 +5689,7 @@ function renderAll(){
   if(currentView==='projects')renderProjects();
   if(currentView==='capacity')renderCapacity();
   if(currentView==='recurring')renderRecurring();
+  if(currentView==='jobs')renderJobs();
 }
 
 // ======================================================
