@@ -1338,27 +1338,35 @@ function showPushApprovalModal(proposal, fields) {
         n + p.tasksByMonth.reduce((nn, m) => nn + m.filter(t => t.exists).length, 0), 0);
 
     const projectsHtml = proposal.projects.map((p, i) => {
+        // Existing projects: no task list. Just a summary line acknowledging
+        // its tasks already exist so we don't re-push anything for it.
+        if (p.alreadyExists) {
+            return `
+            <div class="push-project push-project-existing">
+                <div class="push-project-head">
+                    <span class="push-project-num">QP${p.qp.i + 1}</span>
+                    <span class="push-project-name">${escapeHtml(p.projectName)}</span>
+                    <span class="push-exists-badge">Existing · not touched</span>
+                </div>
+                <div class="push-project-meta" style="font-size:12px;color:var(--text-muted);font-style:italic">
+                    ${p.existingTaskCount
+                        ? `${p.existingTaskCount} task${p.existingTaskCount === 1 ? '' : 's'} already linked. No changes will be made to this project.`
+                        : 'No changes will be made to this project.'}
+                </div>
+            </div>`;
+        }
+        // New project — render task list to be created.
         const monthsHtml = p.tasksByMonth.map((tasks, m) => {
             if (!tasks.length) return '';
             const header = `<div class="push-month-label">Month ${m + 1} — due ${tasks[0].dueISO}</div>`;
-            const items = tasks.map(t =>
-                t.exists
-                    ? `<li class="task-existing">${escapeHtml(t.name)}<span class="task-existing-badge">Already exists</span></li>`
-                    : `<li>${escapeHtml(t.name)}</li>`
-            ).join('');
+            const items = tasks.map(t => `<li>${escapeHtml(t.name)}</li>`).join('');
             return `${header}<ul class="push-task-list">${items}</ul>`;
         }).join('');
-
-        const badge = p.alreadyExists
-            ? '<span class="push-exists-badge">Existing project — tasks will be linked to it</span>'
-            : '';
-
         return `
-        <div class="push-project${p.alreadyExists ? ' push-project-existing' : ''}">
+        <div class="push-project">
             <div class="push-project-head">
                 <span class="push-project-num">QP${p.qp.i + 1}</span>
                 <span class="push-project-name">${escapeHtml(p.projectName)}</span>
-                ${badge}
             </div>
             ${p.kpiName ? `<div class="push-project-meta"><strong>KPI:</strong> ${escapeHtml(p.kpiName)}${p.kpiUnit ? ' (' + escapeHtml(p.kpiUnit) + ')' : ''}</div>` : ''}
             ${p.dod ? `<div class="push-project-meta"><strong>Definition of Done:</strong> ${escapeHtml(p.dod)}</div>` : ''}
@@ -1416,12 +1424,14 @@ async function executePush(proposal, fields, opts) {
     const btn = document.getElementById('pushProjBtn');
     if (btn) btn.disabled = true;
 
-    // New projects vs existing — tasks get created for both; projects only
-    // for the new ones.
+    // Existing projects are never touched on push — no new tasks, no name
+    // updates — only new projects write anything. Task dedup for existing
+    // ones was unreliable (AI names drift between runs), so the rule is
+    // "leave what's already there alone".
     const newProjects = proposal.projects.filter(p => !p.alreadyExists);
     const countNewTasks = proposal.projects.reduce((n, p) =>
-        n + p.tasksByMonth.reduce((nn, m) => nn + m.filter(t => !t.exists).length, 0), 0);
-    setStatus('info', `Creating ${newProjects.length} project${newProjects.length === 1 ? '' : 's'}${opts.tasks ? ` + ${countNewTasks} task${countNewTasks === 1 ? '' : 's'}` : ''}…`);
+        n + (p.alreadyExists ? 0 : p.tasksByMonth.reduce((nn, m) => nn + m.filter(t => !t.exists).length, 0)), 0);
+    const overlay = showProgressOverlay(`Creating ${newProjects.length} project${newProjects.length === 1 ? '' : 's'}${opts.tasks ? ` + ${countNewTasks} task${countNewTasks === 1 ? '' : 's'}` : ''}…`);
 
     const results = {
         projectsCreated: 0, projectsReused: 0,
@@ -1476,6 +1486,10 @@ async function executePush(proposal, fields, opts) {
         // project. Skip tasks whose names already exist on that project.
         if (!opts.tasks) continue;
         if (!projectId) continue;
+        // Don't touch existing projects — their tasks already exist and AI
+        // task-name drift means dedup is unreliable. New projects only.
+        if (p.alreadyExists) continue;
+        overlay.update(`Creating tasks for "${p.projectName.slice(0, 40)}…"`);
         for (const month of p.tasksByMonth) {
             for (const t of month) {
                 if (t.exists) { results.tasksSkipped++; continue; }
@@ -1525,6 +1539,7 @@ async function executePush(proposal, fields, opts) {
         }
     }
     if (btn) btn.disabled = false;
+    overlay.close();
 
     if (results.failed === 0) {
         const bits = [];

@@ -288,6 +288,35 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
 }
 .qp-stones .stone textarea::placeholder { color: var(--text-muted); font-style: italic; }
 
+/* Progress overlay — shown during long async flows (push preview, etc.)
+   so the user can see the app is working. Sits below the push modal so
+   if something errors, the modal is still reachable. */
+.strategy-progress-overlay {
+    position: fixed; inset: 0; z-index: 900;
+    background: rgba(28, 36, 34, 0.5);
+    display: flex; align-items: center; justify-content: center;
+}
+.strategy-progress-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: 12px;
+    padding: 22px 28px;
+    display: flex; align-items: center; gap: 14px;
+    box-shadow: var(--shadow-lg);
+    min-width: 300px;
+}
+.strategy-progress-spinner {
+    width: 22px; height: 22px;
+    border: 3px solid var(--bg-surface-2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+.strategy-progress-msg {
+    font-size: 13px; font-weight: 500; color: var(--text-primary);
+}
+
 /* Push Projects approval modal */
 .push-modal-overlay {
     position: fixed; inset: 0; z-index: 1000;
