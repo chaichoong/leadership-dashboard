@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1545 col-reorder</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1630 contractor-no-due</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1214,7 +1214,13 @@ function parseTask(rec){
   // back to Airtable so it persists; the derivation here also handles
   // tasks whose dueDate has rolled past without being touched (e.g. an
   // "Upcoming" task that's silently become today's).
-  const _effectiveStatus=deriveTaskStatus(_dueDate,_storedStatus);
+  // Contractor/maintenance tasks don't carry due dates — they always read
+  // as Upcoming (unless Kevin has explicitly marked them Completed or
+  // Approval). Prevents stale due dates from showing as Overdue/Today.
+  const _isContractorTask=!!gf(rec,F.maintenance);
+  const _effectiveStatus=_isContractorTask
+    ? (_storedStatus==='Completed'||_storedStatus==='Approval'?_storedStatus:'Upcoming')
+    : deriveTaskStatus(_dueDate,_storedStatus);
   return {
     id:rec.id,
     name:gf(rec,F.name)||'(Untitled)',
@@ -1919,9 +1925,12 @@ function openTaskDrawer(taskId){
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
       <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
-      <div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()"></div></div>
+      ${(t.maintenance||t.contractor)
+        ? `<div class="field-row"><label>Created</label><div class="field-val" style="font-size:13px;color:var(--text-secondary)">${t.createdDate?new Date(t.createdDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'—'}<span style="color:var(--text-muted);font-size:11px;margin-left:8px">(contractor tasks have no due date)</span></div></div>`
+        : `<div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()"></div></div>
       <div class="field-row"><label>Hard Deadline</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--danger);font-weight:600;cursor:pointer"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked);renderAll()" style="width:16px;height:16px;accent-color:var(--danger)">Flag as immovable (never auto-rescheduled)</label></div></div>
-      <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>`
+      }
       <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
       <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
@@ -5672,12 +5681,15 @@ function renderJobs(){
     </button>`;
   }).join('');
   const list=pool.filter(t=>t.contractor===activeContractor);
-  // Default status → Upcoming for contractor tasks (no due date attached).
-  // Patches Airtable once per task missing a status so the grid stays clean.
+  // Contractor tasks don't carry due dates — so status should always
+  // read as Upcoming (unless Completed / Approval). parseTask already
+  // derives that for the UI; here we also persist it back to Airtable
+  // for any task whose stored status drifted (e.g. legacy Overdue/Today
+  // rows from when this tab used due-date derivation).
   list.forEach(t=>{
-    if(!t.status||t.status===''){
+    if(t.status==='Completed'||t.status==='Approval')return;
+    if(t.status!=='Upcoming'){
       t.status='Upcoming';
-      // Fire-and-forget — don't block render
       try{updateTaskField(t.id,'status','Upcoming')}catch(e){}
     }
   });

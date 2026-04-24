@@ -1007,16 +1007,16 @@ function offerProjectPush() {
         setStatus('', '');
     };
     document.getElementById('pushNowBtn').onclick = async () => {
-        // Route through the preview modal so tasks-from-stones get the same approval flow.
         const btn = document.getElementById('pushNowBtn');
         if (btn) btn.disabled = true;
-        setStatus('info', 'Building preview…');
+        const overlay = showProgressOverlay('Building preview…');
         try {
-            const proposal = await buildPushProposal(qps, fields);
-            setStatus('', '');
+            const proposal = await buildPushProposal(qps, fields, overlay.update);
+            overlay.close();
             showPushApprovalModal(proposal, fields);
         } catch (e) {
             console.error('[post-save push preview]', e);
+            overlay.close();
             setStatus('error', `Couldn't build preview: ${e.message || e}`);
         }
         if (btn) btn.disabled = false;
@@ -1042,20 +1042,42 @@ async function pushProjectsManually() {
 
     const btn = document.getElementById('pushProjBtn');
     if (btn) btn.disabled = true;
-    setStatus('info', 'Building preview (extracting tasks from monthly stones)…');
+    const overlay = showProgressOverlay('Building preview…');
 
     let proposal;
     try {
-        proposal = await buildPushProposal(qps, fields);
+        proposal = await buildPushProposal(qps, fields, overlay.update);
     } catch (e) {
         console.error('[pushProjectsManually] buildPushProposal', e);
+        overlay.close();
         setStatus('error', `Couldn't build task preview: ${e.message || e}`);
         if (btn) btn.disabled = false;
         return;
     }
-    setStatus('', '');
+    overlay.close();
     if (btn) btn.disabled = false;
     showPushApprovalModal(proposal, fields);
+}
+
+// Modal-style progress overlay — used during multi-step async flows where
+// the user needs to see the app is working (push preview, executePush, etc).
+// Returns { update(msg), close() }. Stacks under the merge/push modals by
+// default (z-index 9500) but can be flagged topmost for blocking operations.
+function showProgressOverlay(initialMsg) {
+    document.getElementById('strategyProgressOverlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'strategyProgressOverlay';
+    overlay.className = 'strategy-progress-overlay';
+    overlay.innerHTML = `<div class="strategy-progress-card">
+        <div class="strategy-progress-spinner"></div>
+        <div class="strategy-progress-msg" id="strategyProgressMsg">${escapeHtml(initialMsg || 'Working…')}</div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const msgEl = overlay.querySelector('#strategyProgressMsg');
+    return {
+        update(msg) { if (msgEl && msg) msgEl.textContent = msg; },
+        close() { overlay.remove(); },
+    };
 }
 
 // Snapshot every form field by its data-field-id into a { fid: value } map.
@@ -1185,28 +1207,26 @@ async function buildPushProposal(qps, fields, onProgress) {
                 .filter(Boolean)
             : [];
 
-        // For existing projects, fetch the tasks already linked to them so we
-        // can dedup tasks on name. For new projects, nothing to fetch yet.
-        let existingTaskNames = new Set();
-        if (alreadyExists) {
+        // For existing projects, just count the tasks already linked for the
+        // modal's "N tasks already linked" summary. We don't re-extract.
+        let existingTaskCount = 0;
+        if (alreadyExists && existingProjectId) {
+            report(`Counting tasks on "${projectName.slice(0, 40)}…"`);
             try {
-                const safeName = projectName.replace(/"/g, '\\"');
-                const tFilter = `FIND("${safeName}", ARRAYJOIN({Projects}))>0`;
+                const tFilter = `FIND("${existingProjectId}", ARRAYJOIN({Projects}))>0`;
                 const tParams = new URLSearchParams({
                     filterByFormula: tFilter,
                     returnFieldsByFieldId: 'true',
                     pageSize: '200',
+                    'fields[]': TASK_F.name,
                 });
                 const tData = await airtableFetch(`${TABLES.tasks}?${tParams.toString()}`);
-                (tData.records || []).forEach(r => {
-                    const n = r.fields?.[TASK_F.name];
-                    if (n) existingTaskNames.add(String(n).trim().toLowerCase());
-                });
-                console.log(`[buildPushProposal] existing tasks on "${projectName}":`, Array.from(existingTaskNames));
+                existingTaskCount = (tData.records || []).length;
             } catch (e) {
-                console.warn('[buildPushProposal] task dedup fetch failed for', projectName, e);
+                console.warn('[buildPushProposal] task count failed for', projectName, e);
             }
         }
+        const existingTaskNames = new Set(); // kept for backwards-compat in the loop
 
         const stones = OBJSTRAT.monthlyStones[qp.i].map(sFid => (fields[sFid] || '').trim());
         const tasksByMonth = [[], [], []];
@@ -1220,7 +1240,7 @@ async function buildPushProposal(qps, fields, onProgress) {
             for (let m = 0; m < 3; m++) {
                 const stone = stones[m];
                 if (!stone || /^(n\/?a|tbc|skip|none|-|—|…)$/i.test(stone)) continue;
-                if (typeof onProgress === 'function') onProgress(`Extracting tasks for QP${qp.i + 1} month ${m + 1}…`);
+                report(`Extracting tasks for QP${qp.i + 1}, month ${m + 1}…`);
                 const extracted = await extractTasksFromStone(stone, qp.i + 1, m + 1, projectName);
                 tasksByMonth[m] = extracted.map(name => ({
                     name,
@@ -1244,6 +1264,7 @@ async function buildPushProposal(qps, fields, onProgress) {
             alreadyExists,
             existingProjectId,
             inheritedCollabEmails,
+            existingTaskCount,
         });
     }
     return proposal;
