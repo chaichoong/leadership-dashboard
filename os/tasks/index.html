@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1630 contractor-no-due</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1700 property-headers</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -5732,8 +5732,13 @@ function renderJobs(){
   } else {
     groupNames.forEach(prop=>{
       const g=groups[prop];
-      body+=`<div class="person-section" style="margin-bottom:24px">
-        <h3 style="font-size:14px;border-bottom:1px solid var(--border-default);padding-bottom:6px;margin-bottom:8px">🏠 ${escHtml(prop)} <span style="font-weight:400;color:var(--text-secondary);font-size:12px">(${g.length} task${g.length===1?'':'s'})</span></h3>
+      body+=`<div class="person-section" style="margin-bottom:28px;border:1px solid var(--border-default);border-radius:10px;overflow:hidden;box-shadow:var(--shadow-sm)">
+        <div style="background:linear-gradient(90deg,var(--accent) 0%,var(--accent-hover) 100%);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;letter-spacing:0.2px">
+            <span style="font-size:18px">🏠</span>${escHtml(prop)}
+          </div>
+          <span style="font-size:11px;font-weight:600;background:rgba(255,255,255,0.22);padding:3px 10px;border-radius:12px;letter-spacing:0.3px;text-transform:uppercase">${g.length} task${g.length===1?'':'s'}</span>
+        </div>
         <div style="overflow-x:auto">
         <table class="task-table" style="width:100%;min-width:1100px;font-size:13px">
           <thead><tr>
