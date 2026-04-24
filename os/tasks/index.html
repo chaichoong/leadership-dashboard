@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1330 contractor-tasks</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1500 property-names</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1093,6 +1093,25 @@ async function fetchTable(tableId,fieldIds,filter){
 }
 
 let BUSINESS_ID_TO_NAME={};  // reverse lookup id -> name
+// Property (Rental Unit) linked records on the Tasks table come back from
+// REST as plain ID arrays (`returnFieldsByFieldId=true` strips names).
+// We fetch the Properties table once and build an id→name map so the
+// Contractor Tasks view can show the address instead of the record ID.
+let PROPERTY_ID_TO_NAME={};
+const PROPERTIES_TABLE='tbl6f0OkAmTC2jbuG';
+async function fetchProperties(){
+  try{
+    const recs=await fetchTable(PROPERTIES_TABLE,['fldy2t735TV5e1DIL','fldqMbR329TNY974G'],'');
+    PROPERTY_ID_TO_NAME={};
+    recs.forEach(r=>{
+      const c=r.cellValuesByFieldId||r.fields||{};
+      const full=c.fldy2t735TV5e1DIL;const short=c.fldqMbR329TNY974G;
+      const name=full||short||r.id;
+      PROPERTY_ID_TO_NAME[r.id]=name;
+    });
+    console.log('[Properties] loaded',Object.keys(PROPERTY_ID_TO_NAME).length,'rows');
+  }catch(e){console.warn('properties fetch failed',e)}
+}
 async function fetchBusinesses(){
   try{
     // Businesses table primary field "Business Name" = fldbbRqVxLxUdHwIR
@@ -1226,8 +1245,8 @@ function parseTask(rec){
     maintenance:!!gf(rec,F.maintenance),
     contractor:selectName(gf(rec,F.contractor)),
     priorityLevel:selectName(gf(rec,F.priorityLvl)),
-    property:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>typeof x==='object'?(x.name||''):'').filter(Boolean):[]})(),
     propertyIds:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>typeof x==='object'?(x.id||''):x).filter(Boolean):[]})(),
+    property:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>{const id=typeof x==='object'?(x.id||''):x;const inlineName=typeof x==='object'?(x.name||''):'';return inlineName||PROPERTY_ID_TO_NAME[id]||id}).filter(Boolean):[]})(),
     createdDate:gf(rec,F.createdDate)||gf(rec,F.created)||'',
     collaborators,
     _startMin:null, // scheduled start minute of day (for My Day timeline)
@@ -5572,9 +5591,12 @@ function renderRecurring(){
 // Columns: Task · Description · Property · Created · Age · Priority · Status · Attachments
 let activeContractor='Gary Marsh';
 function setActiveContractor(name){activeContractor=name;renderJobs()}
-// Build property options from unique properties already linked on any task
+// Build property options from the full Properties table (fetched on load).
+// Falls back to any properties that happen to be linked on existing tasks,
+// in case the Properties fetch failed.
 function getPropertyOptions(){
   const map={};
+  Object.entries(PROPERTY_ID_TO_NAME||{}).forEach(([id,name])=>{map[id]=name});
   allTasks.forEach(t=>{
     if(Array.isArray(t.propertyIds)&&Array.isArray(t.property)){
       t.propertyIds.forEach((id,i)=>{if(id&&!map[id])map[id]=t.property[i]||id});
@@ -5582,6 +5604,7 @@ function getPropertyOptions(){
   });
   return Object.entries(map).map(([id,name])=>({id,name})).sort((a,b)=>a.name.localeCompare(b.name));
 }
+function propertyLabel(id){return PROPERTY_ID_TO_NAME[id]||id||''}
 function jobsPriorityCell(taskId,current){
   const options=['High Priority','Low Priority'];
   const optList=current&&!options.includes(current)?[...options,current]:options;
@@ -5708,7 +5731,7 @@ function renderJobs(){
             <th style="width:6%">Age</th>
             <th style="width:11%">Priority</th>
             <th style="width:9%">Status</th>
-            <th style="width:11%">Assigned</th>
+            <th style="width:11%">Assignee</th>
             <th style="width:10%">Attachments</th>
           </tr></thead>
           <tbody>`;
@@ -5781,7 +5804,7 @@ async function loadAllData(){
   toast('Refreshing from Airtable...');
   const startedAt=Date.now();
   try{
-    await fetchBusinesses();
+    await Promise.all([fetchBusinesses(),fetchProperties()]);
     const[rawTasks,rawProjects,cal,rawTeam]=await Promise.all([
       fetchTable(TASKS_TABLE,TASK_FIELD_IDS,`AND({Status}!="Completed",{Some Day}=FALSE())`),
       fetchTable(PROJECTS_TABLE,PROJECT_FIELD_IDS,''),

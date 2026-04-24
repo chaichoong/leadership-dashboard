@@ -259,21 +259,24 @@
         }
     }
 
-    // Auto-load cached sync data on script start so the badge reflects truth
-    // without requiring the user to open the Site Map tab first.
+    // Auto-load cached sync data on script start so the table AND sidebar badge
+    // reflect the last-known state without requiring any clicks. We deliberately
+    // ignore the TTL here — showing old-but-complete data is far better than
+    // reverting to "Not checked yet" on a hard refresh. The "checked X ago"
+    // line in the KPI card tells the user exactly how fresh it is, and the
+    // Re-check button is one click away. TTL still gates runGitSyncCheck so an
+    // intentional click that sees stale cache will refetch.
     (function primeSitemapBadge() {
         try {
             const cached = localStorage.getItem(GIT_SYNC_CACHE_KEY);
             if (!cached) return;
             const parsed = JSON.parse(cached);
-            if (Date.now() - parsed.fetchedAt < GIT_SYNC_CACHE_TTL) {
-                const expected = expectedSyncPaths();
-                const covered = parsed.results && [...expected].every(p => {
-                    const r = parsed.results[p];
-                    return r === null || (r && r.date);
-                });
-                if (covered) gitSyncData = parsed;
-            }
+            const expected = expectedSyncPaths();
+            const covered = parsed.results && [...expected].every(p => {
+                const r = parsed.results[p];
+                return r === null || (r && r.date);
+            });
+            if (covered) gitSyncData = parsed;
         } catch {}
         // Wait for DOM so the badge element exists; then paint.
         if (document.readyState === 'loading') {
