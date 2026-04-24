@@ -276,6 +276,14 @@
         // DO NOT auto-update Airtable — show potential CFVs for user approval
         // User must confirm before status changes in Airtable
 
+        // Before filtering: restore dismissals from Airtable comments for any potential
+        // CFV where localStorage is empty (e.g. user cleared site data). Keeps dismissals
+        // persistent across browsers/devices.
+        const potentialEntries = cfvList.filter(e => e.status === 'potential');
+        if (potentialEntries.length > 0) {
+            await syncDismissalsFromAirtable(potentialEntries);
+        }
+
         // Filter out dismissed potential CFVs (user clicked "Not a CFV")
         // Dismissal holds until the NEXT due day (plus tolerance) has passed —
         // i.e. the start of the next rent cycle. A fixed 25-day expiry was
@@ -533,16 +541,59 @@
         if (!confirm(`Dismiss ${surname} as not a CFV? This will keep the tenancy as In Payment.`)) return;
         btn.textContent = '...';
         btn.disabled = true;
-        // Store dismissal so it doesn't reappear until next month
-        localStorage.setItem('cfv_dismissed_' + tenancyId, new Date().toISOString());
+        // Store dismissal locally so it doesn't reappear until next cycle
+        const now = new Date();
+        localStorage.setItem('cfv_dismissed_' + tenancyId, now.toISOString());
         // Clear any chase data that was started
         localStorage.removeItem('cfv_' + tenancyId + '_chaseStart');
         localStorage.removeItem('cfv_' + tenancyId + '_startDate');
-        await addTenancyComment(tenancyId, `Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.`);
+        // Also post a structured Airtable comment so the dismissal survives
+        // browser cache clears. The tag is machine-readable by syncDismissalsFromAirtable.
+        const tag = `[CFV-DISMISSED:${now.toISOString().split('T')[0]}]`;
+        await addTenancyComment(tenancyId, `${tag} Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.`);
         btn.textContent = 'Dismissed ✓';
         btn.style.background = '#dcfce7';
         btn.style.color = '#16a34a';
         setTimeout(() => renderCFVTab(), 1500);
+    }
+
+    // Rebuild missing localStorage dismissals from Airtable comments.
+    // Handles the case where the user cleared site data or switched browser — previously
+    // dismissed CFVs would all reappear because localStorage was wiped. Now the dismissal
+    // lives permanently as a comment on the tenancy record, so we can restore it.
+    async function syncDismissalsFromAirtable(potentialEntries) {
+        if (!PAT || !potentialEntries.length) return;
+        await Promise.all(potentialEntries.map(async entry => {
+            if (localStorage.getItem('cfv_dismissed_' + entry.tenancyId)) return; // already have it
+            let comments;
+            try {
+                comments = await fetchAllComments(TABLES.tenancies, entry.tenancyId);
+            } catch (e) { return; }
+            // Find the most recent dismissal comment. Match either the new structured
+            // tag [CFV-DISMISSED:YYYY-MM-DD] or the historic free-text form so pre-tag
+            // dismissals are also recognised.
+            let latest = null;
+            for (const c of comments) {
+                const text = c.text || '';
+                const hasTag = /\[CFV-DISMISSED:\d{4}-\d{2}-\d{2}\]/.test(text);
+                const hasLegacy = /Dismissed as not a CFV/i.test(text);
+                if (!hasTag && !hasLegacy) continue;
+                const d = new Date(c.createdTime);
+                if (!latest || d > latest) latest = d;
+            }
+            if (!latest) return;
+            // Apply the same "expires at next due day + tolerance" rule used in
+            // renderCFVTab's filter, so restored dismissals respect the current cycle.
+            const dueDay = entry.dueDay || 1;
+            let nextDueDate = new Date(latest.getFullYear(), latest.getMonth(), dueDay);
+            if (nextDueDate <= latest) {
+                nextDueDate = new Date(latest.getFullYear(), latest.getMonth() + 1, dueDay);
+            }
+            const expiryTime = nextDueDate.getTime() + CFV_TOLERANCE_DAYS * 86400000;
+            if (Date.now() < expiryTime) {
+                localStorage.setItem('cfv_dismissed_' + entry.tenancyId, latest.toISOString());
+            }
+        }));
     }
 
     // Re-flag: confirm CFV Actioned back to CFV
