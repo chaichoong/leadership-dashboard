@@ -5,13 +5,14 @@
     // Map PAGE_REGISTRY id → array of source files to check on GitHub
     const PAGE_SOURCE_FILES = {
         'overview':    ['js/dashboard.js'],
+        'os-strategy': ['os/strategy/index.html', 'os/strategy/strategy.js', 'os/strategy/strategy.css'],
         'tasks':       ['os/tasks/index.html'],
         'cfv':         ['js/cfv.js'],
         'invoices':    ['js/invoices.js'],
         'pnl':         ['js/pnl.js'],
         'comms':       ['follow-up.html'],
         'compliance':  ['compliance.html'],
-        'airtable':    [],                               // no single source file — HTML is in index.html
+        'airtable':    [],                               // UI embedded in index.html — no isolatable source
         'launch-plan': ['os/launch-plan.html'],
         'os-hub':      ['os/index.html'],
         'os-bplan':    ['os/business-plan-builder/index.html'],
@@ -402,22 +403,25 @@
         if (integrity) {
             const total = PAGE_REGISTRY.length;
             const allGood = matched === total;
+            // Prefer git-stale list when we have git data; otherwise fall back to the
+            // declared-version mismatch list so the button still works pre-sync.
+            const effectiveStalePages = gitSyncData ? gitStalePages : outOfSync;
             let sopRequested = localStorage.getItem('_sop_update_requested');
             // Clear the requested flag if everything is now in sync OR if it's older than 24 hours
             if (sopRequested) {
                 const elapsed = Date.now() - new Date(sopRequested).getTime();
-                if (outOfSync.length === 0 || elapsed > 24 * 60 * 60 * 1000) {
+                if (effectiveStalePages.length === 0 || elapsed > 24 * 60 * 60 * 1000) {
                     localStorage.removeItem('_sop_update_requested');
                     sopRequested = null;
                 }
             }
             let updateAllBtn = '';
-            if (outOfSync.length > 0) {
+            if (effectiveStalePages.length > 0) {
                 if (sopRequested) {
-                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${outOfSync.length} SOPs)</button>`
+                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${effectiveStalePages.length} SOPs)</button>`
                         + ` <button class="cfv-action-btn" onclick="resetSOPRequestFlag()" style="font-size:11px;padding:8px 16px;margin-top:8px">Reset &amp; Re-enable</button>`;
                 } else {
-                    updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${outOfSync.length})</button>`;
+                    updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${effectiveStalePages.length})</button>`;
                 }
             }
             // Auth state for the GitHub API (affects rate limit)
@@ -528,14 +532,29 @@
     }
 
     async function requestAllSOPUpdates(btn) {
-        if (!confirm('Queue SOP updates for all out-of-sync pages?')) return;
+        // Build the list of pages to update. If git sync data is loaded, use
+        // git-stale truth (page committed after SOP). Otherwise fall back to
+        // the declared-version mismatch (pageVer !== sopVer) from config.js.
+        const stalePages = [];
+        for (const p of PAGE_REGISTRY) {
+            if (!p.sopFile) continue; // can't update a SOP that doesn't exist
+            const gs = getGitStatus(p);
+            if (gs) {
+                if (gs.state === 'stale') stalePages.push(p);
+            } else if (p.pageVer !== p.sopVer) {
+                stalePages.push(p);
+            }
+        }
+        if (stalePages.length === 0) {
+            alert('Nothing to update — all tracked SOPs are current.');
+            return;
+        }
+        if (!confirm(`Queue SOP updates for ${stalePages.length} out-of-sync page${stalePages.length === 1 ? '' : 's'}?\n\n${stalePages.map(p => '• ' + p.name).join('\n')}`)) return;
         btn.textContent = 'Requesting...';
         btn.disabled = true;
-        for (const p of PAGE_REGISTRY) {
-            if (p.pageVer !== p.sopVer) {
-                await requestSOPUpdate(p.id, p.sopFile, p.pageVer, p.name, { textContent: '', disabled: false, style: {} });
-                await new Promise(r => setTimeout(r, 300));
-            }
+        for (const p of stalePages) {
+            await requestSOPUpdate(p.id, p.sopFile, p.pageVer, p.name, { textContent: '', disabled: false, style: {} });
+            await new Promise(r => setTimeout(r, 300));
         }
         // Mark as requested in localStorage so it persists across refreshes
         localStorage.setItem('_sop_update_requested', new Date().toISOString());
