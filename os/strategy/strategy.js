@@ -40,9 +40,15 @@ function authenticate() {
     // that's the primary. Also look up legacy keys the iframe may have
     // written in a previous session. Same-origin iframes share localStorage
     // with the parent, so once the shell has authenticated we inherit.
-    const saved = localStorage.getItem('_dlr_pat')
-        || localStorage.getItem('airtable_pat')
-        || sessionStorage.getItem('_dlr_pat');
+    const patDlr = localStorage.getItem('_dlr_pat');
+    const patAirtable = localStorage.getItem('airtable_pat');
+    const patSession = sessionStorage.getItem('_dlr_pat');
+    console.log('[strategy init] PAT lookup — _dlr_pat:', patDlr ? 'FOUND (' + patDlr.length + 'ch)' : 'missing',
+                '· airtable_pat:', patAirtable ? 'FOUND' : 'missing',
+                '· session _dlr_pat:', patSession ? 'FOUND' : 'missing',
+                '· origin:', window.location.origin,
+                '· parent origin:', (window.parent === window) ? 'self (standalone)' : 'iframe');
+    const saved = patDlr || patAirtable || patSession;
     if (saved) {
         PAT_LOCAL = saved;
         // Mirror to both keys for any other code paths that rely on either.
