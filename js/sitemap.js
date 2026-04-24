@@ -25,6 +25,16 @@
     // Holds the fetched git data between renderSiteMap calls. null = not checked yet.
     let gitSyncData = null;
 
+    // Parse the total commit count out of a GitHub API Link header.
+    // Link looks like: <url&page=42>; rel="last". That tells us the total pages
+    // at per_page=1, i.e. the total commit count for the path. If no Link header
+    // (≤1 page of results), the count is the length of the current response.
+    function commitCountFromLink(linkHeader, fallback) {
+        if (!linkHeader) return fallback;
+        const m = linkHeader.match(/[?&]page=(\d+)[^>]*>;\s*rel="last"/);
+        return m ? parseInt(m[1], 10) : fallback;
+    }
+
     async function fetchLastCommit(path) {
         if (!path) return null;
         const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${encodeURIComponent(path)}&per_page=1`;
@@ -39,11 +49,25 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         if (!Array.isArray(data) || data.length === 0) return null;
+        const count = commitCountFromLink(resp.headers.get('link'), data.length);
         return {
             date: data[0].commit.author.date,
             sha: data[0].sha.slice(0, 7),
             message: data[0].commit.message.split('\n')[0],
+            count, // total commits for this path
         };
+    }
+
+    // For a stale page, count how many page-source commits landed AFTER the SOP's
+    // last commit. That's the "improvements behind" number.
+    async function fetchCommitsSince(path, sinceIso) {
+        if (!path || !sinceIso) return null;
+        const url = `https://api.github.com/repos/${GITHUB_REPO}/commits?path=${encodeURIComponent(path)}&since=${encodeURIComponent(sinceIso)}&per_page=1`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!Array.isArray(data)) return 0;
+        return commitCountFromLink(resp.headers.get('link'), data.length);
     }
 
     async function runGitSyncCheck(btn) {
@@ -82,10 +106,39 @@
                     if (/rate-limited/.test(e.message)) rateLimited = true;
                 }
             }
+            // Second pass: for each page, if its source was committed AFTER the SOP,
+            // count commits to the source since the SOP's last commit. That's "improvements
+            // behind". Keyed by page.id in a side-map.
+            const driftByPage = {};
+            if (!rateLimited) {
+                for (const p of PAGE_REGISTRY) {
+                    if (!p.sopFile) continue;
+                    const srcFiles = PAGE_SOURCE_FILES[p.id] || [];
+                    if (srcFiles.length === 0) continue;
+                    const sopRec = results[p.sopFile];
+                    if (!sopRec || !sopRec.date) continue;
+                    // Pick latest page source date across this page's source files
+                    let latestSrc = null;
+                    for (const f of srcFiles) {
+                        const r = results[f];
+                        if (r && r.date && (!latestSrc || r.date > latestSrc)) latestSrc = r.date;
+                    }
+                    if (!latestSrc || latestSrc <= sopRec.date) continue; // not stale, skip
+                    try {
+                        // Use the first (latest) source file for drift. Good enough for pages
+                        // with a single source file (which is all of them today).
+                        const driftCount = await fetchCommitsSince(srcFiles[0], sopRec.date);
+                        if (driftCount != null) driftByPage[p.id] = driftCount;
+                    } catch (e) {
+                        if (/rate-limited/.test(e.message)) { rateLimited = true; break; }
+                    }
+                }
+            }
+
             // Count how many genuinely succeeded (got a date OR returned null cleanly)
             const successCount = Object.values(results).filter(r => r === null || (r && r.date)).length;
             const errorCount = Object.values(results).filter(r => r && r.error).length;
-            gitSyncData = { fetchedAt: Date.now(), results, successCount, errorCount, rateLimited };
+            gitSyncData = { fetchedAt: Date.now(), results, driftByPage, successCount, errorCount, rateLimited };
             // Only cache if most calls succeeded — don't poison the cache with a mostly-failed run
             if (successCount >= paths.size / 2) {
                 localStorage.setItem(GIT_SYNC_CACHE_KEY, JSON.stringify(gitSyncData));
@@ -115,28 +168,35 @@
         return d.toLocaleDateString();
     }
 
-    // Return { pageDate, sopDate, stale, state, errors } for a given PAGE_REGISTRY entry.
+    // Return full git status for a page: dates, commit counts, drift count, state.
     // state is one of: 'stale' | 'current' | 'unknown' | 'no-source' | 'no-sop'
     function getGitStatus(p) {
         if (!gitSyncData) return null;
         const srcFiles = PAGE_SOURCE_FILES[p.id] || [];
         const errors = [];
-        // Latest page source date across all tracked files for this page
+        // Latest page source date + commit count across all tracked files for this page
         let pageDate = null;
-        let pageHadAnyFetch = false;
+        let pageCount = null;
         for (const f of srcFiles) {
             const r = gitSyncData.results[f];
             if (!r) continue;
-            pageHadAnyFetch = true;
             if (r.error) { errors.push(`${f}: ${r.error}`); continue; }
             if (r.date && (!pageDate || r.date > pageDate)) pageDate = r.date;
+            if (typeof r.count === 'number') {
+                pageCount = (pageCount == null) ? r.count : Math.max(pageCount, r.count);
+            }
         }
         const sopRec = p.sopFile ? gitSyncData.results[p.sopFile] : null;
-        let sopDate = null;
+        let sopDate = null, sopCount = null;
         if (sopRec) {
             if (sopRec.error) errors.push(`${p.sopFile}: ${sopRec.error}`);
-            else if (sopRec.date) sopDate = sopRec.date;
+            else {
+                if (sopRec.date) sopDate = sopRec.date;
+                if (typeof sopRec.count === 'number') sopCount = sopRec.count;
+            }
         }
+        const driftCount = gitSyncData.driftByPage ? gitSyncData.driftByPage[p.id] : null;
+
         // Determine state
         let state, stale = false;
         if (srcFiles.length === 0) {
@@ -151,7 +211,7 @@
             stale = pageDate > sopDate;
             state = stale ? 'stale' : 'current';
         }
-        return { pageDate, sopDate, stale, state, errors };
+        return { pageDate, sopDate, pageCount, sopCount, driftCount, stale, state, errors };
     }
 
     // ── Site Map Renderer ──
@@ -190,9 +250,22 @@
                 else if (gs.state === 'unknown') { gitUnknown++; gitUnknownPages.push(p); }
             }
 
-            const statusHtml = versionMatch
-                ? '<span style="color:var(--success);font-weight:600">✓ In sync</span>'
-                : '<span style="color:var(--warning);font-weight:600">⚠ Update needed</span>';
+            // Status: prefer git truth when we have it; fall back to declared-version match
+            let statusHtml;
+            if (gs && gs.state === 'stale') {
+                statusHtml = '<span style="color:var(--danger);font-weight:600">⚠ Update needed</span>';
+            } else if (gs && gs.state === 'current') {
+                statusHtml = '<span style="color:var(--success);font-weight:600">✓ In sync</span>';
+            } else if (gs && gs.state === 'unknown') {
+                statusHtml = '<span style="color:var(--warning);font-weight:600">? Unknown</span>';
+            } else if (gs && (gs.state === 'no-source' || gs.state === 'no-sop')) {
+                statusHtml = '<span style="color:var(--text-muted);font-weight:500">—</span>';
+            } else {
+                // No git data yet — fall back to declared-version comparison
+                statusHtml = versionMatch
+                    ? '<span style="color:var(--success);font-weight:600">✓ In sync (declared)</span>'
+                    : '<span style="color:var(--warning);font-weight:600">⚠ Update needed (declared)</span>';
+            }
 
             let gitCell;
             if (!gs) {
@@ -220,34 +293,56 @@
                 </div>`;
             }
 
-            // Page v. / SOP v. cells get git context appended after a sync.
+            // Page v. / SOP v. cells: git commit count is the live version number,
+            // declared pageVer/sopVer from config.js is shown as a small semver tag
+            // underneath for continuity. Drift count appears under Page v. when stale.
             const pageVerCell = (() => {
-                let html = `<div style="font-family:monospace;font-size:12px;font-weight:600">${p.pageVer}`;
-                if (gs && gs.state === 'stale') {
-                    html += ` <span style="color:var(--danger);font-weight:700" title="Page source has commits past v${p.pageVer}">+drift</span>`;
+                // Headline: git commit count if we have it, else declared pageVer.
+                let headline;
+                if (gs && typeof gs.pageCount === 'number') {
+                    const colour = gs.state === 'stale' ? 'var(--danger)' : 'var(--text-primary)';
+                    headline = `<div style="font-family:monospace;font-size:14px;font-weight:700;color:${colour}">v${gs.pageCount}</div>`;
+                } else {
+                    headline = `<div style="font-family:monospace;font-size:12px;font-weight:600">${p.pageVer}</div>`;
                 }
-                html += `</div>`;
+                let lines = headline;
+                // Sub-line: declared tag (if we have git data) + date + drift.
+                if (gs && typeof gs.pageCount === 'number') {
+                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">tag ${escHtml(p.pageVer)}</div>`;
+                }
                 if (gs && gs.pageDate) {
                     const col = gs.state === 'stale' ? 'var(--danger)' : 'var(--text-muted)';
-                    html += `<div style="font-size:10px;color:${col};margin-top:2px">${fmtRelative(gs.pageDate)}</div>`;
-                } else if (gs && gs.state === 'no-source') {
-                    html += `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">no tracked src</div>`;
-                } else if (gs && gs.errors.length) {
-                    html += `<div style="font-size:10px;color:var(--warning);margin-top:2px">? unknown</div>`;
+                    lines += `<div style="font-size:10px;color:${col};margin-top:1px">${fmtRelative(gs.pageDate)}</div>`;
                 }
-                return html;
+                if (gs && gs.state === 'stale' && typeof gs.driftCount === 'number' && gs.driftCount > 0) {
+                    lines += `<div style="font-size:10px;color:var(--danger);font-weight:600;margin-top:1px" title="page-source commits since SOP was last written">⚠ ${gs.driftCount} improvement${gs.driftCount === 1 ? '' : 's'} behind</div>`;
+                }
+                if (gs && gs.state === 'no-source') {
+                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">no tracked src</div>`;
+                } else if (gs && gs.errors.length && !gs.pageDate) {
+                    lines += `<div style="font-size:10px;color:var(--warning);margin-top:1px">? unknown</div>`;
+                }
+                return lines;
             })();
             const sopVerCell = (() => {
-                let html = `<div style="font-family:monospace;font-size:12px;font-weight:600">${p.sopVer}</div>`;
-                if (gs && gs.sopDate) {
-                    const col = gs.state === 'stale' ? 'var(--text-secondary)' : 'var(--text-muted)';
-                    html += `<div style="font-size:10px;color:${col};margin-top:2px">${fmtRelative(gs.sopDate)}</div>`;
-                } else if (gs && !p.sopFile) {
-                    html += `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">no SOP</div>`;
-                } else if (gs && gs.errors.length) {
-                    html += `<div style="font-size:10px;color:var(--warning);margin-top:2px">? unknown</div>`;
+                let headline;
+                if (gs && typeof gs.sopCount === 'number') {
+                    headline = `<div style="font-family:monospace;font-size:14px;font-weight:700;color:var(--text-primary)">v${gs.sopCount}</div>`;
+                } else {
+                    headline = `<div style="font-family:monospace;font-size:12px;font-weight:600">${p.sopVer}</div>`;
                 }
-                return html;
+                let lines = headline;
+                if (gs && typeof gs.sopCount === 'number') {
+                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">tag ${escHtml(p.sopVer)}</div>`;
+                }
+                if (gs && gs.sopDate) {
+                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">${fmtRelative(gs.sopDate)}</div>`;
+                } else if (gs && !p.sopFile) {
+                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">no SOP</div>`;
+                } else if (gs && gs.errors.length && !gs.sopDate) {
+                    lines += `<div style="font-size:10px;color:var(--warning);margin-top:1px">? unknown</div>`;
+                }
+                return lines;
             })();
 
             return `<tr>
