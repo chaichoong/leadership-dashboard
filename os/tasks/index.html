@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-2130 kanban-overdue</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-2230 task-kpi</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4615,6 +4615,28 @@ function renderProjKpiDrill(pid,bucket){
     label=`${monthNames[m]||m} ${y}`;
   }
   if(!detail){el.style.display='none';return}
+  const _displayHint0=(data&&data.display)||{};
+  if(_displayHint0.kind==='taskCompletion'){
+    const done=detail.completedTasks||[];
+    const open=detail.outstandingTasks||[];
+    const row=t=>`<tr style="border-top:1px solid var(--border-subtle)"><td style="padding:6px 8px;color:var(--text-primary)">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-secondary)">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
+    const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px">
+        <div style="font-weight:600;color:${color};margin-bottom:6px">${title} · ${list.length} task${list.length===1?'':'s'}</div>
+        ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:12px">None</div>'}
+      </div>`;
+    el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div><strong>${escHtml(label)}</strong> · ${escHtml(detail.label||'')}</div>
+        <button onclick="toggleProjKpiDrill('${pid}','${bucket}')" class="btn btn-sm">Close ▴</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+        <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:var(--success)">${detail.completedCount||0}</div></div>
+        <div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Outstanding</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${detail.outstandingCount||0}</div></div>
+        <div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Total</div><div style="font-size:16px;font-weight:700;color:var(--info)">${detail.total||0}</div></div>
+      </div>
+      ${table('Completed',done,'var(--success)')}
+      ${table('Outstanding',open,'var(--danger)')}`;
+    el.style.display='block';el.setAttribute('data-expanded',bucket);return;
+  }
   const unitPre=p.kpiUnit==='£'?'£':'';
   const fmtAmt=n=>`${unitPre}${(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   const fmtSigned=n=>{const num=Number(n)||0;const abs=Math.abs(num);const s=`${unitPre}${abs.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;return num<0?`<span style="color:var(--danger)">−${s}</span>`:s};

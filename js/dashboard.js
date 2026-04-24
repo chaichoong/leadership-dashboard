@@ -363,6 +363,36 @@
         }catch(e){console.warn('[runKpiComputeCode] error',e);return null}
     }
 
+    // Fetch a slim view of every task — just the fields we need for
+    // task-completion style KPIs. Only called when the dashboard runs
+    // automated KPIs, so it doesn't add load to unrelated refreshes.
+    async function fetchTasksForKpi(){
+        try{
+            const url=`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}?returnFieldsByFieldId=true&pageSize=100&fields[]=fldx4qCw17UfrKpaN&fields[]=fldBg0rQy0FrOAkRN&fields[]=fldFOi1SwEKuJRmdN&fields[]=fldgFjGBw6bTKJFCD&fields[]=fld7XP8w8kbxfETV4`;
+            let all=[],offset=null;
+            do{
+                const r=await fetch(url+(offset?'&offset='+offset:''),{headers:{Authorization:`Bearer ${PAT}`}});
+                if(!r.ok)throw new Error('tasks fetch '+r.status);
+                const d=await r.json();all=all.concat(d.records||[]);offset=d.offset||null;
+            }while(offset);
+            return all.map(t=>{
+                const c=t.cellValuesByFieldId||t.fields||{};
+                const statusObj=c['fldx4qCw17UfrKpaN'];
+                const status=typeof statusObj==='string'?statusObj:(statusObj&&statusObj.name)||'';
+                const projLinks=c['fldBg0rQy0FrOAkRN']||[];
+                const projectIds=(Array.isArray(projLinks)?projLinks:[]).map(x=>typeof x==='object'?x.id:x).filter(Boolean);
+                return {
+                    id:t.id,
+                    name:c['fldgFjGBw6bTKJFCD']||'',
+                    status,
+                    completed:status==='Completed',
+                    projectIds,
+                    completion:c['fldFOi1SwEKuJRmdN']||'',
+                    dueDate:c['fld7XP8w8kbxfETV4']||'',
+                };
+            });
+        }catch(e){console.warn('[fetchTasksForKpi] failed',e);return []}
+    }
     async function runAutomatedKpis(projectRecords){
         if(!Array.isArray(projectRecords))return;
         const withCode=projectRecords.filter(r=>{
@@ -370,6 +400,8 @@
             return code && String(code).trim();
         });
         if(!withCode.length)return;
+        // Fetch the task list once for any project KPI that needs it.
+        const tasksForKpi=await fetchTasksForKpi();
         for(const rec of withCode){
             try{
                 const code=getField(rec,STRAT_PF.kpiComputeCode);
@@ -383,6 +415,9 @@
                     kpiUnit:_stratSelName(getField(rec,STRAT_PF.kpiUnit)),
                 };
                 const ctx=buildAutomatedKpiContext(local);
+                // Attach the pre-fetched task list so task-completion KPIs
+                // can simply filter ctx.tasks by ctx.project.id.
+                ctx.tasks=tasksForKpi;
                 const value=runKpiComputeCode(code,ctx);
                 if(value==null)continue;
                 const rounded=Math.round(value*100)/100;
@@ -570,6 +605,30 @@
             label=`${monthNames[m]||m} ${y}`;
         }
         if(!detail){el.style.display='none';return}
+        // Task-completion KPIs have no transactions — render a tasks list instead.
+        const displayHint0=(kRet&&kRet.display)||{};
+        if(displayHint0.kind==='taskCompletion'){
+            const done=detail.completedTasks||[];
+            const open=detail.outstandingTasks||[];
+            const row=t=>`<tr style="border-top:1px solid #f1f5f9"><td style="padding:6px 8px;color:#1e293b">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:#64748b">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#64748b">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
+            const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px">
+                <div style="font-weight:600;color:${color};margin-bottom:6px">${title} · ${list.length} task${list.length===1?'':'s'}</div>
+                ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:#94a3b8;font-style:italic;font-size:12px">None</div>'}
+            </div>`;
+            el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div><strong>${escHtml(label)}</strong> · ${escHtml(detail.label||'')}</div>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid #cbd5e1;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+                <div style="padding:10px;background:#f0fdf4;border-radius:6px"><div style="font-size:10px;color:#14532d;font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:#14532d">${detail.completedCount||0}</div></div>
+                <div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Outstanding</div><div style="font-size:16px;font-weight:700;color:#991b1b">${detail.outstandingCount||0}</div></div>
+                <div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Total</div><div style="font-size:16px;font-weight:700;color:#1e3a8a">${detail.total||0}</div></div>
+              </div>
+              ${table('Completed',done,'#14532d')}
+              ${table('Outstanding',open,'#991b1b')}`;
+            el.style.display='block';el.setAttribute('data-expanded',bucket);
+            return;
+        }
         const unitPrefix=p.kpiUnit==='£'?'£':'';
         const fmtAmt=n=>`${unitPrefix}${(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
         const fmtSigned=n=>{
