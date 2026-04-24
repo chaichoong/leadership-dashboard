@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1800 kanban-rolling</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-1900 drift-fix</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -875,13 +875,20 @@ async function runSyncCheck(){
       }
     });
     // --- Local vs remote drift (for things we did that weren't in persisted log) ---
+    // IMPORTANT: `t.status` is a *derived* value — for regular tasks it's
+    // derived from the due date, for contractor tasks it's forced to
+    // Upcoming. Comparing that against Airtable's stored status produces
+    // false-positive drift for every task whose due date has rolled past
+    // without being touched. Instead we compare `t.storedStatus`, which is
+    // the status we last read from Airtable for that task — any difference
+    // there is a real drift (an edit that was reverted or a stale cache).
     const drift=[];
     (allTasks||[]).forEach(t=>{
       const r=byId.get(t.id);if(!r)return;
       const c=r.cellValuesByFieldId||r.fields||{};
       const checks=[
         ['name',t.name,c[F.name]||''],
-        ['status',t.status,selectName(c[F.status])],
+        ['status',t.storedStatus||'',selectName(c[F.status])],
         ['priority',t.priority,selectName(c[F.priority])],
         ['dueDate',t.dueDate||'',c[F.dueDate]||''],
         ['description',t.description||'',c[F.description]||''],
@@ -897,14 +904,54 @@ async function runSyncCheck(){
       res.innerHTML=head+rows+(reverted.length>20?`<div style="color:var(--text-muted);font-size:11px;margin-top:6px">…and ${reverted.length-20} more</div>`:'');
       return;
     }
-    if(!drift.length){res.innerHTML='<span style="color:var(--success);font-weight:600">✓ In sync — no drift detected across '+fresh.length+' tasks</span>';return}
+    // Compute "stale status" separately — every task where Airtable's
+    // stored status disagrees with what we'd derive today (so the grid
+    // shows Overdue but Airtable still says Upcoming, etc.). These aren't
+    // bugs — just stale — but we can fix them in a batch with a button.
+    const staleStatuses=[];
+    (allTasks||[]).forEach(t=>{
+      const r=byId.get(t.id);if(!r)return;
+      const c=r.cellValuesByFieldId||r.fields||{};
+      const remote=selectName(c[F.status]);
+      if(t.status&&remote&&t.status!==remote)staleStatuses.push({id:t.id,name:t.name,derived:t.status,remote});
+    });
+    if(!drift.length){
+      let msg=`<span style="color:var(--success);font-weight:600">✓ In sync — no drift detected across ${fresh.length} tasks</span>`;
+      if(staleStatuses.length){
+        msg+=`<div style="margin-top:10px;padding:10px;background:var(--warning-bg);color:var(--warning);border-radius:8px;font-size:11px">${staleStatuses.length} Airtable statuses are stale (derived locally from due date). <button class="btn btn-sm" style="margin-top:6px" onclick="reconcileStaleStatuses()">Reconcile all</button></div>`;
+      }
+      res.innerHTML=msg;return;
+    }
     res.innerHTML=`<div style="color:var(--danger);font-weight:600;margin-bottom:6px">⚠ ${drift.length} drift${drift.length===1?'':'s'} found (local ≠ Airtable):</div>`+
       drift.slice(0,15).map(d=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml(d.name.slice(0,40))}</b><div style="font-size:11px;color:var(--text-secondary)">${escHtml(d.field)}: local <b>${escHtml(String(d.local||'(empty)').slice(0,30))}</b> vs Airtable <b>${escHtml(String(d.remote||'(empty)').slice(0,30))}</b></div></div>`).join('')+
-      (drift.length>15?`<div style="color:var(--text-muted);font-size:11px;margin-top:6px">…and ${drift.length-15} more</div>`:'');
+      (drift.length>15?`<div style="color:var(--text-muted);font-size:11px;margin-top:6px">…and ${drift.length-15} more</div>`:'')+
+      (staleStatuses.length?`<div style="margin-top:10px;padding:10px;background:var(--warning-bg);color:var(--warning);border-radius:8px;font-size:11px">${staleStatuses.length} stale statuses in Airtable (derived locally from due date). <button class="btn btn-sm" style="margin-top:6px" onclick="reconcileStaleStatuses()">Reconcile all</button></div>`:'');
   }catch(e){
     if(res)res.innerHTML='<span style="color:var(--danger)">Sync check failed: '+escHtml((e&&e.message)||'unknown')+'</span>';
   }
 }
+// Reconcile stale Airtable statuses in batch — patches each task's status
+// field to its current derived value. Rate-limited at 5 req/s (Airtable cap).
+async function reconcileStaleStatuses(){
+  const res=document.getElementById('syncCheckResult');
+  const targets=(allTasks||[]).filter(t=>t.status&&t.storedStatus&&t.status!==t.storedStatus&&t.status!=='Completed'&&t.status!=='Approval'&&t.storedStatus!=='Completed'&&t.storedStatus!=='Approval');
+  if(!targets.length){if(res)res.innerHTML='<span style="color:var(--success)">Nothing to reconcile.</span>';return}
+  if(res)res.innerHTML=`<div style="color:var(--info)">⟳ Reconciling ${targets.length} statuses…</div>`;
+  let done=0,failed=0;
+  for(let i=0;i<targets.length;i+=5){
+    const chunk=targets.slice(i,i+5);
+    const results=await Promise.allSettled(chunk.map(t=>patchTask(t.id,{[F.status]:t.status}).then(r=>{
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      t.storedStatus=t.status;return true;
+    })));
+    results.forEach(r=>{if(r.status==='fulfilled')done++;else failed++});
+    if(res)res.innerHTML=`<div style="color:var(--info)">⟳ Reconciling… ${done}/${targets.length} done${failed?' ('+failed+' failed)':''}</div>`;
+    await new Promise(r=>setTimeout(r,220)); // ~5 req/s
+  }
+  if(res)res.innerHTML=`<span style="color:var(--success);font-weight:600">✓ Reconciled ${done} status${done===1?'':'es'}${failed?' — '+failed+' failed, open console':''}</span>`;
+  toast(`Reconciled ${done} statuses`);
+}
+window.reconcileStaleStatuses=reconcileStaleStatuses;
 window.syncPillClick=syncPillClick;window.runSyncCheck=runSyncCheck;
 // Wire pill click once DOM is ready
 setTimeout(()=>{const p=document.getElementById('syncPill');if(p)p.onclick=syncPillClick},0);
