@@ -220,14 +220,44 @@
                 </div>`;
             }
 
+            // Page v. / SOP v. cells get git context appended after a sync.
+            const pageVerCell = (() => {
+                let html = `<div style="font-family:monospace;font-size:12px;font-weight:600">${p.pageVer}`;
+                if (gs && gs.state === 'stale') {
+                    html += ` <span style="color:var(--danger);font-weight:700" title="Page source has commits past v${p.pageVer}">+drift</span>`;
+                }
+                html += `</div>`;
+                if (gs && gs.pageDate) {
+                    const col = gs.state === 'stale' ? 'var(--danger)' : 'var(--text-muted)';
+                    html += `<div style="font-size:10px;color:${col};margin-top:2px">${fmtRelative(gs.pageDate)}</div>`;
+                } else if (gs && gs.state === 'no-source') {
+                    html += `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">no tracked src</div>`;
+                } else if (gs && gs.errors.length) {
+                    html += `<div style="font-size:10px;color:var(--warning);margin-top:2px">? unknown</div>`;
+                }
+                return html;
+            })();
+            const sopVerCell = (() => {
+                let html = `<div style="font-family:monospace;font-size:12px;font-weight:600">${p.sopVer}</div>`;
+                if (gs && gs.sopDate) {
+                    const col = gs.state === 'stale' ? 'var(--text-secondary)' : 'var(--text-muted)';
+                    html += `<div style="font-size:10px;color:${col};margin-top:2px">${fmtRelative(gs.sopDate)}</div>`;
+                } else if (gs && !p.sopFile) {
+                    html += `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">no SOP</div>`;
+                } else if (gs && gs.errors.length) {
+                    html += `<div style="font-size:10px;color:var(--warning);margin-top:2px">? unknown</div>`;
+                }
+                return html;
+            })();
+
             return `<tr>
                 <td style="text-align:center;color:var(--text-muted);font-weight:600">${i + 1}</td>
                 <td style="font-weight:600">${p.icon} ${escHtml(p.name)}</td>
-                <td style="text-align:center;font-family:monospace;font-size:11px">${p.pageVer}</td>
+                <td style="text-align:center">${pageVerCell}</td>
                 <td><a href="#${p.id}" onclick="switchTab('${p.id}')" style="font-size:12px">Open</a></td>
                 <td style="font-size:11px"><a href="${p.standalone}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.standalone}')">Copy</button></td>
                 <td>${p.sopFile ? `<a href="${p.sopFile}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.sopFile}')">Copy</button>` : '<span style="color:var(--text-muted);font-size:11px">no SOP</span>'}</td>
-                <td style="text-align:center;font-family:monospace;font-size:11px">${p.sopVer}</td>
+                <td style="text-align:center">${sopVerCell}</td>
                 <td style="text-align:center">${statusHtml}</td>
                 <td>${gitCell}</td>
             </tr>`;
