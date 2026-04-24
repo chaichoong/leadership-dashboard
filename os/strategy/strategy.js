@@ -1074,7 +1074,10 @@ function readAllFormFields() {
 // tasks from each monthly stepping stone. Also checks which projects already
 // exist in Projects OS for this business/quarter so we can flag duplicates
 // and skip them on write.
-async function buildPushProposal(qps, fields) {
+// `onProgress(msg)` is called at each long-running step so the UI can show
+// what's happening during the 5-15s preview build.
+async function buildPushProposal(qps, fields, onProgress) {
+    const report = onProgress || (() => {});
     const { businessId, quarter, year } = getSelection();
     const qIdx = QUARTERS.indexOf(quarter);
     const yearNum = parseInt(year, 10);
@@ -1089,6 +1092,7 @@ async function buildPushProposal(qps, fields) {
         return `${yearNum}-${pad(mo)}-${pad(lastDay)}`;
     });
 
+    report('Checking for existing projects…');
     // Dedup signal #1 — direct record-ID link from the O&S record. This is
     // the authoritative way to identify an existing Project for a given QP;
     // it survives renames on either side.
@@ -1157,6 +1161,7 @@ async function buildPushProposal(qps, fields) {
 
     // Load Team Members once so we can resolve Project Collaborator record
     // IDs → emails for Task.Collaborators writes later.
+    report('Loading team…');
     await ensureTeamMembersLoaded();
 
     const proposal = { quarter, year, qStartISO, qEndISO, projects: [] };
@@ -1205,16 +1210,25 @@ async function buildPushProposal(qps, fields) {
 
         const stones = OBJSTRAT.monthlyStones[qp.i].map(sFid => (fields[sFid] || '').trim());
         const tasksByMonth = [[], [], []];
-        for (let m = 0; m < 3; m++) {
-            const stone = stones[m];
-            if (!stone || /^(n\/?a|tbc|skip|none|-|—|…)$/i.test(stone)) continue;
-            const extracted = await extractTasksFromStone(stone, qp.i + 1, m + 1, projectName);
-            tasksByMonth[m] = extracted.map(name => ({
-                name,
-                dueISO: monthEndsInQuarter[m],
-                month: m + 1,
-                exists: existingTaskNames.has(String(name).trim().toLowerCase()),
-            }));
+        const existingTaskCount = existingTaskNames.size;
+        // Existing projects: skip task extraction entirely. AI task names are
+        // not deterministic between runs, so even a "dedup by name" approach
+        // would re-push near-identical tasks. Kevin's rule: if a project is
+        // already there with tasks, leave it alone. Only NEW projects get
+        // their stones broken into tasks on push.
+        if (!alreadyExists) {
+            for (let m = 0; m < 3; m++) {
+                const stone = stones[m];
+                if (!stone || /^(n\/?a|tbc|skip|none|-|—|…)$/i.test(stone)) continue;
+                if (typeof onProgress === 'function') onProgress(`Extracting tasks for QP${qp.i + 1} month ${m + 1}…`);
+                const extracted = await extractTasksFromStone(stone, qp.i + 1, m + 1, projectName);
+                tasksByMonth[m] = extracted.map(name => ({
+                    name,
+                    dueISO: monthEndsInQuarter[m],
+                    month: m + 1,
+                    exists: false,
+                }));
+            }
         }
 
         proposal.projects.push({
