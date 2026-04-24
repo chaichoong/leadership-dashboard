@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0030 kpi-autoopen</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0115 collab-verify</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1498,10 +1498,20 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         if(!Object.prototype.hasOwnProperty.call(got,sentFid))return; // field not returned → can't verify
         const returned=got[sentFid];
         const sent=payload[sentFid];
+        // Normalise for cross-checking. Pick a SINGLE identity field and
+        // stick with it for both sides so sent vs returned can only
+        // mismatch when the actual value differs, not because the server
+        // echoed a richer object. For collaborator fields we keyed sent
+        // by email, so return email first if present; otherwise fall back
+        // to id / name / string.
         const norm=v=>{
           if(v==null||v==='')return '';
           if(Array.isArray(v))return v.map(x=>x&&x.id?x.id:x).sort().join(',');
-          if(typeof v==='object'){if(v.id)return v.id;if(v.name)return v.name;if(v.email)return v.email}
+          if(typeof v==='object'){
+            if(v.email)return v.email;
+            if(v.id)return v.id;
+            if(v.name)return v.name;
+          }
           return String(v);
         };
         if(norm(sent)!==norm(returned)){
