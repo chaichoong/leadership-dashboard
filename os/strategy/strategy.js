@@ -25,16 +25,28 @@ function authenticate() {
     const input = document.getElementById('patInput').value.trim();
     if (!input) return;
     PAT_LOCAL = input;
-    sessionStorage.setItem('_dlr_pat', input);
+    // Write under BOTH keys so every other OS page finds it regardless of
+    // which storage key it happens to read (legacy 'airtable_pat' vs the
+    // shell's '_dlr_pat').
+    localStorage.setItem('_dlr_pat', input);
     localStorage.setItem('airtable_pat', input);
+    sessionStorage.setItem('_dlr_pat', input);
     document.getElementById('authScreen').style.display = 'none';
     initApp();
 }
 
 (function init() {
-    const saved = localStorage.getItem('airtable_pat') || sessionStorage.getItem('_dlr_pat');
+    // The parent shell (shared.js) stores the PAT as localStorage._dlr_pat —
+    // that's the primary. Also look up legacy keys the iframe may have
+    // written in a previous session. Same-origin iframes share localStorage
+    // with the parent, so once the shell has authenticated we inherit.
+    const saved = localStorage.getItem('_dlr_pat')
+        || localStorage.getItem('airtable_pat')
+        || sessionStorage.getItem('_dlr_pat');
     if (saved) {
         PAT_LOCAL = saved;
+        // Mirror to both keys for any other code paths that rely on either.
+        localStorage.setItem('_dlr_pat', saved);
         sessionStorage.setItem('_dlr_pat', saved);
         document.getElementById('authScreen').style.display = 'none';
         initApp();
