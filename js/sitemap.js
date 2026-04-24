@@ -112,13 +112,38 @@
         return commitCountFromLink(resp.headers.get('link'), data.length);
     }
 
+    // All paths we currently expect to have fetched for the checker to be complete.
+    function expectedSyncPaths() {
+        const paths = new Set();
+        for (const p of PAGE_REGISTRY) {
+            (PAGE_SOURCE_FILES[p.id] || []).forEach(f => paths.add(f));
+            if (p.sopFile) paths.add(p.sopFile);
+        }
+        return paths;
+    }
+
     async function runGitSyncCheck(btn) {
         // Check localStorage cache first
         const cached = localStorage.getItem(GIT_SYNC_CACHE_KEY);
         if (cached) {
             try {
                 const parsed = JSON.parse(cached);
-                if (Date.now() - parsed.fetchedAt < GIT_SYNC_CACHE_TTL) {
+                const fresh = Date.now() - parsed.fetchedAt < GIT_SYNC_CACHE_TTL;
+                // Require the cache to have a SUCCESSFUL entry for every path we
+                // currently expect. This handles two failure modes:
+                //   (a) PAGE_SOURCE_FILES has grown since this cache was written
+                //       (e.g. we added strategy sources) — missing keys force refetch.
+                //   (b) A prior run was partially rate-limited, leaving error
+                //       entries instead of real data. A later run (e.g. with a
+                //       GitHub token now set) should refetch those.
+                // An entry counts as "good" if it's null (file has no commits,
+                // which is valid) or has a `date` field (successful fetch).
+                const expected = expectedSyncPaths();
+                const covered = parsed.results && [...expected].every(p => {
+                    const r = parsed.results[p];
+                    return r === null || (r && r.date);
+                });
+                if (fresh && covered) {
                     gitSyncData = parsed;
                     renderSiteMap();
                     return;
