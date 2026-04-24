@@ -1435,9 +1435,8 @@
             calcBalInput.value = openingBalance.toFixed(2);
         }
 
-        // Footer
-        const lastSync = getField(santanderRec, F.accLastUpdate) || getField(zemplerRec, F.accLastUpdate) || 'Unknown';
-        document.getElementById('footerSync').textContent = `Last bank sync: ${lastSync}`;
+        // (Removed) — the "Last bank sync" footer was dropped from index.html; the
+        // Fintable Sync Monitor OS page surfaces this same timestamp more clearly.
 
         // Store computed state for AI context
         if (typeof updateDashboardState === 'function') {
