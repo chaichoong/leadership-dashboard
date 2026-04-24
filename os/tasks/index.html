@@ -421,7 +421,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0759</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-24-0821</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1120,6 +1120,21 @@ function selectName(v){
   return '';
 }
 
+// Derive the correct status from a task's due date.
+// Completed and Approval are override states — user has deliberately
+// set them and they trump the due-date rule. Everything else is
+// computed: no date → Upcoming, before today → Overdue, today → Today,
+// after today → Upcoming.
+function deriveTaskStatus(dueDate, storedStatus){
+  if(storedStatus==='Completed')return 'Completed';
+  if(storedStatus==='Approval')return 'Approval';
+  const today=todayStr();
+  if(!dueDate)return 'Upcoming';
+  if(dueDate<today)return 'Overdue';
+  if(dueDate===today)return 'Today';
+  return 'Upcoming';
+}
+
 function parseTask(rec){
   const statusObj=gf(rec,F.status);
   const priorityObj=gf(rec,F.priority);
@@ -1152,11 +1167,23 @@ function parseTask(rec){
   const collabRaw=gf(rec,F.collaborators)||[];
   const collaborators=Array.isArray(collabRaw)?collabRaw.map(c=>({id:c.id,email:c.email,name:c.name})):[];
 
+  const _dueDate=gf(rec,F.dueDate)||'';
+  const _storedStatus=selectName(statusObj);
+  // Status is derived from due date for every task except the two override
+  // states (Completed / Approval) which the user sets deliberately. This
+  // guarantees the grid status column always matches reality — if due
+  // date is today → Today, before today → Overdue, after today → Upcoming.
+  // When updateTaskField changes dueDate the auto-status patch writes this
+  // back to Airtable so it persists; the derivation here also handles
+  // tasks whose dueDate has rolled past without being touched (e.g. an
+  // "Upcoming" task that's silently become today's).
+  const _effectiveStatus=deriveTaskStatus(_dueDate,_storedStatus);
   return {
     id:rec.id,
     name:gf(rec,F.name)||'(Untitled)',
-    dueDate:gf(rec,F.dueDate)||'',
-    status:selectName(statusObj),
+    dueDate:_dueDate,
+    status:_effectiveStatus,
+    storedStatus:_storedStatus, // what Airtable has (in case we want to reconcile)
     assignee:assigneeObj?assigneeObj.name:'',
     assigneeEmail:assigneeObj?assigneeObj.email:'',
     assigneeId:assigneeObj?assigneeObj.id:'',
