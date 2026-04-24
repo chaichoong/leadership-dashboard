@@ -221,7 +221,68 @@
         localStorage.removeItem(GIT_SYNC_CACHE_KEY);
         gitSyncData = null;
         renderSiteMap();
+        updateSitemapBadge();
     }
+
+    // Sidebar badge next to "Site Map & Links" — total pages needing attention.
+    // When git sync data is loaded, counts git-stale + missing-SOP + unknown.
+    // Before any sync has run, falls back to the old declared-version mismatch
+    // count so the badge still signals something useful on a fresh page load.
+    function updateSitemapBadge() {
+        const badge = document.getElementById('sitemapBadge');
+        if (!badge) return;
+        let stale = 0, missing = 0, unknown = 0, declaredOnly = 0;
+        if (gitSyncData) {
+            for (const p of PAGE_REGISTRY) {
+                const gs = getGitStatus(p);
+                if (!gs) continue;
+                if (gs.state === 'stale') stale++;
+                else if (gs.state === 'no-sop') missing++;
+                else if (gs.state === 'unknown') unknown++;
+            }
+        } else {
+            declaredOnly = PAGE_REGISTRY.filter(p => p.pageVer !== p.sopVer).length;
+        }
+        const total = gitSyncData ? (stale + missing + unknown) : declaredOnly;
+        if (total > 0) {
+            badge.textContent = total;
+            badge.style.display = 'inline-block';
+            // Red if anything stale/missing/declared-mismatch; orange only when
+            // the sole issue is "unknown" (can't make a real call yet).
+            const anyAction = stale + missing + declaredOnly > 0;
+            badge.style.background = anyAction ? 'var(--danger)' : 'var(--warning)';
+            badge.title = gitSyncData
+                ? `${stale} stale · ${missing} missing SOP${unknown ? ' · ' + unknown + ' unknown' : ''}`
+                : `${declaredOnly} page${declaredOnly === 1 ? '' : 's'} with declared-version mismatch — click Check Git Sync for real status`;
+        } else {
+            badge.style.display = 'none';
+            badge.title = '';
+        }
+    }
+
+    // Auto-load cached sync data on script start so the badge reflects truth
+    // without requiring the user to open the Site Map tab first.
+    (function primeSitemapBadge() {
+        try {
+            const cached = localStorage.getItem(GIT_SYNC_CACHE_KEY);
+            if (!cached) return;
+            const parsed = JSON.parse(cached);
+            if (Date.now() - parsed.fetchedAt < GIT_SYNC_CACHE_TTL) {
+                const expected = expectedSyncPaths();
+                const covered = parsed.results && [...expected].every(p => {
+                    const r = parsed.results[p];
+                    return r === null || (r && r.date);
+                });
+                if (covered) gitSyncData = parsed;
+            }
+        } catch {}
+        // Wait for DOM so the badge element exists; then paint.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', updateSitemapBadge);
+        } else {
+            updateSitemapBadge();
+        }
+    })();
 
     function fmtRelative(iso) {
         if (!iso) return '—';
@@ -530,6 +591,8 @@
                 </div>` : ''}
             `;
         }
+        // Keep the sidebar badge in step with whatever the table now shows.
+        updateSitemapBadge();
     }
 
     async function requestSOPUpdate(pageId, sopFile, pageVer, pageName, btn) {

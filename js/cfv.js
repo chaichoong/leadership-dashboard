@@ -260,18 +260,11 @@
         container.innerHTML = html;
     }
 
-    // Update sitemap sync badge
-    function updateSitemapBadge() {
-        const badge = document.getElementById('sitemapBadge');
-        if (!badge) return;
-        const count = PAGE_REGISTRY.filter(p => p.pageVer !== p.sopVer).length;
-        if (count > 0) {
-            badge.textContent = count;
-            badge.style.display = 'inline-block';
-            badge.style.background = '#d97706';
-        } else {
-            badge.style.display = 'none';
-        }
+    // updateSitemapBadge lives in js/sitemap.js now — it's git-aware and belongs
+    // with the rest of the Site Map logic. Left as a no-op fallback in case this
+    // file loads alone.
+    if (typeof updateSitemapBadge !== 'function') {
+        window.updateSitemapBadge = function noop() {};
     }
 
     async function renderCFVTab() {
