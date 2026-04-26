@@ -1285,13 +1285,13 @@
         const cfvUnactioned = cfvTenancies.reduce((s, r) => s + (Number(getField(r, F.tenRent)) || 0), 0);
 
         // ── CREDIT CARD STRATEGIC REPAYMENT PLAN ──
-        // Payment deadlines: AmEx 28th, Santander CC 14th, Lloyds CC 23rd
+        // Payment deadlines: AmEx 28th, Santander CC 14th, Lloyds CC 21st
         // Minimum payments estimated at ~2% of balance or £25 whichever is greater
         const ccRepaymentPlan = (() => {
             const cards = [
                 { name: 'American Express', owed: amexOwed, dueDay: 28, recId: REC.americanExpress },
                 { name: 'Santander Credit Card', owed: santanderCCOwed, dueDay: 14, recId: REC.santanderCC },
-                { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 23, recId: REC.lloydsCreditCard },
+                { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 21, recId: REC.lloydsCreditCard },
             ].filter(c => c.owed > 0.01);
 
             // Estimate minimum payment for each card (2% of balance or £25, whichever is greater)
@@ -1501,12 +1501,23 @@
             <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong> across ${ccRepaymentPlan.cards.length} card${ccRepaymentPlan.cards.length !== 1 ? 's' : ''}.</p>
             <p style="margin:0 0 12px;font-size:13px;color:#475569">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
             <div style="margin-bottom:16px">
-                ${ccRepaymentPlan.cards.map(c =>
-                    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:14px;">
-                        <span style="color:#475569">${escHtml(c.name)} <span style="color:#94a3b8;font-size:12px">(due ${c.dueDay}${c.dueDay===1?'st':c.dueDay===2?'nd':c.dueDay===3?'rd':'th'} | min. ${fmt(c.minPayment)})</span></span>
+                ${ccRepaymentPlan.cards.map(c => {
+                    // Proper English ordinal: 11/12/13 are always 'th'; otherwise
+                    // the last digit picks st/nd/rd/th. The previous one-liner
+                    // matched only the literal numbers 1/2/3, so 21st rendered
+                    // as "21th".
+                    const d = c.dueDay;
+                    const lastTwo = d % 100;
+                    const last = d % 10;
+                    const suffix = (lastTwo >= 11 && lastTwo <= 13) ? 'th'
+                        : last === 1 ? 'st'
+                        : last === 2 ? 'nd'
+                        : last === 3 ? 'rd' : 'th';
+                    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:14px;">
+                        <span style="color:#475569">${escHtml(c.name)} <span style="color:#94a3b8;font-size:12px">(due ${d}${suffix} | min. ${fmt(c.minPayment)})</span></span>
                         <span style="font-weight:600;color:${c.owed > 5000 ? '#dc2626' : '#d97706'}">${fmt(c.owed)}</span>
-                    </div>`
-                ).join('')}
+                    </div>`;
+                }).join('')}
             </div>
             <div>${ccTableRows}</div>
             ${ccRepaymentPlan.remaining.some(c => c.owed > 0.01)
