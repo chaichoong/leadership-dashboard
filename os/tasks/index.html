@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0315 inline-add-assignee</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0345 inline-add-status</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -3136,6 +3136,10 @@ function tlDoubleClickAddTask(e){
           else if(currentUser&&currentUser.email){t.assigneeEmail=currentUser.email;t.assignee=currentUser.name||currentUser.email}
         }
         if(!t.dueDate)t.dueDate=todayStr();
+        // Re-derive status from the (now guaranteed) due date — parseTask
+        // may have computed Upcoming if the POST response didn't echo the
+        // due date back, leaving today's tasks looking like future ones.
+        t.status=deriveTaskStatus(t.dueDate,t.storedStatus||t.status);
         if(!t.status)t.status='Today';
         if(!t.minutes||t.minutes===0)t.minutes=15;
         if(!t.timeEst)t.timeEst='15 min';
