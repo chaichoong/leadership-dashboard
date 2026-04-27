@@ -808,7 +808,7 @@
     const UC_TASK_CONFIG = {
         assigneeEmail: 'micaa.work@gmail.com',
         teamMemberId: 'rec4b5MDoaxEC7WRE',     // Mica Albovias
-        projectId: 'recpg9gSr5Wh1X1Kv',        // £4,000 profit project
+        projectId: 'recyJDDWaEAzMXMxw',        // £12,000 Monthly Operating Cushion project
         priorityName: 'Project',
         statusName: 'Today',
     };
@@ -849,11 +849,12 @@
             const recordId = created.id;
             console.log('Step 1 done — created:', recordId);
 
-            // Step 2: Immediately PATCH with Time Estimate + Projects + linked records
+            // Step 2: Immediately PATCH with Time Estimate + Projects + Due Date + linked records
             btn.textContent = 'Linking...';
             const patchFields = {};
             patchFields['fld10VzzbiNNgRmIi'] = '15 min';          // Time Estimate
             patchFields['fldBg0rQy0FrOAkRN'] = [UC_TASK_CONFIG.projectId];  // Projects
+            patchFields['fld7XP8w8kbxfETV4'] = todayStr;                     // Due Date — today (Kevin's local), so it lands in Mica's Today queue immediately
             patchFields['fldmne4RYJU22ICub'] = [tenancyId];                  // Tenancies
             if (tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [tenantId];    // Tenants
             if (unitId) patchFields['fldEW648YtTZ6j01n'] = [unitId];        // Rental Units
