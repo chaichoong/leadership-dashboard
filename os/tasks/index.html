@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0200 myday-drop</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0245 timeline-cols</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2950,17 +2950,53 @@ function renderMyDay(){
     html+=`<div class="tl-hour" style="top:${y-6}px">${h}:00</div>`;
     html+=`<div class="tl-hour-line" style="top:${y}px"></div>`;
   }
+  // Column assignment for overlapping blocks. When two or more blocks
+  // share the same time slot, split the column horizontally so they sit
+  // side-by-side instead of stacking and obscuring each other.
+  // Greedy interval-graph colouring: walk blocks in start-order, drop
+  // each into the leftmost free column. totalCols for each block = max
+  // simultaneously-active columns across its time range.
+  (function assignTimelineCols(){
+    const sorted=[...plan.blocks].sort((a,b)=>a.start-b.start||b.end-a.end);
+    const colEnds=[]; // each entry = the latest .end currently in that column
+    sorted.forEach(b=>{
+      let placed=false;
+      for(let i=0;i<colEnds.length;i++){
+        if(colEnds[i]<=b.start){colEnds[i]=b.end;b._col=i;placed=true;break}
+      }
+      if(!placed){b._col=colEnds.length;colEnds.push(b.end)}
+    });
+    // For each block, totalCols = max (_col+1) among blocks that overlap it.
+    sorted.forEach(b=>{
+      let max=b._col+1;
+      sorted.forEach(o=>{if(o!==b&&o.start<b.end&&o.end>b.start)max=Math.max(max,o._col+1)});
+      b._totalCols=max;
+    });
+  })();
   // blocks
   plan.blocks.forEach(b=>{
     const top=(b.start-plan.dayStart)*PIXELS_PER_MIN;
     const height=Math.max(22,(b.end-b.start)*PIXELS_PER_MIN);
+    // Convert _col / _totalCols to a horizontal slice of the canvas.
+    // Single-occupancy blocks keep the existing 6px padding on both sides;
+    // overlapping ones split with a 2px inner gap between columns.
+    const total=b._totalCols||1;
+    const col=b._col||0;
+    let posStyle;
+    if(total<=1){
+      posStyle=`left:6px;right:6px;`;
+    }else{
+      const leftPct=(col/total)*100;
+      const widthPct=(1/total)*100;
+      posStyle=`left:calc(${leftPct}% + 6px);width:calc(${widthPct}% - 8px);right:auto;`;
+    }
     if(b.type==='event'){
-      html+=`<div class="tl-block event" style="top:${top}px;height:${height}px"><div class="tb-title">${escHtml(b.name)}</div><div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${b.location?escHtml(b.location):'Calendar'}</div></div>`;
+      html+=`<div class="tl-block event" style="top:${top}px;height:${height}px;${posStyle}"><div class="tb-title">${escHtml(b.name)}</div><div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${b.location?escHtml(b.location):'Calendar'}</div></div>`;
     } else if(b.type==='routine'){
       const rKey='routine:'+b.name.toLowerCase().replace(/\s+/g,'');
       html+=`<div class="tl-block routine" data-routine-key="${rKey}" draggable="true"
         ondragstart="dragRoutineBlock(event,'${rKey}',${b.start},${b.duration})"
-        style="top:${top}px;height:${height}px">
+        style="top:${top}px;height:${height}px;${posStyle}">
         <div class="tb-title">${escHtml(b.name)}</div>
         <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)}</div>
         <div class="resize-handle" onmousedown="event.stopPropagation();routineResizeStart(event,'${rKey}','${escHtml(b.name)}',${b.start},${b.duration})"></div>
@@ -2973,7 +3009,7 @@ function renderMyDay(){
         ondragstart="dragTaskBlock(event,'${t.id}')"
         onclick="if(!window._tlDragging)openTaskDrawer('${t.id}')"
         onmousedown="tlBlockMouseDown(event,'${t.id}',${b.start},${b.end-b.start})"
-        style="top:${top}px;height:${height}px">
+        style="top:${top}px;height:${height}px;${posStyle}">
         <div class="tb-title">${escHtml(b.name)}${flag}</div>
         <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${priorityBadge(t.priority)} ${t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''} ${avatarSmall(t)}</div>
         <div class="resize-handle" onmousedown="event.stopPropagation();tlResizeStart(event,'${t.id}',${b.start},${b.end-b.start})"></div>
