@@ -427,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0400 event-colour</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0500 add-task-cascade</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -5605,6 +5605,47 @@ async function performDeleteProject(pid){
 
 async function deleteProject(pid){return openDeleteProjectConfirm(pid)}
 
+// ── Add Task modal — live cross-field automations ──
+// Selecting a Project flips Priority to Project and inherits the
+// project's Business so the new task lands consistently with the
+// rules every other code path uses.
+function ctOnProjectChange(){
+  const proj=document.getElementById('ctProject');if(!proj)return;
+  const pri=document.getElementById('ctPriority');
+  const biz=document.getElementById('ctBusiness');
+  if(!proj.value){return}
+  if(pri){
+    // Match exactly to the option text — Priority is a singleSelect
+    // with a Project value.
+    Array.from(pri.options).forEach(o=>{if(o.value==='Project'||o.text==='Project')pri.value=o.value||'Project'});
+    if(pri.value!=='Project')pri.value='Project';
+  }
+  // Inherit business from the picked project's data-business attribute
+  const opt=proj.options[proj.selectedIndex];
+  const projBiz=opt&&opt.getAttribute('data-business');
+  if(biz&&projBiz){
+    Array.from(biz.options).forEach(o=>{if(o.value===projBiz||o.text===projBiz)biz.value=o.value||projBiz});
+  }
+}
+// Changing the Due Date re-derives Status. Skips Completed / Approval
+// because those are deliberate end states the user picked manually.
+function ctSyncStatusFromDue(){
+  const due=document.getElementById('ctDue');const st=document.getElementById('ctStatus');
+  if(!due||!st)return;
+  const cur=st.value;
+  if(cur==='Completed'||cur==='Approval')return;
+  const todayS=todayStr();
+  let next='Upcoming';
+  if(due.value){
+    if(due.value<todayS)next='Overdue';
+    else if(due.value===todayS)next='Today';
+    else next='Upcoming';
+  }
+  st.value=next;
+}
+window.ctOnProjectChange=ctOnProjectChange;
+window.ctSyncStatusFromDue=ctSyncStatusFromDue;
+
 // ======================================================
 // CREATE TASK MODAL
 // ======================================================
@@ -5621,11 +5662,11 @@ function openCreateTaskModal(){
   overlay.innerHTML=`<div class="modal"><h2>Add Task</h2>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Task</label><input type="text" id="ctName" placeholder="Task name" autofocus></div>
     <div class="field-row"><label>Assignee</label><select id="ctAssignee">${TEAM.map(m=>`<option value="${m.key}" ${m.key===defaultKey?'selected':''}>${m.name}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard Deadline</label></div></div>
+    <div class="field-row"><label>Due Date</label><div class="field-val" style="display:flex;gap:8px;align-items:center"><input type="date" id="ctDue" value="${today}" style="flex:1" oninput="ctSyncStatusFromDue()"><label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" id="ctHard">Hard Deadline</label></div></div>
     <div class="field-row"><label>Time Estimate</label><select id="ctTimeEst">${TIME_OPTIONS.map(o=>`<option ${o==='15 min'?'selected':''}>${o}</option>`).join('')}</select></div>
     <div class="field-row"><label>Priority</label><select id="ctPriority">${PRIORITY_OPTIONS.map(p=>`<option ${p==='Not Urgent'?'selected':''}>${p}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Project</label><select id="ctProject"><option value="">—</option>${activeProjs.map(p=>`<option value="${p.id}">${escHtml(p.name.length>60?p.name.slice(0,60)+'…':p.name)}</option>`).join('')}</select></div>
-    <div class="field-row"><label>Status</label><select id="ctStatus">${STATUS_OPTIONS.map(s=>`<option ${s==='Upcoming'?'selected':''}>${s}</option>`).join('')}</select><span style="margin-left:8px;font-size:10px;color:var(--text-muted)">auto-derived from due date unless you pick manually</span></div>
+    <div class="field-row"><label>Project</label><select id="ctProject" onchange="ctOnProjectChange()"><option value="">—</option>${activeProjs.map(p=>`<option value="${p.id}" data-business="${escHtml(p.business||'')}">${escHtml(p.name.length>60?p.name.slice(0,60)+'…':p.name)}</option>`).join('')}</select></div>
+    <div class="field-row"><label>Status</label><select id="ctStatus">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${s==='Today'?'selected':''}>${s}</option>`).join('')}</select><span style="margin-left:8px;font-size:10px;color:var(--text-muted)">auto-derived from due date — change due date and this updates</span></div>
     <div class="field-row"><label>Business</label><select id="ctBusiness">${BUSINESS_OPTIONS.map(b=>`<option ${b==='Real Estate'?'selected':''}>${b}</option>`).join('')}</select></div>
     <div class="field-row"><label>Recurring</label><select id="ctRecur"><option value="" selected>-</option>${['Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'].map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><textarea id="ctDesc" rows="3" placeholder="Describe the task or the end result..."></textarea></div>
