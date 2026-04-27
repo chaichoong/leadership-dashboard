@@ -68,7 +68,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Timeline drop-back zone */
 .side-panel.drop-target{background:var(--accent-soft);outline:2px dashed var(--accent)}
-.tl-time-tooltip{position:fixed;background:var(--bg-sidebar);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;pointer-events:none;z-index:10002;font-weight:600}
+.tl-time-tooltip{position:fixed;background:var(--bg-sidebar);color:#fff;padding:5px 10px;border-radius:6px;font-size:12px;pointer-events:none;z-index:10002;font-weight:700;box-shadow:var(--shadow-md);letter-spacing:0.3px}
 .tl-block.routine{cursor:move}
 .tl-block.routine .resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:linear-gradient(to bottom, transparent, rgba(0,0,0,0.08))}
 .kpi .value{font-size:28px;font-weight:700;margin-bottom:2px}
@@ -427,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0500 add-task-cascade</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0530 drag-tooltip-side</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -3253,8 +3253,18 @@ document.addEventListener('dragover',function(e){
   let tip=document.getElementById('tlTooltip');
   if(!tip){tip=document.createElement('div');tip.id='tlTooltip';tip.className='tl-time-tooltip';document.body.appendChild(tip)}
   tip.textContent=minutesToTime(minOfDay);
-  tip.style.left=(e.clientX+14)+'px';
-  tip.style.top=(e.clientY+14)+'px';
+  // Position the time chip OUTSIDE the dragged task so it isn't hidden
+  // underneath. Default: just past the right edge of the timeline canvas
+  // at the cursor's vertical line. If the right edge is off-screen
+  // (narrow viewports), fall back to just past the left edge.
+  // Vertical: clamp to the canvas so the chip never goes off-canvas.
+  const tipH=24;
+  const yClamped=Math.max(rect.top,Math.min(rect.bottom-tipH,e.clientY-tipH/2));
+  const viewportW=window.innerWidth||document.documentElement.clientWidth;
+  let left=rect.right+10;
+  if(left+90>viewportW){left=Math.max(8,rect.left-100)}
+  tip.style.left=left+'px';
+  tip.style.top=yClamped+'px';
 });
 document.addEventListener('dragend',removeTlTooltip);
 document.addEventListener('drop',removeTlTooltip);
