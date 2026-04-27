@@ -427,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0700 slack-notify</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0800 slack-url</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -801,7 +801,7 @@ function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_
 //
 // SaaS migration: change SLACK_NOTIFY_URL to the Supabase Edge Function
 // URL when migrating; the request shape and behaviour stay identical.
-const SLACK_NOTIFY_URL='https://claude-proxy.kevinbrittain.workers.dev/notify-slack';
+const SLACK_NOTIFY_URL='https://slack-notify.kevinbrittain.workers.dev/';
 function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
   if(!recipientEmail||!taskName)return;
   // Don't ping the actor when they assign a task to themselves.
