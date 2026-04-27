@@ -1544,25 +1544,12 @@ async function updateTaskField(taskId,fieldKey,rawValue){
           return String(v);
         };
         if(norm(sent)!==norm(returned)){
-          // Special case for non-empty link arrays where Airtable returns the
-          // field empty in the immediate PATCH response: the link IS persisted
-          // server-side (re-fetching shows it), but Airtable's reverse-link
-          // computation hasn't echoed back yet at response time. Treat as
-          // success rather than crying wolf — bulk operations on link fields
-          // were producing "5 saves failed" toasts on every project change
-          // even though the data was correctly saved.
-          const sentIsLinkArray = Array.isArray(sent) && sent.length>0
-            && sent.every(x=>typeof x==='string' || (x && x.id));
-          const returnedIsEmpty = !returned || (Array.isArray(returned) && returned.length===0);
-          if(sentIsLinkArray && returnedIsEmpty){
-            console.info('[PATCH verify] link field returned empty but PATCH was 200 — Airtable async echo, treating as success',sentFid,sent);
-            return; // continue forEach to the next sent field
-          }
           console.warn('[PATCH verify] drift on',sentFid,'— sent',sent,'got',returned);
-          // When a multipleRecordLinks field silently returns a *different* ID
-          // (not empty), the usual cause is a viewIdForRecordSelection
-          // restriction on the field — i.e. the linked record isn't in the
-          // view the field is filtered to. Surface that hint.
+          // When a multipleRecordLinks field silently drops the ID, the cause
+          // is almost always a viewIdForRecordSelection restriction on the
+          // field in Airtable — i.e. the linked record isn't visible in the
+          // view the field is filtered to. Surface that hint so Kevin doesn't
+          // have to ask.
           const sentIsLinks=Array.isArray(sent)&&sent.some(x=>x&&x.id);
           const hint=sentIsLinks?' — This usually means the Airtable field has a view restriction that excludes the target record. Edit the field → "Linked records selection" → switch to "All records".':'';
           throw new Error('Airtable accepted the request but field did not persist. Sent '+JSON.stringify(sent).slice(0,80)+', got '+JSON.stringify(returned).slice(0,80)+hint);
@@ -1843,24 +1830,15 @@ async function quickRelinkProject(taskId,newProjectId){
       let body='';try{body=await res.text()}catch(_){}
       throw new Error('HTTP '+res.status+' '+body.slice(0,200));
     }
-    // Post-PATCH verification (response is keyed by field ID because patchWithRetry forces returnFieldsByFieldId).
-    // Linked-record fields sometimes come back empty in the immediate PATCH response even when
-    // the link IS persisted (Airtable's reverse-link computation hasn't echoed yet). Treat
-    // empty-response-when-we-sent-a-link as success; only fail on a *different* non-empty value.
+    // Post-PATCH verification (response is keyed by field ID because patchWithRetry forces returnFieldsByFieldId)
     try{
       const bod=await res.clone().json();
       const got=(bod&&bod.fields)||{};
       const returned=got[F.projects];
       const expected=newProjectId?[newProjectId]:[];
       const gotIds=Array.isArray(returned)?returned.map(x=>x&&x.id?x.id:x).sort():[];
-      const expectedKey=expected.sort().join(',');
-      const gotKey=gotIds.join(',');
-      if(gotKey!==expectedKey){
-        if(expected.length>0 && gotIds.length===0){
-          console.info('[quickRelinkProject] response returned empty for projects field — Airtable async echo, treating as success',expected);
-        } else {
-          throw new Error('Airtable accepted project update but value did not persist. Expected '+JSON.stringify(expected)+', got '+JSON.stringify(gotIds));
-        }
+      if(gotIds.sort().join(',')!==expected.sort().join(',')){
+        throw new Error('Airtable accepted project update but value did not persist. Expected '+JSON.stringify(expected)+', got '+JSON.stringify(gotIds));
       }
     }catch(ve){
       if(ve&&ve.message&&ve.message.indexOf('Airtable accepted')===0)throw ve;
