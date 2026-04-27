@@ -2269,10 +2269,6 @@
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
-    // Every inbound task gets linked to the Executive Assistant project so
-    // Kevin can track the full inbox-generated workload in one view.
-    const AIRTABLE_EXEC_ASSISTANT_PROJECT_ID = 'recgrVaqY5iMY9nXX';
-    const AIRTABLE_PROJECTS_FIELD_ID = 'fldBg0rQy0FrOAkRN';
 
     // AI Accuracy log — shared across all team devices via Airtable.
     // Rolling 60-day retention, trickle-purged from the client on load.
@@ -2386,8 +2382,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
                 [AIRTABLE_FIELDS.dateReceived]: today,
                 [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
-                [AIRTABLE_FIELDS.dueDate]: today,
-                [AIRTABLE_PROJECTS_FIELD_ID]: [{ id: AIRTABLE_EXEC_ASSISTANT_PROJECT_ID }]
+                [AIRTABLE_FIELDS.dueDate]: today
             }
         };
 
@@ -4762,23 +4757,37 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
                 showSuccess('Sent from ' + (fromEmail || 'primary account') + ' to ' + to + attNote + ' — staying in "' + currentLabel + '"');
                 addAuditEntry('email_sent', `Delayed payment sent to ${to}: "${truncate(subject, 40)}"${attNote}`);
             } else {
-                // Move label: remove current label, add destination label
+                // Move label: remove current label, add destination label.
+                // Match labels case-insensitively — team Gmail labels may have
+                // different casing than the hardcoded names below.
                 const destLabelName = destination === 'responded' ? '5: responded' : '2: to follow-up';
                 const fromLabelObj = allLabelsRaw.find(l => l.name.toLowerCase() === currentLabel.toLowerCase());
-                const destLabelObj = allLabelsRaw.find(l => l.name === destLabelName);
+                let destLabelObj = allLabelsRaw.find(l => l.name.toLowerCase() === destLabelName.toLowerCase());
+                // Fallback: match by leading number prefix (e.g. "5:" or "2:")
+                if (!destLabelObj) {
+                    const prefix = destLabelName.match(/^\d+/)?.[0];
+                    if (prefix) {
+                        const re = new RegExp('^' + prefix + '[.:]\\s', 'i');
+                        destLabelObj = allLabelsRaw.find(l => re.test(l.name));
+                    }
+                }
 
-                if (fromLabelObj && destLabelObj && currentDraftEmail?.msgIds) {
+                if (destLabelObj && currentDraftEmail?.msgIds) {
+                    const addIds = [destLabelObj.id];
+                    const removeIds = (fromLabelObj && fromLabelObj.id !== destLabelObj.id) ? [fromLabelObj.id] : [];
                     for (let m = 0; m < currentDraftEmail.msgIds.length; m++) {
                         if (m > 0) await new Promise(r => setTimeout(r, 300));
                         await gapi.client.gmail.users.messages.modify({
                             userId: 'me',
                             id: currentDraftEmail.msgIds[m],
                             resource: {
-                                addLabelIds: [destLabelObj.id],
-                                removeLabelIds: [fromLabelObj.id]
+                                addLabelIds: addIds,
+                                removeLabelIds: removeIds
                             }
                         });
                     }
+                } else if (!destLabelObj) {
+                    showError(`Could not find Gmail label "${destLabelName}" — please check your labels.`);
                 }
 
                 // Remove from current list and re-render
