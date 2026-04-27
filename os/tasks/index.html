@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0115 collab-verify</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0200 myday-drop</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -3270,15 +3270,56 @@ function routineResizeStart(e,rKey,name,startMin,durMin){
 // Extend dropOnTimeline to handle routine moves (wrap original: overridden below)
 
 // Drop on side panel (un-schedule task from today)
+// Find the next work-day (skipping weekends) starting from `fromDate`+1
+// that has capacity for `task.minutes` given the assignee's existing
+// scheduled load. Mirrors the auto-scheduler's daily cap logic so the
+// "drop off the timeline" behaviour matches what the auto-schedule
+// would have picked. Falls back to tomorrow if nothing fits within 60d.
+function findNextAvailableDay(task){
+  const config=getWorkConfig();
+  const dailyCapMin=Math.max(0,(config.maxTaskHours||6)*60);
+  const mins=task.minutes||30;
+  const sameAssignee=allTasks.filter(t=>t.assigneeEmail===task.assigneeEmail&&t.id!==task.id&&t.status!=='Completed'&&!t.someDay);
+  function loadFor(day){
+    return sameAssignee.filter(t=>t.dueDate===day).reduce((s,t)=>s+(t.minutes||30),0);
+  }
+  let day=todayStr();
+  // Always start from tomorrow — the whole point of dropping off the timeline
+  // is that the user doesn't want it today.
+  day=addDays(day,1);
+  let guard=0;
+  while(isWeekend(day)&&guard<10){day=addDays(day,1);guard++}
+  for(let i=0;i<60;i++){
+    const used=loadFor(day);
+    if(dailyCapMin<=0||used+mins<=dailyCapMin)return day;
+    day=addDays(day,1);
+    let g=0;while(isWeekend(day)&&g<10){day=addDays(day,1);g++}
+  }
+  // Fallback: tomorrow even if overloaded.
+  let fb=addDays(todayStr(),1);
+  while(isWeekend(fb))fb=addDays(fb,1);
+  return fb;
+}
 function dropOnSidePanel(e){
   e.preventDefault();
   document.getElementById('sidePanel').classList.remove('drop-target');
   let data;try{data=JSON.parse(e.dataTransfer.getData('text/plain'))}catch(err){return}
   if(data.kind!=='tlmove')return;
   const task=allTasks.find(t=>t.id===data.taskId);if(!task)return;
+  // Clear the pinned start minute and remove any local time slot for today
   task._startMin=null;
   saveStartTime(todayStr(),task.id,null);
-  updateTaskField(task.id,'status','Upcoming');
+  // Push the due date to the next available day for this assignee — uses
+  // the same daily-cap logic as the auto-scheduler so you don't end up
+  // overloading tomorrow if it's already full.
+  const nextDay=findNextAvailableDay(task);
+  task.dueDate=nextDay;
+  // Status will be derived from the new due date by parseTask on next read,
+  // but also write it explicitly so Airtable + grid match immediately.
+  Promise.all([
+    updateTaskField(task.id,'dueDate',nextDay),
+  ]).catch(err=>{console.warn('drop reschedule failed',err)});
+  toast(`Moved off today — rescheduled to ${nextDay}`);
   window._tlDragging=false;
   renderMyDay();
 }
