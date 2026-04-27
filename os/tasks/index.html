@@ -425,7 +425,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0245 timeline-cols</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0315 inline-add-assignee</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -3109,7 +3109,13 @@ function tlDoubleClickAddTask(e){
     const hdr=wrap.querySelector('div');if(hdr)hdr.innerHTML=`<span style="color:var(--accent);font-weight:600">⟳ Saving at ${timeLabel}…</span>`;
     let created=null;
     try{
-      created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min'});
+      // Assign to whoever's day is currently being viewed — not the
+      // logged-in user. Otherwise filtering by Mica/Erica/Gary etc. would
+      // create a task for Kevin and immediately filter it out, making
+      // the task look like it disappeared from the timeline.
+      const viewMember=TEAM.find(m=>m.key===activeTeam);
+      const assigneeEmail=viewMember?viewMember.email:(currentUser&&currentUser.email);
+      created=await createSimpleTask({name,dueDate:todayStr(),timeEst:'15 min',assigneeEmail});
     }catch(err){console.error('[tlInlineAdd] exception',err)}
     if(created&&created.id){
       saveStartTime(todayStr(),created.id,minOfDay);
@@ -3122,9 +3128,12 @@ function tlDoubleClickAddTask(e){
       if(t){
         // Name — always overwrite with what the user typed (Airtable saved this)
         t.name=name;
-        if(!t.assigneeEmail&&currentUser&&currentUser.email){
-          t.assigneeEmail=currentUser.email;
-          t.assignee=currentUser.name||currentUser.email;
+        if(!t.assigneeEmail){
+          // Match the same fallback used at POST time so the task lands
+          // on the timeline currently being viewed.
+          const viewMember=TEAM.find(m=>m.key===activeTeam);
+          if(viewMember){t.assigneeEmail=viewMember.email;t.assignee=viewMember.name}
+          else if(currentUser&&currentUser.email){t.assigneeEmail=currentUser.email;t.assignee=currentUser.name||currentUser.email}
         }
         if(!t.dueDate)t.dueDate=todayStr();
         if(!t.status)t.status='Today';
