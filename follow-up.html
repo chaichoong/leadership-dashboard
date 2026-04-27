@@ -1051,22 +1051,31 @@
         startCompletionSweep();
     }
 
-    // Background sweep: move any email whose Airtable task has been marked
-    // Completed from label 8 → label 9, without requiring the user to open
-    // the "Task Created" view. Fires on startup, every 5 min, and whenever
-    // the tab regains focus.
+    // Background sweeps run regardless of which view the user has open:
+    //  1. sweepCompletedInboundTasks → moves label 8 → label 9 when the
+    //     Airtable task is marked Completed.
+    //  2. sweepFollowUpReplies → removes the "2: to follow-up" label from
+    //     any thread where the external party has replied (i.e. a new
+    //     message landed in INBOX while the thread was tagged follow-up),
+    //     so the thread reappears in the master inbox for re-triage.
+    // Both fire on startup, every 5 min, and whenever the tab regains focus.
     let completionSweepTimer = null;
     function startCompletionSweep() {
         if (completionSweepTimer) clearInterval(completionSweepTimer);
-        sweepCompletedInboundTasks();
+        runAllBackgroundSweeps();
         completionSweepTimer = setInterval(() => {
-            sweepCompletedInboundTasks();
+            runAllBackgroundSweeps();
         }, 5 * 60 * 1000);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
-                sweepCompletedInboundTasks();
+                runAllBackgroundSweeps();
             }
         });
+    }
+
+    function runAllBackgroundSweeps() {
+        sweepCompletedInboundTasks();
+        sweepFollowUpReplies();
     }
 
     // Labels that should show a count in the dropdown
@@ -2568,6 +2577,78 @@ Respond with ONLY the JSON object, no markdown.`;
             console.error('Completion sweep failed:', err);
         } finally {
             sweepInFlight = false;
+        }
+    }
+
+    // Background sweep: when an external party replies to a thread tagged
+    // "2: to follow-up", the chase is done — strip the follow-up label so
+    // the thread reappears in the master inbox for re-triage.
+    //
+    // Detection: applying the follow-up label removes INBOX from every
+    // existing message in the thread. So if a thread has BOTH the
+    // follow-up label AND INBOX, a new external reply has landed since
+    // we last triaged. We remove follow-up via threads.modify (which
+    // operates on every message in the thread); the new reply already
+    // carries INBOX so the thread surfaces in the inbox view.
+    let followUpSweepInFlight = false;
+    async function sweepFollowUpReplies() {
+        if (followUpSweepInFlight) return;
+        followUpSweepInFlight = true;
+        try {
+            if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) return;
+
+            if (!allLabelsRaw || allLabelsRaw.length === 0) {
+                try {
+                    const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
+                    allLabelsRaw = labelsResp.result.labels || [];
+                } catch (err) { return; }
+            }
+            const followUpLabel = allLabelsRaw.find(l => /^2[.:]\s/.test(l.name));
+            if (!followUpLabel) return;
+
+            // Threads with BOTH labels = chased thread that's had a reply
+            let listResp;
+            try {
+                listResp = await gapi.client.gmail.users.threads.list({
+                    userId: 'me',
+                    labelIds: [followUpLabel.id, 'INBOX'],
+                    maxResults: 200
+                });
+            } catch (err) { return; }
+
+            const threads = listResp.result.threads || [];
+            if (threads.length === 0) return;
+
+            let clearedCount = 0;
+            for (const t of threads) {
+                try {
+                    await gapi.client.gmail.users.threads.modify({
+                        userId: 'me',
+                        id: t.id,
+                        resource: { removeLabelIds: [followUpLabel.id] }
+                    });
+                    clearedCount++;
+                    addAuditEntry('followup_cleared_bg', `External reply received — cleared follow-up label on thread ${t.id.slice(-8)}, returned to inbox`);
+                } catch (err) {
+                    console.warn('Failed to clear follow-up label on thread', t.id, err);
+                }
+            }
+
+            if (clearedCount > 0) {
+                localStorage.setItem('last_followup_sweep', new Date().toISOString());
+                scheduleLabelCountRefresh();
+                // If we happen to be on follow-up or inbox view, refresh it
+                if (typeof isFollowUpView === 'function' && isFollowUpView()) {
+                    loadEmails();
+                } else if (isInboxView) {
+                    loadInboxEmails();
+                }
+                console.log(`Follow-up sweep cleared ${clearedCount} thread(s) — replies received`);
+            }
+        } catch (err) {
+            console.error('Follow-up sweep failed:', err);
+        } finally {
+            followUpSweepInFlight = false;
         }
     }
 
