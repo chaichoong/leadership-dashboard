@@ -849,12 +849,14 @@
             const recordId = created.id;
             console.log('Step 1 done — created:', recordId);
 
-            // Step 2: Immediately PATCH with Time Estimate + Projects + Due Date + linked records
+            // Step 2: Immediately PATCH with Time Estimate + Projects + Due Date + Status + Hard Deadline + linked records
             btn.textContent = 'Linking...';
             const patchFields = {};
-            patchFields['fld10VzzbiNNgRmIi'] = '15 min';          // Time Estimate
-            patchFields['fldBg0rQy0FrOAkRN'] = [UC_TASK_CONFIG.projectId];  // Projects
-            patchFields['fld7XP8w8kbxfETV4'] = todayStr;                     // Due Date — today (Kevin's local), so it lands in Mica's Today queue immediately
+            patchFields['fld10VzzbiNNgRmIi'] = '15 min';                     // Time Estimate
+            patchFields['fldBg0rQy0FrOAkRN'] = [UC_TASK_CONFIG.projectId];   // Projects → £12k Operating Cushion
+            patchFields['fld7XP8w8kbxfETV4'] = todayStr;                     // Due Date = today (Kevin's local), so it lands in Mica's Today queue
+            patchFields['fldx4qCw17UfrKpaN'] = 'Today';                      // Status — explicit "Today" so the task sorts correctly the moment it's created (don't rely on Airtable status-from-due-date automation timing)
+            patchFields['fldZKzIxgyrQ8CG8a'] = true;                         // Hard Deadline — UC verification must happen before the rent cycle, so this task can't be auto-rescheduled out of today
             patchFields['fldmne4RYJU22ICub'] = [tenancyId];                  // Tenancies
             if (tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [tenantId];    // Tenants
             if (unitId) patchFields['fldEW648YtTZ6j01n'] = [unitId];        // Rental Units
