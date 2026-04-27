@@ -427,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0600 clean-drag-ghost</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0700 slack-notify</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -793,6 +793,33 @@ const _SAVE_LOG_KEY='_task_save_log_v1';
 function _loadPersistedLog(){try{const s=localStorage.getItem(_SAVE_LOG_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr}}catch(e){}return []}
 function _persistSaveLog(){try{const slim=_saveState.log.slice(0,50).map(l=>({taskId:l.taskId,taskName:l.taskName,fieldKey:l.fieldKey,value:l.value,status:l.status,error:l.error,when:l.when}));localStorage.setItem(_SAVE_LOG_KEY,JSON.stringify(slim))}catch(e){}}
 function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_saveState.log.length>100)_saveState.log.length=100;try{_persistSaveLog()}catch(e){}}
+
+// ── Slack assignee notifications ─────────────────────────────────────
+// Fires a fire-and-forget POST to the Cloudflare Worker (later: Supabase
+// Edge Function) so the assignee gets a Slack DM. Never blocks save —
+// failures are logged but the user's task action still succeeds.
+//
+// SaaS migration: change SLACK_NOTIFY_URL to the Supabase Edge Function
+// URL when migrating; the request shape and behaviour stay identical.
+const SLACK_NOTIFY_URL='https://claude-proxy.kevinbrittain.workers.dev/notify-slack';
+function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
+  if(!recipientEmail||!taskName)return;
+  // Don't ping the actor when they assign a task to themselves.
+  const actorEmail=(currentUser&&currentUser.email)||'';
+  if(recipientEmail===actorEmail)return;
+  const actorName=(currentUser&&currentUser.name)||'';
+  try{
+    fetch(SLACK_NOTIFY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({recipientEmail,taskName,taskId,actorName,action:action||'assigned'}),
+      // Keep this independent of any document-leaving event so a tab close
+      // mid-fire doesn't leave a half-sent payload.
+      keepalive:true,
+    }).catch(e=>console.warn('[notify slack] failed (non-blocking)',e));
+  }catch(e){console.warn('[notify slack] threw (non-blocking)',e)}
+}
+window.notifyAssigneeSlack=notifyAssigneeSlack;
 function renderSyncPill(){
   const pill=document.getElementById('syncPill');if(!pill)return;
   if(_saveState.pending>0){
@@ -1553,6 +1580,17 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         // Non-recurring: just log the completion so productivity reporting counts it
         try{await logTaskCompletion(task);}catch(e){console.warn('log completion failed',e)}
       }
+    }
+    // Slack DM the new assignee on a real change. Fires after the PATCH
+    // verify so we never notify for a save that didn't land. Skips the
+    // ping when reassigning to the same person or to the actor.
+    if(fieldKey==='assignee'&&prev.assigneeEmail!==task.assigneeEmail&&task.assigneeEmail){
+      notifyAssigneeSlack({
+        recipientEmail:task.assigneeEmail,
+        taskName:task.name,
+        taskId:task.id,
+        action:prev.assigneeEmail?'reassigned':'assigned',
+      });
     }
     if(fieldKey==='dueDate'){
       const today=todayStr();
@@ -5432,6 +5470,14 @@ async function createSimpleTask(opts){
     const data=await res.json();
     const parsed=parseTask(data);
     allTasks.push(parsed);
+    // Fire Slack DM to the assignee (skipped silently if the actor IS the
+    // assignee, or if the assignee email isn't known yet).
+    notifyAssigneeSlack({
+      recipientEmail:parsed.assigneeEmail||assigneeEmail,
+      taskName:parsed.name||opts.name,
+      taskId:parsed.id,
+      action:'assigned',
+    });
     return parsed;
   }catch(e){console.warn('[createSimpleTask] failed',e);return null}
 }
@@ -5787,6 +5833,13 @@ async function submitCreateTask(){
     window._pendingCreateStartMin=null;
     document.getElementById('createTaskModal').remove();
     toast('Task added');
+    // Slack DM the assignee (no-op if the actor IS the assignee).
+    notifyAssigneeSlack({
+      recipientEmail:parsed.assigneeEmail||(member?member.email:''),
+      taskName:parsed.name||name,
+      taskId:parsed.id,
+      action:'assigned',
+    });
     renderAll();
   }catch(e){toast('Failed: '+e.message,true)}
 }
