@@ -248,7 +248,9 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 .tl-block{position:absolute;left:6px;right:6px;border-radius:6px;padding:6px 10px;font-size:12px;overflow:hidden;cursor:move;border:1px solid;box-sizing:border-box;user-select:none}
 .tl-block .tb-title{font-weight:600;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tl-block .tb-meta{font-size:10px;opacity:.85;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.tl-block.event{background:var(--info-bg);border-color:var(--info-border);color:var(--info)}
+/* Calendar events use the plum tone so they're visually distinct from
+   Project-priority tasks (which use the info-blue tone). */
+.tl-block.event{background:#F1ECF7;border-color:var(--tone-plum);color:var(--tone-plum)}
 .tl-block.routine{background:var(--warning-bg);border-color:var(--warning-bg);color:var(--warning)}
 .tl-block.task{background:var(--bg-surface-2);border-color:var(--border-default);color:var(--text-primary)}
 .tl-block.task.p-Urgent{background:var(--danger-bg);border-color:var(--danger)}
@@ -425,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0345 inline-add-status</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0400 event-colour</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
