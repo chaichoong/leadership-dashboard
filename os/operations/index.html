@@ -1390,10 +1390,14 @@ function openDrawer(entityKey, recId){
     .map(c => fieldRow(c, rec, entityKey))
     .join('');
 
-  // Computed financial section for Properties
+  // Computed financial sections for Properties
   let computedSection = '';
+  let rentBreakdownSection = '';
+  let mortgageBreakdownSection = '';
   if (entityKey === 'properties') {
-    computedSection = renderPropertyDetailMetrics(rec);
+    computedSection         = renderPropertyDetailMetrics(rec);
+    rentBreakdownSection    = renderPropertyRentBreakdown(rec);
+    mortgageBreakdownSection= renderPropertyMortgageBreakdown(rec);
   }
 
   // Linked units list for properties
@@ -1432,6 +1436,8 @@ function openDrawer(entityKey, recId){
         </div>
         <div class="drawer-body">
           ${computedSection}
+          ${rentBreakdownSection}
+          ${mortgageBreakdownSection}
           <div class="drawer-section">
             <h3>Details</h3>
             ${mainRows}
