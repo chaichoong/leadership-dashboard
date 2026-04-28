@@ -308,7 +308,7 @@
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
         // Highlight the sidebar item
         // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'os-strategy': 'Objective & Strategy', 'launch-plan': 'Director Launch Plan' };
+        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'os-strategy': 'Objective & Strategy', 'launch-plan': 'Director Launch Plan', operations: 'Operations OS' };
         document.querySelectorAll('.sidebar-item').forEach(b => {
             if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
         });
@@ -362,6 +362,13 @@ if (tabId === 'comms') {
         if (tabId === 'launch-plan') {
             const frame = document.getElementById('launchPlanFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('launch-plan')) frame.src = frame.dataset.src;
+        }
+        // Operations OS lazy-load (cache-busted so Pages deploys are picked up)
+        if (tabId === 'operations') {
+            const frame = document.getElementById('operationsFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('operations')) {
+                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+            }
         }
         // OS-INTEGRATION: Lazy-load iframes — DO NOT REMOVE (see MEMORY.md)
         if (tabId === 'os-hub') {

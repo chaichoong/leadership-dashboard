@@ -28,6 +28,7 @@ FILE_TO_PAGE = {
     'os/strategy/index.html': 'os-strategy',
     'os/strategy/strategy.js': 'os-strategy',
     'os/strategy/strategy.css': 'os-strategy',
+    'os/operations/index.html': 'operations',
 }
 
 CONFIG_FILE = 'js/config.js'

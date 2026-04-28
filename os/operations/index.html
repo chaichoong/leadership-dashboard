@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations OS — Tenants, Tenancies, Units, Properties</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+/* Auth bar */
+.auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:14px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:13px;width:340px}
+.auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}
+.auth-bar button:hover{background:var(--accent-hover)}
+
+/* Topbar */
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
+.topbar h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
+.topbar .subtitle{font-size:12px;color:var(--text-secondary)}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover);color:#fff}
+.btn-sm{padding:4px 10px;font-size:11px}
+
+/* Sub-tabs */
+.view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-default);overflow-x:auto;background:var(--bg-app);padding:8px 24px 0}
+.view-tab{padding:10px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.view-tab:hover{color:var(--text-primary)}
+.view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.view-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700}
+.view-tab.active .count{background:var(--accent-soft);color:var(--accent)}
+
+/* Main */
+.main{padding:20px 24px;max-width:1600px;margin:0 auto}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* Controls */
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.search-box{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 12px;border-radius:6px;font-size:13px;width:280px}
+.search-box:focus{outline:none;border-color:var(--accent)}
+.filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 10px;border-radius:6px;font-size:13px;cursor:pointer}
+.filter-select:focus{outline:none;border-color:var(--accent)}
+.controls .meta{margin-left:auto;font-size:11px;color:var(--text-muted)}
+
+/* KPI grid (Properties portfolio overview) */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px 16px}
+.kpi .label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.kpi .value{font-size:22px;font-weight:700;margin-top:4px;color:var(--text-primary)}
+.kpi .sub{font-size:11px;color:var(--text-muted);margin-top:2px}
+
+/* Data table */
+.table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
+.dt{width:100%;border-collapse:collapse;font-size:13px}
+.dt th{background:var(--bg-surface-2);padding:10px 12px;text-align:left;font-weight:700;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle);cursor:pointer;user-select:none}
+.dt th:last-child{border-right:none}
+.dt th:hover{background:var(--bg-subtle)}
+.dt th .sort{font-size:9px;margin-left:4px;color:var(--text-muted)}
+.dt th.sorted .sort{color:var(--accent)}
+.dt td{padding:8px 12px;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);vertical-align:middle}
+.dt td:last-child{border-right:none}
+.dt tbody tr:nth-child(even) td{background:var(--bg-surface-2)}
+.dt tbody tr:hover td{background:var(--accent-soft)}
+.dt tbody tr.row-flash td{animation:flash 1.6s ease-out}
+@keyframes flash{0%{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}100%{background:transparent;box-shadow:none}}
+
+/* Editable cells */
+.editable{cursor:text;padding:3px 6px;border-radius:4px;display:inline-block;min-width:60px;min-height:20px}
+.editable:hover{background:var(--bg-surface);outline:1px solid var(--border-default)}
+.editable[contenteditable=true]:focus{background:var(--bg-surface);outline:2px solid var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inline-input,.inline-select{background:var(--bg-surface);border:1px solid var(--accent);color:var(--text-primary);padding:3px 6px;border-radius:4px;font-size:13px;font-family:inherit}
+.inline-select{cursor:pointer}
+.cell-saving{opacity:.55}
+.cell-error{outline:2px solid var(--danger)!important;background:var(--danger-bg)!important}
+
+/* Linked record chip */
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;max-width:200px}
+.chip:hover{border-color:var(--accent);background:var(--bg-surface)}
+.chip-readonly{cursor:default;background:var(--bg-subtle);color:var(--text-secondary)}
+.chip-readonly:hover{border-color:transparent;background:var(--bg-subtle)}
+.chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips-cell{display:flex;flex-wrap:wrap;gap:4px}
+
+/* Status badges */
+.badge{display:inline-block;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge-active,.badge-occupied,.badge-current,.badge-in-payment{background:var(--success-bg);color:var(--success)}
+.badge-void,.badge-vacant,.badge-former{background:var(--bg-subtle);color:var(--text-secondary)}
+.badge-overdue,.badge-cfv{background:var(--danger-bg);color:var(--danger)}
+.badge-warning{background:var(--warning-bg);color:var(--warning)}
+.badge-info{background:var(--info-bg);color:var(--info)}
+
+/* Drawer */
+.drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
+.drawer{background:var(--bg-surface);width:640px;max-width:95vw;height:100vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.drawer-header{position:sticky;top:0;background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:16px 24px;z-index:2;display:flex;align-items:flex-start;gap:10px}
+.drawer-header .hdr-main{flex:1;min-width:0}
+.drawer-header h2{font-size:18px;margin:0;word-break:break-word}
+.drawer-header .hdr-sub{font-size:12px;color:var(--text-secondary);margin-top:2px}
+.drawer-body{flex:1;overflow-y:auto;padding:20px 24px}
+.drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
+.drawer-section{margin-bottom:24px}
+.drawer-section h3{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:10px;font-weight:700}
+.field-row{display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;align-items:center}
+.field-row:last-child{border-bottom:none}
+.field-label{color:var(--text-secondary);font-weight:500;font-size:12px}
+.field-value{color:var(--text-primary);word-break:break-word}
+.field-value .editable{display:block;min-height:28px;padding:6px 10px}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-sidebar);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:500;z-index:10000;box-shadow:var(--shadow-lg);max-width:340px;animation:slideUp .3s ease-out}
+.toast.error{background:var(--danger)}
+.toast.success{background:var(--success)}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Empty state */
+.empty{text-align:center;padding:60px 20px;color:var(--text-muted)}
+.empty .icon{font-size:48px;margin-bottom:12px;opacity:.4}
+.empty .msg{font-size:14px}
+
+/* Loading */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;color:var(--text-muted)}
+.spinner{width:36px;height:36px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Checkbox cell */
+.cb-cell{text-align:center}
+.cb-cell input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
+
+/* Money cell */
+.money{font-variant-numeric:tabular-nums;text-align:right}
+.dt th.money,.dt td.money{text-align:right}
+
+/* Detail link button */
+.row-open{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
+.row-open:hover{background:var(--bg-surface);color:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- Auth bar (only if no PAT yet) -->
+<div class="auth-bar" id="authBar" style="display:none">
+  <span style="font-size:13px;color:var(--text-secondary)">Airtable PAT:</span>
+  <input id="patInput" type="password" placeholder="pat_xxxxxxxxxx..." autocomplete="off">
+  <button onclick="saveAuth()">Connect</button>
+  <span id="authError" style="font-size:12px;color:var(--danger);display:none">Invalid token — please check and try again.</span>
+</div>
+
+<!-- Topbar -->
+<div class="topbar" id="topbar" style="display:none">
+  <div>
+    <h1>🏢 Operations OS</h1>
+    <div class="subtitle">Tenants · Tenancies · Rental Units · Properties — synced live with Airtable</div>
+  </div>
+  <div class="topbar-right">
+    <span id="syncStatus" style="font-size:11px;color:var(--text-muted)"></span>
+    <button class="btn btn-sm" onclick="refreshAll()">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- Sub-tabs -->
+<div class="view-tabs" id="viewTabs" style="display:none">
+  <button class="view-tab active" data-tab="tenants" onclick="switchSubTab('tenants')">👤 Tenants <span class="count" id="cntTenants">·</span></button>
+  <button class="view-tab" data-tab="tenancies" onclick="switchSubTab('tenancies')">📄 Tenancies <span class="count" id="cntTenancies">·</span></button>
+  <button class="view-tab" data-tab="units" onclick="switchSubTab('units')">🚪 Rental Units <span class="count" id="cntUnits">·</span></button>
+  <button class="view-tab" data-tab="properties" onclick="switchSubTab('properties')">🏠 Properties <span class="count" id="cntProperties">·</span></button>
+</div>
+
+<!-- Main -->
+<div class="main" id="main" style="display:none">
+
+  <!-- Tenants -->
+  <div class="tab-pane active" id="pane-tenants">
+    <div class="controls">
+      <input class="search-box" id="searchTenants" placeholder="Search tenants..." oninput="renderTenants()">
+      <select class="filter-select" id="filterTenantStatus" onchange="renderTenants()">
+        <option value="">All statuses</option>
+      </select>
+      <span class="meta" id="metaTenants"></span>
+    </div>
+    <div id="contentTenants"><div class="loading"><div class="spinner"></div><div>Loading tenants...</div></div></div>
+  </div>
+
+  <!-- Tenancies -->
+  <div class="tab-pane" id="pane-tenancies">
+    <div class="controls">
+      <input class="search-box" id="searchTenancies" placeholder="Search tenancies..." oninput="renderTenancies()">
+      <select class="filter-select" id="filterTenancyPayStatus" onchange="renderTenancies()">
+        <option value="">All payment statuses</option>
+      </select>
+      <select class="filter-select" id="filterTenancyActive" onchange="renderTenancies()">
+        <option value="active">Active only</option>
+        <option value="">Show all</option>
+      </select>
+      <span class="meta" id="metaTenancies"></span>
+    </div>
+    <div id="contentTenancies"><div class="loading"><div class="spinner"></div><div>Loading tenancies...</div></div></div>
+  </div>
+
+  <!-- Rental Units -->
+  <div class="tab-pane" id="pane-units">
+    <div class="controls">
+      <input class="search-box" id="searchUnits" placeholder="Search rental units..." oninput="renderUnits()">
+      <select class="filter-select" id="filterUnitStatus" onchange="renderUnits()">
+        <option value="">All statuses</option>
+      </select>
+      <select class="filter-select" id="filterUnitProperty" onchange="renderUnits()">
+        <option value="">All properties</option>
+      </select>
+      <span class="meta" id="metaUnits"></span>
+    </div>
+    <div id="contentUnits"><div class="loading"><div class="spinner"></div><div>Loading rental units...</div></div></div>
+  </div>
+
+  <!-- Properties -->
+  <div class="tab-pane" id="pane-properties">
+    <div id="propertyKpis" class="kpi-grid"></div>
+    <div class="controls">
+      <input class="search-box" id="searchProperties" placeholder="Search properties..." oninput="renderProperties()">
+      <select class="filter-select" id="filterPropertyType" onchange="renderProperties()">
+        <option value="">All property types</option>
+      </select>
+      <select class="filter-select" id="filterPropertyOwnership" onchange="renderProperties()">
+        <option value="">All ownerships</option>
+      </select>
+      <span class="meta" id="metaProperties"></span>
+    </div>
+    <div id="contentProperties"><div class="loading"><div class="spinner"></div><div>Loading properties...</div></div></div>
+  </div>
+
+</div>
+
+<!-- Drawer -->
+<div id="drawerOverlay"></div>
+
+<!-- Toast -->
+<div id="toastContainer"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// CONFIG — Airtable IDs (mirrors js/config.js — hardcoded since iframe can't
+// reliably reach parent globals across navigation/reloads)
+// ═══════════════════════════════════════════════════════════════════════
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const TABLE = {
+  tenants:     'tblX4elTuu01gwBYh',
+  tenancies:   'tblN51a88qTDB6iMH',
+  rentalUnits: 'tblM3mZCR5kiEdWMj',
+  properties:  'tbl6f0OkAmTC2jbuG',
+  costs:       'tblx5kvhzNEI5TFlS',
+};
+
+// Curated field NAMES per entity. Field IDs are resolved at load time via
+// the Airtable metadata API and cached. This is more robust than hardcoding
+// IDs because Airtable lets you rename a field without breaking the page.
+//
+// `key`     — internal id used in render code
+// `label`   — column header
+// `name`    — field name as it appears in Airtable (case-insensitive match)
+// `type`    — display hint: text|long|number|money|percent|date|select|check|link|formula
+// `edit`    — true if cell is editable (auto-disabled if Airtable says read-only)
+// `link`    — for `type:link`, target table key (eg 'tenancies')
+// `width`   — optional CSS width
+const SCHEMA = {
+  tenants: {
+    label: 'Tenants',
+    primary: 'name',
+    fields: [
+      { key:'name',    label:'Name',           name:'Name',                  type:'text',   edit:true,  width:'180px' },
+      { key:'status',  label:'Status',         name:'Tenant Status',         type:'select', edit:true },
+      { key:'unit',    label:'Current Unit',   name:'Rental Unit',           type:'link',   link:'units' },
+      { key:'phone',   label:'Phone',          name:'Contact Number',        type:'text',   edit:true },
+      { key:'email',   label:'Email',          name:'Email Address',         type:'text',   edit:true },
+      { key:'dob',     label:'DOB',            name:'Date of Birth',         type:'date',   edit:true },
+      { key:'payType', label:'Pay Type',       name:'Rent Payment Type',     type:'select', edit:true },
+      { key:'tenancy', label:'Tenancy',        name:'Tenancies',             type:'link',   link:'tenancies' },
+      { key:'notes',   label:'Notes',          name:'Notes',                 type:'long',   edit:true },
+    ],
+  },
+  tenancies: {
+    label: 'Tenancies',
+    primary: 'ref',
+    fields: [
+      { key:'ref',         label:'Reference',         name:'Tenancy',                  type:'text', edit:false, width:'180px' },
+      { key:'tenant',      label:'Tenant',            name:'Customers',                type:'link', link:'tenants' },
+      { key:'unit',        label:'Unit',              name:'Rental Unit',              type:'link', link:'units' },
+      { key:'property',    label:'Property',          name:'Property',                 type:'link', link:'properties' },
+      { key:'status',      label:'Status',            name:'Tenant Status',            type:'select', edit:false },
+      { key:'payStatus',   label:'Payment Status',    name:'Payment Status',           type:'select', edit:true },
+      { key:'startDate',   label:'Start Date',        name:'Tenancy Start Date',       type:'date',   edit:true },
+      { key:'rent',        label:'Monthly Rent',      name:'Expected Monthly Rent',    type:'money',  edit:true },
+      { key:'dueDay',      label:'Due Day',           name:'Day of Month Rent is Due', type:'number', edit:true },
+      { key:'payFreq',     label:'Pay Freq',          name:'Payment Frequency',        type:'select', edit:true },
+    ],
+  },
+  units: {
+    label: 'Rental Units',
+    primary: 'name',
+    fields: [
+      { key:'name',     label:'Unit',             name:'Rental Unit',         type:'text',   edit:false, width:'200px' },
+      { key:'unitType', label:'Type',             name:'Unit Type',           type:'select', edit:true },
+      { key:'unitNum',  label:'Unit #',           name:'Unit Number',         type:'number', edit:true },
+      { key:'property', label:'Property',         name:'Property',            type:'link',   link:'properties' },
+      { key:'status',   label:'Status',           name:'Status',              type:'select', edit:true },
+      { key:'tenant',   label:'Current Tenant',   name:'Current Tenant',      type:'link',   link:'tenants' },
+      { key:'tenancy',  label:'Current Tenancy',  name:'Tenancies',           type:'link',   link:'tenancies' },
+      { key:'rent',     label:'Current Rent',     name:'Current Rent',        type:'money',  edit:false },
+    ],
+  },
+  // Properties uses a curated PRIMARY column list but also injects every
+  // remaining field on the table so nothing useful is hidden by accident.
+  // The detail drawer always shows everything.
+  properties: {
+    label: 'Properties',
+    primary: 'name',
+    fields: [
+      { key:'name',         label:'Property',         name:'Property',                  type:'text',   edit:true, width:'220px' },
+      { key:'type',         label:'Type',             name:'Property Type',             type:'select', edit:true },
+      { key:'ownership',    label:'Ownership',        name:'Ownership',                 type:'select', edit:true },
+      { key:'agent',        label:'Agent / Landlord', name:'Agent / Landlord',          type:'text',   edit:true },
+      { key:'units',        label:'Units',            name:'Rental Units',              type:'link',   link:'units' },
+      { key:'grossRent',    label:'Gross Rent / mo',  name:'Gross Monthly Rent',        type:'money',  edit:false },
+      { key:'marketValue',  label:'Market Value',     name:'Current Market Value',      type:'money',  edit:true },
+      { key:'mortgageBal',  label:'Mortgage Bal',     name:'Mortgage Balance',          type:'money',  edit:true },
+      { key:'ltv',          label:'LTV',              name:'LTV',                       type:'percent',edit:false },
+      { key:'rate',         label:'Rate',             name:'Interest Rate',             type:'percent',edit:true },
+      { key:'mortgagePay',  label:'Mortgage / mo',    name:'Monthly Mortgage Payment',  type:'money',  edit:true },
+      { key:'grossYield',   label:'Gross Yield',      name:'Gross Yield',               type:'percent',edit:false },
+    ],
+    // Extra fields shown ONLY in the detail drawer
+    drawerExtras: [
+      { name:'Address',                  type:'long',   edit:true },
+      { name:'Postcode',                 type:'text',   edit:true },
+      { name:'Purchase Date',            type:'date',   edit:true },
+      { name:'Purchase Price',           type:'money',  edit:true },
+      { name:'Mortgage Provider',        type:'text',   edit:true },
+      { name:'Mortgage Account Number',  type:'text',   edit:true },
+      { name:'Mortgage Start Date',      type:'date',   edit:true },
+      { name:'Mortgage End Date',        type:'date',   edit:true },
+      { name:'Notes',                    type:'long',   edit:true },
+    ],
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════
+let PAT = '';
+let SCHEMA_RESOLVED = null; // { tenants:{primary,byKey:{},byId:{},tableMeta:{}}, ... }
+let DATA = { tenants:[], tenancies:[], units:[], properties:[] };
+let INDEX = { tenants:{}, tenancies:{}, units:{}, properties:{} }; // recordId → record
+let activeTab = 'tenants';
+let sortState = { tenants:null, tenancies:null, units:null, properties:null };
+
+// ═══════════════════════════════════════════════════════════════════════
+// Auth — try parent window first, then localStorage, then prompt
+// ═══════════════════════════════════════════════════════════════════════
+function bootAuth(){
+  try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e){}
+  const stored = localStorage.getItem('_dlr_pat');
+  if (stored) { PAT = stored; return true; }
+  return false;
+}
+function saveAuth(){
+  const v = document.getElementById('patInput').value.trim();
+  if (!v) return;
+  PAT = v;
+  localStorage.setItem('_dlr_pat', v);
+  document.getElementById('authError').style.display = 'none';
+  start();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Airtable API helpers
+// ═══════════════════════════════════════════════════════════════════════
+async function airtableFetch(path, opts={}){
+  const url = path.startsWith('http') ? path : `https://api.airtable.com/v0/${path}`;
+  const res = await fetch(url, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+  });
+  if (res.status === 401 || res.status === 403) {
+    PAT = ''; localStorage.removeItem('_dlr_pat');
+    document.getElementById('authBar').style.display = 'flex';
+    document.getElementById('authError').style.display = 'inline';
+    document.getElementById('topbar').style.display = 'none';
+    document.getElementById('viewTabs').style.display = 'none';
+    document.getElementById('main').style.display = 'none';
+    throw new Error('Auth failed');
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Airtable ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+async function fetchAllRecords(tableId, opts={}){
+  const out = [];
+  let offset = '';
+  do {
+    const params = new URLSearchParams({ pageSize: '100', returnFieldsByFieldId: 'true', ...(opts.params||{}) });
+    if (offset) params.set('offset', offset);
+    const data = await airtableFetch(`${BASE_ID}/${tableId}?${params}`);
+    out.push(...(data.records||[]));
+    offset = data.offset || '';
+  } while (offset);
+  return out;
+}
+
+async function fetchSchema(){
+  const data = await airtableFetch(`meta/bases/${BASE_ID}/tables`);
+  const result = {};
+  for (const entityKey of Object.keys(SCHEMA)) {
+    const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
+    const meta = data.tables.find(t => t.id === tableId);
+    if (!meta) { console.warn('table not found in metadata:', entityKey, tableId); continue; }
+    const byKey = {}; const byId = {}; const byName = {};
+    // Map every field by name (case-insensitive)
+    for (const f of meta.fields) byName[f.name.toLowerCase().trim()] = f;
+    // Resolve curated SCHEMA fields
+    for (const def of SCHEMA[entityKey].fields) {
+      const f = byName[def.name.toLowerCase().trim()];
+      if (f) { byKey[def.key] = { ...def, id:f.id, atType:f.type, options:f.options || null, readOnly: isReadOnlyAirtable(f.type) };
+               byId[f.id] = byKey[def.key]; }
+      else   { byKey[def.key] = { ...def, id:null, atType:null, options:null, readOnly:true, missing:true }; }
+    }
+    // Drawer extras (Properties only)
+    if (SCHEMA[entityKey].drawerExtras) {
+      const extras = [];
+      for (const def of SCHEMA[entityKey].drawerExtras) {
+        const f = byName[def.name.toLowerCase().trim()];
+        if (f) extras.push({ ...def, id:f.id, atType:f.type, options:f.options||null, key:'_'+f.id, readOnly:isReadOnlyAirtable(f.type) });
+      }
+      result[entityKey] = { primary:SCHEMA[entityKey].primary, byKey, byId, byName, drawerExtras:extras, allFields:meta.fields };
+    } else {
+      result[entityKey] = { primary:SCHEMA[entityKey].primary, byKey, byId, byName, drawerExtras:[], allFields:meta.fields };
+    }
+  }
+  return result;
+}
+
+function isReadOnlyAirtable(atType){
+  return ['formula','rollup','count','lookup','autoNumber','createdTime','lastModifiedTime','createdBy','lastModifiedBy','externalSyncSource','aiText','button','barcode'].includes(atType);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Data loading
+// ═══════════════════════════════════════════════════════════════════════
+async function start(){
+  document.getElementById('authBar').style.display = 'none';
+  document.getElementById('topbar').style.display = 'flex';
+  document.getElementById('viewTabs').style.display = 'flex';
+  document.getElementById('main').style.display = 'block';
+  setSync('Loading schema...');
+  try {
+    SCHEMA_RESOLVED = await fetchSchema();
+    setSync('Loading records...');
+    await refreshAll(true);
+    bindHashRouting();
+  } catch(e) {
+    console.error(e);
+    setSync('Error: ' + e.message, true);
+  }
+}
+
+async function refreshAll(initial=false){
+  setSync('Refreshing...');
+  try {
+    const [tn, tc, un, pr] = await Promise.all([
+      fetchAllRecords(TABLE.tenants),
+      fetchAllRecords(TABLE.tenancies),
+      fetchAllRecords(TABLE.rentalUnits),
+      fetchAllRecords(TABLE.properties),
+    ]);
+    DATA.tenants    = tn;
+    DATA.tenancies  = tc;
+    DATA.units      = un;
+    DATA.properties = pr;
+    INDEX.tenants    = Object.fromEntries(tn.map(r=>[r.id,r]));
+    INDEX.tenancies  = Object.fromEntries(tc.map(r=>[r.id,r]));
+    INDEX.units      = Object.fromEntries(un.map(r=>[r.id,r]));
+    INDEX.properties = Object.fromEntries(pr.map(r=>[r.id,r]));
+    document.getElementById('cntTenants').textContent    = tn.length;
+    document.getElementById('cntTenancies').textContent  = tc.length;
+    document.getElementById('cntUnits').textContent      = un.length;
+    document.getElementById('cntProperties').textContent = pr.length;
+    populateFilters();
+    renderActiveTab();
+    setSync(`Synced — ${new Date().toLocaleTimeString()}`);
+  } catch(e) {
+    console.error(e);
+    setSync('Refresh failed: '+e.message, true);
+  }
+}
+
+function setSync(msg, isErr){
+  const el = document.getElementById('syncStatus');
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--danger)' : 'var(--text-muted)';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Filters — populate select dropdowns from data
+// ═══════════════════════════════════════════════════════════════════════
+function populateFilters(){
+  const sel = (id, vals) => {
+    const el = document.getElementById(id); if (!el) return;
+    const cur = el.value;
+    const first = el.querySelector('option').outerHTML;
+    el.innerHTML = first + vals.filter(Boolean).map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    el.value = cur;
+  };
+  // Status filter values from data
+  sel('filterTenantStatus',     uniqVals(DATA.tenants,    SCHEMA_RESOLVED.tenants?.byKey?.status?.id));
+  sel('filterTenancyPayStatus', uniqVals(DATA.tenancies,  SCHEMA_RESOLVED.tenancies?.byKey?.payStatus?.id));
+  sel('filterUnitStatus',       uniqVals(DATA.units,      SCHEMA_RESOLVED.units?.byKey?.status?.id));
+  sel('filterPropertyType',     uniqVals(DATA.properties, SCHEMA_RESOLVED.properties?.byKey?.type?.id));
+  sel('filterPropertyOwnership',uniqVals(DATA.properties, SCHEMA_RESOLVED.properties?.byKey?.ownership?.id));
+  // Property filter for units
+  const propEl = document.getElementById('filterUnitProperty');
+  if (propEl) {
+    const cur = propEl.value;
+    const opts = DATA.properties.map(p => {
+      const nm = getCellRaw(p, SCHEMA_RESOLVED.properties?.byKey?.name);
+      return `<option value="${p.id}">${escapeHtml(displayName(p, 'properties'))}</option>`;
+    }).join('');
+    propEl.innerHTML = '<option value="">All properties</option>' + opts;
+    propEl.value = cur;
+  }
+}
+
+function uniqVals(records, fieldId){
+  if (!fieldId) return [];
+  const set = new Set();
+  for (const r of records) {
+    const v = r.fields[fieldId];
+    if (v == null) continue;
+    if (Array.isArray(v)) v.forEach(x => set.add(typeof x === 'object' ? (x.name||x.id) : x));
+    else if (typeof v === 'object') set.add(v.name || v.id);
+    else set.add(String(v));
+  }
+  return [...set].sort();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Sub-tab switching
+// ═══════════════════════════════════════════════════════════════════════
+function switchSubTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('pane-'+tab).classList.add('active');
+  if (history.replaceState) history.replaceState(null, '', '#'+tab);
+  renderActiveTab();
+}
+
+function renderActiveTab(){
+  if (activeTab === 'tenants')    renderTenants();
+  if (activeTab === 'tenancies')  renderTenancies();
+  if (activeTab === 'units')      renderUnits();
+  if (activeTab === 'properties') renderProperties();
+}
+
+function bindHashRouting(){
+  const apply = () => {
+    const h = window.location.hash.replace('#','').split('/')[0];
+    if (['tenants','tenancies','units','properties'].includes(h) && h !== activeTab) switchSubTab(h);
+  };
+  window.addEventListener('hashchange', apply);
+  apply();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Cell helpers — read raw value, render display, link cross-nav
+// ═══════════════════════════════════════════════════════════════════════
+function getCellRaw(record, fieldDef){
+  if (!fieldDef || !fieldDef.id) return null;
+  return record.fields[fieldDef.id];
+}
+
+function displayName(record, entityKey){
+  const sch = SCHEMA_RESOLVED[entityKey];
+  if (!sch) return record.id;
+  const primary = sch.byKey[sch.primary];
+  let v = primary ? record.fields[primary.id] : null;
+  if (v == null) {
+    // Fallback: first non-empty scalar value
+    for (const f of Object.values(sch.byKey)) {
+      const x = record.fields[f.id];
+      if (x != null && typeof x !== 'object') { v = x; break; }
+    }
+  }
+  if (Array.isArray(v)) v = v.length ? (typeof v[0] === 'object' ? (v[0].name||v[0].id) : v[0]) : '';
+  if (typeof v === 'object' && v !== null) v = v.name || v.id;
+  return String(v ?? '(no name)');
+}
+
+function fmtMoney(n){
+  if (n == null || n === '') return '';
+  const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/[£,]/g,''));
+  if (isNaN(num)) return '';
+  return '£' + num.toLocaleString('en-GB', {maximumFractionDigits:0});
+}
+function fmtPercent(n){
+  if (n == null || n === '') return '';
+  const num = typeof n === 'number' ? n : parseFloat(n);
+  if (isNaN(num)) return '';
+  // Airtable percent returns decimal (0.05 = 5%)
+  return (num*100).toFixed(1) + '%';
+}
+function fmtDate(s){
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderCell(record, fieldDef, entityKey){
+  const v = getCellRaw(record, fieldDef);
+  if (v == null || v === '') {
+    if (fieldDef.edit && !fieldDef.readOnly) return `<span class="editable" data-edit="${fieldDef.id}" data-type="${fieldDef.type}" data-rec="${record.id}" data-entity="${entityKey}">—</span>`;
+    return '<span style="color:var(--text-muted)">—</span>';
+  }
+
+  // Linked records → chips
+  if (fieldDef.type === 'link' || (Array.isArray(v) && v.length && typeof v[0] === 'string' && v[0].startsWith('rec'))) {
+    const ids = Array.isArray(v) ? v : [v];
+    const targetEntity = fieldDef.link;
+    const chips = ids.map(id => {
+      const rec = INDEX[targetEntity] && INDEX[targetEntity][id];
+      const nm = rec ? displayName(rec, targetEntity) : id;
+      const cls = targetEntity ? 'chip' : 'chip chip-readonly';
+      const onClick = targetEntity ? `onclick="event.stopPropagation();crossNav('${targetEntity}','${id}')"` : '';
+      return `<span class="${cls}" ${onClick}><span class="chip-name">${escapeHtml(nm)}</span></span>`;
+    }).join('');
+    return `<div class="chips-cell">${chips}</div>`;
+  }
+
+  // Status badges for select fields
+  if (fieldDef.type === 'select') {
+    const name = typeof v === 'object' ? (v.name||v.id) : String(v);
+    const cls = badgeClass(name);
+    const inner = fieldDef.edit && !fieldDef.readOnly
+      ? `<span class="editable" data-edit="${fieldDef.id}" data-type="select" data-rec="${record.id}" data-entity="${entityKey}">${escapeHtml(name)}</span>`
+      : escapeHtml(name);
+    return `<span class="badge ${cls}">${inner}</span>`;
+  }
+
+  // Money / percent / date
+  if (fieldDef.type === 'money')   return wrapEditable(fmtMoney(v),    fieldDef, record, entityKey, 'money');
+  if (fieldDef.type === 'percent') return wrapEditable(fmtPercent(v),  fieldDef, record, entityKey, 'percent');
+  if (fieldDef.type === 'date')    return wrapEditable(fmtDate(v),     fieldDef, record, entityKey, 'date', v);
+  if (fieldDef.type === 'number')  return wrapEditable(String(v),      fieldDef, record, entityKey, 'number');
+  if (fieldDef.type === 'check')   return `<input type="checkbox" ${v?'checked':''} ${fieldDef.edit&&!fieldDef.readOnly?`onchange="saveCheckbox(this,'${record.id}','${fieldDef.id}','${entityKey}')"`:'disabled'}>`;
+  if (fieldDef.type === 'long') {
+    const trimmed = String(v).length > 80 ? String(v).slice(0,80)+'…' : String(v);
+    return wrapEditable(escapeHtml(trimmed), fieldDef, record, entityKey, 'long', v);
+  }
+
+  // text / formula / fallback
+  let display = '';
+  if (Array.isArray(v)) display = v.map(x => typeof x === 'object' ? (x.name||x.id) : x).join(', ');
+  else if (typeof v === 'object') display = v.name || v.id || JSON.stringify(v);
+  else display = String(v);
+  return wrapEditable(escapeHtml(display), fieldDef, record, entityKey, 'text', v);
+}
+
+function wrapEditable(html, fieldDef, record, entityKey, type, raw){
+  if (!fieldDef.edit || fieldDef.readOnly) return `<span>${html}</span>`;
+  return `<span class="editable" data-edit="${fieldDef.id}" data-type="${type}" data-rec="${record.id}" data-entity="${entityKey}" data-raw="${escapeHtml(raw==null?'':String(raw))}">${html}</span>`;
+}
+
+function badgeClass(name){
+  const n = String(name).toLowerCase();
+  if (/(active|occupied|current|in payment|paid)/.test(n)) return 'badge-active';
+  if (/(former|void|vacant|inactive|ended)/.test(n)) return 'badge-void';
+  if (/(cfv|overdue|arrears)/.test(n)) return 'badge-overdue';
+  if (/(actioned|warning|due)/.test(n)) return 'badge-warning';
+  return 'badge-info';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Cross-tab navigation
+// ═══════════════════════════════════════════════════════════════════════
+function crossNav(entity, recordId){
+  switchSubTab(entity);
+  // Wait for render then scroll + flash the row
+  setTimeout(() => {
+    const row = document.querySelector(`tr[data-rec="${recordId}"]`);
+    if (row) {
+      row.scrollIntoView({behavior:'smooth', block:'center'});
+      row.classList.add('row-flash');
+      setTimeout(()=>row.classList.remove('row-flash'), 1700);
+    } else {
+      // The row may be filtered out — clear filters and try again
+      if (entity === 'tenancies') {
+        const f = document.getElementById('filterTenancyActive'); if (f) { f.value=''; renderTenancies(); }
+        setTimeout(()=>crossNav(entity, recordId), 60);
+      }
+    }
+  }, 80);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Tenants
+// ═══════════════════════════════════════════════════════════════════════
+function renderTenants(){
+  const sch = SCHEMA_RESOLVED?.tenants; if (!sch) return;
+  const search = document.getElementById('searchTenants').value.toLowerCase().trim();
+  const status = document.getElementById('filterTenantStatus').value;
+  let rows = DATA.tenants.filter(r => {
+    if (search) {
+      const blob = JSON.stringify(r.fields).toLowerCase();
+      if (!blob.includes(search)) return false;
+    }
+    if (status) {
+      const v = r.fields[sch.byKey.status?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== status) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'tenants', sch);
+  document.getElementById('metaTenants').textContent = `${rows.length} of ${DATA.tenants.length}`;
+  document.getElementById('contentTenants').innerHTML = renderTable('tenants', sch, rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Tenancies
+// ═══════════════════════════════════════════════════════════════════════
+function renderTenancies(){
+  const sch = SCHEMA_RESOLVED?.tenancies; if (!sch) return;
+  const search = document.getElementById('searchTenancies').value.toLowerCase().trim();
+  const payStatus = document.getElementById('filterTenancyPayStatus').value;
+  const activeOnly = document.getElementById('filterTenancyActive').value === 'active';
+  let rows = DATA.tenancies.filter(r => {
+    if (search && !JSON.stringify(r.fields).toLowerCase().includes(search)) return false;
+    if (payStatus) {
+      const v = r.fields[sch.byKey.payStatus?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== payStatus) return false;
+    }
+    if (activeOnly) {
+      const sv = r.fields[sch.byKey.status?.id];
+      const sn = Array.isArray(sv) ? (sv[0]?.name || sv[0]) : (typeof sv === 'object' ? sv?.name : sv);
+      if (sn && /former|ended|inactive/i.test(String(sn))) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'tenancies', sch);
+  document.getElementById('metaTenancies').textContent = `${rows.length} of ${DATA.tenancies.length}`;
+  document.getElementById('contentTenancies').innerHTML = renderTable('tenancies', sch, rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Rental Units
+// ═══════════════════════════════════════════════════════════════════════
+function renderUnits(){
+  const sch = SCHEMA_RESOLVED?.units; if (!sch) return;
+  const search = document.getElementById('searchUnits').value.toLowerCase().trim();
+  const status = document.getElementById('filterUnitStatus').value;
+  const propId = document.getElementById('filterUnitProperty').value;
+  let rows = DATA.units.filter(r => {
+    if (search && !JSON.stringify(r.fields).toLowerCase().includes(search)) return false;
+    if (status) {
+      const v = r.fields[sch.byKey.status?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== status) return false;
+    }
+    if (propId) {
+      const v = r.fields[sch.byKey.property?.id];
+      if (!Array.isArray(v) || !v.includes(propId)) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'units', sch);
+  document.getElementById('metaUnits').textContent = `${rows.length} of ${DATA.units.length}`;
+  document.getElementById('contentUnits').innerHTML = renderTable('units', sch, rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Properties (with portfolio KPIs)
+// ═══════════════════════════════════════════════════════════════════════
+function renderProperties(){
+  const sch = SCHEMA_RESOLVED?.properties; if (!sch) return;
+  const search = document.getElementById('searchProperties').value.toLowerCase().trim();
+  const type = document.getElementById('filterPropertyType').value;
+  const owner = document.getElementById('filterPropertyOwnership').value;
+  let rows = DATA.properties.filter(r => {
+    if (search && !JSON.stringify(r.fields).toLowerCase().includes(search)) return false;
+    if (type) {
+      const v = r.fields[sch.byKey.type?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== type) return false;
+    }
+    if (owner) {
+      const v = r.fields[sch.byKey.ownership?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== owner) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'properties', sch);
+  document.getElementById('metaProperties').textContent = `${rows.length} of ${DATA.properties.length}`;
+  renderPropertyKpis();
+  document.getElementById('contentProperties').innerHTML = renderTable('properties', sch, rows);
+}
+
+function renderPropertyKpis(){
+  const sch = SCHEMA_RESOLVED?.properties; if (!sch) return;
+  const total = DATA.properties.length;
+  const sumNum = (arr, fieldId) => arr.reduce((s,r)=>{
+    const v = r.fields[fieldId]; const n = typeof v==='number'?v:parseFloat(v); return s + (isNaN(n)?0:n);
+  },0);
+  const totalValue   = sumNum(DATA.properties, sch.byKey.marketValue?.id);
+  const totalDebt    = sumNum(DATA.properties, sch.byKey.mortgageBal?.id);
+  const totalRent    = sumNum(DATA.properties, sch.byKey.grossRent?.id);
+  const totalMortgage= sumNum(DATA.properties, sch.byKey.mortgagePay?.id);
+  const equity = totalValue - totalDebt;
+  const annualRent = totalRent * 12;
+  const portfolioYield = totalValue > 0 ? (annualRent / totalValue * 100) : 0;
+
+  // Occupancy across all units
+  const unitSch = SCHEMA_RESOLVED?.units;
+  let occupied = 0, totalUnits = DATA.units.length;
+  if (unitSch?.byKey?.status?.id) {
+    for (const u of DATA.units) {
+      const v = u.fields[unitSch.byKey.status.id];
+      const name = Array.isArray(v) ? (v[0]?.name||v[0]) : (typeof v==='object'?v?.name:v);
+      if (/occupied|active/i.test(String(name||''))) occupied++;
+    }
+  }
+  const occRate = totalUnits ? (occupied/totalUnits*100) : 0;
+
+  document.getElementById('propertyKpis').innerHTML = `
+    <div class="kpi"><div class="label">Properties</div><div class="value">${total}</div><div class="sub">${totalUnits} rental units</div></div>
+    <div class="kpi"><div class="label">Portfolio Value</div><div class="value">${fmtMoney(totalValue)}</div><div class="sub">market value</div></div>
+    <div class="kpi"><div class="label">Total Debt</div><div class="value">${fmtMoney(totalDebt)}</div><div class="sub">mortgages outstanding</div></div>
+    <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoney(equity)}</div><div class="sub">${totalValue?(equity/totalValue*100).toFixed(0):0}% of value</div></div>
+    <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoney(totalRent)}</div><div class="sub">${fmtMoney(annualRent)} / yr</div></div>
+    <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoney(totalMortgage)}</div><div class="sub">total debt service</div></div>
+    <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(totalRent-totalMortgage)>=0?'var(--success)':'var(--danger)'}">${fmtMoney(totalRent-totalMortgage)}</div><div class="sub">before opex</div></div>
+    <div class="kpi"><div class="label">Portfolio Yield</div><div class="value">${portfolioYield.toFixed(2)}%</div><div class="sub">gross annual</div></div>
+    <div class="kpi"><div class="label">Occupancy</div><div class="value" style="color:${occRate>=90?'var(--success)':occRate>=75?'var(--warning)':'var(--danger)'}">${occRate.toFixed(0)}%</div><div class="sub">${occupied} / ${totalUnits} units</div></div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Generic table renderer
+// ═══════════════════════════════════════════════════════════════════════
+function renderTable(entityKey, sch, rows){
+  if (!rows.length) {
+    return `<div class="empty"><div class="icon">📭</div><div class="msg">No ${SCHEMA[entityKey].label.toLowerCase()} match the current filters.</div></div>`;
+  }
+  const cols = SCHEMA[entityKey].fields.map(def => sch.byKey[def.key]).filter(c => c && !c.missing);
+  const sort = sortState[entityKey];
+  const head = '<tr>' + cols.map(c => {
+    const isSorted = sort && sort.key === c.key;
+    const arrow = isSorted ? (sort.dir==='asc'?'▲':'▼') : '↕';
+    const cls = (c.type==='money'||c.type==='number'||c.type==='percent') ? 'money' : '';
+    return `<th class="${cls} ${isSorted?'sorted':''}" data-col="${c.key}" onclick="toggleSort('${entityKey}','${c.key}')" style="${c.width?`width:${c.width};`:''}">${escapeHtml(c.label)} <span class="sort">${arrow}</span></th>`;
+  }).join('') + '<th style="width:32px"></th></tr>';
+
+  const body = rows.map(r => {
+    const tds = cols.map(c => {
+      const cls = (c.type==='money'||c.type==='number'||c.type==='percent') ? 'money' : '';
+      return `<td class="${cls}">${renderCell(r, c, entityKey)}</td>`;
+    }).join('');
+    return `<tr data-rec="${r.id}" data-entity="${entityKey}"><td onclick="openDrawer('${entityKey}','${r.id}')" style="cursor:pointer">${tds.replace(/^<td/, '<td')}</td>`.replace(/^<tr([^>]*)><td onclick="[^"]*"[^>]*>/, (m, attrs)=>`<tr${attrs}>`) + tds + `<td><button class="row-open" onclick="event.stopPropagation();openDrawer('${entityKey}','${r.id}')" title="Open detail">↗</button></td></tr>`;
+  }).join('');
+
+  // Note: above .map produced redundant tds; rebuild cleanly:
+  const cleanBody = rows.map(r => {
+    const tds = cols.map(c => {
+      const cls = (c.type==='money'||c.type==='number'||c.type==='percent') ? 'money' : '';
+      return `<td class="${cls}">${renderCell(r, c, entityKey)}</td>`;
+    }).join('');
+    return `<tr data-rec="${r.id}" data-entity="${entityKey}">${tds}<td><button class="row-open" onclick="event.stopPropagation();openDrawer('${entityKey}','${r.id}')" title="Open detail">↗</button></td></tr>`;
+  }).join('');
+
+  return `<div class="table-wrap"><table class="dt"><thead>${head}</thead><tbody>${cleanBody}</tbody></table></div>`;
+}
+
+function applySort(rows, entityKey, sch){
+  const s = sortState[entityKey];
+  if (!s) return rows;
+  const col = sch.byKey[s.key];
+  if (!col) return rows;
+  const dir = s.dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a,b) => {
+    let av = a.fields[col.id]; let bv = b.fields[col.id];
+    if (Array.isArray(av)) av = av[0]; if (Array.isArray(bv)) bv = bv[0];
+    if (typeof av === 'object' && av) av = av.name || av.id;
+    if (typeof bv === 'object' && bv) bv = bv.name || bv.id;
+    if (av == null) return 1; if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av-bv)*dir;
+    return String(av).localeCompare(String(bv)) * dir;
+  });
+}
+
+function toggleSort(entityKey, key){
+  const cur = sortState[entityKey];
+  if (cur && cur.key === key) {
+    sortState[entityKey] = cur.dir === 'asc' ? {key, dir:'desc'} : null;
+  } else {
+    sortState[entityKey] = {key, dir:'asc'};
+  }
+  renderActiveTab();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Inline editing
+// ═══════════════════════════════════════════════════════════════════════
+document.addEventListener('click', e => {
+  const editEl = e.target.closest('.editable');
+  if (!editEl || editEl.dataset._editing) return;
+  if (e.target.closest('.chip')) return; // don't trigger from chip clicks
+  startEdit(editEl);
+});
+
+function startEdit(el){
+  if (el.dataset._editing) return;
+  el.dataset._editing = '1';
+  const type = el.dataset.type;
+  const fieldId = el.dataset.edit;
+  const recId = el.dataset.rec;
+  const entityKey = el.dataset.entity;
+  const sch = SCHEMA_RESOLVED[entityKey];
+  const fieldDef = sch.byId[fieldId];
+  const record = INDEX[entityKey][recId];
+  const raw = record.fields[fieldId];
+
+  if (type === 'select') {
+    const sel = document.createElement('select');
+    sel.className = 'inline-select';
+    const cur = typeof raw === 'object' ? raw?.name : raw;
+    sel.innerHTML = '<option value="">—</option>' + (fieldDef.options?.choices||[]).map(c=>`<option value="${escapeHtml(c.name)}" ${c.name===cur?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+    replaceWithEditor(el, sel, async () => {
+      const newVal = sel.value || null;
+      if (newVal === cur) { finishEdit(el, record, entityKey); return; }
+      await saveField(entityKey, recId, fieldId, newVal === null ? null : { name: newVal }, el);
+    });
+    sel.focus(); return;
+  }
+
+  if (type === 'date') {
+    const inp = document.createElement('input');
+    inp.type = 'date'; inp.className = 'inline-input';
+    if (raw) inp.value = String(raw).slice(0,10);
+    replaceWithEditor(el, inp, async () => {
+      const v = inp.value || null;
+      if (v === (raw ? String(raw).slice(0,10) : null)) { finishEdit(el, record, entityKey); return; }
+      await saveField(entityKey, recId, fieldId, v, el);
+    });
+    inp.focus(); return;
+  }
+
+  if (type === 'number' || type === 'money' || type === 'percent') {
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.className = 'inline-input';
+    inp.step = type === 'percent' ? '0.001' : (type === 'money' ? '0.01' : '1');
+    inp.value = raw == null ? '' : (type === 'percent' && typeof raw === 'number' ? raw : raw);
+    replaceWithEditor(el, inp, async () => {
+      const v = inp.value === '' ? null : parseFloat(inp.value);
+      if (v === raw) { finishEdit(el, record, entityKey); return; }
+      await saveField(entityKey, recId, fieldId, v, el);
+    });
+    inp.focus(); inp.select(); return;
+  }
+
+  // text / long
+  const tag = type === 'long' ? 'textarea' : 'input';
+  const inp = document.createElement(tag);
+  inp.className = 'inline-input';
+  if (tag === 'input') inp.type = 'text';
+  else inp.rows = 4;
+  inp.style.width = '100%';
+  inp.value = raw == null ? '' : String(raw);
+  replaceWithEditor(el, inp, async () => {
+    const v = inp.value;
+    if (v === (raw == null ? '' : String(raw))) { finishEdit(el, record, entityKey); return; }
+    await saveField(entityKey, recId, fieldId, v === '' ? null : v, el);
+  });
+  inp.focus();
+  if (tag === 'input') inp.select();
+}
+
+function replaceWithEditor(el, editor, commit){
+  const original = el.outerHTML;
+  el.dataset._original = original;
+  el.style.display = 'none';
+  el.parentNode.insertBefore(editor, el.nextSibling);
+  let committed = false;
+  const commitOnce = async () => {
+    if (committed) return; committed = true;
+    editor.disabled = true;
+    try { await commit(); } catch (e) { console.error(e); }
+  };
+  editor.addEventListener('blur', commitOnce);
+  editor.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && editor.tagName !== 'TEXTAREA') { e.preventDefault(); editor.blur(); }
+    else if (e.key === 'Escape') {
+      committed = true;
+      editor.remove();
+      el.style.display = '';
+      delete el.dataset._editing;
+    }
+  });
+}
+
+function finishEdit(el, record, entityKey){
+  // Re-render the cell fresh
+  const fieldId = el.dataset.edit;
+  const sch = SCHEMA_RESOLVED[entityKey];
+  const fieldDef = sch.byId[fieldId];
+  const html = renderCell(record, fieldDef, entityKey);
+  // Replace the editor + the hidden span
+  const next = el.nextSibling;
+  if (next && next !== el) next.remove();
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  el.replaceWith(tmp.firstChild || document.createTextNode(''));
+}
+
+async function saveField(entityKey, recId, fieldId, value, el){
+  const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
+  el.classList.add('cell-saving');
+  try {
+    const body = { fields: { [fieldId]: value }, returnFieldsByFieldId: true };
+    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify(body) });
+    // Update local record
+    const rec = INDEX[entityKey][recId];
+    if (rec && res.fields) {
+      rec.fields = { ...rec.fields, ...res.fields };
+    }
+    el.classList.remove('cell-saving');
+    el.classList.remove('cell-error');
+    finishEdit(el, rec, entityKey);
+    toast('Saved', 'success');
+  } catch (e) {
+    console.error('save failed', e);
+    el.classList.remove('cell-saving');
+    el.classList.add('cell-error');
+    delete el.dataset._editing;
+    el.style.display = '';
+    const next = el.nextSibling;
+    if (next && next.tagName && /input|select|textarea/i.test(next.tagName)) next.remove();
+    toast('Save failed: ' + (e.message||'unknown'), 'error');
+  }
+}
+
+async function saveCheckbox(input, recId, fieldId, entityKey){
+  const v = input.checked;
+  const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
+  try {
+    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify({ fields: { [fieldId]: v }, returnFieldsByFieldId:true }) });
+    const rec = INDEX[entityKey][recId];
+    if (rec && res.fields) rec.fields = { ...rec.fields, ...res.fields };
+    toast('Saved', 'success');
+  } catch (e) {
+    input.checked = !v;
+    toast('Save failed: '+e.message, 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Detail drawer
+// ═══════════════════════════════════════════════════════════════════════
+function openDrawer(entityKey, recId){
+  const sch = SCHEMA_RESOLVED[entityKey];
+  const rec = INDEX[entityKey][recId]; if (!rec) return;
+  const title = displayName(rec, entityKey);
+  const subtitle = SCHEMA[entityKey].label.replace(/s$/,'') + ' · ' + recId;
+
+  // Main fields (curated)
+  const mainRows = SCHEMA[entityKey].fields
+    .map(def => sch.byKey[def.key])
+    .filter(c => c && !c.missing)
+    .map(c => fieldRow(c, rec, entityKey))
+    .join('');
+
+  // Drawer extras (Properties only)
+  const extraRows = (sch.drawerExtras||[])
+    .map(c => fieldRow(c, rec, entityKey))
+    .join('');
+
+  // Computed financial section for Properties
+  let computedSection = '';
+  if (entityKey === 'properties') {
+    computedSection = renderPropertyDetailMetrics(rec);
+  }
+
+  // Linked units list for properties
+  let linkedSection = '';
+  if (entityKey === 'properties') {
+    const unitSch = SCHEMA_RESOLVED.units;
+    const linkedUnits = DATA.units.filter(u => {
+      const v = u.fields[unitSch?.byKey?.property?.id];
+      return Array.isArray(v) && v.includes(recId);
+    });
+    if (linkedUnits.length) {
+      linkedSection = `<div class="drawer-section"><h3>Rental Units (${linkedUnits.length})</h3>` +
+        linkedUnits.map(u => {
+          const status = u.fields[unitSch.byKey.status?.id];
+          const statusName = Array.isArray(status) ? (status[0]?.name||status[0]) : (typeof status==='object'?status?.name:status);
+          const tenant = u.fields[unitSch.byKey.tenant?.id];
+          const tenantName = Array.isArray(tenant) && tenant[0] ? (INDEX.tenants[tenant[0]] ? displayName(INDEX.tenants[tenant[0]],'tenants') : tenant[0]) : '—';
+          return `<div class="field-row" style="grid-template-columns:1fr 100px 1fr;cursor:pointer" onclick="closeDrawer();crossNav('units','${u.id}')">
+            <div><strong>${escapeHtml(displayName(u,'units'))}</strong></div>
+            <div><span class="badge ${badgeClass(statusName||'')}">${escapeHtml(statusName||'—')}</span></div>
+            <div style="color:var(--text-secondary)">${escapeHtml(tenantName)}</div>
+          </div>`;
+        }).join('') + '</div>';
+    }
+  }
+
+  const html = `
+    <div class="drawer-overlay" onclick="if(event.target===this)closeDrawer()">
+      <div class="drawer">
+        <div class="drawer-header">
+          <div class="hdr-main">
+            <h2>${escapeHtml(title)}</h2>
+            <div class="hdr-sub">${escapeHtml(subtitle)}</div>
+          </div>
+          <button class="drawer-close" onclick="closeDrawer()">×</button>
+        </div>
+        <div class="drawer-body">
+          ${computedSection}
+          <div class="drawer-section">
+            <h3>Details</h3>
+            ${mainRows}
+            ${extraRows}
+          </div>
+          ${linkedSection}
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('drawerOverlay').innerHTML = html;
+}
+
+function closeDrawer(){
+  document.getElementById('drawerOverlay').innerHTML = '';
+}
+
+function fieldRow(fieldDef, record, entityKey){
+  const cellHtml = renderCell(record, fieldDef, entityKey);
+  return `<div class="field-row"><div class="field-label">${escapeHtml(fieldDef.label || fieldDef.name)}</div><div class="field-value">${cellHtml}</div></div>`;
+}
+
+function renderPropertyDetailMetrics(rec){
+  const sch = SCHEMA_RESOLVED.properties;
+  const rent  = parseFloat(rec.fields[sch.byKey.grossRent?.id])    || 0;
+  const value = parseFloat(rec.fields[sch.byKey.marketValue?.id])  || 0;
+  const debt  = parseFloat(rec.fields[sch.byKey.mortgageBal?.id])  || 0;
+  const mort  = parseFloat(rec.fields[sch.byKey.mortgagePay?.id])  || 0;
+  const equity = value - debt;
+  const annualRent = rent * 12;
+  const grossYield = value > 0 ? annualRent / value * 100 : 0;
+  const netRent = rent - mort;
+  const ltv = value > 0 ? debt / value * 100 : 0;
+  return `<div class="drawer-section">
+    <h3>Performance</h3>
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoney(equity)}</div></div>
+      <div class="kpi"><div class="label">LTV</div><div class="value">${ltv.toFixed(1)}%</div></div>
+      <div class="kpi"><div class="label">Gross Yield</div><div class="value">${grossYield.toFixed(2)}%</div></div>
+      <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${netRent>=0?'var(--success)':'var(--danger)'}">${fmtMoney(netRent)}</div><div class="sub">after mortgage, before opex</div></div>
+    </div>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Toast
+// ═══════════════════════════════════════════════════════════════════════
+function toast(msg, kind){
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind?' '+kind:'');
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════
+if (bootAuth()) {
+  start();
+} else {
+  document.getElementById('authBar').style.display = 'flex';
+}
+</script>
+</body>
+</html>
