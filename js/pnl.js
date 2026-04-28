@@ -853,6 +853,41 @@ RULES:
                             return { status: 'pass', detail: 'pnlRenderCharts() queued via requestAnimationFrame after each render' };
                         }
                     },
+                    // ── Passive deep-check: arithmetic drift detection ──
+                    // The buildPnL function computes per-month figures AND grand totals
+                    // from the same transactions. They MUST match. If they don't,
+                    // there's a bug somewhere in the section/sub-cat filter or sign
+                    // logic. This check is the kind of silent-data-bug catcher that
+                    // would never surface visually (Kevin can't eyeball whether 12
+                    // monthly numbers add up to the displayed 12-month total).
+                    {
+                        name: 'Grand totals == sum of monthly buckets (no drift)', kind: 'sync', run: () => {
+                            const drift = (label, monthlyMap, grandTotal) => {
+                                const sum = Object.values(monthlyMap || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+                                const diff = Math.abs(sum - (Number(grandTotal) || 0));
+                                return diff < 0.01 ? null : `${label}: monthly sum ${pnlGBP(sum)} ≠ grand ${pnlGBP(grandTotal)} (Δ ${pnlGBP(diff)})`;
+                            };
+                            const issues = [
+                                drift('Net Profit', pnl.netProfit, pnl.grand.netProfit),
+                                drift('Gross Profit', pnl.grossProfit, pnl.grand.grossProfit),
+                            ].filter(Boolean);
+                            if (issues.length) return { status: 'fail', detail: issues.join(' · ') };
+                            return { status: 'pass', detail: `Net Profit grand ${pnlGBP(pnl.grand.netProfit)} matches sum of ${pnlMonths} monthly buckets` };
+                        }
+                    },
+                    {
+                        name: 'Margins are within sane bounds', kind: 'sync', run: () => {
+                            const checks = [];
+                            const gm = pnl.grand.grossMargin;
+                            const nm = pnl.grand.netMargin;
+                            if (!isFinite(gm)) checks.push('Gross Margin not finite');
+                            else if (Math.abs(gm) > 1000) checks.push(`Gross Margin ${gm.toFixed(0)}% looks wrong`);
+                            if (!isFinite(nm)) checks.push('Net Margin not finite');
+                            else if (Math.abs(nm) > 1000) checks.push(`Net Margin ${nm.toFixed(0)}% looks wrong`);
+                            if (checks.length) return { status: 'fail', detail: checks.join(' · ') };
+                            return { status: 'pass', detail: `Gross Margin ${gm.toFixed(1)}% · Net Margin ${nm.toFixed(1)}%` };
+                        }
+                    },
                 ],
             });
             markTabSynced('pnl');

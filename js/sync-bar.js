@@ -48,8 +48,11 @@
         if (!s) return;
         s.lastSyncedAt = Date.now();
         s.isRefreshing = false;
-        // Auto-run checks once on each successful sync so the pill is always live
-        runHealthChecks(tabId);
+        // Auto-run passive checks only — active checks (heavy round-trips) wait
+        // for the user to click Re-run in the drawer. This keeps the auto-pill
+        // up-to-date on every load without burning Airtable rate limits or
+        // running test writes on every dashboard refresh.
+        runHealthChecks(tabId, { activeOnly: false });
     }
 
     function markTabRefreshing(tabId) {
@@ -59,30 +62,66 @@
         renderSyncBar(tabId);
     }
 
-    async function runHealthChecks(tabId) {
+    // Run health checks for a tab.
+    //   { activeOnly: false }   — passive only (auto, runs on every markTabSynced)
+    //   { activeOnly: true }    — only the active (heavy round-trip) ones
+    //   { activeOnly: 'all' }   — both passive and active (default for user-clicked Re-run)
+    //
+    // Each check declares `active: true` if it does a heavy operation (Airtable
+    // create+delete, HTTP ping per registered link, etc.) that we don't want
+    // running on every dashboard refresh. Active checks display "Click Re-run
+    // to verify" until explicitly invoked.
+    async function runHealthChecks(tabId, opts) {
         const s = _syncBars[tabId];
         if (!s) return;
-        // Each check's run() may be sync or async; we await both forms uniformly.
-        // Async checks let us hit external services (Airtable round-trip writes,
-        // Apps Script ping, Claude proxy) the way Inbound Comms already does.
-        const items = s.checks || [];
-        // Render a "running" placeholder so the user sees feedback for slow checks
-        s.lastResults = items.map(c => ({ name: c.name, kind: c.kind || 'sync', status: 'warn', detail: 'Running…' }));
+        const allItems = s.checks || [];
+        opts = opts || {};
+        const which = (opts.activeOnly === true) ? 'activeOnly'
+                    : (opts.activeOnly === false) ? 'passiveOnly'
+                    : 'all';
+
+        // Decide which checks actually run this round.
+        const runIdx = new Set();
+        allItems.forEach((c, i) => {
+            const isActive = c.active === true;
+            if (which === 'all') runIdx.add(i);
+            else if (which === 'activeOnly' && isActive) runIdx.add(i);
+            else if (which === 'passiveOnly' && !isActive) runIdx.add(i);
+        });
+
+        // Initial render so the user sees feedback while async checks run.
+        // For checks NOT in this round, preserve their previous result if any.
+        const prevByName = {};
+        (s.lastResults || []).forEach(r => { prevByName[r.name] = r; });
+        s.lastResults = allItems.map((c, i) => {
+            if (runIdx.has(i)) return { name: c.name, kind: c.kind || 'sync', active: !!c.active, status: 'warn', detail: 'Running…' };
+            if (prevByName[c.name]) return prevByName[c.name];
+            // Active check that's never been run — show a "click to verify" placeholder
+            if (c.active) return { name: c.name, kind: c.kind || 'sync', active: true, status: 'warn', detail: 'Click Re-run in the drawer to verify' };
+            return { name: c.name, kind: c.kind || 'sync', active: false, status: 'warn', detail: 'Not yet run' };
+        });
         s.lastRunAt = Date.now();
         renderSyncBar(tabId);
 
-        const settled = await Promise.allSettled(items.map(c => Promise.resolve().then(() => c.run())));
-        s.lastResults = settled.map((sr, i) => {
-            const c = items[i];
+        // Run only the selected checks
+        const settled = await Promise.allSettled(
+            allItems.map((c, i) => runIdx.has(i) ? Promise.resolve().then(() => c.run()) : Promise.resolve(null))
+        );
+        s.lastResults = allItems.map((c, i) => {
+            if (!runIdx.has(i)) return s.lastResults[i]; // preserved
+            const sr = settled[i];
             if (sr.status === 'rejected') {
-                return { name: c.name, kind: c.kind || 'sync', status: 'fail', detail: 'Check threw: ' + ((sr.reason && sr.reason.message) || String(sr.reason)) };
+                return { name: c.name, kind: c.kind || 'sync', active: !!c.active, status: 'fail', detail: 'Check threw: ' + ((sr.reason && sr.reason.message) || String(sr.reason)) };
             }
             const r = sr.value || { status: 'warn', detail: 'No result returned' };
-            return { name: c.name, kind: c.kind || 'sync', ...r };
+            return { name: c.name, kind: c.kind || 'sync', active: !!c.active, ...r };
         });
         s.lastRunAt = Date.now();
         renderSyncBar(tabId);
     }
+
+    // Convenience for the drawer: re-run ALL checks (passive + active).
+    function runAllHealthChecks(tabId) { return runHealthChecks(tabId, { activeOnly: 'all' }); }
 
     function _formatAge(ms) {
         if (ms == null) return 'never';
@@ -197,7 +236,7 @@
                         <div class="sync-check-item ${r.status}">
                             <span class="sync-check-icon">${r.status === 'pass' ? '✓' : r.status === 'warn' ? '⚠' : '✗'}</span>
                             <div class="sync-check-body">
-                                <div class="sync-check-name">${_escHtml(r.name)}</div>
+                                <div class="sync-check-name">${_escHtml(r.name)}${r.active ? ' <span class="sync-check-active-tag">active</span>' : ''}</div>
                                 <div class="sync-check-detail">${_escHtml(r.detail || '')}</div>
                             </div>
                         </div>
@@ -206,12 +245,17 @@
             `;
         };
         const lastRunText = s.lastRunAt ? 'Checks last run ' + _formatAge(Date.now() - s.lastRunAt) : '';
+        const hasActive = (s.checks || []).some(c => c.active === true);
+        const activeNote = hasActive
+            ? '<span style="color:var(--text-muted);font-size:var(--fs-xs);margin-left:6px">· "Re-run" includes deep round-trip checks</span>'
+            : '';
         return `
             <div class="sync-bar-drawer">
                 <div class="sync-bar-drawer-header">
                     <strong>Health check</strong>
                     <span style="color:var(--text-muted);font-size:var(--fs-xs);margin-left:8px">${_escHtml(lastRunText)}</span>
-                    <button class="sync-bar-rerun" onclick="runHealthChecks('${tabId}')" title="Re-run all checks">Re-run</button>
+                    ${activeNote}
+                    <button class="sync-bar-rerun" onclick="runAllHealthChecks('${tabId}')" title="Re-run all checks (including deep round-trip ones)">Re-run</button>
                 </div>
                 ${renderGroup('Data sync', grouped.sync)}
                 ${renderGroup('Automations & feature health', grouped.automation)}

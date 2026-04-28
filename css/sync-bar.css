@@ -126,4 +126,16 @@
 .sync-check-item.fail .sync-check-icon { color: var(--danger); }
 .sync-check-body { flex: 1 1 auto; }
 .sync-check-name { color: var(--text-primary); font-weight: var(--fw-medium); font-size: var(--fs-sm); }
+.sync-check-name .sync-check-active-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--info-bg);
+    color: var(--info);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
 .sync-check-detail { color: var(--text-secondary); font-size: var(--fs-xs); margin-top: 2px; }

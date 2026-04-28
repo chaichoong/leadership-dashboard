@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inbound Comms OS</title>
     <link rel="stylesheet" href="css/tokens.css?v=1">
-    <link rel="stylesheet" href="css/sync-bar.css?v=1">
+    <link rel="stylesheet" href="css/sync-bar.css?v=2">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -876,7 +876,7 @@
 <!-- Google Identity Services -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js"></script>
-<script src="js/sync-bar.js?v=3"></script>
+<script src="js/sync-bar.js?v=4"></script>
 
 <script>
     // ============================================================
@@ -1774,11 +1774,43 @@
                                 } catch (e) { return { status: 'warn', detail: 'getAiAccuracyStats threw: ' + e.message }; }
                             }
                         },
+                        // ── Deep round-trip checks (active — only run on user click) ──
+                        // These do real Airtable writes-then-deletes and external system pings.
+                        // Marked `active: true` so they DON'T run automatically on every sync —
+                        // only when the user hits Re-run in the drawer.
                         {
-                            name: 'Deeper round-trip check available', kind: 'automation', run: () => {
-                                const btn = document.getElementById('healthCheckBtn');
-                                if (!btn) return { status: 'fail', detail: '"Run health check" button missing' };
-                                return { status: 'pass', detail: 'Settings → Run health check tests Airtable writes, Apps Script, Claude proxy end-to-end' };
+                            name: 'Tasks table create+delete (Mica assignee)', kind: 'automation', active: true,
+                            run: async () => {
+                                const r = await healthCheckAirtable();
+                                return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
+                            }
+                        },
+                        {
+                            name: 'Tasks table create+delete (Kevin assignee)', kind: 'automation', active: true,
+                            run: async () => {
+                                const r = await healthCheckKevinTask();
+                                return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
+                            }
+                        },
+                        {
+                            name: 'Tenancy doc-link write (Tenancies table)', kind: 'automation', active: true,
+                            run: async () => {
+                                const r = await healthCheckTenancies();
+                                return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
+                            }
+                        },
+                        {
+                            name: 'Gmail Apps Script reachable', kind: 'automation', active: true,
+                            run: async () => {
+                                const r = await healthCheckInvoiceScript();
+                                return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
+                            }
+                        },
+                        {
+                            name: 'Claude AI proxy round-trip', kind: 'automation', active: true,
+                            run: async () => {
+                                const r = await healthCheckClaudeProxy();
+                                return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
                             }
                         },
                     ],

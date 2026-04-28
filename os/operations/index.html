@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations OS — Tenants, Tenancies, Units, Properties</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
-<link rel="stylesheet" href="../../css/sync-bar.css?v=1">
+<link rel="stylesheet" href="../../css/sync-bar.css?v=2">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
@@ -293,7 +293,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Toast -->
 <div id="toastContainer"></div>
 
-<script src="../../js/sync-bar.js?v=3"></script>
+<script src="../../js/sync-bar.js?v=4"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 // CONFIG — Airtable IDs (mirrors js/config.js — hardcoded since iframe can't
@@ -826,6 +826,60 @@ async function refreshAll(initial=false){
                 }
               }
               return { status: 'pass', detail: 'All four sub-tab badges match the loaded record counts' };
+            }
+          },
+          // ── Cross-table integrity: the deeper kind of check that catches
+          // dangling links before they cause display bugs ──
+          {
+            name: 'Tenancies → Rental Unit links resolve', kind: 'sync', run: () => {
+              const tcs = DATA.tenancies || [];
+              const unitIdx = INDEX.units || {};
+              const orphans = tcs.filter(r => {
+                const f = r.fields || {};
+                const link = f['fld7cjLLEHKAx49OK']; // tenUnit
+                if (!Array.isArray(link) || !link.length) return false;
+                const id = typeof link[0] === 'object' ? link[0].id : link[0];
+                return !unitIdx[id];
+              });
+              if (orphans.length) return { status: 'fail', detail: `${orphans.length} tenancy(ies) link to a unit that wasn't fetched — display will show '-' in the Unit column` };
+              return { status: 'pass', detail: 'All tenancies link to a unit present in the dataset' };
+            }
+          },
+          {
+            name: 'Rental Units → Property links resolve', kind: 'sync', run: () => {
+              const units = DATA.units || [];
+              const propIdx = INDEX.properties || {};
+              const orphans = units.filter(r => {
+                const f = r.fields || {};
+                const link = f['fldUJNRGgzgyAwwjt']; // unitProperty
+                if (!Array.isArray(link) || !link.length) return false;
+                const id = typeof link[0] === 'object' ? link[0].id : link[0];
+                return !propIdx[id];
+              });
+              if (orphans.length) return { status: 'fail', detail: `${orphans.length} unit(s) link to a property that wasn't fetched` };
+              return { status: 'pass', detail: 'All units link to a property present in the dataset' };
+            }
+          },
+          {
+            name: 'No duplicate tenancies for the same unit', kind: 'sync', run: () => {
+              // Two ACTIVE tenancies on the same unit means somewhere a tenant move-out
+              // wasn't recorded. Catches data-quality drift after onboarding.
+              const tcs = DATA.tenancies || [];
+              const activeByUnit = {};
+              tcs.forEach(r => {
+                const f = r.fields || {};
+                const status = f['fldxU3dPUnbK0SCDq']; // tenPayStatus
+                const statusName = (status && status.name) || status;
+                if (statusName !== 'In Payment' && statusName !== 'CFV' && statusName !== 'CFV Actioned') return;
+                const link = f['fld7cjLLEHKAx49OK'];
+                if (!Array.isArray(link) || !link.length) return;
+                const unitId = typeof link[0] === 'object' ? link[0].id : link[0];
+                if (!unitId) return;
+                activeByUnit[unitId] = (activeByUnit[unitId] || 0) + 1;
+              });
+              const dupes = Object.entries(activeByUnit).filter(([_, n]) => n > 1);
+              if (dupes.length) return { status: 'warn', detail: `${dupes.length} unit(s) have multiple active tenancies — likely a missed move-out` };
+              return { status: 'pass', detail: 'Each unit has at most one active tenancy' };
             }
           },
         ],

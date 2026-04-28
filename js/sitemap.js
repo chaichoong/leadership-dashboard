@@ -639,6 +639,56 @@
                             return { status: 'pass', detail: 'SOP-update buttons in the table will route a request via Airtable' };
                         }
                     },
+                    // ── Active: ping every registered standalone link ──
+                    // Heavy (1 GET per registered page), so only fires on user-clicked Re-run.
+                    // Catches dead routes, missing files, broken iframe sources, and 404s in
+                    // the SOP files — exactly the kind of regression that would silently
+                    // break a tab without anyone noticing.
+                    {
+                        name: 'Every registered page returns HTTP 200', kind: 'automation', active: true,
+                        run: async () => {
+                            const reg = (PAGE_REGISTRY || []).filter(p => p.standalone);
+                            if (reg.length === 0) return { status: 'warn', detail: 'No standalone pages in registry' };
+                            const checks = await Promise.allSettled(reg.map(async p => {
+                                try {
+                                    // HEAD avoids downloading the full page; some servers reject HEAD,
+                                    // so fall back to GET if it's not OK.
+                                    let r = await fetch(p.standalone, { method: 'HEAD', cache: 'no-store' });
+                                    if (!r.ok && r.status !== 405) {
+                                        r = await fetch(p.standalone, { method: 'GET', cache: 'no-store' });
+                                    } else if (r.status === 405) {
+                                        r = await fetch(p.standalone, { method: 'GET', cache: 'no-store' });
+                                    }
+                                    return { id: p.id, ok: r.ok, status: r.status };
+                                } catch (e) { return { id: p.id, ok: false, status: 'ERR', err: e.message }; }
+                            }));
+                            const broken = checks
+                                .map(s => s.status === 'fulfilled' ? s.value : { id: '?', ok: false, status: 'throw' })
+                                .filter(c => !c.ok);
+                            if (broken.length === 0) return { status: 'pass', detail: `All ${reg.length} standalone pages returned HTTP 200` };
+                            const list = broken.slice(0, 4).map(b => `${b.id} (${b.status})`).join(', ');
+                            return { status: 'fail', detail: `${broken.length} broken: ${list}${broken.length > 4 ? '…' : ''}` };
+                        }
+                    },
+                    {
+                        name: 'Every registered SOP file returns HTTP 200', kind: 'automation', active: true,
+                        run: async () => {
+                            const reg = (PAGE_REGISTRY || []).filter(p => p.sopFile);
+                            if (reg.length === 0) return { status: 'warn', detail: 'No SOP files in registry' };
+                            const checks = await Promise.allSettled(reg.map(async p => {
+                                try {
+                                    const r = await fetch(p.sopFile, { method: 'GET', cache: 'no-store' });
+                                    return { id: p.id, ok: r.ok, status: r.status };
+                                } catch (e) { return { id: p.id, ok: false, status: 'ERR' }; }
+                            }));
+                            const broken = checks
+                                .map(s => s.status === 'fulfilled' ? s.value : { id: '?', ok: false, status: 'throw' })
+                                .filter(c => !c.ok);
+                            if (broken.length === 0) return { status: 'pass', detail: `All ${reg.length} SOP files reachable` };
+                            const list = broken.slice(0, 4).map(b => `${b.id} (${b.status})`).join(', ');
+                            return { status: 'fail', detail: `${broken.length} broken SOP file(s): ${list}${broken.length > 4 ? '…' : ''}` };
+                        }
+                    },
                 ],
             });
             markTabSynced('sitemap');
