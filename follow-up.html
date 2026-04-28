@@ -2603,7 +2603,11 @@ Body: ${bodyText}`;
         const pat = getAirtablePat();
         const F = AIRTABLE_TENANCIES_FIELDS;
         // Re-read current value so we don't overwrite anything
-        const getResp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${tenancy.id}?returnFieldsByFieldId=true&fields%5B%5D=${F.documentLinks}`, {
+        // Note: the per-record GET endpoint does NOT support fields[] —
+        // that param only works on the LIST endpoint. Including it here
+        // returns 422 "Unknown query parameter". Just fetch the whole
+        // record; we only read one field but the payload is tiny.
+        const getResp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${tenancy.id}?returnFieldsByFieldId=true`, {
             headers: { 'Authorization': 'Bearer ' + pat }
         });
         if (!getResp.ok) throw new Error('Read failed: HTTP ' + getResp.status);
@@ -2875,7 +2879,8 @@ Body: ${bodyText}`;
         // Re-read its current Document Links so we can restore exactly
         let priorValue;
         try {
-            const r = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${target.id}?returnFieldsByFieldId=true&fields%5B%5D=${F.documentLinks}`, {
+            // Per-record GET doesn't accept fields[] — fetch the whole record
+            const r = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${target.id}?returnFieldsByFieldId=true`, {
                 headers: { 'Authorization': 'Bearer ' + pat }
             });
             if (!r.ok) return { ok: false, detail: `Tenancy read failed: HTTP ${r.status}` };
