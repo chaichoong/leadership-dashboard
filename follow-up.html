@@ -1569,7 +1569,7 @@
             } else {
                 console.log('Auto-refresh skipped (user active)');
             }
-        }, 15 * 60 * 1000); // 15 minutes
+        }, 30 * 60 * 1000); // 30 minutes — halves AI suggestion call volume
     }
 
     async function loadLabelEmails() {
@@ -3426,18 +3426,24 @@ Respond with ONLY valid JSON, no markdown.`;
 
             const labelList = allLabels.map(l => `"${l.name}"`).join(', ');
 
-            const prompt = `You are an email classification assistant. Based on the knowledge base patterns below, suggest the most appropriate label for each email.
+            // Prompt is split into a stable system block (instructions + KB +
+            // corrections + label list) and a variable user message (just the
+            // batch of emails). The system block is marked cache_control so
+            // Anthropic caches it across calls within the 5-min TTL — the team
+            // typically loads the inbox more than once per 5 min, so cache
+            // hits drop input cost on the cached portion by 90%.
+            const systemPrompt = `You are an email classification assistant. Based on the knowledge base patterns below, suggest the most appropriate label for each email.
 
 Available labels: ${labelList}
 
 ${kbSummary}
 ${correctionText}
-EMAILS TO CLASSIFY:
-${emailDescriptions}
-
 Respond with ONLY a JSON array. Each element must have: "index" (the email number), "label" (one of the available labels exactly as written), "confidence" ("high", "medium", or "low"), and "reason" (brief explanation, under 15 words).
 
 Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "Invoice from known supplier"}]`;
+
+            const userPrompt = `EMAILS TO CLASSIFY:
+${emailDescriptions}`;
 
             try {
                 // Retry logic with backoff for overloaded API
@@ -3449,7 +3455,10 @@ Example: [{"index": 0, "label": "3. to pay", "confidence": "high", "reason": "In
                         body: JSON.stringify({
                             model: 'claude-haiku-4-5-20251001',
                             max_tokens: 1000,
-                            messages: [{ role: 'user', content: prompt }]
+                            system: [
+                                { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+                            ],
+                            messages: [{ role: 'user', content: userPrompt }]
                         })
                     });
                     if (response.status !== 529) break;
@@ -4571,7 +4580,9 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
+                    // Haiku 4.5 — drafts here are short replies that don't
+                    // need Sonnet quality. ~3× cheaper.
+                    model: 'claude-haiku-4-5-20251001',
                     max_tokens: 500,
                     messages: [{ role: 'user', content: prompt }]
                 })
@@ -4701,7 +4712,8 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
+                    // Haiku 4.5 — revising a short reply doesn't need Sonnet.
+                    model: 'claude-haiku-4-5-20251001',
                     max_tokens: 500,
                     messages: [{ role: 'user', content: `Here is a draft email I wrote on behalf of ${senderName}:\n\n${currentBody}\n\nPlease revise this draft based on the following feedback:\n${feedback}\n\nIMPORTANT STYLE RULE: Never use em dashes (—) or long hyphens (–) anywhere in the email. Use commas, full stops, or restructure the sentence instead.\n\nReturn ONLY the revised email body text. No subject line, no explanations.` }]
                 })
