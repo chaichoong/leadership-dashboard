@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1500 slack-merge-collabs</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1600 project-week-pin</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -3713,11 +3713,21 @@ function scheduleTasksAcrossDays(){
   // pushed them out — don't pull them back in just because there's capacity).
   const PULL_IN_DAYS=Math.max(1,(config.autoSchedulePullInDays||14));
   const horizonDate=addDays(today,PULL_IN_DAYS);
+  // End-of-current-week (Sunday). Project-priority tasks scheduled beyond
+  // this point are deliberately week-aligned in the Kanban — never pull
+  // them forward into the current week. They can still move WITHIN the
+  // current week or be brought into it from overdue.
+  const _todayParts=today.split('-').map(Number);
+  const _todayDate=new Date(_todayParts[0],_todayParts[1]-1,_todayParts[2]);
+  const _dow=_todayDate.getDay(); // 0=Sun..6=Sat
+  const _daysToSunday=_dow===0?0:7-_dow;
+  const endOfWeek=addDays(today,_daysToSunday);
 
-  console.log('[Scheduler] Step 6: process',tasks.length,'tasks  (horizon:',PULL_IN_DAYS,'days)');
+  console.log('[Scheduler] Step 6: process',tasks.length,'tasks  (horizon:',PULL_IN_DAYS,'days, eow:',endOfWeek,')');
   let processed=0;
   let skippedFarFuture=0;
   let skippedHard=0;
+  let skippedProjectFuture=0;
   for(let i=0;i<tasks.length;i++){
     const task=tasks[i];
     const mins=task.minutes||30;
@@ -3726,6 +3736,17 @@ function scheduleTasksAcrossDays(){
     if(task.hardDeadline){
       if(task.dueDate){usage[task.dueDate]=(usage[task.dueDate]||0)+mins}
       skippedHard++;
+      processed++;
+      continue;
+    }
+    // PROJECT TASK pinned past this week — Kevin uses the Kanban to
+    // schedule project work into specific future weeks; the auto-
+    // scheduler must not pull those tasks back into the current week.
+    // Urgent / High / Not Urgent priorities are still movable within
+    // the pull-in horizon.
+    if(task.priority==='Project'&&task.dueDate&&task.dueDate>endOfWeek){
+      usage[task.dueDate]=(usage[task.dueDate]||0)+mins;
+      skippedProjectFuture++;
       processed++;
       continue;
     }
@@ -3754,7 +3775,7 @@ function scheduleTasksAcrossDays(){
     processed++;
     if(processed%25===0)console.log('[Scheduler] processed',processed,'/',tasks.length);
   }
-  console.log('[Scheduler] skipped hard-deadline:',skippedHard,'skipped far-future:',skippedFarFuture);
+  console.log('[Scheduler] skipped hard-deadline:',skippedHard,'skipped far-future:',skippedFarFuture,'skipped project beyond this week:',skippedProjectFuture);
   console.log('[Scheduler] DONE. moves=',moves.length,'warnings=',warnings.length);
 
   return{moves,warnings};
