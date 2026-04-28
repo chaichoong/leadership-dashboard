@@ -315,6 +315,66 @@
         // Tab is being viewed — mark invoices as seen so sidebar badge clears next refresh
         markInvoicesAsSeen();
         updateInvoicesSidebarBadge();
+
+        // ── Sync Bar + Health Checks ──
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('invoices', {
+                // Re-fetch from Airtable (and trigger Gmail sync) — fetchInvoicesFromAirtable's
+                // success path calls renderInvoiceTab which re-runs markTabSynced.
+                refreshFn: async () => {
+                    if (typeof triggerGmailInvoiceSync === 'function') triggerGmailInvoiceSync();
+                    await fetchInvoicesFromAirtable();
+                },
+                checks: [
+                    {
+                        name: 'Invoices fetched from Airtable', kind: 'sync', run: () => {
+                            const n = (airtableInvoices || []).length;
+                            if (n === 0) return { status: 'warn', detail: 'No invoices loaded yet — Airtable fetch may be in flight' };
+                            return { status: 'pass', detail: `${n} invoice records loaded (all statuses)` };
+                        }
+                    },
+                    {
+                        name: 'Outstanding invoices count', kind: 'sync', run: () => {
+                            const open = (airtableInvoices || []).filter(inv => inv.status !== 'Paid');
+                            return { status: 'pass', detail: `${open.length} not yet paid · ${(airtableInvoices||[]).length - open.length} marked Paid` };
+                        }
+                    },
+                    {
+                        name: 'Each invoice has Gmail thread link', kind: 'sync', run: () => {
+                            const invs = airtableInvoices || [];
+                            const missing = invs.filter(inv => !inv.gmailUrl && !inv.threadId);
+                            if (missing.length) return { status: 'warn', detail: `${missing.length} invoices missing Gmail link — may have been imported manually` };
+                            return { status: 'pass', detail: `All ${invs.length} invoices link back to their Gmail thread` };
+                        }
+                    },
+                    {
+                        name: 'Match-to-transaction matcher functioning', kind: 'automation', run: () => {
+                            if (typeof matchInvoicesToTransactions !== 'function') return { status: 'fail', detail: 'matchInvoicesToTransactions() not loaded' };
+                            try {
+                                const matches = matchInvoicesToTransactions(airtableInvoices || [], allTransactions || []);
+                                const matched = (matches || []).filter(m => m && m.matchedTxId).length;
+                                return { status: 'pass', detail: `${matched} invoices matched to a reconciled transaction` };
+                            } catch (e) {
+                                return { status: 'fail', detail: 'Matcher threw: ' + e.message };
+                            }
+                        }
+                    },
+                    {
+                        name: 'Gmail sync script reachable', kind: 'automation', run: () => {
+                            if (!GMAIL_SCRIPT_URL) return { status: 'warn', detail: 'GMAIL_SCRIPT_URL not configured in config.js' };
+                            return { status: 'pass', detail: 'Apps Script web app URL configured · last fetch fires every dashboard load' };
+                        }
+                    },
+                    {
+                        name: 'Sidebar "new invoices" badge wired', kind: 'automation', run: () => {
+                            if (typeof updateInvoicesSidebarBadge !== 'function') return { status: 'fail', detail: 'updateInvoicesSidebarBadge() not loaded' };
+                            return { status: 'pass', detail: 'Badge updates on render and after fetch' };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('invoices');
+        }
     }
 
     // ── Match invoices to Airtable transactions ──

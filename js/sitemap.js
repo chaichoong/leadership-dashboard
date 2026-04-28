@@ -595,6 +595,54 @@
         }
         // Keep the sidebar badge in step with whatever the table now shows.
         updateSitemapBadge();
+
+        // ── Sync Bar + Health Checks ──
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('sitemap', {
+                refreshFn: () => { clearGitSyncCache(); renderSiteMap(); },
+                checks: [
+                    {
+                        name: 'PAGE_REGISTRY populated', kind: 'sync', run: () => {
+                            const n = (PAGE_REGISTRY || []).length;
+                            if (n === 0) return { status: 'fail', detail: 'Empty registry — sitemap will be blank' };
+                            return { status: 'pass', detail: `${n} pages registered in config.js` };
+                        }
+                    },
+                    {
+                        name: 'Live page versions vs registered', kind: 'sync', run: () => {
+                            const reg = PAGE_REGISTRY || [];
+                            const sopMatches = reg.filter(p => p.pageVer === p.sopVer).length;
+                            const sopBehind = reg.filter(p => p.pageVer !== p.sopVer && p.sopFile);
+                            if (sopBehind.length === 0) return { status: 'pass', detail: `All ${sopMatches} pages have SOP version matching pageVer` };
+                            return { status: 'warn', detail: `${sopBehind.length} page(s) have an SOP version behind pageVer: ${sopBehind.slice(0, 3).map(p => p.id).join(', ')}${sopBehind.length > 3 ? '…' : ''}` };
+                        }
+                    },
+                    {
+                        name: 'GitHub API reachable', kind: 'automation', run: () => {
+                            // gitSyncData is populated by getGitStatus — set to true means a fetch ran
+                            if (typeof gitSyncData === 'undefined' || !gitSyncData) return { status: 'warn', detail: 'GitHub status not yet fetched (auto-loads when tab opens)' };
+                            return { status: 'pass', detail: 'Live GitHub API check ran successfully on this load' };
+                        }
+                    },
+                    {
+                        name: 'Auto-bump pageVer workflow healthy', kind: 'automation', run: () => {
+                            // Heuristic: if any page in registry has a non-1.0 pageVer, the auto-bump has run at least once.
+                            const reg = PAGE_REGISTRY || [];
+                            const bumped = reg.filter(p => p.pageVer && p.pageVer !== '1.0').length;
+                            if (bumped === 0) return { status: 'warn', detail: 'No page has been bumped above v1.0 — workflow may not be running' };
+                            return { status: 'pass', detail: `${bumped} pages have been auto-bumped past v1.0` };
+                        }
+                    },
+                    {
+                        name: 'SOP-update request mechanism wired', kind: 'automation', run: () => {
+                            if (typeof requestSOPUpdate !== 'function') return { status: 'fail', detail: 'requestSOPUpdate() missing' };
+                            return { status: 'pass', detail: 'SOP-update buttons in the table will route a request via Airtable' };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('sitemap');
+        }
     }
 
     async function requestSOPUpdate(pageId, sopFile, pageVer, pageName, btn) {

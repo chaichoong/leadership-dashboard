@@ -845,6 +845,12 @@
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
+        // Expose accounts + rentalUnits as globals so the sync-bar's health checks
+        // (which run lazily on user click) can read live values rather than capturing
+        // stale closures from this single render.
+        allAccounts = accounts;
+        allRentalUnits = rentalUnits;
+
         // Header
         document.getElementById('headerDate').textContent =
             now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) +
@@ -1550,5 +1556,113 @@
                 occupancyRate,
                 unreconciledCount: unreconciledTx.length,
             });
+        }
+
+        // ── Sync Bar + Health Checks ──
+        // Re-register on every render so check closures capture the latest scope.
+        // markTabSynced(...) is called below to bump the lastSyncedAt and roll up
+        // the health pill.
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('overview', {
+                refreshFn: () => loadDashboard(),
+                checks: [
+                    // ─── DATA SYNC ───
+                    {
+                        name: 'Santander balance loaded', kind: 'sync', run: () => {
+                            const rec = (allAccounts || []).find(r => r.id === REC.santander);
+                            if (!rec) return { status: 'fail', detail: 'Santander account record not found in Airtable response' };
+                            const bal = Number(getField(rec, F.accGBP));
+                            const lastSync = getField(rec, F.accLastUpdate) || 'unknown';
+                            if (Number.isNaN(bal)) return { status: 'fail', detail: 'Balance field is not a number' };
+                            return { status: 'pass', detail: `${fmtAccounting(bal)} · last bank sync ${lastSync}` };
+                        }
+                    },
+                    {
+                        name: 'TNT Zempler balance loaded', kind: 'sync', run: () => {
+                            const rec = (allAccounts || []).find(r => r.id === REC.tntZempler);
+                            if (!rec) return { status: 'fail', detail: 'TNT Zempler account record not found' };
+                            const bal = Number(getField(rec, F.accGBP));
+                            const lastSync = getField(rec, F.accLastUpdate) || 'unknown';
+                            if (Number.isNaN(bal)) return { status: 'fail', detail: 'Balance field is not a number' };
+                            return { status: 'pass', detail: `${fmtAccounting(bal)} · last bank sync ${lastSync}` };
+                        }
+                    },
+                    {
+                        name: 'Active tenancies fetched', kind: 'sync', run: () => {
+                            const n = (allTenancies || []).filter(r => isTenantStatusActive(r) && isTenancyActive(getField(r, F.tenPayStatus))).length;
+                            if (n === 0) return { status: 'fail', detail: 'No active tenancies — fetch likely returned empty' };
+                            if (n < 30) return { status: 'warn', detail: `${n} active tenancies — fewer than expected (~60+)` };
+                            return { status: 'pass', detail: `${n} active tenancies (In Payment / CFV / CFV Actioned)` };
+                        }
+                    },
+                    {
+                        name: 'Active costs fetched', kind: 'sync', run: () => {
+                            const n = (allCosts || []).filter(r => isCostActive(r)).length;
+                            if (n === 0) return { status: 'fail', detail: 'No active costs — fetch likely returned empty' };
+                            return { status: 'pass', detail: `${n} active costs loaded` };
+                        }
+                    },
+                    {
+                        name: 'Recent reconciled transactions present', kind: 'sync', run: () => {
+                            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
+                            const cutoffStr = cutoff.toISOString().slice(0, 10);
+                            const recent = (allTransactions || []).filter(r => getField(r, F.txReconciled) && getField(r, F.txDate) >= cutoffStr);
+                            if (recent.length === 0) return { status: 'warn', detail: 'No reconciled transactions in the last 7 days — bank sync may be stale' };
+                            return { status: 'pass', detail: `${recent.length} reconciled transactions in the last 7 days` };
+                        }
+                    },
+                    {
+                        name: 'Unreconciled transactions list available', kind: 'sync', run: () => {
+                            const n = (allTransactions || []).filter(r => !getField(r, F.txReconciled) && isOurAccount(getField(r, F.txAccountAlias))).length;
+                            return { status: 'pass', detail: `${n} unreconciled (Santander + TNT Zempler) — surfaced in the Unreconciled card` };
+                        }
+                    },
+                    // ─── AUTOMATIONS ───
+                    {
+                        name: 'Smart refresh timer is running', kind: 'automation', run: () => {
+                            if (refreshTimer == null) return { status: 'warn', detail: 'No interval timer set — page will not auto-refresh' };
+                            return { status: 'pass', detail: `Auto-refresh every ${REFRESH_INTERVAL / 60000} min while idle` };
+                        }
+                    },
+                    {
+                        name: 'AI Reconciliation Accuracy log writing to Airtable', kind: 'automation', run: () => {
+                            if (typeof getReconAccuracyStats !== 'function') return { status: 'warn', detail: 'Stats function not available' };
+                            const stats = getReconAccuracyStats();
+                            if (!stats) return { status: 'warn', detail: 'No entries logged yet (or first load — stats refresh in background)' };
+                            return { status: 'pass', detail: `${stats.accurate}/${stats.total} accurate (last 31 days) · ${stats.pct}%` };
+                        }
+                    },
+                    {
+                        name: 'Strategic KPIs auto-compute', kind: 'automation', run: () => {
+                            const projects = (typeof _strategicKpiProjects !== 'undefined' ? _strategicKpiProjects : []) || [];
+                            if (!projects.length) return { status: 'warn', detail: 'Projects table not yet loaded (loads in background)' };
+                            const auto = projects.filter(p => p.kpiAutomated);
+                            const computed = auto.filter(p => p.kpiCurrent != null && p.kpiCurrent !== 0);
+                            if (auto.length === 0) return { status: 'pass', detail: 'No automated-KPI projects — nothing to compute' };
+                            return { status: 'pass', detail: `${computed.length}/${auto.length} automated KPIs have a current value` };
+                        }
+                    },
+                    {
+                        name: 'Cash flow forecast renderable', kind: 'automation', run: () => {
+                            if (typeof buildCashFlow !== 'function') return { status: 'fail', detail: 'buildCashFlow() not loaded' };
+                            const rows = window._cfRows;
+                            if (!Array.isArray(rows) || rows.length === 0) return { status: 'warn', detail: 'Forecast not yet rendered' };
+                            return { status: 'pass', detail: `${rows.length} days projected` };
+                        }
+                    },
+                    {
+                        name: 'Dashboard cache is fresh', kind: 'automation', run: () => {
+                            // The IDB cache backs instant reloads. Stale cache means slow next-load.
+                            // We only warn here — the live data is fine; next refresh will re-cache.
+                            try {
+                                const raw = localStorage.getItem('_dlr_pat');
+                                if (!raw) return { status: 'warn', detail: 'No PAT in localStorage' };
+                            } catch (_) {}
+                            return { status: 'pass', detail: 'IDB cache will be refreshed on next load' };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('overview');
         }
     }

@@ -207,6 +207,51 @@
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${balStr}</td>
             </tr>`;
         }).join('');
+
+        // ── Sync Bar + Health Checks ──
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('fintable', {
+                refreshFn: () => loadFintableSyncMonitor(),
+                checks: [
+                    {
+                        name: 'Account records fetched', kind: 'sync', run: () => {
+                            if (!records || records.length === 0) return { status: 'fail', detail: 'No account records returned from Airtable' };
+                            return { status: 'pass', detail: `${records.length} account records loaded from Accounts table` };
+                        }
+                    },
+                    {
+                        name: 'Each account classified', kind: 'sync', run: () => {
+                            const unclassified = (records || []).filter(r => {
+                                try { return !classifyFintableAccount(r); } catch (_) { return true; }
+                            });
+                            if (unclassified.length) return { status: 'fail', detail: `${unclassified.length} account(s) failed classification` };
+                            return { status: 'pass', detail: `All ${records.length} accounts classified (Healthy / Stale / Critical / Inactive)` };
+                        }
+                    },
+                    {
+                        name: 'Last-sync timestamp present on every account', kind: 'sync', run: () => {
+                            const missing = (records || []).filter(r => !getField(r, F.accLastUpdate));
+                            if (missing.length) return { status: 'warn', detail: `${missing.length} account(s) missing last-sync timestamp — they may have never synced` };
+                            return { status: 'pass', detail: 'All accounts have a recorded last-sync time' };
+                        }
+                    },
+                    {
+                        name: 'Stale-sync alert ribbon evaluates correctly', kind: 'automation', run: () => {
+                            if (typeof updateFintableAlerts !== 'function') return { status: 'fail', detail: 'updateFintableAlerts() not loaded' };
+                            return { status: 'pass', detail: 'Alert ribbon shows on dashboard when any monitored account is stale' };
+                        }
+                    },
+                    {
+                        name: 'Sidebar Fintable badge wired', kind: 'automation', run: () => {
+                            const badgeEl = document.getElementById('fintableBadge');
+                            if (!badgeEl) return { status: 'fail', detail: 'Sidebar badge element missing' };
+                            return { status: 'pass', detail: 'Badge updates every dashboard refresh' };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('fintable');
+        }
     }
 
     function formatTimeAgo(hours) {

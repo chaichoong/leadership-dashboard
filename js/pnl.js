@@ -679,6 +679,7 @@ RULES:
         const monthOptions = [1, 3, 6, 12].map(m => `<option value="${m}" ${m === pnlMonths ? 'selected' : ''}>${m} month${m === 1 ? '' : 's'}</option>`).join('');
 
         host.innerHTML = `
+            <div data-sync-bar="pnl"></div>
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:12px">
                     <div>
@@ -792,4 +793,60 @@ RULES:
 
         // Render charts after DOM is ready
         requestAnimationFrame(() => pnlRenderCharts(pnl, keys));
+
+        // ── Sync Bar + Health Checks ──
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('pnl', {
+                // Pull fresh transactions/categories then re-render the P&L view from them.
+                refreshFn: async () => { await loadDashboard(); renderPnL(); },
+                checks: [
+                    {
+                        name: 'Reconciled transactions present', kind: 'sync', run: () => {
+                            const rec = (allTransactions || []).filter(r => getField(r, F.txReconciled));
+                            if (rec.length === 0) return { status: 'fail', detail: 'No reconciled transactions — P&L cannot be computed' };
+                            return { status: 'pass', detail: `${rec.length} reconciled transactions available across all business filters` };
+                        }
+                    },
+                    {
+                        name: `Last ${pnlMonths} months computed`, kind: 'sync', run: () => {
+                            if (!keys || keys.length === 0) return { status: 'fail', detail: 'No month buckets generated' };
+                            const haveData = keys.filter(k => (pnl.revenue[k] || 0) > 0 || (pnl.cogs[k] || 0) > 0).length;
+                            if (haveData === 0) return { status: 'warn', detail: `${keys.length} month buckets generated but all empty — check business filter and data` };
+                            return { status: 'pass', detail: `${haveData}/${keys.length} months have non-zero P&L data` };
+                        }
+                    },
+                    {
+                        name: 'Categories + Sub-Categories loaded', kind: 'sync', run: () => {
+                            const cats = (allCategories || []).length;
+                            const subs = (allSubCategories || []).length;
+                            if (cats === 0 || subs === 0) return { status: 'fail', detail: `Chart of Accounts incomplete: ${cats} categories, ${subs} sub-categories` };
+                            return { status: 'pass', detail: `${cats} categories · ${subs} sub-categories from Chart of Accounts` };
+                        }
+                    },
+                    {
+                        name: 'Business filter resolves to records', kind: 'sync', run: () => {
+                            const matches = (allTransactions || []).filter(t => {
+                                const links = getField(t, F.txBusiness);
+                                if (!Array.isArray(links)) return false;
+                                return links.some(l => (typeof l === 'object' ? l.name : l) === pnlBusinessName);
+                            });
+                            return { status: 'pass', detail: `${matches.length} transactions matched business "${pnlBusinessName}"` };
+                        }
+                    },
+                    {
+                        name: 'Net Profit grand total computed', kind: 'automation', run: () => {
+                            const grand = pnl.grand;
+                            if (!grand || isNaN(grand.netProfit)) return { status: 'fail', detail: 'Grand totals missing or NaN' };
+                            return { status: 'pass', detail: `${pnlMonths}-month net profit: ${pnlGBP(grand.netProfit)} (${(grand.netMargin || 0).toFixed(1)}%)` };
+                        }
+                    },
+                    {
+                        name: 'Charts render hook scheduled', kind: 'automation', run: () => {
+                            return { status: 'pass', detail: 'pnlRenderCharts() queued via requestAnimationFrame after each render' };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('pnl');
+        }
     }

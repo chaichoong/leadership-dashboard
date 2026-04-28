@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="css/tokens.css?v=1">
-    <link rel="stylesheet" href="css/styles.css?v=12">
+    <link rel="stylesheet" href="css/styles.css?v=13">
 </head>
 <body>
     <!-- Auth Screen -->
@@ -118,6 +118,8 @@
 
         <!-- Tab 1: Leadership Dashboard -->
         <div class="tab-panel active" id="tab-overview">
+
+        <div data-sync-bar="overview"></div>
 
         <div class="header">
             <h1>Leadership Dashboard OS</h1>
@@ -249,6 +251,7 @@
 
         <!-- Tab 3: Invoices -->
         <div class="tab-panel" id="tab-invoices">
+            <div data-sync-bar="invoices"></div>
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Invoices OS — Invoices to Pay</h2>
@@ -301,6 +304,7 @@
 
         <!-- Tab 4: CFVs -->
         <div class="tab-panel" id="tab-cfv">
+            <div data-sync-bar="cfv"></div>
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids OS</h2>
@@ -380,6 +384,7 @@
 
         <!-- Tab 7: Site Map -->
         <div class="tab-panel" id="tab-sitemap">
+            <div data-sync-bar="sitemap"></div>
             <div class="section">
                 <h2 class="section-title">Site Map & Links</h2>
                 <div id="sitemapIntegrity" style="margin-bottom:16px"></div>
@@ -406,6 +411,7 @@
 
         <!-- Tab 8: Fintable Sync Monitor (Admin) -->
         <div class="tab-panel" id="tab-fintable">
+            <div data-sync-bar="fintable"></div>
             <div class="section">
                 <h2 class="section-title">Fintable Sync Monitor OS</h2>
                 <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">Monitors active bank account syncs from Fintable. Accounts that haven't synced recently are flagged so you can reconnect them.</p>
@@ -451,17 +457,18 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <script defer src="js/config.js?v=16"></script>
+    <script defer src="js/config.js?v=17"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
     <script defer src="js/shared.js?v=17"></script>
-    <script defer src="js/dashboard.js?v=17"></script>
+    <script defer src="js/sync-bar.js?v=1"></script>
+    <script defer src="js/dashboard.js?v=18"></script>
     <script defer src="js/cashflow.js?v=13"></script>
-    <script defer src="js/sitemap.js?v=21"></script>
-    <script defer src="js/invoices.js?v=11"></script>
-    <script defer src="js/pnl.js?v=17"></script>
+    <script defer src="js/sitemap.js?v=22"></script>
+    <script defer src="js/invoices.js?v=12"></script>
+    <script defer src="js/pnl.js?v=18"></script>
     <script defer src="js/reconciliation.js?v=13"></script>
-    <script defer src="js/cfv.js?v=12"></script>
-    <script defer src="js/fintable.js?v=11"></script>
+    <script defer src="js/cfv.js?v=13"></script>
+    <script defer src="js/fintable.js?v=12"></script>
     <script defer src="js/ai-assistant.js?v=13"></script>
 </body>
 </html>

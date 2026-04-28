@@ -273,4 +273,6 @@
     let allCategories = [];   // Chart of Accounts categories
     let allSubCategories = []; // Chart of Accounts sub-categories
     let allBusinesses = [];   // Business entities
+    let allAccounts = [];     // Bank/credit-card account records — used by sync-bar health checks
+    let allRentalUnits = [];  // Rental unit records — used by sync-bar health checks
 

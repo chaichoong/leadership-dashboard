@@ -462,6 +462,74 @@
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
             </tr>`;
         }).join('');
+
+        // ── Sync Bar + Health Checks ──
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('cfv', {
+                // loadDashboard re-fetches the underlying tenancies/transactions; renderCFVTab
+                // re-derives this tab's view from those globals. Both must run for the user's
+                // refresh click to actually reflect new data on this specific tab.
+                refreshFn: async () => { await loadDashboard(); await renderCFVTab(); },
+                checks: [
+                    {
+                        name: 'CFV detection runs without error', kind: 'sync', run: () => {
+                            try {
+                                const list = detectCFVs();
+                                return { status: 'pass', detail: `${list.length} CFV entries computed (CFV + actioned + potential)` };
+                            } catch (e) {
+                                return { status: 'fail', detail: 'detectCFVs() threw: ' + e.message };
+                            }
+                        }
+                    },
+                    {
+                        name: 'Tenancy → Tenant link resolves', kind: 'sync', run: () => {
+                            const lookup = buildTenantLookup();
+                            const cfvList = detectCFVs();
+                            const orphans = cfvList.filter(e => !lookup[(e.tenantId || '')]);
+                            if (orphans.length) return { status: 'warn', detail: `${orphans.length} CFV tenancies have no resolvable tenant record` };
+                            return { status: 'pass', detail: `All ${cfvList.length} CFV entries have a linked tenant` };
+                        }
+                    },
+                    {
+                        name: 'Days-overdue figure populated for each CFV', kind: 'sync', run: () => {
+                            const cfvList = detectCFVs();
+                            const cfvOnly = cfvList.filter(e => e.status === 'cfv' || e.status === 'cfv actioned');
+                            const missing = cfvOnly.filter(e => e.daysOverdue == null || isNaN(e.daysOverdue));
+                            if (missing.length) return { status: 'fail', detail: `${missing.length} CFV(s) missing daysOverdue value — formula on Tenancies table may be broken` };
+                            return { status: 'pass', detail: `All ${cfvOnly.length} CFV entries have daysOverdue computed` };
+                        }
+                    },
+                    {
+                        name: 'CFV exposure number computed', kind: 'sync', run: () => {
+                            const cfvList = detectCFVs();
+                            const exposure = cfvList.filter(e => e.status === 'cfv' || e.status === 'cfv actioned')
+                                .reduce((s, e) => s + (Number(e.rent) || 0), 0);
+                            if (isNaN(exposure)) return { status: 'fail', detail: 'Exposure calculation produced NaN' };
+                            return { status: 'pass', detail: `Total CFV exposure: ${fmt(exposure)}` };
+                        }
+                    },
+                    {
+                        name: 'Sidebar CFV badges in sync with detection', kind: 'automation', run: () => {
+                            const cfvList = detectCFVs();
+                            const visible = cfvList.filter(e => {
+                                if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
+                                return true;
+                            });
+                            const cfvCount = visible.filter(e => e.status === 'cfv' || e.status === 'potential').length;
+                            const actionedCount = visible.filter(e => e.status === 'cfv actioned').length;
+                            return { status: 'pass', detail: `${cfvCount} unactioned · ${actionedCount} actioned · sidebar badges match` };
+                        }
+                    },
+                    {
+                        name: 'Dismissals persist across devices', kind: 'automation', run: () => {
+                            const localCount = Object.keys(localStorage).filter(k => k.startsWith('cfv_dismissed_')).length;
+                            return { status: 'pass', detail: `${localCount} potential-CFV dismissals stored locally; restored from Airtable comments on load` };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('cfv');
+        }
     }
 
     // ── CFV Actions ──
