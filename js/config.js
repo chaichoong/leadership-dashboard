@@ -13,7 +13,7 @@
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.8', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.1', sopFile: 'sop-invoices.html',           sopVer: '2.1', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.12', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
-        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.6', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.7', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.1', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
         { id: 'launch-plan', name: 'Operations Director Launch Plan', icon: '🚀', pageVer: '1.0', sopFile: '',                         sopVer: '1.0', standalone: 'index.html#launch-plan' },
         // OS-INTEGRATION: PAGE_REGISTRY entries — DO NOT REMOVE (see MEMORY.md)
