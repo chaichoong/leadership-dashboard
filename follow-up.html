@@ -822,6 +822,13 @@
                 <p class="kb-status" id="backupStatus" style="margin-top:8px;"></p>
             </div>
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
+                <label>Health Check</label>
+                <p class="settings-info" style="margin-bottom:10px;">Tests that all the connected systems are still working — Airtable, the Gmail invoice sync, and the AI. Run this any time you want to verify nothing's broken before the team hits an issue. Each click costs roughly nothing (~£0.0001).</p>
+                <button class="kb-btn" id="healthCheckBtn" onclick="runHealthCheck()" style="width:100%;">▶ Run health check</button>
+                <div id="healthCheckResults" style="margin-top:12px; display:none; font-size:13px; line-height:1.7;"></div>
+            </div>
+
+            <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
                 <label>Audit Log</label>
                 <p class="settings-info" style="margin-bottom:10px;">Recent actions performed in this app.</p>
                 <div class="audit-log-list" id="auditLogList">
@@ -2442,6 +2449,147 @@ Respond with ONLY the JSON object, no markdown.`;
             console.error('Airtable task creation failed:', err);
             showError('Failed to create Airtable task: ' + err.message);
             return false;
+        }
+    }
+
+    // ============================================================
+    // HEALTH CHECK — admin smoke test
+    // ============================================================
+    // Verifies the three external systems Inbound Comms depends on:
+    //   1. Airtable Tasks table — creates a TEST record then deletes it.
+    //      Catches field-format regressions (status, assignee, priority,
+    //      etc.) before the team hits them in production.
+    //   2. Gmail Invoice Apps Script — hits ?action=count, expects a
+    //      number back. Catches script deploy or label-name issues.
+    //   3. Claude API proxy — sends a tiny Haiku call, expects a 200.
+    //      Catches proxy outages and credit exhaustion.
+    async function runHealthCheck() {
+        const btn = document.getElementById('healthCheckBtn');
+        const resultsEl = document.getElementById('healthCheckResults');
+        btn.disabled = true;
+        btn.textContent = 'Running...';
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = '<div style="color:var(--text-muted);">⏳ Running checks…</div>';
+
+        const checks = [];
+
+        // Check 1: Airtable Tasks create + delete
+        const airtableResult = await healthCheckAirtable();
+        checks.push({ name: 'Tasks (Airtable)', ...airtableResult });
+
+        // Check 2: Gmail Invoice Apps Script
+        const scriptResult = await healthCheckInvoiceScript();
+        checks.push({ name: 'Invoices (Gmail sync)', ...scriptResult });
+
+        // Check 3: Claude API proxy
+        const aiResult = await healthCheckClaudeProxy();
+        checks.push({ name: 'AI (Claude)', ...aiResult });
+
+        // Render
+        const okCount = checks.filter(c => c.ok).length;
+        const summary = okCount === checks.length
+            ? '<div style="color:var(--success); font-weight:600; margin-bottom:8px;">✅ All systems working.</div>'
+            : `<div style="color:var(--danger); font-weight:600; margin-bottom:8px;">⚠️ ${checks.length - okCount} of ${checks.length} checks failed — see details below.</div>`;
+
+        const lines = checks.map(c => {
+            const icon = c.ok ? '✅' : '❌';
+            const color = c.ok ? 'var(--success)' : 'var(--danger)';
+            const detail = c.detail ? `<span style="color:var(--text-muted); margin-left:6px;">${escapeHtml(c.detail)}</span>` : '';
+            return `<div><span style="color:${color};">${icon}</span> <strong>${c.name}</strong>${detail}</div>`;
+        }).join('');
+
+        resultsEl.innerHTML = summary + lines;
+        addAuditEntry('health_check', `Ran health check: ${okCount}/${checks.length} passed`);
+        btn.disabled = false;
+        btn.textContent = '▶ Run health check';
+    }
+
+    async function healthCheckAirtable() {
+        const pat = getAirtablePat();
+        if (!pat) return { ok: false, detail: 'No Airtable PAT configured in Settings' };
+
+        const testTitle = `[HEALTHCHECK] ${new Date().toISOString()}`;
+        const record = {
+            fields: {
+                [AIRTABLE_FIELDS.taskName]: testTitle,
+                [AIRTABLE_FIELDS.status]: 'Today',
+                [AIRTABLE_FIELDS.assignee]: { id: getAirtableAssignee() },
+                [AIRTABLE_FIELDS.priority]: 'Urgent',
+                [AIRTABLE_FIELDS.timeEstimate]: '15 min',
+                [AIRTABLE_FIELDS.description]: 'Automated health check — safe to delete',
+                [AIRTABLE_FIELDS.isInbound]: true,
+                [AIRTABLE_FIELDS.sourceType]: 'Gmail',
+                [AIRTABLE_FIELDS.sender]: 'healthcheck@local',
+                [AIRTABLE_FIELDS.dateReceived]: new Date().toISOString().slice(0, 10),
+                [AIRTABLE_FIELDS.noteUrl]: 'https://example.com/healthcheck',
+                [AIRTABLE_FIELDS.dueDate]: new Date().toISOString().slice(0, 10)
+            }
+        };
+
+        let createdId = null;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: [record] })
+            });
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                return { ok: false, detail: `Create failed: ${errData.error?.message || resp.status}` };
+            }
+            const data = await resp.json();
+            createdId = data.records?.[0]?.id;
+            if (!createdId) return { ok: false, detail: 'Create returned no record ID' };
+        } catch (err) {
+            return { ok: false, detail: 'Create error: ' + err.message };
+        }
+
+        // Cleanup — delete the test record. Cleanup failure is logged but
+        // does not fail the check, since the create succeeded.
+        try {
+            await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${createdId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + pat }
+            });
+        } catch (err) {
+            console.warn('Health check cleanup failed:', err);
+            return { ok: true, detail: '(test record could not be auto-deleted — please remove manually)' };
+        }
+        return { ok: true, detail: 'Created + deleted test record' };
+    }
+
+    async function healthCheckInvoiceScript() {
+        try {
+            const resp = await fetch(GMAIL_INVOICE_SCRIPT_URL + '?action=count');
+            if (!resp.ok) return { ok: false, detail: `Apps Script HTTP ${resp.status}` };
+            const data = await resp.json();
+            if (typeof data.gmailCount !== 'number') {
+                return { ok: false, detail: 'Apps Script did not return a count — label may be missing' };
+            }
+            return { ok: true, detail: `${data.gmailCount} invoices in Gmail "to pay" label` };
+        } catch (err) {
+            return { ok: false, detail: 'Could not reach Apps Script: ' + err.message };
+        }
+    }
+
+    async function healthCheckClaudeProxy() {
+        try {
+            const resp = await fetch(CLAUDE_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'claude-haiku-4-5-20251001',
+                    max_tokens: 5,
+                    messages: [{ role: 'user', content: 'reply with just the word OK' }]
+                })
+            });
+            if (!resp.ok) return { ok: false, detail: `Proxy HTTP ${resp.status}` };
+            const data = await resp.json();
+            const text = data.content?.[0]?.text || '';
+            if (!text) return { ok: false, detail: 'Proxy returned empty content' };
+            return { ok: true, detail: 'AI responded: "' + text.trim() + '"' };
+        } catch (err) {
+            return { ok: false, detail: 'Could not reach Claude proxy: ' + err.message };
         }
     }
 
