@@ -2383,17 +2383,18 @@ Respond with ONLY the JSON object, no markdown.`;
         const record = {
             fields: {
                 [AIRTABLE_FIELDS.taskName]: content.title,
-                [AIRTABLE_FIELDS.status]: { name: 'Today' },
-                // Assignee is a singleCollaborator field — Airtable expects a
-                // bare object (or string), NOT an array. Wrapping in an array
-                // returns 422 "Cannot parse value" and silently kills the
-                // entire task create.
+                // singleSelect fields (Status, Priority, Time Estimate, Source
+                // Type) must be passed as a plain string — Airtable rejects
+                // the {name: '...'} format with "Cannot parse value for field".
+                [AIRTABLE_FIELDS.status]: 'Today',
+                // singleCollaborator (Assignee) expects a bare object, not an
+                // array — wrapping in [] returns 422.
                 [AIRTABLE_FIELDS.assignee]: { id: getAirtableAssignee() },
-                [AIRTABLE_FIELDS.priority]: { name: 'Urgent' },
-                [AIRTABLE_FIELDS.timeEstimate]: { name: '15 min' },
+                [AIRTABLE_FIELDS.priority]: 'Urgent',
+                [AIRTABLE_FIELDS.timeEstimate]: '15 min',
                 [AIRTABLE_FIELDS.description]: content.description,
                 [AIRTABLE_FIELDS.isInbound]: true,
-                [AIRTABLE_FIELDS.sourceType]: { name: 'Gmail' },
+                [AIRTABLE_FIELDS.sourceType]: 'Gmail',
                 [AIRTABLE_FIELDS.messageContent]: bodyText,
                 [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
                 [AIRTABLE_FIELDS.dateReceived]: today,
