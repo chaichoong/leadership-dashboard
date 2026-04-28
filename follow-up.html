@@ -2699,15 +2699,23 @@ Body: ${bodyText}`;
 
         const checks = [];
 
-        // Check 1: Airtable Tasks create + delete
+        // Check 1: Airtable Tasks create + delete (default Mica assignee)
         const airtableResult = await healthCheckAirtable();
-        checks.push({ name: 'Tasks (Airtable)', ...airtableResult });
+        checks.push({ name: 'Tasks — Mica assignee (label 8)', ...airtableResult });
 
-        // Check 2: Gmail Invoice Apps Script
+        // Check 2: Airtable Tasks create + delete with Kevin as assignee (label 12)
+        const kevinResult = await healthCheckKevinTask();
+        checks.push({ name: 'Tasks — Kevin assignee (label 12)', ...kevinResult });
+
+        // Check 3: Tenancies table read + Document Links write (label 11)
+        const tenancyResult = await healthCheckTenancies();
+        checks.push({ name: 'Tenancy docs link (label 11)', ...tenancyResult });
+
+        // Check 4: Gmail Invoice Apps Script
         const scriptResult = await healthCheckInvoiceScript();
         checks.push({ name: 'Invoices (Gmail sync)', ...scriptResult });
 
-        // Check 3: Claude API proxy
+        // Check 5: Claude API proxy
         const aiResult = await healthCheckClaudeProxy();
         checks.push({ name: 'AI (Claude)', ...aiResult });
 
@@ -2782,6 +2790,127 @@ Body: ${bodyText}`;
             return { ok: true, detail: '(test record could not be auto-deleted — please remove manually)' };
         }
         return { ok: true, detail: 'Created + deleted test record' };
+    }
+
+    // Same as healthCheckAirtable but uses Kevin's user ID — proves the
+    // label-12 path works.
+    async function healthCheckKevinTask() {
+        const pat = getAirtablePat();
+        if (!pat) return { ok: false, detail: 'No Airtable PAT' };
+
+        const record = {
+            fields: {
+                [AIRTABLE_FIELDS.taskName]: `[HEALTHCHECK Kevin] ${new Date().toISOString()}`,
+                [AIRTABLE_FIELDS.status]: 'Today',
+                [AIRTABLE_FIELDS.assignee]: { id: AIRTABLE_ASSIGNEE_KEVIN },
+                [AIRTABLE_FIELDS.priority]: 'Urgent',
+                [AIRTABLE_FIELDS.timeEstimate]: '15 min',
+                [AIRTABLE_FIELDS.description]: 'Health check — safe to delete',
+                [AIRTABLE_FIELDS.isInbound]: true,
+                [AIRTABLE_FIELDS.sourceType]: 'Gmail',
+                [AIRTABLE_FIELDS.sender]: 'healthcheck@local',
+                [AIRTABLE_FIELDS.dateReceived]: new Date().toISOString().slice(0, 10),
+                [AIRTABLE_FIELDS.noteUrl]: 'https://example.com/healthcheck',
+                [AIRTABLE_FIELDS.dueDate]: new Date().toISOString().slice(0, 10)
+            }
+        };
+
+        let createdId = null;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: [record] })
+            });
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                return { ok: false, detail: `Create failed: ${errData.error?.message || resp.status}` };
+            }
+            const data = await resp.json();
+            createdId = data.records?.[0]?.id;
+            const assigneeName = data.records?.[0]?.fields?.[AIRTABLE_FIELDS.assignee]?.name || '';
+            // Verify Airtable resolved Kevin's user ID to the correct person
+            if (assigneeName && !assigneeName.toLowerCase().includes('kevin')) {
+                if (createdId) await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${createdId}`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + pat } });
+                return { ok: false, detail: `Assignee resolved to "${assigneeName}" instead of Kevin — user ID may be wrong` };
+            }
+        } catch (err) {
+            return { ok: false, detail: 'Create error: ' + err.message };
+        }
+
+        // Cleanup
+        try {
+            await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${createdId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + pat }
+            });
+        } catch (err) {
+            return { ok: true, detail: '(test record could not be auto-deleted — please remove manually)' };
+        }
+        return { ok: true, detail: 'Created + deleted Kevin-assigned test record' };
+    }
+
+    // Reads active tenancies (proves the label-11 list fetch works) and
+    // round-trips a Document Links PATCH on a single record (proves the
+    // append-link write works), then immediately reverts the test write
+    // by clearing back to the prior value.
+    async function healthCheckTenancies() {
+        const pat = getAirtablePat();
+        if (!pat) return { ok: false, detail: 'No Airtable PAT' };
+        const F = AIRTABLE_TENANCIES_FIELDS;
+
+        // 1. Read — fetch active tenancies
+        let tenancies;
+        try {
+            tenancies = await fetchActiveTenancies();
+        } catch (err) {
+            return { ok: false, detail: 'Tenancies fetch failed: ' + err.message };
+        }
+        if (tenancies.length === 0) {
+            return { ok: false, detail: 'No active tenancies found' };
+        }
+
+        // 2. Write round-trip on the FIRST tenancy
+        const target = tenancies[0];
+        // Re-read its current Document Links so we can restore exactly
+        let priorValue;
+        try {
+            const r = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${target.id}?returnFieldsByFieldId=true&fields%5B%5D=${F.documentLinks}`, {
+                headers: { 'Authorization': 'Bearer ' + pat }
+            });
+            if (!r.ok) return { ok: false, detail: `Tenancy read failed: HTTP ${r.status}` };
+            priorValue = (await r.json()).fields?.[F.documentLinks] || '';
+        } catch (err) {
+            return { ok: false, detail: 'Tenancy read error: ' + err.message };
+        }
+
+        const testMarker = `[HEALTHCHECK ${Date.now()}]`;
+        const testWrite = priorValue ? priorValue + '\n' + testMarker : testMarker;
+        try {
+            const w = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${target.id}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.documentLinks]: testWrite } })
+            });
+            if (!w.ok) {
+                const errData = await w.json().catch(() => ({}));
+                return { ok: false, detail: `Document Links write failed: ${errData.error?.message || w.status}` };
+            }
+        } catch (err) {
+            return { ok: false, detail: 'Document Links write error: ' + err.message };
+        }
+
+        // 3. Revert to prior value
+        try {
+            await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${target.id}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.documentLinks]: priorValue } })
+            });
+        } catch (err) {
+            return { ok: true, detail: `${tenancies.length} active tenancies; write OK but revert failed — please clear "${testMarker}" from ${target.surname} manually` };
+        }
+        return { ok: true, detail: `${tenancies.length} active tenancies; Document Links write+revert OK` };
     }
 
     async function healthCheckInvoiceScript() {
