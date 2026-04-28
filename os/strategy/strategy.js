@@ -238,7 +238,7 @@ async function loadRecord() {
                 },
                 {
                     name: 'Push-to-Projects working', kind: 'automation', run: () => {
-                        if (typeof pushProjectsToTable !== 'function') return { status: 'warn', detail: 'pushProjectsToTable() not loaded — quarterly projects can\'t be promoted' };
+                        if (typeof pushProjectsManually !== 'function') return { status: 'warn', detail: 'pushProjectsManually() not loaded — quarterly projects can\'t be promoted' };
                         return { status: 'pass', detail: 'Projects table push wired — Strategy projects flow into Task OS' };
                     }
                 },
