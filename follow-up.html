@@ -815,8 +815,8 @@
                 <label>Backup &amp; Restore</label>
                 <p class="settings-info" style="margin-bottom:10px;">Export all local data (knowledge base, AI corrections, accuracy log, delay payments, newsletter reads, unsubscribe log, sender name) to a JSON file. Import to restore on a new browser or device.</p>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button class="kb-btn" onclick="exportBackup()" style="background:var(--success);">Export Backup</button>
-                    <button class="kb-btn" onclick="document.getElementById('importFile').click();" style="background:var(--accent);">Import Backup</button>
+                    <button class="kb-btn" onclick="exportBackup()" style="background:var(--success); color:white; border-color:var(--success);">Export Backup</button>
+                    <button class="kb-btn" onclick="document.getElementById('importFile').click();" style="background:var(--accent); color:white; border-color:var(--accent);">Import Backup</button>
                     <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importBackup(event)" />
                 </div>
                 <p class="kb-status" id="backupStatus" style="margin-top:8px;"></p>
