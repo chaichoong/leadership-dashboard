@@ -139,6 +139,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Detail link button */
 .row-open{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
 .row-open:hover{background:var(--bg-surface);color:var(--accent)}
+
+/* Schema inspector modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.5);z-index:9997;display:flex;align-items:center;justify-content:center;padding:24px}
+.modal-card{background:var(--bg-surface);border-radius:12px;max-width:1100px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.modal-header{padding:18px 24px;border-bottom:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between}
+.modal-header h2{font-size:17px}
+.modal-body{flex:1;overflow-y:auto;padding:18px 24px}
+.modal-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
+.schema-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:24px}
+.schema-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px}
+.schema-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.schema-table tr.unmapped td{background:var(--warning-bg)}
+.schema-table tr.unused td{color:var(--text-muted)}
+.schema-table .col-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.schema-table .col-type{color:var(--text-muted);font-size:11px}
+.schema-section h3{font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.schema-section h3 .pill{font-size:10px;padding:1px 7px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.schema-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-secondary);font-weight:600}
+.schema-tag.warn{background:var(--warning-bg);color:var(--warning)}
+.schema-tag.ok{background:var(--success-bg);color:var(--success)}
 </style>
 </head>
 <body>
@@ -159,6 +179,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   </div>
   <div class="topbar-right">
     <span id="syncStatus" style="font-size:11px;color:var(--text-muted)"></span>
+    <button class="btn btn-sm" onclick="openSchemaInspector()" title="Show every field across the four tables and what's mapped">🔍 Schema</button>
     <button class="btn btn-sm" onclick="refreshAll()">↻ Refresh</button>
   </div>
 </div>
@@ -255,94 +276,90 @@ const TABLE = {
   costs:       'tblx5kvhzNEI5TFlS',
 };
 
-// Curated field NAMES per entity. Field IDs are resolved at load time via
-// the Airtable metadata API and cached. This is more robust than hardcoding
-// IDs because Airtable lets you rename a field without breaking the page.
+// Curated field RESOLVERS per entity. Field IDs are resolved at load time
+// via the Airtable metadata API. Each field provides MULTIPLE name candidates
+// + optional keyword matchers so common naming variations work without
+// hand-editing this file.
+//
+// Resolution order: `primary:true` → use Airtable's primaryFieldId
+//                   `exact:[...]`  → first case-insensitive match wins
+//                   `keywords:[]`  → first field whose name contains ALL keywords
 //
 // `key`     — internal id used in render code
 // `label`   — column header
-// `name`    — field name as it appears in Airtable (case-insensitive match)
-// `type`    — display hint: text|long|number|money|percent|date|select|check|link|formula
+// `type`    — display hint: text|long|number|money|percent|date|select|check|link
 // `edit`    — true if cell is editable (auto-disabled if Airtable says read-only)
 // `link`    — for `type:link`, target table key (eg 'tenancies')
 // `width`   — optional CSS width
 const SCHEMA = {
   tenants: {
     label: 'Tenants',
-    primary: 'name',
     fields: [
-      { key:'name',    label:'Name',           name:'Name',                  type:'text',   edit:true,  width:'180px' },
-      { key:'status',  label:'Status',         name:'Tenant Status',         type:'select', edit:true },
-      { key:'unit',    label:'Current Unit',   name:'Rental Unit',           type:'link',   link:'units' },
-      { key:'phone',   label:'Phone',          name:'Contact Number',        type:'text',   edit:true },
-      { key:'email',   label:'Email',          name:'Email Address',         type:'text',   edit:true },
-      { key:'dob',     label:'DOB',            name:'Date of Birth',         type:'date',   edit:true },
-      { key:'payType', label:'Pay Type',       name:'Rent Payment Type',     type:'select', edit:true },
-      { key:'tenancy', label:'Tenancy',        name:'Tenancies',             type:'link',   link:'tenancies' },
-      { key:'notes',   label:'Notes',          name:'Notes',                 type:'long',   edit:true },
+      { key:'name',    label:'Name',         primary:true,                                                                      type:'text',   edit:true, width:'180px' },
+      { key:'status',  label:'Status',       exact:['Tenant Status','Status'],                                                  type:'select', edit:true },
+      { key:'unit',    label:'Current Unit', exact:['Rental Unit','Current Unit','Unit','Rental Units'],                        type:'link',   edit:true, link:'units' },
+      { key:'phone',   label:'Phone',        exact:['Contact Number','Phone Number','Phone','Mobile','Mobile Number'],          type:'text',   edit:true },
+      { key:'email',   label:'Email',        exact:['Email Address','Email','Email Address (Tenant)'],                          type:'text',   edit:true },
+      { key:'dob',     label:'DOB',          exact:['Date of Birth','DOB'],                                                     type:'date',   edit:true },
+      { key:'payType', label:'Pay Type',     exact:['Rent Payment Type','Payment Type'], keywords:['payment','type'],           type:'select', edit:true },
+      { key:'tenancy', label:'Tenancy',      exact:['Tenancies','Tenancy','Linked Tenancy'],                                    type:'link',   edit:true, link:'tenancies' },
     ],
   },
   tenancies: {
     label: 'Tenancies',
-    primary: 'ref',
     fields: [
-      { key:'ref',         label:'Reference',         name:'Tenancy',                  type:'text', edit:false, width:'180px' },
-      { key:'tenant',      label:'Tenant',            name:'Customers',                type:'link', link:'tenants' },
-      { key:'unit',        label:'Unit',              name:'Rental Unit',              type:'link', link:'units' },
-      { key:'property',    label:'Property',          name:'Property',                 type:'link', link:'properties' },
-      { key:'status',      label:'Status',            name:'Tenant Status',            type:'select', edit:false },
-      { key:'payStatus',   label:'Payment Status',    name:'Payment Status',           type:'select', edit:true },
-      { key:'startDate',   label:'Start Date',        name:'Tenancy Start Date',       type:'date',   edit:true },
-      { key:'rent',        label:'Monthly Rent',      name:'Expected Monthly Rent',    type:'money',  edit:true },
-      { key:'dueDay',      label:'Due Day',           name:'Day of Month Rent is Due', type:'number', edit:true },
-      { key:'payFreq',     label:'Pay Freq',          name:'Payment Frequency',        type:'select', edit:true },
+      { key:'ref',         label:'Reference',      primary:true,                                                                            type:'text',   edit:false, width:'180px' },
+      { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                  type:'link',   edit:true,  link:'tenants' },
+      { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                             type:'link',   edit:true,  link:'units' },
+      { key:'property',    label:'Property',       exact:['Property','Properties'],                                                         type:'link',   edit:false, link:'properties' },
+      { key:'status',      label:'Status',         exact:['Tenant Status','Tenancy Status','Status'],                                       type:'select', edit:false },
+      { key:'payStatus',   label:'Payment Status', exact:['Payment Status','Rent Payment Status','Pay Status'], keywords:['payment','status'], type:'select', edit:true },
+      { key:'startDate',   label:'Start Date',     exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                    type:'date',   edit:true },
+      { key:'rent',        label:'Monthly Rent',   exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],      type:'money',  edit:true },
+      { key:'dueDay',      label:'Due Day',        exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],     type:'number', edit:true },
+      { key:'payFreq',     label:'Pay Freq',       exact:['Payment Frequency','Pay Frequency'], keywords:['payment','frequency'],           type:'select', edit:true },
     ],
   },
   units: {
     label: 'Rental Units',
-    primary: 'name',
     fields: [
-      { key:'name',     label:'Unit',             name:'Rental Unit',         type:'text',   edit:false, width:'200px' },
-      { key:'unitType', label:'Type',             name:'Unit Type',           type:'select', edit:true },
-      { key:'unitNum',  label:'Unit #',           name:'Unit Number',         type:'number', edit:true },
-      { key:'property', label:'Property',         name:'Property',            type:'link',   link:'properties' },
-      { key:'status',   label:'Status',           name:'Status',              type:'select', edit:true },
-      { key:'tenant',   label:'Current Tenant',   name:'Current Tenant',      type:'link',   link:'tenants' },
-      { key:'tenancy',  label:'Current Tenancy',  name:'Tenancies',           type:'link',   link:'tenancies' },
-      { key:'rent',     label:'Current Rent',     name:'Current Rent',        type:'money',  edit:false },
+      { key:'name',     label:'Unit',            primary:true,                                                                              type:'text',   edit:false, width:'200px' },
+      { key:'unitType', label:'Type',            exact:['Unit Type'], keywords:['unit','type'],                                             type:'select', edit:true },
+      { key:'unitNum',  label:'Unit #',          exact:['Unit Number'], keywords:['unit','number'],                                         type:'number', edit:true },
+      { key:'property', label:'Property',        exact:['Property','Properties'],                                                           type:'link',   edit:false, link:'properties' },
+      { key:'status',   label:'Status',          exact:['Status','Unit Status','Occupancy Status'], keywords:['status'],                    type:'select', edit:true },
+      { key:'tenant',   label:'Current Tenant',  exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants' },
+      { key:'tenancy',  label:'Current Tenancy', exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies' },
+      { key:'rent',     label:'Current Rent',    exact:['Current Rent','Monthly Rent','Rent'],                                              type:'money',  edit:false },
     ],
   },
-  // Properties uses a curated PRIMARY column list but also injects every
-  // remaining field on the table so nothing useful is hidden by accident.
-  // The detail drawer always shows everything.
   properties: {
     label: 'Properties',
-    primary: 'name',
     fields: [
-      { key:'name',         label:'Property',         name:'Property',                  type:'text',   edit:true, width:'220px' },
-      { key:'type',         label:'Type',             name:'Property Type',             type:'select', edit:true },
-      { key:'ownership',    label:'Ownership',        name:'Ownership',                 type:'select', edit:true },
-      { key:'agent',        label:'Agent / Landlord', name:'Agent / Landlord',          type:'text',   edit:true },
-      { key:'units',        label:'Units',            name:'Rental Units',              type:'link',   link:'units' },
-      { key:'grossRent',    label:'Gross Rent / mo',  name:'Gross Monthly Rent',        type:'money',  edit:false },
-      { key:'marketValue',  label:'Market Value',     name:'Current Market Value',      type:'money',  edit:true },
-      { key:'mortgageBal',  label:'Mortgage Bal',     name:'Mortgage Balance',          type:'money',  edit:true },
-      { key:'ltv',          label:'LTV',              name:'LTV',                       type:'percent',edit:false },
-      { key:'rate',         label:'Rate',             name:'Interest Rate',             type:'percent',edit:true },
-      { key:'mortgagePay',  label:'Mortgage / mo',    name:'Monthly Mortgage Payment',  type:'money',  edit:true },
-      { key:'grossYield',   label:'Gross Yield',      name:'Gross Yield',               type:'percent',edit:false },
+      { key:'name',         label:'Property',         primary:true,                                                                                                       type:'text',    edit:true, width:'220px' },
+      { key:'type',         label:'Type',             exact:['Property Type','Type'], keywords:['property','type'],                                                       type:'select',  edit:true },
+      { key:'ownership',    label:'Ownership',        exact:['Ownership','Owner','Owned/Managed','Ownership Type'],                                                       type:'select',  edit:true },
+      { key:'agent',        label:'Agent / Landlord', exact:['Agent / Landlord','Agent','Landlord','Managing Agent','Owner / Landlord'], keywords:['agent'],              type:'text',    edit:true },
+      { key:'units',        label:'Units',            exact:['Rental Units','Units','Linked Units'],                                                                      type:'link',    edit:false, link:'units' },
+      { key:'grossRent',    label:'Gross Rent / mo',  exact:['Gross Monthly Rent','Total Rent','Total Monthly Rent','Monthly Rent'], keywords:['gross','rent'],            type:'money',   edit:false },
+      { key:'marketValue',  label:'Market Value',     exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                        type:'money',   edit:true },
+      { key:'mortgageBal',  label:'Mortgage Bal',     exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'], type:'money', edit:true },
+      { key:'ltv',          label:'LTV',              exact:['LTV','LTV %','Loan to Value','Loan-to-Value'],                                                              type:'percent', edit:false },
+      { key:'rate',         label:'Rate',             exact:['Interest Rate','Mortgage Rate','Rate'], keywords:['interest','rate'],                                       type:'percent', edit:true },
+      { key:'mortgagePay',  label:'Mortgage / mo',    exact:['Monthly Mortgage Payment','Mortgage Payment','Approx Mortgage Payment','Mortgage Cost'], keywords:['mortgage','payment'], type:'money', edit:true },
+      { key:'grossYield',   label:'Gross Yield',      exact:['Gross Yield','Yield','Yield %'], keywords:['yield'],                                                        type:'percent', edit:false },
     ],
     // Extra fields shown ONLY in the detail drawer
     drawerExtras: [
-      { name:'Address',                  type:'long',   edit:true },
-      { name:'Postcode',                 type:'text',   edit:true },
-      { name:'Purchase Date',            type:'date',   edit:true },
-      { name:'Purchase Price',           type:'money',  edit:true },
-      { name:'Mortgage Provider',        type:'text',   edit:true },
-      { name:'Mortgage Account Number',  type:'text',   edit:true },
-      { name:'Mortgage Start Date',      type:'date',   edit:true },
-      { name:'Mortgage End Date',        type:'date',   edit:true },
-      { name:'Notes',                    type:'long',   edit:true },
+      { key:'_address',     label:'Address',                 exact:['Address','Full Address','Property Address'],            type:'long',  edit:true },
+      { key:'_postcode',    label:'Postcode',                exact:['Postcode','Post Code','Zip','Zip Code'],                type:'text',  edit:true },
+      { key:'_purchDate',   label:'Purchase Date',           exact:['Purchase Date','Date Purchased','Acquisition Date'],    type:'date',  edit:true },
+      { key:'_purchPrice',  label:'Purchase Price',          exact:['Purchase Price','Acquisition Price','Bought For'],      type:'money', edit:true },
+      { key:'_mortProv',    label:'Mortgage Provider',       exact:['Mortgage Provider','Lender','Mortgage Lender'],         type:'text',  edit:true },
+      { key:'_mortAcct',    label:'Mortgage Account Number', exact:['Mortgage Account Number','Account Number','Mortgage Reference'], type:'text', edit:true },
+      { key:'_mortStart',   label:'Mortgage Start Date',     exact:['Mortgage Start Date'],                                  type:'date',  edit:true },
+      { key:'_mortEnd',     label:'Mortgage End Date',       exact:['Mortgage End Date','Mortgage Expiry'],                  type:'date',  edit:true },
+      { key:'_notes',       label:'Notes',                   exact:['Notes','Property Notes','Comments'],                    type:'long',  edit:true },
     ],
   },
 };
@@ -413,6 +430,31 @@ async function fetchAllRecords(tableId, opts={}){
   return out;
 }
 
+// Resolve a single curated field def against an Airtable table's field list.
+// Returns the matched Airtable field or null.
+function resolveField(def, allFields, primaryFieldId){
+  if (def.primary) {
+    return allFields.find(f => f.id === primaryFieldId) || null;
+  }
+  // exact name match (case + whitespace tolerant), in priority order
+  const norm = s => String(s||'').toLowerCase().trim();
+  const byName = new Map(allFields.map(f => [norm(f.name), f]));
+  for (const want of (def.exact || [])) {
+    const f = byName.get(norm(want));
+    if (f) return f;
+  }
+  // keyword match: all keywords must appear in the field name
+  if (def.keywords && def.keywords.length) {
+    const kw = def.keywords.map(norm);
+    const f = allFields.find(f => {
+      const n = norm(f.name);
+      return kw.every(k => n.includes(k));
+    });
+    if (f) return f;
+  }
+  return null;
+}
+
 async function fetchSchema(){
   const data = await airtableFetch(`meta/bases/${BASE_ID}/tables`);
   const result = {};
@@ -420,28 +462,59 @@ async function fetchSchema(){
     const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
     const meta = data.tables.find(t => t.id === tableId);
     if (!meta) { console.warn('table not found in metadata:', entityKey, tableId); continue; }
-    const byKey = {}; const byId = {}; const byName = {};
-    // Map every field by name (case-insensitive)
-    for (const f of meta.fields) byName[f.name.toLowerCase().trim()] = f;
+    const byKey = {}; const byId = {};
+    const usedFieldIds = new Set();
     // Resolve curated SCHEMA fields
     for (const def of SCHEMA[entityKey].fields) {
-      const f = byName[def.name.toLowerCase().trim()];
-      if (f) { byKey[def.key] = { ...def, id:f.id, atType:f.type, options:f.options || null, readOnly: isReadOnlyAirtable(f.type) };
-               byId[f.id] = byKey[def.key]; }
-      else   { byKey[def.key] = { ...def, id:null, atType:null, options:null, readOnly:true, missing:true }; }
+      const f = resolveField(def, meta.fields, meta.primaryFieldId);
+      if (f) {
+        const resolved = { ...def, id:f.id, name:f.name, atType:f.type, options:f.options || null, readOnly: !def.edit || isReadOnlyAirtable(f.type) };
+        byKey[def.key] = resolved;
+        byId[f.id] = resolved;
+        usedFieldIds.add(f.id);
+      } else {
+        byKey[def.key] = { ...def, id:null, name:null, atType:null, options:null, readOnly:true, missing:true };
+      }
     }
     // Drawer extras (Properties only)
+    const extras = [];
     if (SCHEMA[entityKey].drawerExtras) {
-      const extras = [];
       for (const def of SCHEMA[entityKey].drawerExtras) {
-        const f = byName[def.name.toLowerCase().trim()];
-        if (f) extras.push({ ...def, id:f.id, atType:f.type, options:f.options||null, key:'_'+f.id, readOnly:isReadOnlyAirtable(f.type) });
+        const f = resolveField(def, meta.fields, meta.primaryFieldId);
+        if (f) {
+          const resolved = { ...def, id:f.id, name:f.name, atType:f.type, options:f.options || null, readOnly: !def.edit || isReadOnlyAirtable(f.type) };
+          extras.push(resolved);
+          byId[f.id] = resolved;
+          usedFieldIds.add(f.id);
+        }
       }
-      result[entityKey] = { primary:SCHEMA[entityKey].primary, byKey, byId, byName, drawerExtras:extras, allFields:meta.fields };
-    } else {
-      result[entityKey] = { primary:SCHEMA[entityKey].primary, byKey, byId, byName, drawerExtras:[], allFields:meta.fields };
     }
+    result[entityKey] = {
+      tableId,
+      tableName: meta.name,
+      primaryFieldId: meta.primaryFieldId,
+      byKey,
+      byId,
+      drawerExtras: extras,
+      allFields: meta.fields,
+      usedFieldIds,
+    };
   }
+  // Expose for debugging / Schema Inspector
+  window.__OPS_SCHEMA__ = result;
+  // Console-friendly summary so the user can paste it back to me if anything's still off
+  try {
+    console.groupCollapsed('[OPS] Schema resolution');
+    for (const k of Object.keys(result)) {
+      const r = result[k];
+      const mapped = Object.entries(r.byKey).filter(([,v])=>!v.missing).map(([key,v])=>({key, label:v.label, '→ Airtable':v.name, type:v.atType}));
+      const missing = Object.entries(r.byKey).filter(([,v])=>v.missing).map(([key,v])=>({key, label:v.label}));
+      console.log(`-- ${r.tableName} (${k}) --  ${r.allFields.length} fields total`);
+      console.table(mapped);
+      if (missing.length) { console.warn('Unmapped curated fields:', missing); }
+    }
+    console.groupEnd();
+  } catch(e){}
   return result;
 }
 
@@ -587,11 +660,12 @@ function getCellRaw(record, fieldDef){
 function displayName(record, entityKey){
   const sch = SCHEMA_RESOLVED[entityKey];
   if (!sch) return record.id;
-  const primary = sch.byKey[sch.primary];
-  let v = primary ? record.fields[primary.id] : null;
+  // Always use Airtable's primaryFieldId — survives field renames + name guesses
+  let v = sch.primaryFieldId ? record.fields[sch.primaryFieldId] : null;
   if (v == null) {
-    // Fallback: first non-empty scalar value
+    // Fallback: first non-empty scalar value across resolved fields
     for (const f of Object.values(sch.byKey)) {
+      if (!f.id) continue;
       const x = record.fields[f.id];
       if (x != null && typeof x !== 'object') { v = x; break; }
     }
@@ -605,7 +679,14 @@ function fmtMoney(n){
   if (n == null || n === '') return '';
   const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/[£,]/g,''));
   if (isNaN(num)) return '';
-  return '£' + num.toLocaleString('en-GB', {maximumFractionDigits:0});
+  return '£' + num.toLocaleString('en-GB', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtMoneyShort(n){
+  // Compact form for KPI tiles where 2dp adds noise
+  if (n == null || n === '') return '';
+  const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/[£,]/g,''));
+  if (isNaN(num)) return '';
+  return '£' + num.toLocaleString('en-GB', { maximumFractionDigits:0 });
 }
 function fmtPercent(n){
   if (n == null || n === '') return '';
@@ -841,12 +922,12 @@ function renderPropertyKpis(){
 
   document.getElementById('propertyKpis').innerHTML = `
     <div class="kpi"><div class="label">Properties</div><div class="value">${total}</div><div class="sub">${totalUnits} rental units</div></div>
-    <div class="kpi"><div class="label">Portfolio Value</div><div class="value">${fmtMoney(totalValue)}</div><div class="sub">market value</div></div>
-    <div class="kpi"><div class="label">Total Debt</div><div class="value">${fmtMoney(totalDebt)}</div><div class="sub">mortgages outstanding</div></div>
-    <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoney(equity)}</div><div class="sub">${totalValue?(equity/totalValue*100).toFixed(0):0}% of value</div></div>
-    <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoney(totalRent)}</div><div class="sub">${fmtMoney(annualRent)} / yr</div></div>
-    <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoney(totalMortgage)}</div><div class="sub">total debt service</div></div>
-    <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(totalRent-totalMortgage)>=0?'var(--success)':'var(--danger)'}">${fmtMoney(totalRent-totalMortgage)}</div><div class="sub">before opex</div></div>
+    <div class="kpi"><div class="label">Portfolio Value</div><div class="value">${fmtMoneyShort(totalValue)}</div><div class="sub">market value</div></div>
+    <div class="kpi"><div class="label">Total Debt</div><div class="value">${fmtMoneyShort(totalDebt)}</div><div class="sub">mortgages outstanding</div></div>
+    <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div><div class="sub">${totalValue?(equity/totalValue*100).toFixed(0):0}% of value</div></div>
+    <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(totalRent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
+    <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoneyShort(totalMortgage)}</div><div class="sub">total debt service</div></div>
+    <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(totalRent-totalMortgage)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(totalRent-totalMortgage)}</div><div class="sub">before opex</div></div>
     <div class="kpi"><div class="label">Portfolio Yield</div><div class="value">${portfolioYield.toFixed(2)}%</div><div class="sub">gross annual</div></div>
     <div class="kpi"><div class="label">Occupancy</div><div class="value" style="color:${occRate>=90?'var(--success)':occRate>=75?'var(--warning)':'var(--danger)'}">${occRate.toFixed(0)}%</div><div class="sub">${occupied} / ${totalUnits} units</div></div>
   `;
@@ -1169,12 +1250,101 @@ function renderPropertyDetailMetrics(rec){
   return `<div class="drawer-section">
     <h3>Performance</h3>
     <div class="kpi-grid" style="margin-bottom:0">
-      <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoney(equity)}</div></div>
+      <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div></div>
       <div class="kpi"><div class="label">LTV</div><div class="value">${ltv.toFixed(1)}%</div></div>
       <div class="kpi"><div class="label">Gross Yield</div><div class="value">${grossYield.toFixed(2)}%</div></div>
-      <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${netRent>=0?'var(--success)':'var(--danger)'}">${fmtMoney(netRent)}</div><div class="sub">after mortgage, before opex</div></div>
+      <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${netRent>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(netRent)}</div><div class="sub">after mortgage, before opex</div></div>
     </div>
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Schema Inspector — shows what's mapped, what's missing, what's unused
+// Opens via the 🔍 Schema button. Use this to diagnose any column showing
+// as "—" everywhere — the unmapped fields are flagged in amber here.
+// ═══════════════════════════════════════════════════════════════════════
+function openSchemaInspector(){
+  if (!SCHEMA_RESOLVED) { toast('Schema not loaded yet', 'error'); return; }
+  const sections = Object.entries(SCHEMA_RESOLVED).map(([entityKey, sch]) => {
+    const curated = Object.entries(sch.byKey).map(([key, def]) => ({
+      key,
+      label: def.label,
+      mapped: !def.missing,
+      airtableName: def.name || '',
+      atType: def.atType || '',
+      readOnly: def.readOnly,
+    }));
+    const drawerExtras = (sch.drawerExtras||[]).map(def => ({
+      key: def.key, label: def.label, mapped: true,
+      airtableName: def.name || '', atType: def.atType || '', readOnly: def.readOnly,
+    }));
+    const allRows = [...curated, ...drawerExtras];
+    const unusedFields = sch.allFields
+      .filter(f => !sch.usedFieldIds.has(f.id))
+      .map(f => ({ name:f.name, type:f.type, id:f.id }))
+      .sort((a,b) => a.name.localeCompare(b.name));
+
+    const mappedCount = allRows.filter(r => r.mapped).length;
+    const totalCurated = allRows.length;
+
+    const curatedTable = `
+      <table class="schema-table">
+        <thead><tr><th>Curated key</th><th>Label</th><th>Airtable field</th><th>Type</th><th>Status</th></tr></thead>
+        <tbody>
+          ${allRows.map(r => `
+            <tr class="${r.mapped?'':'unmapped'}">
+              <td class="col-name">${escapeHtml(r.key)}</td>
+              <td>${escapeHtml(r.label)}</td>
+              <td class="col-name">${r.mapped?escapeHtml(r.airtableName):'<span style="color:var(--warning)">— NOT FOUND —</span>'}</td>
+              <td class="col-type">${escapeHtml(r.atType)}</td>
+              <td>${r.mapped ? (r.readOnly?'<span class="schema-tag">read-only</span>':'<span class="schema-tag ok">editable</span>') : '<span class="schema-tag warn">missing</span>'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    const unusedTable = unusedFields.length ? `
+      <details style="margin-bottom:24px">
+        <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);margin-bottom:8px">▸ ${unusedFields.length} other fields on this table (not currently shown)</summary>
+        <table class="schema-table">
+          <thead><tr><th>Airtable field</th><th>Type</th></tr></thead>
+          <tbody>
+            ${unusedFields.map(f => `<tr class="unused"><td class="col-name">${escapeHtml(f.name)}</td><td class="col-type">${escapeHtml(f.type)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </details>
+    ` : '';
+
+    return `
+      <div class="schema-section">
+        <h3>${escapeHtml(sch.tableName)} <span class="pill">${entityKey}</span> <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:auto">${mappedCount} / ${totalCurated} mapped · ${sch.allFields.length} fields total</span></h3>
+        ${curatedTable}
+        ${unusedTable}
+      </div>
+    `;
+  }).join('');
+
+  const html = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeSchemaInspector()">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h2>🔍 Schema Inspector</h2>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Anything in <span class="schema-tag warn">missing</span> means the page can't find that field. Tell me what it's actually called in Airtable and I'll remap.</div>
+          </div>
+          <button class="modal-close" onclick="closeSchemaInspector()">×</button>
+        </div>
+        <div class="modal-body">${sections}</div>
+      </div>
+    </div>
+  `;
+  let host = document.getElementById('schemaModalHost');
+  if (!host) { host = document.createElement('div'); host.id = 'schemaModalHost'; document.body.appendChild(host); }
+  host.innerHTML = html;
+}
+function closeSchemaInspector(){
+  const host = document.getElementById('schemaModalHost');
+  if (host) host.innerHTML = '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════
