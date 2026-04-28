@@ -143,6 +143,17 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .row-open{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
 .row-open:hover{background:var(--bg-surface);color:var(--accent)}
 
+/* Drilldown cell — value is calculated, click opens drawer to see how */
+.cell-drilldown{cursor:pointer;border-bottom:1px dotted var(--text-muted);padding-bottom:1px}
+.cell-drilldown:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Breakdown table — used inside drawer for mortgage / rent breakdowns */
+.breakdown-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
+.breakdown-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px}
+.breakdown-table td{padding:6px 8px;border-bottom:1px solid var(--border-subtle)}
+.breakdown-table td.money{text-align:right;font-variant-numeric:tabular-nums}
+.breakdown-table tr.total td{border-top:2px solid var(--border-default);border-bottom:none;font-weight:700;background:var(--bg-surface-2)}
+
 /* Schema inspector modal */
 .modal-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.5);z-index:9997;display:flex;align-items:center;justify-content:center;padding:24px}
 .modal-card{background:var(--bg-surface);border-radius:12px;max-width:1100px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
@@ -356,8 +367,9 @@ const SCHEMA = {
       { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false },
       { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false },
       // Virtual: derived from active tenancies linked via rental units (expected rent).
-      { key:'grossRent',    label:'Rent / mo',    virtual:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies on this property', type:'money', edit:false },
-      { key:'mortgagePay',  label:'Mortgage / mo',virtual:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked mortgage costs from the Costs table',                          type:'money',   edit:false },
+      // clickToDrawer makes the cell clickable — the drawer shows a unit-by-unit breakdown.
+      { key:'grossRent',    label:'Rent / mo',    virtual:true, clickToDrawer:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies. Click for breakdown.', type:'money', edit:false },
+      { key:'mortgagePay',  label:'Mortgage / mo',virtual:true, clickToDrawer:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked mortgage costs. Click to see which records.', type:'money', edit:false },
       { key:'netRent',      label:'Net / mo',     virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false },
       { key:'grossYield',   label:'Gross Yield',  virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false },
       { key:'cashOnCash',   label:'Cash on Cash', virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false },
@@ -489,11 +501,12 @@ function deriveInterestRate(p){
   if (!m || !b) return null; return (m * 12) / b;
 }
 function deriveGrossYield(p){
-  const r = numField(p,'properties','grossRent'); const v = numField(p,'properties','marketValue');
+  // grossRent is now virtual — must call the derive helper, not look it up by field id
+  const r = derivePropertyGrossRent(p); const v = numField(p,'properties','marketValue');
   if (!r || !v) return null; return (r * 12) / v;
 }
 function deriveNetRent(p){
-  const r = numField(p,'properties','grossRent'); const m = deriveMortgagePay(p);
+  const r = derivePropertyGrossRent(p); const m = deriveMortgagePay(p);
   if (r == null) return null; return r - (m||0);
 }
 function deriveCashOnCash(p){
@@ -888,7 +901,13 @@ function renderCell(record, fieldDef, entityKey){
 
   // Status badges for select fields
   if (fieldDef.type === 'select') {
-    const name = typeof v === 'object' ? (v.name||v.id) : String(v);
+    // Rollups of singleSelect fields come back as ARRAYS of choice objects,
+    // not a single object. Unwrap before pulling .name/.id — otherwise we
+    // render the literal string "undefined".
+    let val = v;
+    if (Array.isArray(val)) val = val[0];
+    const name = (typeof val === 'object' && val !== null) ? (val.name || val.id || '') : (val == null ? '' : String(val));
+    if (!name) return '<span style="color:var(--text-muted)">—</span>';
     const cls = badgeClass(name);
     const inner = fieldDef.edit && !fieldDef.readOnly
       ? `<span class="editable" data-edit="${fieldDef.id}" data-type="select" data-rec="${record.id}" data-entity="${entityKey}">${escapeHtml(name)}</span>`
@@ -916,6 +935,11 @@ function renderCell(record, fieldDef, entityKey){
 }
 
 function wrapEditable(html, fieldDef, record, entityKey, type, raw){
+  // clickToDrawer: not editable but clickable — opens the drawer to show how
+  // the value was derived (eg. mortgage cost breakdown, rent per unit).
+  if (fieldDef.clickToDrawer) {
+    return `<span class="cell-drilldown" onclick="event.stopPropagation();openDrawer('${entityKey}','${record.id}')" title="Click to see breakdown">${html}</span>`;
+  }
   if (!fieldDef.edit || fieldDef.readOnly) return `<span>${html}</span>`;
   return `<span class="editable" data-edit="${fieldDef.id}" data-type="${type}" data-rec="${record.id}" data-entity="${entityKey}" data-raw="${escapeHtml(raw==null?'':String(raw))}">${html}</span>`;
 }
@@ -1428,6 +1452,105 @@ function closeDrawer(){
 function fieldRow(fieldDef, record, entityKey){
   const cellHtml = renderCell(record, fieldDef, entityKey);
   return `<div class="field-row"><div class="field-label">${escapeHtml(fieldDef.label || fieldDef.name)}</div><div class="field-value">${cellHtml}</div></div>`;
+}
+
+// Mortgage Cost Breakdown — list every cost record linked to this property
+// with its amount and active flag. Lets the user verify which cost records
+// the Mortgage / mo column is summing.
+function renderPropertyMortgageBreakdown(rec){
+  const linkId = fid('properties','_mortCostLink');
+  if (!linkId) return '';
+  const linked = rec.fields[linkId];
+  if (!Array.isArray(linked) || !linked.length) {
+    return `<div class="drawer-section">
+      <h3>Mortgage Cost Breakdown</h3>
+      <div style="font-size:12px;color:var(--text-muted)">No mortgage cost is linked to this property in Airtable. Mortgage / mo therefore shows blank. Link a Cost record on the Properties table to fix.</div>
+    </div>`;
+  }
+  const expFid      = fid('costs','expected');
+  const inactiveFid = fid('costs','inactive');
+  if (!expFid) return '';
+  const rows = linked.map(id => {
+    const cost = INDEX.costs[id];
+    if (!cost) return { id, name:id, amount:null, active:false, missing:true };
+    const amt = parseFloat(cost.fields[expFid]);
+    return {
+      id,
+      name: displayName(cost,'costs'),
+      amount: isNaN(amt) ? null : amt,
+      active: !inactiveFid || !cost.fields[inactiveFid],
+    };
+  });
+  const active   = rows.filter(r => r.active);
+  const inactive = rows.filter(r => !r.active);
+  const total    = active.reduce((s,r) => s + (r.amount||0), 0);
+  return `<div class="drawer-section">
+    <h3>Mortgage Cost Breakdown</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">The Mortgage / mo column sums the active rows below. If a value here looks wrong, fix the link or the cost record in Airtable.</div>
+    <table class="breakdown-table">
+      <thead><tr><th>Cost record</th><th style="text-align:right">Monthly</th><th style="width:80px">Status</th></tr></thead>
+      <tbody>
+        ${active.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="money">${r.amount!=null?fmtMoney(r.amount):'—'}</td><td><span class="badge badge-active">active</span></td></tr>`).join('')}
+        ${inactive.map(r => `<tr style="color:var(--text-muted)"><td>${escapeHtml(r.name)}</td><td class="money">${r.amount!=null?fmtMoney(r.amount):'—'}</td><td><span class="badge badge-former">inactive</span></td></tr>`).join('')}
+        <tr class="total"><td>Total (active)</td><td class="money">${fmtMoney(total)}</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// Rent Breakdown — list units belonging to this property and the active
+// tenancy / rent on each. Lets the user verify what Rent / mo is summing.
+function renderPropertyRentBreakdown(rec){
+  const unitSch = SCHEMA_RESOLVED?.units;
+  const tenSch  = SCHEMA_RESOLVED?.tenancies;
+  if (!unitSch || !tenSch) return '';
+  const propLinkOnUnits = unitSch.byKey.property?.id;
+  const unitLinkOnTen   = tenSch.byKey.unit?.id;
+  const rentFid         = tenSch.byKey.rent?.id;
+  const tenantLinkFid   = tenSch.byKey.tenant?.id;
+  if (!propLinkOnUnits || !unitLinkOnTen || !rentFid) return '';
+  const units = DATA.units.filter(u => {
+    const v = u.fields[propLinkOnUnits];
+    return Array.isArray(v) && v.includes(rec.id);
+  });
+  if (!units.length) return '';
+  let total = 0;
+  const rows = [];
+  for (const u of units) {
+    const unitName = displayName(u,'units');
+    const activeTen = DATA.tenancies.filter(t => {
+      const v = t.fields[unitLinkOnTen];
+      return Array.isArray(v) && v.includes(u.id) && isActiveStatus(t,'tenancies');
+    });
+    if (!activeTen.length) {
+      rows.push({ unit:unitName, tenant:null, rent:null, void:true });
+      continue;
+    }
+    for (const t of activeTen) {
+      const tlink = tenantLinkFid ? t.fields[tenantLinkFid] : null;
+      const tid   = Array.isArray(tlink) ? tlink[0] : null;
+      const tname = (tid && INDEX.tenants[tid]) ? displayName(INDEX.tenants[tid],'tenants') : '—';
+      const r = parseFloat(t.fields[rentFid]);
+      const rent = isNaN(r) ? null : r;
+      if (rent != null) total += rent;
+      rows.push({ unit:unitName, tenant:tname, rent });
+    }
+  }
+  return `<div class="drawer-section">
+    <h3>Rent Breakdown</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Expected monthly rent on active tenancies, per unit. Void units contribute nothing.</div>
+    <table class="breakdown-table">
+      <thead><tr><th>Unit</th><th>Tenant</th><th style="text-align:right">Rent / mo</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `<tr>
+          <td>${escapeHtml(r.unit)}</td>
+          <td>${r.void ? '<span class="badge badge-void">void</span>' : escapeHtml(r.tenant)}</td>
+          <td class="money">${r.rent!=null?fmtMoney(r.rent):'—'}</td>
+        </tr>`).join('')}
+        <tr class="total"><td colspan="2">Total</td><td class="money">${fmtMoney(total)}</td></tr>
+      </tbody>
+    </table>
+  </div>`;
 }
 
 function renderPropertyDetailMetrics(rec){

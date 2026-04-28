@@ -62,6 +62,13 @@ export async function handleNotifySlack(request, env) {
     if (!recipientEmail || !taskName) {
         return json({ error: 'recipientEmail and taskName are required' }, 400, corsHeaders);
     }
+    // Reject the local placeholder so a stale web-app cache can never DM
+    // "(Untitled)" to a real human. The legitimate fix is to make sure
+    // the caller passes the user-typed name; this is the safety net.
+    const cleanName = String(taskName).trim();
+    if (!cleanName || cleanName === '(Untitled)') {
+        return json({ error: `Task name placeholder rejected (was "${cleanName}"). Caller should pass the user-typed name.` }, 400, corsHeaders);
+    }
 
     const token = env.SLACK_BOT_TOKEN;
     if (!token) return json({ error: 'SLACK_BOT_TOKEN not configured' }, 500, corsHeaders);
@@ -87,10 +94,10 @@ export async function handleNotifySlack(request, env) {
     const headerLine = actorName
         ? `*${escapeMrkdwn(actorName)}* ${verb} a task:`
         : `A task was ${verb}:`;
-    const text = `${headerLine}\n\n• ${escapeMrkdwn(taskName)}`;
+    const text = `${headerLine}\n\n• ${escapeMrkdwn(cleanName)}`;
     const blocks = [
         { type: 'section', text: { type: 'mrkdwn', text: headerLine } },
-        { type: 'section', text: { type: 'mrkdwn', text: `*${escapeMrkdwn(taskName)}*` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*${escapeMrkdwn(cleanName)}*` } },
     ];
     if (taskId) {
         blocks.push({
