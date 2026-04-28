@@ -917,15 +917,25 @@ async function refreshAll(initial=false){
           },
           {
             name: 'No duplicate tenancies for the same unit', kind: 'sync', run: () => {
-              // Two ACTIVE tenancies on the same unit means somewhere a tenant move-out
-              // wasn't recorded. Catches data-quality drift after onboarding.
+              // We only care about overlaps between currently-active tenants. If
+              // a Former tenant's Payment Status was never reset on move-out
+              // (which is common — that field gets stale), that's data drift,
+              // not a missed move-out. Require BOTH:
+              //   - Payment Status in {In Payment, CFV, CFV Actioned}, AND
+              //   - Tenant Status (rollup) = Active
+              // before counting a tenancy toward the per-unit duplicate test.
               const tcs = DATA.tenancies || [];
               const activeByUnit = {};
               tcs.forEach(r => {
                 const f = r.fields || {};
-                const status = f['fldxU3dPUnbK0SCDq']; // tenPayStatus
-                const statusName = (status && status.name) || status;
-                if (statusName !== 'In Payment' && statusName !== 'CFV' && statusName !== 'CFV Actioned') return;
+                const payStatus = f['fldxU3dPUnbK0SCDq']; // tenPayStatus
+                const payName = (payStatus && payStatus.name) || payStatus;
+                if (payName !== 'In Payment' && payName !== 'CFV' && payName !== 'CFV Actioned') return;
+                const tenStatusRaw = f['fldgWAyha1Uij1SZP']; // tenStatus rollup of tenant Active/Former
+                const tenName = Array.isArray(tenStatusRaw)
+                  ? (typeof tenStatusRaw[0]==='object'?tenStatusRaw[0]?.name:tenStatusRaw[0])
+                  : (typeof tenStatusRaw==='object'?tenStatusRaw?.name:tenStatusRaw);
+                if (String(tenName||'').toLowerCase() !== 'active') return;
                 const link = f['fld7cjLLEHKAx49OK'];
                 if (!Array.isArray(link) || !link.length) return;
                 const unitId = typeof link[0] === 'object' ? link[0].id : link[0];
