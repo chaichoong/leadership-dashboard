@@ -427,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-25-0800 slack-url</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-0900 slack-name-fix</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -804,6 +804,10 @@ function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_
 const SLACK_NOTIFY_URL='https://slack-notify.kevinbrittain.workers.dev/';
 function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
   if(!recipientEmail||!taskName)return;
+  // Drop the placeholder so it never ships to Slack — better to skip the
+  // ping entirely than DM "(Untitled)" to the assignee.
+  const tn=String(taskName||'').trim();
+  if(!tn||tn==='(Untitled)')return;
   // Don't ping the actor when they assign a task to themselves.
   const actorEmail=(currentUser&&currentUser.email)||'';
   if(recipientEmail===actorEmail)return;
@@ -812,7 +816,7 @@ function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
     fetch(SLACK_NOTIFY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({recipientEmail,taskName,taskId,actorName,action:action||'assigned'}),
+      body:JSON.stringify({recipientEmail,taskName:tn,taskId,actorName,action:action||'assigned'}),
       // Keep this independent of any document-leaving event so a tab close
       // mid-fire doesn't leave a half-sent payload.
       keepalive:true,
@@ -5471,10 +5475,15 @@ async function createSimpleTask(opts){
     const parsed=parseTask(data);
     allTasks.push(parsed);
     // Fire Slack DM to the assignee (skipped silently if the actor IS the
-    // assignee, or if the assignee email isn't known yet).
+    // assignee, or if the assignee email isn't known yet). Prefer the
+    // user-typed name (opts.name) over the parsed echo because the POST
+    // response sometimes omits the name field, in which case parseTask
+    // falls back to "(Untitled)".
+    const realName=(opts.name&&opts.name.trim())
+      || (parsed.name && parsed.name!=='(Untitled)' ? parsed.name : '');
     notifyAssigneeSlack({
       recipientEmail:parsed.assigneeEmail||assigneeEmail,
-      taskName:parsed.name||opts.name,
+      taskName:realName,
       taskId:parsed.id,
       action:'assigned',
     });
@@ -5833,10 +5842,15 @@ async function submitCreateTask(){
     window._pendingCreateStartMin=null;
     document.getElementById('createTaskModal').remove();
     toast('Task added');
-    // Slack DM the assignee (no-op if the actor IS the assignee).
+    // Slack DM the assignee (no-op if the actor IS the assignee). Prefer
+    // the user-typed name over the parsed echo because the Airtable POST
+    // response sometimes omits the name and parseTask substitutes
+    // "(Untitled)" — which is jarring in a Slack DM.
+    const slackName=(name&&name.trim())
+      || (parsed.name && parsed.name!=='(Untitled)' ? parsed.name : '');
     notifyAssigneeSlack({
       recipientEmail:parsed.assigneeEmail||(member?member.email:''),
-      taskName:parsed.name||name,
+      taskName:slackName,
       taskId:parsed.id,
       action:'assigned',
     });
