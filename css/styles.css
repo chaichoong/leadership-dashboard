@@ -151,6 +151,21 @@ body {
 .sidebar-item.active { color: var(--text-inverse); background: rgba(198,161,91,0.12); border-left-color: var(--accent-gold); }
 .sidebar-item .sidebar-icon { font-size: 16px; width: 20px; text-align: center; }
 .sidebar-item .sidebar-label { flex: 1; }
+/* Tab health dot — mirrors that tab's sync-bar rollup so a glance at the
+ * sidebar tells Kevin if anything's amber or red anywhere. */
+.sidebar-health-dot {
+    flex: 0 0 auto;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.18);
+    transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.sidebar-health-dot.unknown { background: rgba(255,255,255,0.18); }
+.sidebar-health-dot.green   { background: var(--success); box-shadow: 0 0 6px rgba(45,164,91,0.55); }
+.sidebar-health-dot.amber   { background: var(--warning); box-shadow: 0 0 6px rgba(198,161,91,0.55); }
+.sidebar-health-dot.red     { background: var(--danger); animation: sidebar-dot-pulse 1.6s ease-in-out infinite; }
+.sidebar-health-dot.refreshing { background: var(--info); animation: sidebar-dot-pulse 1.4s ease-in-out infinite; }
+@keyframes sidebar-dot-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
 .cfv-sidebar-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 10px; font-weight: var(--fw-bold); line-height: 1; }
 .cfv-sidebar-badge.cfv-red { background: var(--danger); color: #fff; }
 .cfv-sidebar-badge.cfv-orange { background: var(--warning); color: #fff; }

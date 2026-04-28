@@ -103,6 +103,32 @@
         return 'pass';
     }
 
+    // Broadcast a tab's rollup status so the parent shell can mirror it as a
+    // sidebar dot — single glance at the sidebar tells Kevin if anything's off.
+    // In iframe pages we postMessage up; in the parent we call directly.
+    function _broadcastStatus(tabId) {
+        const s = _syncBars[tabId];
+        if (!s) return;
+        const status = s.isRefreshing ? 'refreshing' : _rollupStatus(s.lastResults);
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'syncBarStatus', tabId, status }, '*');
+            }
+        } catch (_) { /* cross-origin or no parent — fine */ }
+        if (typeof updateSidebarHealth === 'function') {
+            try { updateSidebarHealth(tabId, status); } catch (_) {}
+        }
+    }
+
+    // Public read access for the current rollup, e.g. for the parent shell to
+    // re-query a tab on demand without waiting for the next broadcast.
+    function getTabRollup(tabId) {
+        const s = _syncBars[tabId];
+        if (!s) return 'unknown';
+        if (s.isRefreshing) return 'refreshing';
+        return _rollupStatus(s.lastResults);
+    }
+
     function renderSyncBar(tabId) {
         const host = document.querySelector(`[data-sync-bar="${tabId}"]`);
         if (!host) return;
@@ -147,6 +173,9 @@
             </div>
             ${drawerHtml}
         `;
+
+        // Mirror this tab's rollup to the parent shell's sidebar dot.
+        _broadcastStatus(tabId);
     }
 
     function _renderDrawer(tabId, s) {

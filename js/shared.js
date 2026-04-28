@@ -300,6 +300,38 @@
 
     function toggleCard(el) { el.classList.toggle('expanded'); }
 
+    // ── Sidebar health rollup ──
+    // Each tab's sync-bar broadcasts its rollup status via _broadcastStatus()
+    // in js/sync-bar.js. The parent shell catches those broadcasts here and
+    // updates a small dot beside that tab's sidebar item, so a single glance
+    // at the sidebar tells Kevin whether anything's gone amber/red anywhere.
+    function updateSidebarHealth(tabId, status) {
+        const dot = document.querySelector(`[data-sidebar-health="${tabId}"]`);
+        if (!dot) return;
+        // Translate rollup status names ('pass'/'warn'/'fail') into the dot's
+        // colour classes ('green'/'amber'/'red'). Iframes broadcast pass/warn/
+        // fail; the parent's own sync-bar.js calls updateSidebarHealth directly
+        // with the same names. Either way, we land on a single colour class.
+        const cls = status === 'pass' ? 'green'
+            : status === 'warn' ? 'amber'
+            : status === 'fail' ? 'red'
+            : status === 'refreshing' ? 'refreshing'
+            : status; // pass through 'green'/'amber'/'red' if already translated
+        dot.classList.remove('green', 'amber', 'red', 'refreshing', 'unknown');
+        dot.classList.add(cls || 'unknown');
+        const label = (cls === 'green') ? 'All checks passing'
+            : (cls === 'amber') ? 'Some checks warning'
+            : (cls === 'red') ? 'Failures detected'
+            : (cls === 'refreshing') ? 'Refreshing…'
+            : 'No checks run yet';
+        dot.title = label;
+    }
+    // Listen for status pings from iframe pages.
+    window.addEventListener('message', (e) => {
+        if (!e.data || e.data.type !== 'syncBarStatus' || !e.data.tabId) return;
+        updateSidebarHealth(e.data.tabId, e.data.status);
+    });
+
     async function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
