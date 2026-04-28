@@ -711,6 +711,17 @@
 
     // ── Dashboard Load ──
     async function loadDashboard() {
+        // Schedule the smart-refresh timer FIRST, before any rendering paths fire.
+        // Reason: renderDashboard (called from both the cache-hit and fresh-fetch
+        // paths) ends with markTabSynced('overview'), which auto-runs the health
+        // checks. One of those checks asserts refreshTimer is set. If we waited
+        // until after the fresh-fetch completed (as we used to), the cache-render
+        // path's health-check pass would always show this as a warning until the
+        // fresh fetch landed. Fixing it here means the wiring is in place from
+        // the moment loadDashboard is invoked.
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
+
         // Kick off Strategic KPIs loading IMMEDIATELY — parallel with everything
         // below. It used to fire AFTER the main 9-table fetch landed (transactions
         // alone is ~7k rows paginated) which pushed the KPIs section to ~60s on
@@ -814,11 +825,9 @@
                 );
             } catch(e) { console.warn('Badge update failed:', e); }
 
-            // Schedule smart refresh — defers if user is actively interacting
-            if (refreshTimer) clearInterval(refreshTimer);
-            refreshTimer = setInterval(() => smartRefresh(), REFRESH_INTERVAL);
-            // (Strategic KPIs already loading — fired at the top of loadDashboard so
-            // they render in parallel with the main fetch instead of behind it.)
+            // (Smart-refresh timer already scheduled at the top of loadDashboard
+            // so the health check sees it as wired regardless of which render
+            // path fires first. Strategic KPIs likewise.)
         } catch (e) {
             if (e.message === 'Auth failed') { clearDashCache(); return; }
             console.error(e);
