@@ -764,7 +764,10 @@
                     <label>Feedback / Amendments</label>
                     <div style="display:flex; gap:8px; align-items:flex-start;">
                         <textarea id="draftFeedback" placeholder="e.g. Make it more formal, mention the invoice number, add a reference to the previous conversation..." style="flex:1; min-height:80px; resize:vertical; font-family:inherit; font-size:13px; padding:10px; border:1px solid var(--border-default); border-radius:8px;"></textarea>
-                        <button class="btn-send" id="reviseBtn" onclick="reviseDraft()" style="flex-shrink:0; padding:10px 16px;">Revise</button>
+                        <div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">
+                            <button class="btn-send" id="reviseBtn" onclick="reviseDraft()" style="padding:10px 16px;">Revise</button>
+                            <button class="btn-send" id="polishBtn" onclick="polishDraftWithSonnet()" title="Rewrite the current draft using the higher-quality Sonnet model. Costs ~3× more — use for higher-stakes replies." style="padding:10px 16px; background:var(--tone-plum); display:flex; align-items:center; gap:6px; justify-content:center;">✨ Polish (Sonnet)</button>
+                        </div>
                     </div>
                     <p class="settings-info" id="reviseStatus"></p>
                 </div>
@@ -4736,6 +4739,83 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
 
         reviseBtn.disabled = false;
         reviseBtn.textContent = 'Revise';
+    }
+
+    // ============================================================
+    // POLISH DRAFT WITH SONNET
+    // ============================================================
+    // Default drafting uses Haiku 4.5 (cheap, fine for most replies).
+    // For higher-stakes correspondence — formal complaints, council
+    // letters, key supplier comms — the team can opt to upgrade the
+    // current draft via Sonnet 4. Costs ~3× a Haiku call but only fires
+    // when the team consciously chooses to spend it. Optional feedback
+    // in the same textarea is incorporated into the polish.
+    async function polishDraftWithSonnet() {
+        const currentBody = document.getElementById('draftBody').value.trim();
+        if (!currentBody) {
+            showError('Nothing to polish — generate a draft first.');
+            return;
+        }
+
+        const feedback = document.getElementById('draftFeedback').value.trim();
+        const polishBtn = document.getElementById('polishBtn');
+        const reviseBtn = document.getElementById('reviseBtn');
+        const statusEl = document.getElementById('reviseStatus');
+        const senderName = localStorage.getItem('sender_name') || 'Kevin';
+
+        polishBtn.disabled = true;
+        reviseBtn.disabled = true;
+        polishBtn.textContent = '✨ Polishing...';
+        statusEl.textContent = 'Sonnet is polishing your draft...';
+
+        const polishInstructions = feedback
+            ? `Polish this email and apply the user's specific feedback below. Keep it professional and clear; preserve the sender's voice; tighten weak phrasing; ensure tone matches the seriousness of the matter.\n\nUser feedback to apply:\n${feedback}`
+            : `Polish this email so it reads as a high-quality, professional reply. Keep it clear and concise; preserve the sender's voice and intent; tighten weak phrasing; ensure tone matches the seriousness of the matter; fix any awkward sentences.`;
+
+        const prompt = `You are polishing a draft email written on behalf of ${senderName}.
+
+CURRENT DRAFT:
+${currentBody}
+
+${polishInstructions}
+
+IMPORTANT STYLE RULE: Never use em dashes (—) or long hyphens (–) anywhere in the email. Use commas, full stops, or restructure the sentence instead.
+
+Return ONLY the polished email body text. No subject line, no commentary, no explanations.`;
+
+        try {
+            const response = await fetch(CLAUDE_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'claude-sonnet-4-20250514',
+                    max_tokens: 800,
+                    messages: [{ role: 'user', content: prompt }]
+                })
+            });
+
+            if (!response.ok) throw new Error(`API error ${response.status}`);
+
+            const data = await response.json();
+            const polished = data.content?.[0]?.text || '';
+            if (!polished) throw new Error('Empty response from Sonnet');
+
+            document.getElementById('draftBody').value = polished;
+            document.getElementById('draftFeedback').value = '';
+            statusEl.textContent = '✨ Polished with Sonnet.';
+            statusEl.style.color = 'var(--tone-plum)';
+
+            addAuditEntry('draft_polished', `Polished draft with Sonnet for "${truncate(currentDraftEmail?.subject || '', 40)}"`);
+            if (feedback) storeResponseAmendment(currentDraftEmail?.subject || '', feedback);
+        } catch (err) {
+            console.error('Polish error:', err);
+            statusEl.textContent = 'Failed to polish: ' + err.message;
+            statusEl.style.color = 'var(--danger)';
+        }
+
+        polishBtn.disabled = false;
+        reviseBtn.disabled = false;
+        polishBtn.innerHTML = '✨ Polish (Sonnet)';
     }
 
     function storeResponseAmendment(subject, feedback) {
