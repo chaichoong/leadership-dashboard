@@ -810,7 +810,11 @@ RULES:
                     {
                         name: `Last ${pnlMonths} months computed`, kind: 'sync', run: () => {
                             if (!keys || keys.length === 0) return { status: 'fail', detail: 'No month buckets generated' };
-                            const haveData = keys.filter(k => (pnl.revenue[k] || 0) > 0 || (pnl.cogs[k] || 0) > 0).length;
+                            const haveData = keys.filter(k =>
+                                Math.abs(pnl.revenue.totals[k] || 0) > 0 ||
+                                Math.abs(pnl.cogs.totals[k] || 0) > 0 ||
+                                Math.abs(pnl.opex.totals[k] || 0) > 0
+                            ).length;
                             if (haveData === 0) return { status: 'warn', detail: `${keys.length} month buckets generated but all empty — check business filter and data` };
                             return { status: 'pass', detail: `${haveData}/${keys.length} months have non-zero P&L data` };
                         }
@@ -825,11 +829,15 @@ RULES:
                     },
                     {
                         name: 'Business filter resolves to records', kind: 'sync', run: () => {
+                            // Use the same resolution path as buildPnL: link → record ID → name via lookup
+                            const bizNames = pnlBuildLookup(allBusinesses, 'fldbbRqVxLxUdHwIR');
                             const matches = (allTransactions || []).filter(t => {
-                                const links = getField(t, F.txBusiness);
-                                if (!Array.isArray(links)) return false;
-                                return links.some(l => (typeof l === 'object' ? l.name : l) === pnlBusinessName);
+                                const id = pnlLinkId(getField(t, F.txBusiness));
+                                return id && bizNames[id] === pnlBusinessName;
                             });
+                            if (matches.length === 0) {
+                                return { status: 'fail', detail: `0 transactions matched business "${pnlBusinessName}" — check business filter and link resolution` };
+                            }
                             return { status: 'pass', detail: `${matches.length} transactions matched business "${pnlBusinessName}"` };
                         }
                     },
