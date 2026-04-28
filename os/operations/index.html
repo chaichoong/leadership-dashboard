@@ -129,8 +129,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .field-row{display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;align-items:center}
 .field-row:last-child{border-bottom:none}
 .field-label{color:var(--text-secondary);font-weight:500;font-size:12px}
-.field-value{color:var(--text-primary);word-break:break-word}
-.field-value .editable{display:block;min-height:28px;padding:6px 10px}
+.field-value{color:var(--text-primary);word-break:break-word;min-width:0}
+/* Editable cells use a hover-box (padding + bg on focus) but a negative
+   margin-left so the text itself starts on the same x as non-editable
+   values — they all line up regardless of whether you can edit them. */
+.field-value .editable{display:inline-block;min-height:28px;padding:6px 10px;margin-left:-10px;border-radius:4px;vertical-align:middle}
+.field-value .badge,
+.field-value .cell-drilldown,
+.field-value .chips-cell{vertical-align:middle}
 
 /* Toast */
 .toast{position:fixed;bottom:20px;right:20px;background:var(--bg-sidebar);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:500;z-index:10000;box-shadow:var(--shadow-lg);max-width:340px;animation:slideUp .3s ease-out}
