@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1300 slack-completion</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1500 slack-merge-collabs</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -710,7 +710,11 @@ const TEAM = [
   { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
   { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
   { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
-  { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
+  // Gary's Airtable collaborator email differs from his Slack email — the
+  // first goes on the Assignee / Collaborators fields, the second is what
+  // the Slack worker needs to find his DM. slackEmail overrides the main
+  // email only at notification time.
+  { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com', slackEmail:'roofline@outlook.com' },
   { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
   { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
 ];
@@ -805,6 +809,14 @@ function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_
 // SaaS migration: change SLACK_NOTIFY_URL to the Supabase Edge Function
 // URL when migrating; the request shape and behaviour stay identical.
 const SLACK_NOTIFY_URL='https://slack-notify.kevinbrittain.workers.dev/';
+// Translate the Airtable collaborator email to the Slack-registered email
+// for any team member whose two emails differ. Falls through unchanged
+// when the team member has the same email on both sides.
+function slackEmailFor(airtableEmail){
+  if(!airtableEmail)return airtableEmail;
+  const m=TEAM.find(x=>x.email===airtableEmail);
+  return (m&&m.slackEmail)||airtableEmail;
+}
 function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
   if(!recipientEmail||!taskName)return;
   // Drop the placeholder so it never ships to Slack — better to skip the
@@ -815,11 +827,14 @@ function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
   const actorEmail=(currentUser&&currentUser.email)||'';
   if(recipientEmail===actorEmail)return;
   const actorName=(currentUser&&currentUser.name)||'';
+  // Translate Airtable collaborator email → Slack-registered email
+  // (e.g. Gary's Airtable account uses one email, Slack uses another).
+  const slackTarget=slackEmailFor(recipientEmail);
   try{
     fetch(SLACK_NOTIFY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({recipientEmail,taskName:tn,taskId,actorName,action:action||'assigned'}),
+      body:JSON.stringify({recipientEmail:slackTarget,taskName:tn,taskId,actorName,action:action||'assigned'}),
       // Keep this independent of any document-leaving event so a tab close
       // mid-fire doesn't leave a half-sent payload.
       keepalive:true,
@@ -838,14 +853,17 @@ async function testSlackNotification(){
   const out=document.getElementById('slackTestResult');
   if(!target||!out)return;
   const recipientEmail=target.value;
+  // Use the Slack-translated email so the diagnostic mirrors production.
+  const slackTarget=slackEmailFor(recipientEmail);
   const payload={
-    recipientEmail,
+    recipientEmail:slackTarget,
     taskName:`Slack diagnostic test — ${new Date().toLocaleTimeString()}`,
     taskId:'TEST-'+Date.now(),
     actorName:(currentUser&&currentUser.name)||'Diagnostic',
     action:'assigned',
   };
-  out.innerHTML=`<span style="color:var(--info)">⟳ Sending to ${escHtml(recipientEmail)}…</span>`;
+  const note=slackTarget!==recipientEmail?` (Slack: ${escHtml(slackTarget)})`:'';
+  out.innerHTML=`<span style="color:var(--info)">⟳ Sending to ${escHtml(recipientEmail)}${note}…</span>`;
   let res,body;
   try{
     res=await fetch(SLACK_NOTIFY_URL,{
@@ -5510,30 +5528,37 @@ async function createSimpleTask(opts){
   }
   if(bizId)fields[F.business]=[bizId];
   if(opts.projectIds&&opts.projectIds.length)fields[F.projects]=opts.projectIds.slice();
-  // Collaborators: explicit opts win, otherwise inherit from the first linked
-  // project so "every new task with a project link pulls the business + the
-  // collaborators from the project" (Kevin's rule).
-  let taskCollabs=opts.collaborators;
-  if((!taskCollabs||!taskCollabs.length)&&opts.projectIds&&opts.projectIds.length){
+  // Collaborators: build up additively from THREE sources, deduplicating
+  // by email. Order doesn't matter for Airtable, but we keep the explicit
+  // ones first for readability when introspecting the payload.
+  //   1. Explicit opts.collaborators (caller-supplied)
+  //   2. Project collaborators (every member listed on the linked project)
+  //   3. Creator (currentUser) if assignee differs from creator
+  let taskCollabs=Array.isArray(opts.collaborators)?opts.collaborators.slice():[];
+  if(opts.projectIds&&opts.projectIds.length){
     const proj=allProjects.find(x=>x.id===opts.projectIds[0]);
-    if(proj&&proj.collaboratorIds&&proj.collaboratorIds.length){
-      taskCollabs=proj.collaboratorIds
-        .map(mid=>allTeamMembers.find(m=>m.id===mid))
-        .filter(Boolean)
-        .map(m=>({email:m.email,name:m.name}));
-    }
-    // Also inherit Business from the project if not explicitly set.
-    if((!bizId||bizId===BUSINESS_MAP?.['Real Estate'])&&proj&&proj.businessId){
-      bizId=proj.businessId;fields[F.business]=[bizId];
+    if(proj){
+      // Always inherit Business from the project if not explicitly set.
+      if((!bizId||bizId===BUSINESS_MAP?.['Real Estate'])&&proj.businessId){
+        bizId=proj.businessId;fields[F.business]=[bizId];
+      }
+      if(proj.collaboratorIds&&proj.collaboratorIds.length){
+        proj.collaboratorIds
+          .map(mid=>allTeamMembers.find(m=>m.id===mid))
+          .filter(Boolean)
+          .forEach(m=>{
+            if(m.email&&!taskCollabs.some(c=>c&&c.email===m.email)){
+              taskCollabs.push({email:m.email,name:m.name});
+            }
+          });
+      }
     }
   }
-  // Auto-add the creator as a collaborator when they assign the task to
-  // someone else. Means the creator gets the completion DM later (and
-  // shows up on the task's Collaborators list in the drawer). No-op when
-  // the assignee IS the creator — they already see their own task.
+  // Add the creator as a collaborator when they assign to someone else
+  // — runs after project inheritance so creator + project collabs both
+  // get added in cases where the creator isn't already on the project.
   const _creatorEmail=(currentUser&&currentUser.email)||'';
   if(_creatorEmail&&assigneeEmail&&_creatorEmail!==assigneeEmail){
-    taskCollabs=Array.isArray(taskCollabs)?taskCollabs.slice():[];
     if(!taskCollabs.some(c=>c&&c.email===_creatorEmail)){
       taskCollabs.push({email:_creatorEmail,name:(currentUser&&currentUser.name)||_creatorEmail});
     }
@@ -5894,14 +5919,31 @@ async function submitCreateTask(){
   const assigneeKey=document.getElementById('ctAssignee').value;
   const member=TEAM.find(m=>m.key===assigneeKey);
   if(member)fields[F.assignee]={email:member.email};
-  // Auto-add the creator as a collaborator when the assignee is someone
-  // else, so the creator gets the completion DM and appears on the
-  // task's Collaborators list.
+  // Build collaborators additively: project collaborators + creator (when
+  // the assignee differs from the creator). Same rule as createSimpleTask
+  // so both creation paths produce identical collaborator lists.
   const creatorEmail=(currentUser&&currentUser.email)||'';
   const assigneeEmailVal=member?member.email:'';
-  if(creatorEmail&&assigneeEmailVal&&creatorEmail!==assigneeEmailVal){
-    fields[F.collaborators]=[{email:creatorEmail}];
+  const collabsList=[];
+  if(pickedProj){
+    const proj=(allProjects||[]).find(p=>p.id===pickedProj);
+    if(proj&&proj.collaboratorIds&&proj.collaboratorIds.length){
+      proj.collaboratorIds
+        .map(mid=>(allTeamMembers||[]).find(m=>m.id===mid))
+        .filter(Boolean)
+        .forEach(m=>{
+          if(m.email&&!collabsList.some(c=>c.email===m.email)){
+            collabsList.push({email:m.email});
+          }
+        });
+    }
   }
+  if(creatorEmail&&assigneeEmailVal&&creatorEmail!==assigneeEmailVal){
+    if(!collabsList.some(c=>c.email===creatorEmail)){
+      collabsList.push({email:creatorEmail});
+    }
+  }
+  if(collabsList.length)fields[F.collaborators]=collabsList;
   const priority=document.getElementById('ctPriority').value;if(priority)fields[F.priority]=priority;
   const timeEst=document.getElementById('ctTimeEst').value;if(timeEst)fields[F.timeEst]=timeEst;
   const desc=document.getElementById('ctDesc').value;if(desc)fields[F.description]=desc;
