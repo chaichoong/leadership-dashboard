@@ -308,16 +308,18 @@ const SCHEMA = {
   tenancies: {
     label: 'Tenancies',
     fields: [
-      { key:'ref',         label:'Reference',      primary:true,                                                                            type:'text',   edit:false, width:'180px' },
-      { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                  type:'link',   edit:true,  link:'tenants' },
-      { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                             type:'link',   edit:true,  link:'units' },
-      { key:'property',    label:'Property',       exact:['Property','Properties'],                                                         type:'link',   edit:false, link:'properties' },
-      { key:'status',      label:'Status',         exact:['Tenant Status','Tenancy Status','Status'],                                       type:'select', edit:false },
-      { key:'payStatus',   label:'Payment Status', exact:['Payment Status','Rent Payment Status','Pay Status'], keywords:['payment','status'], type:'select', edit:true },
-      { key:'startDate',   label:'Start Date',     exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                    type:'date',   edit:true },
-      { key:'rent',        label:'Monthly Rent',   exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],      type:'money',  edit:true },
-      { key:'dueDay',      label:'Due Day',        exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],     type:'number', edit:true },
-      { key:'payFreq',     label:'Pay Freq',       exact:['Payment Frequency','Pay Frequency'], keywords:['payment','frequency'],           type:'select', edit:true },
+      { key:'ref',         label:'Reference',      primary:true,                                                                                                          type:'text',   edit:false, width:'180px' },
+      { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                                                type:'link',   edit:true,  link:'tenants' },
+      { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                                                           type:'link',   edit:true,  link:'units' },
+      { key:'property',    label:'Property',       exact:['Property','Properties'],                                                                                       type:'link',   edit:false, link:'properties' },
+      // Locked to "Tenant Status" only — that field rolls Active/Former up from Tenants. Generic "Status" matches were giving wrong values.
+      { key:'status',      label:'Status',         exact:['Tenant Status'],                                                                                               type:'select', edit:false },
+      // Use the unified payment status field that the rest of the platform writes to (CFV / In Payment / etc.)
+      { key:'payStatus',   label:'Payment Status', exact:['Payment Status Unified','Payment Status'],                                                                     type:'select', edit:true },
+      { key:'startDate',   label:'Start Date',     exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                                                  type:'date',   edit:true },
+      { key:'rent',        label:'Monthly Rent',   exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],                                    type:'money',  edit:true },
+      { key:'dueDay',      label:'Due Day',        exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],                                   type:'number', edit:true },
+      { key:'payFreq',     label:'Pay Freq',       exact:['Payment Frequency','Pay Frequency'], keywords:['payment','frequency'],                                         type:'select', edit:true },
     ],
   },
   units: {
@@ -328,38 +330,56 @@ const SCHEMA = {
       { key:'unitNum',  label:'Unit #',          exact:['Unit Number'], keywords:['unit','number'],                                         type:'number', edit:true },
       { key:'property', label:'Property',        exact:['Property','Properties'],                                                           type:'link',   edit:false, link:'properties' },
       { key:'status',   label:'Status',          exact:['Status','Unit Status','Occupancy Status'], keywords:['status'],                    type:'select', edit:true },
-      { key:'tenant',   label:'Current Tenant',  exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants' },
-      { key:'tenancy',  label:'Current Tenancy', exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies' },
+      // Filter linked tenants/tenancies to the ACTIVE one — the raw link includes
+      // historical (Former) records too, which we don't want under "Current".
+      { key:'tenant',   label:'Current Tenant',  exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants',   linkFilter:(rec)=>isActiveStatus(rec,'tenants') },
+      { key:'tenancy',  label:'Current Tenancy', exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies') },
       { key:'rent',     label:'Current Rent',    exact:['Current Rent','Monthly Rent','Rent'],                                              type:'money',  edit:false },
     ],
   },
   properties: {
     label: 'Properties',
     fields: [
-      { key:'name',         label:'Property',         primary:true,                                                                                                       type:'text',    edit:true, width:'220px' },
-      { key:'type',         label:'Type',             exact:['Property Type','Type'], keywords:['property','type'],                                                       type:'select',  edit:true },
-      { key:'ownership',    label:'Ownership',        exact:['Ownership','Owner','Owned/Managed','Ownership Type'],                                                       type:'select',  edit:true },
-      { key:'agent',        label:'Agent / Landlord', exact:['Agent / Landlord','Agent','Landlord','Managing Agent','Owner / Landlord'], keywords:['agent'],              type:'text',    edit:true },
-      { key:'units',        label:'Units',            exact:['Rental Units','Units','Linked Units'],                                                                      type:'link',    edit:false, link:'units' },
-      { key:'grossRent',    label:'Gross Rent / mo',  exact:['Gross Monthly Rent','Total Rent','Total Monthly Rent','Monthly Rent'], keywords:['gross','rent'],            type:'money',   edit:false },
-      { key:'marketValue',  label:'Market Value',     exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                        type:'money',   edit:true },
-      { key:'mortgageBal',  label:'Mortgage Bal',     exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'], type:'money', edit:true },
-      { key:'ltv',          label:'LTV',              exact:['LTV','LTV %','Loan to Value','Loan-to-Value'],                                                              type:'percent', edit:false },
-      { key:'rate',         label:'Rate',             exact:['Interest Rate','Mortgage Rate','Rate'], keywords:['interest','rate'],                                       type:'percent', edit:true },
-      { key:'mortgagePay',  label:'Mortgage / mo',    exact:['Monthly Mortgage Payment','Mortgage Payment','Approx Mortgage Payment','Mortgage Cost'], keywords:['mortgage','payment'], type:'money', edit:true },
-      { key:'grossYield',   label:'Gross Yield',      exact:['Gross Yield','Yield','Yield %'], keywords:['yield'],                                                        type:'percent', edit:false },
+      { key:'name',         label:'Property',     primary:true,                                                                                                                                          type:'text',    edit:true, width:'220px' },
+      { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true },
+      { key:'beds',         label:'Beds',         exact:['Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds'], keywords:['beds'],                                                   type:'number',  edit:true },
+      { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units' },
+      { key:'marketValue',  label:'Market Value', exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'money',   edit:true },
+      { key:'mortgageBal',  label:'Mortgage Bal', exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'money',   edit:true },
+      { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'money',   edit:false },
+      { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false },
+      { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false },
+      { key:'grossRent',    label:'Rent / mo',    exact:['Gross Monthly Rent','Total Rent','Total Monthly Rent','Monthly Rent'], keywords:['gross','rent'],                                              type:'money',   edit:false },
+      { key:'mortgagePay',  label:'Mortgage / mo',virtual:true, compute:r => deriveMortgagePay(r), tooltip:'Pulled from the linked mortgage cost in the Costs table',                                     type:'money',   edit:false },
+      { key:'netRent',      label:'Net / mo',     virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false },
+      { key:'grossYield',   label:'Gross Yield',  virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false },
+      { key:'cashOnCash',   label:'Cash on Cash', virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false },
     ],
-    // Extra fields shown ONLY in the detail drawer
+    // Drawer-only fields. The mortgage-cost link drives the Mortgage / mo column;
+    // purchase price/date drive the capital-growth metrics in the drawer.
     drawerExtras: [
-      { key:'_address',     label:'Address',                 exact:['Address','Full Address','Property Address'],            type:'long',  edit:true },
-      { key:'_postcode',    label:'Postcode',                exact:['Postcode','Post Code','Zip','Zip Code'],                type:'text',  edit:true },
-      { key:'_purchDate',   label:'Purchase Date',           exact:['Purchase Date','Date Purchased','Acquisition Date'],    type:'date',  edit:true },
-      { key:'_purchPrice',  label:'Purchase Price',          exact:['Purchase Price','Acquisition Price','Bought For'],      type:'money', edit:true },
-      { key:'_mortProv',    label:'Mortgage Provider',       exact:['Mortgage Provider','Lender','Mortgage Lender'],         type:'text',  edit:true },
-      { key:'_mortAcct',    label:'Mortgage Account Number', exact:['Mortgage Account Number','Account Number','Mortgage Reference'], type:'text', edit:true },
-      { key:'_mortStart',   label:'Mortgage Start Date',     exact:['Mortgage Start Date'],                                  type:'date',  edit:true },
-      { key:'_mortEnd',     label:'Mortgage End Date',       exact:['Mortgage End Date','Mortgage Expiry'],                  type:'date',  edit:true },
-      { key:'_notes',       label:'Notes',                   exact:['Notes','Property Notes','Comments'],                    type:'long',  edit:true },
+      { key:'_address',     label:'Address',                 exact:['Address','Full Address','Property Address'],                                  type:'long',  edit:true },
+      { key:'_postcode',    label:'Postcode',                exact:['Postcode','Post Code','Zip','Zip Code'],                                      type:'text',  edit:true },
+      { key:'_ownership',   label:'Ownership',               exact:['Ownership','Owner','Owned/Managed','Ownership Type'],                         type:'select',edit:true },
+      { key:'_agent',       label:'Agent / Landlord',        exact:['Agent / Landlord','Agent','Landlord','Managing Agent','Owner / Landlord'], keywords:['agent'], type:'text', edit:true },
+      { key:'_purchDate',   label:'Purchase Date',           exact:['Purchase Date','Date Purchased','Acquisition Date'],                          type:'date',  edit:true },
+      { key:'_purchPrice',  label:'Purchase Price',          exact:['Purchase Price','Acquisition Price','Bought For'],                            type:'money', edit:true },
+      { key:'_mortProv',    label:'Mortgage Provider',       exact:['Mortgage Provider','Lender','Mortgage Lender'],                               type:'text',  edit:true },
+      { key:'_mortAcct',    label:'Mortgage Account Number', exact:['Mortgage Account Number','Account Number','Mortgage Reference'],              type:'text',  edit:true },
+      { key:'_mortStart',   label:'Mortgage Start Date',     exact:['Mortgage Start Date'],                                                        type:'date',  edit:true },
+      { key:'_mortEnd',     label:'Mortgage End Date',       exact:['Mortgage End Date','Mortgage Expiry'],                                        type:'date',  edit:true },
+      // Hidden/internal: the link to the mortgage cost record. Resolved as a link field; only shown if matched.
+      { key:'_mortCostLink',label:'Mortgage Cost (linked)',  exact:['Mortgage Cost','Mortgage Costs','Monthly Mortgage Payment','Mortgage Payment','Costs'], keywords:['mortgage','cost'], type:'link', edit:false, link:'costs' },
+      { key:'_notes',       label:'Notes',                   exact:['Notes','Property Notes','Comments'],                                          type:'long',  edit:true },
+    ],
+  },
+  // Resolved silently — no tab. Used to look up monthly mortgage amounts.
+  costs: {
+    label: 'Costs',
+    hidden: true,
+    fields: [
+      { key:'name',     primary:true,                                                                                  type:'text' },
+      { key:'expected', exact:['Expected Cost','Expected Amount','Monthly Cost','Amount'], keywords:['expected'],      type:'money' },
     ],
   },
 };
@@ -368,11 +388,75 @@ const SCHEMA = {
 // State
 // ═══════════════════════════════════════════════════════════════════════
 let PAT = '';
-let SCHEMA_RESOLVED = null; // { tenants:{primary,byKey:{},byId:{},tableMeta:{}}, ... }
-let DATA = { tenants:[], tenancies:[], units:[], properties:[] };
-let INDEX = { tenants:{}, tenancies:{}, units:{}, properties:{} }; // recordId → record
+let SCHEMA_RESOLVED = null;
+let DATA  = { tenants:[], tenancies:[], units:[], properties:[], costs:[] };
+let INDEX = { tenants:{}, tenancies:{}, units:{}, properties:{}, costs:{} };
 let activeTab = 'tenants';
 let sortState = { tenants:null, tenancies:null, units:null, properties:null };
+
+// ═══════════════════════════════════════════════════════════════════════
+// Derived metrics — compute helpers used by virtual fields on Properties.
+// All computes return JS numbers (or null when prerequisites are missing).
+// Percent-typed virtuals return DECIMALS (0.05 = 5%) to match Airtable's
+// percent convention so fmtPercent renders consistently.
+// ═══════════════════════════════════════════════════════════════════════
+function fid(entityKey, fieldKey){
+  return SCHEMA_RESOLVED?.[entityKey]?.byKey?.[fieldKey]?.id || null;
+}
+function numField(record, entityKey, fieldKey){
+  const id = fid(entityKey, fieldKey);
+  if (!id) return null;
+  const v = record.fields[id];
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+function deriveMortgagePay(propRec){
+  const linkId = fid('properties','_mortCostLink');
+  if (!linkId) return null;
+  const linked = propRec.fields[linkId];
+  const costId = Array.isArray(linked) ? linked[0] : linked;
+  if (!costId) return null;
+  const cost = INDEX.costs[costId];
+  if (!cost) return null;
+  return numField(cost, 'costs', 'expected');
+}
+function deriveEquity(p){
+  const v = numField(p,'properties','marketValue'); const m = numField(p,'properties','mortgageBal');
+  if (v == null) return null; return v - (m||0);
+}
+function deriveLTV(p){
+  const v = numField(p,'properties','marketValue'); const m = numField(p,'properties','mortgageBal');
+  if (!v || !m) return null; return m / v; // decimal
+}
+function deriveInterestRate(p){
+  // User's spec: (monthly mortgage × 12) / mortgage balance → decimal
+  const m = deriveMortgagePay(p); const b = numField(p,'properties','mortgageBal');
+  if (!m || !b) return null; return (m * 12) / b;
+}
+function deriveGrossYield(p){
+  const r = numField(p,'properties','grossRent'); const v = numField(p,'properties','marketValue');
+  if (!r || !v) return null; return (r * 12) / v;
+}
+function deriveNetRent(p){
+  const r = numField(p,'properties','grossRent'); const m = deriveMortgagePay(p);
+  if (r == null) return null; return r - (m||0);
+}
+function deriveCashOnCash(p){
+  const net = deriveNetRent(p); const eq = deriveEquity(p);
+  if (net == null || !eq || eq <= 0) return null; return (net * 12) / eq;
+}
+
+// Status-based link filter — used on Rental Units to keep "Current Tenant /
+// Tenancy" cells from listing historical Former rows alongside the active one.
+function isActiveStatus(rec, entityKey){
+  const sch = SCHEMA_RESOLVED && SCHEMA_RESOLVED[entityKey];
+  const sid = sch?.byKey?.status?.id;
+  if (!sid) return true; // can't filter — show everything
+  const v = rec.fields[sid];
+  const name = Array.isArray(v) ? (v[0]?.name || v[0]) : (typeof v === 'object' ? v?.name : v);
+  return /active/i.test(String(name||''));
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Auth — try parent window first, then localStorage, then prompt
@@ -432,21 +516,25 @@ async function fetchAllRecords(tableId, opts={}){
 
 // Resolve a single curated field def against an Airtable table's field list.
 // Returns the matched Airtable field or null.
+//
+// When `def.type==='link'`, we restrict the search to multipleRecordLinks
+// fields only — otherwise a money column literally named "Monthly Mortgage
+// Payment" can outrank the actual link field that points at the cost record.
 function resolveField(def, allFields, primaryFieldId){
   if (def.primary) {
     return allFields.find(f => f.id === primaryFieldId) || null;
   }
-  // exact name match (case + whitespace tolerant), in priority order
   const norm = s => String(s||'').toLowerCase().trim();
-  const byName = new Map(allFields.map(f => [norm(f.name), f]));
+  const wantLink = def.type === 'link';
+  const candidates = wantLink ? allFields.filter(f => f.type === 'multipleRecordLinks') : allFields;
+  const byName = new Map(candidates.map(f => [norm(f.name), f]));
   for (const want of (def.exact || [])) {
     const f = byName.get(norm(want));
     if (f) return f;
   }
-  // keyword match: all keywords must appear in the field name
   if (def.keywords && def.keywords.length) {
     const kw = def.keywords.map(norm);
-    const f = allFields.find(f => {
+    const f = candidates.find(f => {
       const n = norm(f.name);
       return kw.every(k => n.includes(k));
     });
@@ -458,41 +546,46 @@ function resolveField(def, allFields, primaryFieldId){
 async function fetchSchema(){
   const data = await airtableFetch(`meta/bases/${BASE_ID}/tables`);
   const result = {};
+  // entity-key → Airtable table-id mapping (entity keys don't always match TABLE keys)
+  const tableIdFor = (k) => TABLE[k === 'units' ? 'rentalUnits' : k];
   for (const entityKey of Object.keys(SCHEMA)) {
-    const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
+    const tableId = tableIdFor(entityKey);
     const meta = data.tables.find(t => t.id === tableId);
     if (!meta) { console.warn('table not found in metadata:', entityKey, tableId); continue; }
     const byKey = {}; const byId = {};
     const usedFieldIds = new Set();
-    // Resolve curated SCHEMA fields
-    for (const def of SCHEMA[entityKey].fields) {
+    const resolveOne = (def) => {
+      // Virtual fields have no Airtable backing — they're computed on render
+      if (def.virtual) {
+        return { ...def, id:null, name:def.label||def.key, atType:'virtual', options:null, readOnly:true, missing:false };
+      }
       const f = resolveField(def, meta.fields, meta.primaryFieldId);
       if (f) {
-        const resolved = { ...def, id:f.id, name:f.name, atType:f.type, options:f.options || null, readOnly: !def.edit || isReadOnlyAirtable(f.type) };
-        byKey[def.key] = resolved;
-        byId[f.id] = resolved;
-        usedFieldIds.add(f.id);
-      } else {
-        byKey[def.key] = { ...def, id:null, name:null, atType:null, options:null, readOnly:true, missing:true };
+        return { ...def, id:f.id, name:f.name, atType:f.type, options:f.options || null, readOnly: !def.edit || isReadOnlyAirtable(f.type) };
       }
+      return { ...def, id:null, name:null, atType:null, options:null, readOnly:true, missing:true };
+    };
+    // Curated columns
+    for (const def of SCHEMA[entityKey].fields) {
+      const r = resolveOne(def);
+      byKey[def.key] = r;
+      if (r.id) { byId[r.id] = r; usedFieldIds.add(r.id); }
     }
-    // Drawer extras (Properties only)
+    // Drawer extras — also indexed in byKey so computes can reference them
     const extras = [];
-    if (SCHEMA[entityKey].drawerExtras) {
-      for (const def of SCHEMA[entityKey].drawerExtras) {
-        const f = resolveField(def, meta.fields, meta.primaryFieldId);
-        if (f) {
-          const resolved = { ...def, id:f.id, name:f.name, atType:f.type, options:f.options || null, readOnly: !def.edit || isReadOnlyAirtable(f.type) };
-          extras.push(resolved);
-          byId[f.id] = resolved;
-          usedFieldIds.add(f.id);
-        }
+    for (const def of (SCHEMA[entityKey].drawerExtras || [])) {
+      const r = resolveOne(def);
+      if (!r.missing) {
+        extras.push(r);
+        byKey[def.key] = r;
+        if (r.id) { byId[r.id] = r; usedFieldIds.add(r.id); }
       }
     }
     result[entityKey] = {
       tableId,
       tableName: meta.name,
       primaryFieldId: meta.primaryFieldId,
+      hidden: !!SCHEMA[entityKey].hidden,
       byKey,
       byId,
       drawerExtras: extras,
@@ -545,20 +638,23 @@ async function start(){
 async function refreshAll(initial=false){
   setSync('Refreshing...');
   try {
-    const [tn, tc, un, pr] = await Promise.all([
+    const [tn, tc, un, pr, cs] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
       fetchAllRecords(TABLE.tenancies),
       fetchAllRecords(TABLE.rentalUnits),
       fetchAllRecords(TABLE.properties),
+      fetchAllRecords(TABLE.costs),
     ]);
     DATA.tenants    = tn;
     DATA.tenancies  = tc;
     DATA.units      = un;
     DATA.properties = pr;
+    DATA.costs      = cs;
     INDEX.tenants    = Object.fromEntries(tn.map(r=>[r.id,r]));
     INDEX.tenancies  = Object.fromEntries(tc.map(r=>[r.id,r]));
     INDEX.units      = Object.fromEntries(un.map(r=>[r.id,r]));
     INDEX.properties = Object.fromEntries(pr.map(r=>[r.id,r]));
+    INDEX.costs      = Object.fromEntries(cs.map(r=>[r.id,r]));
     document.getElementById('cntTenants').textContent    = tn.length;
     document.getElementById('cntTenancies').textContent  = tc.length;
     document.getElementById('cntUnits').textContent      = un.length;
@@ -653,7 +749,9 @@ function bindHashRouting(){
 // Cell helpers — read raw value, render display, link cross-nav
 // ═══════════════════════════════════════════════════════════════════════
 function getCellRaw(record, fieldDef){
-  if (!fieldDef || !fieldDef.id) return null;
+  if (!fieldDef) return null;
+  if (fieldDef.virtual && typeof fieldDef.compute === 'function') return fieldDef.compute(record);
+  if (!fieldDef.id) return null;
   return record.fields[fieldDef.id];
 }
 
@@ -692,8 +790,9 @@ function fmtPercent(n){
   if (n == null || n === '') return '';
   const num = typeof n === 'number' ? n : parseFloat(n);
   if (isNaN(num)) return '';
-  // Airtable percent returns decimal (0.05 = 5%)
-  return (num*100).toFixed(1) + '%';
+  // Convention: percent values are stored as decimals (0.05 = 5%), matching
+  // both Airtable's percent type and our virtual-field output.
+  return (num*100).toFixed(2) + '%';
 }
 function fmtDate(s){
   if (!s) return '';
@@ -712,8 +811,17 @@ function renderCell(record, fieldDef, entityKey){
 
   // Linked records → chips
   if (fieldDef.type === 'link' || (Array.isArray(v) && v.length && typeof v[0] === 'string' && v[0].startsWith('rec'))) {
-    const ids = Array.isArray(v) ? v : [v];
+    let ids = Array.isArray(v) ? v : [v];
     const targetEntity = fieldDef.link;
+    // Optional per-record filter (eg. only Active tenancies under "Current Tenancy")
+    if (typeof fieldDef.linkFilter === 'function' && targetEntity) {
+      ids = ids.filter(id => {
+        const rec = INDEX[targetEntity] && INDEX[targetEntity][id];
+        if (!rec) return true; // unresolved — keep so user can still see it
+        try { return fieldDef.linkFilter(rec, targetEntity); } catch(e){ return true; }
+      });
+      if (!ids.length) return '<span style="color:var(--text-muted)">—</span>';
+    }
     const chips = ids.map(id => {
       const rec = INDEX[targetEntity] && INDEX[targetEntity][id];
       const nm = rec ? displayName(rec, targetEntity) : id;
@@ -900,13 +1008,20 @@ function renderPropertyKpis(){
   const sumNum = (arr, fieldId) => arr.reduce((s,r)=>{
     const v = r.fields[fieldId]; const n = typeof v==='number'?v:parseFloat(v); return s + (isNaN(n)?0:n);
   },0);
-  const totalValue   = sumNum(DATA.properties, sch.byKey.marketValue?.id);
-  const totalDebt    = sumNum(DATA.properties, sch.byKey.mortgageBal?.id);
-  const totalRent    = sumNum(DATA.properties, sch.byKey.grossRent?.id);
-  const totalMortgage= sumNum(DATA.properties, sch.byKey.mortgagePay?.id);
-  const equity = totalValue - totalDebt;
+  const sumDerived = (arr, fn) => arr.reduce((s,r)=>{ const n = fn(r); return s + ((n==null||isNaN(n))?0:n); },0);
+  const totalValue    = sumNum(DATA.properties, sch.byKey.marketValue?.id);
+  const totalDebt     = sumNum(DATA.properties, sch.byKey.mortgageBal?.id);
+  const totalRent     = sumNum(DATA.properties, sch.byKey.grossRent?.id);
+  const totalMortgage = sumDerived(DATA.properties, deriveMortgagePay);
+  const totalBeds     = sumNum(DATA.properties, sch.byKey.beds?.id);
+  const totalPurchase = sumNum(DATA.properties, sch.byKey._purchPrice?.id);
+  const equity     = totalValue - totalDebt;
   const annualRent = totalRent * 12;
+  const annualNet  = (totalRent - totalMortgage) * 12;
   const portfolioYield = totalValue > 0 ? (annualRent / totalValue * 100) : 0;
+  const cashOnCash     = equity > 0 ? (annualNet / equity * 100) : 0;
+  const capGrowth      = totalPurchase > 0 ? totalValue - totalPurchase : null;
+  const avgLTV         = totalValue > 0 ? (totalDebt / totalValue * 100) : 0;
 
   // Occupancy across all units
   const unitSch = SCHEMA_RESOLVED?.units;
@@ -921,14 +1036,16 @@ function renderPropertyKpis(){
   const occRate = totalUnits ? (occupied/totalUnits*100) : 0;
 
   document.getElementById('propertyKpis').innerHTML = `
-    <div class="kpi"><div class="label">Properties</div><div class="value">${total}</div><div class="sub">${totalUnits} rental units</div></div>
+    <div class="kpi"><div class="label">Properties</div><div class="value">${total}</div><div class="sub">${totalUnits} units · ${totalBeds||'—'} beds</div></div>
     <div class="kpi"><div class="label">Portfolio Value</div><div class="value">${fmtMoneyShort(totalValue)}</div><div class="sub">market value</div></div>
-    <div class="kpi"><div class="label">Total Debt</div><div class="value">${fmtMoneyShort(totalDebt)}</div><div class="sub">mortgages outstanding</div></div>
+    <div class="kpi"><div class="label">Total Debt</div><div class="value">${fmtMoneyShort(totalDebt)}</div><div class="sub">avg LTV ${avgLTV.toFixed(1)}%</div></div>
     <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div><div class="sub">${totalValue?(equity/totalValue*100).toFixed(0):0}% of value</div></div>
+    ${capGrowth!=null?`<div class="kpi"><div class="label">Capital Growth</div><div class="value" style="color:${capGrowth>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(capGrowth)}</div><div class="sub">${(capGrowth/totalPurchase*100).toFixed(1)}% since purchase</div></div>`:''}
     <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(totalRent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
     <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoneyShort(totalMortgage)}</div><div class="sub">total debt service</div></div>
     <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(totalRent-totalMortgage)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(totalRent-totalMortgage)}</div><div class="sub">before opex</div></div>
-    <div class="kpi"><div class="label">Portfolio Yield</div><div class="value">${portfolioYield.toFixed(2)}%</div><div class="sub">gross annual</div></div>
+    <div class="kpi"><div class="label">Gross Yield</div><div class="value">${portfolioYield.toFixed(2)}%</div><div class="sub">annual rent / value</div></div>
+    <div class="kpi"><div class="label">Cash on Cash</div><div class="value" style="color:${cashOnCash>=8?'var(--success)':cashOnCash>=4?'var(--warning)':'var(--danger)'}">${cashOnCash.toFixed(2)}%</div><div class="sub">net rent / equity</div></div>
     <div class="kpi"><div class="label">Occupancy</div><div class="value" style="color:${occRate>=90?'var(--success)':occRate>=75?'var(--warning)':'var(--danger)'}">${occRate.toFixed(0)}%</div><div class="sub">${occupied} / ${totalUnits} units</div></div>
   `;
 }
@@ -1238,22 +1355,62 @@ function fieldRow(fieldDef, record, entityKey){
 
 function renderPropertyDetailMetrics(rec){
   const sch = SCHEMA_RESOLVED.properties;
-  const rent  = parseFloat(rec.fields[sch.byKey.grossRent?.id])    || 0;
-  const value = parseFloat(rec.fields[sch.byKey.marketValue?.id])  || 0;
-  const debt  = parseFloat(rec.fields[sch.byKey.mortgageBal?.id])  || 0;
-  const mort  = parseFloat(rec.fields[sch.byKey.mortgagePay?.id])  || 0;
+  const numF = (k) => { const id = sch.byKey[k]?.id; if (!id) return null; const v = rec.fields[id]; const n = typeof v==='number'?v:parseFloat(v); return isNaN(n)?null:n; };
+  const value = numF('marketValue') || 0;
+  const debt  = numF('mortgageBal')  || 0;
+  const rent  = numF('grossRent')    || 0;
+  const mort  = deriveMortgagePay(rec) || 0;
+  const beds  = numF('beds') || 0;
+  const purchPrice = numF('_purchPrice');
+  const purchDate  = sch.byKey._purchDate?.id ? rec.fields[sch.byKey._purchDate.id] : null;
   const equity = value - debt;
   const annualRent = rent * 12;
+  const annualNet  = annualRent - (mort * 12);
   const grossYield = value > 0 ? annualRent / value * 100 : 0;
-  const netRent = rent - mort;
-  const ltv = value > 0 ? debt / value * 100 : 0;
-  return `<div class="drawer-section">
-    <h3>Performance</h3>
+  const netYield   = value > 0 ? annualNet   / value * 100 : 0;
+  const ltv        = value > 0 ? debt / value * 100 : 0;
+  const rate       = (mort && debt) ? (mort * 12) / debt * 100 : 0;
+  const cashOnCash = equity > 0 ? annualNet / equity * 100 : 0;
+  const rentPerBed = beds > 0 ? rent / beds : null;
+  // Capital growth
+  let yearsHeld = null, growthGBP = null, growthPct = null, cagr = null;
+  if (purchPrice && value) {
+    growthGBP = value - purchPrice;
+    growthPct = (growthGBP / purchPrice) * 100;
+    if (purchDate) {
+      const ms = Date.now() - new Date(purchDate).getTime();
+      yearsHeld = ms / (365.25 * 24 * 3600 * 1000);
+      if (yearsHeld > 0.25) cagr = (Math.pow(value/purchPrice, 1/yearsHeld) - 1) * 100;
+    }
+  }
+  const totalROI = (purchPrice && value) ? (((value - purchPrice) + (annualNet * (yearsHeld||1))) / purchPrice) * 100 : null;
+
+  return `
+  <div class="drawer-section">
+    <h3>Cashflow Performance</h3>
     <div class="kpi-grid" style="margin-bottom:0">
-      <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div></div>
-      <div class="kpi"><div class="label">LTV</div><div class="value">${ltv.toFixed(1)}%</div></div>
-      <div class="kpi"><div class="label">Gross Yield</div><div class="value">${grossYield.toFixed(2)}%</div></div>
-      <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${netRent>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(netRent)}</div><div class="sub">after mortgage, before opex</div></div>
+      <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(rent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
+      <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoneyShort(mort)}</div><div class="sub">${rate?rate.toFixed(2)+'% rate':'no link to cost'}</div></div>
+      <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(rent-mort)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(rent-mort)}</div><div class="sub">before opex</div></div>
+      ${rentPerBed!=null?`<div class="kpi"><div class="label">Rent / bed</div><div class="value">${fmtMoneyShort(rentPerBed)}</div><div class="sub">${beds} beds</div></div>`:''}
+    </div>
+  </div>
+  <div class="drawer-section">
+    <h3>Capital Position</h3>
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div><div class="sub">${value?(equity/value*100).toFixed(0):0}% of value</div></div>
+      <div class="kpi"><div class="label">LTV</div><div class="value">${ltv.toFixed(2)}%</div></div>
+      ${growthGBP!=null?`<div class="kpi"><div class="label">Capital Growth</div><div class="value" style="color:${growthGBP>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(growthGBP)}</div><div class="sub">${growthPct.toFixed(1)}% since ${purchPrice?fmtMoneyShort(purchPrice):'—'}</div></div>`:''}
+      ${cagr!=null?`<div class="kpi"><div class="label">CAGR</div><div class="value">${cagr.toFixed(2)}%</div><div class="sub">over ${yearsHeld.toFixed(1)} years</div></div>`:''}
+    </div>
+  </div>
+  <div class="drawer-section">
+    <h3>Returns</h3>
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="label">Gross Yield</div><div class="value">${grossYield.toFixed(2)}%</div><div class="sub">rent / value</div></div>
+      <div class="kpi"><div class="label">Net Yield</div><div class="value">${netYield.toFixed(2)}%</div><div class="sub">after mortgage / value</div></div>
+      <div class="kpi"><div class="label">Cash on Cash</div><div class="value" style="color:${cashOnCash>=8?'var(--success)':cashOnCash>=4?'var(--warning)':'var(--danger)'}">${cashOnCash.toFixed(2)}%</div><div class="sub">net rent / equity</div></div>
+      ${totalROI!=null?`<div class="kpi"><div class="label">Total ROI</div><div class="value">${totalROI.toFixed(1)}%</div><div class="sub">income + capital growth on cost</div></div>`:''}
     </div>
   </div>`;
 }
