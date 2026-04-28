@@ -6,6 +6,8 @@
 <title>Operations OS — Tenants, Tenancies, Units, Properties</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <link rel="stylesheet" href="../../css/sync-bar.css?v=2">
+<!-- Chart.js — used for the Valuation History trend chart -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
@@ -188,6 +190,36 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .schema-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-secondary);font-weight:600}
 .schema-tag.warn{background:var(--warning-bg);color:var(--warning)}
 .schema-tag.ok{background:var(--success-bg);color:var(--success)}
+
+/* Valuation history (in property drawer) */
+.valuation-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px}
+.val-tile{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px}
+.val-tile .lbl{font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+.val-tile .val{font-size:16px;font-weight:700;margin-top:2px;color:var(--text-primary);font-variant-numeric:tabular-nums}
+.val-tile .sub{font-size:10px;color:var(--text-muted);margin-top:2px}
+.val-chart-wrap{height:180px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:8px;margin-bottom:12px;position:relative}
+.val-chart-wrap canvas{display:block}
+.val-empty{padding:20px;text-align:center;color:var(--text-muted);font-size:12px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;margin-bottom:12px}
+.val-actions{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.btn-ai{background:linear-gradient(135deg,var(--accent),var(--accent-hover));color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.btn-ai:hover{filter:brightness(1.06)}
+.btn-ai:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+
+/* AI valuation modal */
+.ai-status{display:flex;align-items:center;gap:10px;padding:14px;background:var(--bg-surface-2);border-radius:8px;font-size:13px;color:var(--text-secondary);margin-bottom:14px}
+.ai-status .spin{width:18px;height:18px;border:2px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+.ai-error{background:var(--danger-bg);color:var(--danger);padding:12px 14px;border-radius:8px;font-size:12px;margin-bottom:14px;line-height:1.5}
+.ai-headline{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
+.ai-headline .val-tile{background:var(--bg-surface);border-color:var(--accent-soft)}
+.ai-headline .val-tile.primary{background:var(--accent-soft);border-color:var(--accent)}
+.ai-comp-link{color:var(--accent);font-size:11px;text-decoration:none}
+.ai-comp-link:hover{text-decoration:underline}
+.ai-methodology{padding:12px;background:var(--bg-surface-2);border-radius:8px;font-size:12px;color:var(--text-secondary);line-height:1.5;margin-top:14px;white-space:pre-wrap}
+.ai-key-prompt{display:flex;flex-direction:column;gap:8px}
+.ai-key-prompt input{padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-size:13px;background:var(--bg-surface)}
+.ai-key-prompt input:focus{outline:none;border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -306,6 +338,7 @@ const TABLE = {
   rentalUnits: 'tblM3mZCR5kiEdWMj',
   properties:  'tbl6f0OkAmTC2jbuG',
   costs:       'tblx5kvhzNEI5TFlS',
+  valuations:  'tblZYsa0u1M17N7ZE',  // Property Valuations — historical AI/manual estimates
 };
 
 // Curated field RESOLVERS per entity. Field IDs are resolved at load time
@@ -420,6 +453,25 @@ const SCHEMA = {
       { key:'inactive', exact:['Inactive','Inactive?','Archived','Is Inactive'],                                       type:'check' },
     ],
   },
+  // Property Valuations — historical snapshots (manual + AI). Resolved silently;
+  // surfaced through the property drawer's Valuation History section.
+  valuations: {
+    label: 'Property Valuations', singular: 'Valuation', hidden: true,
+    fields: [
+      { key:'title',        primary:true,                                                                              type:'text' },
+      { key:'property',     exact:['Property','Properties'],                                                           type:'link', link:'properties' },
+      { key:'date',         exact:['Date','Valuation Date'],                                                           type:'date' },
+      { key:'value',        exact:['Estimated Value','Value','Market Value'],                                          type:'moneyBig' },
+      { key:'source',       exact:['Source'],                                                                          type:'select' },
+      { key:'status',       exact:['Status'],                                                                          type:'select' },
+      { key:'confidence',   exact:['Confidence'],                                                                      type:'select' },
+      { key:'comparables',  exact:['Comparables'],                                                                     type:'long' },
+      { key:'methodology',  exact:['Methodology','Notes'],                                                             type:'long' },
+      { key:'previousValue',exact:['Previous Value'],                                                                  type:'moneyBig' },
+      { key:'approvedBy',   exact:['Approved By'],                                                                     type:'text' },
+      { key:'approvedOn',   exact:['Approved On','Approved Date'],                                                     type:'date' },
+    ],
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -427,8 +479,8 @@ const SCHEMA = {
 // ═══════════════════════════════════════════════════════════════════════
 let PAT = '';
 let SCHEMA_RESOLVED = null;
-let DATA  = { tenants:[], tenancies:[], units:[], properties:[], costs:[] };
-let INDEX = { tenants:{}, tenancies:{}, units:{}, properties:{}, costs:{} };
+let DATA  = { tenants:[], tenancies:[], units:[], properties:[], costs:[], valuations:[] };
+let INDEX = { tenants:{}, tenancies:{}, units:{}, properties:{}, costs:{}, valuations:{} };
 let activeTab = 'tenants';
 let sortState = { tenants:null, tenancies:null, units:null, properties:null };
 
@@ -723,23 +775,26 @@ async function start(){
 async function refreshAll(initial=false){
   setSync('Refreshing...');
   try {
-    const [tn, tc, un, pr, cs] = await Promise.all([
+    const [tn, tc, un, pr, cs, vl] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
       fetchAllRecords(TABLE.tenancies),
       fetchAllRecords(TABLE.rentalUnits),
       fetchAllRecords(TABLE.properties),
       fetchAllRecords(TABLE.costs),
+      fetchAllRecords(TABLE.valuations),
     ]);
     DATA.tenants    = tn;
     DATA.tenancies  = tc;
     DATA.units      = un;
     DATA.properties = pr;
     DATA.costs      = cs;
+    DATA.valuations = vl;
     INDEX.tenants    = Object.fromEntries(tn.map(r=>[r.id,r]));
     INDEX.tenancies  = Object.fromEntries(tc.map(r=>[r.id,r]));
     INDEX.units      = Object.fromEntries(un.map(r=>[r.id,r]));
     INDEX.properties = Object.fromEntries(pr.map(r=>[r.id,r]));
     INDEX.costs      = Object.fromEntries(cs.map(r=>[r.id,r]));
+    INDEX.valuations = Object.fromEntries(vl.map(r=>[r.id,r]));
     document.getElementById('cntTenants').textContent    = tn.length;
     document.getElementById('cntTenancies').textContent  = tc.length;
     document.getElementById('cntUnits').textContent      = un.length;
@@ -1581,10 +1636,12 @@ function openDrawer(entityKey, recId){
 
   // Computed financial sections for Properties
   let computedSection = '';
+  let valuationSection = '';
   let rentBreakdownSection = '';
   let mortgageBreakdownSection = '';
   if (entityKey === 'properties') {
     computedSection         = renderPropertyDetailMetrics(rec);
+    valuationSection        = renderPropertyValuationHistory(rec);
     rentBreakdownSection    = renderPropertyRentBreakdown(rec);
     mortgageBreakdownSection= renderPropertyMortgageBreakdown(rec);
   }
@@ -1625,6 +1682,7 @@ function openDrawer(entityKey, recId){
         </div>
         <div class="drawer-body">
           ${computedSection}
+          ${valuationSection}
           ${rentBreakdownSection}
           ${mortgageBreakdownSection}
           <div class="drawer-section">
@@ -1746,6 +1804,406 @@ function renderPropertyRentBreakdown(rec){
       </tbody>
     </table>
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Valuation History — per-property historical estimates with trend chart.
+// Approved valuations update Property.Current Market Value. The chart
+// plots Approved valuations only so the trend line reflects accepted truth.
+// ═══════════════════════════════════════════════════════════════════════
+function getPropertyValuations(propRec){
+  const sch = SCHEMA_RESOLVED.valuations; if (!sch) return [];
+  const propLink = sch.byKey.property?.id; if (!propLink) return [];
+  return DATA.valuations
+    .filter(v => Array.isArray(v.fields[propLink]) && v.fields[propLink].includes(propRec.id))
+    .map(v => ({
+      id: v.id,
+      date: v.fields[sch.byKey.date?.id] || null,
+      value: parseFloat(v.fields[sch.byKey.value?.id]) || 0,
+      source: ((v.fields[sch.byKey.source?.id])||{}).name || '',
+      status: ((v.fields[sch.byKey.status?.id])||{}).name || '',
+      confidence: ((v.fields[sch.byKey.confidence?.id])||{}).name || '',
+      methodology: v.fields[sch.byKey.methodology?.id] || '',
+      previousValue: parseFloat(v.fields[sch.byKey.previousValue?.id]) || null,
+      raw: v,
+    }))
+    .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
+}
+
+function renderPropertyValuationHistory(propRec){
+  const all = getPropertyValuations(propRec);
+  const approved = all.filter(v => /approved/i.test(v.status));
+  const pending  = all.filter(v => /pending/i.test(v.status));
+  const sch = SCHEMA_RESOLVED.properties;
+  const currentValue = parseFloat(propRec.fields[sch.byKey.marketValue?.id]) || 0;
+  const purchPrice   = parseFloat(propRec.fields[sch.byKey._purchPrice?.id]) || null;
+
+  // Headline tiles: current, change since first approved, change since purchase
+  const first = approved[0];
+  const sinceFirst = (first && currentValue) ? currentValue - first.value : null;
+  const sinceFirstPct = (first && first.value) ? ((currentValue - first.value) / first.value * 100) : null;
+  const sincePurch = (purchPrice && currentValue) ? currentValue - purchPrice : null;
+  const sincePurchPct = (purchPrice) ? ((currentValue - purchPrice) / purchPrice * 100) : null;
+
+  const tiles = `
+    <div class="valuation-summary">
+      <div class="val-tile"><div class="lbl">Current Value</div><div class="val">${fmtMoneyShort(currentValue)}</div><div class="sub">latest approved</div></div>
+      ${sincePurch != null ? `<div class="val-tile"><div class="lbl">vs Purchase</div><div class="val" style="color:${sincePurch>=0?'var(--success)':'var(--danger)'}">${sincePurch>=0?'+':''}${fmtMoneyShort(sincePurch)}</div><div class="sub">${sincePurchPct.toFixed(1)}% since ${fmtMoneyShort(purchPrice)}</div></div>` : ''}
+      ${sinceFirst != null ? `<div class="val-tile"><div class="lbl">vs First Valuation</div><div class="val" style="color:${sinceFirst>=0?'var(--success)':'var(--danger)'}">${sinceFirst>=0?'+':''}${fmtMoneyShort(sinceFirst)}</div><div class="sub">${sinceFirstPct.toFixed(1)}% since ${fmtDate(first.date)}</div></div>` : ''}
+      <div class="val-tile"><div class="lbl">Total Valuations</div><div class="val">${all.length}</div><div class="sub">${approved.length} approved · ${pending.length} pending</div></div>
+    </div>`;
+
+  // Chart canvas (approved valuations as a line)
+  const chartId = 'valChart_' + propRec.id;
+  const chartHtml = approved.length >= 2
+    ? `<div class="val-chart-wrap"><canvas id="${chartId}"></canvas></div>`
+    : (approved.length === 1
+        ? `<div class="val-empty">One approved valuation logged. Run another to start the trend.</div>`
+        : `<div class="val-empty">No approved valuations yet. Run an AI valuation below to add the first one.</div>`);
+
+  // Pending review banner
+  const pendingHtml = pending.length ? `
+    <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--warning)">
+      <strong>${pending.length} valuation${pending.length>1?'s':''} pending review</strong>
+      — open the most recent below to approve or reject.
+    </div>` : '';
+
+  // History table — most recent first
+  const historyRows = [...all].reverse().map(v => {
+    const isPending = /pending/i.test(v.status);
+    return `<tr style="${isPending?'background:var(--warning-bg)':''}${/rejected/i.test(v.status)?';opacity:.5':''}">
+      <td>${escapeHtml(fmtDate(v.date)||'—')}</td>
+      <td class="money">${fmtMoneyShort(v.value)}</td>
+      <td><span class="schema-tag">${escapeHtml(v.source||'—')}</span></td>
+      <td><span class="badge ${badgeClass(v.status)}">${escapeHtml(v.status||'—')}</span></td>
+      <td>${escapeHtml(v.confidence||'—')}</td>
+      <td><button class="btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();openValuationModal('${propRec.id}','${v.id}')">${isPending?'Review':'View'}</button></td>
+    </tr>`;
+  }).join('');
+
+  const historyTable = all.length ? `
+    <table class="breakdown-table">
+      <thead><tr><th>Date</th><th style="text-align:right">Value</th><th>Source</th><th>Status</th><th>Confidence</th><th></th></tr></thead>
+      <tbody>${historyRows}</tbody>
+    </table>` : '';
+
+  // Render the chart on next tick (canvas needs to be in DOM first)
+  if (approved.length >= 2) {
+    setTimeout(() => renderValuationChart(chartId, approved), 50);
+  }
+
+  return `<div class="drawer-section">
+    <h3>Valuation History</h3>
+    ${tiles}
+    ${pendingHtml}
+    ${chartHtml}
+    <div class="val-actions">
+      <button class="btn-ai" onclick="runAIValuation('${propRec.id}')">✨ Run AI Valuation</button>
+    </div>
+    ${historyTable}
+  </div>`;
+}
+
+function renderValuationChart(canvasId, approvedValuations){
+  if (typeof Chart === 'undefined') return;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  // Tear down any prior instance on this canvas
+  if (canvas._chart) { try { canvas._chart.destroy(); } catch(e){} }
+  // Resolve token colours so the chart matches the design system
+  const css = getComputedStyle(document.body);
+  const accent = css.getPropertyValue('--accent').trim() || '#2C6E49';
+  const textMuted = css.getPropertyValue('--text-muted').trim() || '#8A928C';
+  const borderSubtle = css.getPropertyValue('--border-subtle').trim() || '#E5E8E1';
+  canvas._chart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: approvedValuations.map(v => fmtDate(v.date)),
+      datasets: [{
+        label: 'Approved Valuation',
+        data: approvedValuations.map(v => v.value),
+        borderColor: accent,
+        backgroundColor: accent + '22',
+        tension: 0.2,
+        fill: true,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => '£' + ctx.parsed.y.toLocaleString('en-GB') } },
+      },
+      scales: {
+        y: { ticks: { callback: (v) => '£' + Number(v).toLocaleString('en-GB'), color: textMuted, font:{ size: 10 } }, grid: { color: borderSubtle } },
+        x: { ticks: { color: textMuted, font:{ size: 10 } }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI Valuation flow — Anthropic API with web search
+// 1. Confirm or capture API key
+// 2. Send Claude a structured prompt with the property details
+// 3. Claude does up to 6 web searches for comparable sales
+// 4. Parse the <output> JSON block from the response
+// 5. Show review modal with comparables + estimated value
+// 6. On Approve: persist a Pending → Approved valuation + PATCH Market Value
+// ═══════════════════════════════════════════════════════════════════════
+const ANTHROPIC_KEY_LS = '_anthropic_key';
+function getAnthropicKey(){ return localStorage.getItem(ANTHROPIC_KEY_LS) || ''; }
+function setAnthropicKey(k){ localStorage.setItem(ANTHROPIC_KEY_LS, k); }
+
+function showAIModal(html, opts={}){
+  const close = opts.closable !== false;
+  const wrap = document.getElementById('drawerOverlay');
+  // Render on top of the drawer; we use a separate stacking container
+  let host = document.getElementById('aiModalHost');
+  if (!host) { host = document.createElement('div'); host.id='aiModalHost'; document.body.appendChild(host); }
+  host.innerHTML = `
+    <div class="modal-overlay" style="z-index:10001" ${close?'onclick="if(event.target===this)closeAIModal()"':''}>
+      <div class="modal-card" style="max-width:780px">
+        <div class="modal-header">
+          <h2>${opts.title || 'AI Valuation'}</h2>
+          ${close ? '<button class="modal-close" onclick="closeAIModal()">×</button>' : ''}
+        </div>
+        <div class="modal-body" id="aiModalBody">${html}</div>
+      </div>
+    </div>`;
+}
+function closeAIModal(){ const h=document.getElementById('aiModalHost'); if (h) h.innerHTML=''; }
+
+async function ensureAnthropicKey(){
+  let key = getAnthropicKey();
+  if (key) return key;
+  return new Promise((resolve) => {
+    showAIModal(`
+      <div class="ai-key-prompt">
+        <p style="font-size:13px;color:var(--text-secondary);line-height:1.5">Connect your Anthropic API key so the page can run web-search-backed property valuations. The key is stored in this browser's localStorage only — same place as your Airtable PAT.</p>
+        <input id="aiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off">
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="btn-ai" onclick="(()=>{const v=document.getElementById('aiKeyInput').value.trim();if(!v)return;setAnthropicKey(v);window.__aiKeyResolve(v);closeAIModal();})()">Save & Continue</button>
+          <button class="btn-secondary" onclick="window.__aiKeyResolve(null);closeAIModal()">Cancel</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Get a key at <a href="https://console.anthropic.com/" target="_blank" rel="noopener" style="color:var(--accent)">console.anthropic.com</a></div>
+      </div>
+    `, { title: 'Connect Anthropic API key' });
+    window.__aiKeyResolve = resolve;
+  });
+}
+
+async function callClaudeForValuation(property){
+  const sch = SCHEMA_RESOLVED.properties;
+  const name = displayName(property, 'properties');
+  const typeRaw = property.fields[sch.byKey.type?.id];
+  const type = typeRaw ? (Array.isArray(typeRaw)?(typeRaw[0]?.name||typeRaw[0]):(typeRaw.name||typeRaw)) : 'Unknown';
+  const beds = property.fields[sch.byKey.beds?.id] || '?';
+  const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
+  const postcode = property.fields[sch.byKey._postcode?.id] || '';
+  const address  = property.fields[sch.byKey._address?.id] || '';
+
+  const prompt = `You are a UK property valuation analyst. Research recent comparable sales and produce an estimated current market value.
+
+PROPERTY UNDER VALUATION
+- Name / Address: ${name}${address?` — ${address}`:''}
+- Postcode: ${postcode || 'not provided — infer from name'}
+- Property Type: ${type}
+- Bedrooms: ${beds}
+- Currently recorded value: £${currentValue.toLocaleString('en-GB')}
+
+TASK
+Search the web (Rightmove, Zoopla, Land Registry, OnTheMarket, etc.) for 3–5 RECENT (within the last 6 months, ideally last 3 months) sale prices of comparable properties. Comparable means:
+1. Same property type (${type})
+2. Same number of bedrooms (${beds})
+3. Within ~1 mile of the subject property
+4. Genuinely sold (Sold STC or Sold Subject To Contract is acceptable, but actual completed sales preferred)
+
+For each comparable capture: full address, sale price, sale date, beds, type, distance from subject (in miles, your best estimate), and the source URL.
+
+Then estimate the subject property's CURRENT market value as the median (or weighted average where you can justify it) of the comps. Note any positive or negative adjustments needed (e.g. subject has been refurbished, comp has a bigger garden, etc.).
+
+OUTPUT FORMAT — respond with a brief plain-English explanation, then this exact JSON inside <output>...</output> tags. No other JSON in the response.
+
+<output>
+{
+  "estimated_value": 195000,
+  "confidence": "Medium",
+  "comparables": [
+    { "address": "...", "sale_price": 198000, "sale_date": "2024-09-15", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.4 }
+  ],
+  "methodology": "Brief 2-3 sentence summary of how you arrived at the estimate."
+}
+</output>
+
+Confidence guide: High = 4+ very-similar recent comps, all consistent. Medium = 3 comps with mild variance. Low = fewer than 3 comps, or wide variance, or stale data.`;
+
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': getAnthropicKey(),
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 8192,
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }],
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(()=>({}));
+    throw new Error(`Anthropic ${r.status}: ${err.error?.message || 'request failed'}`);
+  }
+  const data = await r.json();
+  // Concatenate every text block (web search produces interleaved blocks)
+  const finalText = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+  const m = finalText.match(/<output>\s*([\s\S]*?)\s*<\/output>/);
+  if (!m) throw new Error('AI response did not contain <output> JSON. Raw: ' + finalText.slice(0, 200));
+  let parsed;
+  try { parsed = JSON.parse(m[1]); }
+  catch(e) { throw new Error('AI response JSON failed to parse: ' + e.message); }
+  return { result: parsed, rawText: finalText, usage: data.usage };
+}
+
+async function runAIValuation(propertyId){
+  const property = INDEX.properties[propertyId];
+  if (!property) { toast('Property not found', 'error'); return; }
+  const key = await ensureAnthropicKey();
+  if (!key) return; // user cancelled
+
+  const propName = displayName(property, 'properties');
+  showAIModal(`
+    <div class="ai-status">
+      <div class="spin"></div>
+      <div>
+        <div style="font-weight:600;color:var(--text-primary);margin-bottom:2px">Researching ${escapeHtml(propName)}…</div>
+        <div>Claude is searching Rightmove, Zoopla and Land Registry for recent comparable sales. Usually takes 30–90 seconds.</div>
+      </div>
+    </div>`, { title: 'AI Valuation', closable: false });
+
+  try {
+    const { result } = await callClaudeForValuation(property);
+    showValuationReviewModal(property, result);
+  } catch (e) {
+    console.error('AI valuation failed', e);
+    showAIModal(`
+      <div class="ai-error"><strong>Valuation failed.</strong><br>${escapeHtml(e.message)}</div>
+      <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+      <button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')" style="margin-left:8px">Try again</button>`, { title: 'AI Valuation' });
+  }
+}
+
+function showValuationReviewModal(property, result){
+  const sch = SCHEMA_RESOLVED.properties;
+  const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
+  const newValue = parseFloat(result.estimated_value) || 0;
+  const diff = newValue - currentValue;
+  const diffPct = currentValue ? (diff / currentValue * 100) : 0;
+  const comps = Array.isArray(result.comparables) ? result.comparables : [];
+  const compsRows = comps.map(c => `
+    <tr>
+      <td>${escapeHtml(c.address || '—')}</td>
+      <td class="money">${fmtMoneyShort(c.sale_price)}</td>
+      <td>${escapeHtml(c.sale_date || '—')}</td>
+      <td>${c.distance_miles != null ? c.distance_miles.toFixed(1) + ' mi' : '—'}</td>
+      <td>${c.url ? `<a class="ai-comp-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">view ↗</a>` : ''}</td>
+    </tr>`).join('');
+  const html = `
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">${escapeHtml(displayName(property,'properties'))}</div>
+    <div class="ai-headline">
+      <div class="val-tile"><div class="lbl">Current</div><div class="val">${fmtMoneyShort(currentValue)}</div></div>
+      <div class="val-tile primary"><div class="lbl">AI Estimate</div><div class="val">${fmtMoneyShort(newValue)}</div><div class="sub">confidence: ${escapeHtml(result.confidence||'—')}</div></div>
+      <div class="val-tile"><div class="lbl">Change</div><div class="val" style="color:${diff>=0?'var(--success)':'var(--danger)'}">${diff>=0?'+':''}${fmtMoneyShort(diff)}</div><div class="sub">${diffPct.toFixed(1)}%</div></div>
+    </div>
+    <h3 style="font-size:12px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">Comparables (${comps.length})</h3>
+    <table class="breakdown-table">
+      <thead><tr><th>Address</th><th style="text-align:right">Sale Price</th><th>Date</th><th>Distance</th><th></th></tr></thead>
+      <tbody>${compsRows || '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:14px">No comparables returned</td></tr>'}</tbody>
+    </table>
+    ${result.methodology ? `<div class="ai-methodology"><strong>Methodology.</strong> ${escapeHtml(result.methodology)}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      <button class="btn-secondary" onclick="rejectValuation('${property.id}')" style="border-color:var(--danger);color:var(--danger)">Reject</button>
+      <button class="btn-ai" onclick='approveValuation(${JSON.stringify(JSON.stringify({propertyId:property.id, currentValue, result}))})'>Approve & Update Market Value</button>
+    </div>`;
+  showAIModal(html, { title: 'Review AI Valuation' });
+}
+
+async function approveValuation(payloadJSON){
+  // payloadJSON arrives double-encoded: a JSON string of a JSON string. Inner parse, then real parse.
+  const payload = JSON.parse(JSON.parse(payloadJSON));
+  const { propertyId, currentValue, result } = payload;
+  const property = INDEX.properties[propertyId]; if (!property) { toast('Property gone','error'); return; }
+  const propName = displayName(property,'properties');
+  const sch = SCHEMA_RESOLVED.properties;
+  const valSch = SCHEMA_RESOLVED.valuations;
+  // Disable buttons + show spinner
+  const body = document.getElementById('aiModalBody');
+  if (body) body.innerHTML = `<div class="ai-status"><div class="spin"></div><div>Saving valuation and updating Market Value…</div></div>`;
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const dateLabel = fmtDate(today);
+    // 1. Create the valuation record
+    const valFields = {
+      [valSch.byKey.title.id]:        `${propName} — ${dateLabel}`,
+      [valSch.byKey.property.id]:     [propertyId],
+      [valSch.byKey.date.id]:         today,
+      [valSch.byKey.value.id]:        Math.round(result.estimated_value),
+      [valSch.byKey.source.id]:       { name: 'AI Estimate' },
+      [valSch.byKey.status.id]:       { name: 'Approved' },
+      [valSch.byKey.confidence.id]:   { name: result.confidence || 'Medium' },
+      [valSch.byKey.comparables.id]:  JSON.stringify(result.comparables||[], null, 2),
+      [valSch.byKey.methodology.id]:  result.methodology || '',
+      [valSch.byKey.previousValue.id]:Math.round(currentValue),
+      [valSch.byKey.approvedOn.id]:   today,
+    };
+    await airtableFetch(`${BASE_ID}/${TABLE.valuations}`, {
+      method: 'POST',
+      body: JSON.stringify({ fields: valFields, returnFieldsByFieldId: true }),
+    });
+    // 2. Update the property's Market Value
+    const marketValueFid = sch.byKey.marketValue.id;
+    await airtableFetch(`${BASE_ID}/${TABLE.properties}/${propertyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: { [marketValueFid]: Math.round(result.estimated_value) }, returnFieldsByFieldId: true }),
+    });
+    // 3. Refresh local data + UI
+    await refreshAll();
+    closeAIModal();
+    // Re-open the property drawer so the new valuation shows
+    openDrawer('properties', propertyId);
+    toast('Valuation approved · Market Value updated', 'success');
+  } catch (e) {
+    console.error('approve failed', e);
+    if (body) body.innerHTML = `<div class="ai-error"><strong>Couldn't save.</strong><br>${escapeHtml(e.message)}</div><button class="btn-secondary" onclick="closeAIModal()">Close</button>`;
+  }
+}
+
+function rejectValuation(propertyId){
+  // We don't persist rejected AI estimates — keeps the table clean.
+  closeAIModal();
+  toast('Valuation discarded', 'success');
+}
+
+// Open an existing valuation record (Pending → review/approve, Approved/Rejected → read-only)
+function openValuationModal(propertyId, valuationId){
+  const property = INDEX.properties[propertyId];
+  const val      = INDEX.valuations[valuationId];
+  if (!property || !val) return;
+  const sch = SCHEMA_RESOLVED.valuations;
+  const result = {
+    estimated_value: parseFloat(val.fields[sch.byKey.value?.id]) || 0,
+    confidence:      ((val.fields[sch.byKey.confidence?.id])||{}).name || '',
+    methodology:     val.fields[sch.byKey.methodology?.id] || '',
+    comparables:     (() => { try { return JSON.parse(val.fields[sch.byKey.comparables?.id] || '[]'); } catch(e){ return []; } })(),
+  };
+  showValuationReviewModal(property, result);
 }
 
 function renderPropertyDetailMetrics(rec){
