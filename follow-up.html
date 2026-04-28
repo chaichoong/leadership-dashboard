@@ -2305,7 +2305,17 @@
         dueDate: 'fld7XP8w8kbxfETV4'
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
+    const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain — used by label 12
     const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
+
+    // Tenancies table — used by label 11 (tenancy docs) auto-link flow.
+    const AIRTABLE_TENANCIES_TABLE_ID = 'tblN51a88qTDB6iMH';
+    const AIRTABLE_TENANCIES_FIELDS = {
+        surname:       'fldOXazTqBWieEOK2', // rollup, e.g. "Smith"
+        unitRef:       'fldql2nyQlPfkPP4p', // lookup, e.g. ["Unit 1 – 82 Devon Street"]
+        endDate:       'fldwHhhKAq4f1nY9e', // empty for active tenancies
+        documentLinks: 'fldaJGnXuCOLTqAs1'  // multilineText — append-only
+    };
 
     // AI Accuracy log — shared across all team devices via Airtable.
     // Rolling 60-day retention, trickle-purged from the client on load.
@@ -2375,7 +2385,10 @@ Respond with ONLY the JSON object, no markdown.`;
         }
     }
 
-    async function createAirtableTask(email) {
+    // Optional opts:
+    //   assigneeId — override the default Mica assignee (e.g. for label 12 → Kevin)
+    async function createAirtableTask(email, opts) {
+        opts = opts || {};
         const pat = getAirtablePat();
         if (!pat) {
             showError('Airtable token not configured. Go to Settings to add your Personal Access Token.');
@@ -2414,7 +2427,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.status]: 'Today',
                 // singleCollaborator (Assignee) expects a bare object, not an
                 // array — wrapping in [] returns 422.
-                [AIRTABLE_FIELDS.assignee]: { id: getAirtableAssignee() },
+                [AIRTABLE_FIELDS.assignee]: { id: opts.assigneeId || getAirtableAssignee() },
                 [AIRTABLE_FIELDS.priority]: 'Urgent',
                 [AIRTABLE_FIELDS.timeEstimate]: '15 min',
                 [AIRTABLE_FIELDS.description]: content.description,
@@ -2449,6 +2462,219 @@ Respond with ONLY the JSON object, no markdown.`;
             console.error('Airtable task creation failed:', err);
             showError('Failed to create Airtable task: ' + err.message);
             return false;
+        }
+    }
+
+    // ============================================================
+    // TENANCY DOCS AUTO-LINK (label 11)
+    // ============================================================
+    // When the team applies "11: tenancy docs" to an email, we:
+    //   1. Pull the list of active tenancies (no end date) from Airtable.
+    //   2. Ask Haiku to identify which tenancy this email belongs to,
+    //      based on tenant surname or property address mentioned in the
+    //      thread.
+    //   3. If matched with high confidence: append the Gmail thread URL
+    //      to the tenancy's "Document Links" field (multilineText, with
+    //      date + short label per line — append-only, never overwrites)
+    //      and STAR the Gmail message as visual confirmation.
+    //   4. If uncertain: fall back to creating an Airtable task for
+    //      Mica with the Gmail URL, asking her to link manually.
+    async function processTenancyDocsEmail(email) {
+        const pat = getAirtablePat();
+        if (!pat) {
+            showError('Airtable token not configured.');
+            return;
+        }
+
+        // 1. Fetch active tenancies
+        let tenancies;
+        try {
+            tenancies = await fetchActiveTenancies();
+        } catch (err) {
+            console.error('Failed to fetch tenancies:', err);
+            await fallbackTenancyDocTask(email, 'Could not fetch tenancies from Airtable: ' + err.message);
+            return;
+        }
+        if (tenancies.length === 0) {
+            await fallbackTenancyDocTask(email, 'No active tenancies found in Airtable.');
+            return;
+        }
+
+        // 2. AI match
+        let match;
+        try {
+            match = await matchEmailToTenancy(email, tenancies);
+        } catch (err) {
+            console.error('Tenancy match failed:', err);
+            await fallbackTenancyDocTask(email, 'AI tenancy-match failed: ' + err.message);
+            return;
+        }
+
+        if (!match || !match.recordId || match.confidence === 'low') {
+            await fallbackTenancyDocTask(email, match?.reason || 'No confident tenancy match.');
+            showError('Couldn\'t auto-match the tenancy — created a task for Mica to link manually.');
+            return;
+        }
+
+        const matched = tenancies.find(t => t.id === match.recordId);
+        if (!matched) {
+            await fallbackTenancyDocTask(email, 'AI returned an invalid tenancy record ID.');
+            return;
+        }
+
+        // 3. Append link to tenancy record + star Gmail message
+        try {
+            await appendTenancyDocLink(matched, email, match.label || email.subject);
+            await starGmailMessages(email);
+            showSuccess(`Tenancy doc linked → ${matched.surname} (${matched.unitRef})`);
+            addAuditEntry('tenancy_doc_linked', `Linked email "${truncate(email.subject, 40)}" to tenancy ${matched.surname} (${matched.unitRef})`);
+        } catch (err) {
+            console.error('Tenancy doc link failed:', err);
+            await fallbackTenancyDocTask(email, 'Found tenancy but failed to write link: ' + err.message);
+        }
+    }
+
+    async function fetchActiveTenancies() {
+        const pat = getAirtablePat();
+        const F = AIRTABLE_TENANCIES_FIELDS;
+        const fields = [F.surname, F.unitRef, F.endDate].map(f => 'fields%5B%5D=' + f).join('&');
+        // Active = no end date set
+        const formula = encodeURIComponent('{' + F.endDate + '} = ""');
+        const url = `https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&pageSize=100`;
+        const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + pat } });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        return (data.records || []).map(r => {
+            const surnameVal = r.fields[F.surname];
+            const unitVal = r.fields[F.unitRef];
+            return {
+                id: r.id,
+                surname: Array.isArray(surnameVal) ? surnameVal.join(', ') : (surnameVal || ''),
+                unitRef: Array.isArray(unitVal) ? unitVal.join('; ') : (typeof unitVal === 'object' ? '' : (unitVal || ''))
+            };
+        }).filter(t => t.surname || t.unitRef);
+    }
+
+    async function matchEmailToTenancy(email, tenancies) {
+        const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 2500);
+        const tenancyList = tenancies
+            .map((t, i) => `${i + 1}. id=${t.id} | surname="${t.surname}" | unit="${t.unitRef}"`)
+            .join('\n');
+
+        const systemPrompt = `You match property tenancy documents to existing tenancy records.
+
+You will receive an email and a list of active tenancies. Each tenancy has a record ID, a tenant surname, and a unit reference (which usually includes the property address).
+
+Identify which ONE tenancy this email is about. Match on tenant surname OR property address mentioned anywhere in the email subject, sender, or body.
+
+Respond with ONLY a JSON object:
+{ "recordId": "rec...", "confidence": "high"|"medium"|"low", "label": "short description of the document, e.g. 'Signed AST'", "reason": "brief why" }
+
+If no confident match, return: { "recordId": null, "confidence": "low", "reason": "..." }
+
+ACTIVE TENANCIES:
+${tenancyList}`;
+
+        const userPrompt = `EMAIL:
+From: ${email.fromFull || email.from || ''}
+Subject: ${email.subject || ''}
+Body: ${bodyText}`;
+
+        const response = await fetch(CLAUDE_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 200,
+                system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+                messages: [{ role: 'user', content: userPrompt }]
+            })
+        });
+        if (!response.ok) throw new Error('AI HTTP ' + response.status);
+        const data = await response.json();
+        const text = data.content?.[0]?.text || '';
+        // Strip any code fences
+        const json = text.replace(/```json\s*|```\s*$/g, '').trim();
+        try { return JSON.parse(json); }
+        catch (e) { throw new Error('AI returned invalid JSON: ' + text.slice(0, 200)); }
+    }
+
+    async function appendTenancyDocLink(tenancy, email, docLabel) {
+        const pat = getAirtablePat();
+        const F = AIRTABLE_TENANCIES_FIELDS;
+        // Re-read current value so we don't overwrite anything
+        const getResp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${tenancy.id}?returnFieldsByFieldId=true&fields%5B%5D=${F.documentLinks}`, {
+            headers: { 'Authorization': 'Bearer ' + pat }
+        });
+        if (!getResp.ok) throw new Error('Read failed: HTTP ' + getResp.status);
+        const existing = (await getResp.json()).fields?.[F.documentLinks] || '';
+
+        const today = new Date().toISOString().slice(0, 10);
+        const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#inbox/' + email.threadId);
+        const newLine = `${today} | ${docLabel} | ${gmailUrl}`;
+        const updated = existing ? existing.trimEnd() + '\n' + newLine : newLine;
+
+        const patchResp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${AIRTABLE_TENANCIES_TABLE_ID}/${tenancy.id}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { [F.documentLinks]: updated } })
+        });
+        if (!patchResp.ok) {
+            const errData = await patchResp.json().catch(() => ({}));
+            throw new Error(errData.error?.message || 'PATCH HTTP ' + patchResp.status);
+        }
+    }
+
+    async function starGmailMessages(email) {
+        // STAR every message in the thread as visual confirmation that the
+        // doc has been linked. Team can scan label 11 and see at a glance
+        // which emails are still pending.
+        if (!email.msgIds || email.msgIds.length === 0) return;
+        for (let m = 0; m < email.msgIds.length; m++) {
+            if (m > 0) await new Promise(r => setTimeout(r, 200));
+            try {
+                await gapi.client.gmail.users.messages.modify({
+                    userId: 'me',
+                    id: email.msgIds[m],
+                    resource: { addLabelIds: ['STARRED'] }
+                });
+            } catch (err) { console.warn('Failed to star message', email.msgIds[m], err); }
+        }
+    }
+
+    async function fallbackTenancyDocTask(email, reason) {
+        // Couldn't auto-link — make a task for Mica with the Gmail URL.
+        try {
+            const pat = getAirtablePat();
+            if (!pat) return;
+            const today = new Date().toISOString().slice(0, 10);
+            const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 3000);
+            const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#inbox/' + email.threadId);
+            const record = {
+                fields: {
+                    [AIRTABLE_FIELDS.taskName]: 'INBOUND: Link tenancy doc — ' + truncate(email.subject || '(no subject)', 60),
+                    [AIRTABLE_FIELDS.status]: 'Today',
+                    [AIRTABLE_FIELDS.assignee]: { id: getAirtableAssignee() },
+                    [AIRTABLE_FIELDS.priority]: 'Urgent',
+                    [AIRTABLE_FIELDS.timeEstimate]: '15 min',
+                    [AIRTABLE_FIELDS.description]: `Auto-link to a tenancy failed: ${reason}\n\nPlease review this tenancy doc and link it to the correct tenancy record manually.\n\nGmail thread: ${gmailUrl}`,
+                    [AIRTABLE_FIELDS.isInbound]: true,
+                    [AIRTABLE_FIELDS.sourceType]: 'Gmail',
+                    [AIRTABLE_FIELDS.messageContent]: bodyText,
+                    [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
+                    [AIRTABLE_FIELDS.dateReceived]: today,
+                    [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
+                    [AIRTABLE_FIELDS.dueDate]: today
+                }
+            };
+            await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: [record] })
+            });
+            addAuditEntry('tenancy_doc_fallback', `Auto-link failed for "${truncate(email.subject, 40)}" — created Mica task. Reason: ${reason}`);
+        } catch (err) {
+            console.error('Fallback task creation failed:', err);
         }
     }
 
@@ -3180,6 +3406,18 @@ Respond with ONLY valid JSON, no markdown.`;
                 processComplianceEmail(email).catch(err => console.error('Compliance processing failed:', err));
             }
 
+            // Tenancy docs (11) → AI-auto-link to tenancy + star email
+            if (/^11[.:]\s/.test(newLabelName)) {
+                processTenancyDocsEmail(email).catch(err => console.error('Tenancy doc auto-link failed:', err));
+            }
+
+            // Kevin to respond (12) → create Airtable task assigned to Kevin
+            if (/^12[.:]\s/.test(newLabelName)) {
+                createAirtableTask(email, { assigneeId: AIRTABLE_ASSIGNEE_KEVIN }).then(ok => {
+                    if (ok) showSuccess('Airtable task created for Kevin: "' + truncate(email.subject, 40) + '"');
+                });
+            }
+
             // Remove from current list and re-render
             allEmails.splice(emailIndex, 1);
             if (filteredEmails) {
@@ -3257,6 +3495,18 @@ Respond with ONLY valid JSON, no markdown.`;
             // Auto-process compliance cert if applied to Property Compliance
             if (labelName.startsWith('10')) {
                 processComplianceEmail(email).catch(err => console.error('Compliance processing failed:', err));
+            }
+
+            // Tenancy docs (11) → AI-auto-link to tenancy + star email
+            if (/^11[.:]\s/.test(labelName)) {
+                processTenancyDocsEmail(email).catch(err => console.error('Tenancy doc auto-link failed:', err));
+            }
+
+            // Kevin to respond (12) → create Airtable task assigned to Kevin
+            if (/^12[.:]\s/.test(labelName)) {
+                createAirtableTask(email, { assigneeId: AIRTABLE_ASSIGNEE_KEVIN }).then(ok => {
+                    if (ok) showSuccess('Airtable task created for Kevin: "' + truncate(email.subject, 40) + '"');
+                });
             }
 
             // Update applied today count
@@ -3357,6 +3607,16 @@ Respond with ONLY valid JSON, no markdown.`;
                 // Auto-process compliance cert if applied to Property Compliance
                 if (labelName.startsWith('10')) {
                     processComplianceEmail(email).catch(err => console.error('Bulk compliance processing failed:', err));
+                }
+
+                // Tenancy docs (11) → AI-auto-link to tenancy + star email
+                if (/^11[.:]\s/.test(labelName)) {
+                    processTenancyDocsEmail(email).catch(err => console.error('Bulk tenancy doc auto-link failed:', err));
+                }
+
+                // Kevin to respond (12) → create Airtable task assigned to Kevin
+                if (/^12[.:]\s/.test(labelName)) {
+                    createAirtableTask(email, { assigneeId: AIRTABLE_ASSIGNEE_KEVIN }).catch(err => console.error('Bulk Kevin task creation failed:', err));
                 }
 
                 // Remove suggestion and email
