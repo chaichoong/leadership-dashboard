@@ -2381,7 +2381,11 @@ Respond with ONLY the JSON object, no markdown.`;
             fields: {
                 [AIRTABLE_FIELDS.taskName]: content.title,
                 [AIRTABLE_FIELDS.status]: { name: 'Today' },
-                [AIRTABLE_FIELDS.assignee]: [{ id: getAirtableAssignee() }],
+                // Assignee is a singleCollaborator field — Airtable expects a
+                // bare object (or string), NOT an array. Wrapping in an array
+                // returns 422 "Cannot parse value" and silently kills the
+                // entire task create.
+                [AIRTABLE_FIELDS.assignee]: { id: getAirtableAssignee() },
                 [AIRTABLE_FIELDS.priority]: { name: 'Urgent' },
                 [AIRTABLE_FIELDS.timeEstimate]: { name: '15 min' },
                 [AIRTABLE_FIELDS.description]: content.description,
@@ -2511,34 +2515,49 @@ Respond with ONLY the JSON object, no markdown.`;
         if (sweepInFlight) return;
         sweepInFlight = true;
         try {
-            if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) return;
-            if (!getAirtablePat()) return;
+            if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) {
+                console.log('[sweep] gapi not ready');
+                return;
+            }
+            if (!getAirtablePat()) {
+                console.log('[sweep] Airtable PAT not configured');
+                return;
+            }
 
             // Make sure labels are loaded
             if (!allLabelsRaw || allLabelsRaw.length === 0) {
                 try {
                     const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
                     allLabelsRaw = labelsResp.result.labels || [];
-                } catch (err) { return; }
+                } catch (err) {
+                    console.warn('[sweep] failed to load labels:', err);
+                    return;
+                }
             }
             const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
             const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
-            if (!label8 || !label9) return;
+            if (!label8) { console.warn('[sweep] no label "8: ..." found'); return; }
+            if (!label9) { console.warn('[sweep] no label "9: ..." found'); return; }
 
             const completedMap = await fetchCompletedInboundThreadIds();
+            console.log(`[sweep] ${completedMap.size} completed inbound task(s) in Airtable`);
             if (completedMap.size === 0) return;
 
-            // Pull the live list of label-8 threads from Gmail
+            // Pull the live list of label-8 threads from Gmail directly
             let listResp;
             try {
-                listResp = await gapi.client.gmail.users.messages.list({
+                listResp = await gapi.client.gmail.users.threads.list({
                     userId: 'me',
                     labelIds: [label8.id],
                     maxResults: 500
                 });
-            } catch (err) { return; }
+            } catch (err) {
+                console.warn('[sweep] failed to list label-8 threads:', err);
+                return;
+            }
 
-            const label8ThreadIds = new Set((listResp.result.messages || []).map(m => m.threadId));
+            const label8ThreadIds = new Set((listResp.result.threads || []).map(t => t.id));
+            console.log(`[sweep] ${label8ThreadIds.size} thread(s) currently in label 8`);
             if (label8ThreadIds.size === 0) return;
 
             const toMove = [];
@@ -2547,6 +2566,7 @@ Respond with ONLY the JSON object, no markdown.`;
                     toMove.push({ threadId, taskName: completedMap.get(threadId) });
                 }
             }
+            console.log(`[sweep] ${toMove.length} thread(s) to move from label 8 → label 9`);
             if (toMove.length === 0) return;
 
             let movedCount = 0;
