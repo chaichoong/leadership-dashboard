@@ -426,12 +426,12 @@ const SCHEMA = {
       // Virtual: derived from active tenancies linked via rental units (expected rent).
       // clickToDrawer makes the cell clickable — the drawer shows a unit-by-unit breakdown.
       { key:'grossRent',    label:'Rent / mo',    virtual:true, clickToDrawer:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies. Click for breakdown.', type:'money', edit:false, width:'100px' },
-      { key:'mortgagePay',  label:'Mortgage / mo',virtual:true, clickToDrawer:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked mortgage costs. Click to see which records.',     type:'money', edit:false, width:'105px' },
+      { key:'mortgagePay',  label:'Fixed Costs / mo',virtual:true, clickToDrawer:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked monthly costs (mortgage, council tax, insurance, etc.). Click to see which records.', type:'money', edit:false, width:'115px' },
       { key:'netRent',      label:'Net / mo',     virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false, width:'100px' },
       { key:'grossYield',   label:'Gross Yield',  virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false, width:'80px' },
       { key:'cashOnCash',   label:'Cash on Cash', virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false, width:'90px' },
     ],
-    // Drawer-only fields. The mortgage-cost link drives the Mortgage / mo column;
+    // Drawer-only fields. The mortgage-cost link drives the Fixed Costs / mo column;
     // purchase price/date drive the capital-growth metrics in the drawer.
     drawerExtras: [
       { key:'_address',     label:'Address',                 exact:['Address','Full Address','Property Address'],                                  type:'long',  edit:true },
@@ -445,7 +445,7 @@ const SCHEMA = {
       { key:'_mortStart',   label:'Mortgage Start Date',     exact:['Mortgage Start Date'],                                                        type:'date',  edit:true },
       { key:'_mortEnd',     label:'Mortgage End Date',       exact:['Mortgage End Date','Mortgage Expiry'],                                        type:'date',  edit:true },
       // Hidden/internal: the link to the mortgage cost record. Resolved as a link field; only shown if matched.
-      { key:'_mortCostLink',label:'Mortgage Cost (linked)',  exact:['Mortgage Cost','Mortgage Costs','Monthly Mortgage Payment','Mortgage Payment','Costs'], keywords:['mortgage','cost'], type:'link', edit:false, link:'costs' },
+      { key:'_mortCostLink',label:'Linked Costs (monthly)',  exact:['Mortgage Cost','Mortgage Costs','Monthly Mortgage Payment','Mortgage Payment','Costs'], keywords:['mortgage','cost'], type:'link', edit:false, link:'costs' },
       { key:'_notes',       label:'Notes',                   exact:['Notes','Property Notes','Comments'],                                          type:'long',  edit:true },
     ],
   },
@@ -1375,7 +1375,7 @@ function renderPropertyKpis(){
     <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div><div class="sub">${totalValue?(equity/totalValue*100).toFixed(0):0}% of value</div></div>
     ${capGrowth!=null?`<div class="kpi"><div class="label">Capital Growth</div><div class="value" style="color:${capGrowth>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(capGrowth)}</div><div class="sub">${(capGrowth/totalPurchase*100).toFixed(1)}% since purchase</div></div>`:''}
     <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(totalRent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
-    <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoneyShort(totalMortgage)}</div><div class="sub">total debt service</div></div>
+    <div class="kpi"><div class="label">Fixed Costs / mo</div><div class="value">${fmtMoneyShort(totalMortgage)}</div><div class="sub">all linked monthly costs</div></div>
     <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(totalRent-totalMortgage)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(totalRent-totalMortgage)}</div><div class="sub">before opex</div></div>
     <div class="kpi"><div class="label">Gross Yield</div><div class="value">${portfolioYield.toFixed(2)}%</div><div class="sub">annual rent / value</div></div>
     <div class="kpi"><div class="label">Cash on Cash</div><div class="value" style="color:${cashOnCash>=8?'var(--success)':cashOnCash>=4?'var(--warning)':'var(--danger)'}">${cashOnCash.toFixed(2)}%</div><div class="sub">net rent / equity</div></div>
@@ -1723,17 +1723,17 @@ function fieldRow(fieldDef, record, entityKey){
   return `<div class="field-row"><div class="field-label">${escapeHtml(fieldDef.label || fieldDef.name)}</div><div class="field-value">${cellHtml}</div></div>`;
 }
 
-// Mortgage Cost Breakdown — list every cost record linked to this property
+// Fixed Cost Breakdown — list every cost record linked to this property
 // with its amount and active flag. Lets the user verify which cost records
-// the Mortgage / mo column is summing.
+// the Fixed Costs / mo column is summing (mortgage, council tax, insurance, …).
 function renderPropertyMortgageBreakdown(rec){
   const linkId = fid('properties','_mortCostLink');
   if (!linkId) return '';
   const linked = rec.fields[linkId];
   if (!Array.isArray(linked) || !linked.length) {
     return `<div class="drawer-section">
-      <h3>Mortgage Cost Breakdown</h3>
-      <div style="font-size:12px;color:var(--text-muted)">No mortgage cost is linked to this property in Airtable. Mortgage / mo therefore shows blank. Link a Cost record on the Properties table to fix.</div>
+      <h3>Fixed Cost Breakdown</h3>
+      <div style="font-size:12px;color:var(--text-muted)">No costs are linked to this property in Airtable. Fixed Costs / mo therefore shows blank. Link the relevant Cost records (mortgage, council tax, insurance, etc.) on the Properties table to fix.</div>
     </div>`;
   }
   const expFid      = fid('costs','expected');
@@ -1754,8 +1754,8 @@ function renderPropertyMortgageBreakdown(rec){
   const inactive = rows.filter(r => !r.active);
   const total    = active.reduce((s,r) => s + (r.amount||0), 0);
   return `<div class="drawer-section">
-    <h3>Mortgage Cost Breakdown</h3>
-    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">The Mortgage / mo column sums the active rows below. If a value here looks wrong, fix the link or the cost record in Airtable.</div>
+    <h3>Fixed Cost Breakdown</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">The Fixed Costs / mo column sums the active rows below (mortgage, council tax, insurance, etc.). If a value here looks wrong, fix the link or the cost record in Airtable.</div>
     <table class="breakdown-table">
       <thead><tr><th>Cost record</th><th style="text-align:right">Monthly</th><th style="width:80px">Status</th></tr></thead>
       <tbody>
@@ -2259,7 +2259,7 @@ function renderPropertyDetailMetrics(rec){
     <h3>Cashflow Performance</h3>
     <div class="kpi-grid" style="margin-bottom:0">
       <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(rent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
-      <div class="kpi"><div class="label">Mortgage / mo</div><div class="value">${fmtMoneyShort(mort)}</div><div class="sub">${rate?rate.toFixed(2)+'% rate':'no link to cost'}</div></div>
+      <div class="kpi"><div class="label">Fixed Costs / mo</div><div class="value">${fmtMoneyShort(mort)}</div><div class="sub">${rate?rate.toFixed(2)+'% of debt':'no linked costs'}</div></div>
       <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(rent-mort)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(rent-mort)}</div><div class="sub">before opex</div></div>
       ${rentPerBed!=null?`<div class="kpi"><div class="label">Rent / bed</div><div class="value">${fmtMoneyShort(rentPerBed)}</div><div class="sub">${beds} beds</div></div>`:''}
     </div>
