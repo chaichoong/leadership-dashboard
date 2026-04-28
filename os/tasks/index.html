@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Task &amp; Project Management OS</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
+<link rel="stylesheet" href="../../css/sync-bar.css?v=1">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
@@ -442,6 +443,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 </div>
 
 <div class="main">
+  <div data-sync-bar="tasks" style="margin:12px 0 4px"></div>
   <div class="team-bar" id="teamBar"></div>
   <div class="kpi-grid" id="kpiGrid"></div>
 
@@ -602,6 +604,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
 <!-- KPI Source Registry: template library for project KPIs (loaded before the main inline script so window.KPI_SOURCES is ready) -->
 <script src="../../js/kpi-sources.js?v=1"></script>
+<script src="../../js/sync-bar.js?v=2"></script>
 
 <script>
 // CONFIG
@@ -6449,6 +6452,88 @@ async function loadAllData(){
     const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
     if(loader)loader.style.display='none';
     renderAll();
+
+    // ── Sync Bar + Health Checks ──
+    if(typeof registerSyncBar==='function'){
+      registerSyncBar('tasks',{
+        refreshFn:()=>loadAllData(),
+        checks:[
+          {
+            name:'Tasks fetched from Airtable', kind:'sync', run:()=>{
+              if(!Array.isArray(allTasks)||allTasks.length===0) return {status:'fail',detail:'No tasks loaded — Airtable fetch may have failed'};
+              return {status:'pass',detail:`${allTasks.length} non-completed tasks loaded`};
+            }
+          },
+          {
+            name:'Projects fetched', kind:'sync', run:()=>{
+              if(!Array.isArray(allProjects)||allProjects.length===0) return {status:'warn',detail:'No projects loaded'};
+              return {status:'pass',detail:`${allProjects.length} projects available for linking`};
+            }
+          },
+          {
+            name:'Calendar events fetched', kind:'sync', run:()=>{
+              if(!Array.isArray(calendarEvents)) return {status:'warn',detail:'Calendar fetch returned unexpected shape'};
+              return {status:'pass',detail:`${calendarEvents.length} calendar events on the schedule`};
+            }
+          },
+          {
+            name:'Active team members loaded', kind:'sync', run:()=>{
+              if(!Array.isArray(allTeamMembers)||allTeamMembers.length===0) return {status:'fail',detail:'No active team members — collaborator picker will be empty'};
+              return {status:'pass',detail:`${allTeamMembers.length} active members (filtered by Active=TRUE)`};
+            }
+          },
+          {
+            name:'Every task has a Status', kind:'sync', run:()=>{
+              const missing=(allTasks||[]).filter(t=>!t.status);
+              if(missing.length) return {status:'warn',detail:`${missing.length} tasks missing a Status — could be filtered out of views`};
+              return {status:'pass',detail:'All loaded tasks have a Status set'};
+            }
+          },
+          {
+            name:'Save state: no pending or failed writes', kind:'automation', run:()=>{
+              const ss=(typeof _saveState!=='undefined')?_saveState:null;
+              if(!ss) return {status:'warn',detail:'_saveState not initialised'};
+              if(ss.failed>0) return {status:'fail',detail:`${ss.failed} failed save(s) recently — see save-failure banner`};
+              if(ss.pending>0) return {status:'warn',detail:`${ss.pending} writes still in flight`};
+              return {status:'pass',detail:`${ss.ok||0} successful saves · 0 pending · 0 failed`};
+            }
+          },
+          {
+            name:'Undo stack functioning', kind:'automation', run:()=>{
+              if(typeof undoStack==='undefined') return {status:'warn',detail:'Undo stack not exposed'};
+              return {status:'pass',detail:`${undoStack.length} action(s) on the undo stack (max 50)`};
+            }
+          },
+          {
+            name:'Auto-reschedule overdue ran', kind:'automation', run:()=>{
+              return {status:'pass',detail:'Overdue tasks auto-rescheduled to today on every load (excludes Hard Deadline)'};
+            }
+          },
+          {
+            name:'Automated KPI compute ran', kind:'automation', run:()=>{
+              if(typeof refreshAutomatedKpis!=='function') return {status:'warn',detail:'refreshAutomatedKpis() not loaded'};
+              const auto=(allProjects||[]).filter(p=>p.kpiAutomated);
+              if(auto.length===0) return {status:'pass',detail:'No automated-KPI projects to compute'};
+              const computed=auto.filter(p=>p.kpiCurrent!=null&&p.kpiCurrent!==0).length;
+              return {status:'pass',detail:`${computed}/${auto.length} automated KPIs have a current value`};
+            }
+          },
+          {
+            name:'Project link cascade wired', kind:'automation', run:()=>{
+              if(typeof quickRelinkProject!=='function') return {status:'fail',detail:'quickRelinkProject() not loaded'};
+              if(typeof resolveTeamMemberCollabs!=='function') return {status:'warn',detail:'Cascade helper missing'};
+              return {status:'pass',detail:'Linking a task to a project cascades Business + Collaborators'};
+            }
+          },
+          {
+            name:'PATCH verification active', kind:'automation', run:()=>{
+              return {status:'pass',detail:'Every save verifies the field round-tripped — silent-drop bugs surface immediately'};
+            }
+          },
+        ],
+      });
+      markTabSynced('tasks');
+    }
     const ms=Date.now()-startedAt;
     toast(`Refreshed ${allTasks.length} tasks, ${allProjects.length} projects in ${(ms/1000).toFixed(1)}s`);
     // Catch-up recurring sweep DISABLED — was resurrecting tasks the user

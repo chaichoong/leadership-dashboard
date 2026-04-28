@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Property Compliance OS</title>
     <link rel="stylesheet" href="css/tokens.css?v=1">
+    <link rel="stylesheet" href="css/sync-bar.css?v=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -205,6 +206,7 @@
                 <a href="#" onclick="goToDashboard(); return false;">Back to Dashboard</a>
             </div>
         </div>
+        <div data-sync-bar="compliance"></div>
         <div class="summary-bar" id="summaryBar"></div>
 
         <h2 class="section-title">🎯 Self-managed <span class="section-sub">— your action list</span></h2>
@@ -236,6 +238,7 @@
         </details>
     </div>
 </div>
+<script src="js/sync-bar.js?v=2"></script>
 <script>
 const BASE_ID = 'appnqjDpqDniH3IRl';
 
@@ -601,6 +604,75 @@ async function loadData() {
 
         document.getElementById('dashboard').style.display = 'block';
         document.getElementById('loadingOverlay').style.display = 'none';
+
+        // \u2500\u2500 Sync Bar + Health Checks \u2500\u2500
+        // Stash the loaded data on window so the (lazy) check closures can read it.
+        window._complianceData = { certs, props, units, blockPropIds, standardPropIds };
+        if (typeof registerSyncBar === 'function') {
+            registerSyncBar('compliance', {
+                refreshFn: () => loadData(),
+                checks: [
+                    {
+                        name: 'Certificates table fetched', kind: 'sync', run: () => {
+                            const c = (window._complianceData || {}).certs || [];
+                            if (c.length === 0) return { status: 'fail', detail: 'No certificate records returned \u2014 Airtable fetch failed' };
+                            return { status: 'pass', detail: `${c.length} certificates loaded across GSC / EICR / Landlord Insurance` };
+                        }
+                    },
+                    {
+                        name: 'Properties table fetched', kind: 'sync', run: () => {
+                            const p = (window._complianceData || {}).props || {};
+                            const n = Object.keys(p).length;
+                            if (n === 0) return { status: 'fail', detail: 'No properties returned' };
+                            return { status: 'pass', detail: `${n} properties loaded` };
+                        }
+                    },
+                    {
+                        name: 'Rental Units table fetched', kind: 'sync', run: () => {
+                            const u = (window._complianceData || {}).units || {};
+                            const n = Object.keys(u).length;
+                            if (n === 0) return { status: 'fail', detail: 'No units returned' };
+                            return { status: 'pass', detail: `${n} rental units loaded` };
+                        }
+                    },
+                    {
+                        name: 'Every certificate has a property link', kind: 'sync', run: () => {
+                            const certs = (window._complianceData || {}).certs || [];
+                            const orphans = certs.filter(c => !c.propertyId);
+                            if (orphans.length) return { status: 'warn', detail: `${orphans.length} certificate(s) not linked to a property \u2014 won't show on the grid` };
+                            return { status: 'pass', detail: `All ${certs.length} certificates link to a property` };
+                        }
+                    },
+                    {
+                        name: 'Renewal dates parseable', kind: 'sync', run: () => {
+                            const certs = (window._complianceData || {}).certs || [];
+                            const valid = certs.filter(c => c.d && !isNaN(new Date(c.d).getTime()));
+                            const missing = certs.length - valid.length;
+                            if (missing > 0) return { status: 'warn', detail: `${missing} certificate(s) missing or have unparseable renewal date \u2014 will display as N/A` };
+                            return { status: 'pass', detail: `All ${certs.length} certificates have a valid renewal date` };
+                        }
+                    },
+                    {
+                        name: 'Block vs Standard property classification', kind: 'sync', run: () => {
+                            const d = window._complianceData || {};
+                            const blocks = (d.blockPropIds || new Set()).size;
+                            const standard = (d.standardPropIds || new Set()).size;
+                            return { status: 'pass', detail: `${blocks} Block properties \u00b7 ${standard} Standard properties (drives the two-table layout)` };
+                        }
+                    },
+                    {
+                        name: 'Status field is one of the known options', kind: 'automation', run: () => {
+                            const certs = (window._complianceData || {}).certs || [];
+                            const known = new Set(['Valid', 'Expiring Soon', 'Expired', 'Missing', '']);
+                            const odd = certs.filter(c => !known.has(c.s));
+                            if (odd.length) return { status: 'warn', detail: `${odd.length} certificate(s) have an unrecognised status value` };
+                            return { status: 'pass', detail: 'All certificates have a recognised Status (Valid / Expiring Soon / Expired / Missing)' };
+                        }
+                    },
+                ],
+            });
+            markTabSynced('compliance');
+        }
 
     } catch (err) {
         if (err.message !== 'Auth failed') {

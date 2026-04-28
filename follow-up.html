@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inbound Comms OS</title>
     <link rel="stylesheet" href="css/tokens.css?v=1">
+    <link rel="stylesheet" href="css/sync-bar.css?v=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -644,6 +645,7 @@
     </div>
 
     <div class="container">
+        <div data-sync-bar="comms" style="margin-top:12px"></div>
         <div id="errorContainer"></div>
 
         <!-- Label view stats -->
@@ -874,6 +876,7 @@
 <!-- Google Identity Services -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js"></script>
+<script src="js/sync-bar.js?v=2"></script>
 
 <script>
     // ============================================================
@@ -1697,6 +1700,90 @@
             // Auto-check Airtable for completed tasks when viewing label 8
             if (isTaskCreatedView()) {
                 checkCompletedAirtableTasks();
+            }
+
+            // ── Sync Bar passive checks ──
+            // (The existing "Run health check" button does deeper round-trip
+            // writes — left untouched. These are lightweight passive assertions
+            // that auto-run on every sync.)
+            if (typeof registerSyncBar === 'function') {
+                registerSyncBar('comms', {
+                    refreshFn: () => loadEmails(),
+                    checks: [
+                        {
+                            name: 'Google sign-in active', kind: 'sync', run: () => {
+                                if (typeof gapi === 'undefined' || !gapi.client) return { status: 'fail', detail: 'Google API client not loaded' };
+                                const tok = (gapi.client.getToken && gapi.client.getToken()) || null;
+                                if (!tok || !tok.access_token) return { status: 'fail', detail: 'Not signed in to Google' };
+                                return { status: 'pass', detail: 'Signed in · access token present' };
+                            }
+                        },
+                        {
+                            name: 'Gmail labels loaded', kind: 'sync', run: () => {
+                                const sel = document.getElementById('labelSelect');
+                                const options = sel ? sel.querySelectorAll('option:not([value=""])').length : 0;
+                                if (options === 0) return { status: 'fail', detail: 'Label dropdown is empty — fetchLabels likely failed' };
+                                return { status: 'pass', detail: `${options} labels available in the picker` };
+                            }
+                        },
+                        {
+                            name: 'Emails fetched for current label', kind: 'sync', run: () => {
+                                const n = (allEmails || []).length;
+                                if (n === 0) return { status: 'warn', detail: 'No emails returned for this label (may be expected if cleared)' };
+                                return { status: 'pass', detail: `${n} email threads loaded` };
+                            }
+                        },
+                        {
+                            name: 'Days-old computed for every email', kind: 'sync', run: () => {
+                                const missing = (allEmails || []).filter(e => e.daysOld == null || isNaN(e.daysOld));
+                                if (missing.length) return { status: 'warn', detail: `${missing.length} email(s) missing daysOld figure` };
+                                return { status: 'pass', detail: 'All emails have a daysOld value used by triage stat cards' };
+                            }
+                        },
+                        {
+                            name: 'Triage buckets add up to total', kind: 'sync', run: () => {
+                                const all = allEmails || [];
+                                const crit = all.filter(e => e.daysOld >= 30).length;
+                                const warn = all.filter(e => e.daysOld >= 14 && e.daysOld < 30).length;
+                                const recent = all.filter(e => e.daysOld < 14).length;
+                                if (crit + warn + recent !== all.length) return { status: 'fail', detail: `Bucket sum ${crit + warn + recent} ≠ total ${all.length}` };
+                                return { status: 'pass', detail: `${crit} critical · ${warn} warning · ${recent} recent (sums to ${all.length})` };
+                            }
+                        },
+                        {
+                            name: 'Airtable PAT configured', kind: 'automation', run: () => {
+                                const pat = (typeof getAirtablePat === 'function') ? getAirtablePat() : null;
+                                if (!pat) return { status: 'warn', detail: 'No Airtable PAT in Settings — task-creation features disabled' };
+                                return { status: 'pass', detail: 'PAT present · enables task creation, doc-link writes, and the deeper health check' };
+                            }
+                        },
+                        {
+                            name: 'Cloud sync indicator wired', kind: 'automation', run: () => {
+                                const el = document.getElementById('cloudSyncIndicator');
+                                if (!el) return { status: 'fail', detail: 'Indicator element missing' };
+                                return { status: 'pass', detail: 'Sync indicator present in header — reflects backup status to Drive' };
+                            }
+                        },
+                        {
+                            name: 'AI label-suggestion accuracy log', kind: 'automation', run: () => {
+                                if (typeof getAiAccuracyStats !== 'function') return { status: 'pass', detail: 'No AI accuracy module on this page (only used in inbox view)' };
+                                try {
+                                    const stats = getAiAccuracyStats();
+                                    if (!stats) return { status: 'pass', detail: 'No accuracy data yet (logs build with use)' };
+                                    return { status: 'pass', detail: `${stats.correct || 0}/${stats.total || 0} suggestions accepted in last 30 days` };
+                                } catch (e) { return { status: 'warn', detail: 'getAiAccuracyStats threw: ' + e.message }; }
+                            }
+                        },
+                        {
+                            name: 'Deeper round-trip check available', kind: 'automation', run: () => {
+                                const btn = document.getElementById('healthCheckBtn');
+                                if (!btn) return { status: 'fail', detail: '"Run health check" button missing' };
+                                return { status: 'pass', detail: 'Settings → Run health check tests Airtable writes, Apps Script, Claude proxy end-to-end' };
+                            }
+                        },
+                    ],
+                });
+                markTabSynced('comms');
             }
 
         } catch (err) {

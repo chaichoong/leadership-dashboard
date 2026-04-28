@@ -22,6 +22,12 @@
 // Each check's run() returns:
 //   { status: 'pass'|'warn'|'fail', detail: 'human-readable line' }
 
+    // Local escHtml fallback so this module works inside iframe pages that don't load shared.js.
+    // Same semantics as shared.js's version.
+    const _escHtml = (typeof escHtml === 'function')
+        ? escHtml
+        : (s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+
     const _syncBars = {}; // tabId → { lastSyncedAt, refreshFn, isRefreshing, checks, drawerOpen, lastResults, lastRunAt }
 
     function registerSyncBar(tabId, config) {
@@ -53,18 +59,27 @@
         renderSyncBar(tabId);
     }
 
-    function runHealthChecks(tabId) {
+    async function runHealthChecks(tabId) {
         const s = _syncBars[tabId];
         if (!s) return;
-        const checks = (s.checks || []).map(c => {
-            try {
-                const r = c.run() || { status: 'warn', detail: 'No result returned' };
-                return { name: c.name, kind: c.kind || 'sync', ...r };
-            } catch (e) {
-                return { name: c.name, kind: c.kind || 'sync', status: 'fail', detail: 'Check threw: ' + (e.message || String(e)) };
+        // Each check's run() may be sync or async; we await both forms uniformly.
+        // Async checks let us hit external services (Airtable round-trip writes,
+        // Apps Script ping, Claude proxy) the way Inbound Comms already does.
+        const items = s.checks || [];
+        // Render a "running" placeholder so the user sees feedback for slow checks
+        s.lastResults = items.map(c => ({ name: c.name, kind: c.kind || 'sync', status: 'warn', detail: 'Running…' }));
+        s.lastRunAt = Date.now();
+        renderSyncBar(tabId);
+
+        const settled = await Promise.allSettled(items.map(c => Promise.resolve().then(() => c.run())));
+        s.lastResults = settled.map((sr, i) => {
+            const c = items[i];
+            if (sr.status === 'rejected') {
+                return { name: c.name, kind: c.kind || 'sync', status: 'fail', detail: 'Check threw: ' + ((sr.reason && sr.reason.message) || String(sr.reason)) };
             }
+            const r = sr.value || { status: 'warn', detail: 'No result returned' };
+            return { name: c.name, kind: c.kind || 'sync', ...r };
         });
-        s.lastResults = checks;
         s.lastRunAt = Date.now();
         renderSyncBar(tabId);
     }
@@ -126,7 +141,7 @@
         host.innerHTML = `
             <div class="sync-bar">
                 <span class="sync-bar-dot ${dotClass}" aria-hidden="true"></span>
-                <span class="sync-bar-time">${escHtml(timeText)}</span>
+                <span class="sync-bar-time">${_escHtml(timeText)}</span>
                 <button class="sync-bar-refresh" onclick="triggerSyncBarRefresh('${tabId}')" ${refreshDisabled ? 'disabled' : ''} title="Re-fetch this tab's data">↻ Refresh</button>
                 <button class="sync-bar-health ${pillClass}" onclick="toggleHealthDrawer('${tabId}')" title="Click to expand checks">${pillText}</button>
             </div>
@@ -153,8 +168,8 @@
                         <div class="sync-check-item ${r.status}">
                             <span class="sync-check-icon">${r.status === 'pass' ? '✓' : r.status === 'warn' ? '⚠' : '✗'}</span>
                             <div class="sync-check-body">
-                                <div class="sync-check-name">${escHtml(r.name)}</div>
-                                <div class="sync-check-detail">${escHtml(r.detail || '')}</div>
+                                <div class="sync-check-name">${_escHtml(r.name)}</div>
+                                <div class="sync-check-detail">${_escHtml(r.detail || '')}</div>
                             </div>
                         </div>
                     `).join('')}
@@ -166,7 +181,7 @@
             <div class="sync-bar-drawer">
                 <div class="sync-bar-drawer-header">
                     <strong>Health check</strong>
-                    <span style="color:var(--text-muted);font-size:var(--fs-xs);margin-left:8px">${escHtml(lastRunText)}</span>
+                    <span style="color:var(--text-muted);font-size:var(--fs-xs);margin-left:8px">${_escHtml(lastRunText)}</span>
                     <button class="sync-bar-rerun" onclick="runHealthChecks('${tabId}')" title="Re-run all checks">Re-run</button>
                 </div>
                 ${renderGroup('Data sync', grouped.sync)}
