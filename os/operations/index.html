@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations OS — Tenants, Tenancies, Units, Properties</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
+<link rel="stylesheet" href="../../css/sync-bar.css?v=1">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
@@ -223,6 +224,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Main -->
 <div class="main" id="main" style="display:none">
 
+  <div data-sync-bar="operations" style="margin:12px 0"></div>
+
   <!-- Tenants -->
   <div class="tab-pane active" id="pane-tenants">
     <div class="controls">
@@ -290,6 +293,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <!-- Toast -->
 <div id="toastContainer"></div>
 
+<script src="../../js/sync-bar.js?v=2"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 // CONFIG — Airtable IDs (mirrors js/config.js — hardcoded since iframe can't
@@ -743,6 +747,91 @@ async function refreshAll(initial=false){
     populateFilters();
     renderActiveTab();
     setSync(`Synced — ${new Date().toLocaleTimeString()}`);
+
+    // ── Sync Bar + Health Checks ──
+    if (typeof registerSyncBar === 'function') {
+      registerSyncBar('operations', {
+        refreshFn: () => refreshAll(),
+        checks: [
+          {
+            name: 'Tenants table fetched', kind: 'sync', run: () => {
+              const n = (DATA.tenants||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No tenants returned' };
+              return { status: 'pass', detail: `${n} tenant records loaded` };
+            }
+          },
+          {
+            name: 'Tenancies table fetched', kind: 'sync', run: () => {
+              const n = (DATA.tenancies||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No tenancies returned' };
+              return { status: 'pass', detail: `${n} tenancy records loaded` };
+            }
+          },
+          {
+            name: 'Rental Units table fetched', kind: 'sync', run: () => {
+              const n = (DATA.units||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No units returned' };
+              return { status: 'pass', detail: `${n} rental units loaded` };
+            }
+          },
+          {
+            name: 'Properties table fetched', kind: 'sync', run: () => {
+              const n = (DATA.properties||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No properties returned' };
+              return { status: 'pass', detail: `${n} property records loaded` };
+            }
+          },
+          {
+            name: 'Costs table fetched (used by mortgage derive)', kind: 'sync', run: () => {
+              const n = (DATA.costs||[]).length;
+              if (n === 0) return { status: 'warn', detail: 'No costs loaded — mortgage rate / yield derives will be blank' };
+              return { status: 'pass', detail: `${n} cost records loaded` };
+            }
+          },
+          {
+            name: 'Indexes built for fast linked-record lookup', kind: 'automation', run: () => {
+              const expected = ['tenants','tenancies','units','properties','costs'];
+              const missing = expected.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
+              if (missing.length) return { status: 'fail', detail: `Missing indexes: ${missing.join(', ')}` };
+              return { status: 'pass', detail: 'All five tables indexed by record ID' };
+            }
+          },
+          {
+            name: 'Tenancies link to a known tenant', kind: 'sync', run: () => {
+              const tcs = DATA.tenancies || [];
+              const tenIdx = INDEX.tenants || {};
+              const orphans = tcs.filter(r => {
+                const f = r.fields || {};
+                const tenLink = f['fld1i5bDoHL3B6rUf'];
+                if (!Array.isArray(tenLink) || !tenLink.length) return false;
+                const id = typeof tenLink[0] === 'object' ? tenLink[0].id : tenLink[0];
+                return !tenIdx[id];
+              });
+              if (orphans.length) return { status: 'warn', detail: `${orphans.length} tenancy record(s) link to a tenant that wasn't fetched` };
+              return { status: 'pass', detail: 'All tenancies link to a tenant present in the dataset' };
+            }
+          },
+          {
+            name: 'Active count badges match table data', kind: 'automation', run: () => {
+              const expected = {
+                tenants: (DATA.tenants||[]).length,
+                tenancies: (DATA.tenancies||[]).length,
+                units: (DATA.units||[]).length,
+                properties: (DATA.properties||[]).length,
+              };
+              for (const [k, n] of Object.entries(expected)) {
+                const el = document.getElementById('cnt' + k.charAt(0).toUpperCase() + k.slice(1));
+                if (!el || parseInt(el.textContent, 10) !== n) {
+                  return { status: 'warn', detail: `Sub-tab badge for ${k} doesn't match data length` };
+                }
+              }
+              return { status: 'pass', detail: 'All four sub-tab badges match the loaded record counts' };
+            }
+          },
+        ],
+      });
+      markTabSynced('operations');
+    }
   } catch(e) {
     console.error(e);
     setSync('Refresh failed: '+e.message, true);

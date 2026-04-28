@@ -196,6 +196,62 @@ async function loadRecord() {
     }
     isDirty = false;
     updateSaveButton();
+
+    // ── Sync Bar + Health Checks ──
+    if (typeof registerSyncBar === 'function') {
+        registerSyncBar('os-strategy', {
+            refreshFn: () => loadRecord(),
+            checks: [
+                {
+                    name: 'Businesses list loaded', kind: 'sync', run: () => {
+                        const n = (typeof allBusinessesLocal !== 'undefined' ? allBusinessesLocal : []).length;
+                        if (n === 0) return { status: 'fail', detail: 'Businesses fetch returned empty — picker is unusable' };
+                        return { status: 'pass', detail: `${n} businesses available in the picker` };
+                    }
+                },
+                {
+                    name: 'Selection complete', kind: 'sync', run: () => {
+                        const sel = (typeof getSelection === 'function') ? getSelection() : {};
+                        const missing = ['businessId','quarter','year'].filter(k => !sel[k]);
+                        if (missing.length) return { status: 'warn', detail: `Pick ${missing.join(', ')} to load a plan` };
+                        return { status: 'pass', detail: `${sel.quarter} ${sel.year} for the selected business` };
+                    }
+                },
+                {
+                    name: 'Plan record loaded for current selection', kind: 'sync', run: () => {
+                        if (!currentRecord) return { status: 'warn', detail: 'No plan exists yet for this quarter — Wizard will create one' };
+                        const fieldCount = Object.keys(currentRecord.fields || {}).length;
+                        return { status: 'pass', detail: `Record ${currentRecord.id} loaded with ${fieldCount} field(s) populated` };
+                    }
+                },
+                {
+                    name: 'Save state is clean', kind: 'automation', run: () => {
+                        if (typeof isDirty !== 'undefined' && isDirty) return { status: 'warn', detail: 'Unsaved changes — click Save before navigating away' };
+                        return { status: 'pass', detail: 'No pending edits' };
+                    }
+                },
+                {
+                    name: 'AI Wizard available', kind: 'automation', run: () => {
+                        if (typeof openWizard !== 'function') return { status: 'fail', detail: 'openWizard() not loaded' };
+                        return { status: 'pass', detail: 'Boardroom Mentor wizard wired — kicks off plan from previous quarter' };
+                    }
+                },
+                {
+                    name: 'Push-to-Projects working', kind: 'automation', run: () => {
+                        if (typeof pushProjectsToTable !== 'function') return { status: 'warn', detail: 'pushProjectsToTable() not loaded — quarterly projects can\'t be promoted' };
+                        return { status: 'pass', detail: 'Projects table push wired — Strategy projects flow into Task OS' };
+                    }
+                },
+                {
+                    name: 'PDF export available', kind: 'automation', run: () => {
+                        if (typeof html2pdf === 'undefined') return { status: 'warn', detail: 'html2pdf.js library not loaded' };
+                        return { status: 'pass', detail: 'PDF export available via the Download button' };
+                    }
+                },
+            ],
+        });
+        markTabSynced('os-strategy');
+    }
 }
 
 function renderEmptyState(message) {

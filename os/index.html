@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations Director — Operating Systems</title>
 <link rel="stylesheet" href="../css/tokens.css?v=1">
+<link rel="stylesheet" href="../css/sync-bar.css?v=1">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -166,6 +167,7 @@ a:hover { text-decoration: underline; color: var(--text-link-hover); }
 </header>
 
 <div class="container">
+  <div data-sync-bar="os-hub" style="margin-top:16px"></div>
 
   <!-- Hero -->
   <section class="hero">
@@ -268,6 +270,42 @@ CATEGORIES.forEach(cat => {
   });
   gridContainer.appendChild(group);
 });
+</script>
+<script src="../js/sync-bar.js?v=2"></script>
+<script>
+// ── Sync Bar + Health Checks ──
+// OS Hub is a static directory page — no Airtable, no automations.
+// Checks here just confirm the page itself rendered correctly.
+if (typeof registerSyncBar === 'function') {
+  registerSyncBar('os-hub', {
+    refreshFn: () => location.reload(),
+    checks: [
+      {
+        name: 'Operating Systems grid rendered', kind: 'sync', run: () => {
+          const grid = document.getElementById('grid-container');
+          const cards = grid ? grid.querySelectorAll('.card').length : 0;
+          if (cards === 0) return { status: 'fail', detail: 'No OS cards rendered — directory is empty' };
+          return { status: 'pass', detail: `${cards} operating-system tiles in the grid` };
+        }
+      },
+      {
+        name: 'Business Lifecycle journey rendered', kind: 'sync', run: () => {
+          const j = document.getElementById('journey');
+          if (!j || j.children.length === 0) return { status: 'warn', detail: 'Journey section empty' };
+          return { status: 'pass', detail: `${j.children.length} lifecycle stages displayed` };
+        }
+      },
+      {
+        name: 'Topbar stats present', kind: 'sync', run: () => {
+          const stats = document.querySelectorAll('.topbar-stats strong').length;
+          if (stats < 2) return { status: 'warn', detail: 'Topbar stats incomplete' };
+          return { status: 'pass', detail: 'Operating-system count + built count present in header' };
+        }
+      },
+    ],
+  });
+  markTabSynced('os-hub');
+}
 </script>
 </body>
 </html>

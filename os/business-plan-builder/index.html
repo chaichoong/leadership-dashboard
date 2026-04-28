@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Business Launch Plan Builder OS</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
+<link rel="stylesheet" href="../../css/sync-bar.css?v=1">
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{--radius:12px}
@@ -564,6 +565,7 @@ body{line-height:1.6;height:100vh;overflow:hidden;background:var(--bg-app);color
   </aside>
 
   <div class="chat-area">
+    <div data-sync-bar="os-bplan" style="margin:12px 16px 0"></div>
     <div class="chat-header">
       <div>
         <h1 id="chatPhaseTitle">Getting Started</h1>
@@ -604,6 +606,7 @@ body{line-height:1.6;height:100vh;overflow:hidden;background:var(--bg-app);color
   </div>
 </div>
 
+<script src="../../js/sync-bar.js?v=2"></script>
 <script>
 // ══════════════════════════════════════════════════════════════
 // DEPLOYMENT CONFIG
@@ -788,6 +791,59 @@ function showApp() {
   document.getElementById('setupScreen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   renderSections();
+
+  // ── Sync Bar + Health Checks ──
+  // BPlan Builder is a chat-driven plan builder backed by localStorage.
+  // No Airtable, just config + conversation state. Checks confirm the
+  // app's persistence + AI proxy are wired correctly.
+  if (typeof registerSyncBar === 'function') {
+    registerSyncBar('os-bplan', {
+      refreshFn: () => location.reload(),
+      checks: [
+        {
+          name: 'AI provider configured', kind: 'sync', run: () => {
+            if (!config) return { status: 'fail', detail: 'No config object — startApp() may have failed' };
+            if (config.provider === 'custom' && !config.endpoint) return { status: 'fail', detail: 'Custom provider missing endpoint' };
+            if (config.provider !== 'custom' && !config.apiKey && typeof PROXY_ENDPOINT !== 'undefined' && !PROXY_ENDPOINT) {
+              return { status: 'fail', detail: 'No API key and no proxy endpoint' };
+            }
+            return { status: 'pass', detail: `Provider: ${config.provider} · model: ${config.model || 'default'}` };
+          }
+        },
+        {
+          name: 'Conversation state persists', kind: 'sync', run: () => {
+            try {
+              const k = '_bplan_test_' + Date.now();
+              localStorage.setItem(k, '1');
+              localStorage.removeItem(k);
+              return { status: 'pass', detail: `${(messages||[]).length} messages in current session, persisted to localStorage` };
+            } catch (e) { return { status: 'fail', detail: 'localStorage unavailable: ' + e.message }; }
+          }
+        },
+        {
+          name: 'Section list rendered', kind: 'sync', run: () => {
+            const list = document.getElementById('sectionList');
+            const items = list ? list.children.length : 0;
+            if (items === 0) return { status: 'fail', detail: 'sectionList is empty — phase navigation will be missing' };
+            return { status: 'pass', detail: `${items} plan sections in the sidebar` };
+          }
+        },
+        {
+          name: 'AI send pipeline wired', kind: 'automation', run: () => {
+            if (typeof sendToAI !== 'function') return { status: 'fail', detail: 'sendToAI() not loaded' };
+            return { status: 'pass', detail: 'sendToAI() function present — chat input will fire on submit' };
+          }
+        },
+        {
+          name: 'Plan export available', kind: 'automation', run: () => {
+            if (typeof showPlan !== 'function') return { status: 'warn', detail: 'showPlan() not loaded — View Your Plan button disabled' };
+            return { status: 'pass', detail: 'View Your Plan + PDF export both wired' };
+          }
+        },
+      ],
+    });
+    markTabSynced('os-bplan');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

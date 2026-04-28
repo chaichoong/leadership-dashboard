@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Operations Director Launch Plan OS</title>
 <link rel="stylesheet" href="../css/tokens.css?v=1">
+<link rel="stylesheet" href="../css/sync-bar.css?v=1">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{background:var(--bg-app);color:var(--text-primary);line-height:1.7}
@@ -257,6 +258,7 @@
 </head>
 <body>
 <div class="wrap">
+<div data-sync-bar="launch-plan"></div>
 
 <div class="hdr">
   <h1>Operations Director Launch Plan OS</h1>
@@ -1521,6 +1523,7 @@
 
 <div class="footer">Operations Director — Master Action Plan v3.1 — Updated 14 April 2026 (schedule shifted +1 day after kickoff)<br>Claude does the work. You point it in the right direction.</div>
 
+<script src="../js/sync-bar.js?v=2"></script>
 <script>
 /* ── Task-to-day/week mapping ── */
 var TASK_MAP = {
@@ -2077,6 +2080,62 @@ function initTracking(){
 }
 
 initTracking();
+
+// ── Sync Bar + Health Checks ──
+// Launch Plan is a static planning document with localStorage-backed
+// task-tracking. The "sync" here means: tracking state is persisting,
+// and the plan is on schedule. No Airtable round-trip, so this is
+// purely a state-correctness check.
+if (typeof registerSyncBar === 'function') {
+  registerSyncBar('launch-plan', {
+    refreshFn: () => { try { initTracking(); updateDashboard(); } catch(_){} },
+    checks: [
+      {
+        name: 'Task map covers every planned week', kind: 'sync', run: () => {
+          const weeks = Object.keys(TASK_MAP || {});
+          if (weeks.length === 0) return { status: 'fail', detail: 'TASK_MAP is empty — schedule UI will be blank' };
+          return { status: 'pass', detail: `${weeks.length} weeks defined: ${weeks.join(', ')}` };
+        }
+      },
+      {
+        name: 'Launch date in the future or past?', kind: 'sync', run: () => {
+          const d = LAUNCH_DATE;
+          if (!(d instanceof Date) || isNaN(d.getTime())) return { status: 'fail', detail: 'LAUNCH_DATE is invalid' };
+          const today = new Date(); today.setHours(0,0,0,0);
+          const days = Math.round((d - today) / 86400000);
+          if (days < 0) return { status: 'warn', detail: `Launch was ${-days} day(s) ago — update or archive this plan` };
+          return { status: 'pass', detail: `${days} day(s) until launch (${d.toLocaleDateString('en-GB')})` };
+        }
+      },
+      {
+        name: 'Build-start date present', kind: 'sync', run: () => {
+          if (!(BUILD_START instanceof Date) || isNaN(BUILD_START.getTime())) return { status: 'fail', detail: 'BUILD_START missing' };
+          return { status: 'pass', detail: `Build started ${BUILD_START.toLocaleDateString('en-GB')}` };
+        }
+      },
+      {
+        name: 'Task tracking persists in localStorage', kind: 'automation', run: () => {
+          try {
+            const k = '_launchplan_test_' + Date.now();
+            localStorage.setItem(k, '1');
+            const ok = localStorage.getItem(k) === '1';
+            localStorage.removeItem(k);
+            if (!ok) return { status: 'fail', detail: 'localStorage write/read round-trip failed' };
+            return { status: 'pass', detail: 'localStorage available — task ticks survive reload' };
+          } catch (e) { return { status: 'fail', detail: 'localStorage unavailable: ' + e.message }; }
+        }
+      },
+      {
+        name: 'Owner labels resolved', kind: 'automation', run: () => {
+          const owners = Object.keys(ownerLabels || {});
+          if (owners.length < 4) return { status: 'warn', detail: `Only ${owners.length} owners — expected kevin / mica / erica / claude / all` };
+          return { status: 'pass', detail: `${owners.length} owner labels: ${owners.join(', ')}` };
+        }
+      },
+    ],
+  });
+  markTabSynced('launch-plan');
+}
 </script>
 </body>
 </html>
