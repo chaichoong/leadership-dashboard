@@ -12,7 +12,7 @@
         { id: 'tasks',       name: 'Task and Project Management OS', icon: '✅', pageVer: '1.38', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.9', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.3', sopFile: 'sop-invoices.html',           sopVer: '2.1', standalone: 'index.html#invoices' },
-        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.13', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
+        { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.14', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.16', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.2', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
         { id: 'launch-plan', name: 'Operations Director Launch Plan', icon: '🚀', pageVer: '1.0', sopFile: '',                         sopVer: '1.0', standalone: 'index.html#launch-plan' },
