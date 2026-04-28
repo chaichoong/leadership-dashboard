@@ -90,9 +90,12 @@ export async function handleNotifySlack(request, env) {
     if (!userId) return json({ error: 'No Slack user for that email' }, 404, corsHeaders);
 
     // 2. Open / reuse a DM channel and post the message
-    const verb = action === 'reassigned' ? 'reassigned to you' : 'assigned to you';
+    let verb;
+    if (action === 'completed') verb = 'completed a task you collaborate on';
+    else if (action === 'reassigned') verb = 'reassigned to you';
+    else verb = 'assigned to you';
     const headerLine = actorName
-        ? `*${escapeMrkdwn(actorName)}* ${verb} a task:`
+        ? `*${escapeMrkdwn(actorName)}* ${verb}:`
         : `A task was ${verb}:`;
     const text = `${headerLine}\n\n• ${escapeMrkdwn(cleanName)}`;
     const blocks = [

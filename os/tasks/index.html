@@ -427,7 +427,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1100 slack-diag</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1300 slack-completion</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1635,6 +1635,23 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         // Non-recurring: just log the completion so productivity reporting counts it
         try{await logTaskCompletion(task);}catch(e){console.warn('log completion failed',e)}
       }
+      // Slack DM every collaborator (other than the completer) so the
+      // people who care about this task find out it's done. Assignee
+      // typically IS a collaborator, so they'll get the ping too — except
+      // when the assignee marked it complete themselves, which is the
+      // expected case (no need to tell yourself you finished a thing).
+      const completerEmail=(currentUser&&currentUser.email)||'';
+      const collabs=Array.isArray(task.collaborators)?task.collaborators:[];
+      collabs.forEach(c=>{
+        if(c&&c.email&&c.email!==completerEmail){
+          notifyAssigneeSlack({
+            recipientEmail:c.email,
+            taskName:task.name,
+            taskId:task.id,
+            action:'completed',
+          });
+        }
+      });
     }
     // Slack DM the new assignee on a real change. Fires after the PATCH
     // verify so we never notify for a save that didn't land. Skips the
@@ -5507,6 +5524,17 @@ async function createSimpleTask(opts){
       bizId=proj.businessId;fields[F.business]=[bizId];
     }
   }
+  // Auto-add the creator as a collaborator when they assign the task to
+  // someone else. Means the creator gets the completion DM later (and
+  // shows up on the task's Collaborators list in the drawer). No-op when
+  // the assignee IS the creator — they already see their own task.
+  const _creatorEmail=(currentUser&&currentUser.email)||'';
+  if(_creatorEmail&&assigneeEmail&&_creatorEmail!==assigneeEmail){
+    taskCollabs=Array.isArray(taskCollabs)?taskCollabs.slice():[];
+    if(!taskCollabs.some(c=>c&&c.email===_creatorEmail)){
+      taskCollabs.push({email:_creatorEmail,name:(currentUser&&currentUser.name)||_creatorEmail});
+    }
+  }
   if(taskCollabs&&taskCollabs.length)fields[F.collaborators]=taskCollabs.map(c=>({email:c.email}));
   try{
     // IMPORTANT: request field-ID keyed response so parseTask (which reads
@@ -5863,6 +5891,14 @@ async function submitCreateTask(){
   const assigneeKey=document.getElementById('ctAssignee').value;
   const member=TEAM.find(m=>m.key===assigneeKey);
   if(member)fields[F.assignee]={email:member.email};
+  // Auto-add the creator as a collaborator when the assignee is someone
+  // else, so the creator gets the completion DM and appears on the
+  // task's Collaborators list.
+  const creatorEmail=(currentUser&&currentUser.email)||'';
+  const assigneeEmailVal=member?member.email:'';
+  if(creatorEmail&&assigneeEmailVal&&creatorEmail!==assigneeEmailVal){
+    fields[F.collaborators]=[{email:creatorEmail}];
+  }
   const priority=document.getElementById('ctPriority').value;if(priority)fields[F.priority]=priority;
   const timeEst=document.getElementById('ctTimeEst').value;if(timeEst)fields[F.timeEst]=timeEst;
   const desc=document.getElementById('ctDesc').value;if(desc)fields[F.description]=desc;

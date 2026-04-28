@@ -58,19 +58,24 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Data table */
 .table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
 .dt{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
-/* Headers — wrap to two lines without breaking words, vertically centered.
-   word-break:normal + overflow-wrap:normal stops mid-word breaks; the
-   per-column widths in the SCHEMA give every label enough room. */
-.dt th{background:var(--bg-surface-2);padding:8px 10px;text-align:left;font-weight:700;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.4px;white-space:normal;word-break:normal;overflow-wrap:normal;hyphens:none;line-height:1.25;vertical-align:middle;height:46px;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle);cursor:pointer;user-select:none}
+/* Headers — flex layout pins the sort arrow at the right edge no matter how
+   the label wraps. word-break:normal + overflow-wrap:normal stop mid-word
+   breaks; per-column widths give every label enough room for two lines. */
+.dt th{background:var(--bg-surface-2);padding:0;text-align:left;font-weight:700;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.4px;vertical-align:middle;height:48px;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle);cursor:pointer;user-select:none}
 .dt th:last-child{border-right:none}
 .dt th:hover{background:var(--bg-subtle)}
-.dt th .sort{font-size:9px;margin-left:4px;color:var(--text-muted)}
-.dt th.sorted .sort{color:var(--accent)}
+.dt th .th-inner{display:flex;align-items:center;gap:6px;height:100%;padding:6px 10px}
+.dt th .th-label{flex:1;min-width:0;white-space:normal;word-break:normal;overflow-wrap:normal;hyphens:none;line-height:1.25}
+.dt th .th-sort{flex-shrink:0;font-size:9px;color:var(--text-muted);font-weight:400}
+.dt th.sorted .th-sort{color:var(--accent)}
+.dt th.money .th-inner{justify-content:space-between}
+.dt th.money .th-label{text-align:right}
 .dt td{padding:7px 10px;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dt td:last-child{border-right:none}
-/* Cells with stacked content (chips, multi-line) opt out of ellipsis */
-.dt td.wrap-cell{white-space:normal;overflow:visible}
-.dt td:has(.chips-cell),.dt td:has(.badge){white-space:normal;overflow:visible}
+/* Cells with stacked content (chips, multi-line) opt out of single-line ellipsis,
+   but still clip horizontally — chips inside size themselves to fit the cell. */
+.dt td.wrap-cell{white-space:normal;text-overflow:clip}
+.dt td:has(.chips-cell),.dt td:has(.badge){white-space:normal;text-overflow:clip}
 .dt tbody tr:nth-child(even) td{background:var(--bg-surface-2)}
 .dt tbody tr:hover td{background:var(--accent-soft)}
 .dt tbody tr.row-flash td{animation:flash 1.6s ease-out}
@@ -85,13 +90,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .cell-saving{opacity:.55}
 .cell-error{outline:2px solid var(--danger)!important;background:var(--danger-bg)!important}
 
-/* Linked record chip */
-.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;max-width:200px}
+/* Linked record chip — must fit within its cell, never overflow into the next column. */
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;max-width:100%;box-sizing:border-box;min-width:0}
 .chip:hover{border-color:var(--accent);background:var(--bg-surface)}
 .chip-readonly{cursor:default;background:var(--bg-subtle);color:var(--text-secondary)}
 .chip-readonly:hover{border-color:transparent;background:var(--bg-subtle)}
-.chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chips-cell{display:flex;flex-wrap:wrap;gap:4px}
+.chip-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips-cell{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;min-width:0}
 
 /* Status badges */
 .badge{display:inline-block;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:600;white-space:nowrap}
@@ -367,9 +372,9 @@ const SCHEMA = {
       { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true,  width:'95px' },
       { key:'beds',         label:'Beds',         exact:['No. of Bedrooms','Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds','# of Beds'], keywords:['beds','bedrooms'],          type:'number',  edit:true,  width:'60px' },
       { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units', width:'110px' },
-      { key:'marketValue',  label:'Market Value', exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'money',   edit:true,  width:'110px' },
-      { key:'mortgageBal',  label:'Mortgage Bal', exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'money',   edit:true,  width:'110px' },
-      { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'money',   edit:false, width:'105px' },
+      { key:'marketValue',  label:'Market Value', exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'moneyBig',edit:true,  width:'105px' },
+      { key:'mortgageBal',  label:'Mortgage Bal', exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'moneyBig',edit:true,  width:'105px' },
+      { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'moneyBig',edit:false, width:'105px' },
       { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false, width:'75px' },
       { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false, width:'75px' },
       // Virtual: derived from active tenancies linked via rental units (expected rent).
@@ -922,8 +927,11 @@ function renderCell(record, fieldDef, entityKey){
   }
 
   // Money / percent / date
-  if (fieldDef.type === 'money')   return wrapEditable(fmtMoney(v),    fieldDef, record, entityKey, 'money');
-  if (fieldDef.type === 'percent') return wrapEditable(fmtPercent(v),  fieldDef, record, entityKey, 'percent');
+  if (fieldDef.type === 'money')    return wrapEditable(fmtMoney(v),      fieldDef, record, entityKey, 'money');
+  // moneyBig: capital amounts (property value, mortgage balance, equity).
+  // Drops the trailing .00 so "£195,000.00" doesn't truncate to "£195,000.00 ..".
+  if (fieldDef.type === 'moneyBig') return wrapEditable(fmtMoneyShort(v), fieldDef, record, entityKey, 'moneyBig');
+  if (fieldDef.type === 'percent')  return wrapEditable(fmtPercent(v),    fieldDef, record, entityKey, 'percent');
   if (fieldDef.type === 'date')    return wrapEditable(fmtDate(v),     fieldDef, record, entityKey, 'date', v);
   if (fieldDef.type === 'number')  return wrapEditable(String(v),      fieldDef, record, entityKey, 'number');
   if (fieldDef.type === 'check')   return `<input type="checkbox" ${v?'checked':''} ${fieldDef.edit&&!fieldDef.readOnly?`onchange="saveCheckbox(this,'${record.id}','${fieldDef.id}','${entityKey}')"`:'disabled'}>`;
@@ -937,7 +945,9 @@ function renderCell(record, fieldDef, entityKey){
   if (Array.isArray(v)) display = v.map(x => typeof x === 'object' ? (x.name||x.id) : x).join(', ');
   else if (typeof v === 'object') display = v.name || v.id || JSON.stringify(v);
   else display = String(v);
-  return wrapEditable(escapeHtml(display), fieldDef, record, entityKey, 'text', v);
+  // Pass the human-readable display string as `raw` so the tooltip shows the
+  // full value (not the underlying object/array shape) when the cell ellipses.
+  return wrapEditable(escapeHtml(display), fieldDef, record, entityKey, 'text', display);
 }
 
 function wrapEditable(html, fieldDef, record, entityKey, type, raw){
@@ -946,8 +956,12 @@ function wrapEditable(html, fieldDef, record, entityKey, type, raw){
   if (fieldDef.clickToDrawer) {
     return `<span class="cell-drilldown" onclick="event.stopPropagation();openDrawer('${entityKey}','${record.id}')" title="Click to see breakdown">${html}</span>`;
   }
-  if (!fieldDef.edit || fieldDef.readOnly) return `<span>${html}</span>`;
-  return `<span class="editable" data-edit="${fieldDef.id}" data-type="${type}" data-rec="${record.id}" data-entity="${entityKey}" data-raw="${escapeHtml(raw==null?'':String(raw))}">${html}</span>`;
+  // Long text/long fields can truncate via the td's text-overflow:ellipsis.
+  // Stash the full value as a native browser tooltip so hover reveals it.
+  const fullText = (type === 'text' || type === 'long') && raw != null ? String(raw) : '';
+  const titleAttr = fullText ? ` title="${escapeHtml(fullText)}"` : '';
+  if (!fieldDef.edit || fieldDef.readOnly) return `<span${titleAttr}>${html}</span>`;
+  return `<span class="editable" data-edit="${fieldDef.id}" data-type="${type}" data-rec="${record.id}" data-entity="${entityKey}" data-raw="${escapeHtml(raw==null?'':String(raw))}"${titleAttr}>${html}</span>`;
 }
 
 function badgeClass(name){
@@ -1150,7 +1164,7 @@ function renderTable(entityKey, sch, rows){
   // Per-column class for body-cell styling (right-align numerics, allow chips/badges to wrap)
   const colCls = (c) => {
     const a = [];
-    if (c.type === 'money' || c.type === 'number' || c.type === 'percent') a.push('money');
+    if (c.type === 'money' || c.type === 'moneyBig' || c.type === 'number' || c.type === 'percent') a.push('money');
     if (c.type === 'link' || c.type === 'select') a.push('wrap-cell');
     return a.join(' ');
   };
@@ -1167,7 +1181,7 @@ function renderTable(entityKey, sch, rows){
     const isSorted = sort && sort.key === c.key;
     const arrow = isSorted ? (sort.dir==='asc'?'▲':'▼') : '↕';
     const cls = [colCls(c), isSorted?'sorted':''].filter(Boolean).join(' ');
-    return `<th class="${cls}" data-col="${c.key}" onclick="toggleSort('${entityKey}','${c.key}')">${escapeHtml(c.label)} <span class="sort">${arrow}</span></th>`;
+    return `<th class="${cls}" data-col="${c.key}" onclick="toggleSort('${entityKey}','${c.key}')"><span class="th-inner"><span class="th-label">${escapeHtml(c.label)}</span><span class="th-sort">${arrow}</span></span></th>`;
   }).join('') + '<th></th></tr>';
 
   const body = rows.map(r => {
@@ -1271,10 +1285,10 @@ function startEdit(el){
     inp.focus(); return;
   }
 
-  if (type === 'number' || type === 'money' || type === 'percent') {
+  if (type === 'number' || type === 'money' || type === 'moneyBig' || type === 'percent') {
     const inp = document.createElement('input');
     inp.type = 'number'; inp.className = 'inline-input';
-    inp.step = type === 'percent' ? '0.001' : (type === 'money' ? '0.01' : '1');
+    inp.step = type === 'percent' ? '0.001' : (type === 'money' ? '0.01' : (type === 'moneyBig' ? '100' : '1'));
     inp.value = raw == null ? '' : (type === 'percent' && typeof raw === 'number' ? raw : raw);
     replaceWithEditor(el, inp, async () => {
       const v = inp.value === '' ? null : parseFloat(inp.value);
