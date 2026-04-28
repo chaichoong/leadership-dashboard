@@ -992,6 +992,18 @@ function renderCell(record, fieldDef, entityKey){
       });
       if (!ids.length) return '<span style="color:var(--text-muted)">—</span>';
     }
+    // Sort chips by linked-record display name with natural numeric ordering so
+    // eg. property "Units" comes out as 1, 2, 3, 10 rather than the random
+    // record-id order Airtable returns. Unresolved IDs sink to the end.
+    if (targetEntity && INDEX[targetEntity]) {
+      ids = [...ids].sort((a,b) => {
+        const ra = INDEX[targetEntity][a]; const rb = INDEX[targetEntity][b];
+        if (!ra && !rb) return 0;
+        if (!ra) return 1;
+        if (!rb) return -1;
+        return String(displayName(ra, targetEntity)).localeCompare(String(displayName(rb, targetEntity)), undefined, { numeric:true, sensitivity:'base' });
+      });
+    }
     const chips = ids.map(id => {
       const rec = INDEX[targetEntity] && INDEX[targetEntity][id];
       const nm = rec ? displayName(rec, targetEntity) : id;
@@ -1063,8 +1075,11 @@ function badgeClass(name){
   // like "Inactive Void" still gets the red treatment.
   if (/(void|vacant)/.test(n)) return 'badge-void';
   if (/(former|inactive|ended)/.test(n)) return 'badge-former';
+  // `actioned` MUST be checked before `cfv` — "CFV Actioned" goes gold
+  // (in-progress) not red (open void). Matches the Cash Flow Voids OS.
+  if (/actioned/.test(n)) return 'badge-warning';
   if (/(cfv|overdue|arrears)/.test(n)) return 'badge-overdue';
-  if (/(actioned|warning|due)/.test(n)) return 'badge-warning';
+  if (/(warning|due)/.test(n)) return 'badge-warning';
   return 'badge-info';
 }
 
