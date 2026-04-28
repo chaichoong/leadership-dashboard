@@ -351,9 +351,10 @@
                         name: 'Match-to-transaction matcher functioning', kind: 'automation', run: () => {
                             if (typeof matchInvoicesToTransactions !== 'function') return { status: 'fail', detail: 'matchInvoicesToTransactions() not loaded' };
                             try {
-                                const matches = matchInvoicesToTransactions(airtableInvoices || [], allTransactions || []);
-                                const matched = (matches || []).filter(m => m && m.matchedTxId).length;
-                                return { status: 'pass', detail: `${matched} invoices matched to a reconciled transaction` };
+                                const unpaid = (airtableInvoices || []).filter(i => i.status !== 'Paid');
+                                const matches = matchInvoicesToTransactions(unpaid, allTransactions || []) || {};
+                                const matched = Object.values(matches).filter(m => m && m.txRecordId).length;
+                                return { status: 'pass', detail: `${matched} of ${unpaid.length} unpaid invoices matched to a reconciled transaction` };
                             } catch (e) {
                                 return { status: 'fail', detail: 'Matcher threw: ' + e.message };
                             }
