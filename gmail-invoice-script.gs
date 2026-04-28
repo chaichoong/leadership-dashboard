@@ -22,7 +22,10 @@
  * ACTIONS (via query string):
  *   ?action=sync          → Manually trigger Gmail → Airtable sync
  *   ?action=markPaid&threadId=xxx → Move email to "4: paid" label + update Airtable
- *   ?action=count         → Returns { gmailCount: N } for "3. to pay" label
+ *   ?action=count         → Returns { gmailCount: N } for the "3: to pay" label
+ *
+ * Label lookup is by leading number prefix (3:, 3., or 3 ) so a future
+ * rename does not silently break the sync. Falls back to exact name match.
  *   (no action)           → Returns { status: 'ok' }
  */
 
@@ -59,6 +62,32 @@ var FIELDS = {
 
 
 // ═══════════════════════════════════════════
+// Label lookup — robust against rename
+// ═══════════════════════════════════════════
+//
+// Looks up a Gmail label by its leading number prefix (e.g. "3:", "3.",
+// or "3 "). Falls back to exact-name match. Means a label rename like
+// "3. to pay" → "3: to pay" doesn't break the sync.
+function findLabelByNumber(num, fallbackName) {
+  if (fallbackName) {
+    var byName = GmailApp.getUserLabelByName(fallbackName);
+    if (byName) return byName;
+  }
+  var prefix = String(num);
+  var labels = GmailApp.getUserLabels();
+  for (var i = 0; i < labels.length; i++) {
+    var name = labels[i].getName();
+    if (name.indexOf(prefix + ':') === 0 ||
+        name.indexOf(prefix + '.') === 0 ||
+        name.indexOf(prefix + ' ') === 0) {
+      return labels[i];
+    }
+  }
+  return null;
+}
+
+
+// ═══════════════════════════════════════════
 // Web App Entry Point
 // ═══════════════════════════════════════════
 
@@ -71,7 +100,7 @@ function doGet(e) {
     }
 
     if (params.action === 'count') {
-      var label = GmailApp.getUserLabelByName('3. to pay');
+      var label = findLabelByNumber(3, '3: to pay');
       var count = label ? label.getThreads(0, 100).length : 0;
       return jsonResponse({ gmailCount: count });
     }
@@ -97,8 +126,8 @@ function syncGmailToAirtable() {
   var config = getConfig();
   if (!config.pat) return { error: 'AIRTABLE_PAT not set in Script Properties' };
 
-  var label = GmailApp.getUserLabelByName('3. to pay');
-  if (!label) return { error: 'Gmail label "3. to pay" not found', synced: 0 };
+  var label = findLabelByNumber(3, '3: to pay');
+  if (!label) return { error: 'Gmail label starting with "3:" not found', synced: 0 };
 
   var threads = label.getThreads(0, 50);
   var cache = PropertiesService.getScriptProperties();
@@ -359,8 +388,8 @@ function handleMarkPaid(threadId) {
     var thread = GmailApp.getThreadById(threadId);
     if (!thread) return jsonResponse({ error: 'Thread not found', success: false });
 
-    var toPayLabel = GmailApp.getUserLabelByName('3. to pay');
-    var paidLabel  = GmailApp.getUserLabelByName('4: paid');
+    var toPayLabel = findLabelByNumber(3, '3: to pay');
+    var paidLabel  = findLabelByNumber(4, '4: paid');
     if (!toPayLabel || !paidLabel) {
       return jsonResponse({ error: 'Labels not found', success: false });
     }

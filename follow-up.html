@@ -878,6 +878,24 @@
     const DEFAULT_LABEL = '__INBOX__';
     const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
     const INBOX_VALUE = '__INBOX__';
+    // Apps Script that pulls Gmail "3: to pay" → Airtable Invoice Records.
+    // Triggered ad-hoc when the team applies label 3 so Invoices OS reflects
+    // new invoices within seconds rather than waiting for the 15-min cron.
+    const GMAIL_INVOICE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwzn-xAv2li7Qo8GrEEkELWzRNp0_4fcz9tiuxQdXiDDgwhCHpoRTTbDyF2K3Ks5wza/exec';
+
+    // Debounced — a bulk apply that touches several label-3 emails should
+    // fire one sync, not N. The 1.5s settle also lets Gmail's label state
+    // propagate before the Apps Script scans.
+    let _invoiceSyncDebounce = null;
+    function triggerInvoiceSync() {
+        if (_invoiceSyncDebounce) clearTimeout(_invoiceSyncDebounce);
+        _invoiceSyncDebounce = setTimeout(() => {
+            try {
+                fetch(GMAIL_INVOICE_SCRIPT_URL + '?action=sync', { mode: 'no-cors', redirect: 'follow' });
+                addAuditEntry('invoice_sync_trigger', 'Triggered Gmail → Airtable invoice sync after label-3 apply');
+            } catch (err) { console.warn('Invoice sync trigger failed:', err); }
+        }, 1500);
+    }
 
     let tokenClient;
     let accessToken = null;
@@ -3004,6 +3022,11 @@ Respond with ONLY valid JSON, no markdown.`;
                 });
             }
 
+            // Trigger immediate Gmail → Airtable invoice sync if moved to label 3 (To Pay)
+            if (/^3[.:]\s/.test(newLabelName)) {
+                triggerInvoiceSync();
+            }
+
             // Auto-process compliance cert if moved to Property Compliance
             if (newLabelName.startsWith('10')) {
                 processComplianceEmail(email).catch(err => console.error('Compliance processing failed:', err));
@@ -3076,6 +3099,11 @@ Respond with ONLY valid JSON, no markdown.`;
                 createAirtableTask(email).then(ok => {
                     if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
                 });
+            }
+
+            // Trigger immediate Gmail → Airtable invoice sync if applied to label 3 (To Pay)
+            if (/^3[.:]\s/.test(labelName)) {
+                triggerInvoiceSync();
             }
 
             // Auto-process compliance cert if applied to Property Compliance
@@ -3169,6 +3197,13 @@ Respond with ONLY valid JSON, no markdown.`;
                 // Auto-create Airtable task if applied to label 8 (Task Created)
                 if (/^8[.:]\s/.test(labelName)) {
                     createAirtableTask(email).catch(err => console.error('Bulk Airtable task creation failed:', err));
+                }
+
+                // Trigger immediate Gmail → Airtable invoice sync if applied to label 3 (To Pay).
+                // The trigger is debounced so a bulk apply with multiple label-3 emails
+                // collapses into a single Apps Script invocation.
+                if (/^3[.:]\s/.test(labelName)) {
+                    triggerInvoiceSync();
                 }
 
                 // Auto-process compliance cert if applied to Property Compliance
