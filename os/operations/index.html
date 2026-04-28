@@ -90,7 +90,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Status badges */
 .badge{display:inline-block;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:600;white-space:nowrap}
 .badge-active,.badge-occupied,.badge-current,.badge-in-payment{background:var(--success-bg);color:var(--success)}
-.badge-void,.badge-vacant,.badge-former{background:var(--bg-subtle);color:var(--text-secondary)}
+/* Void / vacant — red so they jump out from the green Occupied rows */
+.badge-void,.badge-vacant{background:var(--danger-bg);color:var(--danger)}
+/* Former / inactive — grey, historical state, not actionable */
+.badge-former,.badge-inactive,.badge-ended{background:var(--bg-subtle);color:var(--text-secondary)}
 .badge-overdue,.badge-cfv{background:var(--danger-bg);color:var(--danger)}
 .badge-warning{background:var(--warning-bg);color:var(--warning)}
 .badge-info{background:var(--info-bg);color:var(--info)}
@@ -293,7 +296,7 @@ const TABLE = {
 // `width`   — optional CSS width
 const SCHEMA = {
   tenants: {
-    label: 'Tenants',
+    label: 'Tenants', singular: 'Tenant',
     fields: [
       { key:'name',    label:'Name',         primary:true,                                                                      type:'text',   edit:true, width:'180px' },
       { key:'status',  label:'Status',       exact:['Tenant Status','Status'],                                                  type:'select', edit:true },
@@ -302,20 +305,20 @@ const SCHEMA = {
       { key:'email',   label:'Email',        exact:['Email Address','Email','Email Address (Tenant)'],                          type:'text',   edit:true },
       { key:'dob',     label:'DOB',          exact:['Date of Birth','DOB'],                                                     type:'date',   edit:true },
       { key:'payType', label:'Pay Type',     exact:['Rent Payment Type','Payment Type'], keywords:['payment','type'],           type:'select', edit:true },
-      { key:'tenancy', label:'Tenancy',      exact:['Tenancies','Tenancy','Linked Tenancy'],                                    type:'link',   edit:true, link:'tenancies' },
+      { key:'tenancy', label:'Tenancy',      exact:['Tenancies','Tenancy','Linked Tenancy'],                                    type:'link',   edit:true, link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies') },
     ],
   },
   tenancies: {
-    label: 'Tenancies',
+    label: 'Tenancies', singular: 'Tenancy',
     fields: [
       { key:'ref',         label:'Reference',      primary:true,                                                                                                          type:'text',   edit:false, width:'180px' },
       { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                                                type:'link',   edit:true,  link:'tenants' },
       { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                                                           type:'link',   edit:true,  link:'units' },
       { key:'property',    label:'Property',       exact:['Property','Properties'],                                                                                       type:'link',   edit:false, link:'properties' },
-      // Locked to "Tenant Status" only — that field rolls Active/Former up from Tenants. Generic "Status" matches were giving wrong values.
-      { key:'status',      label:'Status',         exact:['Tenant Status'],                                                                                               type:'select', edit:false },
-      // Use the unified payment status field that the rest of the platform writes to (CFV / In Payment / etc.)
-      { key:'payStatus',   label:'Payment Status', exact:['Payment Status Unified','Payment Status'],                                                                     type:'select', edit:true },
+      // The plain "Status" field on Tenancies holds Active/Former. "Tenant Status" remains as a fallback only.
+      { key:'status',      label:'Status',         exact:['Status','Tenant Status'],                                                                                      type:'select', edit:false },
+      // Field name in Airtable is "Payment Status (Unified)" — note the parens.
+      { key:'payStatus',   label:'Payment Status', exact:['Payment Status (Unified)','Payment Status Unified','Payment Status'], keywords:['payment','status'],          type:'select', edit:true },
       { key:'startDate',   label:'Start Date',     exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                                                  type:'date',   edit:true },
       { key:'rent',        label:'Monthly Rent',   exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],                                    type:'money',  edit:true },
       { key:'dueDay',      label:'Due Day',        exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],                                   type:'number', edit:true },
@@ -323,7 +326,7 @@ const SCHEMA = {
     ],
   },
   units: {
-    label: 'Rental Units',
+    label: 'Rental Units', singular: 'Rental Unit',
     fields: [
       { key:'name',     label:'Unit',            primary:true,                                                                              type:'text',   edit:false, width:'200px' },
       { key:'unitType', label:'Type',            exact:['Unit Type'], keywords:['unit','type'],                                             type:'select', edit:true },
@@ -334,23 +337,27 @@ const SCHEMA = {
       // historical (Former) records too, which we don't want under "Current".
       { key:'tenant',   label:'Current Tenant',  exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants',   linkFilter:(rec)=>isActiveStatus(rec,'tenants') },
       { key:'tenancy',  label:'Current Tenancy', exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies') },
-      { key:'rent',     label:'Current Rent',    exact:['Current Rent','Monthly Rent','Rent'],                                              type:'money',  edit:false },
+      // Virtual: sum expected monthly rent from active tenancies linked to this unit.
+      // Switching from a direct field match to derived means we always show the
+      // contractual rent regardless of how the unit table is set up.
+      { key:'rent',     label:'Rent / mo',       virtual:true, compute:r=>deriveUnitRent(r), tooltip:'Sum of expected monthly rent from active tenancies linked to this unit', type:'money', edit:false },
     ],
   },
   properties: {
-    label: 'Properties',
+    label: 'Properties', singular: 'Property',
     fields: [
       { key:'name',         label:'Property',     primary:true,                                                                                                                                          type:'text',    edit:true, width:'220px' },
       { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true },
-      { key:'beds',         label:'Beds',         exact:['Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds'], keywords:['beds'],                                                   type:'number',  edit:true },
+      { key:'beds',         label:'Beds',         exact:['No. of Bedrooms','Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds','# of Beds'], keywords:['beds','bedrooms'],          type:'number',  edit:true },
       { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units' },
       { key:'marketValue',  label:'Market Value', exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'money',   edit:true },
       { key:'mortgageBal',  label:'Mortgage Bal', exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'money',   edit:true },
       { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'money',   edit:false },
       { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false },
       { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false },
-      { key:'grossRent',    label:'Rent / mo',    exact:['Gross Monthly Rent','Total Rent','Total Monthly Rent','Monthly Rent'], keywords:['gross','rent'],                                              type:'money',   edit:false },
-      { key:'mortgagePay',  label:'Mortgage / mo',virtual:true, compute:r => deriveMortgagePay(r), tooltip:'Pulled from the linked mortgage cost in the Costs table',                                     type:'money',   edit:false },
+      // Virtual: derived from active tenancies linked via rental units (expected rent).
+      { key:'grossRent',    label:'Rent / mo',    virtual:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies on this property', type:'money', edit:false },
+      { key:'mortgagePay',  label:'Mortgage / mo',virtual:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked mortgage costs from the Costs table',                          type:'money',   edit:false },
       { key:'netRent',      label:'Net / mo',     virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false },
       { key:'grossYield',   label:'Gross Yield',  virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false },
       { key:'cashOnCash',   label:'Cash on Cash', virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false },
@@ -375,11 +382,12 @@ const SCHEMA = {
   },
   // Resolved silently — no tab. Used to look up monthly mortgage amounts.
   costs: {
-    label: 'Costs',
-    hidden: true,
+    label: 'Costs', singular: 'Cost', hidden: true,
     fields: [
       { key:'name',     primary:true,                                                                                  type:'text' },
       { key:'expected', exact:['Expected Cost','Expected Amount','Monthly Cost','Amount'], keywords:['expected'],      type:'money' },
+      // Used to filter out historic mortgages when summing
+      { key:'inactive', exact:['Inactive','Inactive?','Archived','Is Inactive'],                                       type:'check' },
     ],
   },
 };
@@ -415,11 +423,57 @@ function deriveMortgagePay(propRec){
   const linkId = fid('properties','_mortCostLink');
   if (!linkId) return null;
   const linked = propRec.fields[linkId];
-  const costId = Array.isArray(linked) ? linked[0] : linked;
-  if (!costId) return null;
-  const cost = INDEX.costs[costId];
-  if (!cost) return null;
-  return numField(cost, 'costs', 'expected');
+  if (!Array.isArray(linked) || !linked.length) return null;
+  const expFid      = fid('costs','expected');
+  const inactiveFid = fid('costs','inactive');
+  if (!expFid) return null;
+  // Sum every linked cost (skip ones flagged Inactive). When properties have
+  // multiple linked mortgage costs (eg. main + product fee, or refinanced
+  // loans where the old cost was kept linked), summing gives the right total.
+  let total = 0; let found = false;
+  for (const id of linked) {
+    const cost = INDEX.costs[id]; if (!cost) continue;
+    if (inactiveFid && cost.fields[inactiveFid]) continue;
+    const v = parseFloat(cost.fields[expFid]);
+    if (!isNaN(v)) { total += v; found = true; }
+  }
+  return found ? total : null;
+}
+
+// Sum expected monthly rent across all ACTIVE tenancies whose Rental-Unit
+// link includes this unit. Returns null if no active tenancies exist —
+// that way an unoccupied unit shows "—" rather than £0.
+function deriveUnitRent(unitRec){
+  const sch = SCHEMA_RESOLVED?.tenancies; if (!sch) return null;
+  const unitFid = sch.byKey.unit?.id;
+  const rentFid = sch.byKey.rent?.id;
+  if (!unitFid || !rentFid) return null;
+  let total = 0; let found = false;
+  for (const t of DATA.tenancies) {
+    const linked = t.fields[unitFid];
+    if (!Array.isArray(linked) || !linked.includes(unitRec.id)) continue;
+    if (!isActiveStatus(t,'tenancies')) continue;
+    const v = parseFloat(t.fields[rentFid]);
+    if (!isNaN(v)) { total += v; found = true; }
+  }
+  return found ? total : null;
+}
+
+// Property-level gross rent = sum of unit-level expected rent across every
+// rental unit linked to this property. Going via units keeps us consistent
+// with whatever Rental Unit rent shows.
+function derivePropertyGrossRent(propRec){
+  const unitSch = SCHEMA_RESOLVED?.units; if (!unitSch) return null;
+  const propFid = unitSch.byKey.property?.id;
+  if (!propFid) return null;
+  let total = 0; let found = false;
+  for (const u of DATA.units) {
+    const v = u.fields[propFid];
+    if (!Array.isArray(v) || !v.includes(propRec.id)) continue;
+    const r = deriveUnitRent(u);
+    if (r != null) { total += r; found = true; }
+  }
+  return found ? total : null;
 }
 function deriveEquity(p){
   const v = numField(p,'properties','marketValue'); const m = numField(p,'properties','mortgageBal');
@@ -869,7 +923,10 @@ function wrapEditable(html, fieldDef, record, entityKey, type, raw){
 function badgeClass(name){
   const n = String(name).toLowerCase();
   if (/(active|occupied|current|in payment|paid)/.test(n)) return 'badge-active';
-  if (/(former|void|vacant|inactive|ended)/.test(n)) return 'badge-void';
+  // Order matters — match void/vacant BEFORE former/inactive so a status
+  // like "Inactive Void" still gets the red treatment.
+  if (/(void|vacant)/.test(n)) return 'badge-void';
+  if (/(former|inactive|ended)/.test(n)) return 'badge-former';
   if (/(cfv|overdue|arrears)/.test(n)) return 'badge-overdue';
   if (/(actioned|warning|due)/.test(n)) return 'badge-warning';
   return 'badge-info';
@@ -1011,7 +1068,7 @@ function renderPropertyKpis(){
   const sumDerived = (arr, fn) => arr.reduce((s,r)=>{ const n = fn(r); return s + ((n==null||isNaN(n))?0:n); },0);
   const totalValue    = sumNum(DATA.properties, sch.byKey.marketValue?.id);
   const totalDebt     = sumNum(DATA.properties, sch.byKey.mortgageBal?.id);
-  const totalRent     = sumNum(DATA.properties, sch.byKey.grossRent?.id);
+  const totalRent     = sumDerived(DATA.properties, derivePropertyGrossRent);
   const totalMortgage = sumDerived(DATA.properties, deriveMortgagePay);
   const totalBeds     = sumNum(DATA.properties, sch.byKey.beds?.id);
   const totalPurchase = sumNum(DATA.properties, sch.byKey._purchPrice?.id);
@@ -1092,14 +1149,33 @@ function applySort(rows, entityKey, sch){
   const col = sch.byKey[s.key];
   if (!col) return rows;
   const dir = s.dir === 'asc' ? 1 : -1;
+
+  // Compute a sortable key per record. For link fields we need the linked
+  // record's display NAME, not its raw `recXXX` id (which sorts as if random).
+  // Virtual fields use their compute(). Numbers fall through unchanged.
+  const sortKey = (rec) => {
+    if (col.virtual && col.compute) return col.compute(rec);
+    if (!col.id) return null;
+    let v = rec.fields[col.id];
+    if (Array.isArray(v)) {
+      if (col.type === 'link' && col.link && v.length) {
+        const linked = INDEX[col.link] && INDEX[col.link][v[0]];
+        return linked ? displayName(linked, col.link) : v[0];
+      }
+      v = v[0];
+    }
+    if (typeof v === 'object' && v) v = v.name || v.id;
+    return v;
+  };
+
   return [...rows].sort((a,b) => {
-    let av = a.fields[col.id]; let bv = b.fields[col.id];
-    if (Array.isArray(av)) av = av[0]; if (Array.isArray(bv)) bv = bv[0];
-    if (typeof av === 'object' && av) av = av.name || av.id;
-    if (typeof bv === 'object' && bv) bv = bv.name || bv.id;
-    if (av == null) return 1; if (bv == null) return -1;
+    const av = sortKey(a); const bv = sortKey(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
     if (typeof av === 'number' && typeof bv === 'number') return (av-bv)*dir;
-    return String(av).localeCompare(String(bv)) * dir;
+    // numeric:true gives natural sort so "23 Viola Street" < "30 Burnbank" < "282 X"
+    return String(av).localeCompare(String(bv), undefined, { numeric:true, sensitivity:'base' }) * dir;
   });
 }
 
@@ -1275,7 +1351,8 @@ function openDrawer(entityKey, recId){
   const sch = SCHEMA_RESOLVED[entityKey];
   const rec = INDEX[entityKey][recId]; if (!rec) return;
   const title = displayName(rec, entityKey);
-  const subtitle = SCHEMA[entityKey].label.replace(/s$/,'') + ' · ' + recId;
+  // Use the explicit `singular` label so "Tenancies" → "Tenancy" (not "Tenancie")
+  const subtitle = (SCHEMA[entityKey].singular || SCHEMA[entityKey].label.replace(/s$/,'')) + ' · ' + recId;
 
   // Main fields (curated)
   const mainRows = SCHEMA[entityKey].fields
@@ -1358,7 +1435,7 @@ function renderPropertyDetailMetrics(rec){
   const numF = (k) => { const id = sch.byKey[k]?.id; if (!id) return null; const v = rec.fields[id]; const n = typeof v==='number'?v:parseFloat(v); return isNaN(n)?null:n; };
   const value = numF('marketValue') || 0;
   const debt  = numF('mortgageBal')  || 0;
-  const rent  = numF('grossRent')    || 0;
+  const rent  = derivePropertyGrossRent(rec) || 0;
   const mort  = deriveMortgagePay(rec) || 0;
   const beds  = numF('beds') || 0;
   const purchPrice = numF('_purchPrice');
