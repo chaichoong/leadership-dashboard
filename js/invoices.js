@@ -4,6 +4,9 @@
     // ── Invoices Tab — backed by Airtable ──
     let airtableInvoices = [];
     let invoiceRefreshedAt = null;
+    // Tracks the last Mark-Paid / Approve-Match attempt for the health checks panel
+    // Shape: { ok: bool, when: Date, error: string|null, action: 'markPaid'|'approveMatch' }
+    let lastApprovalAttempt = null;
 
     // ── New-invoice tracking (based on Airtable createdTime vs localStorage lastSeen) ──
     function getLastSeenInvoiceTime() {
@@ -399,6 +402,19 @@
                             return { status: 'pass', detail: 'Badge updates on render and after fetch' };
                         }
                     },
+                    {
+                        name: 'Last Mark-Paid / AI match approval', kind: 'automation', run: () => {
+                            if (!lastApprovalAttempt) {
+                                return { status: 'pass', detail: 'No approvals yet this session' };
+                            }
+                            const when = lastApprovalAttempt.when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                            const verb = lastApprovalAttempt.action === 'approveMatch' ? 'AI match approval' : 'Mark Paid';
+                            if (lastApprovalAttempt.ok) {
+                                return { status: 'pass', detail: `${verb} succeeded at ${when}` };
+                            }
+                            return { status: 'fail', detail: `${verb} failed at ${when}: ${lastApprovalAttempt.error}` };
+                        }
+                    },
                 ],
             });
             markTabSynced('invoices');
@@ -572,7 +588,8 @@
                 [INV.paidDate]: new Date().toISOString().slice(0, 10),
             };
             if (txRecordId) {
-                paidFields[INV.matchedTx] = [{ id: txRecordId }];
+                // Linked record fields take an array of record ID strings, not objects
+                paidFields[INV.matchedTx] = [txRecordId];
             }
             const paidResp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
                 method: 'PATCH',
@@ -612,6 +629,8 @@
             // Remove from local array and re-render
             airtableInvoices = airtableInvoices.filter(i => i.recordId !== recordId);
             updateInvoicesSidebarBadge();
+            // Record success for the health checks panel
+            lastApprovalAttempt = { ok: true, when: new Date(), error: null, action: txRecordId ? 'approveMatch' : 'markPaid' };
             setTimeout(() => {
                 invoiceTabRendered = false;
                 renderInvoiceTab();
@@ -619,6 +638,8 @@
 
         } catch (e) {
             console.error('Mark as paid failed:', e);
+            // Record failure for the health checks panel — this is what the user will see
+            lastApprovalAttempt = { ok: false, when: new Date(), error: e.message || String(e), action: txRecordId ? 'approveMatch' : 'markPaid' };
             btn.textContent = 'Failed';
             btn.style.background = '#fee2e2';
             btn.classList.remove('loading');
