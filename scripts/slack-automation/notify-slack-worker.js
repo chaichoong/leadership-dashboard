@@ -15,7 +15,7 @@
 //                      Required scopes: chat:write, users:read, users:read.email
 //   ALLOWED_ORIGIN   — e.g. https://chaichoong.github.io (or "*" for any)
 //
-// ─── REQUEST ──────────────────────────────────────────────────────────
+// ─── REQUEST (assignee DM — original flow) ────────────────────────────
 //
 //   POST /notify-slack
 //   Content-Type: application/json
@@ -26,6 +26,19 @@
 //     "actorName":      "Kevin Brittain",         // who did the assigning
 //     "action":         "assigned"                // or "reassigned"
 //   }
+//
+// ─── REQUEST (channel reply — contractor-bot flow) ────────────────────
+//
+//   POST /notify-slack
+//   Content-Type: application/json
+//   {
+//     "channel":   "C09EMKREPJL",                  // channel ID
+//     "text":      "✅ Logged, Gary...",            // mrkdwn text
+//     "thread_ts": "1234567890.123456"             // optional, for threaded replies
+//   }
+//
+//   The handler distinguishes the two flows by which fields are present:
+//   `channel` + `text` → channel reply; `recipientEmail` + `taskName` → DM.
 //
 //   Returns 200 { ok: true } on success, 4xx / 5xx with { error } on failure.
 //   Caller should ignore failures — notifications never block the user save.
@@ -58,9 +71,16 @@ export async function handleNotifySlack(request, env) {
     try { body = await request.json(); }
     catch { return json({ error: 'Invalid JSON' }, 400, corsHeaders); }
 
+    // Branch: channel-reply flow (used by the Airtable contractor-bot automation).
+    // Detected by the presence of `channel` + `text` instead of `recipientEmail`.
+    if (body && body.channel && body.text) {
+        return handleChannelReply(body, env, corsHeaders);
+    }
+
+    // Original flow: assignee DM via email lookup.
     const { recipientEmail, taskName, taskId, actorName, action } = body || {};
     if (!recipientEmail || !taskName) {
-        return json({ error: 'recipientEmail and taskName are required' }, 400, corsHeaders);
+        return json({ error: 'recipientEmail and taskName are required (or pass channel + text for a channel reply)' }, 400, corsHeaders);
     }
     // Reject the local placeholder so a stale web-app cache can never DM
     // "(Untitled)" to a real human. The legitimate fix is to make sure
@@ -122,6 +142,37 @@ export async function handleNotifySlack(request, env) {
         return json({ error: `Slack post failed: ${post.error}` }, 502, corsHeaders);
     }
 
+    return json({ ok: true, channel: post.channel, ts: post.ts }, 200, corsHeaders);
+}
+
+// ─── Channel-reply handler (contractor-bot flow) ──────────────────────
+// Posts an arbitrary mrkdwn message to a channel, optionally as a thread reply.
+// Used by the Airtable automation `contractor-bot.js` to confirm new jobs,
+// status updates, and "show my list" replies in #property-management.
+async function handleChannelReply(body, env, corsHeaders) {
+    const token = env.SLACK_BOT_TOKEN;
+    if (!token) return json({ error: 'SLACK_BOT_TOKEN not configured' }, 500, corsHeaders);
+
+    const { channel, text, thread_ts } = body;
+    if (!channel || !text) {
+        return json({ error: 'channel and text are required' }, 400, corsHeaders);
+    }
+
+    const payload = { channel, text };
+    if (thread_ts) payload.thread_ts = thread_ts;
+
+    const postRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify(payload),
+    });
+    const post = await postRes.json();
+    if (!post.ok) {
+        return json({ error: `Slack post failed: ${post.error}` }, 502, corsHeaders);
+    }
     return json({ ok: true, channel: post.channel, ts: post.ts }, 200, corsHeaders);
 }
 

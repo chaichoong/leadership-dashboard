@@ -26,17 +26,21 @@
 
 // ─── CONFIGURATION ────────────────────────────────────────────────────────────
 
-// Contractor lookup: Slack user ID → Airtable collaborator user record.
-// Populate usrIds once Gary/Roy/Rob have accepted their Airtable invites.
+// Contractor lookup: Slack user ID → contractor identity. The Airtable email
+// matches the email each contractor used to accept their base collaborator
+// invite — Airtable's API resolves emails to user records on write, so we
+// don't need to know their `usr...` IDs. Source of truth: TEAM array in
+// os/tasks/index.html (lines 709–720).
 const CONTRACTORS = {
-  U0A9XD12YPN: { name: 'Gary Marsh',  firstName: 'Gary',  airtableUserId: 'usrTODO_GARY' },
-  U0AAN4CTVQQ: { name: 'Roy Lavin',   firstName: 'Roy',   airtableUserId: 'usrTODO_ROY' },
-  U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',   airtableUserId: 'usrTODO_ROB' },
+  U0A9XD12YPN: { name: 'Gary Marsh',  firstName: 'Gary', airtableEmail: 'gkm.property.maintenance@outlook.com' },
+  U0AAN4CTVQQ: { name: 'Roy Lavin',   firstName: 'Roy',  airtableEmail: 'roy.lavin1978@gmail.com' },
+  U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',  airtableEmail: 'rjm320@hotmail.com' },
 };
 
-// Slack bot token — MUST be set as an Airtable automation secret rather than
-// hard-coded. Placeholder shown for clarity; read it from input variables.
-// See README for setup.
+// Existing slack-notify Cloudflare Worker — already deployed and configured
+// with SLACK_BOT_TOKEN. The contractor-bot reuses it for channel replies; no
+// new Slack app or token needed.
+const SLACK_NOTIFY_URL = 'https://slack-notify.kevinbrittain.workers.dev/';
 
 // Airtable table IDs / field IDs (match the rest of the web app).
 const TABLE_TASKS = 'tblqB8b22hKBL4PF1';
@@ -69,7 +73,6 @@ const {
   slackTs,        // string — message timestamp (used to reply in thread)
   threadTs,       // string | null — if the message is already a thread reply
   channel,        // string — channel ID, e.g. "C09EMKREPJL"
-  slackBotToken,  // string — xoxb-… (set as automation secret)
 } = input.config();
 
 // ─── ENTRY POINT ──────────────────────────────────────────────────────────────
@@ -161,14 +164,15 @@ async function handleNewJob(contractor, text) {
   // Step C: priority mapping (High Priority → Urgent, Low Priority → Not Urgent).
   const priority = extraction.priority === 'High Priority' ? 'Urgent' : 'Not Urgent';
 
-  // Step D: create the task.
+  // Step D: create the task. Airtable resolves the contractor's email to their
+  // collaborator record on write — no need to know their `usr...` ID.
   const tasksTable = base.getTable(TABLE_TASKS);
   const newId = await tasksTable.createRecordAsync({
     [FIELD.taskName]:        extraction.taskName,
     [FIELD.description]:     text, // full original message as the description
     [FIELD.status]:          { name: 'Upcoming' },
     [FIELD.priority]:        { name: priority },
-    [FIELD.assignee]:        { id: contractor.airtableUserId },
+    [FIELD.assignee]:        { email: contractor.airtableEmail },
     [FIELD.properties]:      [{ id: property.id }],
     [FIELD.maintenanceTick]: true,
   });
@@ -339,7 +343,7 @@ async function fetchOpenTasksFor(contractor) {
       return {
         id: r.id,
         taskName: r.getCellValueAsString(FIELD.taskName),
-        assigneeId: assignee && assignee.id,
+        assigneeEmail: assignee && assignee.email,
         status: status && status.name,
         priority: priority && priority.name,
         propertyName: props[0] ? props[0].name : '',
@@ -348,7 +352,7 @@ async function fetchOpenTasksFor(contractor) {
       };
     })
     .filter(t =>
-      t.assigneeId === contractor.airtableUserId &&
+      t.assigneeEmail === contractor.airtableEmail &&
       t.status !== 'Completed'
     )
     .sort((a, b) => {
@@ -388,12 +392,12 @@ async function callClaude({ system, messages, maxTokens }) {
 }
 
 async function replyInThread(text) {
-  const resp = await fetch('https://slack.com/api/chat.postMessage', {
+  // Posts via the existing slack-notify Cloudflare Worker, which holds the
+  // SLACK_BOT_TOKEN as a Cloudflare secret. The contractor-bot never needs
+  // to handle the token directly.
+  const resp = await fetch(SLACK_NOTIFY_URL, {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + slackBotToken,
-      'Content-Type': 'application/json; charset=utf-8',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       channel,
       text,
@@ -402,6 +406,6 @@ async function replyInThread(text) {
   });
   const data = await resp.json();
   if (!data.ok) {
-    throw new Error(`Slack post failed: ${data.error}`);
+    throw new Error(`Slack reply failed: ${data.error || resp.status}`);
   }
 }

@@ -7,43 +7,63 @@ no third-party glue layer.
 ## Architecture
 
 ```
-Slack Events API  →  Slack app  →  Airtable incoming webhook (automation trigger)
-                                         ↓
-                                  contractor-bot.js (Airtable script)
-                                         ↓
-                          classifies intent via Claude proxy
-                                         ↓
-                       new job / status update / list reply
-                                         ↓
-                   writes to Tasks table + posts reply to Slack
+Slack Events API  →  existing Slack app  →  Airtable incoming webhook (automation trigger)
+                                                  ↓
+                                           contractor-bot.js (Airtable script)
+                                                  ↓
+                                   classifies intent via Claude proxy
+                                                  ↓
+                                new job / status update / list reply
+                                                  ↓
+              writes to Tasks table + replies via slack-notify worker
 ```
+
+> The existing **slack-notify** Cloudflare worker
+> (`https://slack-notify.kevinbrittain.workers.dev/`) already holds the
+> `SLACK_BOT_TOKEN` and is used by the dashboard for assignment DMs. The
+> contractor-bot reuses it — no new Slack app required.
 
 ## One-time setup
 
-### 1. Airtable collaborators
+### 1. Redeploy the slack-notify worker
 
-Invite Gary Marsh, Roy Lavin, and Rob Jackson to base `appnqjDpqDniH3IRl` as
-**free commenter-only collaborators** (same tier as Mica and Ericamae). Once
-they accept, grab each person's `usr...` ID from the collaborator list in the
-base's Share panel and fill the `airtableUserId` placeholders at the top of
-`contractor-bot.js`.
+The worker source in `scripts/slack-automation/notify-slack-worker.js` now
+handles two payload shapes (the original assignee-DM, and a new channel-reply
+flow used by the contractor-bot). Kevin needs to redeploy the worker once for
+this change to take effect.
 
-### 2. Slack app
+If it's deployed via `wrangler`:
+```bash
+wrangler deploy
+```
+If it's pasted into the Cloudflare dashboard, paste the new contents of
+`notify-slack-worker.js` into the worker source and click *Save and Deploy*.
 
-Create a Slack app at https://api.slack.com/apps → "From scratch" → name it
-something like **Contractor Bot**.
+Verify by sending a smoke-test channel reply:
+```bash
+curl -X POST https://slack-notify.kevinbrittain.workers.dev/ \
+  -H "Content-Type: application/json" \
+  -d '{"channel": "C09EMKREPJL", "text": "Smoke test from worker"}'
+```
 
-Required scopes (OAuth & Permissions → Bot Token Scopes):
-- `chat:write`
-- `channels:history` (to receive messages posted in `#property-management`)
-- `users:read`
+### 2. Add the Slack app's event subscription
 
-Install the app to the workspace and copy the **Bot User OAuth Token**
-(starts `xoxb-…`). Invite the bot to `#property-management` (`/invite @Contractor Bot`).
+The existing Slack app (the one whose bot token is in `slack-notify`) needs
+permission to *receive* messages in `#property-management`, not just send
+them. In https://api.slack.com/apps → your app → **OAuth & Permissions**:
 
-Enable **Event Subscriptions**:
-- Request URL: the Airtable webhook URL (from step 3)
-- Subscribe to bot event: `message.channels`
+- Add bot token scope: `channels:history` (probably already has `chat:write`
+  and `users:read.email`).
+- Reinstall the app to the workspace if scopes changed.
+
+In **Event Subscriptions**:
+
+- Toggle on.
+- Request URL: paste the Airtable webhook URL (from step 3).
+- Subscribe to bot event: `message.channels`.
+- Save changes.
+
+Make sure the bot is in `#property-management` (`/invite @<bot-name>`).
 
 ### 3. Airtable automation
 
@@ -55,17 +75,15 @@ In base `appnqjDpqDniH3IRl`, create a new automation:
   into the editor.
 - **Input variables** (map each one from the webhook payload):
 
-  | Variable        | Webhook path                          |
-  | --------------- | ------------------------------------- |
-  | `messageText`   | `event.text`                          |
-  | `slackUserId`   | `event.user`                          |
-  | `slackTs`       | `event.ts`                            |
-  | `threadTs`      | `event.thread_ts` (may be empty)      |
-  | `channel`       | `event.channel`                       |
-  | `slackBotToken` | (paste the xoxb-… token as a string)  |
+  | Variable      | Webhook path                          |
+  | ------------- | ------------------------------------- |
+  | `messageText` | `event.text`                          |
+  | `slackUserId` | `event.user`                          |
+  | `slackTs`     | `event.ts`                            |
+  | `threadTs`    | `event.thread_ts` (may be empty)      |
+  | `channel`     | `event.channel`                       |
 
-  > Storing the bot token as an input variable keeps it out of the script
-  > body. When Airtable adds a secrets manager we can move it there.
+  > No Slack token here — the worker holds it.
 
 - **Test** the automation with a sample payload before enabling.
 
@@ -93,7 +111,7 @@ Claude (Haiku) is called with the message text and returns exactly one of:
 | Description         | Full Slack message verbatim                                  |
 | Status              | `Upcoming`                                                   |
 | Priority            | AI-inferred → `Urgent` or `Not Urgent` (see mapping below)   |
-| Assignee            | The contractor (via their Airtable user ID)                  |
+| Assignee            | The contractor (resolved by email — Airtable maps it to the collaborator) |
 | Properties          | AI-matched → Properties table                                |
 | Maintenance Ticket  | `true`                                                       |
 | Due Date            | unset                                                        |
@@ -156,8 +174,9 @@ Gary, here's your list (3):
 | ---------------------------------------------- | --------------------------------------------------------------- |
 | Bot doesn't respond at all                     | Automation off, or Slack event URL not verified                 |
 | "Claude proxy error 5xx"                       | Worker is down — check `claude-proxy.kevinbrittain.workers.dev` |
+| "Slack reply failed: invalid_auth"             | `slack-notify` worker hasn't been redeployed with the channel-reply branch |
 | New jobs created with no property linked       | Property hint didn't match — contractor needs to include a name |
-| Job assigned to Kevin not to contractor        | `airtableUserId` placeholder not updated in the script          |
+| Task assignee shows as empty                   | Contractor's email in `CONTRACTORS` doesn't match the Airtable collaborator email |
 | Bot replies in channel instead of thread       | `threadTs` input variable not mapped from webhook payload       |
 
 ## Related files
