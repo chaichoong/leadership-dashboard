@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1600 project-week-pin</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1700 collab-attach-comments</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1578,7 +1578,22 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     } else if(fieldKey==='assignee'){
       // rawValue = team key
       const member=TEAM.find(m=>m.key===rawValue);
-      if(member){payload[fid]={email:member.email};task.assignee=member.name;task.assigneeEmail=member.email}
+      if(member){
+        payload[fid]={email:member.email};task.assignee=member.name;task.assigneeEmail=member.email;
+        // Add the actor (whoever clicked Reassign) as a collaborator so
+        // they get the completion DM. Skipped when actor IS the new
+        // assignee, OR is already on the collaborator list, OR has no
+        // known email. Reassigning to yourself doesn't trigger this.
+        const actorEmail=(currentUser&&currentUser.email)||'';
+        if(actorEmail&&actorEmail!==member.email){
+          const collabs=Array.isArray(task.collaborators)?task.collaborators.slice():[];
+          if(!collabs.some(c=>c&&c.email===actorEmail)){
+            collabs.push({email:actorEmail,name:(currentUser&&currentUser.name)||actorEmail});
+            payload[F.collaborators]=collabs.map(c=>({email:c.email}));
+            task.collaborators=collabs;
+          }
+        }
+      }
     } else {
       payload[fid]=rawValue;task[fieldKey]=rawValue;
     }
@@ -2138,7 +2153,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
-      <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
+      <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn btn-danger" onclick="deleteTask('${t.id}')">Delete</button>
@@ -2146,7 +2161,28 @@ function openTaskDrawer(taskId){
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  // Load the live comment count for the badge next to "Comments"
+  loadCommentCountForDrawer(t.id);
 }
+// Fetch comment count and write it into the drawer's badge. Called on
+// drawer open and after every post / delete so the number stays in
+// sync without the user having to open the comments modal.
+async function loadCommentCountForDrawer(taskId){
+  const badge=document.getElementById('drwCommentCount-'+taskId);
+  if(!badge)return;
+  try{
+    const list=await fetchComments(taskId);
+    const n=Array.isArray(list)?list.length:0;
+    badge.textContent=n===0?'0':String(n);
+    badge.title=n===1?'1 comment':n+' comments';
+    badge.style.background=n>0?'var(--accent-soft)':'var(--bg-subtle)';
+    badge.style.color=n>0?'var(--accent)':'var(--text-secondary)';
+  }catch(e){
+    badge.textContent='?';
+    badge.title='Couldn\'t load comment count';
+  }
+}
+window.loadCommentCountForDrawer=loadCommentCountForDrawer;
 function closeDrawer(){
   // Force blur on any focused editor inside the drawer so its onblur fires
   // BEFORE we remove the overlay — otherwise contenteditable edits are lost.
@@ -2323,12 +2359,24 @@ function renderAttachmentsMarkup(t){
         const safeId=escHtml(a.id||'');
         return `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:6px;padding:4px 8px;margin:0 4px 4px 0;font-size:11px"><a href="${escHtml(a.url)}" target="_blank" style="text-decoration:none;color:var(--accent)">${escHtml(a.filename||'file')}</a>${sizeKb}<button onclick="removeAttachment('${taskId}','${safeId}')" title="Remove attachment" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;line-height:1;padding:1px 5px;border-radius:50%;transition:all .15s" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button></div>`;
       }).join('')
-    : '<div style="color:var(--text-secondary);font-size:12px;margin-bottom:6px">No attachments</div>';
+    : '<div style="color:var(--text-secondary);font-size:12px">No attachments yet</div>';
+  // Wrap in a drop zone — drag any file(s) anywhere into the dashed box
+  // and they upload. Multi-file works either via the picker (input has
+  // multiple) or by dropping several files at once.
   return `
-    <div id="drwAttachList" style="display:flex;flex-wrap:wrap;align-items:center;margin-bottom:6px">${listHtml}</div>
-    <input type="file" id="drwAttachInput" multiple style="display:none" onchange="uploadAttachments('${taskId}', this.files); this.value=''">
-    <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('drwAttachInput').click()">+ Add Attachment</button>
-    <span id="drwAttachStatus" style="margin-left:8px;font-size:11px;color:var(--text-secondary)"></span>
+    <div id="drwAttachDrop"
+         ondragover="event.preventDefault();event.stopPropagation();this.style.background='var(--accent-soft)';this.style.borderColor='var(--accent)'"
+         ondragleave="event.preventDefault();event.stopPropagation();this.style.background='';this.style.borderColor='var(--border-default)'"
+         ondrop="event.preventDefault();event.stopPropagation();this.style.background='';this.style.borderColor='var(--border-default)';if(event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files.length)uploadAttachments('${taskId}',event.dataTransfer.files)"
+         style="border:2px dashed var(--border-default);border-radius:8px;padding:10px 12px;background:var(--bg-surface);transition:background .15s, border-color .15s;cursor:default">
+      <div id="drwAttachList" style="display:flex;flex-wrap:wrap;align-items:center;margin-bottom:8px">${listHtml}</div>
+      <input type="file" id="drwAttachInput" multiple style="display:none" onchange="uploadAttachments('${taskId}', this.files); this.value=''">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('drwAttachInput').click()">+ Add Attachment${list.length?'s':''}</button>
+        <span style="font-size:11px;color:var(--text-muted)">or drag &amp; drop one or more files into this box</span>
+        <span id="drwAttachStatus" style="margin-left:auto;font-size:11px;color:var(--text-secondary)"></span>
+      </div>
+    </div>
   `;
 }
 function renderAttachmentsInDrawer(t){
@@ -2483,6 +2531,7 @@ async function submitDrawerComment(taskId){
     _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
     toast('Comment posted');
   }catch(e){
     console.warn(e);toast('Failed to post comment',true);
@@ -2502,6 +2551,7 @@ async function doDeleteComment(taskId,commentId){
     _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
     pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
     if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
+    if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
     toast('Comment deleted');
   }catch(e){
     console.warn(e);toast('Failed to delete comment',true);
@@ -2648,6 +2698,7 @@ async function submitModalComment(taskId){
     _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     renderCommentsInModal(taskId);
+    if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
     toast('Comment posted');
   }catch(e){
     console.error('[Comments] post failed',e);toast('Failed to post comment',true);
@@ -2663,7 +2714,9 @@ function confirmDeleteCommentModal(taskId,commentId){
       await deleteCommentApi(taskId,commentId);
       _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
       pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
-      renderCommentsInModal(taskId);toast('Comment deleted');
+      renderCommentsInModal(taskId);
+      if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+      toast('Comment deleted');
     }catch(e){console.error(e);toast('Failed to delete',true)}
   })();
 }
@@ -4032,10 +4085,10 @@ function renderTasks(){
     }
     const k=teamKey(t.assigneeEmail);
     const initials=t.assignee?t.assignee.split(' ').map(w=>w[0]).join('').slice(0,2):'';
-    html+=`<tr${rowStyle}>
+    html+=`<tr${rowStyle} onclick="openTaskDrawer('${t.id}')" style="cursor:pointer" title="Click to open task details">
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
-      <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Enter to save · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="taskNameKeydown(event,'${t.id}')" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${t.description?`<div class="task-desc" onclick="openTaskDrawer('${t.id}')">${escHtml(t.description)}</div>`:'<div class="task-open-link" onclick="openTaskDrawer('+"'"+t.id+"'"+')" style="font-size:10px;color:var(--text-muted);cursor:pointer;margin-top:2px">Open details ›</div>'}</td>
+      <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Enter to save · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="taskNameKeydown(event,'${t.id}')" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:'<div class="task-open-link" style="font-size:10px;color:var(--text-muted);margin-top:2px">Click row to open details ›</div>'}</td>
       <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value).then(()=>{renderTeamBar();renderKPIs();renderTasks()})">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
       <td class="${dueCls}" onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px;background:transparent;border-color:transparent;color:inherit;font-weight:inherit" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
       <td class="hard-cell" onclick="event.stopPropagation()"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
