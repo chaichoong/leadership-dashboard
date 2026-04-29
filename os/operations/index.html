@@ -2024,7 +2024,7 @@ async function ensureAnthropicKey(){
   });
 }
 
-async function callClaudeForValuation(property){
+async function callClaudeForValuation(property, opts = {}){
   const sch = SCHEMA_RESOLVED.properties;
   const name = displayName(property, 'properties');
   const typeRaw = property.fields[sch.byKey.type?.id];
@@ -2034,40 +2034,77 @@ async function callClaudeForValuation(property){
   const postcode = property.fields[sch.byKey._postcode?.id] || '';
   const address  = property.fields[sch.byKey._address?.id] || '';
 
-  const prompt = `You are a UK property valuation analyst. Research recent comparable sales and produce an estimated current market value.
+  // Decompose UK postcode for tiered location matching:
+  //   "CB9 0AH" → district "CB9", sector "CB9 0"
+  // Search same sector first (tightest), then district, then 1-mile fallback.
+  const pcMatch = String(postcode || '').toUpperCase().trim().match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)\s*(\d)([A-Z]{2})?$/);
+  const pcDistrict = pcMatch ? pcMatch[1] : '';
+  const pcSector   = pcMatch ? `${pcMatch[1]} ${pcMatch[2]}` : '';
+
+  // Optional refinement context — when the user clicks "Refine with feedback"
+  // on a prior result, their notes are spliced in here so the AI can address
+  // them (e.g. "use only Land Registry data, ignore listings on Trinity Road").
+  const feedbackBlock = (opts.feedback || '').trim()
+    ? `\nUSER FEEDBACK FROM A PRIOR ATTEMPT — incorporate this and explicitly address it in the methodology:\n"""\n${opts.feedback.trim()}\n"""\n`
+    : '';
+
+  const prompt = `You are a UK property valuation analyst. Estimate the current market value of this property using ACTUAL COMPLETED SALE PRICES — never asking prices.
 
 PROPERTY UNDER VALUATION
 - Name / Address: ${name}${address?` — ${address}`:''}
-- Postcode: ${postcode || 'not provided — infer from name'}
+- Postcode: ${postcode || '(not provided — infer from address)'}
 - Property Type: ${type}
 - Bedrooms: ${beds}
 - Currently recorded value: £${currentValue.toLocaleString('en-GB')}
+${feedbackBlock}
+LOCATION SEARCH STRATEGY — follow this order:
+1. **Same postcode SECTOR** ${pcSector ? `(${pcSector})` : '(first half + first digit of second half of the postcode)'} — aim for 3+ comparables here. This is a tight neighbourhood match.
+2. If <3 found, expand to **same postcode DISTRICT** ${pcDistrict ? `(${pcDistrict})` : '(outward code, e.g. CB9)'}.
+3. Only if <3 still found, expand within ~1 mile — and explicitly note in the methodology that you had to.
 
-TASK
-Search the web (Rightmove, Zoopla, Land Registry, OnTheMarket, etc.) for 3–5 RECENT (within the last 6 months, ideally last 3 months) sale prices of comparable properties. Comparable means:
-1. Same property type (${type})
-2. Same number of bedrooms (${beds})
-3. Within ~1 mile of the subject property
-4. Genuinely sold (Sold STC or Sold Subject To Contract is acceptable, but actual completed sales preferred)
+SOURCE PRIORITY — only use COMPLETED SALES, NOT asking prices:
+1. **HM Land Registry "Price Paid" data** — the gold standard, real recorded transactions
+2. **Rightmove "Sold Prices"** section: rightmove.co.uk/house-prices/...
+3. **Zoopla "Sold Prices"** section: zoopla.co.uk/house-prices/...
+4. **OnTheMarket** completed sales filter
 
-For each comparable capture: full address, sale price, sale date, beds, type, distance from subject (in miles, your best estimate), and the source URL.
+REJECT (do NOT include these as comparables):
+- "For Sale" / live listings — those are asking prices and run higher than actuals
+- "Sold STC" / "Under Offer" with no confirmed completion date
+- Auction guide prices (frequently below true value)
+- Anything more than 12 months old
 
-Then estimate the subject property's CURRENT market value as the median (or weighted average where you can justify it) of the comps. Note any positive or negative adjustments needed (e.g. subject has been refurbished, comp has a bigger garden, etc.).
+WHAT TO CAPTURE per comparable:
+- address (with postcode)
+- sale_price (actual GBP completed-sale figure)
+- sale_date (YYYY-MM-DD; if you only have month+year, YYYY-MM)
+- beds (number, must equal subject's ${beds})
+- type (must match subject's "${type}")
+- url (link to the source page that proves the sale)
+- distance_miles (best estimate from postcode geometry)
+- is_completed_sale (boolean — TRUE only if you have a recorded completion date / sale price; FALSE if it's still on market or unconfirmed)
+- postcode_match ("sector" | "district" | "wider")
 
-OUTPUT FORMAT — respond with a brief plain-English explanation, then this exact JSON inside <output>...</output> tags. No other JSON in the response.
+ESTIMATE
+Take the median of completed-sale comparables. Adjust for material differences (refurb status, garden, parking, off-grid issues) and state the adjustment in methodology.
+
+OUTPUT FORMAT — short plain-English explanation first, then this single JSON inside <output>...</output> tags. No other JSON anywhere in the response.
 
 <output>
 {
   "estimated_value": 195000,
   "confidence": "Medium",
   "comparables": [
-    { "address": "...", "sale_price": 198000, "sale_date": "2024-09-15", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.4 }
+    { "address": "...", "sale_price": 198000, "sale_date": "2024-09-15", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.4, "is_completed_sale": true, "postcode_match": "sector" }
   ],
-  "methodology": "Brief 2-3 sentence summary of how you arrived at the estimate."
+  "methodology": "2-3 sentences: which sources, what range, what adjustments, any caveats."
 }
 </output>
 
-Confidence guide: High = 4+ very-similar recent comps, all consistent. Medium = 3 comps with mild variance. Low = fewer than 3 comps, or wide variance, or stale data.`;
+Confidence guide:
+- **High** = 4+ completed sales in the same postcode sector, last 6 months, tight value range
+- **Medium** = 3 completed sales OR mix of sector/district, last 6 months
+- **Low** = fewer than 3 completed sales, OR fell back to asking prices, OR wide value variance, OR data older than 6 months`;
 
   let r;
   try {
@@ -2116,24 +2153,25 @@ Confidence guide: High = 4+ very-similar recent comps, all consistent. Medium = 
   return { result: parsed, rawText: finalText, usage: data.usage };
 }
 
-async function runAIValuation(propertyId){
+async function runAIValuation(propertyId, opts = {}){
   const property = INDEX.properties[propertyId];
   if (!property) { toast('Property not found', 'error'); return; }
   const key = await ensureAnthropicKey();
   if (!key) return; // user cancelled
 
   const propName = displayName(property, 'properties');
+  const refining = !!(opts.feedback && opts.feedback.trim());
   showAIModal(`
     <div class="ai-status">
       <div class="spin"></div>
       <div>
-        <div style="font-weight:600;color:var(--text-primary);margin-bottom:2px">Researching ${escapeHtml(propName)}…</div>
-        <div>Claude is searching Rightmove, Zoopla and Land Registry for recent comparable sales. Usually takes 30–90 seconds.</div>
+        <div style="font-weight:600;color:var(--text-primary);margin-bottom:2px">${refining ? 'Refining valuation' : 'Researching'} ${escapeHtml(propName)}…</div>
+        <div>${refining ? 'Re-running with your feedback. ' : ''}Claude is searching Land Registry, Rightmove Sold Prices and Zoopla Sold Prices for completed sales — postcode sector first, then district. Usually takes 30–90 seconds.</div>
       </div>
-    </div>`, { title: 'AI Valuation', closable: false });
+    </div>`, { title: refining ? 'Refining AI Valuation' : 'AI Valuation', closable: false });
 
   try {
-    const { result } = await callClaudeForValuation(property);
+    const { result } = await callClaudeForValuation(property, opts);
     showValuationReviewModal(property, result);
   } catch (e) {
     console.error('AI valuation failed', e);
@@ -2166,45 +2204,145 @@ async function runAIValuation(propertyId){
   }
 }
 
+// Stash the current AI result on `window` so the modal's inline handlers can
+// read the (possibly user-edited) value/methodology at click time without
+// having to JSON-encode the whole object onto every onclick attribute.
+let _currentAIReview = null;
+
 function showValuationReviewModal(property, result){
+  _currentAIReview = { property, result };
   const sch = SCHEMA_RESOLVED.properties;
   const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
   const newValue = parseFloat(result.estimated_value) || 0;
-  const diff = newValue - currentValue;
-  const diffPct = currentValue ? (diff / currentValue * 100) : 0;
   const comps = Array.isArray(result.comparables) ? result.comparables : [];
-  const compsRows = comps.map(c => `
-    <tr>
-      <td>${escapeHtml(c.address || '—')}</td>
+  const askingCount = comps.filter(c => c.is_completed_sale === false).length;
+
+  const compsRows = comps.map(c => {
+    const isAsking = c.is_completed_sale === false;
+    const matchTag = c.postcode_match
+      ? `<span class="schema-tag" style="font-size:9px;margin-left:4px">${escapeHtml(c.postcode_match)}</span>`
+      : '';
+    const askingFlag = isAsking
+      ? `<span class="schema-tag warn" style="font-size:9px;margin-left:4px" title="Not a completed sale — asking price">asking</span>`
+      : '';
+    return `<tr style="${isAsking?'background:var(--warning-bg)':''}">
+      <td>${escapeHtml(c.address || '—')}${matchTag}${askingFlag}</td>
       <td class="money">${fmtMoneyShort(c.sale_price)}</td>
       <td>${escapeHtml(c.sale_date || '—')}</td>
-      <td>${c.distance_miles != null ? c.distance_miles.toFixed(1) + ' mi' : '—'}</td>
+      <td>${c.distance_miles != null ? Number(c.distance_miles).toFixed(1) + ' mi' : '—'}</td>
       <td>${c.url ? `<a class="ai-comp-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">view ↗</a>` : ''}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+
+  const askingBanner = askingCount > 0
+    ? `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5">
+        <strong>${askingCount} of ${comps.length} comparable${askingCount>1?'s are':' is'}</strong> based on an asking price, not a completed sale. Consider clicking <em>Refine with feedback</em> and asking for Land Registry / sold-prices data only.
+      </div>`
+    : '';
+
   const html = `
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">${escapeHtml(displayName(property,'properties'))}</div>
+    ${askingBanner}
     <div class="ai-headline">
       <div class="val-tile"><div class="lbl">Current</div><div class="val">${fmtMoneyShort(currentValue)}</div></div>
-      <div class="val-tile primary"><div class="lbl">AI Estimate</div><div class="val">${fmtMoneyShort(newValue)}</div><div class="sub">confidence: ${escapeHtml(result.confidence||'—')}</div></div>
-      <div class="val-tile"><div class="lbl">Change</div><div class="val" style="color:${diff>=0?'var(--success)':'var(--danger)'}">${diff>=0?'+':''}${fmtMoneyShort(diff)}</div><div class="sub">${diffPct.toFixed(1)}%</div></div>
+      <div class="val-tile primary">
+        <div class="lbl">AI Estimate <span style="font-size:9px;color:var(--text-muted);font-weight:400">(editable)</span></div>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
+          <span style="font-size:18px;font-weight:700">£</span>
+          <input id="aiEstValue" type="number" step="500" value="${Math.round(newValue)}" oninput="recalcEstimateChange(${currentValue})" style="font-size:18px;font-weight:700;border:1px solid var(--border-default);border-radius:4px;padding:2px 6px;width:120px;background:var(--bg-surface);color:var(--text-primary);font-variant-numeric:tabular-nums">
+        </div>
+        <div class="sub">confidence: ${escapeHtml(result.confidence||'—')}</div>
+      </div>
+      <div class="val-tile">
+        <div class="lbl">Change</div>
+        <div id="aiChangeValue" class="val" style="color:${(newValue-currentValue)>=0?'var(--success)':'var(--danger)'}">${(newValue-currentValue)>=0?'+':''}${fmtMoneyShort(newValue-currentValue)}</div>
+        <div class="sub"><span id="aiChangePct">${currentValue?((newValue-currentValue)/currentValue*100).toFixed(1):'0.0'}%</span></div>
+      </div>
     </div>
     <h3 style="font-size:12px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">Comparables (${comps.length})</h3>
     <table class="breakdown-table">
-      <thead><tr><th>Address</th><th style="text-align:right">Sale Price</th><th>Date</th><th>Distance</th><th></th></tr></thead>
+      <thead><tr><th>Address</th><th style="text-align:right">Price</th><th>Date</th><th>Distance</th><th></th></tr></thead>
       <tbody>${compsRows || '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:14px">No comparables returned</td></tr>'}</tbody>
     </table>
-    ${result.methodology ? `<div class="ai-methodology"><strong>Methodology.</strong> ${escapeHtml(result.methodology)}</div>` : ''}
-    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end">
+    <div style="margin-top:14px">
+      <label style="font-size:11px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px;display:block;margin-bottom:4px">Methodology / Notes <span style="font-size:9px;font-weight:400">(editable)</span></label>
+      <textarea id="aiMethodology" rows="3" style="width:100%;font-family:inherit;font-size:12px;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5">${escapeHtml(result.methodology||'')}</textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      <button class="btn-secondary" onclick="showFeedbackModal('${property.id}')">↻ Refine with feedback</button>
       <button class="btn-secondary" onclick="rejectValuation('${property.id}')" style="border-color:var(--danger);color:var(--danger)">Reject</button>
-      <button class="btn-ai" onclick='approveValuation(${JSON.stringify(JSON.stringify({propertyId:property.id, currentValue, result}))})'>Approve & Update Market Value</button>
-    </div>`;
+      <button class="btn-ai" onclick="approveValuationFromModal()">Approve &amp; Update Market Value</button>
+    </div>
+  `;
   showAIModal(html, { title: 'Review AI Valuation' });
 }
 
-async function approveValuation(payloadJSON){
-  // payloadJSON arrives double-encoded: a JSON string of a JSON string. Inner parse, then real parse.
-  const payload = JSON.parse(JSON.parse(payloadJSON));
+// Inline handler used by the editable AI Estimate field — updates the
+// "Change" tile on every keystroke. Defined at top level so the inline
+// oninput can find it.
+function recalcEstimateChange(currentValue){
+  const input = document.getElementById('aiEstValue');
+  const cb = document.getElementById('aiChangeValue');
+  const cp = document.getElementById('aiChangePct');
+  if (!input || !cb || !cp) return;
+  const v = parseFloat(input.value) || 0;
+  const d = v - (currentValue||0);
+  const sign = d >= 0 ? '+' : '-';
+  cb.textContent = sign + '£' + Math.abs(d).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+  cb.style.color = d >= 0 ? 'var(--success)' : 'var(--danger)';
+  cp.textContent = (currentValue ? (d/currentValue*100).toFixed(1) : '0.0') + '%';
+}
+
+// Open a small modal to capture user feedback, then re-run the AI with that
+// feedback baked into the prompt. Existing comparables aren't shown again —
+// a fresh search is done with the user's guidance.
+function showFeedbackModal(propertyId){
+  // Capture any edited estimate / methodology so we can warn the user
+  // they're about to discard them.
+  const html = `
+    <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;margin-bottom:10px">
+      Tell Claude what to do differently. Examples:
+    </p>
+    <ul style="font-size:12px;color:var(--text-secondary);margin-left:18px;line-height:1.6;margin-bottom:12px">
+      <li>"Use only Land Registry sold prices — no Rightmove listings."</li>
+      <li>"Comparables on Withersfield Road and Camps Road aren't relevant — different neighbourhood."</li>
+      <li>"Filter to last 6 months and at least 3 of the comps must be in postcode CB9 0."</li>
+      <li>"Subject has been fully refurbished — adjust upward."</li>
+    </ul>
+    <textarea id="aiFeedback" rows="5" placeholder="What should the AI do differently?" style="width:100%;font-family:inherit;font-size:13px;padding:10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      <button class="btn-ai" onclick="(()=>{const f=document.getElementById('aiFeedback').value.trim();if(!f){toast('Add some feedback first','error');return;}closeAIModal();runAIValuation('${propertyId}',{feedback:f})})()">Re-run with feedback</button>
+    </div>`;
+  showAIModal(html, { title: 'Refine valuation with feedback' });
+}
+
+// Approve handler that reads the (possibly edited) value + methodology from
+// the modal at click time. Replaces the earlier double-JSON-encoded payload.
+function approveValuationFromModal(){
+  if (!_currentAIReview) { toast('Nothing to approve', 'error'); return; }
+  const valEl = document.getElementById('aiEstValue');
+  const methEl = document.getElementById('aiMethodology');
+  const editedValue = parseFloat(valEl?.value) || 0;
+  const editedMethodology = methEl?.value || '';
+  const { property, result } = _currentAIReview;
+  const sch = SCHEMA_RESOLVED.properties;
+  const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
+  approveValuation({
+    propertyId: property.id,
+    currentValue,
+    result: { ...result, estimated_value: editedValue, methodology: editedMethodology },
+  });
+}
+
+async function approveValuation(payload){
+  // payload is now a plain object passed in from approveValuationFromModal
+  // (which reads any user edits to the value/methodology at click time).
+  // Stays string-tolerant for any older callers that still pass JSON.
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload); } catch(e) { try { payload = JSON.parse(JSON.parse(payload)); } catch(e2) { toast('Approve failed: payload parse', 'error'); return; } }
+  }
   const { propertyId, currentValue, result } = payload;
   const property = INDEX.properties[propertyId]; if (!property) { toast('Property gone','error'); return; }
   const propName = displayName(property,'properties');
