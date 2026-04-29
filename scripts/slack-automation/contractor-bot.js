@@ -62,18 +62,30 @@ const FIELD = {
     properties:      'fldZKFvEpJ6NZeFKz', // multipleRecordLinks → Properties
     maintenanceTick: 'fldSEUvVA98as1HW6', // checkbox
     notes:           'fldR7apBzSp3oxFxz', // long text
+    business:        'fldLu1Y4GzyWcDoxr', // multipleRecordLinks → Businesses
+    // The legacy Contractor singleSelect — kept in sync because the
+    // Contractor Tasks tab in the dashboard still filters by this field.
+    // (Long-term: update the tab to filter by Assignee and retire this.)
+    contractor:      'fldgmzcr3jHALsdYD', // singleSelect — Gary Marsh / Rob Jackson / Roy Lavin
     propertyName:    'fldy2t735TV5e1DIL', // single line text (Properties table)
 };
+
+// Defaults written on every contractor-created task.
+const BUSINESS_REAL_ESTATE_ID = 'recoGcXRXCniyJsTz';
 
 // Slack user ID → contractor identity. Airtable email matches the email
 // each contractor used to accept their base collaborator invite —
 // Airtable's API resolves emails to user records on write, so no
 // `usr...` IDs needed. Source of truth: TEAM array in
 // os/tasks/index.html (lines 709–720).
+//
+// `contractorFieldValue` (optional) is the value to write to the legacy
+// Contractor singleSelect field. Only set for the three real contractors
+// — Kevin can self-map for testing without contaminating that field.
 const CONTRACTORS = {
-    U0A9XD12YPN: { name: 'Gary Marsh',  firstName: 'Gary', airtableEmail: 'gkm.property.maintenance@outlook.com' },
-    U0AAN4CTVQQ: { name: 'Roy Lavin',   firstName: 'Roy',  airtableEmail: 'roy.lavin1978@gmail.com' },
-    U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',  airtableEmail: 'rjm320@hotmail.com' },
+    U0A9XD12YPN: { name: 'Gary Marsh',  firstName: 'Gary', airtableEmail: 'gkm.property.maintenance@outlook.com', contractorFieldValue: 'Gary Marsh' },
+    U0AAN4CTVQQ: { name: 'Roy Lavin',   firstName: 'Roy',  airtableEmail: 'roy.lavin1978@gmail.com',              contractorFieldValue: 'Roy Lavin' },
+    U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',  airtableEmail: 'rjm320@hotmail.com',                   contractorFieldValue: 'Rob Jackson' },
 };
 
 // ─── ENTRY ────────────────────────────────────────────────────────────
@@ -198,15 +210,23 @@ async function handleNewJob(contractor, text, threadTs, env) {
     const property = matches[0];
     const priority = extraction.priority === 'High Priority' ? 'Urgent' : 'Not Urgent';
 
-    await createTask(env, {
+    const fields = {
         [FIELD.taskName]:        extraction.taskName,
         [FIELD.description]:     text,
         [FIELD.status]:          'Upcoming',
         [FIELD.priority]:        priority,
         [FIELD.assignee]:        { email: contractor.airtableEmail },
         [FIELD.properties]:      [property.id],
+        [FIELD.business]:        [BUSINESS_REAL_ESTATE_ID],
         [FIELD.maintenanceTick]: true,
-    });
+    };
+    // Only write the legacy Contractor singleSelect for the three real
+    // contractors — Kevin's self-mapped testing entry has no value here.
+    if (contractor.contractorFieldValue) {
+        fields[FIELD.contractor] = contractor.contractorFieldValue;
+    }
+
+    await createTask(env, fields);
 
     return reply(threadTs, env,
         `✅ Logged, ${contractor.firstName}.\n` +
