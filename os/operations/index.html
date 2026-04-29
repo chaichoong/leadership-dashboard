@@ -1971,8 +1971,20 @@ function renderValuationChart(canvasId, approvedValuations){
 // 6. On Approve: persist a Pending → Approved valuation + PATCH Market Value
 // ═══════════════════════════════════════════════════════════════════════
 const ANTHROPIC_KEY_LS = '_anthropic_key';
+const ANTHROPIC_PROXY_LS = '_anthropic_proxy_url';
 function getAnthropicKey(){ return localStorage.getItem(ANTHROPIC_KEY_LS) || ''; }
 function setAnthropicKey(k){ localStorage.setItem(ANTHROPIC_KEY_LS, k); }
+// If the user's network/extensions block direct calls to api.anthropic.com,
+// they can deploy the Cloudflare Worker in /cloudflare-worker/ and store its
+// URL here — every Anthropic call is then routed through that proxy.
+function getAnthropicBaseUrl(){
+  const proxy = localStorage.getItem(ANTHROPIC_PROXY_LS);
+  return (proxy && proxy.replace(/\/$/, '')) || 'https://api.anthropic.com';
+}
+function setAnthropicProxyUrl(url){
+  if (!url) { localStorage.removeItem(ANTHROPIC_PROXY_LS); return; }
+  localStorage.setItem(ANTHROPIC_PROXY_LS, url.trim().replace(/\/$/, ''));
+}
 
 function showAIModal(html, opts={}){
   const close = opts.closable !== false;
@@ -2059,7 +2071,7 @@ Confidence guide: High = 4+ very-similar recent comps, all consistent. Medium = 
 
   let r;
   try {
-    r = await fetch('https://api.anthropic.com/v1/messages', {
+    r = await fetch(getAnthropicBaseUrl() + '/v1/messages', {
       method: 'POST',
       headers: {
         'x-api-key': getAnthropicKey(),
@@ -2136,6 +2148,7 @@ async function runAIValuation(propertyId){
         <li>Try a different browser profile / Incognito window with extensions off.</li>
         <li>If you're on a corporate network or VPN, check that <code>api.anthropic.com</code> isn't blocked.</li>
         <li>Open DevTools → Network → re-run, look for the failed request to confirm what's blocking it.</li>
+        <li><strong>Permanent workaround:</strong> deploy the Cloudflare Worker in <code>cloudflare-worker/anthropic-proxy.js</code> and click "Set proxy URL" below. Routes the call through a domain that filters don't touch.</li>
       </ul>` : (isAuth ? `
       <ul style="margin-top:10px;margin-left:18px;line-height:1.6">
         <li>The API key was rejected. Double-check it at <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> — it should start with <code>sk-ant-</code>.</li>
@@ -2146,6 +2159,7 @@ async function runAIValuation(propertyId){
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
         <button class="btn-secondary" onclick="closeAIModal()">Close</button>
         <button class="btn-secondary" onclick="closeAIModal();testAnthropicKey('${propertyId}')">Test API key (simple call)</button>
+        ${isNetwork ? `<button class="btn-secondary" onclick="closeAIModal();showProxySetupModal('${propertyId}')">Set proxy URL</button>` : ''}
         ${isAuth ? `<button class="btn-secondary" onclick="localStorage.removeItem('_anthropic_key');closeAIModal();runAIValuation('${propertyId}')">Re-enter key</button>` : ''}
         <button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')">Try again</button>
       </div>`, { title: 'AI Valuation' });
@@ -2238,6 +2252,29 @@ async function approveValuation(payloadJSON){
   }
 }
 
+// Capture / clear the Cloudflare Worker proxy URL. Stored in localStorage so
+// every Anthropic call (full valuation + the simple test) routes through it.
+function showProxySetupModal(propertyId){
+  const current = localStorage.getItem('_anthropic_proxy_url') || '';
+  showAIModal(`
+    <div class="ai-key-prompt">
+      <p style="font-size:13px;color:var(--text-secondary);line-height:1.5">
+        Once you've deployed the Worker (file: <code>cloudflare-worker/anthropic-proxy.js</code>),
+        paste its URL here. It looks like <code>https://anthropic-proxy.&lt;your-account&gt;.workers.dev</code>.
+        Leave blank to clear and call api.anthropic.com directly again.
+      </p>
+      <input id="proxyUrlInput" type="url" placeholder="https://anthropic-proxy.your-account.workers.dev" autocomplete="off" value="${escapeHtml(current)}">
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn-ai" onclick="(()=>{const v=document.getElementById('proxyUrlInput').value.trim();setAnthropicProxyUrl(v);closeAIModal();testAnthropicKey('${propertyId}')})()">Save & Test</button>
+        <button class="btn-secondary" onclick="setAnthropicProxyUrl('');closeAIModal();toast('Proxy URL cleared','success')">Clear proxy</button>
+        <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">
+        Setup steps live in <code>cloudflare-worker/anthropic-proxy.js</code> — top-of-file comment.
+      </div>
+    </div>`, { title: 'Cloudflare Worker proxy URL' });
+}
+
 // Minimal API call with no tools — used to isolate whether the issue is
 // network/CORS, auth, or specific to the web_search tool. If THIS works
 // but the full call doesn't, the user's key likely lacks web search access.
@@ -2245,9 +2282,11 @@ async function approveValuation(payloadJSON){
 async function testAnthropicKey(propertyId){
   const key = await ensureAnthropicKey();
   if (!key) return;
-  showAIModal(`<div class="ai-status"><div class="spin"></div><div>Testing connection to api.anthropic.com…</div></div>`, { title: 'Test API key', closable: false });
+  const target = getAnthropicBaseUrl();
+  const targetLabel = target === 'https://api.anthropic.com' ? 'api.anthropic.com (direct)' : 'your proxy at ' + target;
+  showAIModal(`<div class="ai-status"><div class="spin"></div><div>Testing connection to ${escapeHtml(targetLabel)}…</div></div>`, { title: 'Test API key', closable: false });
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetch(target + '/v1/messages', {
       method: 'POST',
       headers: {
         'x-api-key': key,
