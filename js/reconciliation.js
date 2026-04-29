@@ -270,10 +270,16 @@
             const vendor = String(getField(tx, F.txVendor) || '');
             const desc = String(getField(tx, F.txDescription) || '');
             const txDate = getField(tx, F.txDate) || '';
+            // Account Alias — Santander / TNT Zempler / AmEx / Lloyds CC / etc.
+            // Surfaced in the recon panel so Kevin can disambiguate transactions
+            // that look the same but came from different accounts (e.g. a £40
+            // Tesco charge could be groceries on AmEx personal vs a tenant move-in
+            // refund on Santander business — the account is the deciding signal).
+            const txAccount = String(getField(tx, F.txAccountAlias) || '');
             const txId = tx.id;
 
             const result = {
-                txId, txDate, txVendor: vendor, txDesc: desc,
+                txId, txDate, txVendor: vendor, txDesc: desc, txAccount,
                 txAmount: amt || rawAmt,
                 categoryId: '', categoryName: '',
                 subCatId: '', subCatName: '',
@@ -445,11 +451,12 @@
                 </div>
             </div>
             <div style="overflow:auto;padding:8px 12px">
-                <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:1200px">
+                <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:1260px">
                     <thead>
                         <tr style="border-bottom:2px solid #e2e8f0">
                             <th style="${thStyle}">#</th>
                             <th style="${thStyle}">Date</th>
+                            <th style="${thStyle}">Account</th>
                             <th style="${thStyle}">Vendor / Description</th>
                             <th style="${thStyle};text-align:right">Amount</th>
                             <th style="${thStyle}">Category</th>
@@ -496,6 +503,7 @@
         return `<tr id="recon-row-${i}" style="border-bottom:1px solid #f1f5f9;${r.status === 'approved' ? 'opacity:0.5;' : ''}">
             <td style="${cell};color:#94a3b8;font-weight:600">${i + 1}</td>
             <td style="${cell};white-space:nowrap">${escHtml(r.txDate)}</td>
+            <td style="${cell};white-space:nowrap;font-size:10px;color:var(--text-secondary)">${escHtml(r.txAccount || '—')}</td>
             <td style="${cell};max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span style="${dim}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
             <td style="${cell};text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
             <td style="${cell}">${catSelect}</td>
