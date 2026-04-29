@@ -230,6 +230,48 @@
     }
 
     // ── Render initial shell ──
+    // Snapshot of last-rendered data sizes — used to skip redundant re-renders
+    // and to detect when the dashboard's globals have caught up after an initial
+    // paint that ran before loadDashboard() finished.
+    let _txLastSig = '';
+    function _txDataSig() {
+        return [
+            (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions.length : 0),
+            (typeof allCategories !== 'undefined' && allCategories ? allCategories.length : 0),
+            (typeof allSubCategories !== 'undefined' && allSubCategories ? allSubCategories.length : 0),
+            (typeof allBusinesses !== 'undefined' && allBusinesses ? allBusinesses.length : 0),
+            (typeof allCosts !== 'undefined' && allCosts ? allCosts.length : 0),
+            (typeof allRentalUnits !== 'undefined' && allRentalUnits ? allRentalUnits.length : 0),
+            (typeof allTenancies !== 'undefined' && allTenancies ? allTenancies.length : 0),
+            (typeof allTenants !== 'undefined' && allTenants ? allTenants.length : 0),
+        ].join('|');
+    }
+
+    let _txWatchTimer = null;
+    function _txWatchForData() {
+        // Race-fix: when the user lands on #transactions on first paint, switchTab
+        // can fire BEFORE loadDashboard's async await for the IndexedDB cache
+        // resolves — so allTransactions is still []. Poll briefly until the
+        // globals are populated, then re-render. Stops once data appears or after
+        // ~30s. Cleans up on subsequent successful renders.
+        if (_txWatchTimer) return;
+        let ticks = 0;
+        _txWatchTimer = setInterval(() => {
+            ticks++;
+            const sig = _txDataSig();
+            if (sig !== _txLastSig && (typeof allTransactions !== 'undefined' && allTransactions && allTransactions.length > 0)) {
+                clearInterval(_txWatchTimer);
+                _txWatchTimer = null;
+                renderTransactionsTab();
+                return;
+            }
+            if (ticks > 60) {  // 60 * 500ms = 30s cap
+                clearInterval(_txWatchTimer);
+                _txWatchTimer = null;
+            }
+        }, 500);
+    }
+
     function renderTransactionsTab() {
         const root = document.getElementById('tab-transactions');
         if (!root) return;
@@ -245,10 +287,21 @@
         }
         _txBuildLookups();
         _txPopulateFilterOptions();
+        // Reset cached search blobs so newly-resolved linked-record names get
+        // included on the next search (blobs are computed lazily and cached
+        // on each record; if lookups were empty during the first render, the
+        // blob would have missed those names).
+        if (typeof allTransactions !== 'undefined' && allTransactions) {
+            for (const r of allTransactions) { if (r && r._txBlob) r._txBlob = null; }
+        }
         _txApplyFilters();
         _txRenderRows();
         _txRenderInsights();
         _txRegisterSyncBar();
+        _txLastSig = _txDataSig();
+        // If data wasn't ready yet, watch for it and re-render once it arrives.
+        const total = (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions.length : 0);
+        if (total === 0) _txWatchForData();
     }
 
     // ── Sync Bar + Health Checks ──
