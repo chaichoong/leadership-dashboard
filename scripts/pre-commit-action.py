@@ -12,7 +12,11 @@ import re
 import subprocess
 import sys
 
-# Map of source files → PAGE_REGISTRY id
+# Map of source files → PAGE_REGISTRY id.
+# Keep in sync with the `paths:` filter in
+# .github/workflows/auto-bump-pagever.yml — both should list the same
+# files. Removed entries: os/index.html (Operating Systems Hub deleted),
+# os/launch-plan.html (Launch Plan deleted, duplicated Strategy OS).
 FILE_TO_PAGE = {
     'js/dashboard.js':      'overview',
     'js/cfv.js':            'cfv',
@@ -23,7 +27,6 @@ FILE_TO_PAGE = {
     'follow-up.html':       'comms',
     'compliance.html':      'compliance',
     'os/tasks/index.html':  'tasks',
-    'os/index.html':        'os-hub',
     'os/business-plan-builder/index.html': 'os-bplan',
     'os/strategy/index.html': 'os-strategy',
     'os/strategy/strategy.js': 'os-strategy',

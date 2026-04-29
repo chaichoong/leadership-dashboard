@@ -3,6 +3,9 @@ name: Auto-bump pageVer
 on:
   push:
     branches: [main]
+    # Keep this list in sync with FILE_TO_PAGE in scripts/pre-commit-action.py.
+    # (os/index.html removed — Operating Systems Hub deleted Apr 2026.
+    #  os/launch-plan.html removed — duplicated Strategy OS, deleted Apr 2026.)
     paths:
       - 'js/dashboard.js'
       - 'js/cfv.js'
@@ -13,8 +16,11 @@ on:
       - 'follow-up.html'
       - 'compliance.html'
       - 'os/tasks/index.html'
-      - 'os/index.html'
       - 'os/business-plan-builder/index.html'
+      - 'os/strategy/index.html'
+      - 'os/strategy/strategy.js'
+      - 'os/strategy/strategy.css'
+      - 'os/operations/index.html'
 
 permissions:
   contents: write  # needed so the job can push its auto-bump commit back to main
@@ -43,4 +49,17 @@ jobs:
           git diff --quiet js/config.js && exit 0
           git add js/config.js
           git commit -m "Auto-bump pageVer for modified pages [auto-bump]"
-          git push
+          # Retry-on-race: if another push landed on main while this workflow
+          # was running, our push will be rejected as non-fast-forward. Pull
+          # with rebase and retry once. (Caused a recurring "All jobs have
+          # failed" email when Kevin pushed two commits within ~30s.)
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "Push attempt $attempt rejected — pulling with rebase and retrying"
+            git pull --rebase origin main || true
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
