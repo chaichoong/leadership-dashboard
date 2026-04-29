@@ -140,6 +140,33 @@
         }
     }
 
+    // Trigger full reconcile: Airtable status realigned to match Gmail "3: to pay"
+    async function triggerGmailInvoiceReconcile() {
+        if (!GMAIL_SCRIPT_URL) return;
+        if (!confirm('Reconcile dashboard against Gmail?\n\nThis will:\n• Mark as Paid any invoice whose email is no longer in "3: to pay"\n• Restore to Unpaid any invoice whose email IS in "3: to pay"\n\nUse this if the dashboard and Gmail get out of sync.')) return;
+        try {
+            // Use a real GET so we can read the JSON response (CORS allows simple GET)
+            const resp = await fetch(GMAIL_SCRIPT_URL + '?action=reconcile', { redirect: 'follow' });
+            let summary = 'Reconcile complete.';
+            try {
+                const data = await resp.json();
+                if (data && data.success) {
+                    summary = `Reconcile complete:\n• Gmail "3: to pay": ${data.gmailThreadCount}\n• Marked Paid: ${data.markedPaid}\n• Restored to Unpaid: ${data.restoredUnpaid}\n• Skipped (Estimates etc): ${data.skipped}`;
+                } else if (data && data.error) {
+                    summary = 'Reconcile error: ' + data.error;
+                }
+            } catch (parseErr) {
+                // Response might be opaque if no-cors — just refresh
+            }
+            alert(summary);
+            // Refresh dashboard to reflect changes
+            setTimeout(fetchInvoicesFromAirtable, 500);
+        } catch (e) {
+            console.error('Reconcile failed:', e);
+            alert('Reconcile failed — check the console for details.');
+        }
+    }
+
     function fmtInvDate(dateStr) {
         if (!dateStr) return '—';
         const d = new Date(dateStr);
@@ -166,7 +193,7 @@
             const statusLabel = airtableInvoices.length > 0
                 ? '<span style="color:#16a34a;font-weight:600">Airtable</span>'
                 : '<span style="color:#d97706;font-weight:600">Loading…</span>';
-            refreshSpan.innerHTML = `Source: <strong style="color:#64748b">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:#2563eb;font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
+            refreshSpan.innerHTML = `Source: <strong style="color:#64748b">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:#2563eb;font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceReconcile(); this.textContent='Reconciling…'; setTimeout(()=>this.textContent='Reconcile with Gmail',4000)" style="color:#7c3aed;font-size:11px;text-decoration:underline" title="Realign dashboard against Gmail '3: to pay' label">Reconcile with Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
         }
         updateSyncHealthIndicator();
 
