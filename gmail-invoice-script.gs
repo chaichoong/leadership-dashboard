@@ -110,7 +110,18 @@ function doGet(e) {
       return jsonResponse(result);
     }
 
-    return jsonResponse({ status: 'ok', message: 'Gmail Invoice Sync v3' });
+    if (params.action === 'listThreads') {
+      var label = findLabelByNumber(3, '3: to pay');
+      var threads = label ? label.getThreads(0, 100) : [];
+      var ids = threads.map(function(t){ return t.getId(); });
+      return jsonResponse({ threadIds: ids, count: ids.length });
+    }
+
+    if (params.action === 'reconcile') {
+      return jsonResponse(reconcileWithGmail());
+    }
+
+    return jsonResponse({ status: 'ok', message: 'Gmail Invoice Sync v4' });
 
   } catch (err) {
     return jsonResponse({ error: String(err) });
@@ -309,6 +320,112 @@ function parseThread(thread, cache) {
 // Airtable API Helpers
 // ═══════════════════════════════════════════
 
+// Reconcile Airtable status against Gmail "3: to pay" label.
+// Source of truth = Gmail. Any Airtable record whose threadId is currently
+// in the label should be Unpaid; any Unpaid Airtable record whose thread is
+// no longer in the label should be Paid.
+function reconcileWithGmail() {
+  var config = getConfig();
+  if (!config.pat) return { error: 'AIRTABLE_PAT not set in Script Properties' };
+
+  var label = findLabelByNumber(3, '3: to pay');
+  if (!label) return { error: 'Gmail label "3: to pay" not found' };
+
+  // Gmail truth set
+  var gmailThreads = label.getThreads(0, 100);
+  var gmailIds = {};
+  for (var g = 0; g < gmailThreads.length; g++) {
+    gmailIds[gmailThreads[g].getId()] = true;
+  }
+
+  // All Airtable invoice records (any status), keyed by threadId
+  var atRecords = getAllInvoiceRecords(config);
+
+  var markedPaid = [];      // Were Unpaid, no longer in Gmail label → mark Paid
+  var restoredUnpaid = [];  // Were Paid (or anything else), still in Gmail label → restore Unpaid
+  var skipped = [];         // Estimates, no threadId, etc.
+  var today = fmtDate(new Date());
+
+  for (var i = 0; i < atRecords.length; i++) {
+    var rec = atRecords[i];
+    var tid = rec.threadId;
+    var status = rec.status;
+    if (!tid) { skipped.push({ id: rec.id, reason: 'no threadId' }); continue; }
+    if (status === 'Estimate') { skipped.push({ id: rec.id, reason: 'estimate' }); continue; }
+
+    var inGmail = !!gmailIds[tid];
+
+    if (inGmail && status !== 'Unpaid') {
+      // Gmail says it's still to pay, but Airtable has it as Paid → restore Unpaid
+      var fields = {};
+      fields[FIELDS.status] = 'Unpaid';
+      fields[FIELDS.paidDate] = null;
+      var ok = updateAirtableRecord(config, rec.id, fields);
+      if (ok) restoredUnpaid.push(rec.id);
+    } else if (!inGmail && status === 'Unpaid') {
+      // No longer in "3: to pay" → must be paid
+      var fields2 = {};
+      fields2[FIELDS.status] = 'Paid';
+      fields2[FIELDS.paidDate] = today;
+      var ok2 = updateAirtableRecord(config, rec.id, fields2);
+      if (ok2) markedPaid.push(rec.id);
+    }
+    // Rate limit
+    if ((markedPaid.length + restoredUnpaid.length) % 4 === 0) Utilities.sleep(800);
+  }
+
+  return {
+    success: true,
+    gmailThreadCount: gmailThreads.length,
+    airtableRecordCount: atRecords.length,
+    markedPaid: markedPaid.length,
+    restoredUnpaid: restoredUnpaid.length,
+    skipped: skipped.length,
+    markedPaidIds: markedPaid,
+    restoredUnpaidIds: restoredUnpaid,
+  };
+}
+
+// Returns all invoice records with id, threadId, and status
+function getAllInvoiceRecords(config) {
+  var out = [];
+  var offset = null;
+
+  do {
+    var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table +
+      '?fields%5B%5D=' + FIELDS.threadId +
+      '&fields%5B%5D=' + FIELDS.status +
+      '&returnFieldsByFieldId=true' +
+      '&pageSize=100';
+    if (offset) url += '&offset=' + offset;
+
+    var resp = UrlFetchApp.fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + config.pat },
+      muteHttpExceptions: true
+    });
+
+    if (resp.getResponseCode() !== 200) {
+      Logger.log('Airtable list error: ' + resp.getContentText());
+      break;
+    }
+
+    var data = JSON.parse(resp.getContentText());
+    (data.records || []).forEach(function(r) {
+      var statusVal = r.fields[FIELDS.status];
+      var statusName = (statusVal && typeof statusVal === 'object') ? statusVal.name : statusVal;
+      out.push({
+        id: r.id,
+        threadId: r.fields[FIELDS.threadId] || null,
+        status: statusName || null,
+      });
+    });
+
+    offset = data.offset || null;
+  } while (offset);
+
+  return out;
+}
+
 function getExistingThreadIds(config) {
   var map = {};
   var offset = null;
@@ -361,7 +478,7 @@ function createAirtableRecord(config, fields) {
 }
 
 function updateAirtableRecord(config, recordId, fields) {
-  var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table + '/' + recordId;
+  var url = 'https://api.airtable.com/v0/' + config.base + '/' + config.table + '/' + recordId + '?returnFieldsByFieldId=true';
   var resp = UrlFetchApp.fetch(url, {
     method: 'patch',
     headers: {
