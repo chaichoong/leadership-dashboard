@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1900 lookup-only</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-2000 created-by</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -650,6 +650,7 @@ const F = {
   someDay:     'fldmhkeRaDkiL3Ga4',
   collaborators:'fldcq3t6uAPgWSOP8',
   maintenance: 'fldSEUvVA98as1HW6',
+  createdByEmail: 'fldtzljV5m0eTgBK5', // Email of the user who created the task via the web app — set once on create, never overwritten
   contractor:  'fldgmzcr3jHALsdYD',  // singleSelect: Gary Marsh / Rob Jackson / Roy Lavin
   priorityLvl: 'fldSsspLUGqzDqJYz',  // singleSelect: High Priority / Low Priority
   property:    'fldZKFvEpJ6NZeFKz',  // multipleRecordLinks to Rental Units
@@ -1493,6 +1494,7 @@ function parseTask(rec){
     hardDeadline:!!gf(rec,F.hardDeadline),
     someDay:!!gf(rec,F.someDay),
     maintenance:!!gf(rec,F.maintenance),
+    createdByEmail:gf(rec,F.createdByEmail)||'',
     contractor:selectName(gf(rec,F.contractor)),
     priorityLevel:selectName(gf(rec,F.priorityLvl)),
     propertyIds:(()=>{const p=gf(rec,F.property)||[];return Array.isArray(p)?p.map(x=>typeof x==='object'?(x.id||''):x).filter(Boolean):[]})(),
@@ -2221,7 +2223,8 @@ function openTaskDrawer(taskId){
     <div class="drawer-body">
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
-      <div class="field-row"><label>Assignee</label><div class="field-val"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select></div></div>
+      <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
+      ${t.createdByEmail?`<div class="field-row"><label>Created by</label><div class="field-val" style="font-size:12px;color:var(--text-secondary)"><span title="Set automatically when the task was created via the web app">${escHtml((TEAM.find(m=>m.email===t.createdByEmail)||{}).name||t.createdByEmail)}</span>${t.created?` <span style="color:var(--text-muted);margin-left:6px">on ${new Date(t.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}</div></div>`:''}
       ${(t.maintenance||t.contractor)
         ? `<div class="field-row"><label>Created</label><div class="field-val" style="font-size:13px;color:var(--text-secondary)">${t.createdDate?new Date(t.createdDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'—'}<span style="color:var(--text-muted);font-size:11px;margin-left:8px">(contractor tasks have no due date)</span></div></div>`
         : `<div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()"></div></div>
@@ -2266,6 +2269,52 @@ async function loadCommentCountForDrawer(taskId){
   }
 }
 window.loadCommentCountForDrawer=loadCommentCountForDrawer;
+// Manually re-fire the assignee Slack DM. Used when the automatic
+// notification didn't land (e.g. creator was on a stale cache, the
+// task was created in Airtable directly, etc.). Uses the task's
+// stored Created By Email as the actor when present, otherwise falls
+// back to the current user — guarantees the recipient sees who's
+// chasing them even if the task was created by an unknown actor.
+async function resendAssigneeNotification(taskId){
+  const task=allTasks.find(x=>x.id===taskId);if(!task)return;
+  if(!task.assigneeEmail){toast('No assignee on this task',true);return}
+  // Don't ping yourself.
+  const actorEmail=(currentUser&&currentUser.email)||'';
+  if(task.assigneeEmail===actorEmail){toast('You are the assignee — no DM to send',true);return}
+  // Pick the friendliest available actor name: stored Created By → current user → "(unknown)"
+  let actorName='(unknown)';
+  if(task.createdByEmail){
+    const m=TEAM.find(t=>t.email===task.createdByEmail);
+    actorName=(m&&m.name)||task.createdByEmail;
+  } else if(currentUser&&currentUser.name){
+    actorName=currentUser.name;
+  }
+  const slackTarget=slackEmailFor(task.assigneeEmail);
+  toast('Sending Slack DM…');
+  try{
+    const r=await fetch(SLACK_NOTIFY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        recipientEmail:slackTarget,
+        taskName:task.name||'(no name)',
+        taskId:task.id,
+        actorName,
+        action:'assigned',
+      }),
+    });
+    const body=await r.text();
+    let parsed=null;try{parsed=JSON.parse(body)}catch(_){}
+    if(r.ok&&parsed&&parsed.ok){
+      toast('Slack DM resent to '+task.assigneeEmail);
+    } else {
+      const err=(parsed&&parsed.error)||body||(r.status+' '+r.statusText);
+      toast('Resend failed: '+err,true);
+      console.error('[resendAssigneeNotification]',err);
+    }
+  }catch(e){toast('Resend failed: '+(e&&e.message),true);console.error(e)}
+}
+window.resendAssigneeNotification=resendAssigneeNotification;
 function closeDrawer(){
   // Force blur on any focused editor inside the drawer so its onblur fires
   // BEFORE we remove the overlay — otherwise contenteditable edits are lost.
@@ -5721,6 +5770,11 @@ async function createSimpleTask(opts){
     }
   }
   if(taskCollabs&&taskCollabs.length)fields[F.collaborators]=taskCollabs.map(c=>({email:c.email}));
+  // Stamp the creator's email on the record so we always know who made
+  // the task — survives the user's localStorage being cleared, web app
+  // bundle being upgraded, identity switching, etc. Plain text field so
+  // a missing currentUser writes nothing rather than failing.
+  if(_creatorEmail)fields[F.createdByEmail]=_creatorEmail;
   try{
     // IMPORTANT: request field-ID keyed response so parseTask (which reads
     // field IDs) can populate the new record correctly. Without this, the
@@ -6101,6 +6155,8 @@ async function submitCreateTask(){
     }
   }
   if(collabsList.length)fields[F.collaborators]=collabsList;
+  // Stamp the creator email — same rationale as createSimpleTask.
+  if(creatorEmail)fields[F.createdByEmail]=creatorEmail;
   const priority=document.getElementById('ctPriority').value;if(priority)fields[F.priority]=priority;
   const timeEst=document.getElementById('ctTimeEst').value;if(timeEst)fields[F.timeEst]=timeEst;
   const desc=document.getElementById('ctDesc').value;if(desc)fields[F.description]=desc;
