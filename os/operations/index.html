@@ -2048,7 +2048,12 @@ async function callClaudeForValuation(property, opts = {}){
     ? `\nUSER FEEDBACK FROM A PRIOR ATTEMPT — incorporate this and explicitly address it in the methodology:\n"""\n${opts.feedback.trim()}\n"""\n`
     : '';
 
-  const prompt = `You are a UK property valuation analyst. Estimate the current market value of this property using ACTUAL COMPLETED SALE PRICES — never asking prices.
+  const prompt = `You are a UK property valuation analyst. Estimate the current market value of this property by triangulating TWO data types:
+
+1. **~3 COMPLETED SALES** (historical anchor — what buyers actually paid in the last 6 months)
+2. **~3 CURRENT LISTINGS** (forward-looking signal — what sellers are asking RIGHT NOW)
+
+Together these give you a balanced view: completed sales are truth; current asking prices show where the market is heading. Aim for 3 of each (6 comparables total), but never fewer than 2 of each unless the area is genuinely thin.
 
 PROPERTY UNDER VALUATION
 - Name / Address: ${name}${address?` — ${address}`:''}
@@ -2058,35 +2063,45 @@ PROPERTY UNDER VALUATION
 - Currently recorded value: £${currentValue.toLocaleString('en-GB')}
 ${feedbackBlock}
 LOCATION SEARCH STRATEGY — follow this order:
-1. **Same postcode SECTOR** ${pcSector ? `(${pcSector})` : '(first half + first digit of second half of the postcode)'} — aim for 3+ comparables here. This is a tight neighbourhood match.
-2. If <3 found, expand to **same postcode DISTRICT** ${pcDistrict ? `(${pcDistrict})` : '(outward code, e.g. CB9)'}.
-3. Only if <3 still found, expand within ~1 mile — and explicitly note in the methodology that you had to.
+1. **Same postcode SECTOR** ${pcSector ? `(${pcSector})` : '(first half + first digit of second half of the postcode)'} — aim for 2+ of EACH type here. This is a tight neighbourhood match.
+2. If <2 of either type found, expand to **same postcode DISTRICT** ${pcDistrict ? `(${pcDistrict})` : '(outward code, e.g. CB9)'}.
+3. Only as a last resort, expand within ~1 mile — and explicitly note in the methodology that you had to.
 
-SOURCE PRIORITY — only use COMPLETED SALES, NOT asking prices:
-1. **HM Land Registry "Price Paid" data** — the gold standard, real recorded transactions
-2. **Rightmove "Sold Prices"** section: rightmove.co.uk/house-prices/...
-3. **Zoopla "Sold Prices"** section: zoopla.co.uk/house-prices/...
-4. **OnTheMarket** completed sales filter
+SOURCES per type:
+**Completed sales** (must show an actual recorded transaction):
+- HM Land Registry "Price Paid" data
+- Rightmove "Sold Prices": rightmove.co.uk/house-prices/...
+- Zoopla "Sold Prices": zoopla.co.uk/house-prices/...
 
-REJECT (do NOT include these as comparables):
-- "For Sale" / live listings — those are asking prices and run higher than actuals
-- "Sold STC" / "Under Offer" with no confirmed completion date
-- Auction guide prices (frequently below true value)
-- Anything more than 12 months old
+**Current listings** (must be live "For Sale", not removed/sold):
+- Rightmove live property pages
+- Zoopla live property pages
+- OnTheMarket
+- Local estate agent sites where indexed
+
+REJECT (do NOT include):
+- "Sold STC" / "Under Offer" — neither truly completed nor still on market
+- Auction guide prices (frequently misleading)
+- Sales older than 12 months
+- Listings that have been removed / withdrawn
 
 WHAT TO CAPTURE per comparable:
 - address (with postcode)
-- sale_price (actual GBP completed-sale figure)
-- sale_date (YYYY-MM-DD; if you only have month+year, YYYY-MM)
-- beds (number, must equal subject's ${beds})
+- sale_price: actual completed sale price (for completed sales) OR current asking price (for live listings) — in GBP
+- sale_date: completion date (sales) OR listing date (listings) — YYYY-MM-DD or YYYY-MM
+- beds (must equal subject's ${beds})
 - type (must match subject's "${type}")
-- url (link to the source page that proves the sale)
-- distance_miles (best estimate from postcode geometry)
-- is_completed_sale (boolean — TRUE only if you have a recorded completion date / sale price; FALSE if it's still on market or unconfirmed)
-- postcode_match ("sector" | "district" | "wider")
+- url (link to the source page)
+- distance_miles
+- is_completed_sale: TRUE for completed sales, FALSE for current listings
+- postcode_match: "sector" | "district" | "wider"
 
-ESTIMATE
-Take the median of completed-sale comparables. Adjust for material differences (refurb status, garden, parking, off-grid issues) and state the adjustment in methodology.
+ESTIMATE LOGIC
+- **Anchor on the median completed sale price** — that's truth.
+- **Compare to the median current asking price** — if listings are above the sold median, the market is rising; if below, it's softening; adjust accordingly.
+- Account for any material differences (refurb state, garden, parking, off-grid issues).
+- Produce a single estimated current market value reflecting both signals.
+- In the methodology, state the two medians and the % gap between them, then explain your adjustment.
 
 OUTPUT FORMAT — short plain-English explanation first, then this single JSON inside <output>...</output> tags. No other JSON anywhere in the response.
 
@@ -2095,16 +2110,17 @@ OUTPUT FORMAT — short plain-English explanation first, then this single JSON i
   "estimated_value": 195000,
   "confidence": "Medium",
   "comparables": [
-    { "address": "...", "sale_price": 198000, "sale_date": "2024-09-15", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.4, "is_completed_sale": true, "postcode_match": "sector" }
+    { "address": "...", "sale_price": 198000, "sale_date": "2024-09-15", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.4, "is_completed_sale": true,  "postcode_match": "sector" },
+    { "address": "...", "sale_price": 210000, "sale_date": "2026-04-01", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.3, "is_completed_sale": false, "postcode_match": "sector" }
   ],
-  "methodology": "2-3 sentences: which sources, what range, what adjustments, any caveats."
+  "methodology": "Median completed sale £X (3 comps), median current asking £Y (3 comps); listings ~Z% above sold, suggesting modest market rise. Adjusted for [property-specific reason]. Estimate £..."
 }
 </output>
 
 Confidence guide:
-- **High** = 4+ completed sales in the same postcode sector, last 6 months, tight value range
-- **Medium** = 3 completed sales OR mix of sector/district, last 6 months
-- **Low** = fewer than 3 completed sales, OR fell back to asking prices, OR wide value variance, OR data older than 6 months`;
+- **High** = 3+ completed sales AND 3+ current listings, all in same postcode sector, completed sales ≤6 months, listings consistent with sold median ±10%
+- **Medium** = 2-3 of each type, mostly sector/district, gap between sold and listed medians within ±15%
+- **Low** = <2 of either type, OR fell back to district/wider, OR sold and listed medians diverge >20%, OR completed-sale data older than 6 months`;
 
   let r;
   try {
@@ -2118,8 +2134,10 @@ Confidence guide:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 8192,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }],
+        max_tokens: 12288,
+        // Higher budget — finding 3 sold + 3 listed across multiple sources
+        // typically needs more searches than a single-type pass.
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 10 }],
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -2215,34 +2233,85 @@ function showValuationReviewModal(property, result){
   const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
   const newValue = parseFloat(result.estimated_value) || 0;
   const comps = Array.isArray(result.comparables) ? result.comparables : [];
-  const askingCount = comps.filter(c => c.is_completed_sale === false).length;
+  const completedSales  = comps.filter(c => c.is_completed_sale === true);
+  const currentListings = comps.filter(c => c.is_completed_sale === false);
 
-  const compsRows = comps.map(c => {
-    const isAsking = c.is_completed_sale === false;
-    const matchTag = c.postcode_match
-      ? `<span class="schema-tag" style="font-size:9px;margin-left:4px">${escapeHtml(c.postcode_match)}</span>`
-      : '';
-    const askingFlag = isAsking
-      ? `<span class="schema-tag warn" style="font-size:9px;margin-left:4px" title="Not a completed sale — asking price">asking</span>`
-      : '';
-    return `<tr style="${isAsking?'background:var(--warning-bg)':''}">
-      <td>${escapeHtml(c.address || '—')}${matchTag}${askingFlag}</td>
-      <td class="money">${fmtMoneyShort(c.sale_price)}</td>
-      <td>${escapeHtml(c.sale_date || '—')}</td>
-      <td>${c.distance_miles != null ? Number(c.distance_miles).toFixed(1) + ' mi' : '—'}</td>
-      <td>${c.url ? `<a class="ai-comp-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">view ↗</a>` : ''}</td>
-    </tr>`;
-  }).join('');
+  // Helper: median of a numeric array
+  const median = (arr) => {
+    const xs = arr.map(c => parseFloat(c.sale_price)).filter(n => !isNaN(n)).sort((a,b)=>a-b);
+    if (!xs.length) return null;
+    const mid = Math.floor(xs.length/2);
+    return xs.length % 2 ? xs[mid] : (xs[mid-1]+xs[mid]) / 2;
+  };
+  const soldMedian   = median(completedSales);
+  const listedMedian = median(currentListings);
 
-  const askingBanner = askingCount > 0
-    ? `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5">
-        <strong>${askingCount} of ${comps.length} comparable${askingCount>1?'s are':' is'}</strong> based on an asking price, not a completed sale. Consider clicking <em>Refine with feedback</em> and asking for Land Registry / sold-prices data only.
-      </div>`
-    : '';
+  // Render a single section table for one comp type.
+  const renderCompSection = (rows, opts) => {
+    if (!rows.length) {
+      return `<div style="padding:14px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;color:var(--text-muted);font-size:12px;text-align:center;margin-bottom:14px">No ${opts.label.toLowerCase()} returned. Use <em>Refine with feedback</em> to ask Claude to find some.</div>`;
+    }
+    const trs = rows.map(c => {
+      const matchTag = c.postcode_match
+        ? `<span class="schema-tag" style="font-size:9px;margin-left:4px">${escapeHtml(c.postcode_match)}</span>`
+        : '';
+      return `<tr>
+        <td>${escapeHtml(c.address || '—')}${matchTag}</td>
+        <td class="money">${fmtMoneyShort(c.sale_price)}</td>
+        <td>${escapeHtml(c.sale_date || '—')}</td>
+        <td>${c.distance_miles != null ? Number(c.distance_miles).toFixed(1) + ' mi' : '—'}</td>
+        <td>${c.url ? `<a class="ai-comp-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">view ↗</a>` : ''}</td>
+      </tr>`;
+    }).join('');
+    const medianBlurb = opts.median != null
+      ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:6px">median ${fmtMoneyShort(opts.median)}</span>`
+      : '';
+    return `
+      <h3 style="font-size:12px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">
+        ${opts.icon} ${opts.label} (${rows.length})${medianBlurb}
+      </h3>
+      <table class="breakdown-table" style="margin-bottom:14px">
+        <thead><tr>
+          <th>Address</th>
+          <th style="text-align:right">${opts.priceHeader}</th>
+          <th>${opts.dateHeader}</th>
+          <th>Distance</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>`;
+  };
+  const completedHtml = renderCompSection(completedSales, {
+    label: 'Completed Sales', icon: '✓', median: soldMedian,
+    priceHeader: 'Sold £', dateHeader: 'Sold',
+  });
+  const listedHtml = renderCompSection(currentListings, {
+    label: 'Current Listings', icon: '◷', median: listedMedian,
+    priceHeader: 'Asking £', dateHeader: 'Listed',
+  });
+
+  // Sold-vs-listed delta — gives Kevin a quick directional read.
+  let deltaTile = '';
+  if (soldMedian != null && listedMedian != null) {
+    const gapPct = ((listedMedian - soldMedian) / soldMedian) * 100;
+    const dir = gapPct >= 0 ? 'above' : 'below';
+    deltaTile = `<div style="font-size:11px;color:var(--text-secondary);background:var(--bg-surface-2);border:1px solid var(--border-subtle);padding:8px 12px;border-radius:6px;margin:0 0 14px">Listings ${Math.abs(gapPct).toFixed(1)}% ${dir} sold-price median — ${gapPct >= 0 ? 'market trending up' : 'market softening'}.</div>`;
+  }
+
+  // Banner only fires when one side of the data is genuinely thin.
+  // Two completed + two listed is enough triangulation; below that we flag.
+  let warningBanner = '';
+  if (completedSales.length === 0) {
+    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5"><strong>No completed sales found</strong> — estimate is anchored on current asking prices only, which usually run higher than actuals. Click <em>Refine with feedback</em> and ask for Land Registry / Rightmove Sold Prices data.</div>`;
+  } else if (currentListings.length === 0) {
+    warningBanner = `<div style="background:var(--info-bg);color:var(--info);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5"><strong>No current listings found</strong> — estimate is anchored on completed sales only. Useful but lacks a forward-looking signal of where the market is heading.</div>`;
+  } else if (completedSales.length < 2 || currentListings.length < 2) {
+    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5"><strong>Thin data</strong> — only ${completedSales.length} completed sale${completedSales.length===1?'':'s'} and ${currentListings.length} current listing${currentListings.length===1?'':'s'} returned. Click <em>Refine with feedback</em> to push for more.</div>`;
+  }
 
   const html = `
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">${escapeHtml(displayName(property,'properties'))}</div>
-    ${askingBanner}
+    ${warningBanner}
     <div class="ai-headline">
       <div class="val-tile"><div class="lbl">Current</div><div class="val">${fmtMoneyShort(currentValue)}</div></div>
       <div class="val-tile primary">
@@ -2259,11 +2328,9 @@ function showValuationReviewModal(property, result){
         <div class="sub"><span id="aiChangePct">${currentValue?((newValue-currentValue)/currentValue*100).toFixed(1):'0.0'}%</span></div>
       </div>
     </div>
-    <h3 style="font-size:12px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">Comparables (${comps.length})</h3>
-    <table class="breakdown-table">
-      <thead><tr><th>Address</th><th style="text-align:right">Price</th><th>Date</th><th>Distance</th><th></th></tr></thead>
-      <tbody>${compsRows || '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:14px">No comparables returned</td></tr>'}</tbody>
-    </table>
+    ${completedHtml}
+    ${listedHtml}
+    ${deltaTile}
     <div style="margin-top:14px">
       <label style="font-size:11px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px;display:block;margin-bottom:4px">Methodology / Notes <span style="font-size:9px;font-weight:400">(editable)</span></label>
       <textarea id="aiMethodology" rows="3" style="width:100%;font-family:inherit;font-size:12px;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5">${escapeHtml(result.methodology||'')}</textarea>
