@@ -11,7 +11,7 @@
         { id: 'os-strategy', name: 'Objective & Strategy OS',         icon: '🎯', pageVer: '1.6', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Task and Project Management OS', icon: '✅', pageVer: '1.45', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.9', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
-        { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.7', sopFile: 'sop-invoices.html',           sopVer: '2.1', standalone: 'index.html#invoices' },
+        { id: 'invoices',   name: 'Invoices',                      icon: '🧾', pageVer: '2.8', sopFile: 'sop-invoices.html',           sopVer: '2.1', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.15', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.19', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
