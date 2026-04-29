@@ -453,6 +453,10 @@ if (tabId === 'comms') {
         if (tabId === 'pnl') {
             if (typeof renderPnL === 'function') renderPnL();
         }
+        // Render Transactions on switch
+        if (tabId === 'transactions') {
+            if (typeof renderTransactionsTab === 'function') renderTransactionsTab();
+        }
         // Render CFV tab on switch
         if (tabId === 'cfv') {
             renderCFVTab();
