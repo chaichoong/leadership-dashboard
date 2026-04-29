@@ -109,6 +109,12 @@ export async function handleNotifySlack(request, env) {
     const userId = lookup.user && lookup.user.id;
     if (!userId) return json({ error: 'No Slack user for that email' }, 404, corsHeaders);
 
+    // Lookup-only mode (used by the dashboard's "Check all recipients"
+    // diagnostic). Returns the resolved Slack user without posting a DM.
+    if (action === 'lookup-only') {
+        return json({ ok: true, lookupOnly: true, userId, recipientEmail }, 200, corsHeaders);
+    }
+
     // 2. Open / reuse a DM channel and post the message
     let verb;
     if (action === 'completed') verb = 'completed a task you collaborate on';

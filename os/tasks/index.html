@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1830 health-check-collab-slack</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1900 lookup-only</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -888,13 +888,8 @@ window.testSlackNotification=testSlackNotification;
 // Batch lookup: run a Slack users.lookupByEmail for every TEAM member
 // without sending DMs. Reports each as ✓ resolved / ✗ users_not_found
 // so Kevin can see at-a-glance who can/can't be DM'd before the team
-// hits a real assignment failure. Worker side reuses the existing
-// /notify endpoint with a special action='lookup' that returns the
-// lookup result without posting a message — but for backwards-compat
-// with already-deployed workers, we POST the same shape with a tiny
-// taskName "(diag-lookup)" so the worker's lookup phase runs and
-// either resolves the channel (success) or returns users_not_found.
-// Either response tells us what we need without spamming DMs.
+// hits a real assignment failure. Uses action='lookup-only' so the
+// worker resolves the email but skips chat.postMessage — no DM noise.
 async function testAllSlackRecipients(){
   const out=document.getElementById('slackTestResult');
   if(!out)return;
@@ -919,7 +914,11 @@ async function testAllSlackRecipients(){
       const body=await resp.text();
       let parsed=null;try{parsed=JSON.parse(body)}catch(_){}
       if(resp.ok&&parsed&&parsed.ok){
-        row.status='ok';row.detail='DM sent — Slack user resolved';
+        // Lookup-only response includes lookupOnly:true. Older worker
+        // builds will still respond OK after sending a real DM — handle
+        // both gracefully.
+        row.status='ok';
+        row.detail=parsed.lookupOnly?('Slack user resolved → '+(parsed.userId||'')):'DM sent (older worker — redeploy for lookup-only)';
       }else if(parsed&&parsed.error&&/users_not_found|No Slack user/i.test(parsed.error)){
         row.status='not-found';row.detail='No Slack user matches '+slackTarget;
       }else{
@@ -942,7 +941,7 @@ async function testAllSlackRecipients(){
     return `<div style="padding:4px 0;border-top:1px solid var(--border-subtle);font-size:11px"><div style="display:flex;justify-content:space-between;gap:6px"><span>${icon} <b style="color:${colour}">${escHtml(r.name)}</b>${noteSlack}</span></div><div style="font-size:10px;color:var(--text-muted);margin-left:14px">${escHtml(r.detail)}</div></div>`;
   }).join('');
   const note=okCount===TEAM.length
-    ? '<div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Note: a real DM was sent to every resolved member. They may see "(diag-lookup-only)" in their Slack — safe to ignore.</div>'
+    ? '<div style="margin-top:6px;font-size:10px;color:var(--text-muted)">All recipients resolve cleanly. No DMs were sent — this was a lookup-only check.</div>'
     : '<div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Members marked ✗ won\'t receive Slack pings until their Slack account uses the email we have for them — fix is on their Slack profile, or update their TEAM entry.</div>';
   out.innerHTML=head+rows+note;
 }
