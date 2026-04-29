@@ -2,22 +2,29 @@
 // =====================================================================
 //
 // Receives Slack message events from #property-management (sent by Gary,
-// Roy, or Rob), classifies intent via Claude (claude-proxy worker), acts
-// on Airtable via the REST API, replies in thread via the existing
-// slack-notify worker.
+// Roy, or Rob), classifies intent via Claude, acts on Airtable via the
+// REST API, replies in thread via Slack chat.postMessage.
 //
-// No Airtable automations, no Make / n8n / Zapier — Airtable is a clean
-// database. This file is the entire automation.
+// SELF-CONTAINED. The worker calls Anthropic and Slack APIs directly,
+// not via the dashboard's claude-proxy or slack-notify workers — those
+// are gated to browser calls from the GitHub Pages origin and don't
+// allow worker-to-worker calls (Cloudflare returns error 1042 for
+// `*.workers.dev` worker-to-worker fetches in some configurations,
+// and claude-proxy specifically 403s anything without the right Origin
+// header). Direct API calls are simpler, faster, and remove the
+// dependency entirely. The dashboard's proxies are unchanged and still
+// serve the dashboard exactly as before.
+//
+// No Airtable automations, no Make / n8n / Zapier — Airtable is a
+// clean database. This file is the entire automation.
 //
 // SUPABASE MIGRATION
 // ─────────────────
 // Port the handler body to supabase/functions/contractor-bot/index.ts:
-//   - Replace `airtable()` calls with Supabase client queries on the
-//     equivalent tables/columns.
-//   - Replace the slack-notify worker URL with the Edge Function URL.
+//   - Replace `airtable()` calls with Supabase client queries.
 //   - Move secrets to `supabase secrets set`.
-// Everything else (Slack signature verification, Claude proxy call,
-// intent routing, mrkdwn replies) is portable as-is.
+// Everything else (Slack signature verification, Anthropic call,
+// intent routing, Slack reply) is portable as-is.
 //
 // SECRETS (Cloudflare worker → Settings → Variables and Secrets)
 // ─────────────────────────────────────────────────────────────
@@ -25,19 +32,22 @@
 //                            data.records:read, data.records:write
 //                           on base appnqjDpqDniH3IRl
 //   SLACK_SIGNING_SECRET  — Slack app → Basic Information → App Credentials
-//
-// ENDPOINTS THIS WORKER USES (already deployed)
-// ─────────────────────────────────────────────
-//   slack-notify.kevinbrittain.workers.dev/   — channel-reply branch
-//   claude-proxy.kevinbrittain.workers.dev/   — Anthropic-style { model, system, messages, max_tokens }
+//   ANTHROPIC_API_KEY     — sk-ant-… key from console.anthropic.com
+//                           (same value as in the claude-proxy worker, or
+//                           a fresh dedicated key)
+//   SLACK_BOT_TOKEN       — xoxb-… bot token from the Operations Director
+//                           Slack app (same value as in the slack-notify
+//                           worker)
 
 // ─── CONFIGURATION ────────────────────────────────────────────────────
 
 const PROPERTY_CHANNEL_ID = 'C09EMKREPJL';
 
-const SLACK_NOTIFY_URL  = 'https://slack-notify.kevinbrittain.workers.dev/';
-const CLAUDE_PROXY_URL  = 'https://claude-proxy.kevinbrittain.workers.dev/';
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_VERSION = '2023-06-01';
 const MODEL_FAST        = 'claude-haiku-4-5-20251001';
+
+const SLACK_POST_URL    = 'https://slack.com/api/chat.postMessage';
 
 const AIRTABLE_BASE      = 'appnqjDpqDniH3IRl';
 const TABLE_TASKS        = 'tblqB8b22hKBL4PF1';
@@ -421,12 +431,19 @@ function escapeFormula(s) {
     return String(s || '').replace(/'/g, "\\'");
 }
 
-// ─── EXTERNAL: Claude proxy ───────────────────────────────────────────
+// ─── EXTERNAL: Anthropic API (direct, not via the dashboard's proxy) ──
 
 async function callClaude(env, { system, messages, maxTokens }) {
-    const resp = await fetch(CLAUDE_PROXY_URL, {
+    if (!env.ANTHROPIC_API_KEY) {
+        throw new Error('ANTHROPIC_API_KEY not configured');
+    }
+    const resp = await fetch(ANTHROPIC_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': ANTHROPIC_VERSION,
+        },
         body: JSON.stringify({
             model: MODEL_FAST,
             max_tokens: maxTokens,
@@ -435,18 +452,24 @@ async function callClaude(env, { system, messages, maxTokens }) {
         }),
     });
     if (!resp.ok) {
-        throw new Error(`Claude proxy ${resp.status}: ${await resp.text()}`);
+        throw new Error(`Anthropic API ${resp.status}: ${await resp.text()}`);
     }
     const data = await resp.json();
     return (data.content && data.content[0] && data.content[0].text) || '';
 }
 
-// ─── EXTERNAL: Slack reply via slack-notify worker ────────────────────
+// ─── EXTERNAL: Slack chat.postMessage (direct) ────────────────────────
 
 async function reply(threadTs, env, text) {
-    const resp = await fetch(SLACK_NOTIFY_URL, {
+    if (!env.SLACK_BOT_TOKEN) {
+        throw new Error('SLACK_BOT_TOKEN not configured');
+    }
+    const resp = await fetch(SLACK_POST_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            'Content-Type': 'application/json; charset=utf-8',
+        },
         body: JSON.stringify({
             channel: PROPERTY_CHANNEL_ID,
             text,
@@ -455,7 +478,7 @@ async function reply(threadTs, env, text) {
     });
     const data = await resp.json();
     if (!data.ok) {
-        throw new Error(`Slack reply failed: ${data.error || resp.status}`);
+        throw new Error(`Slack post failed: ${data.error || resp.status}`);
     }
 }
 

@@ -8,20 +8,26 @@ Airtable stays a clean database. Everything lives in Cloudflare workers.
 ## Architecture
 
 ```
-Slack Events API  →  contractor-bot Cloudflare Worker
+Slack Events API  →  contractor-bot Cloudflare Worker (self-contained)
                             │
-                            ├── Claude proxy worker         (intent classification)
-                            ├── Airtable REST API            (read/write tasks)
-                            └── slack-notify worker          (post reply in thread)
+                            ├── Anthropic API           (intent classification)
+                            ├── Airtable REST API       (read/write tasks)
+                            └── Slack chat.postMessage  (reply in thread)
 ```
 
-Three Cloudflare workers in total, all self-owned:
+The contractor-bot worker is fully self-contained — it calls Anthropic
+and Slack APIs directly. The dashboard's existing `claude-proxy` and
+`slack-notify` workers are untouched and still serve the dashboard,
+but the contractor-bot does not depend on them. (Worker-to-worker
+fetches between `*.workers.dev` workers hit Cloudflare error 1042
+in some configurations, plus claude-proxy is origin-gated to the
+GitHub Pages domain only — direct API calls bypass both issues.)
 
-| Worker          | URL                                              | Holds                                  |
-| --------------- | ------------------------------------------------ | -------------------------------------- |
-| `claude-proxy`  | `claude-proxy.kevinbrittain.workers.dev`         | Anthropic API key                      |
-| `slack-notify`  | `slack-notify.kevinbrittain.workers.dev`         | `SLACK_BOT_TOKEN`                      |
-| `contractor-bot`| `contractor-bot.kevinbrittain.workers.dev` (new) | `AIRTABLE_PAT`, `SLACK_SIGNING_SECRET` |
+| Worker            | URL                                              | Purpose                              |
+| ----------------- | ------------------------------------------------ | ------------------------------------ |
+| `claude-proxy`    | `claude-proxy.kevinbrittain.workers.dev`         | Dashboard's AI calls (unchanged)     |
+| `slack-notify`    | `slack-notify.kevinbrittain.workers.dev`         | Dashboard's assignment DMs (unchanged) |
+| `contractor-bot`  | `contractor-bot.kevinbrittain.workers.dev`       | This bot — self-contained            |
 
 ## Supabase migration path
 
@@ -30,12 +36,10 @@ When the SaaS migration happens, port `contractor-bot.js` into
 
 1. Replace the `airtable()` calls with Supabase client queries on the
    equivalent tables/columns.
-2. Replace `SLACK_NOTIFY_URL` with the Supabase Edge Function URL for the
-   notify equivalent.
-3. Move secrets to `supabase secrets set`.
+2. Move secrets to `supabase secrets set`.
 
-Slack signature verification, Claude proxy call, intent routing, mrkdwn
-replies — all portable as-is.
+Slack signature verification, Anthropic call, intent routing, Slack
+reply — all portable as-is.
 
 ## One-time setup
 
@@ -68,27 +72,41 @@ replies — all portable as-is.
 
 ### 4. Add the secrets
 
-Same worker → **Settings** → **Variables and Secrets**:
+Same worker → **Settings** → **Variables and Secrets**.
 
-| Type   | Name                  | Value                                |
-| ------ | --------------------- | ------------------------------------ |
-| Secret | `AIRTABLE_PAT`        | the `pat…` token from step 1         |
-| Secret | `SLACK_SIGNING_SECRET`| the signing secret from step 2       |
+The contractor-bot needs **four** secrets:
 
-Save each. The worker auto-restarts.
+| Type   | Name                   | Value                                                       |
+| ------ | ---------------------- | ----------------------------------------------------------- |
+| Secret | `AIRTABLE_PAT`         | the `pat…` token from step 1                                |
+| Secret | `SLACK_SIGNING_SECRET` | the signing secret from step 2                              |
+| Secret | `ANTHROPIC_API_KEY`    | `sk-ant-…` from https://console.anthropic.com/settings/keys |
+| Secret | `SLACK_BOT_TOKEN`      | `xoxb-…` from your Operations Director Slack app's OAuth & Permissions page (same value as in slack-notify) |
+
+For `ANTHROPIC_API_KEY`: easiest to **create a new key** in the Anthropic
+console specifically for the contractor-bot. Existing keys in other workers
+(like claude-proxy) are write-only after creation, so you can't just copy
+the value — make a new one.
+
+For `SLACK_BOT_TOKEN`: this is the **same** `xoxb-…` value already stored
+in the **slack-notify** worker. To get it, you'll need to either grab it
+from your password manager / notes if you saved it earlier, or
+**Reinstall to Workspace** in the Slack app to get a fresh copy (which
+will also rotate the slack-notify token — you'll need to update that
+secret too).
+
+Save each. The worker auto-restarts after each secret is saved.
 
 ### 5. Add the Slack scopes (if not done already)
 
 Slack app → **OAuth & Permissions** → **Bot Token Scopes**, add:
-- `channels:history` (public-channel messages — the worker doesn't actually
-  need this for `#property-management` since it's private, but include it
-  in case you ever switch to a public channel)
+- `channels:history` (public-channel messages)
 - `groups:history` (private-channel messages — required for
-  `#property-management`)
+  `#property-management` because it's private)
 
-If you added scopes, click **Reinstall to Workspace** at the top, copy the
-new bot token, and update `SLACK_BOT_TOKEN` in the **slack-notify** worker
-(not contractor-bot — it doesn't hold the bot token).
+If you added scopes, click **Reinstall to Workspace** at the top. Note
+that this issues a fresh `xoxb-…` token; update both `SLACK_BOT_TOKEN`
+secrets (in **contractor-bot** AND **slack-notify**).
 
 ### 6. Wire Slack Event Subscriptions
 
@@ -200,10 +218,13 @@ attacks.
 | Symptom                                        | Likely cause                                                          |
 | ---------------------------------------------- | --------------------------------------------------------------------- |
 | Slack URL verification fails                   | `SLACK_SIGNING_SECRET` not set, or wrong value                        |
-| Bot doesn't respond at all                     | Event Subscriptions off, or scopes missing (`groups:history`)         |
+| Bot doesn't respond at all                     | Event Subscriptions off, scopes missing (`groups:history`), or bot not invited to `#property-management` |
 | 401 Invalid signature in worker logs           | `SLACK_SIGNING_SECRET` mismatch — re-copy from Slack app              |
+| `Anthropic API 401`                            | `ANTHROPIC_API_KEY` not set or invalid                                |
+| `Anthropic API 4xx`                            | model name typo, request format issue                                 |
+| `Slack post failed: invalid_auth`              | `SLACK_BOT_TOKEN` is wrong or has been rotated by a Slack reinstall   |
+| `Slack post failed: not_in_channel`            | bot is not a member of `#property-management` — `/invite` it          |
 | Airtable 403 in worker logs                    | `AIRTABLE_PAT` missing scopes or wrong base                           |
-| "Claude proxy 5xx"                             | claude-proxy worker is down                                           |
 | New jobs created with no property linked       | Property hint didn't match any Property record name                   |
 | Task assignee shows as empty                   | Contractor's email in `CONTRACTORS` doesn't match the Airtable user   |
 | Bot replies in channel instead of thread       | `event.thread_ts` was empty — the reply is now in a new thread under  |
@@ -213,7 +234,7 @@ attacks.
 
 - `scripts/slack-automation/contractor-bot.js` — the worker source
 - `scripts/slack-automation/notify-slack-worker.js` — slack-notify worker
-  source (used for outbound replies)
+  source (used by the dashboard, NOT by contractor-bot)
 - `~/.claude/.../contractor-job-creator/SKILL.md` — Kevin's personal Claude
   skill for creating jobs by describing them in conversation
 - `os/tasks/index.html` — main Tasks OS (Contractor Tasks tab shows the
