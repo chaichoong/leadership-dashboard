@@ -118,13 +118,16 @@
     function updateSyncHealthIndicator() {
         const el = document.getElementById('invSyncHealth');
         if (!el) return;
-        const dashCount = airtableInvoices.filter(inv => inv.status !== 'Paid').length;
+        // Compare apples-to-apples: only count Unpaid (excluding Estimate) against Gmail "3: to pay"
+        const unpaidCount = airtableInvoices.filter(inv => inv.status === 'Unpaid').length;
+        const estimateCount = airtableInvoices.filter(inv => inv.status === 'Estimate').length;
+        const estimateNote = estimateCount > 0 ? ` (+${estimateCount} estimate${estimateCount > 1 ? 's' : ''})` : '';
         if (lastGmailCount === null) {
-            el.innerHTML = `<span style="color:#64748b">Dashboard: <strong>${dashCount}</strong> unpaid</span>`;
-        } else if (dashCount === lastGmailCount) {
-            el.innerHTML = `<span style="color:#16a34a">Dashboard: <strong>${dashCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ✓ In sync</span>`;
+            el.innerHTML = `<span style="color:#64748b">Dashboard: <strong>${unpaidCount}</strong> unpaid${estimateNote}</span>`;
+        } else if (unpaidCount === lastGmailCount) {
+            el.innerHTML = `<span style="color:#16a34a">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ✓ In sync${estimateNote}</span>`;
         } else {
-            el.innerHTML = `<span style="color:#d97706">Dashboard: <strong>${dashCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ⚠️ Mismatch</span>`;
+            el.innerHTML = `<span style="color:#d97706">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ⚠️ Mismatch${estimateNote}</span>`;
         }
     }
 
