@@ -103,7 +103,7 @@
         banner.innerHTML = `<div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="switchTab('fintable')">
             <span style="font-size:20px">&#x1F50C;</span>
             <div style="flex:1">
-                <div style="font-weight:600;font-size:13px;color:${iconColor}">Fintable Sync Alert</div>
+                <div style="font-weight:600;font-size:13px;color:${iconColor}">Account Sync Alert</div>
                 <div style="font-size:12px;color:#64748b">${parts.join(' · ')} — <span style="color:${iconColor};text-decoration:underline">View Sync Monitor</span></div>
             </div>
         </div>`;
@@ -230,7 +230,7 @@
                     },
                     {
                         name: 'Last-sync timestamp present on every account', kind: 'sync', run: () => {
-                            const missing = (records || []).filter(r => !getField(r, F.accLastUpdate));
+                            const missing = (records || []).filter(r => !r.fields?.['**Last Successful Update']);
                             if (missing.length) return { status: 'warn', detail: `${missing.length} account(s) missing last-sync timestamp — they may have never synced` };
                             return { status: 'pass', detail: 'All accounts have a recorded last-sync time' };
                         }
@@ -242,7 +242,7 @@
                         }
                     },
                     {
-                        name: 'Sidebar Fintable badge wired', kind: 'automation', run: () => {
+                        name: 'Sidebar Accounts badge wired', kind: 'automation', run: () => {
                             const badgeEl = document.getElementById('fintableBadge');
                             if (!badgeEl) return { status: 'fail', detail: 'Sidebar badge element missing' };
                             return { status: 'pass', detail: 'Badge updates every dashboard refresh' };
