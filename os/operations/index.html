@@ -2227,6 +2227,21 @@ async function runAIValuation(propertyId, opts = {}){
 // having to JSON-encode the whole object onto every onclick attribute.
 let _currentAIReview = null;
 
+// Normalise UK property types so "End Terrace", "End-Terraced", "End Terraced"
+// all collapse to the same key for matching against the subject's type.
+function propertyTypeKey(t){
+  const s = String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  if (!s) return '';
+  if (/end\s*terrac/.test(s)) return 'end-terrace';
+  if (/mid\s*terrac/.test(s) || /^terrac/.test(s) || /\bterrac/.test(s)) return 'terrace';
+  if (/semi\s*detac/.test(s) || /\bsemi\b/.test(s)) return 'semi-detached';
+  if (/detac/.test(s)) return 'detached';
+  if (/flat|apartment|maison/.test(s)) return 'flat';
+  if (/bung/.test(s)) return 'bungalow';
+  if (/cottage/.test(s)) return 'cottage';
+  return s;
+}
+
 function showValuationReviewModal(property, result){
   _currentAIReview = { property, result };
   const sch = SCHEMA_RESOLVED.properties;
@@ -2235,6 +2250,16 @@ function showValuationReviewModal(property, result){
   const comps = Array.isArray(result.comparables) ? result.comparables : [];
   const completedSales  = comps.filter(c => c.is_completed_sale === true);
   const currentListings = comps.filter(c => c.is_completed_sale === false);
+
+  // Subject's beds + type — used to flag any comp the AI returned that
+  // doesn't actually match the subject (eg. came back with a 4-bed semi
+  // when we asked for 3-bed end-terrace).
+  const subjectBeds    = property.fields[sch.byKey.beds?.id];
+  const subjectTypeRaw = property.fields[sch.byKey.type?.id];
+  const subjectType    = subjectTypeRaw
+    ? (Array.isArray(subjectTypeRaw)?(subjectTypeRaw[0]?.name||subjectTypeRaw[0]):(subjectTypeRaw.name||subjectTypeRaw))
+    : '';
+  const subjectTypeKey = propertyTypeKey(subjectType);
 
   // Helper: median of a numeric array
   const median = (arr) => {
@@ -2252,11 +2277,24 @@ function showValuationReviewModal(property, result){
       return `<div style="padding:14px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;color:var(--text-muted);font-size:12px;text-align:center;margin-bottom:14px">No ${opts.label.toLowerCase()} returned. Use <em>Refine with feedback</em> to ask Claude to find some.</div>`;
     }
     const trs = rows.map(c => {
+      // Beds tag — green-ish (default) if it matches the subject; amber if not
+      const bedsMatch = subjectBeds == null || c.beds == null
+        ? true
+        : Number(c.beds) === Number(subjectBeds);
+      const bedsTag = c.beds != null
+        ? `<span class="schema-tag${bedsMatch?'':' warn'}" style="font-size:9px;margin-left:4px"${!bedsMatch?` title="Subject is ${subjectBeds} bed"`:''}>${escapeHtml(String(c.beds))} bed</span>`
+        : '';
+      // Type tag — same idea, with normalised matching for UK type names
+      const compTypeKey = propertyTypeKey(c.type);
+      const typeMatch = !subjectTypeKey || !compTypeKey || compTypeKey === subjectTypeKey;
+      const typeTag = c.type
+        ? `<span class="schema-tag${typeMatch?'':' warn'}" style="font-size:9px;margin-left:4px"${!typeMatch?` title="Subject is ${escapeHtml(subjectType)}"`:''}>${escapeHtml(c.type)}</span>`
+        : '';
       const matchTag = c.postcode_match
         ? `<span class="schema-tag" style="font-size:9px;margin-left:4px">${escapeHtml(c.postcode_match)}</span>`
         : '';
       return `<tr>
-        <td>${escapeHtml(c.address || '—')}${matchTag}</td>
+        <td>${escapeHtml(c.address || '—')}${bedsTag}${typeTag}${matchTag}</td>
         <td class="money">${fmtMoneyShort(c.sale_price)}</td>
         <td>${escapeHtml(c.sale_date || '—')}</td>
         <td>${c.distance_miles != null ? Number(c.distance_miles).toFixed(1) + ' mi' : '—'}</td>
