@@ -169,6 +169,83 @@ body {
 .cfv-sidebar-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 10px; font-weight: var(--fw-bold); line-height: 1; }
 .cfv-sidebar-badge.cfv-red { background: var(--danger); color: #fff; }
 .cfv-sidebar-badge.cfv-orange { background: var(--warning); color: #fff; }
+
+/* ── Sidebar collapsible sections (Phase 3 restructure) ──
+ * Each .sidebar-section wraps a department header + a body of tabs. The header
+ * shows a chevron + the department name + a worst-case rollup dot. Click the
+ * header to collapse the body. State persists in localStorage. */
+.sidebar-section { display: flex; flex-direction: column; }
+.sidebar-section + .sidebar-section { border-top: 1px solid rgba(255,255,255,0.06); }
+.sidebar-section-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    color: rgba(255,255,255,0.55);
+    font-size: 10px; font-weight: var(--fw-bold);
+    text-transform: uppercase; letter-spacing: 1px;
+    cursor: pointer; user-select: none;
+    transition: color var(--dur-fast) var(--ease);
+}
+.sidebar-section-header:hover { color: rgba(255,255,255,0.85); }
+.sidebar-section-chevron {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    transition: color var(--dur-fast) var(--ease);
+    display: inline-block;
+}
+.sidebar-section-header:hover .sidebar-section-chevron { color: rgba(255,255,255,0.7); }
+.sidebar-section-name { flex: 1 1 auto; }
+.sidebar-section-dot {
+    flex: 0 0 auto;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.18);
+    transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.sidebar-section-dot.unknown { background: rgba(255,255,255,0.18); }
+.sidebar-section-dot.green   { background: var(--success); box-shadow: 0 0 6px rgba(45,164,91,0.55); }
+.sidebar-section-dot.amber   { background: var(--warning); box-shadow: 0 0 6px rgba(198,161,91,0.55); }
+.sidebar-section-dot.red     { background: var(--danger); animation: sidebar-dot-pulse 1.6s ease-in-out infinite; }
+.sidebar-section-dot.refreshing { background: var(--info); animation: sidebar-dot-pulse 1.4s ease-in-out infinite; }
+.sidebar-section-coming {
+    flex: 0 0 auto;
+    font-size: 9px; font-weight: var(--fw-bold);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 1px 7px; border-radius: 9px;
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.45);
+}
+.sidebar-section-body {
+    overflow: hidden;
+    transition: max-height var(--dur) var(--ease);
+    max-height: 1000px; /* generous so it never visually clips an open section */
+}
+.sidebar-section.collapsed .sidebar-section-body { max-height: 0; }
+.sidebar-section.collapsed .sidebar-section-chevron { /* glyph itself swaps in JS */ }
+
+/* Coming-soon sections — greyed out, body hidden by default, items unclickable. */
+.sidebar-section.coming-soon .sidebar-section-header { opacity: 0.65; }
+.sidebar-item.disabled {
+    color: rgba(255,255,255,0.35);
+    cursor: default; pointer-events: none;
+    font-style: italic;
+}
+.sidebar-item.disabled:hover { background: transparent; }
+
+/* OPTIMISE step badge — small sage tag indicating which OPTIMISE letter the
+ * tab serves. Decorative; the framework's sequence lives in Strategy OS, the
+ * sidebar uses departments. */
+.sidebar-step {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    background: rgba(198,161,91,0.18);
+    color: var(--accent-gold);
+    font-size: 10px; font-weight: var(--fw-bold);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    letter-spacing: 0;
+}
 .main-content { margin-left: 220px; flex: 1; min-width: 0; }
 .sidebar-toggle {
     display: none; position: fixed; top: 10px; left: 10px; z-index: 200;

@@ -663,10 +663,10 @@ async function loadData() {
                     {
                         name: 'Status field is one of the known options', kind: 'automation', run: () => {
                             const certs = (window._complianceData || {}).certs || [];
-                            const known = new Set(['Valid', 'Expiring Soon', 'Expired', 'Missing', '']);
+                            const known = new Set(['Active', 'Valid', 'Expired', '']);
                             const odd = certs.filter(c => !known.has(c.s));
                             if (odd.length) return { status: 'warn', detail: `${odd.length} certificate(s) have an unrecognised status value` };
-                            return { status: 'pass', detail: 'All certificates have a recognised Status (Valid / Expiring Soon / Expired / Missing)' };
+                            return { status: 'pass', detail: 'All certificates have a recognised Status (Active / Valid / Expired)' };
                         }
                     },
                 ],

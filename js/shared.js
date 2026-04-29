@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-hub', 'os-bplan', 'tasks', 'launch-plan', 'comms', 'compliance'];
+        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'launch-plan', 'comms', 'compliance', 'operations'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -325,6 +325,8 @@
             : (cls === 'refreshing') ? 'Refreshing…'
             : 'No checks run yet';
         dot.title = label;
+        // Bubble the update to the section dot (worst-case rollup of all tabs in this section).
+        rollUpSidebarSection(tabId);
     }
     // Listen for status pings from iframe pages.
     window.addEventListener('message', (e) => {
@@ -332,18 +334,100 @@
         updateSidebarHealth(e.data.tabId, e.data.status);
     });
 
+    // ── Sidebar collapsible sections (Phase 3 restructure) ──
+    // Each .sidebar-section has a [data-section] key and a [data-tabs] CSV of
+    // tab IDs it contains. Collapsed state persists per-section in localStorage.
+    // The active-tab's section is always force-expanded so deep-links never
+    // hide the user's view.
+    const _SIDEBAR_COLLAPSE_KEY = '_sidebar_collapsed_sections';
+    function _readCollapsedSections() {
+        try { return JSON.parse(localStorage.getItem(_SIDEBAR_COLLAPSE_KEY) || '[]') || []; } catch { return []; }
+    }
+    function _writeCollapsedSections(arr) {
+        try { localStorage.setItem(_SIDEBAR_COLLAPSE_KEY, JSON.stringify(arr || [])); } catch {}
+    }
+    function toggleSidebarSection(name) {
+        const sec = document.querySelector(`.sidebar-section[data-section="${name}"]`);
+        if (!sec) return;
+        sec.classList.toggle('collapsed');
+        const chev = sec.querySelector('.sidebar-section-chevron');
+        if (chev) chev.innerHTML = sec.classList.contains('collapsed') ? '&#x25B8;' : '&#x25BE;';
+        const cur = _readCollapsedSections();
+        const idx = cur.indexOf(name);
+        if (sec.classList.contains('collapsed') && idx === -1) cur.push(name);
+        if (!sec.classList.contains('collapsed') && idx !== -1) cur.splice(idx, 1);
+        _writeCollapsedSections(cur);
+    }
+    function expandSidebarSectionForTab(tabId) {
+        // Find the section that owns this tab and force-expand it.
+        const all = document.querySelectorAll('.sidebar-section[data-tabs]');
+        for (const sec of all) {
+            const tabs = (sec.getAttribute('data-tabs') || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (!tabs.includes(tabId)) continue;
+            if (sec.classList.contains('collapsed')) {
+                sec.classList.remove('collapsed');
+                const chev = sec.querySelector('.sidebar-section-chevron');
+                if (chev) chev.innerHTML = '&#x25BE;';
+                // Don't write to localStorage — auto-expand on navigation should be
+                // ephemeral. User-driven toggles still persist as before.
+            }
+            break;
+        }
+    }
+    function restoreSidebarSectionState() {
+        const collapsed = _readCollapsedSections();
+        document.querySelectorAll('.sidebar-section[data-section]').forEach(sec => {
+            const name = sec.getAttribute('data-section');
+            const isCollapsed = collapsed.includes(name) || sec.classList.contains('coming-soon');
+            sec.classList.toggle('collapsed', isCollapsed);
+            const chev = sec.querySelector('.sidebar-section-chevron');
+            if (chev) chev.innerHTML = isCollapsed ? '&#x25B8;' : '&#x25BE;';
+        });
+    }
+    // Worst-case rollup: section dot inherits the worst child's status.
+    // Order of severity: red > amber > refreshing > green > unknown.
+    function rollUpSidebarSection(tabId) {
+        const sec = document.querySelector(`.sidebar-section[data-tabs*="${tabId}"]`);
+        if (!sec) return;
+        // Verify exact membership (data-tabs is CSV, *= is substring).
+        const tabs = (sec.getAttribute('data-tabs') || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (!tabs.includes(tabId)) return;
+        const dotEl = sec.querySelector('.sidebar-section-dot');
+        if (!dotEl) return;
+        let worst = 'unknown';
+        const order = { red: 4, amber: 3, refreshing: 2, green: 1, unknown: 0 };
+        tabs.forEach(t => {
+            const childDot = document.querySelector(`[data-sidebar-health="${t}"]`);
+            if (!childDot) return;
+            const cls = ['red', 'amber', 'refreshing', 'green', 'unknown'].find(c => childDot.classList.contains(c)) || 'unknown';
+            if (order[cls] > order[worst]) worst = cls;
+        });
+        dotEl.classList.remove('red', 'amber', 'refreshing', 'green', 'unknown');
+        dotEl.classList.add(worst);
+    }
+    // Restore section state once DOM is ready.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', restoreSidebarSectionState);
+    } else {
+        restoreSidebarSectionState();
+    }
+
     async function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
         document.getElementById('tab-' + tabId).classList.add('active');
         // Update URL hash for deep-linking
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
-        // Highlight the sidebar item
-        // OS-INTEGRATION: 'os-hub' and 'os-bplan' keys below — DO NOT REMOVE (see MEMORY.md)
-        const tabLabelMap = { overview: 'Leadership', tasks: 'Task and Project Management OS', invoices: 'Invoices', pnl: 'Profit', cfv: 'Cash Flow Voids', comms: 'Inbound', compliance: 'Compliance', sitemap: 'Site Map', fintable: 'Fintable', 'os-hub': 'Operating Systems', 'os-bplan': 'Business Launch Plan Builder', 'os-strategy': 'Objective & Strategy', 'launch-plan': 'Director Launch Plan', operations: 'Operations OS' };
+        // Highlight the sidebar item by mapping tabId → onclick attribute. Cleaner
+        // than the old text-includes approach which broke when labels were
+        // shortened in the Phase 3 restructure.
         document.querySelectorAll('.sidebar-item').forEach(b => {
-            if (b.textContent.includes(tabLabelMap[tabId] || '')) b.classList.add('active');
+            const onclickAttr = b.getAttribute('onclick') || '';
+            if (onclickAttr.includes(`switchTab('${tabId}')`)) b.classList.add('active');
         });
+        // Auto-expand the section that contains the now-active tab so it's
+        // always visible after deep-linking.
+        expandSidebarSectionForTab(tabId);
         // Also highlight old tab buttons (if visible)
         document.querySelectorAll('.tab-btn').forEach(b => {
             if ((tabId === 'overview' && b.textContent.includes('Leadership')) ||
@@ -402,11 +486,8 @@ if (tabId === 'comms') {
                 frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
             }
         }
-        // OS-INTEGRATION: Lazy-load iframes — DO NOT REMOVE (see MEMORY.md)
-        if (tabId === 'os-hub') {
-            const frame = document.getElementById('osHubFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('os/')) frame.src = frame.dataset.src;
-        }
+        // Plan Builder + Strategy iframe lazy-load (Operating Systems Hub
+        // removed in Phase 3 sidebar restructure).
         if (tabId === 'os-bplan') {
             const frame = document.getElementById('osBplanFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('business-plan')) frame.src = frame.dataset.src;
@@ -419,7 +500,6 @@ if (tabId === 'comms') {
                 frame.src = frame.dataset.src + '?cb=' + Date.now();
             }
         }
-        // /OS-INTEGRATION: Lazy-load
 
         // Refresh data on tab switch — but only if cache is stale.
         // Re-fetching on every tab switch was hammering Airtable and causing the

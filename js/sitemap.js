@@ -13,7 +13,6 @@
         'comms':       ['follow-up.html'],
         'compliance':  ['compliance.html'],
         'launch-plan': ['os/launch-plan.html'],
-        'os-hub':      ['os/index.html'],
         'os-bplan':    ['os/business-plan-builder/index.html'],
         'fintable':    ['js/fintable.js'],
         'sitemap':     ['js/sitemap.js'],

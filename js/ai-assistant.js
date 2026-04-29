@@ -79,7 +79,6 @@
         'compliance': 'Property Compliance — certificate tracking (gas, EICR, EPC, legionella, fire, PAT), expiry monitoring, renewal actions.',
         'airtable': 'Contractor Job List — active maintenance jobs, contractor assignment, status.',
         'launch-plan': 'Operations Director Master Action Plan — sequenced launch checklist for the ODR product.',
-        'os-hub': 'Operating Systems Hub — directory of all business operating systems.',
         'os-bplan': 'Business Launch Plan Builder — AI-guided wizard that produces a complete launch plan for a new business.',
         'os-strategy': 'Objective & Strategy OS — quarterly strategy plan per business with Boardroom Mentor wizard support.',
         'fintable': 'Fintable Sync Monitor — health of bank-account sync across all connected accounts; flags stale or disconnected feeds.',
