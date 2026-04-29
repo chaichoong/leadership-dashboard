@@ -68,7 +68,7 @@
     const sopInflight = {};         // { tabId: Promise } — dedupe concurrent fetches
 
     // One-line purpose for every tab. Used as a fast-path description and as a
-    // fallback when a tab has no SOP file (launch-plan, os-strategy, fintable).
+    // fallback when a tab has no SOP file (os-strategy, fintable).
     const PAGE_PURPOSES = {
         'overview': 'Leadership Dashboard — financial overview, 31-day cash flow forecast, balance calculator, reconciliation accuracy, AI commentary. The single executive view of business health.',
         'tasks': 'Task and Project Management OS — tasks and projects across the portfolio, with assignment, due dates, and Kanban-style flow.',
@@ -78,11 +78,10 @@
         'comms': 'Inbound Comms — email triage with AI label suggestions, follow-up tracking, priority scoring.',
         'compliance': 'Property Compliance — certificate tracking (gas, EICR, EPC, legionella, fire, PAT), expiry monitoring, renewal actions.',
         'airtable': 'Contractor Job List — active maintenance jobs, contractor assignment, status.',
-        'launch-plan': 'Operations Director Master Action Plan — sequenced launch checklist for the ODR product.',
         'os-bplan': 'Business Launch Plan Builder — AI-guided wizard that produces a complete launch plan for a new business.',
         'os-strategy': 'Objective & Strategy OS — quarterly strategy plan per business with Boardroom Mentor wizard support.',
         'fintable': 'Fintable Sync Monitor — health of bank-account sync across all connected accounts; flags stale or disconnected feeds.',
-        'sitemap': 'Site Map & Links — registry of every page, current version, matching SOP version, and sync status.',
+        'sitemap': 'Site Map & Guides — registry of every page, current version, matching SOP/user-guide version, and sync status.',
     };
 
     function stripHtmlToText(html) {

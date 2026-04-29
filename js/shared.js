@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'launch-plan', 'comms', 'compliance', 'operations'];
+        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'compliance', 'operations'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -474,11 +474,7 @@ if (tabId === 'comms') {
                 frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
             }
         }
-        // Launch Plan lazy-load
-        if (tabId === 'launch-plan') {
-            const frame = document.getElementById('launchPlanFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('launch-plan')) frame.src = frame.dataset.src;
-        }
+        // (Launch Plan tab removed — content was duplicating Strategy OS.)
         // Operations OS lazy-load (cache-busted so Pages deploys are picked up)
         if (tabId === 'operations') {
             const frame = document.getElementById('operationsFrame');

@@ -232,20 +232,6 @@ body {
 }
 .sidebar-item.disabled:hover { background: transparent; }
 
-/* OPTIMISE step badge — small sage tag indicating which OPTIMISE letter the
- * tab serves. Decorative; the framework's sequence lives in Strategy OS, the
- * sidebar uses departments. */
-.sidebar-step {
-    flex: 0 0 auto;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 18px; height: 18px;
-    border-radius: 4px;
-    background: rgba(198,161,91,0.18);
-    color: var(--accent-gold);
-    font-size: 10px; font-weight: var(--fw-bold);
-    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-    letter-spacing: 0;
-}
 .main-content { margin-left: 220px; flex: 1; min-width: 0; }
 .sidebar-toggle {
     display: none; position: fixed; top: 10px; left: 10px; z-index: 200;

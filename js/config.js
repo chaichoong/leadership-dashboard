@@ -15,13 +15,12 @@
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.15', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.19', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.5', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
-        { id: 'launch-plan', name: 'Operations Director Launch Plan', icon: '🚀', pageVer: '1.0', sopFile: '',                         sopVer: '1.0', standalone: 'index.html#launch-plan' },
         { id: 'operations',  name: 'Operations OS',                 icon: '🏢', pageVer: '1.6', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
-        // Plan Builder kept as a setup tool under the System section.
-        // (Operating Systems Hub removed in Phase 3 sidebar restructure.)
+        // Plan Builder lives under the Leadership section in the sidebar.
+        // (Operating Systems Hub + Launch Plan removed during sidebar restructure.)
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.6', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
         { id: 'fintable',  name: 'Fintable Sync Monitor',          icon: '🔌', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
-        { id: 'sitemap',    name: 'Site Map & Links',              icon: '🔗', pageVer: '1.13', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
+        { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.13', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app

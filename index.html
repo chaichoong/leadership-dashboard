@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="css/tokens.css?v=1">
     <link rel="stylesheet" href="css/sync-bar.css?v=2">
-    <link rel="stylesheet" href="css/styles.css?v=16">
+    <link rel="stylesheet" href="css/styles.css?v=17">
 </head>
 <body>
     <!-- Auth Screen -->
@@ -45,27 +45,24 @@
             <p>Kevin Brittain &bull; Founder &nbsp;<a href="#" onclick="event.preventDefault();logout()" style="color:var(--text-inverse-dim);font-size:10px;text-decoration:underline">Logout</a></p>
         </div>
         <!-- ──────────────────────────────────────────────────────────────────
-             Sidebar — Department-shaped navigation (Phase 3 restructure).
+             Sidebar — Department-shaped navigation.
              Six business-departments + System for tools, modelled on the
              standard Leadership/Marketing/Sales/Operations/Finance/HR org chart.
-             OPTIMISE-framework letters appear as small badges on each tab so
-             the Operations Director story stays visible without dictating the
-             nav layout. Sections are collapsible (state persisted in
-             localStorage); each section's dot is a worst-case rollup of its
-             children's health.
+             Sections are collapsible (state persisted in localStorage); each
+             section's dot is a worst-case rollup of its children's health.
              ────────────────────────────────────────────────────────────────── -->
         <nav class="sidebar-nav" id="sidebarNav">
 
-            <div class="sidebar-section" data-section="leadership" data-tabs="overview,os-strategy,launch-plan">
+            <div class="sidebar-section" data-section="leadership" data-tabs="overview,os-strategy,os-bplan">
                 <div class="sidebar-section-header" onclick="toggleSidebarSection('leadership')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Leadership</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="leadership"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-step" title="OPTIMISE: Scoreboards">S</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('os-strategy')"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-step" title="OPTIMISE: Objective">O</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('launch-plan')"><span class="sidebar-icon">&#x1F680;</span><span class="sidebar-label">Launch Plan</span><span class="sidebar-step" title="OPTIMISE: Objective">O</span><span class="sidebar-health-dot unknown" data-sidebar-health="launch-plan" title="No checks run yet"></span></div>
+                    <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('os-strategy')"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Plan Builder</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-bplan" title="No checks run yet"></span></div>
                 </div>
             </div>
 
@@ -91,31 +88,31 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="operations" data-tabs="tasks,operations,compliance,comms,cfv">
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,cfv,comms,operations,compliance">
                 <div class="sidebar-section-header" onclick="toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="operations"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('tasks')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-step" title="OPTIMISE: Priorities">P</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('operations')"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-step" title="OPTIMISE: Methods">M</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span><span class="sidebar-step" title="OPTIMISE: Methods">M</span><span class="sidebar-health-dot unknown" data-sidebar-health="compliance" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-step" title="OPTIMISE: Methods">M</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids</span><span class="sidebar-step" title="OPTIMISE: Methods">M</span><span class="sidebar-health-dot unknown" data-sidebar-health="cfv" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('tasks')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids</span><span class="sidebar-health-dot unknown" data-sidebar-health="cfv" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('operations')"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span><span class="sidebar-health-dot unknown" data-sidebar-health="compliance" title="No checks run yet"></span></div>
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="finance" data-tabs="pnl,invoices,fintable">
+            <div class="sidebar-section" data-section="finance" data-tabs="invoices,pnl,fintable">
                 <div class="sidebar-section-header" onclick="toggleSidebarSection('finance')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Finance</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('pnl')"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-step" title="OPTIMISE: Income">I</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span><span class="sidebar-step" title="OPTIMISE: Income">I</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync</span><span class="sidebar-step" title="OPTIMISE: Income">I</span><span class="sidebar-health-dot unknown" data-sidebar-health="fintable" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('pnl')"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F50C;</span><span class="sidebar-label">Fintable Sync</span><span class="sidebar-health-dot unknown" data-sidebar-health="fintable" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
                 </div>
             </div>
 
@@ -130,15 +127,14 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="system" data-tabs="sitemap,os-bplan">
+            <div class="sidebar-section" data-section="system" data-tabs="sitemap">
                 <div class="sidebar-section-header" onclick="toggleSidebarSection('system')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">System</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="system"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map</span><span class="sidebar-health-dot unknown" data-sidebar-health="sitemap" title="No checks run yet"></span><span id="sitemapBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Plan Builder</span><span class="sidebar-step" title="OPTIMISE: Objective (setup)">O</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-bplan" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map &amp; Guides</span><span class="sidebar-health-dot unknown" data-sidebar-health="sitemap" title="No checks run yet"></span><span id="sitemapBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
                     <div class="sidebar-item" onclick="shareCurrentPage()" title="Copy link to this page"><span class="sidebar-icon">&#x1F4CE;</span><span class="sidebar-label">Share Current Page</span></div>
                 </div>
             </div>
@@ -436,11 +432,6 @@
             </iframe>
         </div>
 
-        <!-- Tab: Operations Director Launch Plan -->
-        <div class="tab-panel" id="tab-launch-plan">
-            <iframe class="tab-panel-iframe" id="launchPlanFrame" src="" data-src="os/launch-plan.html" loading="lazy" allowfullscreen style="border:none"></iframe>
-        </div>
-
         <!-- Tab: Operations OS (Tenants, Tenancies, Rental Units, Properties) -->
         <div class="tab-panel" id="tab-operations">
             <iframe class="tab-panel-iframe" id="operationsFrame" src="" data-src="os/operations/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
@@ -458,7 +449,7 @@
         <div class="tab-panel" id="tab-sitemap">
             <div data-sync-bar="sitemap"></div>
             <div class="section">
-                <h2 class="section-title">Site Map & Links</h2>
+                <h2 class="section-title">Site Map & Guides</h2>
                 <div id="sitemapIntegrity" style="margin-bottom:16px"></div>
                 <div style="overflow-x:auto">
                     <table class="invoice-table" style="min-width:900px">
@@ -529,18 +520,18 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <script defer src="js/config.js?v=18"></script>
+    <script defer src="js/config.js?v=19"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
-    <script defer src="js/shared.js?v=19"></script>
+    <script defer src="js/shared.js?v=20"></script>
     <script defer src="js/sync-bar.js?v=4"></script>
     <script defer src="js/dashboard.js?v=19"></script>
     <script defer src="js/cashflow.js?v=13"></script>
-    <script defer src="js/sitemap.js?v=24"></script>
+    <script defer src="js/sitemap.js?v=25"></script>
     <script defer src="js/invoices.js?v=12"></script>
     <script defer src="js/pnl.js?v=20"></script>
     <script defer src="js/reconciliation.js?v=13"></script>
     <script defer src="js/cfv.js?v=13"></script>
     <script defer src="js/fintable.js?v=12"></script>
-    <script defer src="js/ai-assistant.js?v=14"></script>
+    <script defer src="js/ai-assistant.js?v=15"></script>
 </body>
 </html>
