@@ -2515,7 +2515,7 @@ Respond with ONLY the JSON object, no markdown.`;
         }
 
         // Check if task already exists for this thread
-        const gmailUrl = 'https://mail.google.com/mail/u/0/#inbox/' + email.threadId;
+        const gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + email.threadId;
         try {
             const checkResp = await fetch(
                 `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${AIRTABLE_FIELDS.noteUrl}})`)}&maxRecords=1`,
@@ -2537,6 +2537,25 @@ Respond with ONLY the JSON object, no markdown.`;
         const today = new Date().toISOString().slice(0, 10);
         const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 5000);
 
+        // Build a self-contained Description so the assignee can action the
+        // task without opening another tab: AI summary, then sender + Gmail
+        // link + date metadata, then a 2,000-char excerpt of the original
+        // email body. The dedicated `messageContent` field still holds the
+        // full body for searchability — this just makes the description
+        // useful at a glance in any Airtable interface.
+        const subjectLine = email.subject || '(no subject)';
+        const fromLine = email.fromFull || email.from || email.fromEmail || 'Unknown sender';
+        const bodyExcerpt = bodyText.substring(0, 2000) + (bodyText.length > 2000 ? '\n\n[…truncated — see Message Content field for full email]' : '');
+        const richDescription =
+            (content.description || '').trim() +
+            '\n\n— — — — — — — — — — — — — — —\n' +
+            'Subject: ' + subjectLine + '\n' +
+            'From: ' + fromLine + '\n' +
+            'Received: ' + today + '\n' +
+            'Open in Gmail: ' + gmailUrl + '\n\n' +
+            'Original message:\n' +
+            bodyExcerpt;
+
         const record = {
             fields: {
                 [AIRTABLE_FIELDS.taskName]: content.title,
@@ -2549,7 +2568,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.assignee]: { id: opts.assigneeId || getAirtableAssignee() },
                 [AIRTABLE_FIELDS.priority]: 'Urgent',
                 [AIRTABLE_FIELDS.timeEstimate]: '15 min',
-                [AIRTABLE_FIELDS.description]: content.description,
+                [AIRTABLE_FIELDS.description]: richDescription,
                 [AIRTABLE_FIELDS.isInbound]: true,
                 [AIRTABLE_FIELDS.sourceType]: 'Gmail',
                 [AIRTABLE_FIELDS.messageContent]: bodyText,
@@ -2733,7 +2752,7 @@ Body: ${bodyText}`;
         const existing = (await getResp.json()).fields?.[F.documentLinks] || '';
 
         const today = new Date().toISOString().slice(0, 10);
-        const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#inbox/' + email.threadId);
+        const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#all/' + email.threadId);
         const newLine = `${today} | ${docLabel} | ${gmailUrl}`;
         const updated = existing ? existing.trimEnd() + '\n' + newLine : newLine;
 
@@ -2772,7 +2791,7 @@ Body: ${bodyText}`;
             if (!pat) return;
             const today = new Date().toISOString().slice(0, 10);
             const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 3000);
-            const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#inbox/' + email.threadId);
+            const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#all/' + email.threadId);
             const record = {
                 fields: {
                     [AIRTABLE_FIELDS.taskName]: 'INBOUND: Link tenancy doc — ' + truncate(email.subject || '(no subject)', 60),
@@ -3381,7 +3400,7 @@ Body: ${bodyText}`;
         const pat = getAirtablePat();
         if (!pat) { showError('Airtable token required. Go to Settings.'); return false; }
 
-        const gmailUrl = 'https://mail.google.com/mail/u/0/#inbox/' + email.threadId;
+        const gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + email.threadId;
 
         // Already processed?
         const processed = getProcessedCompliance();
