@@ -177,7 +177,9 @@ function syncGmailToAirtable() {
     if (parsed.hasAttachment) fields[FIELDS.hasAttachment] = true;
     if (parsed.hasPdf) fields[FIELDS.hasPdf] = true;
     fields[FIELDS.gmailUrl] = parsed.gmailUrl;
-    fields[FIELDS.status] = parsed.isEstimate ? 'Estimate' : 'Unpaid';
+    // Anything in "3: to pay" is treated as an invoice to pay — status always Unpaid.
+    // The isEstimate boolean flag is still set as a hint but doesn't affect dashboard status.
+    fields[FIELDS.status] = 'Unpaid';
     if (parsed.isEstimate) fields[FIELDS.isEstimate] = true;
 
     createAirtableRecord(config, fields);
