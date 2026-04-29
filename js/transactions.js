@@ -4,6 +4,10 @@
 // Virtual scrolling keeps DOM small even with 8000+ records
 // ══════════════════════════════════════════
 
+    // ── Shared grid template for header + rows (kept in lockstep) ──
+    // 13 columns matching the reconciliation engine's linked-record set, plus Account.
+    const _TX_GRID = '100px 220px 100px 130px 150px 130px 140px 140px 120px 140px 140px 130px 60px';
+
     // ── Module state ──
     let _txState = {
         rendered: false,
@@ -29,8 +33,10 @@
         bizById: {},
         costById: {},
         unitById: {},
-        propById: {},
         tenancyById: {},
+        tenancyRecById: {},   // full tenancy record (for tenant + property resolution)
+        tenantById: {},       // tenant name by tenant id
+        unitPropById: {},     // property name (string) keyed by unit id
     };
 
     // ── Build name lookups from globally-loaded data ──
@@ -62,10 +68,58 @@
             s.unitById[r.id] = typeof n === 'string' ? n : (n?.name || '');
         });
         s.tenancyById = {};
+        s.tenancyRecById = {};
         (allTenancies || []).forEach(r => {
             const n = getField(r, F.tenRef);
             s.tenancyById[r.id] = typeof n === 'string' ? n : (n?.name || '');
+            s.tenancyRecById[r.id] = r;
         });
+        // Tenant id → tenant display name (resolves Tenancy → Customers link)
+        s.tenantById = {};
+        (typeof allTenants !== 'undefined' && allTenants ? allTenants : []).forEach(r => {
+            const n = getField(r, F.tenantName);
+            s.tenantById[r.id] = typeof n === 'string' ? n : (n?.name || '');
+        });
+        // Unit id → property name string (via the unit's Property Name lookup)
+        s.unitPropById = {};
+        (allRentalUnits || []).forEach(r => {
+            const v = getField(r, F.unitPropName);
+            if (Array.isArray(v) && v.length) s.unitPropById[r.id] = String(v[0]);
+            else if (typeof v === 'string') s.unitPropById[r.id] = v;
+        });
+    }
+
+    // Resolve tenant name for a transaction:
+    //   tx → tenancy → tenancy.tenLinkedTenant → tenant.name
+    function _txTenantNameFor(rec) {
+        const s = _txState;
+        const tenancyId = _txLinkedId(rec, F.txTenancy);
+        if (!tenancyId) return '';
+        const tenancy = s.tenancyRecById[tenancyId];
+        if (!tenancy) return '';
+        const linked = getField(tenancy, F.tenLinkedTenant);
+        if (!linked) return '';
+        const tenantId = Array.isArray(linked) ? (typeof linked[0] === 'string' ? linked[0] : linked[0]?.id) : '';
+        return tenantId ? (s.tenantById[tenantId] || '') : '';
+    }
+
+    // Resolve property name for a transaction:
+    //   1) tenancy → F.tenProperty (string lookup)
+    //   2) unit → F.unitPropName (string lookup)
+    function _txPropertyNameFor(rec) {
+        const s = _txState;
+        const tenancyId = _txLinkedId(rec, F.txTenancy);
+        if (tenancyId) {
+            const tenancy = s.tenancyRecById[tenancyId];
+            if (tenancy) {
+                const v = getField(tenancy, F.tenProperty);
+                if (Array.isArray(v) && v.length) return String(v[0]);
+                if (typeof v === 'string') return v;
+            }
+        }
+        const unitId = _txLinkedId(rec, F.txUnit);
+        if (unitId && s.unitPropById[unitId]) return s.unitPropById[unitId];
+        return '';
     }
 
     // ── Helpers to extract fields cleanly ──
@@ -105,6 +159,8 @@
             s.costById[_txLinkedId(rec, F.txCost)] || '',
             s.unitById[_txLinkedId(rec, F.txUnit)] || '',
             s.tenancyById[_txLinkedId(rec, F.txTenancy)] || '',
+            _txTenantNameFor(rec),
+            _txPropertyNameFor(rec),
             String(_txAmount(rec).toFixed(2)),
             _txDateStr(rec),
         ];
@@ -192,6 +248,86 @@
         _txApplyFilters();
         _txRenderRows();
         _txRenderInsights();
+        _txRegisterSyncBar();
+    }
+
+    // ── Sync Bar + Health Checks ──
+    // Mirrors the pattern used by every other page so the health-check ribbon
+    // appears in the same place and surfaces stale data the same way.
+    function _txRegisterSyncBar() {
+        if (typeof registerSyncBar !== 'function') return;
+        registerSyncBar('transactions', {
+            refreshFn: async () => {
+                if (typeof loadDashboard === 'function') await loadDashboard();
+                renderTransactionsTab();
+            },
+            checks: [
+                {
+                    name: 'Transactions loaded from cache', kind: 'sync', run: () => {
+                        const n = (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions : []).length;
+                        if (n === 0) return { status: 'fail', detail: 'No transactions in memory — dashboard cache may have failed to load' };
+                        return { status: 'pass', detail: `${n.toLocaleString()} transaction records loaded from dashboard cache (zero extra API calls)` };
+                    }
+                },
+                {
+                    name: 'Reconciliation coverage', kind: 'sync', run: () => {
+                        const all = (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions : []);
+                        if (!all.length) return { status: 'warn', detail: 'No transactions to evaluate' };
+                        const recon = all.filter(t => getField(t, F.txReconciled)).length;
+                        const unrec = all.length - recon;
+                        const pctNum = Math.round((recon / all.length) * 100);
+                        return { status: 'pass', detail: `${recon.toLocaleString()} reconciled · ${unrec.toLocaleString()} unreconciled (${pctNum}% covered)` };
+                    }
+                },
+                {
+                    name: 'Linked-record name lookups resolve', kind: 'sync', run: () => {
+                        const s = _txState;
+                        const counts = {
+                            categories: Object.keys(s.catById || {}).length,
+                            subCategories: Object.keys(s.subCatById || {}).length,
+                            businesses: Object.keys(s.bizById || {}).length,
+                            costs: Object.keys(s.costById || {}).length,
+                            units: Object.keys(s.unitById || {}).length,
+                            tenancies: Object.keys(s.tenancyById || {}).length,
+                            tenants: Object.keys(s.tenantById || {}).length,
+                        };
+                        const empty = Object.entries(counts).filter(([_, v]) => v === 0).map(([k]) => k);
+                        if (empty.length) return { status: 'warn', detail: `Empty lookup tables: ${empty.join(', ')}` };
+                        return { status: 'pass', detail: `Cat ${counts.categories} · SubCat ${counts.subCategories} · Biz ${counts.businesses} · Cost ${counts.costs} · Unit ${counts.units} · Tenancy ${counts.tenancies} · Tenant ${counts.tenants}` };
+                    }
+                },
+                {
+                    name: 'Tenant resolution via Tenancy → Customers link', kind: 'sync', run: () => {
+                        const all = (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions : []);
+                        const linkedToTenancy = all.filter(t => _txLinkedId(t, F.txTenancy));
+                        if (!linkedToTenancy.length) return { status: 'pass', detail: 'No tenancy-linked transactions to check' };
+                        const resolved = linkedToTenancy.filter(t => _txTenantNameFor(t)).length;
+                        if (resolved === 0) return { status: 'fail', detail: `${linkedToTenancy.length} transactions linked to a tenancy but tenant name resolves on 0 — Customers link or allTenants may be empty` };
+                        if (resolved < linkedToTenancy.length) return { status: 'warn', detail: `${resolved}/${linkedToTenancy.length} tenancy-linked tx resolve to a tenant name` };
+                        return { status: 'pass', detail: `All ${linkedToTenancy.length} tenancy-linked tx resolve to a tenant name` };
+                    }
+                },
+                {
+                    name: 'Property resolution', kind: 'sync', run: () => {
+                        const all = (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions : []);
+                        const haveTenancyOrUnit = all.filter(t => _txLinkedId(t, F.txTenancy) || _txLinkedId(t, F.txUnit));
+                        if (!haveTenancyOrUnit.length) return { status: 'pass', detail: 'No transactions linked to a tenancy or unit' };
+                        const resolved = haveTenancyOrUnit.filter(t => _txPropertyNameFor(t)).length;
+                        if (resolved < haveTenancyOrUnit.length * 0.9) return { status: 'warn', detail: `${resolved}/${haveTenancyOrUnit.length} resolve to a property name` };
+                        return { status: 'pass', detail: `${resolved}/${haveTenancyOrUnit.length} resolve to a property name` };
+                    }
+                },
+                {
+                    name: 'Filter + virtual table render', kind: 'automation', run: () => {
+                        const total = (typeof allTransactions !== 'undefined' && allTransactions ? allTransactions : []).length;
+                        const visible = (_txState.filtered || []).length;
+                        if (!document.getElementById('txViewport')) return { status: 'fail', detail: 'Virtual viewport not mounted' };
+                        return { status: 'pass', detail: `${visible.toLocaleString()} of ${total.toLocaleString()} match current filters` };
+                    }
+                },
+            ],
+        });
+        if (typeof markTabSynced === 'function') markTabSynced('transactions');
     }
 
     function _txShellHtml() {
@@ -265,21 +401,32 @@
                 <div id="txInsightsBody" style="padding:0 14px 14px"></div>
             </details>
 
-            <!-- Virtual table -->
+            <!-- Virtual table — horizontal scroll wraps an inner min-width grid so all
+                 reconciliation linked fields fit. Vertical scroll is on the viewport. -->
             <div style="border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);overflow:hidden">
-                <div style="display:grid;grid-template-columns:110px 1fr 1fr 110px 160px 140px 80px;gap:0;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:11px;font-weight:var(--fw-semibold);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em">
+              <div style="overflow-x:auto">
+                <div style="min-width:1700px">
+                <div style="display:grid;grid-template-columns:${_TX_GRID};gap:0;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:11px;font-weight:var(--fw-semibold);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em">
                     <div onclick="_txSetSort('date')" style="padding:8px 12px;cursor:pointer" title="Sort by date">Date <span id="txSortInd-date"></span></div>
                     <div onclick="_txSetSort('vendor')" style="padding:8px 12px;cursor:pointer" title="Sort by vendor">Vendor / Description <span id="txSortInd-vendor"></span></div>
-                    <div style="padding:8px 12px">Category</div>
                     <div onclick="_txSetSort('amount')" style="padding:8px 12px;cursor:pointer;text-align:right" title="Sort by amount">Amount <span id="txSortInd-amount"></span></div>
-                    <div style="padding:8px 12px">Account</div>
+                    <div style="padding:8px 12px">Category</div>
+                    <div style="padding:8px 12px">Sub-Category</div>
                     <div style="padding:8px 12px">Business</div>
+                    <div style="padding:8px 12px">Tenant</div>
+                    <div style="padding:8px 12px">Tenancy</div>
+                    <div style="padding:8px 12px">Unit</div>
+                    <div style="padding:8px 12px">Property</div>
+                    <div style="padding:8px 12px">Cost</div>
+                    <div style="padding:8px 12px">Account</div>
                     <div style="padding:8px 12px;text-align:center">Recon</div>
                 </div>
                 <div id="txViewport" style="height:600px;overflow-y:auto;position:relative">
                     <div id="txSpacer" style="position:relative;width:100%"></div>
                     <div id="txRows" style="position:absolute;top:0;left:0;right:0"></div>
                 </div>
+                </div>
+              </div>
             </div>
         </div>
         `;
@@ -364,27 +511,39 @@
         const sub = vendor && desc ? desc : '';
         const subCatName = s.subCatById[_txLinkedId(rec, F.txSubCategory)] || '';
         const catName = s.catById[_txLinkedId(rec, F.txCategory)] || '';
-        const catLabel = subCatName || catName || '<span style="color:var(--text-muted)">—</span>';
         const amount = _txAmount(rec);
         const amtClass = amount >= 0 ? 'text-green' : 'text-red';
         const account = _txAccountName(rec);
         const bizName = s.bizById[_txLinkedId(rec, F.txBusiness)] || '';
+        const tenantName = _txTenantNameFor(rec);
+        const tenancyRef = s.tenancyById[_txLinkedId(rec, F.txTenancy)] || '';
+        const unitName = s.unitById[_txLinkedId(rec, F.txUnit)] || '';
+        const propertyName = _txPropertyNameFor(rec);
+        const costName = s.costById[_txLinkedId(rec, F.txCost)] || '';
         const reconciled = !!getField(rec, F.txReconciled);
         const reconDot = reconciled
             ? `<span title="Reconciled" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success)"></span>`
             : `<span title="Unreconciled" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warning)"></span>`;
         const zebra = (idx % 2) ? 'var(--bg-surface-2)' : 'var(--bg-surface)';
+        const dimCell = 'padding:0 12px;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        const muted = '<span style="color:var(--text-muted)">—</span>';
         return `
-            <div onclick="_txOpenRow('${rec.id}')" style="display:grid;grid-template-columns:110px 1fr 1fr 110px 160px 140px 80px;gap:0;height:${s.rowH}px;border-bottom:1px solid var(--border-subtle);background:${zebra};cursor:pointer;align-items:center;font-size:13px;color:var(--text-primary)">
+            <div onclick="_txOpenRow('${rec.id}')" style="display:grid;grid-template-columns:${_TX_GRID};gap:0;height:${s.rowH}px;border-bottom:1px solid var(--border-subtle);background:${zebra};cursor:pointer;align-items:center;font-size:13px;color:var(--text-primary)">
                 <div style="padding:0 12px;color:var(--text-secondary);font-size:12px">${escHtml(dateShort)}</div>
                 <div style="padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
                     <div style="font-weight:var(--fw-medium);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(label)}</div>
                     ${sub ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(sub)}</div>` : ''}
                 </div>
-                <div style="padding:0 12px;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${catLabel}</div>
                 <div class="${amtClass}" style="padding:0 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:var(--fw-medium)">${amount < 0 ? '-' : ''}${fmt(amount)}</div>
-                <div style="padding:0 12px;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(account)}</div>
-                <div style="padding:0 12px;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(bizName)}</div>
+                <div style="${dimCell}">${catName ? escHtml(catName) : muted}</div>
+                <div style="${dimCell}">${subCatName ? escHtml(subCatName) : muted}</div>
+                <div style="${dimCell}">${bizName ? escHtml(bizName) : muted}</div>
+                <div style="${dimCell}">${tenantName ? escHtml(tenantName) : muted}</div>
+                <div style="${dimCell}">${tenancyRef ? escHtml(tenancyRef) : muted}</div>
+                <div style="${dimCell}">${unitName ? escHtml(unitName) : muted}</div>
+                <div style="${dimCell}">${propertyName ? escHtml(propertyName) : muted}</div>
+                <div style="${dimCell}">${costName ? escHtml(costName) : muted}</div>
+                <div style="${dimCell}">${account ? escHtml(account) : muted}</div>
                 <div style="padding:0 12px;text-align:center">${reconDot}</div>
             </div>
         `;
@@ -403,6 +562,8 @@
         const cost = s.costById[_txLinkedId(rec, F.txCost)] || '';
         const unit = s.unitById[_txLinkedId(rec, F.txUnit)] || '';
         const tenancy = s.tenancyById[_txLinkedId(rec, F.txTenancy)] || '';
+        const tenant = _txTenantNameFor(rec);
+        const property = _txPropertyNameFor(rec);
         const amount = _txAmount(rec);
         const account = _txAccountName(rec);
         const reconciled = !!getField(rec, F.txReconciled);
@@ -420,9 +581,11 @@
             ['Category', escHtml(cat)],
             ['Sub-Category', escHtml(subCat)],
             ['Business', escHtml(biz)],
-            ['Cost', escHtml(cost)],
-            ['Unit', escHtml(unit)],
+            ['Tenant', escHtml(tenant)],
             ['Tenancy', escHtml(tenancy)],
+            ['Unit', escHtml(unit)],
+            ['Property', escHtml(property)],
+            ['Cost', escHtml(cost)],
             ['Team Member', escHtml(teamMember)],
         ].filter(([_, v]) => v && v !== '');
 
@@ -631,7 +794,7 @@
     function _txExportCsv() {
         const s = _txState;
         const rows = s.filtered;
-        const headers = ['Date','Vendor','Description','Amount','Account','Category','Sub-Category','Business','Cost','Unit','Tenancy','Reconciled'];
+        const headers = ['Date','Vendor','Description','Amount','Account','Category','Sub-Category','Business','Tenant','Tenancy','Unit','Property','Cost','Reconciled'];
         const csvRows = [headers.join(',')];
         const esc = v => {
             if (v == null) return '';
@@ -648,9 +811,11 @@
                 s.catById[_txLinkedId(r, F.txCategory)] || '',
                 s.subCatById[_txLinkedId(r, F.txSubCategory)] || '',
                 s.bizById[_txLinkedId(r, F.txBusiness)] || '',
-                s.costById[_txLinkedId(r, F.txCost)] || '',
-                s.unitById[_txLinkedId(r, F.txUnit)] || '',
+                _txTenantNameFor(r),
                 s.tenancyById[_txLinkedId(r, F.txTenancy)] || '',
+                s.unitById[_txLinkedId(r, F.txUnit)] || '',
+                _txPropertyNameFor(r),
+                s.costById[_txLinkedId(r, F.txCost)] || '',
                 getField(r, F.txReconciled) ? 'Yes' : 'No',
             ].map(esc).join(','));
         }
