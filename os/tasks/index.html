@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-2000 created-by</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-2200 created-by-healthcheck</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -1020,7 +1020,7 @@ async function runSyncCheck(){
     // common "reverted" case is "I marked X Completed, it came back as not
     // Completed". Fetch every task by ID referenced in the persisted log OR
     // currently in local state.
-    const fresh=await fetchTable(TASKS_TABLE,[F.name,F.status,F.priority,F.dueDate,F.business,F.description,F.projects,F.recurring,F.hardDeadline,F.timeEst,F.collaborators],``);
+    const fresh=await fetchTable(TASKS_TABLE,[F.name,F.status,F.priority,F.dueDate,F.business,F.description,F.projects,F.recurring,F.hardDeadline,F.timeEst,F.collaborators,F.createdByEmail],``);
     const norm=v=>{
       const s=(v==null?'':String(v)).trim();
       if(s==='(Untitled)'||s==='(Untitled Project)')return '';
@@ -1085,7 +1085,29 @@ async function runSyncCheck(){
       if(localCollabKey!==remoteCollabKey){
         drift.push({taskId:t.id,name:t.name,field:'collaborators',local:localCollabKey||'(none)',remote:remoteCollabKey||'(none)'});
       }
+      // Created By Email drift — separate check so it's obvious when the
+      // creator stamp didn't write through (the most common cause of
+      // missing Slack DMs at task creation).
+      const localCreator=(t.createdByEmail||'').toLowerCase();
+      const remoteCreator=String(c[F.createdByEmail]||'').toLowerCase();
+      if(localCreator!==remoteCreator){
+        drift.push({taskId:t.id,name:t.name,field:'createdByEmail',local:localCreator||'(none)',remote:remoteCreator||'(none)'});
+      }
     });
+    // Diagnostic: count active (not Completed) tasks where Airtable has
+    // no Created By Email set. Tasks created in Airtable's native UI or
+    // by older code paths land here — they won't get an automatic
+    // assignment Slack DM. Surface the count and offer a one-click
+    // backfill that stamps the current user as the creator (best-guess
+    // fallback) so future Resend buttons have an actor name.
+    let missingCreator=0;
+    fresh.forEach(r=>{
+      const c=r.cellValuesByFieldId||r.fields||{};
+      const status=selectName(c[F.status]);
+      if(status==='Completed')return;
+      if(!String(c[F.createdByEmail]||'').trim())missingCreator++;
+    });
+    window._lastSyncMissingCreator=missingCreator;
     if(!res)return;
     if(reverted.length){
       const head=`<div style="color:var(--danger);font-weight:700;margin-bottom:6px">⚠ ${reverted.length} save(s) we confirmed OK have REVERTED in Airtable:</div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Almost certainly an Airtable automation is overwriting our PATCH milliseconds later. Check Automations in Airtable and disable any that watch the fields below.</div>`;
@@ -1104,17 +1126,22 @@ async function runSyncCheck(){
       const remote=selectName(c[F.status]);
       if(t.status&&remote&&t.status!==remote)staleStatuses.push({id:t.id,name:t.name,derived:t.status,remote});
     });
+    // Build the missing-creator banner once — shown in both the no-drift
+    // and has-drift paths so it's never hidden behind a green tick.
+    const missingCreatorBanner=missingCreator?`<div style="margin-top:10px;padding:10px;background:var(--info-bg);color:var(--info);border-radius:8px;font-size:11px">${missingCreator} active task${missingCreator===1?'':'s'} have no Created By Email — assignment Slack DMs may not have fired for these. <button class="btn btn-sm" style="margin-top:6px" onclick="backfillMissingCreators()" title="Stamps your email as the creator on every active task missing one. Best-guess fallback so the Resend Slack button has an actor name.">Backfill with my email</button></div>`:'';
     if(!drift.length){
       let msg=`<span style="color:var(--success);font-weight:600">✓ In sync — no drift detected across ${fresh.length} tasks</span>`;
       if(staleStatuses.length){
         msg+=`<div style="margin-top:10px;padding:10px;background:var(--warning-bg);color:var(--warning);border-radius:8px;font-size:11px">${staleStatuses.length} Airtable statuses are stale (derived locally from due date). <button class="btn btn-sm" style="margin-top:6px" onclick="reconcileStaleStatuses()">Reconcile all</button></div>`;
       }
+      msg+=missingCreatorBanner;
       res.innerHTML=msg;return;
     }
     res.innerHTML=`<div style="color:var(--danger);font-weight:600;margin-bottom:6px">⚠ ${drift.length} drift${drift.length===1?'':'s'} found (local ≠ Airtable):</div>`+
       drift.slice(0,15).map(d=>`<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle)"><b>${escHtml(d.name.slice(0,40))}</b><div style="font-size:11px;color:var(--text-secondary)">${escHtml(d.field)}: local <b>${escHtml(String(d.local||'(empty)').slice(0,30))}</b> vs Airtable <b>${escHtml(String(d.remote||'(empty)').slice(0,30))}</b></div></div>`).join('')+
       (drift.length>15?`<div style="color:var(--text-muted);font-size:11px;margin-top:6px">…and ${drift.length-15} more</div>`:'')+
-      (staleStatuses.length?`<div style="margin-top:10px;padding:10px;background:var(--warning-bg);color:var(--warning);border-radius:8px;font-size:11px">${staleStatuses.length} stale statuses in Airtable (derived locally from due date). <button class="btn btn-sm" style="margin-top:6px" onclick="reconcileStaleStatuses()">Reconcile all</button></div>`:'');
+      (staleStatuses.length?`<div style="margin-top:10px;padding:10px;background:var(--warning-bg);color:var(--warning);border-radius:8px;font-size:11px">${staleStatuses.length} stale statuses in Airtable (derived locally from due date). <button class="btn btn-sm" style="margin-top:6px" onclick="reconcileStaleStatuses()">Reconcile all</button></div>`:'')+
+      missingCreatorBanner;
   }catch(e){
     if(res)res.innerHTML='<span style="color:var(--danger)">Sync check failed: '+escHtml((e&&e.message)||'unknown')+'</span>';
   }
@@ -1141,6 +1168,35 @@ async function reconcileStaleStatuses(){
   toast(`Reconciled ${done} statuses`);
 }
 window.reconcileStaleStatuses=reconcileStaleStatuses;
+// Backfill Created By Email = current user's email on every active task
+// where it's missing. Best-guess fallback so the Resend Slack button on
+// the drawer has an actor name to use when notifications didn't fire
+// for legacy / Airtable-native tasks. Rate-limited at ~5 req/s.
+async function backfillMissingCreators(){
+  const me=(currentUser&&currentUser.email)||'';
+  if(!me){toast('Pick your identity first',true);return}
+  const res=document.getElementById('syncCheckResult');
+  // Use the local task list — refresh first so we operate on what
+  // Airtable actually has (and can mark task.createdByEmail locally).
+  const targets=(allTasks||[]).filter(t=>t.status!=='Completed'&&!t.createdByEmail);
+  if(!targets.length){if(res)res.innerHTML='<span style="color:var(--success)">Nothing to backfill — every active task has a creator stamped.</span>';return}
+  if(!confirm(`Stamp your email (${me}) as the creator on ${targets.length} task${targets.length===1?'':'s'} that have none?\n\nUse this if you know you're the most likely creator. Skip otherwise.`))return;
+  if(res)res.innerHTML=`<div style="color:var(--info)">⟳ Backfilling ${targets.length} tasks…</div>`;
+  let done=0,failed=0;
+  for(let i=0;i<targets.length;i+=5){
+    const chunk=targets.slice(i,i+5);
+    const results=await Promise.allSettled(chunk.map(t=>patchTask(t.id,{[F.createdByEmail]:me}).then(r=>{
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      t.createdByEmail=me;return true;
+    })));
+    results.forEach(r=>{if(r.status==='fulfilled')done++;else failed++});
+    if(res)res.innerHTML=`<div style="color:var(--info)">⟳ Backfilling… ${done}/${targets.length} done${failed?' ('+failed+' failed)':''}</div>`;
+    await new Promise(r=>setTimeout(r,220));
+  }
+  if(res)res.innerHTML=`<span style="color:var(--success);font-weight:600">✓ Backfilled ${done} task${done===1?'':'s'}${failed?' — '+failed+' failed, open console':''}</span>`;
+  toast(`Backfilled ${done} creators`);
+}
+window.backfillMissingCreators=backfillMissingCreators;
 window.syncPillClick=syncPillClick;window.runSyncCheck=runSyncCheck;
 // Wire pill click once DOM is ready
 setTimeout(()=>{const p=document.getElementById('syncPill');if(p)p.onclick=syncPillClick},0);
