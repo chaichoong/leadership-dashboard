@@ -635,6 +635,9 @@
                 invoiceTabRendered = false;
                 renderInvoiceTab();
             }, 1500);
+            // Re-fetch Gmail count after the label-move has had time to propagate
+            // (Apps Script call was fire-and-forget no-cors, so we wait ~3s then poll)
+            setTimeout(() => { if (typeof fetchGmailLabelCount === 'function') fetchGmailLabelCount(); }, 3500);
 
         } catch (e) {
             console.error('Mark as paid failed:', e);
