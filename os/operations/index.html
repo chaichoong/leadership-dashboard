@@ -2057,24 +2057,41 @@ OUTPUT FORMAT — respond with a brief plain-English explanation, then this exac
 
 Confidence guide: High = 4+ very-similar recent comps, all consistent. Medium = 3 comps with mild variance. Low = fewer than 3 comps, or wide variance, or stale data.`;
 
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': getAnthropicKey(),
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 8192,
-      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }],
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  let r;
+  try {
+    r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': getAnthropicKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 8192,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }],
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch (e) {
+    // TypeError "Failed to fetch" means the request never left the browser.
+    // Re-throw with a network-specific marker so the UI can show diagnostics.
+    if (e instanceof TypeError) {
+      const wrapped = new Error('Network error — request blocked before reaching Anthropic. Likely cause: a browser extension (1Password, uBlock, AdGuard, Privacy Badger), corporate firewall, or VPN intercepting api.anthropic.com.');
+      wrapped.code = 'network_blocked';
+      wrapped.cause = e;
+      throw wrapped;
+    }
+    throw e;
+  }
   if (!r.ok) {
     const err = await r.json().catch(()=>({}));
-    throw new Error(`Anthropic ${r.status}: ${err.error?.message || 'request failed'}`);
+    const msg = err.error?.message || 'request failed';
+    const wrapped = new Error(`Anthropic ${r.status}: ${msg}`);
+    wrapped.code = r.status === 401 ? 'auth' : (r.status === 403 ? 'forbidden' : 'http_error');
+    wrapped.status = r.status;
+    throw wrapped;
   }
   const data = await r.json();
   // Concatenate every text block (web search produces interleaved blocks)
@@ -2108,10 +2125,30 @@ async function runAIValuation(propertyId){
     showValuationReviewModal(property, result);
   } catch (e) {
     console.error('AI valuation failed', e);
+    // Network/CORS errors get a diagnostic panel + the option to test the
+    // API key with a simple call (no web search, no streaming) so the user
+    // can isolate whether the key itself is fine.
+    const isNetwork = e.code === 'network_blocked';
+    const isAuth    = e.code === 'auth';
+    const advice = isNetwork ? `
+      <ul style="margin-top:10px;margin-left:18px;line-height:1.6">
+        <li>Disable any browser extension that filters network calls (uBlock, AdGuard, Privacy Badger, 1Password, Bitwarden, etc.) and try again.</li>
+        <li>Try a different browser profile / Incognito window with extensions off.</li>
+        <li>If you're on a corporate network or VPN, check that <code>api.anthropic.com</code> isn't blocked.</li>
+        <li>Open DevTools → Network → re-run, look for the failed request to confirm what's blocking it.</li>
+      </ul>` : (isAuth ? `
+      <ul style="margin-top:10px;margin-left:18px;line-height:1.6">
+        <li>The API key was rejected. Double-check it at <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> — it should start with <code>sk-ant-</code>.</li>
+        <li>Re-enter the key with the button below.</li>
+      </ul>` : '');
     showAIModal(`
-      <div class="ai-error"><strong>Valuation failed.</strong><br>${escapeHtml(e.message)}</div>
-      <button class="btn-secondary" onclick="closeAIModal()">Close</button>
-      <button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')" style="margin-left:8px">Try again</button>`, { title: 'AI Valuation' });
+      <div class="ai-error"><strong>Valuation failed.</strong><br>${escapeHtml(e.message)}${advice}</div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+        <button class="btn-secondary" onclick="closeAIModal();testAnthropicKey('${propertyId}')">Test API key (simple call)</button>
+        ${isAuth ? `<button class="btn-secondary" onclick="localStorage.removeItem('_anthropic_key');closeAIModal();runAIValuation('${propertyId}')">Re-enter key</button>` : ''}
+        <button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')">Try again</button>
+      </div>`, { title: 'AI Valuation' });
   }
 }
 
@@ -2198,6 +2235,66 @@ async function approveValuation(payloadJSON){
   } catch (e) {
     console.error('approve failed', e);
     if (body) body.innerHTML = `<div class="ai-error"><strong>Couldn't save.</strong><br>${escapeHtml(e.message)}</div><button class="btn-secondary" onclick="closeAIModal()">Close</button>`;
+  }
+}
+
+// Minimal API call with no tools — used to isolate whether the issue is
+// network/CORS, auth, or specific to the web_search tool. If THIS works
+// but the full call doesn't, the user's key likely lacks web search access.
+// If this also fails, something is blocking api.anthropic.com from the browser.
+async function testAnthropicKey(propertyId){
+  const key = await ensureAnthropicKey();
+  if (!key) return;
+  showAIModal(`<div class="ai-status"><div class="spin"></div><div>Testing connection to api.anthropic.com…</div></div>`, { title: 'Test API key', closable: false });
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 32,
+        messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
+      }),
+    }).catch(e => { e.code = 'network_blocked'; throw e; });
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      const status = r.status;
+      const msg = err.error?.message || 'Request failed';
+      throw new Error(`Anthropic ${status}: ${msg}`);
+    }
+    const data = await r.json();
+    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').trim();
+    showAIModal(`
+      <div style="background:var(--success-bg);color:var(--success);padding:14px;border-radius:8px;margin-bottom:14px">
+        <strong>API key works.</strong> Anthropic responded: <code>${escapeHtml(text || '(empty)')}</code>
+      </div>
+      <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;margin-bottom:14px">If the full valuation still fails, the issue is specific to the <code>web_search</code> tool. Web search may need to be enabled on your account, or your key may not have access to that beta. Check <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> → Settings → Web Search.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+        ${propertyId ? `<button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')">Run full valuation</button>` : ''}
+      </div>`, { title: 'API key OK' });
+  } catch (e) {
+    console.error('Test API key failed', e);
+    const isNetwork = e.code === 'network_blocked' || (e instanceof TypeError);
+    const blurb = isNetwork
+      ? `<p style="margin-top:10px;line-height:1.5">The minimal call also failed at the network layer — so the problem is something blocking <code>api.anthropic.com</code> from your browser, not your API key or the web search tool.</p>
+         <ul style="margin-top:8px;margin-left:18px;line-height:1.6">
+           <li>Disable browser extensions (uBlock, AdGuard, Privacy Badger, 1Password, Bitwarden) and retry.</li>
+           <li>Try in an Incognito / Private window.</li>
+           <li>If you're on a corporate network or VPN, check it allows <code>api.anthropic.com</code>.</li>
+         </ul>`
+      : `<p style="margin-top:10px;line-height:1.5">The API rejected the key (auth or quota issue). Check the error above and verify the key at <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a>.</p>`;
+    showAIModal(`
+      <div class="ai-error"><strong>Test failed.</strong><br>${escapeHtml(e.message || 'Unknown error')}${blurb}</div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+        <button class="btn-secondary" onclick="localStorage.removeItem('_anthropic_key');closeAIModal();testAnthropicKey('${propertyId||''}')">Re-enter key</button>
+      </div>`, { title: 'API key test failed' });
   }
 }
 
