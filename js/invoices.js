@@ -291,22 +291,22 @@
             const displayDesc = (inv.desc || '').trim();
             const displayRef = (inv.ref || '').trim();
 
-            // Editable fields — click empty ones to enter data (saves to Airtable)
+            // Editable fields — click ANY field (populated or empty) to edit. Saves to Airtable.
             const amountHtml = displayAmt !== null
-                ? `<span class="inv-amount">${fmt(displayAmt)}</span>`
-                : `<span class="inv-amount unknown" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.amount}','number')" title="Click to enter amount" style="cursor:pointer">Enter £ ✏️</span>`;
+                ? `<span class="inv-amount inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.amount}','number')" title="Click to edit amount" style="cursor:pointer">${fmt(displayAmt)}</span>`
+                : `<span class="inv-amount unknown inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.amount}','number')" title="Click to enter amount" style="cursor:pointer">Enter £ ✏️</span>`;
 
             const payeeHtml = displayPayee
-                ? escHtml(displayPayee)
-                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.payee}','text')" title="Click to enter payee">Enter payee ✏️</span>`;
+                ? `<span class="inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.payee}','text')" title="Click to edit payee" style="cursor:pointer">${escHtml(displayPayee)}</span>`
+                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.payee}','text')" title="Click to enter payee">Enter payee ✏️</span>`;
 
             const descHtml = displayDesc
-                ? escHtml(displayDesc)
-                : `<span style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.desc}','text')" title="Click to enter description">Enter description ✏️</span>`;
+                ? `<span class="inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.desc}','text')" title="Click to edit description" style="cursor:pointer">${escHtml(displayDesc)}</span>`
+                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.desc}','text')" title="Click to enter description">Enter description ✏️</span>`;
 
             const refHtml = displayRef
-                ? `<span style="font-family:monospace;font-size:11px;color:#64748b">${escHtml(displayRef)}</span>`
-                : `<span style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to enter ref">Add ref ✏️</span>`;
+                ? `<span class="inv-editable" style="font-family:monospace;font-size:11px;color:#64748b;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to edit ref">${escHtml(displayRef)}</span>`
+                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to enter ref">Add ref ✏️</span>`;
 
             const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
             const threadId = inv.threadId || inv.id;
@@ -486,7 +486,20 @@
         input.type = inputType === 'number' ? 'number' : 'text';
         if (inputType === 'number') { input.step = '0.01'; input.placeholder = '0.00'; }
         else { input.placeholder = fieldId === INV.payee ? 'Payee name' : fieldId === INV.desc ? 'Description' : fieldId === INV.ref ? 'Invoice ref' : 'Value'; }
-        const w = inputType === 'number' ? '80px' : (fieldId === INV.ref ? '90px' : '150px');
+        // Pre-populate with current value so corrections don't require retyping
+        const currentInv = airtableInvoices.find(i => i.recordId === recordId);
+        if (currentInv) {
+            const currentVal = fieldId === INV.amount ? currentInv.amount
+                : fieldId === INV.payee ? currentInv.payee
+                : fieldId === INV.desc ? currentInv.desc
+                : fieldId === INV.ref ? currentInv.ref
+                : fieldId === INV.dueDate ? currentInv.dueDate
+                : null;
+            if (currentVal !== null && currentVal !== undefined && currentVal !== '') {
+                input.value = String(currentVal);
+            }
+        }
+        const w = inputType === 'number' ? '90px' : (fieldId === INV.ref ? '110px' : '170px');
         input.style.cssText = `width:${w};padding:3px 6px;font-size:12px;border:1px solid #2563eb;border-radius:4px;${inputType === 'number' ? 'text-align:right;' : ''}`;
 
         async function save() {
@@ -545,6 +558,8 @@
         input.onblur = save;
         el.replaceWith(input);
         input.focus();
+        // Pre-select the current value so typing immediately replaces it
+        if (input.value) input.select();
     }
 
     // ── Approve AI match — mark paid in Airtable + move Gmail label ──
