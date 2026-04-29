@@ -6,7 +6,11 @@
 
     // ── Shared grid template for header + rows (kept in lockstep) ──
     // 13 columns matching the reconciliation engine's linked-record set, plus Account.
-    const _TX_GRID = '100px 220px 100px 130px 150px 130px 140px 140px 120px 140px 140px 130px 60px';
+    // Vendor/Description uses minmax(...,1fr) so it absorbs any extra width and
+    // shrinks with text-overflow:ellipsis on tight screens. Tightened from the
+    // original 1700px min so the table fits standard laptop content widths
+    // (~1200–1280) without horizontal scroll.
+    const _TX_GRID = '70px minmax(100px, 1.4fr) 85px 105px 125px 90px 105px 105px 85px 110px 100px 90px 45px';
 
     // ── Module state ──
     let _txState = {
@@ -458,7 +462,7 @@
                  reconciliation linked fields fit. Vertical scroll is on the viewport. -->
             <div style="border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);overflow:hidden">
               <div style="overflow-x:auto">
-                <div style="min-width:1700px">
+                <div style="min-width:1200px">
                 <div style="display:grid;grid-template-columns:${_TX_GRID};gap:0;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:11px;font-weight:var(--fw-semibold);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em">
                     <div onclick="_txSetSort('date')" style="padding:8px 12px;cursor:pointer" title="Sort by date">Date <span id="txSortInd-date"></span></div>
                     <div onclick="_txSetSort('vendor')" style="padding:8px 12px;cursor:pointer" title="Sort by vendor">Vendor / Description <span id="txSortInd-vendor"></span></div>
