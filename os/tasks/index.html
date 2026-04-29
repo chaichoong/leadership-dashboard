@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1700 collab-attach-comments</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-1830 health-check-collab-slack</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -885,6 +885,68 @@ async function testSlackNotification(){
   }
 }
 window.testSlackNotification=testSlackNotification;
+// Batch lookup: run a Slack users.lookupByEmail for every TEAM member
+// without sending DMs. Reports each as ✓ resolved / ✗ users_not_found
+// so Kevin can see at-a-glance who can/can't be DM'd before the team
+// hits a real assignment failure. Worker side reuses the existing
+// /notify endpoint with a special action='lookup' that returns the
+// lookup result without posting a message — but for backwards-compat
+// with already-deployed workers, we POST the same shape with a tiny
+// taskName "(diag-lookup)" so the worker's lookup phase runs and
+// either resolves the channel (success) or returns users_not_found.
+// Either response tells us what we need without spamming DMs.
+async function testAllSlackRecipients(){
+  const out=document.getElementById('slackTestResult');
+  if(!out)return;
+  if(!Array.isArray(TEAM)||!TEAM.length){out.innerHTML='<span style="color:var(--text-muted)">No team members configured.</span>';return}
+  out.innerHTML='<span style="color:var(--info)">⟳ Checking '+TEAM.length+' team member'+(TEAM.length===1?'':'s')+'…</span>';
+  const results=[];
+  for(const m of TEAM){
+    const slackTarget=slackEmailFor(m.email);
+    let row={key:m.key,name:m.name,airtableEmail:m.email,slackEmail:slackTarget,status:'unknown',detail:''};
+    try{
+      const resp=await fetch(SLACK_NOTIFY_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          recipientEmail:slackTarget,
+          taskName:'(diag-lookup-only)',
+          taskId:'DIAG-'+Date.now(),
+          actorName:'Diagnostic',
+          action:'lookup-only', // worker treats unknown actions like assigned
+        }),
+      });
+      const body=await resp.text();
+      let parsed=null;try{parsed=JSON.parse(body)}catch(_){}
+      if(resp.ok&&parsed&&parsed.ok){
+        row.status='ok';row.detail='DM sent — Slack user resolved';
+      }else if(parsed&&parsed.error&&/users_not_found|No Slack user/i.test(parsed.error)){
+        row.status='not-found';row.detail='No Slack user matches '+slackTarget;
+      }else{
+        row.status='error';row.detail=(parsed&&parsed.error)||body||(resp.status+' '+resp.statusText);
+      }
+    }catch(e){
+      row.status='error';row.detail='Network: '+((e&&e.message)||'unknown');
+    }
+    results.push(row);
+  }
+  // Render summary
+  const okCount=results.filter(r=>r.status==='ok').length;
+  const nfCount=results.filter(r=>r.status==='not-found').length;
+  const errCount=results.filter(r=>r.status==='error').length;
+  const head=`<div style="font-weight:600;font-size:12px;margin-bottom:6px">${okCount} resolved · ${nfCount} not found · ${errCount} error</div>`;
+  const rows=results.map(r=>{
+    const icon=r.status==='ok'?'<span style="color:var(--success);font-weight:700">✓</span>':r.status==='not-found'?'<span style="color:var(--danger);font-weight:700">✗</span>':'<span style="color:var(--warning);font-weight:700">!</span>';
+    const colour=r.status==='ok'?'var(--success)':r.status==='not-found'?'var(--danger)':'var(--warning)';
+    const noteSlack=r.airtableEmail!==r.slackEmail?` <span style="color:var(--text-muted);font-size:10px">(Slack: ${escHtml(r.slackEmail)})</span>`:'';
+    return `<div style="padding:4px 0;border-top:1px solid var(--border-subtle);font-size:11px"><div style="display:flex;justify-content:space-between;gap:6px"><span>${icon} <b style="color:${colour}">${escHtml(r.name)}</b>${noteSlack}</span></div><div style="font-size:10px;color:var(--text-muted);margin-left:14px">${escHtml(r.detail)}</div></div>`;
+  }).join('');
+  const note=okCount===TEAM.length
+    ? '<div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Note: a real DM was sent to every resolved member. They may see "(diag-lookup-only)" in their Slack — safe to ignore.</div>'
+    : '<div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Members marked ✗ won\'t receive Slack pings until their Slack account uses the email we have for them — fix is on their Slack profile, or update their TEAM entry.</div>';
+  out.innerHTML=head+rows+note;
+}
+window.testAllSlackRecipients=testAllSlackRecipients;
 function renderSyncPill(){
   const pill=document.getElementById('syncPill');if(!pill)return;
   if(_saveState.pending>0){
@@ -938,7 +1000,10 @@ function syncPillClick(){
       <summary style="cursor:pointer;font-weight:600;font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px">Slack notifications · diagnostic</summary>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
         <select id="slackTestTarget" style="font-size:12px;padding:4px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface)">${slackTargets}</select>
-        <button class="btn btn-sm" onclick="testSlackNotification()" style="font-size:11px">Send test DM</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="testSlackNotification()" style="font-size:11px;flex:1">Send test DM</button>
+          <button class="btn btn-sm" onclick="testAllSlackRecipients()" style="font-size:11px;flex:1" title="Run a Slack lookup for every team member, no DMs sent">Check all recipients</button>
+        </div>
         <div id="slackTestResult" style="font-size:11px;color:var(--text-secondary)"></div>
       </div>
     </details>
@@ -955,7 +1020,7 @@ async function runSyncCheck(){
     // common "reverted" case is "I marked X Completed, it came back as not
     // Completed". Fetch every task by ID referenced in the persisted log OR
     // currently in local state.
-    const fresh=await fetchTable(TASKS_TABLE,[F.name,F.status,F.priority,F.dueDate,F.business,F.description,F.projects,F.recurring,F.hardDeadline,F.timeEst],``);
+    const fresh=await fetchTable(TASKS_TABLE,[F.name,F.status,F.priority,F.dueDate,F.business,F.description,F.projects,F.recurring,F.hardDeadline,F.timeEst,F.collaborators],``);
     const norm=v=>{
       const s=(v==null?'':String(v)).trim();
       if(s==='(Untitled)'||s==='(Untitled Project)')return '';
@@ -987,6 +1052,16 @@ async function runSyncCheck(){
     // without being touched. Instead we compare `t.storedStatus`, which is
     // the status we last read from Airtable for that task — any difference
     // there is a real drift (an edit that was reverted or a stale cache).
+    // Normalise a collaborator-shaped value (array of objects with email)
+    // to a sorted comma list so local vs remote can be string-compared.
+    const collabKey=v=>{
+      if(!Array.isArray(v))return '';
+      return v.map(c=>{
+        if(!c)return '';
+        if(typeof c==='string')return c;
+        return (c.email||c.id||c.name||'').toLowerCase();
+      }).filter(Boolean).sort().join(',');
+    };
     const drift=[];
     (allTasks||[]).forEach(t=>{
       const r=byId.get(t.id);if(!r)return;
@@ -1001,6 +1076,15 @@ async function runSyncCheck(){
       checks.forEach(([field,local,remote])=>{
         if(norm(local)!==norm(remote))drift.push({taskId:t.id,name:t.name,field,local,remote});
       });
+      // Collaborators drift — checks the auto-add cascades (creator-as-
+      // collaborator on create, actor-as-collaborator on reassign,
+      // project-collab inheritance) actually landed in Airtable. Compare
+      // by sorted email list so order doesn't matter.
+      const localCollabKey=collabKey(t.collaborators);
+      const remoteCollabKey=collabKey(c[F.collaborators]);
+      if(localCollabKey!==remoteCollabKey){
+        drift.push({taskId:t.id,name:t.name,field:'collaborators',local:localCollabKey||'(none)',remote:remoteCollabKey||'(none)'});
+      }
     });
     if(!res)return;
     if(reverted.length){

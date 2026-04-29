@@ -10,7 +10,7 @@
     // shrinks with text-overflow:ellipsis on tight screens. Tightened from the
     // original 1700px min so the table fits standard laptop content widths
     // (~1200–1280) without horizontal scroll.
-    const _TX_GRID = '70px minmax(100px, 1.4fr) 85px 105px 125px 90px 105px 105px 85px 110px 100px 90px 45px';
+    const _TX_GRID = '80px minmax(90px, 1fr) 85px 105px 125px 90px 105px 105px 85px 110px 100px 90px 65px';
 
     // ── Module state ──
     let _txState = {
@@ -41,6 +41,8 @@
         tenancyRecById: {},   // full tenancy record (for tenant + property resolution)
         tenantById: {},       // tenant name by tenant id
         unitPropById: {},     // property name (string) keyed by unit id
+        propIdToName: {},     // property record id → property name (built from rental units)
+        propNameToId: {},     // property name → property record id
     };
 
     // ── Build name lookups from globally-loaded data ──
@@ -85,11 +87,23 @@
             s.tenantById[r.id] = typeof n === 'string' ? n : (n?.name || '');
         });
         // Unit id → property name string (via the unit's Property Name lookup)
+        // AND the bidirectional Property record id ↔ name maps used by the
+        // editable Property dropdown (transactions store property as a linked
+        // record, so we need the id to PATCH and the name to display).
         s.unitPropById = {};
+        s.propIdToName = {};
+        s.propNameToId = {};
         (allRentalUnits || []).forEach(r => {
-            const v = getField(r, F.unitPropName);
-            if (Array.isArray(v) && v.length) s.unitPropById[r.id] = String(v[0]);
-            else if (typeof v === 'string') s.unitPropById[r.id] = v;
+            const propLink = getField(r, F.unitProperty);
+            const propIds = Array.isArray(propLink) ? propLink.map(v => (typeof v === 'string' ? v : v?.id)).filter(Boolean) : [];
+            const nameLookup = getField(r, F.unitPropName);
+            const nameVal = Array.isArray(nameLookup) && nameLookup.length ? String(nameLookup[0]) : (typeof nameLookup === 'string' ? nameLookup : '');
+            if (nameVal) s.unitPropById[r.id] = nameVal;
+            if (propIds.length && nameVal) {
+                const pid = propIds[0];
+                if (!s.propIdToName[pid]) s.propIdToName[pid] = nameVal;
+                if (!s.propNameToId[nameVal]) s.propNameToId[nameVal] = pid;
+            }
         });
     }
 
@@ -108,10 +122,13 @@
     }
 
     // Resolve property name for a transaction:
-    //   1) tenancy → F.tenProperty (string lookup)
-    //   2) unit → F.unitPropName (string lookup)
+    //   1) direct F.txProperty linked record → propIdToName
+    //   2) tenancy → F.tenProperty (string lookup)
+    //   3) unit → F.unitPropName (string lookup)
     function _txPropertyNameFor(rec) {
         const s = _txState;
+        const directId = _txLinkedId(rec, F.txProperty);
+        if (directId && s.propIdToName[directId]) return s.propIdToName[directId];
         const tenancyId = _txLinkedId(rec, F.txTenancy);
         if (tenancyId) {
             const tenancy = s.tenancyRecById[tenancyId];
@@ -290,6 +307,8 @@
             });
         }
         _txBuildLookups();
+        // Invalidate cached dropdown items so they pick up any newly-loaded data
+        _txDropdownLists = null;
         _txPopulateFilterOptions();
         // Reset cached search blobs so newly-resolved linked-record names get
         // included on the next search (blobs are computed lazily and cached
@@ -558,49 +577,255 @@
         rowsHost.innerHTML = html;
     }
 
+    // ── Inline editable dropdown ──
+    // Reuses the <input list="datalist"> pattern from reconciliation.js so the
+    // type-to-search behaviour is identical: typing a letter opens the full list
+    // filtered to matches. On change, _txSaveCell PATCHes the field to Airtable
+    // and updates the local cache so subsequent renders reflect the change.
+    //
+    // `field` is one of: category | subcat | business | tenant | tenancy | unit | property | cost
+    // `items` is [{ id, name }] sorted A-Z.
+    function _txEditableDropdown(rec, field, items, currentId) {
+        const id = `tx-cell-${field}-${rec.id}`;
+        const dlId = `dl-${field}-${rec.id}`;
+        const sorted = [...items].filter(it => it.name).sort((a, b) => a.name.localeCompare(b.name));
+        const selected = sorted.find(i => i.id === currentId);
+        const val = selected ? selected.name : '';
+        const datalist = `<datalist id="${dlId}">${sorted.map(i => `<option value="${escHtml(i.name)}" data-id="${escHtml(i.id)}">`).join('')}</datalist>`;
+        const inputStyle = [
+            'width:100%',
+            'padding:4px 6px',
+            'border:1px solid transparent',
+            'border-radius:4px',
+            'background:transparent',
+            'font-size:12px',
+            'color:var(--text-primary)',
+            'font-family:inherit',
+            'box-sizing:border-box',
+            'min-width:0',
+        ].join(';');
+        // onmousedown stops the row's onclick (which opens the modal). Focus and
+        // hover give a visible border so the user can tell the cell is editable.
+        return `${datalist}<input
+            id="${id}"
+            list="${dlId}"
+            value="${escHtml(val)}"
+            data-tx-id="${rec.id}"
+            data-tx-field="${field}"
+            placeholder="—"
+            autocomplete="off"
+            style="${inputStyle}"
+            onmousedown="event.stopPropagation()"
+            onclick="event.stopPropagation()"
+            onfocus="this.style.border='1px solid var(--accent)';this.style.background='var(--bg-surface)'"
+            onblur="this.style.border='1px solid transparent';this.style.background='transparent'"
+            onchange="_txSaveCell(this)"
+        >`;
+    }
+
+    // Map cell field → { airtableFieldId, type ('link'|'string'), itemsKey, requiresIdResolution }
+    // 'link' fields PATCH `[id]`. Property is also 'link'. Tenant doesn't have a direct field
+    //  on the transaction — we route changes through the matching Tenancy when unambiguous.
+    const _TX_FIELD_MAP = {
+        category:  { airtableField: () => F.txCategory,    kind: 'link' },
+        subcat:    { airtableField: () => F.txSubCategory, kind: 'link' },
+        business:  { airtableField: () => F.txBusiness,    kind: 'link' },
+        tenancy:   { airtableField: () => F.txTenancy,     kind: 'link' },
+        unit:      { airtableField: () => F.txUnit,        kind: 'link' },
+        property:  { airtableField: () => F.txProperty,    kind: 'link' },
+        cost:      { airtableField: () => F.txCost,        kind: 'link' },
+        tenant:    { kind: 'derived' },  // routes via Tenancy
+    };
+
+    // Resolve the input's current display value to its record ID (via datalist).
+    function _txResolveInputId(input) {
+        if (!input) return '';
+        const v = input.value || '';
+        if (!v) return '';
+        const dl = document.getElementById(input.getAttribute('list'));
+        if (!dl) return '';
+        const opt = [...dl.options].find(o => o.value === v);
+        return opt ? opt.getAttribute('data-id') : '';
+    }
+
+    // Save handler — PATCHes Airtable, updates local cache, refreshes the row.
+    async function _txSaveCell(input) {
+        const txId = input.getAttribute('data-tx-id');
+        const field = input.getAttribute('data-tx-field');
+        const map = _TX_FIELD_MAP[field];
+        if (!map) return;
+        const rec = (allTransactions || []).find(r => r.id === txId);
+        if (!rec) return;
+
+        // Visual saving state
+        const origBg = input.style.background;
+        input.style.background = 'var(--accent-soft)';
+        input.disabled = true;
+
+        try {
+            // Tenant is "derived": changing the tenant tries to auto-resolve to a tenancy.
+            if (field === 'tenant') {
+                const tenantId = _txResolveInputId(input);
+                if (!tenantId) {
+                    // Cleared — leave tenancy alone (don't unlink); user can clear tenancy explicitly.
+                    return;
+                }
+                // Find tenancy(ies) linked to this tenant. If exactly one, link it.
+                const matches = (allTenancies || []).filter(t => {
+                    const linked = getField(t, F.tenLinkedTenant);
+                    if (!linked) return false;
+                    const ids = Array.isArray(linked) ? linked.map(v => (typeof v === 'string' ? v : v?.id)) : [];
+                    return ids.includes(tenantId);
+                });
+                if (matches.length === 1) {
+                    await _txPatchTransaction(rec, { [F.txTenancy]: [matches[0].id] });
+                } else if (matches.length === 0) {
+                    alert('No tenancy found for this tenant.');
+                    return;
+                } else {
+                    alert(`This tenant has ${matches.length} tenancies — please pick the Tenancy directly.`);
+                    return;
+                }
+            } else if (map.kind === 'link') {
+                const newId = _txResolveInputId(input);
+                const fieldId = map.airtableField();
+                // If user cleared the value, unlink it (empty array).
+                const fields = newId ? { [fieldId]: [newId] } : { [fieldId]: [] };
+                await _txPatchTransaction(rec, fields);
+            }
+
+            // Reset blob cache for this record so search index updates next render
+            if (rec) rec._txBlob = null;
+            // Re-apply filters (in case the change moved this record in/out of filter set)
+            // and re-render visible rows so the updated values reflect across the table.
+            _txApplyFilters();
+            _txRenderRows();
+            _txRenderInsights();
+            // Brief success flash
+            input.style.background = 'var(--success-bg)';
+            setTimeout(() => { input.style.background = origBg; }, 600);
+        } catch (e) {
+            console.error('Transaction save failed:', e);
+            input.style.background = 'var(--danger-bg)';
+            alert(`Save failed: ${e.message || 'unknown error'}`);
+            setTimeout(() => { input.style.background = origBg; }, 1200);
+        } finally {
+            input.disabled = false;
+        }
+    }
+
+    // Patch Airtable + sync local record so re-renders reflect the change.
+    async function _txPatchTransaction(rec, fields) {
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${rec.id}`;
+        const resp = await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields, returnFieldsByFieldId: true })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error?.message || `HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        // Merge returned fields into the local record's `fields` so subsequent reads
+        // (lookup name resolution, search, filters) see the new values immediately.
+        if (!rec.fields) rec.fields = {};
+        Object.assign(rec.fields, data.fields || {});
+        // For linked fields we just PATCHed, also store the raw ids so _txLinkedId resolves
+        // even if Airtable's response reshapes them.
+        Object.assign(rec.fields, fields);
+    }
+
+    // Cached dropdown item lists. Built once per render via _txBuildDropdownLists()
+    // because rebuilding them per row across 25 visible rows is wasteful.
+    let _txDropdownLists = null;
+    function _txBuildDropdownLists() {
+        const s = _txState;
+        const propItems = Object.entries(s.propIdToName).map(([id, name]) => ({ id, name }));
+        // Tenants: only Active (mirrors reconciliation's filter)
+        const tenantItems = (typeof allTenants !== 'undefined' && allTenants ? allTenants : [])
+            .filter(t => {
+                const status = getField(t, F.tenantStatus);
+                if (status && typeof status === 'object') return status.name === 'Active';
+                return String(status || '').toLowerCase() === 'active';
+            })
+            .map(t => ({ id: t.id, name: getField(t, F.tenantName) || '' }));
+        // Tenancies: only currently active (mirrors reconciliation)
+        const tenancyItems = (allTenancies || [])
+            .filter(r => isTenancyActive(getField(r, F.tenPayStatus)))
+            .map(r => ({ id: r.id, name: getField(r, F.tenRef) || '' }));
+        // Costs: only active (mirrors reconciliation)
+        const costItems = (allCosts || [])
+            .filter(r => isCostActive(r))
+            .map(r => ({ id: r.id, name: getField(r, F.costName) || '' }));
+        _txDropdownLists = {
+            category: Object.entries(s.catById).map(([id, name]) => ({ id, name })),
+            subcat:   Object.entries(s.subCatById).map(([id, name]) => ({ id, name })),
+            business: Object.entries(s.bizById).map(([id, name]) => ({ id, name })),
+            tenant:   tenantItems,
+            tenancy:  tenancyItems,
+            unit:     Object.entries(s.unitById).map(([id, name]) => ({ id, name })),
+            property: propItems,
+            cost:     costItems,
+        };
+    }
+
     function _txRowHtml(rec, idx) {
         const s = _txState;
+        if (!_txDropdownLists) _txBuildDropdownLists();
         const date = _txDateStr(rec);
         const dateShort = date ? new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '';
         const vendor = getField(rec, F.txVendor) || '';
         const desc = getField(rec, F.txDescription) || '';
         const label = vendor || desc || '(no label)';
         const sub = vendor && desc ? desc : '';
-        const subCatName = s.subCatById[_txLinkedId(rec, F.txSubCategory)] || '';
-        const catName = s.catById[_txLinkedId(rec, F.txCategory)] || '';
         const amount = _txAmount(rec);
         const amtClass = amount >= 0 ? 'text-green' : 'text-red';
         const account = _txAccountName(rec);
-        const bizName = s.bizById[_txLinkedId(rec, F.txBusiness)] || '';
-        const tenantName = _txTenantNameFor(rec);
-        const tenancyRef = s.tenancyById[_txLinkedId(rec, F.txTenancy)] || '';
-        const unitName = s.unitById[_txLinkedId(rec, F.txUnit)] || '';
-        const propertyName = _txPropertyNameFor(rec);
-        const costName = s.costById[_txLinkedId(rec, F.txCost)] || '';
+        // Resolve current ids for each editable field
+        const catId      = _txLinkedId(rec, F.txCategory);
+        const subCatId   = _txLinkedId(rec, F.txSubCategory);
+        const bizId      = _txLinkedId(rec, F.txBusiness);
+        const tenancyId  = _txLinkedId(rec, F.txTenancy);
+        const unitId     = _txLinkedId(rec, F.txUnit);
+        const costId     = _txLinkedId(rec, F.txCost);
+        // Tenant id derived via Tenancy → Customers
+        let tenantId = '';
+        if (tenancyId && s.tenancyRecById[tenancyId]) {
+            const linked = getField(s.tenancyRecById[tenancyId], F.tenLinkedTenant);
+            if (Array.isArray(linked) && linked.length) {
+                tenantId = typeof linked[0] === 'string' ? linked[0] : (linked[0]?.id || '');
+            }
+        }
+        // Property: prefer direct link; fall back to resolving the displayed name back to an id
+        let propId = _txLinkedId(rec, F.txProperty);
+        if (!propId) {
+            const propName = _txPropertyNameFor(rec);
+            if (propName) propId = s.propNameToId[propName] || '';
+        }
         const reconciled = !!getField(rec, F.txReconciled);
         const reconDot = reconciled
             ? `<span title="Reconciled" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success)"></span>`
             : `<span title="Unreconciled" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warning)"></span>`;
         const zebra = (idx % 2) ? 'var(--bg-surface-2)' : 'var(--bg-surface)';
-        const dimCell = 'padding:0 12px;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-        const muted = '<span style="color:var(--text-muted)">—</span>';
+        const editCell = 'padding:0 4px;display:flex;align-items:center;min-width:0';
         return `
-            <div onclick="_txOpenRow('${rec.id}')" style="display:grid;grid-template-columns:${_TX_GRID};gap:0;height:${s.rowH}px;border-bottom:1px solid var(--border-subtle);background:${zebra};cursor:pointer;align-items:center;font-size:13px;color:var(--text-primary)">
-                <div style="padding:0 12px;color:var(--text-secondary);font-size:12px">${escHtml(dateShort)}</div>
+            <div onclick="_txOpenRow('${rec.id}')" style="display:grid;grid-template-columns:${_TX_GRID};gap:0;min-height:${s.rowH}px;border-bottom:1px solid var(--border-subtle);background:${zebra};cursor:pointer;align-items:center;font-size:13px;color:var(--text-primary)">
+                <div style="padding:0 12px;color:var(--text-secondary);font-size:12px;white-space:nowrap">${escHtml(dateShort)}</div>
                 <div style="padding:0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
                     <div style="font-weight:var(--fw-medium);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(label)}</div>
                     ${sub ? `<div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(sub)}</div>` : ''}
                 </div>
                 <div class="${amtClass}" style="padding:0 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:var(--fw-medium)">${amount < 0 ? '-' : ''}${fmt(amount)}</div>
-                <div style="${dimCell}">${catName ? escHtml(catName) : muted}</div>
-                <div style="${dimCell}">${subCatName ? escHtml(subCatName) : muted}</div>
-                <div style="${dimCell}">${bizName ? escHtml(bizName) : muted}</div>
-                <div style="${dimCell}">${tenantName ? escHtml(tenantName) : muted}</div>
-                <div style="${dimCell}">${tenancyRef ? escHtml(tenancyRef) : muted}</div>
-                <div style="${dimCell}">${unitName ? escHtml(unitName) : muted}</div>
-                <div style="${dimCell}">${propertyName ? escHtml(propertyName) : muted}</div>
-                <div style="${dimCell}">${costName ? escHtml(costName) : muted}</div>
-                <div style="${dimCell}">${account ? escHtml(account) : muted}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'category', _txDropdownLists.category, catId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'subcat', _txDropdownLists.subcat, subCatId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'business', _txDropdownLists.business, bizId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'tenant', _txDropdownLists.tenant, tenantId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'tenancy', _txDropdownLists.tenancy, tenancyId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'unit', _txDropdownLists.unit, unitId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'property', _txDropdownLists.property, propId)}</div>
+                <div style="${editCell}">${_txEditableDropdown(rec, 'cost', _txDropdownLists.cost, costId)}</div>
+                <div style="padding:0 12px;font-size:12px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${account ? escHtml(account) : '<span style="color:var(--text-muted)">—</span>'}</div>
                 <div style="padding:0 12px;text-align:center">${reconDot}</div>
             </div>
         `;
