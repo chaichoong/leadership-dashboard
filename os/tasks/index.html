@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-30-0900 drawer-cascade-resync</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-01-0900 comment-notify</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -843,6 +843,40 @@ function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
   }catch(e){console.warn('[notify slack] threw (non-blocking)',e)}
 }
 window.notifyAssigneeSlack=notifyAssigneeSlack;
+// Fan-out helper: when a comment is added, DM every collaborator on
+// the task (plus the assignee if not already in the list) except the
+// person who wrote the comment. Worker accepts action='comment' and
+// renders the comment text inline as a blockquote.
+function notifyCollabsOnComment(task,commentText){
+  if(!task||!commentText)return;
+  const actorEmail=(currentUser&&currentUser.email)||'';
+  const recipients=new Set();
+  // Collaborators (the cascade adds creator + project members + reassigner)
+  (task.collaborators||[]).forEach(c=>{if(c&&c.email)recipients.add(c.email)});
+  // Assignee — defensive union in case they were never added as a collab
+  if(task.assigneeEmail)recipients.add(task.assigneeEmail);
+  // Skip the commenter — never DM yourself for your own comment.
+  recipients.delete(actorEmail);
+  recipients.forEach(email=>{
+    const slackTarget=slackEmailFor(email);
+    try{
+      fetch(SLACK_NOTIFY_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          recipientEmail:slackTarget,
+          taskName:task.name||'(no name)',
+          taskId:task.id,
+          actorName:(currentUser&&currentUser.name)||actorEmail||'',
+          action:'comment',
+          commentText:String(commentText).slice(0,500),
+        }),
+        keepalive:true,
+      }).catch(e=>console.warn('[notify comment] failed (non-blocking)',e));
+    }catch(e){console.warn('[notify comment] threw (non-blocking)',e)}
+  });
+}
+window.notifyCollabsOnComment=notifyCollabsOnComment;
 // Send a known-good Slack DM and surface the worker's HTTP response so
 // the user can see exactly why the pipeline did or didn't deliver.
 // Bypasses the in-flight value cleaning (we want to test the worker
@@ -2746,6 +2780,9 @@ async function submitDrawerComment(taskId){
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
     if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+    // Fan-out Slack DM to every collaborator + assignee, skipping the commenter.
+    const task=allTasks.find(x=>x.id===taskId);
+    if(task)notifyCollabsOnComment(task,text);
     toast('Comment posted');
   }catch(e){
     console.warn(e);toast('Failed to post comment',true);
@@ -2917,6 +2954,9 @@ async function submitModalComment(taskId){
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     renderCommentsInModal(taskId);
     if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+    // Fan-out Slack DM (modal path uses the same task store as the drawer).
+    const task=allTasks.find(x=>x.id===taskId);
+    if(task)notifyCollabsOnComment(task,text);
     toast('Comment posted');
   }catch(e){
     console.error('[Comments] post failed',e);toast('Failed to post comment',true);

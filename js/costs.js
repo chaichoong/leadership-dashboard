@@ -203,8 +203,10 @@
         const lastReconSubCatIds = (getField(r, F.costLastReconSubCat) || []).map(v => v.id || v).filter(Boolean);
         const accountName = lastReconAccountIds.length > 0 ? getAccountName(lastReconAccountIds[0]) : '';
         const subCatName = lastReconSubCatIds.length > 0 ? getSubCatNameById(lastReconSubCatIds[0]) : '';
-        const status = getPaymentStatusName(getField(r, F.costStatusNew)) || (isCostActive(r) ? 'In Payment' : 'Inactive');
-        const inactive = !!getField(r, F.costInactive) || status === 'Inactive';
+        // Payment Status is the source of truth — Kevin curates this manually.
+        // Active = "In Payment" or "Overdue"; everything else (Paused, Inactive) is excluded.
+        const status = getPaymentStatusName(getField(r, F.costPayStatus)) || '';
+        const inactive = !!getField(r, F.costInactive) || status === 'Inactive' || status === 'Paused';
 
         // Compute expected next payment date and days overdue, client-side
         const expectedNext = computeExpectedNextPayment(lastReconDate, dueDay, frequency);
@@ -245,9 +247,14 @@
         const accountStr = e.accountName ? escHtml(e.accountName) : '<span style="color:var(--text-muted)">—</span>';
         const subCatStr = e.subCatName ? escHtml(e.subCatName) : '<span style="color:var(--text-muted)">—</span>';
 
-        // Status badge
-        const statusClass = e.status === 'Overdue' ? 'overdue' : e.status === 'Inactive' ? 'estimate' : 'in-payment';
-        const statusBadge = `<span class="inv-badge ${statusClass}">${escHtml(e.status)}</span>`;
+        // Status badge — reflects the legacy Payment Status field
+        const statusClass = e.status === 'Overdue' ? 'overdue'
+            : e.status === 'In Payment' ? 'in-payment'
+            : e.status === 'Paused' ? 'due-soon'
+            : 'estimate';
+        const statusBadge = e.status
+            ? `<span class="inv-badge ${statusClass}">${escHtml(e.status)}</span>`
+            : '<span style="color:var(--text-muted);font-size:11px">— no status —</span>';
 
         // Days overdue
         let overdueCell = '<span style="color:var(--text-muted)">—</span>';
@@ -621,89 +628,77 @@
         btn.disabled = true;
         btn.textContent = 'Running dry-run…';
 
+        // Backfill ONLY populates the "Last Reconciled *" fields from each cost's
+        // most recent reconciled transaction. Status is curated manually by Kevin
+        // in the legacy Payment Status field — never touched by the dashboard.
         const plan = [];
         for (const c of (allCosts || [])) {
-            const hasNewStatus = !!getPaymentStatusName(getField(c, F.costStatusNew));
             const hasReconDate = !!getField(c, F.costLastReconDate);
+            if (hasReconDate) continue; // already populated
 
-            // Find most recent reconciled tx linked to this cost (for Last Reconciled fields)
             const reconciledTxs = (allTransactions || []).filter(tx => {
                 if (!getField(tx, F.txReconciled)) return false;
                 const linked = getField(tx, F.txCost);
                 if (!Array.isArray(linked)) return false;
                 return linked.some(v => (v.id || v) === c.id);
             });
-            const newest = reconciledTxs.length > 0 ? reconciledTxs.sort((a, b) =>
-                new Date(getField(b, F.txDate) || '') - new Date(getField(a, F.txDate) || ''))[0] : null;
+            if (reconciledTxs.length === 0) continue;
 
-            // Classify status using recency heuristic
-            const classification = classifyCostStatus(c);
+            const newest = reconciledTxs.sort((a, b) =>
+                new Date(getField(b, F.txDate) || '') - new Date(getField(a, F.txDate) || ''))[0];
 
-            const writes = {};
-            if (!hasNewStatus) writes[F.costStatusNew] = classification.status;
-            if (newest && !hasReconDate) {
-                writes[F.costLastReconDate] = getField(newest, F.txDate);
-                writes[F.costLastReconAmount] = Math.abs(Number(getField(newest, F.txReportAmount)) || 0);
-                const accIds = (getField(newest, F.txAccountLink) || []).map(v => v.id || v).filter(Boolean);
-                if (accIds.length > 0) writes[F.costLastReconAccount] = accIds.slice(0, 1);
-                const scIds = (getField(newest, F.txSubCategory) || []).map(v => v.id || v).filter(Boolean);
-                if (scIds.length > 0) writes[F.costLastReconSubCat] = scIds.slice(0, 1);
-            }
+            const writes = {
+                [F.costLastReconDate]: getField(newest, F.txDate),
+                [F.costLastReconAmount]: Math.abs(Number(getField(newest, F.txReportAmount)) || 0),
+            };
+            const accIds = (getField(newest, F.txAccountLink) || []).map(v => v.id || v).filter(Boolean);
+            if (accIds.length > 0) writes[F.costLastReconAccount] = accIds.slice(0, 1);
+            const scIds = (getField(newest, F.txSubCategory) || []).map(v => v.id || v).filter(Boolean);
+            if (scIds.length > 0) writes[F.costLastReconSubCat] = scIds.slice(0, 1);
 
-            if (Object.keys(writes).length > 0) {
-                plan.push({
-                    id: c.id,
-                    name: getField(c, F.costName) || '(unnamed)',
-                    writes,
-                    suggestedStatus: classification.status,
-                    reason: classification.reason,
-                    daysSinceLastTx: classification.daysSinceLastTx,
-                    reconciledCount: reconciledTxs.length,
-                });
-            }
+            plan.push({
+                id: c.id,
+                name: getField(c, F.costName) || '(unnamed)',
+                writes,
+                paymentStatus: getPaymentStatusName(getField(c, F.costPayStatus)) || '(no status)',
+                reconciledCount: reconciledTxs.length,
+            });
         }
 
         _costsBackfillState.plan = plan;
 
         if (plan.length === 0) {
-            out.innerHTML = '<div style="color:var(--success);font-weight:600;padding:8px 0">All costs are already up to date — nothing to backfill.</div>';
+            out.innerHTML = '<div style="color:var(--success);font-weight:600;padding:8px 0">All costs already have Last Reconciled fields populated — nothing to backfill.</div>';
             btn.disabled = false;
             btn.textContent = 'Re-run dry-run';
             return;
         }
 
-        const inPayment = plan.filter(p => p.suggestedStatus === 'In Payment');
-        const inactive = plan.filter(p => p.suggestedStatus === 'Inactive');
-
         const renderRow = (p) => {
             const w = p.writes;
             const parts = [];
-            if (w[F.costStatusNew]) parts.push(`<strong>Status → ${w[F.costStatusNew]}</strong>`);
-            if (w[F.costLastReconDate]) parts.push(`Last Paid → ${formatCostDate(w[F.costLastReconDate])}`);
-            if (w[F.costLastReconAmount] != null) parts.push(`Amount → ${fmt(w[F.costLastReconAmount])}`);
+            parts.push(`Last Paid → ${formatCostDate(w[F.costLastReconDate])}`);
+            parts.push(`Amount → ${fmt(w[F.costLastReconAmount])}`);
             if (w[F.costLastReconAccount]) parts.push(`Account → ${getAccountName(w[F.costLastReconAccount][0]) || '(linked)'}`);
             if (w[F.costLastReconSubCat]) parts.push(`Sub-Cat → ${getSubCatNameById(w[F.costLastReconSubCat][0]) || '(linked)'}`);
-            return `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px"><strong>${escHtml(p.name)}</strong> <span style="color:var(--text-muted)">(${p.reconciledCount} reconciled · ${escHtml(p.reason)})</span><br><span style="color:var(--text-secondary)">${parts.join(' · ')}</span></div>`;
+            return `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px"><strong>${escHtml(p.name)}</strong> <span style="color:var(--text-muted)">[${escHtml(p.paymentStatus)}] · ${p.reconciledCount} reconciled tx${p.reconciledCount !== 1 ? 's' : ''}</span><br><span style="color:var(--text-secondary)">${parts.join(' · ')}</span></div>`;
         };
 
+        const byStatus = {};
+        plan.forEach(p => { (byStatus[p.paymentStatus] ||= []).push(p); });
+        const sectionsHtml = Object.entries(byStatus)
+            .sort((a, b) => b[1].length - a[1].length)
+            .map(([status, items]) => {
+                const open = (status === 'In Payment' || status === 'Overdue') ? 'open' : '';
+                return `<details ${open} style="margin-bottom:12px"><summary style="cursor:pointer;padding:6px 8px;background:var(--bg-subtle);color:var(--text-secondary);border-radius:4px;font-weight:600">${escHtml(status)} — ${items.length} cost${items.length !== 1 ? 's' : ''}</summary><div style="padding:8px 0">${items.map(renderRow).join('')}</div></details>`;
+            }).join('');
+
         const summary = `
-            <div style="font-weight:600;margin-bottom:12px">Dry-run plan: ${plan.length} cost record(s) will be updated</div>
-            <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px">
-                <div><strong style="color:var(--success)">In Payment:</strong> ${inPayment.length}</div>
-                <div><strong style="color:var(--text-muted)">Inactive:</strong> ${inactive.length}</div>
-            </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Heuristic: cost is "In Payment" if it has a linked transaction within the last ${ACTIVE_WINDOW_DAYS} days. Anything older or never used → Inactive. Review below; if any are wrongly classified, manually flip them in Airtable's <em>Cost Status (New)</em> column before committing (or after — they won't be auto-overwritten).</div>
+            <div style="font-weight:600;margin-bottom:8px">Dry-run plan: ${plan.length} cost record(s) will get their Last Reconciled fields populated</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">This backfill only writes the Last Reconciled Payment Date, Amount, Account and Sub-Category fields, sourced from each cost's most recent reconciled transaction. The Payment Status field is never touched — that stays under your control.</div>
         `;
 
-        const sectionInPayment = inPayment.length > 0
-            ? `<details open style="margin-bottom:12px"><summary style="cursor:pointer;padding:6px 8px;background:var(--success-bg);color:var(--success);border-radius:4px;font-weight:600">▼ Will set to "In Payment" (${inPayment.length})</summary><div style="padding:8px 0">${inPayment.map(renderRow).join('')}</div></details>`
-            : '';
-
-        const sectionInactive = inactive.length > 0
-            ? `<details style="margin-bottom:12px"><summary style="cursor:pointer;padding:6px 8px;background:var(--bg-subtle);color:var(--text-secondary);border-radius:4px;font-weight:600">▶ Will set to "Inactive" (${inactive.length}) — click to expand and review</summary><div style="padding:8px 0">${inactive.map(renderRow).join('')}</div></details>`
-            : '';
-
-        out.innerHTML = summary + sectionInPayment + sectionInactive + `<div style="margin-top:12px;padding:8px;background:var(--info-bg);color:var(--info);border-radius:4px;font-size:12px">Review the lists above. If correct, click <strong>Commit Backfill</strong>. If anything is miscategorised, flip the wrongly-classified records in Airtable manually first (or after the commit — the dashboard never auto-overrides a deliberately-set status).</div>`;
+        out.innerHTML = summary + sectionsHtml + `<div style="margin-top:12px;padding:8px;background:var(--info-bg);color:var(--info);border-radius:4px;font-size:12px">Review the rows above. If correct, click <strong>Commit Backfill</strong>.</div>`;
         btn.disabled = false;
         btn.textContent = 'Re-run dry-run';
         document.getElementById('costsCommitBtn').style.display = 'inline-block';
@@ -725,34 +720,19 @@
             const writes = [];
             for (const c of (allCosts || [])) {
                 const e = enrichCost(c);
-                const inactiveChecked = !!getField(c, F.costInactive);
                 const storedDays = getField(c, F.costDaysOverdue);
                 const storedVarAmt = getField(c, F.costVarianceAmount);
                 const storedVarFlag = getPaymentStatusName(getField(c, F.costVarianceFlag));
                 const storedNext = getField(c, F.costExpectedNext);
-                const storedStatus = getPaymentStatusName(getField(c, F.costStatusNew));
 
                 const computedNext = e.expectedNext ? toIsoDate(e.expectedNext) : null;
                 const computedDays = e.daysOverdue;
                 const computedVarAmt = e.varianceFlag !== 'unknown' ? +(e.varianceAmount.toFixed(2)) : null;
                 const computedVarFlag = ({ match: 'Match', soft: 'Soft', hard: 'Hard', unknown: 'Unknown' })[e.varianceFlag] || 'Unknown';
 
-                // Compute desired status. RULES:
-                // - Inactive checkbox always wins → "Inactive".
-                // - Already-Inactive stays Inactive (never auto-promoted).
-                // - In Payment ↔ Overdue can flip both ways based on Days Overdue.
-                // - Empty status is left empty (only the backfill sets initial status,
-                //   to avoid silently activating paused costs).
-                let desiredStatus = storedStatus || '';
-                if (inactiveChecked) {
-                    desiredStatus = 'Inactive';
-                } else if (storedStatus === 'Inactive') {
-                    desiredStatus = 'Inactive';
-                } else if (storedStatus === 'In Payment' && computedDays !== null && computedDays > 0) {
-                    desiredStatus = 'Overdue';
-                } else if (storedStatus === 'Overdue' && computedDays !== null && computedDays <= 0) {
-                    desiredStatus = 'In Payment';
-                }
+                // NOTE: Status is intentionally not synced here. The legacy
+                // Payment Status field is curated manually by Kevin and is the
+                // source of truth — the dashboard never overwrites it.
 
                 const fields = {};
                 if (computedDays !== null && Number(storedDays) !== Number(computedDays)) {
@@ -766,9 +746,6 @@
                 }
                 if (computedNext && storedNext !== computedNext) {
                     fields[F.costExpectedNext] = computedNext;
-                }
-                if (desiredStatus && desiredStatus !== (storedStatus || '')) {
-                    fields[F.costStatusNew] = desiredStatus;
                 }
 
                 if (Object.keys(fields).length > 0) {

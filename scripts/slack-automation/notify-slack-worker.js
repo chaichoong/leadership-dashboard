@@ -78,7 +78,7 @@ export async function handleNotifySlack(request, env) {
     }
 
     // Original flow: assignee DM via email lookup.
-    const { recipientEmail, taskName, taskId, actorName, action } = body || {};
+    const { recipientEmail, taskName, taskId, actorName, action, commentText } = body || {};
     if (!recipientEmail || !taskName) {
         return json({ error: 'recipientEmail and taskName are required (or pass channel + text for a channel reply)' }, 400, corsHeaders);
     }
@@ -119,15 +119,30 @@ export async function handleNotifySlack(request, env) {
     let verb;
     if (action === 'completed') verb = 'completed a task you collaborate on';
     else if (action === 'reassigned') verb = 'reassigned to you';
+    else if (action === 'comment') verb = 'left a comment on a task you collaborate on';
     else verb = 'assigned to you';
     const headerLine = actorName
         ? `*${escapeMrkdwn(actorName)}* ${verb}:`
         : `A task was ${verb}:`;
-    const text = `${headerLine}\n\n• ${escapeMrkdwn(cleanName)}`;
+    // Optional quoted comment body — only used when action='comment'.
+    // Truncated to 500 chars so a long comment doesn't blow out the DM.
+    const cleanComment = commentText ? String(commentText).trim().slice(0, 500) : '';
+    const commentTail = (action === 'comment' && cleanComment)
+        ? '\n\n> ' + escapeMrkdwn(cleanComment).split('\n').join('\n> ')
+        : '';
+    const text = `${headerLine}\n\n• ${escapeMrkdwn(cleanName)}${commentTail}`;
     const blocks = [
         { type: 'section', text: { type: 'mrkdwn', text: headerLine } },
         { type: 'section', text: { type: 'mrkdwn', text: `*${escapeMrkdwn(cleanName)}*` } },
     ];
+    if (action === 'comment' && cleanComment) {
+        // Slack quote blocks render lines starting with ">" as a left-bar
+        // blockquote. Preserves multi-line comments.
+        blocks.push({
+            type: 'section',
+            text: { type: 'mrkdwn', text: '> ' + escapeMrkdwn(cleanComment).split('\n').join('\n> ') },
+        });
+    }
     if (taskId) {
         blocks.push({
             type: 'context',

@@ -239,13 +239,13 @@
     }
 
     function isCostActive(rec) {
-        const inactive = getField(rec, F.costInactive);
-        if (inactive) return false;
-        const newStatus = getPaymentStatusName(getField(rec, F.costStatusNew));
-        if (newStatus) return newStatus !== 'Inactive';
-        const legacyStatus = getPaymentStatusName(getField(rec, F.costPayStatus));
-        const validLegacy = ['In Payment', 'Active', 'Overdue', 'Due Today', 'Upcoming'];
-        return validLegacy.includes(legacyStatus);
+        // Single rule, used everywhere (Leadership Dashboard monthly costs,
+        // AP Fixed table, reconciliation dropdowns, transactions dropdowns).
+        // Active = Payment Status is "In Payment" OR "Overdue".
+        // Anything else (Paused, Inactive, empty) is excluded.
+        if (getField(rec, F.costInactive)) return false;
+        const status = getPaymentStatusName(getField(rec, F.costPayStatus));
+        return status === 'In Payment' || status === 'Overdue';
     }
 
     // ── Cost reconciliation sync ──
