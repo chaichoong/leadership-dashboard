@@ -12,7 +12,7 @@
         { id: 'tasks',       name: 'Task and Project Management',   icon: '✅', pageVer: '1.49', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.10', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
-        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.13', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
+        { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.14', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.17', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.20', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
