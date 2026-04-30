@@ -1698,7 +1698,9 @@
             document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
 
             // Auto-check Airtable for completed tasks when viewing label 8
-            if (isTaskCreatedView()) {
+            // (Task Created) OR label 12 (Kevin to Respond) — both feed the
+            // same auto-move-to-label-9 flow.
+            if (isTaskCreatedView() || /^12[.:]\s/.test(currentLabel || '')) {
                 checkCompletedAirtableTasks();
             }
 
@@ -3128,14 +3130,23 @@ Body: ${bodyText}`;
     async function checkCompletedAirtableTasks() {
         const pat = getAirtablePat();
         if (!pat) return;
-        if (!isTaskCreatedView()) return;
+        // Fires when the user is viewing label 8 (Task Created) OR label 12
+        // (Kevin to Respond) — both are "task source" labels whose entries
+        // should auto-move to label 9 when their Airtable tasks complete.
+        const onTaskSourceView = isTaskCreatedView() || /^12[.:]\s/.test(currentLabel || '');
+        if (!onTaskSourceView) return;
 
         const completedThreadIds = await fetchCompletedInboundThreadIds();
         if (completedThreadIds.size === 0) return;
 
         const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
         const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
-        if (!label9 || !label8) return;
+        const label12 = allLabelsRaw.find(l => /^12[.:]\s/.test(l.name));
+        if (!label9) return;
+        // Remove whichever source label(s) the thread carries — passing
+        // both is safe (Gmail no-ops on labels not present).
+        const removeIds = [label8, label12].filter(Boolean).map(l => l.id);
+        if (removeIds.length === 0) return;
 
         const toMove = [];
         for (const email of allEmails) {
@@ -3153,7 +3164,7 @@ Body: ${bodyText}`;
                     await gapi.client.gmail.users.messages.modify({
                         userId: 'me',
                         id: email.msgIds[m],
-                        resource: { addLabelIds: [label9.id], removeLabelIds: [label8.id] }
+                        resource: { addLabelIds: [label9.id], removeLabelIds: removeIds }
                     });
                 }
                 movedCount++;
@@ -3175,9 +3186,11 @@ Body: ${bodyText}`;
     }
 
     // Background sweep — runs regardless of current view.
-    // Fetches the current label-8 thread list from Gmail (not from the
-    // local allEmails cache), intersects with Airtable-completed threadIds,
-    // and moves each matching thread from label 8 to label 9.
+    // Fetches the current thread list for both label 8 (Task Created) and
+    // label 12 (Kevin to Respond), intersects with Airtable-completed
+    // threadIds, and moves each matching thread to label 9 — stripping
+    // whichever of 8 or 12 it was tagged with. Gmail's threads.list ANDs
+    // labelIds, so we need two separate queries to cover both sources.
     let sweepInFlight = false;
     async function sweepCompletedInboundTasks() {
         if (sweepInFlight) return;
@@ -3204,46 +3217,59 @@ Body: ${bodyText}`;
             }
             const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
             const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
-            if (!label8) { console.warn('[sweep] no label "8: ..." found'); return; }
+            const label12 = allLabelsRaw.find(l => /^12[.:]\s/.test(l.name));
             if (!label9) { console.warn('[sweep] no label "9: ..." found'); return; }
 
             const completedMap = await fetchCompletedInboundThreadIds();
             console.log(`[sweep] ${completedMap.size} completed inbound task(s) in Airtable`);
             if (completedMap.size === 0) return;
 
-            // Pull the live list of label-8 threads from Gmail directly
-            let listResp;
-            try {
-                listResp = await gapi.client.gmail.users.threads.list({
-                    userId: 'me',
-                    labelIds: [label8.id],
-                    maxResults: 500
-                });
-            } catch (err) {
-                console.warn('[sweep] failed to list label-8 threads:', err);
+            // Both label 8 (Task Created) and label 12 (Kevin to Respond)
+            // create Airtable tasks, so both are valid sources for the
+            // auto-move-to-label-9 flow.
+            const sourceLabels = [label8, label12].filter(Boolean);
+            if (sourceLabels.length === 0) {
+                console.warn('[sweep] no source labels (8 or 12) found');
                 return;
             }
+            const sourceLabelIds = sourceLabels.map(l => l.id);
 
-            const label8ThreadIds = new Set((listResp.result.threads || []).map(t => t.id));
-            console.log(`[sweep] ${label8ThreadIds.size} thread(s) currently in label 8`);
-            if (label8ThreadIds.size === 0) return;
+            const candidateThreadIds = new Set();
+            for (const sourceLabel of sourceLabels) {
+                try {
+                    const listResp = await gapi.client.gmail.users.threads.list({
+                        userId: 'me',
+                        labelIds: [sourceLabel.id],
+                        maxResults: 500
+                    });
+                    for (const t of (listResp.result.threads || [])) {
+                        candidateThreadIds.add(t.id);
+                    }
+                } catch (err) {
+                    console.warn(`[sweep] failed to list ${sourceLabel.name} threads:`, err);
+                }
+            }
+            console.log(`[sweep] ${candidateThreadIds.size} thread(s) across labels 8/12`);
+            if (candidateThreadIds.size === 0) return;
 
             const toMove = [];
-            for (const threadId of label8ThreadIds) {
+            for (const threadId of candidateThreadIds) {
                 if (completedMap.has(threadId)) {
                     toMove.push({ threadId, taskName: completedMap.get(threadId) });
                 }
             }
-            console.log(`[sweep] ${toMove.length} thread(s) to move from label 8 → label 9`);
+            console.log(`[sweep] ${toMove.length} thread(s) to move → label 9`);
             if (toMove.length === 0) return;
 
             let movedCount = 0;
             for (const { threadId, taskName } of toMove) {
                 try {
+                    // removeLabelIds on labels the thread doesn't have is a
+                    // no-op, so we can safely pass both 8 and 12 every time.
                     await gapi.client.gmail.users.threads.modify({
                         userId: 'me',
                         id: threadId,
-                        resource: { addLabelIds: [label9.id], removeLabelIds: [label8.id] }
+                        resource: { addLabelIds: [label9.id], removeLabelIds: sourceLabelIds }
                     });
                     movedCount++;
                     addAuditEntry('airtable_complete_bg', `Background auto-moved thread to Task Completed (task: "${truncate(taskName, 30)}")`);
@@ -3255,10 +3281,10 @@ Body: ${bodyText}`;
             if (movedCount > 0) {
                 localStorage.setItem('last_completion_sweep', new Date().toISOString());
                 scheduleLabelCountRefresh();
-                // If we happen to be on label 8 right now, refresh the view
-                if (typeof isTaskCreatedView === 'function' && isTaskCreatedView()) {
-                    loadEmails();
-                }
+                // If we happen to be on label 8 or label 12 right now, refresh the view
+                const onSource = typeof isTaskCreatedView === 'function' &&
+                    (isTaskCreatedView() || /^12[.:]\s/.test(currentLabel || ''));
+                if (onSource) loadEmails();
                 console.log(`Completion sweep moved ${movedCount} thread(s) to Task Completed`);
             }
         } catch (err) {
