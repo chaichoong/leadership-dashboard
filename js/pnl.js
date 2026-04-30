@@ -285,7 +285,7 @@
 
         const catList = pnlNameList(allCategories, PNL_NAME_FIELDS.category);
         const subList = pnlNameList(allSubCategories, PNL_NAME_FIELDS.subCategory);
-        const bizList = pnlNameList(allBusinesses, PNL_NAME_FIELDS.business);
+        const bizList = pnlNameList(getActiveBusinesses(), PNL_NAME_FIELDS.business);
         const datalistHtml = `
             <datalist id="pnl-dl-category">${pnlDatalistOptions(catList)}</datalist>
             <datalist id="pnl-dl-subCategory">${pnlDatalistOptions(subList)}</datalist>
@@ -624,7 +624,14 @@ RULES:
 
         pnlDestroyCharts();
 
-        const businessNames = PNL_TOP_BUSINESSES.slice();
+        // Derive selectable business list from the Airtable Active flag so deactivated
+        // businesses disappear from the picker. Fall back to the historical hardcoded list
+        // if the Airtable flag hasn't been populated yet.
+        const activeNames = getActiveBusinesses()
+            .map(b => String(getField(b, BIZ_NAME_FIELD) || ''))
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b));
+        const businessNames = activeNames.length ? activeNames : PNL_TOP_BUSINESSES.slice();
         if (!businessNames.includes(pnlBusinessName)) pnlBusinessName = businessNames[0];
 
         const keys = pnlMonthKeys(pnlMonths);

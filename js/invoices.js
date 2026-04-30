@@ -307,10 +307,17 @@
             const descHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.desc}" data-type="text" value="${escHtml(displayDesc)}" placeholder="Description…" style="${inputBase}">`;
             const refHtml = `<input type="text" class="inv-cell-input inv-cell-ref" data-record="${inv.recordId}" data-field="${INV.ref}" data-type="text" value="${escHtml(displayRef)}" placeholder="Ref…" style="${inputBase};font-family:monospace;font-size:11px">`;
 
-            // Business cell — always-visible <select> populated with all businesses
+            // Business cell — always-visible <select> populated with active businesses only.
+            // If the invoice already points at an inactive business we still show that option
+            // so the value is preserved on render.
             const currentBizId = (inv.businessIds && inv.businessIds[0]) || '';
+            const bizPickList = getActiveBusinesses();
+            if (currentBizId && !bizPickList.some(b => b.id === currentBizId)) {
+                const cur = (allBusinesses || []).find(b => b.id === currentBizId);
+                if (cur) bizPickList.push(cur);
+            }
             const bizOptions = ['<option value="">— None —</option>'].concat(
-                (allBusinesses || []).map(b => {
+                bizPickList.map(b => {
                     const nm = getField(b, BIZ_NAME_FIELD);
                     const label = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
                     return `<option value="${b.id}"${b.id === currentBizId ? ' selected' : ''}>${escHtml(label)}</option>`;
@@ -654,7 +661,7 @@
         // Populate bulk business dropdown once
         if (bulkSelect && bulkSelect.options.length === 0) {
             bulkSelect.innerHTML = '<option value="">— None —</option>' +
-                (allBusinesses || []).map(b => {
+                getActiveBusinesses().map(b => {
                     const nm = getField(b, BIZ_NAME_FIELD);
                     const label = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
                     return `<option value="${b.id}">${escHtml(label)}</option>`;
@@ -806,7 +813,12 @@
         const blank = document.createElement('option');
         blank.value = ''; blank.textContent = '— None —';
         select.appendChild(blank);
-        (allBusinesses || []).forEach(b => {
+        const bizPickList = getActiveBusinesses();
+        if (currentBizId && !bizPickList.some(b => b.id === currentBizId)) {
+            const cur = (allBusinesses || []).find(b => b.id === currentBizId);
+            if (cur) bizPickList.push(cur);
+        }
+        bizPickList.forEach(b => {
             const opt = document.createElement('option');
             opt.value = b.id;
             const nm = getField(b, BIZ_NAME_FIELD);

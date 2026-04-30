@@ -129,6 +129,9 @@
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
     const BIZ_NAME_FIELD = 'fldbbRqVxLxUdHwIR';
+    // Active checkbox on the Businesses table — every business picker/filter in the app
+    // hides records where this is unchecked. Tick in Airtable to bring a business back.
+    const BIZ_ACTIVE_FIELD = 'fldhXBnRrngCVsgSk';
 
     // Field IDs
     const F = {
@@ -140,11 +143,18 @@
         costExpected:     'fld9JibXkMpTeMcxw',
         costDueDay:       'fld7IsfiGvKpxEwSs',
         costFrequency:    'fldvozTHvs5VH3lNi',
-        costPayStatus:    'fldXZNI96v8HgjuSh',
-        costAccountAlias: 'fldX2QMLkSYzDEpIF',
+        costPayStatus:    'fldXZNI96v8HgjuSh',   // legacy multi-status singleSelect — kept for migration only
+        costAccountAlias: 'fldX2QMLkSYzDEpIF',   // legacy lookup
         costInactive:     'fldQJPGLFMbwVelsW',
         costDueDateNext:  'fldQZBF4JzBsmWU87',
-        costSubCategory:  'fldRO90pSCj6ahVMC',   // Chart of Accounts - Sub Categories (linked)
+        costSubCategory:  'fldRO90pSCj6ahVMC',   // legacy Chart of Accounts - Sub Categories (linked)
+        // Costs — clean fields owned by the dashboard (single source of truth, written by reconciliation)
+        costEndDate:           'fldhTpqQsVAnHpTCz',  // existing "Last Payment Date" field — UI label: "End Date"
+        costLastReconDate:     'fldeMdOxYemcJwVRD',  // Last Reconciled Payment Date (new)
+        costLastReconAmount:   'fldaYYj2cInwtvOdJ',  // Last Reconciled Amount (new, currency £)
+        costLastReconAccount:  'fldFdBxF4EMABsg2v',  // Last Reconciled Account (new, links → Accounts)
+        costLastReconSubCat:   'fld8jYp42Y7s3NbrM',  // Last Reconciled Sub-Category (new, links → Sub-Categories)
+        costStatusNew:         'fldWl7mp9zTC2aaaQ',  // Cost Status (New): In Payment / Overdue / Inactive
         // Transactions sub-category (already have txSubCategory = fldMRjSVzZVYeHb0A)
         // Tenancies
         tenRef:           'fldyNVvFn4x8GY14q',
@@ -197,6 +207,7 @@
         txUnit:           'fldJGIhSbgXNIEW4a',  // Unit (linked)
         txProperty:       'fldvp44VfF8uTTthp',  // Property (linked)
         txCost:           'fldGkpkVqSeiGvUGL',  // Costs (linked)
+        txAccountLink:    'fld9hm24JQUPOCoWj',  // **Account (linked → Accounts) — actual account record link on tx
         txBusiness:       'fldX1aFlJyzpXGhbF',  // Business (For Reports) (linked)
     };
 
@@ -314,6 +325,10 @@
         costOverdue:     'selGB3gE7Bg7jKoIS',
         costDueToday:    'selZazCz6gUJJ8Pl8',
         costUpcoming:    'selypOeFtsBePQG1E',
+        // Cost Status (New) — clean status field used by the AP Fixed dashboard
+        costNewInPayment: 'sel9bem92hq9d0926',
+        costNewOverdue:   'selc7o2vZ0szCzzBB',
+        costNewInactive:  'sel43EzvHZXeLZbwC',
     };
 
     let PAT = '';

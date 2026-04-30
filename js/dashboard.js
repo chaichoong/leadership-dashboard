@@ -6,7 +6,7 @@
     // Uses IndexedDB, not localStorage: the full dataset is ~50MB (7000+ transactions)
     // which blows through localStorage's 5-10MB quota and silently fails to save.
     // IndexedDB handles hundreds of MB and stores objects directly (no JSON stringify).
-    const DASH_CACHE_KEY = '_dlr_dashcache_v1';
+    const DASH_CACHE_KEY = '_dlr_dashcache_v2';
     const DASH_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h — older than this, don't show stale
     const IDB_DB_NAME = '_dlr_cache';
     const IDB_STORE = 'kv';
@@ -516,7 +516,12 @@
         section.style.display='block';
 
         // Filter pills — match the sage-executive token palette used on the rest of the page.
-        const filters=['all','Real Estate','Operations Director','Personal'];
+        // Active businesses come from Airtable so deactivating a business hides its filter pill.
+        const activeBizNames=getActiveBusinesses()
+            .map(b=>String(getField(b,BIZ_NAME_FIELD)||''))
+            .filter(Boolean)
+            .sort((a,b)=>a.localeCompare(b));
+        const filters=['all',...activeBizNames];
         pills.innerHTML=filters.map(f=>{
             const label=f==='all'?'All':f;
             const isActive=strategicKpiFilter===f;

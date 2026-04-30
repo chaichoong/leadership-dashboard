@@ -106,7 +106,12 @@
         return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:130px');
     }
     function buildBusinessDropdown(id, selectedId) {
-        const items = allBusinesses.map(r => ({
+        const pickList = getActiveBusinesses();
+        if (selectedId && !pickList.some(r => r.id === selectedId)) {
+            const cur = (allBusinesses || []).find(r => r.id === selectedId);
+            if (cur) pickList.push(cur);
+        }
+        const items = pickList.map(r => ({
             id: r.id, name: getField(r, 'fldbbRqVxLxUdHwIR') || ''
         }));
         return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:120px');

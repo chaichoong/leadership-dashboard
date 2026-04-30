@@ -165,6 +165,14 @@
         return rec.fields?.[fieldId];
     }
 
+    // Active businesses only — every user-facing business picker/filter calls this
+    // so deactivated businesses (Active checkbox unticked in Airtable) disappear from
+    // dropdowns while still resolving correctly on historical records via allBusinesses.
+    function getActiveBusinesses() {
+        return (typeof allBusinesses !== 'undefined' ? allBusinesses : [])
+            .filter(b => !!getField(b, BIZ_ACTIVE_FIELD));
+    }
+
     // Account Alias comes back as a flat array of name strings e.g. ["Santander"]
     // or as a linked-record object with linkedRecordIds. Handle both.
     function isOurAccount(aliasField) {
