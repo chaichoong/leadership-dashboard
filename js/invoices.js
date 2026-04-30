@@ -299,8 +299,10 @@
             // attributes so the delegated handlers (handleCellInputChange, handleCellInputBlur,
             // handleCellInputKey) know what to PATCH. See saveCellInput() for the save flow.
             const inputBase = 'border:1px solid var(--border-default);border-radius:4px;padding:4px 6px;font-size:12px;font-family:inherit;background:var(--bg-surface);color:var(--text-primary);width:100%;transition:border-color 0.15s,box-shadow 0.15s';
-            const amountVal = displayAmt !== null ? displayAmt : '';
-            const amountHtml = `<input type="number" step="0.01" class="inv-cell-input inv-cell-amount" data-record="${inv.recordId}" data-field="${INV.amount}" data-type="number" value="${amountVal}" placeholder="0.00" style="${inputBase};text-align:right;font-weight:600">`;
+            // Amount is type="text" (not number) so trailing zeros are preserved — e.g. £40.00 not £40.
+            // inputmode="decimal" still gives mobile users a numeric keyboard. Validation happens on save.
+            const amountVal = displayAmt !== null ? Number(displayAmt).toFixed(2) : '';
+            const amountHtml = `<input type="text" inputmode="decimal" class="inv-cell-input inv-cell-amount" data-record="${inv.recordId}" data-field="${INV.amount}" data-type="number" value="${amountVal}" placeholder="0.00" style="${inputBase};text-align:right;font-weight:600">`;
             const payeeHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.payee}" data-type="text" value="${escHtml(displayPayee)}" placeholder="Payee…" style="${inputBase};font-weight:600">`;
             const descHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.desc}" data-type="text" value="${escHtml(displayDesc)}" placeholder="Description…" style="${inputBase}">`;
             const refHtml = `<input type="text" class="inv-cell-input inv-cell-ref" data-record="${inv.recordId}" data-field="${INV.ref}" data-type="text" value="${escHtml(displayRef)}" placeholder="Ref…" style="${inputBase};font-family:monospace;font-size:11px">`;
@@ -580,6 +582,10 @@
             console.error('Cell save failed:', e);
         } finally {
             input.disabled = false;
+        }
+        // After a successful number save, reformat input to two decimals (e.g. "40" → "40.00")
+        if (saveOk && type === 'number' && fieldValue !== null) {
+            input.value = Number(fieldValue).toFixed(2);
         }
         // Flash the input's parent cell
         const td = input.closest('td');
