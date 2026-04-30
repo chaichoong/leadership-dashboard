@@ -825,17 +825,19 @@
                 );
             } catch(e) { console.warn('Badge update failed:', e); }
 
-            // Arrears engine: TEMPORARILY DISABLED — pagination bug created duplicates.
-            // Re-enabled after dedup fix lands.
-            // try {
-            //     if (typeof runArrearsEngine === 'function') {
-            //         const tenantLookup = {};
-            //         allTenants.forEach(t => { tenantLookup[t.id] = t; });
-            //         runArrearsEngine(new Date(), tenantLookup).catch(err => {
-            //             console.warn('arrears: engine sweep failed', err);
-            //         });
-            //     }
-            // } catch(e) { console.warn('arrears: engine wiring failed', e); }
+            // Arrears engine: once-per-load sweep that opens / progresses /
+            // pauses Arrears Records based on tenant type and days from due.
+            // Re-enabled with cache load fix (treat airtableFetch return as array)
+            // plus triple-guarded create (cache check + in-flight Set).
+            try {
+                if (typeof runArrearsEngine === 'function') {
+                    const tenantLookup = {};
+                    allTenants.forEach(t => { tenantLookup[t.id] = t; });
+                    runArrearsEngine(new Date(), tenantLookup).catch(err => {
+                        console.warn('arrears: engine sweep failed', err);
+                    });
+                }
+            } catch(e) { console.warn('arrears: engine wiring failed', e); }
 
             // (Smart-refresh timer already scheduled at the top of loadDashboard
             // so the health check sees it as wired regardless of which render

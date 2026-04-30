@@ -42,6 +42,9 @@
     // Globals
     let allArrearsRecords = [];
     let arrearsLoadedAt = 0;
+    // Per-sweep guard: prevents duplicate creates if the engine fires twice
+    // in quick succession (e.g. switchTab + loadDashboard both triggering it).
+    const _refsBeingCreated = new Set();
 
     // ── Tenant-type accessor ──
     // Reads `Rent Payment Type` from the linked Tenant record. Returns one of
@@ -79,21 +82,33 @@
     }
 
     // ── Load arrears records from Airtable ──
+    // airtableFetch (shared.js) returns an array of records directly and handles
+    // pagination internally. Earlier this code wrongly unwrapped `.records` on
+    // that array which always returned `undefined` — meaning the cache was
+    // always empty and every sweep recreated every record. That's how 240
+    // duplicates appeared. Treat the return value as an array.
     async function loadArrearsRecords(force = false) {
         // Cache for 60 seconds to avoid re-fetching during the same sweep
         if (!force && allArrearsRecords.length && (Date.now() - arrearsLoadedAt) < 60000) {
             return allArrearsRecords;
         }
         try {
-            const data = await airtableFetch(TABLES.arrears, { pageSize: 100 });
-            allArrearsRecords = (data && data.records) ? data.records : [];
+            const records = await airtableFetch(TABLES.arrears);
+            allArrearsRecords = Array.isArray(records) ? records : [];
             arrearsLoadedAt = Date.now();
             return allArrearsRecords;
         } catch (err) {
             console.warn('arrears: loadArrearsRecords failed', err);
-            allArrearsRecords = [];
-            return [];
+            // Keep stale cache rather than zero — better to skip a sweep than
+            // create dupes against an empty cache.
+            return allArrearsRecords;
         }
+    }
+
+    // Lookup by Reference field — used as the dedup key (one record per
+    // tenancy + due-month is enforced by the Reference being unique).
+    function findArrearsByReference(reference) {
+        return allArrearsRecords.find(r => getField(r, ARREARS.ref) === reference);
     }
 
     // ── Find an existing arrears record for a tenancy + due-date pair ──
@@ -189,29 +204,51 @@
     }
 
     // ── Open a new arrears record at a given stage ──
+    // Triple-guarded against duplicate creation:
+    //   1. Cache check by Reference (after the pagination fix)
+    //   2. In-flight Set guard (prevents same-sweep races)
+    //   3. The Reference itself encodes (tenancy, due-month) so collisions
+    //      are deterministic and easy to detect on cleanup.
     async function openArrearsRecord(tenancy, tenantType, originalDueDate, stage, today) {
-        const rent = Number(getField(tenancy, F.tenRent)) || 0;
         const reference = buildArrearsReference(tenancy, originalDueDate);
-        const nextDue = nextActionDueFor(stage, originalDueDate);
-        const payload = {
-            [ARREARS.ref]: reference,
-            [ARREARS.stage]: stage,
-            [ARREARS.status]: 'Active',
-            [ARREARS.openedDate]: today.toISOString().slice(0, 10),
-            [ARREARS.originalDueDate]: originalDueDate.toISOString().slice(0, 10),
-            [ARREARS.amountOwed]: rent,
-            [ARREARS.tenancy]: [tenancy.id],
-        };
-        if (nextDue) {
-            payload[ARREARS.nextActionDue] = nextDue.toISOString().slice(0, 10);
-            payload[ARREARS.nextActionType] = nextActionTypeFor(stage);
+
+        // Guard 1: already in cache
+        if (findArrearsByReference(reference)) {
+            console.log(`arrears: skipping create — ${reference} already exists`);
+            return null;
         }
-        const created = await createArrearsRecord(payload);
-        if (created) {
-            console.log(`arrears: opened ${reference} at "${stage}" for ${tenancy.id} (${tenantType})`);
-            allArrearsRecords.push(created);
+        // Guard 2: already being created in this sweep
+        if (_refsBeingCreated.has(reference)) {
+            console.log(`arrears: skipping create — ${reference} already in flight`);
+            return null;
         }
-        return created;
+        _refsBeingCreated.add(reference);
+
+        try {
+            const rent = Number(getField(tenancy, F.tenRent)) || 0;
+            const nextDue = nextActionDueFor(stage, originalDueDate);
+            const payload = {
+                [ARREARS.ref]: reference,
+                [ARREARS.stage]: stage,
+                [ARREARS.status]: 'Active',
+                [ARREARS.openedDate]: today.toISOString().slice(0, 10),
+                [ARREARS.originalDueDate]: originalDueDate.toISOString().slice(0, 10),
+                [ARREARS.amountOwed]: rent,
+                [ARREARS.tenancy]: [tenancy.id],
+            };
+            if (nextDue) {
+                payload[ARREARS.nextActionDue] = nextDue.toISOString().slice(0, 10);
+                payload[ARREARS.nextActionType] = nextActionTypeFor(stage);
+            }
+            const created = await createArrearsRecord(payload);
+            if (created) {
+                console.log(`arrears: opened ${reference} at "${stage}" for ${tenancy.id} (${tenantType})`);
+                allArrearsRecords.push(created);
+            }
+            return created;
+        } finally {
+            _refsBeingCreated.delete(reference);
+        }
     }
 
     // ── Progress an existing record to a later stage ──
