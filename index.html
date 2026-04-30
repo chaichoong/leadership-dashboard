@@ -414,6 +414,17 @@
                         <input id="invFilterText" type="text" placeholder="Search payee, description, ref…" oninput="renderInvoiceTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;width:220px;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
                 </div>
+                <!-- Bulk action toolbar — only visible when 1+ rows selected via checkboxes -->
+                <div id="invBulkBar" style="display:none;align-items:center;gap:12px;padding:8px 12px;margin-bottom:8px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-md)">
+                    <strong id="invBulkCount" style="font-size:13px;color:var(--accent-hover)">0 selected</strong>
+                    <span style="color:var(--text-secondary);font-size:12px">Bulk action:</span>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
+                        Set business:
+                        <select id="invBulkBusinessSelect" style="font-size:12px;padding:3px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)"></select>
+                        <button onclick="applyBulkBusiness()" style="font-size:12px;padding:3px 10px;background:var(--accent);color:var(--accent-on);border:none;border-radius:4px;cursor:pointer;font-weight:600">Apply</button>
+                    </label>
+                    <button onclick="clearInvoiceSelection()" style="font-size:11px;padding:3px 8px;background:transparent;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer;margin-left:auto">Clear selection</button>
+                </div>
                 <div class="invoice-table-wrapper">
                     <div id="invoiceLoadingSpinner" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:12px">
                         <div style="width:36px;height:36px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:inv-spin 0.8s linear infinite"></div>
@@ -422,6 +433,7 @@
                     <table class="invoice-table" id="invoiceTable" style="display:none">
                         <thead>
                             <tr>
+                                <th style="width:32px;text-align:center"><input type="checkbox" id="invSelectAll" title="Select all visible"></th>
                                 <th style="width:32px;text-align:center">#</th>
                                 <th>Due / Date</th>
                                 <th>Payee</th>

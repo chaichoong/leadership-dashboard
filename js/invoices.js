@@ -7,6 +7,8 @@
     // Tracks the last Mark-Paid / Approve-Match attempt for the health checks panel
     // Shape: { ok: bool, when: Date, error: string|null, action: 'markPaid'|'approveMatch' }
     let lastApprovalAttempt = null;
+    // Bulk-select state — Set of recordIds currently checked
+    let invSelectedIds = new Set();
 
     // ── New-invoice tracking (based on Airtable createdTime vs localStorage lastSeen) ──
     function getLastSeenInvoiceTime() {
@@ -293,40 +295,38 @@
             const displayDesc = (inv.desc || '').trim();
             const displayRef = (inv.ref || '').trim();
 
-            // Editable fields — click ANY field (populated or empty) to edit. Saves to Airtable.
-            const amountHtml = displayAmt !== null
-                ? `<span class="inv-amount inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.amount}','number')" title="Click to edit amount" style="cursor:pointer">${fmt(displayAmt)}</span>`
-                : `<span class="inv-amount unknown inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.amount}','number')" title="Click to enter amount" style="cursor:pointer">Enter £ ✏️</span>`;
+            // Always-visible spreadsheet-style cell inputs. Each input has data-record + data-field
+            // attributes so the delegated handlers (handleCellInputChange, handleCellInputBlur,
+            // handleCellInputKey) know what to PATCH. See saveCellInput() for the save flow.
+            const inputBase = 'border:1px solid var(--border-default);border-radius:4px;padding:4px 6px;font-size:12px;font-family:inherit;background:var(--bg-surface);color:var(--text-primary);width:100%;transition:border-color 0.15s,box-shadow 0.15s';
+            const amountVal = displayAmt !== null ? displayAmt : '';
+            const amountHtml = `<input type="number" step="0.01" class="inv-cell-input inv-cell-amount" data-record="${inv.recordId}" data-field="${INV.amount}" data-type="number" value="${amountVal}" placeholder="0.00" style="${inputBase};text-align:right;font-weight:600">`;
+            const payeeHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.payee}" data-type="text" value="${escHtml(displayPayee)}" placeholder="Payee…" style="${inputBase};font-weight:600">`;
+            const descHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.desc}" data-type="text" value="${escHtml(displayDesc)}" placeholder="Description…" style="${inputBase}">`;
+            const refHtml = `<input type="text" class="inv-cell-input inv-cell-ref" data-record="${inv.recordId}" data-field="${INV.ref}" data-type="text" value="${escHtml(displayRef)}" placeholder="Ref…" style="${inputBase};font-family:monospace;font-size:11px">`;
 
-            const payeeHtml = displayPayee
-                ? `<span class="inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.payee}','text')" title="Click to edit payee" style="cursor:pointer">${escHtml(displayPayee)}</span>`
-                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.payee}','text')" title="Click to enter payee">Enter payee ✏️</span>`;
-
-            const descHtml = displayDesc
-                ? `<span class="inv-editable" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.desc}','text')" title="Click to edit description" style="cursor:pointer">${escHtml(displayDesc)}</span>`
-                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.desc}','text')" title="Click to enter description">Enter description ✏️</span>`;
-
-            const refHtml = displayRef
-                ? `<span class="inv-editable" style="font-family:monospace;font-size:11px;color:#64748b;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to edit ref">${escHtml(displayRef)}</span>`
-                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to enter ref">Add ref ✏️</span>`;
-
-            // Business cell — looks up linked record name from allBusinesses, click to open dropdown
-            const bizName = (inv.businessIds || []).map(bid => {
-                const biz = (allBusinesses || []).find(b => b.id === bid);
-                return biz ? (getField(biz, BIZ_NAME_FIELD) || '') : '';
-            }).filter(Boolean).join(', ');
-            const businessHtml = bizName
-                ? `<span class="inv-editable" style="cursor:pointer;font-size:12px" onclick="event.stopPropagation(); editInvBusiness(this,'${inv.recordId}')" title="Click to change business">${escHtml(bizName)}</span>`
-                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvBusiness(this,'${inv.recordId}')" title="Click to assign business">Set business ✏️</span>`;
+            // Business cell — always-visible <select> populated with all businesses
+            const currentBizId = (inv.businessIds && inv.businessIds[0]) || '';
+            const bizOptions = ['<option value="">— None —</option>'].concat(
+                (allBusinesses || []).map(b => {
+                    const nm = getField(b, BIZ_NAME_FIELD);
+                    const label = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
+                    return `<option value="${b.id}"${b.id === currentBizId ? ' selected' : ''}>${escHtml(label)}</option>`;
+                })
+            ).join('');
+            const businessHtml = `<select class="inv-cell-input inv-cell-business" data-record="${inv.recordId}" data-field="${INV.business}" data-type="link" style="${inputBase};cursor:pointer">${bizOptions}</select>`;
 
             const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
             const threadId = inv.threadId || inv.id;
+            const isSelected = invSelectedIds.has(inv.recordId);
+            const checkboxHtml = `<input type="checkbox" class="inv-row-check" data-record="${inv.recordId}"${isSelected ? ' checked' : ''} title="Select for bulk action">`;
+            const gmailLinkHtml = `<a href="${gmailUrl}" target="_blank" class="inv-gmail-link" title="Open in Gmail" style="font-size:13px;text-decoration:none;margin-left:6px">📧</a>`;
 
             // AI match suggestion row
             let matchRow = '';
             if (match && !inv.matchRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
-                    <td colspan="8" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
+                    <td colspan="9" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                             <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
@@ -342,17 +342,32 @@
             // Action column
             const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${inv.recordId}','${threadId}','','${gmailUrl}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
-            return `<tr data-record-id="${inv.recordId}" onclick="window.open('${gmailUrl}','_blank')" title="Open in Gmail">
+            return `<tr data-record-id="${inv.recordId}"${isSelected ? ' class="inv-row-selected"' : ''}>
+                <td style="text-align:center;width:32px">${checkboxHtml}</td>
                 <td style="text-align:center;color:#94a3b8;font-size:11px;font-weight:600">${idx + 1}</td>
-                <td style="white-space:nowrap;min-width:100px">${dateCell}<br>${badge}</td>
-                <td style="font-weight:600;max-width:160px">${payeeHtml}</td>
-                <td style="color:#475569;max-width:300px;font-size:12px">${descHtml}</td>
-                <td style="white-space:nowrap">${refHtml}</td>
-                <td style="text-align:right;white-space:nowrap">${amountHtml}</td>
-                <td style="white-space:nowrap;max-width:130px">${businessHtml}</td>
-                <td style="width:110px;text-align:center" onclick="event.stopPropagation()">${actionHtml}</td>
+                <td style="white-space:nowrap;min-width:120px">${dateCell}${gmailLinkHtml}<br>${badge}</td>
+                <td style="max-width:180px">${payeeHtml}</td>
+                <td style="max-width:280px">${descHtml}</td>
+                <td style="white-space:nowrap;max-width:130px">${refHtml}</td>
+                <td style="white-space:nowrap;max-width:120px">${amountHtml}</td>
+                <td style="white-space:nowrap;max-width:140px">${businessHtml}</td>
+                <td style="width:110px;text-align:center">${actionHtml}</td>
             </tr>${matchRow}`;
         }).join('');
+
+        // ── Wire up cell input save (delegate via tbody) ──
+        // Save fires on `change` for selects/numbers and on `blur` for text inputs.
+        // Each input has data-record + data-field + data-type.
+        if (!tbody.dataset.cellHandlersWired) {
+            tbody.addEventListener('change', handleCellInputChange);
+            tbody.addEventListener('blur', handleCellInputBlur, true); // capture
+            tbody.addEventListener('keydown', handleCellInputKey);
+            tbody.addEventListener('click', handleCheckboxClick);
+            tbody.dataset.cellHandlersWired = 'true';
+        }
+
+        // Refresh bulk bar / select-all checkbox state to match invSelectedIds
+        refreshBulkBarUI(sorted);
 
         // Tab is being viewed — mark invoices as seen so sidebar badge clears next refresh
         markInvoicesAsSeen();
@@ -490,6 +505,207 @@
             .replace(/[^a-z0-9\s]/g, ' ')
             .split(/\s+/)
             .filter(w => w.length >= 3 && !stop.has(w));
+    }
+
+    // ══════════════════════════════════════════
+    // Always-visible spreadsheet-style cell inputs
+    // ══════════════════════════════════════════
+
+    // Update local airtableInvoices array so re-renders preserve the edit
+    function _updateLocalInv(recordId, fieldId, value) {
+        const inv = airtableInvoices.find(i => i.recordId === recordId);
+        if (!inv) return;
+        if (fieldId === INV.amount) inv.amount = value;
+        else if (fieldId === INV.payee) inv.payee = value;
+        else if (fieldId === INV.desc) inv.desc = value;
+        else if (fieldId === INV.ref) inv.ref = value;
+        else if (fieldId === INV.dueDate) inv.dueDate = value;
+        else if (fieldId === INV.business) inv.businessIds = Array.isArray(value) ? value : (value ? [value] : []);
+    }
+
+    // Compare current input value against the stored value to skip no-op saves
+    function _inputDirty(input, recordId, fieldId) {
+        const inv = airtableInvoices.find(i => i.recordId === recordId);
+        if (!inv) return true;
+        if (fieldId === INV.amount) {
+            const v = input.value.trim();
+            const num = v === '' ? null : parseFloat(v);
+            return (num === null) !== (inv.amount === null) || (num !== null && Math.abs((num || 0) - (inv.amount || 0)) > 0.001);
+        }
+        if (fieldId === INV.business) {
+            const cur = (inv.businessIds && inv.businessIds[0]) || '';
+            return input.value !== cur;
+        }
+        const map = { [INV.payee]:'payee', [INV.desc]:'desc', [INV.ref]:'ref' };
+        const k = map[fieldId];
+        if (k) return input.value.trim() !== (inv[k] || '');
+        return true;
+    }
+
+    async function saveCellInput(input) {
+        const recordId = input.dataset.record;
+        const fieldId = input.dataset.field;
+        const type = input.dataset.type;
+        if (!recordId || !fieldId) return;
+        if (!_inputDirty(input, recordId, fieldId)) return; // no-op
+
+        let fieldValue;
+        if (type === 'number') {
+            const v = input.value.trim();
+            if (v === '') fieldValue = null;
+            else {
+                const num = parseFloat(v);
+                if (isNaN(num) || num < 0) { input.value = ''; return; }
+                fieldValue = num;
+            }
+        } else if (type === 'link') {
+            fieldValue = input.value ? [input.value] : [];
+        } else {
+            fieldValue = input.value.trim();
+        }
+
+        input.disabled = true;
+        let saveOk = false;
+        try {
+            const body = { fields: { [fieldId]: fieldValue } };
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            _updateLocalInv(recordId, fieldId, type === 'link' ? (input.value ? input.value : '') : fieldValue);
+            saveOk = true;
+        } catch (e) {
+            console.error('Cell save failed:', e);
+        } finally {
+            input.disabled = false;
+        }
+        // Flash the input's parent cell
+        const td = input.closest('td');
+        if (td) {
+            td.classList.add(saveOk ? 'inv-flash-ok' : 'inv-flash-fail');
+            setTimeout(() => td.classList.remove('inv-flash-ok', 'inv-flash-fail'), 1500);
+        }
+    }
+
+    function handleCellInputChange(e) {
+        const t = e.target;
+        if (!t.classList || !t.classList.contains('inv-cell-input')) return;
+        // selects + numbers save on change
+        if (t.tagName === 'SELECT' || t.dataset.type === 'number') saveCellInput(t);
+    }
+
+    function handleCellInputBlur(e) {
+        const t = e.target;
+        if (!t.classList || !t.classList.contains('inv-cell-input')) return;
+        // text saves on blur (so user can keep typing without commit on every keystroke)
+        if (t.tagName === 'INPUT' && t.dataset.type === 'text') saveCellInput(t);
+    }
+
+    function handleCellInputKey(e) {
+        const t = e.target;
+        if (!t.classList || !t.classList.contains('inv-cell-input')) return;
+        if (e.key === 'Enter' && t.tagName === 'INPUT') {
+            t.blur(); // triggers save via blur handler
+            e.preventDefault();
+        }
+        if (e.key === 'Escape' && t.tagName === 'INPUT') {
+            // Revert to stored value
+            const inv = airtableInvoices.find(i => i.recordId === t.dataset.record);
+            if (inv) {
+                if (t.dataset.field === INV.amount) t.value = inv.amount !== null ? inv.amount : '';
+                else if (t.dataset.field === INV.payee) t.value = inv.payee || '';
+                else if (t.dataset.field === INV.desc) t.value = inv.desc || '';
+                else if (t.dataset.field === INV.ref) t.value = inv.ref || '';
+            }
+            t.blur();
+        }
+    }
+
+    function handleCheckboxClick(e) {
+        const cb = e.target;
+        if (!cb.classList || !cb.classList.contains('inv-row-check')) return;
+        const recordId = cb.dataset.record;
+        if (!recordId) return;
+        if (cb.checked) invSelectedIds.add(recordId);
+        else invSelectedIds.delete(recordId);
+        const tr = cb.closest('tr');
+        if (tr) tr.classList.toggle('inv-row-selected', cb.checked);
+        refreshBulkBarUI();
+    }
+
+    // Update bulk-action bar visibility/count and the select-all checkbox state
+    function refreshBulkBarUI(currentlyVisible) {
+        const bar = document.getElementById('invBulkBar');
+        const countEl = document.getElementById('invBulkCount');
+        const selAll = document.getElementById('invSelectAll');
+        const bulkSelect = document.getElementById('invBulkBusinessSelect');
+        if (!bar) return;
+        const n = invSelectedIds.size;
+        bar.style.display = n > 0 ? 'flex' : 'none';
+        if (countEl) countEl.textContent = `${n} selected`;
+        // Populate bulk business dropdown once
+        if (bulkSelect && bulkSelect.options.length === 0) {
+            bulkSelect.innerHTML = '<option value="">— None —</option>' +
+                (allBusinesses || []).map(b => {
+                    const nm = getField(b, BIZ_NAME_FIELD);
+                    const label = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
+                    return `<option value="${b.id}">${escHtml(label)}</option>`;
+                }).join('');
+        }
+        // Sync select-all header checkbox
+        if (selAll && currentlyVisible) {
+            const visibleIds = currentlyVisible.map(i => i.recordId);
+            const allSelected = visibleIds.length > 0 && visibleIds.every(id => invSelectedIds.has(id));
+            selAll.checked = allSelected;
+            selAll.indeterminate = !allSelected && visibleIds.some(id => invSelectedIds.has(id));
+            // (Re-)wire change handler for select-all (idempotent: reassigning is fine)
+            selAll.onchange = () => {
+                if (selAll.checked) visibleIds.forEach(id => invSelectedIds.add(id));
+                else visibleIds.forEach(id => invSelectedIds.delete(id));
+                renderInvoiceTab();
+            };
+        }
+    }
+
+    function clearInvoiceSelection() {
+        invSelectedIds.clear();
+        renderInvoiceTab();
+    }
+
+    async function applyBulkBusiness() {
+        const sel = document.getElementById('invBulkBusinessSelect');
+        if (!sel) return;
+        const bizId = sel.value;
+        const ids = Array.from(invSelectedIds);
+        if (ids.length === 0) return;
+        const bizLabel = bizId ? sel.options[sel.selectedIndex].text : 'None';
+        if (!confirm(`Set business to "${bizLabel}" on ${ids.length} invoice${ids.length > 1 ? 's' : ''}?`)) return;
+        // Airtable API allows up to 10 record updates per PATCH. Chunk them.
+        const fieldValue = bizId ? [bizId] : [];
+        let succeeded = 0, failed = 0;
+        for (let i = 0; i < ids.length; i += 10) {
+            const chunk = ids.slice(i, i + 10);
+            const records = chunk.map(id => ({ id, fields: { [INV.business]: fieldValue } }));
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?returnFieldsByFieldId=true`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records })
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                chunk.forEach(id => _updateLocalInv(id, INV.business, fieldValue));
+                succeeded += chunk.length;
+            } catch (e) {
+                console.error('Bulk business update chunk failed:', e);
+                failed += chunk.length;
+            }
+        }
+        // Clear selection and re-render
+        invSelectedIds.clear();
+        renderInvoiceTab();
+        if (failed > 0) alert(`Updated ${succeeded} of ${ids.length}. ${failed} failed — see console.`);
     }
 
     // ── Click-to-edit any invoice field — saves to Airtable ──

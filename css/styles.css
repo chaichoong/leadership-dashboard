@@ -334,6 +334,15 @@ body {
 @keyframes inv-save-fail { 0% { background: var(--danger-bg); } 100% { background: transparent; } }
 .inv-flash-ok { animation: inv-save-ok 1.2s ease-out; }
 .inv-flash-fail { animation: inv-save-fail 1.5s ease-out; }
+/* Always-visible spreadsheet-style cell inputs */
+.invoice-table .inv-cell-input { width: 100%; }
+.invoice-table .inv-cell-input:focus { outline: none; border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent-soft); }
+.invoice-table .inv-cell-input:hover:not(:focus) { border-color: var(--accent) !important; }
+.invoice-table tr.inv-row-selected td { background: var(--accent-soft) !important; }
+.invoice-table tr.inv-row-selected:hover td { background: var(--accent-soft) !important; }
+.inv-row-check { cursor: pointer; }
+.inv-gmail-link { color: var(--accent); font-size: 13px; }
+.inv-gmail-link:hover { opacity: 0.7; }
 .invoice-table tr.inv-paid { opacity: 0.55; }
 .invoice-table tr.inv-paid td:first-child { border-left: 3px solid var(--success); }
 .inv-badge.paid { background: var(--success-bg); color: var(--success); }
