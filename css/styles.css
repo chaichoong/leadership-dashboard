@@ -631,7 +631,11 @@ body {
 .calc-tx-cb { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; accent-color: var(--accent); }
 .calc-tx-name { flex: 1; color: var(--text-secondary); word-break: break-word; }
 .calc-tx-date { color: var(--text-muted); font-size: var(--fs-sm); min-width: 70px; }
-.calc-tx-amount { font-weight: var(--fw-semibold); white-space: nowrap; min-width: 80px; text-align: right; color: var(--text-primary); }
+/* No colour rule here — the .text-green / .text-red classes appended per row
+ * (in renderCalcList) carry the inflow/outflow signal through to the amount.
+ * Adding `color: var(--text-primary)` here would win the specificity tie
+ * (defined later than .text-green/.text-red) and silently override the intent. */
+.calc-tx-amount { font-weight: var(--fw-semibold); white-space: nowrap; min-width: 80px; text-align: right; }
 .calc-actions { display: flex; gap: 8px; margin-top: 12px; }
 .calc-btn {
     padding: 6px 14px;
