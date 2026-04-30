@@ -7,17 +7,17 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.17', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.18', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy OS',         icon: '🎯', pageVer: '1.6', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Task and Project Management OS', icon: '✅', pageVer: '1.48', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
-        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.9', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
+        { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.10', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.9', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.15', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.19', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.5', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
-        { id: 'operations',  name: 'Operations OS',                 icon: '🏢', pageVer: '1.6', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
+        { id: 'operations',  name: 'Operations OS',                 icon: '🏢', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // Plan Builder lives under the Leadership section in the sidebar.
         // (Operating Systems Hub + Launch Plan removed during sidebar restructure.)
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.6', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
