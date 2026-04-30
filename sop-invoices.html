@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Invoices OS &mdash; Standard Operating Procedure</title>
+<title>Accounts Payable Variable &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="css/tokens.css?v=1">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -100,9 +100,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="header">
   <div class="header-inner">
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
-    <h1>&#x1F9FE; Invoices OS</h1>
+    <h1>&#x1F9FE; Accounts Payable Variable</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Invoice ingestion, AI matching, approval workflow, and payment tracking</div>
-    <div class="version">Version 2.1 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
+    <div class="version">Version 2.2 &bull; 30 Apr 2026 &bull; Owner: Kevin Brittain</div>
   </div>
 </div>
 
@@ -131,7 +131,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="qr-item">
         <div class="qr-label">Dashboard Access</div>
-        <div class="qr-value">Leadership Dashboard &rarr; Invoices OS (sidebar)</div>
+        <div class="qr-value">Leadership Dashboard &rarr; Accounts Payable Variable (sidebar)</div>
       </div>
       <div class="qr-item">
         <div class="qr-label">localStorage Key</div>
@@ -171,7 +171,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="overview">
     <h2 class="section-title"><span class="icon">&#128202;</span> 1. Overview &amp; Purpose</h2>
     <div class="card">
-      <p>The Invoices OS is the single place to see, manage, and pay all outstanding supplier invoices. It sits inside the Leadership Dashboard and connects three systems: <strong>Gmail</strong> (where invoices arrive), <strong>Airtable</strong> (the source of truth for all invoice data), and the <strong>Airtable Transactions table</strong> (bank transactions used for AI-assisted payment matching).</p>
+      <p>The Accounts Payable Variable is the single place to see, manage, and pay all outstanding supplier invoices. It sits inside the Leadership Dashboard and connects three systems: <strong>Gmail</strong> (where invoices arrive), <strong>Airtable</strong> (the source of truth for all invoice data), and the <strong>Airtable Transactions table</strong> (bank transactions used for AI-assisted payment matching).</p>
       <p>The main goals of the module are:</p>
       <ul>
         <li>Give a live view of every invoice that still needs paying, sourced from Gmail label <strong>"3. to pay"</strong></li>
@@ -207,12 +207,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="card">
       <ol class="steps">
         <li>Open the Leadership Dashboard at <a href="index.html">index.html</a> and log in with your Airtable Personal Access Token (PAT).</li>
-        <li>Click <strong>Invoices OS</strong> in the left sidebar (the receipt icon &#x1F9FE;). The tab will become active and <code>renderInvoiceTab()</code> runs immediately to display the current invoice list.</li>
+        <li>Click <strong>Accounts Payable Variable</strong> in the left sidebar (the receipt icon &#x1F9FE;). The tab will become active and <code>renderInvoiceTab()</code> runs immediately to display the current invoice list.</li>
         <li>The tab also loads whenever you navigate back to it from another tab &mdash; it always re-renders from the latest in-memory Airtable data. Data is fetched from Airtable every 15 minutes automatically (smart refresh defers if you are actively typing or clicking).</li>
       </ol>
       <div class="info-box tip">
         <span class="ib-icon">&#128161;</span>
-        <span>The sidebar badge next to "Invoices OS" shows the number of unpaid invoices in grey, and switches to a <strong>red badge</strong> (e.g. <code>5 &bull; 2 new</code>) when invoices have arrived since you last viewed the tab. The badge clears to grey once you open the tab.</span>
+        <span>The sidebar badge next to "Accounts Payable Variable" shows the number of unpaid invoices in grey, and switches to a <strong>red badge</strong> (e.g. <code>5 &bull; 2 new</code>) when invoices have arrived since you last viewed the tab. The badge clears to grey once you open the tab.</span>
       </div>
     </div>
 
@@ -297,8 +297,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr><td>3</td><td>Payee</td><td>Supplier name. Blank cells show "Enter payee ✏️" as a clickable prompt to edit inline.</td></tr>
           <tr><td>4</td><td>Description</td><td>Invoice description/subject. Blank cells show "Enter description ✏️".</td></tr>
           <tr><td>5</td><td>Ref</td><td>Payment reference in monospace font. Blank cells show "Add ref ✏️".</td></tr>
-          <tr><td>6</td><td>Amount</td><td>Invoice amount formatted as £X,XXX.XX. Blank cells show "Enter £ ✏️" as a clickable prompt.</td></tr>
-          <tr><td>7</td><td>(Actions)</td><td>Contains the "Mark Paid" button. Clicking this column does not open Gmail.</td></tr>
+          <tr><td>6</td><td>Amount</td><td>Invoice amount formatted as £X,XXX.XX. Blank cells show "Enter £ ✏️" as a clickable prompt. Click any populated value to correct it.</td></tr>
+          <tr><td>7</td><td>Business</td><td>Which business the invoice relates to. Click to open a dropdown listing all businesses and assign one. Stored as a linked record on the Dashboard Invoices Airtable table.</td></tr>
+          <tr><td>8</td><td>(Actions)</td><td>Contains the "Mark Paid" button. Clicking this column does not open Gmail.</td></tr>
         </tbody>
       </table>
       <div class="info-box tip">

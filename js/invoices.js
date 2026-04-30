@@ -80,6 +80,8 @@
                     status:        typeof f[INV.status] === 'object' ? (f[INV.status]?.name || 'Unpaid') : (f[INV.status] || 'Unpaid'),
                     isEstimate:    !!f[INV.isEstimate],
                     matchRejected: !!f[INV.matchRejected],
+                    // Business is a linked-record field — Airtable returns an array of record IDs
+                    businessIds:   Array.isArray(f[INV.business]) ? f[INV.business] : [],
                 };
             });
             invoiceRefreshedAt = new Date();
@@ -308,6 +310,15 @@
                 ? `<span class="inv-editable" style="font-family:monospace;font-size:11px;color:#64748b;cursor:pointer" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to edit ref">${escHtml(displayRef)}</span>`
                 : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvField(this,'${inv.recordId}','${INV.ref}','text')" title="Click to enter ref">Add ref ✏️</span>`;
 
+            // Business cell — looks up linked record name from allBusinesses, click to open dropdown
+            const bizName = (inv.businessIds || []).map(bid => {
+                const biz = (allBusinesses || []).find(b => b.id === bid);
+                return biz ? (getField(biz, BIZ_NAME_FIELD) || '') : '';
+            }).filter(Boolean).join(', ');
+            const businessHtml = bizName
+                ? `<span class="inv-editable" style="cursor:pointer;font-size:12px" onclick="event.stopPropagation(); editInvBusiness(this,'${inv.recordId}')" title="Click to change business">${escHtml(bizName)}</span>`
+                : `<span class="inv-editable" style="color:#94a3b8;cursor:pointer;font-size:11px" onclick="event.stopPropagation(); editInvBusiness(this,'${inv.recordId}')" title="Click to assign business">Set business ✏️</span>`;
+
             const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
             const threadId = inv.threadId || inv.id;
 
@@ -315,7 +326,7 @@
             let matchRow = '';
             if (match && !inv.matchRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
-                    <td colspan="7" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
+                    <td colspan="8" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                             <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
@@ -338,6 +349,7 @@
                 <td style="color:#475569;max-width:300px;font-size:12px">${descHtml}</td>
                 <td style="white-space:nowrap">${refHtml}</td>
                 <td style="text-align:right;white-space:nowrap">${amountHtml}</td>
+                <td style="white-space:nowrap;max-width:130px">${businessHtml}</td>
                 <td style="width:110px;text-align:center" onclick="event.stopPropagation()">${actionHtml}</td>
             </tr>${matchRow}`;
         }).join('');
@@ -560,6 +572,61 @@
         input.focus();
         // Pre-select the current value so typing immediately replaces it
         if (input.value) input.select();
+    }
+
+    // ── Click-to-edit Business field (linked record dropdown) — saves to Airtable ──
+    function editInvBusiness(el, recordId) {
+        const inv = airtableInvoices.find(i => i.recordId === recordId);
+        const currentBizId = (inv && inv.businessIds && inv.businessIds[0]) || '';
+        const select = document.createElement('select');
+        select.style.cssText = 'padding:3px 6px;font-size:12px;border:1px solid #2563eb;border-radius:4px;background:#fff;color:#1e293b;cursor:pointer';
+        // Empty option for "no business assigned"
+        const blank = document.createElement('option');
+        blank.value = ''; blank.textContent = '— None —';
+        select.appendChild(blank);
+        (allBusinesses || []).forEach(b => {
+            const opt = document.createElement('option');
+            opt.value = b.id;
+            const nm = getField(b, BIZ_NAME_FIELD);
+            opt.textContent = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
+            if (b.id === currentBizId) opt.selected = true;
+            select.appendChild(opt);
+        });
+
+        async function save() {
+            const newBizId = select.value;
+            const fieldValue = newBizId ? [newBizId] : [];
+            select.disabled = true;
+            select.style.opacity = '0.5';
+            let saveOk = false;
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [INV.business]: fieldValue } })
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                if (inv) inv.businessIds = fieldValue;
+                saveOk = true;
+            } catch (e) {
+                console.error('Failed to save business:', e);
+            }
+            renderInvoiceTab();
+            // Flash the cell green/red after re-render. Business is column index 6 (after Business header insert).
+            const newRow = document.querySelector(`tr[data-record-id="${recordId}"]`);
+            const newTd = newRow && newRow.cells[6];
+            if (newTd) {
+                newTd.classList.add(saveOk ? 'inv-flash-ok' : 'inv-flash-fail');
+                setTimeout(() => newTd.classList.remove('inv-flash-ok', 'inv-flash-fail'), 1500);
+            }
+        }
+
+        // Save on change. Escape or click-away cancels by re-rendering.
+        select.onchange = save;
+        select.onblur = function() { if (!select.disabled) renderInvoiceTab(); };
+        select.onkeydown = function(e) { if (e.key === 'Escape') renderInvoiceTab(); };
+        el.replaceWith(select);
+        select.focus();
     }
 
     // ── Approve AI match — mark paid in Airtable + move Gmail label ──

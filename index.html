@@ -110,7 +110,7 @@
                     <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Invoices</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Accounts Payable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
                     <div class="sidebar-item" onclick="switchTab('pnl')"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
                     <div class="sidebar-item" onclick="switchTab('transactions')"><span class="sidebar-icon">&#x1F50D;</span><span class="sidebar-label">Transactions</span><span class="sidebar-health-dot unknown" data-sidebar-health="transactions" title="No checks run yet"></span></div>
                     <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F3E6;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="fintable" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
@@ -185,7 +185,7 @@
         <!-- Tabs Navigation (hidden — replaced by sidebar) -->
         <div class="tabs-nav">
             <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard OS</button>
-            <button class="tab-btn" onclick="switchTab('invoices')">Invoices OS</button>
+            <button class="tab-btn" onclick="switchTab('invoices')">Accounts Payable Variable</button>
             <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids OS</button>
         </div>
 
@@ -327,7 +327,7 @@
             <div data-sync-bar="invoices"></div>
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-                    <h2 class="section-title" style="margin-bottom:0">Invoices OS — Invoices to Pay</h2>
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Payable Variable</h2>
                     <span style="font-size:12px;color:var(--text-muted)">Gmail label: <strong style="color:var(--text-secondary)">3. to pay</strong> &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">28 Mar 2026</strong> &nbsp;·&nbsp; Ask Claude to refresh</span>
                 </div>
                 <div class="cards-grid" id="invoiceSummaryCards"></div>
@@ -363,6 +363,7 @@
                                 <th>Description</th>
                                 <th>Ref</th>
                                 <th style="text-align:right">Amount</th>
+                                <th>Business</th>
                                 <th></th>
                             </tr>
                         </thead>
