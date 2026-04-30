@@ -344,6 +344,10 @@ body {
 .inv-mark-paid-btn:hover { background: var(--success-bg); border-color: var(--success); color: var(--success); }
 .inv-mark-paid-btn.loading { opacity: 0.5; pointer-events: none; }
 .inv-match-info { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.inv-badge.in-payment { background: var(--success-bg); color: var(--success); }
+.cost-inactive-row { opacity: 0.5; }
+.cost-inactive-row:hover { opacity: 0.75; }
+.cost-insight { padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--bg-surface); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-primary); line-height: 1.5; }
 
 .tab-panel-iframe {
     width: 100%;

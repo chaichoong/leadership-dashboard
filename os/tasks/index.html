@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management OS</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-28-2200 created-by-healthcheck</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-04-30-0900 drawer-cascade-resync</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2107,6 +2107,9 @@ async function quickRelinkProject(taskId,newProjectId){
     }
     adjustProjectTaskCounts(oldProjectIds,task.projectIds);
     if(!_undoInProgress&&!_bulkOperation)pushUndo({type:'multi-patch',taskId,edits,label:newProjectId?'Re-linked project (inline)':'Unlinked project (inline)'});
+    // Resync drawer selects too — quickRelinkProject is called from the
+    // grid, but the drawer might also be open on the same task.
+    syncDrawerCascadedFields(taskId);
     if(!_bulkOperation){toast('Project updated');renderAll()}
     _saveState.ok++;saveEntry.status='ok';
   } catch(e){
@@ -2197,11 +2200,11 @@ function openDrillDownTaskDetail(taskId){
       <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--danger);font-weight:600;min-width:auto;text-transform:none;letter-spacing:0"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)">Hard Deadline</label>
     </div></div>
     <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Priority</label><div class="field-val"><select onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
+    <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
     <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'-'}</option>`).join('')}</select></div></div>
     <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
-    <div class="field-row"><label>Business</label><div class="field-val"><select onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
+    <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
     <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
@@ -2325,6 +2328,29 @@ async function loadCommentCountForDrawer(taskId){
   }
 }
 window.loadCommentCountForDrawer=loadCommentCountForDrawer;
+// Resync the drawer's cascaded selects (Priority, Business) to whatever
+// the underlying task currently holds. Called after a project change
+// applies its cascade so the UI matches the local state without a
+// full drawer re-open. Skipped silently when the drawer isn't showing
+// the task in question — we never blow away an unrelated drawer.
+function syncDrawerCascadedFields(taskId){
+  if(drawerTaskId!==taskId)return;
+  const task=allTasks.find(x=>x.id===taskId);if(!task)return;
+  const prio=document.getElementById('drwPrioritySel');
+  if(prio){
+    // Add the option if it's not yet in the dropdown (e.g. legacy "High").
+    let found=false;
+    Array.from(prio.options).forEach(o=>{if(o.value===(task.priority||''))found=true});
+    if(!found&&task.priority){
+      const o=document.createElement('option');o.value=task.priority;o.textContent=task.priority;
+      prio.appendChild(o);
+    }
+    prio.value=task.priority||'';
+  }
+  const biz=document.getElementById('drwBusinessSel');
+  if(biz){biz.value=task.business||''}
+}
+window.syncDrawerCascadedFields=syncDrawerCascadedFields;
 // Manually re-fire the assignee Slack DM. Used when the automatic
 // notification didn't land (e.g. creator was on a stale cache, the
 // task was created in Airtable directly, etc.). Uses the task's
@@ -2796,6 +2822,10 @@ async function applyProjectPick(taskId){
       pushUndo({type:'multi-patch',taskId,edits,label:projectId?`Linked project${setPriorityProject?' (priority -> Project)':''}`:'Unlinked project'});
     }
     const wrap=document.getElementById('drwProjectWrap');if(wrap)wrap.innerHTML=renderProjectPicker(task);
+    // Resync drawer dropdowns so Priority + Business reflect cascaded values
+    // immediately — without this the user has to reopen the drawer to see
+    // that picking a project flipped Priority to "Project".
+    syncDrawerCascadedFields(taskId);
     toast('Saved');
     renderAll();
   }catch(e){
