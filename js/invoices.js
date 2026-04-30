@@ -658,13 +658,16 @@
         const n = invSelectedIds.size;
         bar.style.display = n > 0 ? 'flex' : 'none';
         if (countEl) countEl.textContent = `${n} selected`;
-        // Re-populate bulk business dropdown every time. Uses allBusinesses directly to match
-        // the per-row dropdowns — getActiveBusinesses() filters by an Active flag that not all
-        // business records have set, leaving the bulk dropdown empty.
+        // Re-populate bulk business dropdown every time. Only ACTIVE businesses (filtered by
+        // the BIZ_ACTIVE_FIELD checkbox) — same as the per-row dropdowns. Inactive businesses
+        // shouldn't be assignable in bulk operations.
         if (bulkSelect) {
+            const businesses = (typeof getActiveBusinesses === 'function')
+                ? getActiveBusinesses()
+                : (allBusinesses || []);
             const previousValue = bulkSelect.value;
             bulkSelect.innerHTML = '<option value="">— None —</option>' +
-                (allBusinesses || []).map(b => {
+                businesses.map(b => {
                     const nm = getField(b, BIZ_NAME_FIELD);
                     const label = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
                     return `<option value="${b.id}">${escHtml(label)}</option>`;
