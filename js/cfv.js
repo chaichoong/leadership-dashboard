@@ -376,6 +376,13 @@
         // Update sidebar badges
         updateCFVSidebarBadges(confirmedCfvs.length + potentialCfvs.length, cfvActioned.length);
 
+        // Render the Arrears Pipeline section below the legacy CFV table.
+        // Loads arrears records on demand so the section appears as soon as the
+        // tab is opened, even if the engine sweep hasn't completed yet.
+        if (typeof loadArrearsRecords === 'function' && typeof renderArrearsSection === 'function') {
+            loadArrearsRecords().finally(() => renderArrearsSection('arrearsPipelineContainer'));
+        }
+
         // Table
         const tbody = document.getElementById('cfvTableBody');
         if (!tbody) return;

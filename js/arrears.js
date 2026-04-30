@@ -11,11 +11,18 @@
 //     reconciled payment lands for the rent cycle
 //
 // Out of scope (later slices):
-//   • Mica task auto-creation for phone calls
 //   • Email / SMS / letter sending
 //   • Template engine
 //   • UI rebuild of CFV tab as kanban
 //   • Section 8 trigger (depends on statement work-in-progress)
+
+// Slice A (this file): Mica task auto-creation
+// On a stage event (new arrears record OR progression to a later stage), if the
+// stage requires manual phone work, queue a task in the Tasks table assigned to
+// Mica. The task lands in her "Today" queue, links back to the tenancy/tenant/
+// unit, and includes a script + tenant context. Phone-call stages: Preventive
+// (UC tenants only — call UC office), Soft Chase, Firm Contact, Formal Warning,
+// Pre-Action.
 //
 // Tenant-type rules:
 //   • Working          → preventive at Day -1, full chase pipeline
@@ -38,6 +45,30 @@
 
     // Open / progressing statuses (records the engine acts on)
     const ARREARS_OPEN_STATUSES = new Set(['Active', 'Escalated']);
+
+    // ── Mica task config ──
+    // Mirrored from cashflow.js's UC task pattern (which works in production).
+    // Tasks land in Mica's queue, tied to the £12k Operating Cushion project,
+    // and link back to the tenancy/tenant/unit so they have full context.
+    const MICA = {
+        email:     'micaa.work@gmail.com',
+        projectId: 'recyJDDWaEAzMXMxw',  // £12k Monthly Operating Cushion project
+    };
+    const TASK_F = {
+        name:        'fldgFjGBw6bTKJFCD',
+        assignee:    'fldELMncVJYPDRJNc',
+        dueDate:     'fld7XP8w8kbxfETV4',
+        status:      'fldx4qCw17UfrKpaN',
+        timeEst:     'fld10VzzbiNNgRmIi',
+        project:     'fldBg0rQy0FrOAkRN',
+        hardDeadline:'fldZKzIxgyrQ8CG8a',
+        tenancies:   'fldmne4RYJU22ICub',
+        tenants:     'fld6ZcfEogJmeQj2c',
+        rentalUnits: 'fldEW648YtTZ6j01n',
+        desc:        'fldRGhBQViKZKtkQ6',
+    };
+    // Stages that require Mica to physically pick up the phone
+    const PHONE_TASK_STAGES = new Set(['Soft Chase', 'Firm Contact', 'Formal Warning', 'Pre-Action']);
 
     // Globals
     let allArrearsRecords = [];
@@ -171,6 +202,141 @@
                     || tenancy.id.slice(-4).toUpperCase();
         const idSuffix = tenancy.id.slice(-4).toUpperCase();
         return `AR-${yyyy}-${mm}-${tenRef}-${idSuffix}`;
+    }
+
+    // ── Build the title + body for a Mica task at a given stage ──
+    function buildMicaTaskFor(stage, tenantType, tenancy, tenant, arrearsRecord, daysFromDue) {
+        const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : '';
+        const phone = tenant ? String(getField(tenant, F.tenantPhone) || '') : '';
+        const email = tenant ? String(getField(tenant, F.tenantEmail) || '') : '';
+        const rent = Number(getField(tenancy, F.tenRent)) || 0;
+        const reference = getField(arrearsRecord, ARREARS.ref);
+        const dueRaw = String(getField(arrearsRecord, ARREARS.originalDueDate) || '');
+
+        // Day -7 UC verification call has its own, distinct script
+        if (stage === 'Preventive' && tenantType === 'Universal Credit') {
+            return {
+                title: `Call UC to verify rent payment for ${tenantName} (${reference})`,
+                body:
+`UC Verification Call (Day -7)
+
+Tenant: ${tenantName}
+Reference: ${reference}
+Expected rent: £${rent.toFixed(2)}
+Original due date: ${dueRaw}
+
+UC Office: ${UC_CONTACT.phone}
+
+Confirm with UC:
+1. Payment is scheduled
+2. It is being processed
+3. It will be paid to the landlord (us)
+
+Outcomes:
+- Confirmed → no further action
+- Delayed / Suspended / Reduced → log in arrears record; Early Intervention will fire
+- Unable to reach UC → reschedule for next working day
+
+Auto-generated from arrears engine.`,
+            };
+        }
+
+        const stageScripts = {
+            'Soft Chase':     'Polite check-in. "May be a timing issue — if you\'ve already paid please disregard."',
+            'Firm Contact':   'Need to understand what\'s happening. Agree a payment plan if needed.',
+            'Formal Warning': 'Final chance before formal notice. Letter also being sent.',
+            'Pre-Action':     'Section 8 imminent. Recorded letter being sent. Last chance to settle.',
+        };
+
+        return {
+            title: `${stage} call: ${tenantName} (${reference})`,
+            body:
+`${stage} — phone call
+
+Tenant: ${tenantName}
+Reference: ${reference}
+Days overdue: ${daysFromDue}
+Amount owed: £${rent.toFixed(2)}
+Phone: ${phone || '(no phone on file)'}
+Email: ${email || '(no email on file)'}
+
+Approach: ${stageScripts[stage] || ''}
+
+Log the call outcome by adding a Comment to this task.
+
+Auto-generated from arrears engine.`,
+        };
+    }
+
+    // ── Create a Mica task and link it back to the arrears record ──
+    // Two-step pattern (mirrors cashflow.js createUCTask): Airtable rejects
+    // the full field set on POST, so we create with name + assignee, then
+    // PATCH the rest. Returns the created task record on success.
+    async function createMicaTaskForArrears(arrearsRecord, taskInfo, tenancy, tenant) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`;
+
+        const createBody = {
+            fields: {
+                [TASK_F.name]: taskInfo.title,
+                [TASK_F.assignee]: { email: MICA.email },
+            },
+            typecast: true,
+        };
+        const resp1 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(createBody),
+        });
+        if (!resp1.ok) {
+            console.error('arrears: Mica task create failed', await resp1.text());
+            return null;
+        }
+        const created = await resp1.json();
+
+        const tenantId = tenant ? tenant.id : null;
+        const unitLink = getField(tenancy, F.tenUnit);
+        const unitId = extractLinkedId(unitLink);
+
+        const patchFields = {
+            [TASK_F.timeEst]:      '15 min',
+            [TASK_F.dueDate]:      todayStr,
+            [TASK_F.status]:       'Today',
+            [TASK_F.hardDeadline]: true,
+            [TASK_F.project]:      [MICA.projectId],
+            [TASK_F.tenancies]:    [tenancy.id],
+            [TASK_F.desc]:         taskInfo.body,
+        };
+        if (tenantId) patchFields[TASK_F.tenants] = [tenantId];
+        if (unitId)   patchFields[TASK_F.rentalUnits] = [unitId];
+
+        const resp2 = await fetch(`${url}/${created.id}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: patchFields, typecast: true }),
+        });
+        if (!resp2.ok) {
+            console.warn('arrears: Mica task PATCH failed (task created but missing context)', await resp2.text());
+        }
+
+        // Link the new task back to the arrears record so we have a chain.
+        const existingTaskIds = (function() {
+            const links = getField(arrearsRecord, ARREARS.linkedTasks);
+            if (!Array.isArray(links)) return [];
+            return links.map(x => typeof x === 'string' ? x : (x && x.id)).filter(Boolean);
+        })();
+        await updateArrearsRecord(arrearsRecord.id, {
+            [ARREARS.linkedTasks]: [...existingTaskIds, created.id],
+        });
+
+        console.log(`arrears: Mica task created — "${taskInfo.title}"`);
+        return created;
+    }
+
+    // Does this stage + tenant-type combination need a Mica phone task?
+    function needsMicaPhoneTask(stage, tenantType) {
+        if (stage === 'Preventive' && tenantType === 'Universal Credit') return true;
+        return PHONE_TASK_STAGES.has(stage);
     }
 
     // ── Airtable PATCH with performUpsert: atomic create-or-update by Reference ──
@@ -329,6 +495,11 @@
         if (!allTenancies || !allTenancies.length) return;
         await loadArrearsRecords();
 
+        // Stage events that fire this sweep — Mica tasks are created in a second
+        // pass once all arrears records are settled, so we don't double-create
+        // tasks if an upsert+progression both happen in the same sweep.
+        const stageEvents = [];
+
         for (const tenancy of allTenancies) {
             if (!isTenantStatusActive(tenancy)) continue;
 
@@ -338,10 +509,8 @@
             const rent = Number(getField(tenancy, F.tenRent)) || 0;
             if (rent <= 0) continue;
 
-            // Compute this cycle's due date.
-            // If today is after this month's due day, we track this month.
-            // If before, we look at PREVIOUS month's due (an outstanding cycle).
-            // For Preventive (Day -7 / Day -1) we look forward to NEXT due.
+            const tenant = getTenantForTenancy(tenancy, tenantLookup);
+
             const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
             const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
             const dueNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
@@ -354,23 +523,18 @@
             const candidates = [];
             if (today >= dueLastMonth) candidates.push(dueLastMonth);
             if (today >= new Date(dueThisMonth.getTime() - 8 * 86400000)) candidates.push(dueThisMonth);
-            // Next-month preventive: only if we're inside its preventive window
             const daysToNext = Math.floor((dueNextMonth - today) / 86400000);
             const ucWindow = tenantType === 'Universal Credit' && daysToNext <= 7 && daysToNext > 0;
             const workWindow = tenantType === 'Working' && daysToNext <= 1 && daysToNext > 0;
             if (ucWindow || workWindow) candidates.push(dueNextMonth);
 
-            // Has a reconciled payment landed in the calendar month of any candidate?
             const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today);
 
-            // If payment received, run the resolution rule on existing open records
             if (paidThisMonth) {
                 await applyPaymentResolution(tenancy.id, tenantType, today);
-                // Don't open new records this sweep when current month is paid
                 continue;
             }
 
-            // For each candidate cycle, ensure the right stage is recorded
             for (const dueDate of candidates) {
                 const daysFromDue = Math.floor((today - dueDate) / 86400000);
                 const expectedStage = getExpectedStage(tenantType, daysFromDue);
@@ -378,23 +542,185 @@
 
                 const existing = findArrearsRecord(tenancy.id, dueDate);
                 if (!existing) {
-                    await openArrearsRecord(tenancy, tenantType, dueDate, expectedStage, today);
+                    // Fresh create — stage event for the entry stage
+                    const created = await openArrearsRecord(tenancy, tenantType, dueDate, expectedStage, today);
+                    if (created) {
+                        stageEvents.push({ record: created, stage: expectedStage, tenancy, tenant, tenantType, daysFromDue });
+                    }
                     continue;
                 }
 
-                // Skip if this record is already paused / resolved / closed
                 const status = getStatusName(getField(existing, ARREARS.status));
                 if (!ARREARS_OPEN_STATUSES.has(status)) continue;
 
                 const currentStage = getStageName(getField(existing, ARREARS.stage));
                 if (arrearsStageIndex(expectedStage) > arrearsStageIndex(currentStage)) {
-                    await progressArrearsRecord(existing, expectedStage, today);
+                    const ok = await progressArrearsRecord(existing, expectedStage, today);
+                    if (ok) {
+                        stageEvents.push({ record: existing, stage: expectedStage, tenancy, tenant, tenantType, daysFromDue });
+                    }
                 }
             }
         }
+
+        // Second pass: create Mica tasks for stage events that need a phone call.
+        // We only check `linkedTasks` count as a sanity dedup — the engine's own
+        // logic (upsert is idempotent, progression only fires on real stage change)
+        // already ensures we don't fire tasks for the same (record, stage) twice.
+        for (const evt of stageEvents) {
+            if (!needsMicaPhoneTask(evt.stage, evt.tenantType)) continue;
+            const taskInfo = buildMicaTaskFor(evt.stage, evt.tenantType, evt.tenancy, evt.tenant, evt.record, evt.daysFromDue);
+            await createMicaTaskForArrears(evt.record, taskInfo, evt.tenancy, evt.tenant);
+        }
+    }
+
+    // ══════════════════════════════════════════
+    // ARREARS VIEW — renders into the CFV tab as a "Arrears Pipeline" section.
+    // Shows all active arrears records with stage, days overdue, contacts, etc.
+    // ══════════════════════════════════════════
+
+    // Stage → Sage-token-aware badge classes (matches Airtable colours)
+    const STAGE_BADGE = {
+        'Preventive':       { bg: 'var(--info-bg)',     fg: 'var(--info)' },
+        'Early Intervention':{ bg: 'var(--warning-bg)', fg: 'var(--warning)' },
+        'Soft Chase':       { bg: 'var(--warning-bg)',  fg: 'var(--warning)' },
+        'Firm Contact':     { bg: 'var(--warning-bg)',  fg: 'var(--warning)' },
+        'Formal Warning':   { bg: 'var(--danger-bg)',   fg: 'var(--danger)' },
+        'Pre-Action':       { bg: 'var(--danger-bg)',   fg: 'var(--danger)' },
+        'Section 8':        { bg: 'var(--danger-bg)',   fg: 'var(--danger)' },
+        'Court':            { bg: 'var(--danger-bg)',   fg: 'var(--danger)' },
+        'Resolved':         { bg: 'var(--success-bg)',  fg: 'var(--success)' },
+    };
+    const STATUS_BADGE = {
+        'Active':           { bg: 'var(--success-bg)', fg: 'var(--success)' },
+        'Paused':           { bg: 'var(--bg-subtle)',  fg: 'var(--text-secondary)' },
+        'Paused (UC Rule)': { bg: 'var(--bg-subtle)',  fg: 'var(--text-secondary)' },
+        'Resolved':         { bg: 'var(--success-bg)', fg: 'var(--success)' },
+        'Escalated':        { bg: 'var(--danger-bg)',  fg: 'var(--danger)' },
+        'Closed':           { bg: 'var(--bg-subtle)',  fg: 'var(--text-muted)' },
+    };
+    function badgeHtml(text, palette) {
+        const p = palette || { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' };
+        return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;background:${p.bg};color:${p.fg}">${escHtml(text || '—')}</span>`;
+    }
+
+    // Find tenancy by id (for cross-referencing arrears → tenancy → tenant + property)
+    function findTenancyById(id) {
+        return allTenancies.find(t => t.id === id);
+    }
+
+    function renderArrearsSection(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        // No data yet — show a quiet placeholder rather than nothing
+        if (!allArrearsRecords.length) {
+            container.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:13px;text-align:center">
+                Arrears engine has not yet created any records — a sweep runs on each dashboard load.
+            </div>`;
+            return;
+        }
+
+        // Filter to non-closed and sort by days-overdue desc
+        const todayMs = Date.now();
+        const visible = allArrearsRecords
+            .map(r => {
+                const dueRaw = String(getField(r, ARREARS.originalDueDate) || '');
+                const dueMs = dueRaw ? new Date(dueRaw).getTime() : todayMs;
+                const daysOverdue = Math.floor((todayMs - dueMs) / 86400000);
+                return { rec: r, daysOverdue };
+            })
+            .filter(({ rec }) => {
+                const status = getStatusName(getField(rec, ARREARS.status));
+                return status !== 'Closed';
+            })
+            .sort((a, b) => b.daysOverdue - a.daysOverdue);
+
+        // Summary by stage
+        const byStage = {};
+        let totalAmount = 0;
+        visible.forEach(({ rec }) => {
+            const stage = getStageName(getField(rec, ARREARS.stage)) || '—';
+            byStage[stage] = (byStage[stage] || 0) + 1;
+            totalAmount += Number(getField(rec, ARREARS.amountOwed)) || 0;
+        });
+        const stageOrder = ['Preventive', 'Early Intervention', 'Soft Chase', 'Firm Contact', 'Formal Warning', 'Pre-Action', 'Section 8', 'Court', 'Resolved'];
+        const summaryChips = stageOrder
+            .filter(s => byStage[s])
+            .map(s => `<span style="display:inline-block;margin-right:8px">${badgeHtml(`${s} (${byStage[s]})`, STAGE_BADGE[s])}</span>`)
+            .join('');
+
+        // Build table rows
+        const rows = visible.map(({ rec, daysOverdue }) => {
+            const reference = String(getField(rec, ARREARS.ref) || '—');
+            const stage = getStageName(getField(rec, ARREARS.stage));
+            const status = getStatusName(getField(rec, ARREARS.status));
+            const amount = Number(getField(rec, ARREARS.amountOwed)) || 0;
+            const lastContact = String(getField(rec, ARREARS.lastContactDate) || '');
+            const nextAction = String(getField(rec, ARREARS.nextActionType) || '');
+            const nextDue = String(getField(rec, ARREARS.nextActionDue) || '');
+
+            const tenancyId = extractLinkedId(getField(rec, ARREARS.tenancy));
+            const tenancy = findTenancyById(tenancyId);
+            const tenantLookup = {};
+            allTenants.forEach(t => { tenantLookup[t.id] = t; });
+            const tenant = tenancy ? getTenantForTenancy(tenancy, tenantLookup) : null;
+            const tenantType = tenancy ? getTenantTypeForTenancy(tenancy, tenantLookup) : null;
+            const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : (tenancy ? String(getField(tenancy, F.tenSurname) || '') : '—');
+            const propertyVal = tenancy ? getField(tenancy, F.tenProperty) : null;
+            const property = Array.isArray(propertyVal) ? propertyVal[0] : (propertyVal || '');
+            const unitVal = tenancy ? getField(tenancy, F.tenUnitRef) : null;
+            const unit = Array.isArray(unitVal) ? unitVal[0] : (unitVal || '');
+
+            return `<tr>
+                <td style="font-family:var(--font-family-mono,monospace);font-size:11px;color:var(--text-secondary)">${escHtml(reference)}</td>
+                <td><div style="font-weight:600">${escHtml(tenantName)}</div><div style="font-size:11px;color:var(--text-muted)">${escHtml(unit)}</div></td>
+                <td style="font-size:12px;color:var(--text-secondary)">${escHtml(property)}</td>
+                <td>${badgeHtml(stage, STAGE_BADGE[stage])}</td>
+                <td>${badgeHtml(status, STATUS_BADGE[status])}</td>
+                <td style="text-align:right;font-weight:${daysOverdue >= 21 ? '700' : '500'};color:${daysOverdue >= 14 ? 'var(--danger)' : 'var(--text-primary)'}">${daysOverdue}</td>
+                <td style="text-align:right;font-weight:600">£${amount.toFixed(2)}</td>
+                <td style="font-size:12px;color:var(--text-secondary)">${escHtml(lastContact || '—')}</td>
+                <td style="font-size:12px"><div>${escHtml(nextAction || '—')}</div><div style="color:var(--text-muted);font-size:11px">${escHtml(nextDue || '')}</div></td>
+                <td>${tenantType ? badgeHtml(tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' }) : '—'}</td>
+            </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Arrears Pipeline</h2>
+                    <span style="font-size:12px;color:var(--text-muted)">
+                        ${visible.length} active record${visible.length === 1 ? '' : 's'} &nbsp;·&nbsp;
+                        Total exposure £${totalAmount.toFixed(2)}
+                    </span>
+                </div>
+                <div style="margin-bottom:12px">${summaryChips || '<span style="color:var(--text-muted);font-size:12px">No active records</span>'}</div>
+                <div style="overflow-x:auto">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                        <thead>
+                            <tr style="text-align:left;border-bottom:2px solid var(--border-default);background:var(--bg-surface-2)">
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Reference</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Property</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Stage</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Status</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Days&nbsp;O/D</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Amount</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Last&nbsp;Contact</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Next&nbsp;Action</th>
+                                <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>
+        `;
     }
 
     // Expose to other modules
     window.runArrearsEngine = runArrearsEngine;
     window.loadArrearsRecords = loadArrearsRecords;
     window.getTenantTypeForTenancy = getTenantTypeForTenancy;
+    window.renderArrearsSection = renderArrearsSection;

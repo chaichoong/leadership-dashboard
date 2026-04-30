@@ -335,13 +335,14 @@
             <div class="section">
                 <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap">
                     <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
-                        Sort by:
+                        Sort:
                         <select id="costsSortBy" onchange="renderCostsTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
-                            <option value="due-day">Due Day (earliest first)</option>
+                            <option value="due-day">Due Day</option>
                             <option value="amount-desc">Amount (high→low)</option>
                             <option value="amount-asc">Amount (low→high)</option>
+                            <option value="overdue-desc">Days Overdue (most first)</option>
+                            <option value="last-paid-desc">Last Paid (newest first)</option>
                             <option value="name">Name (A→Z)</option>
-                            <option value="status">Status</option>
                         </select>
                     </label>
                     <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
@@ -353,8 +354,17 @@
                         </select>
                     </label>
                     <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Frequency:
+                        <select id="costsFreqFilter" onchange="renderCostsTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="all">All</option>
+                            <option value="monthly">Monthly &amp; sub-monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="annual">Annual</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
                         Search:
-                        <input id="costsFilterText" type="text" placeholder="Search name, account, category…" oninput="renderCostsTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;width:220px;background:var(--bg-surface);color:var(--text-primary)">
+                        <input id="costsFilterText" type="text" placeholder="Search across name, amount, dates, status, account, category…" oninput="renderCostsTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
                     </label>
                 </div>
                 <div class="invoice-table-wrapper">
@@ -364,12 +374,15 @@
                                 <th style="width:32px;text-align:center">#</th>
                                 <th>Cost Name</th>
                                 <th style="text-align:right">Expected</th>
+                                <th style="text-align:right">Last Reconciled</th>
                                 <th>Due Day</th>
-                                <th>Next Due</th>
+                                <th>Last Paid</th>
+                                <th>Days Overdue</th>
                                 <th>Status</th>
                                 <th>Frequency</th>
                                 <th>Account</th>
-                                <th>Category</th>
+                                <th>Sub-Category</th>
+                                <th>End Date</th>
                                 <th style="width:40px"></th>
                             </tr>
                         </thead>
@@ -384,6 +397,15 @@
             <div class="section">
                 <h3 class="section-title" style="font-size:14px">AI Analysis</h3>
                 <div id="costsAIAnalysis"></div>
+            </div>
+            <div class="section">
+                <h3 class="section-title" style="font-size:14px">Backfill Cost Status &amp; Last Reconciled Fields</h3>
+                <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px">One-shot tool. Populates <code>Cost Status (New)</code>, <code>Last Reconciled Payment Date</code>, <code>Last Reconciled Amount</code>, <code>Last Reconciled Account</code>, and <code>Last Reconciled Sub-Category</code> for any cost that's missing them. Run dry-run first; review the plan; then commit.</p>
+                <div style="display:flex;gap:8px;margin-bottom:12px">
+                    <button id="costsBackfillBtn" onclick="runCostsBackfillDryRun()" style="padding:6px 12px;font-size:12px;font-weight:600;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Run Dry-Run</button>
+                    <button id="costsCommitBtn" onclick="commitCostsBackfill()" style="display:none;padding:6px 12px;font-size:12px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:4px;cursor:pointer">Commit Backfill</button>
+                </div>
+                <div id="costsBackfillOutput" style="font-size:12px;color:var(--text-secondary);max-height:400px;overflow-y:auto"></div>
             </div>
         </div>
 
@@ -486,6 +508,7 @@
                     </table>
                 </div>
             </div>
+            <div id="arrearsPipelineContainer"></div>
             <div class="section" id="cfvCommentsSection" style="display:none">
                 <h2 class="section-title" style="font-size:15px">Comments &amp; Updates</h2>
                 <div id="cfvCommentsContainer"></div>
@@ -609,13 +632,13 @@
     <script defer src="js/dashboard.js?v=19"></script>
     <script defer src="js/cashflow.js?v=13"></script>
     <script defer src="js/sitemap.js?v=25"></script>
-    <script defer src="js/costs.js?v=1"></script>
+    <script defer src="js/costs.js?v=2"></script>
     <script defer src="js/invoices.js?v=12"></script>
     <script defer src="js/pnl.js?v=21"></script>
     <script defer src="js/transactions.js?v=5"></script>
     <script defer src="js/reconciliation.js?v=14"></script>
-    <script defer src="js/cfv.js?v=14"></script>
-    <script defer src="js/arrears.js?v=3"></script>
+    <script defer src="js/cfv.js?v=15"></script>
+    <script defer src="js/arrears.js?v=4"></script>
     <script defer src="js/fintable.js?v=13"></script>
     <script defer src="js/ai-assistant.js?v=16"></script>
 </body>
