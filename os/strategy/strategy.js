@@ -1,4 +1,4 @@
-// Strategy Plan OS — standalone page (loaded directly or via iframe).
+// Strategy Plan — standalone page (loaded directly or via iframe).
 // Depends on: ../../js/config.js (TABLES, OBJSTRAT, BASE_ID), ../../js/prompts/boardroom-mentor.js
 
 const AI_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
@@ -239,7 +239,7 @@ async function loadRecord() {
                 {
                     name: 'Push-to-Projects working', kind: 'automation', run: () => {
                         if (typeof pushProjectsManually !== 'function') return { status: 'warn', detail: 'pushProjectsManually() not loaded — quarterly projects can\'t be promoted' };
-                        return { status: 'pass', detail: 'Projects table push wired — Strategy projects flow into Task OS' };
+                        return { status: 'pass', detail: 'Projects table push wired — Strategy projects flow into Tasks' };
                     }
                 },
                 {
@@ -385,7 +385,7 @@ function renderForm(fields) {
     // STRATEGY PLAN — the quarterly half.
     // ────────────────────────────────────────────────────────────────
     host.appendChild(planDivider('🎯 Strategy Plan',
-        'How the business wins this quarter. Iterated every 90 days. Quarterly projects feed into Projects OS; monthly stones feed into Tasks OS.'));
+        'How the business wins this quarter. Iterated every 90 days. Quarterly projects feed into the Projects table; monthly stones feed into the Tasks table.'));
 
     // Nine-Year Target
     host.appendChild(richSection({
@@ -1148,7 +1148,7 @@ function offerProjectPush() {
     host.className = 'status-bar';
     host.style.display = 'block';
     host.innerHTML = `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between">
-        <span>Push ${qps.length} Quarterly Project${qps.length === 1 ? '' : 's'} to Projects OS? This will create ${qps.length} linked project record${qps.length === 1 ? '' : 's'} in the Projects table for ${escapeHtml(quarter)} ${escapeHtml(year)}.</span>
+        <span>Push ${qps.length} Quarterly Project${qps.length === 1 ? '' : 's'} to the Projects table? This will create ${qps.length} linked project record${qps.length === 1 ? '' : 's'} in the Projects table for ${escapeHtml(quarter)} ${escapeHtml(year)}.</span>
         <span style="display:flex;gap:6px">
             <button class="btn btn-ghost" id="pushLaterBtn">Not now</button>
             <button class="btn btn-primary" id="pushNowBtn">Push projects →</button>
@@ -1462,7 +1462,7 @@ async function buildPushProposal(qps, fields, onProgress) {
 // 5 Woodcock renovation" stays a single task.
 async function extractTasksFromStone(stoneText, projectNumber, monthNumber, projectName) {
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — extracting tasks from a monthly stepping stone.`,
+        `Strategy Plan — extracting tasks from a monthly stepping stone.`,
         `You are breaking down a monthly stepping stone into discrete, actionable tasks for a task management system.
 
 Context:
@@ -1578,7 +1578,7 @@ function showPushApprovalModal(proposal, fields) {
     <div class="push-modal">
         <div class="push-modal-head">
             <div>
-                <div class="push-modal-title">Push to Projects &amp; Tasks OS</div>
+                <div class="push-modal-title">Push to Projects &amp; Tasks</div>
                 <div class="push-modal-sub">${newProjects.length} new project${newProjects.length === 1 ? '' : 's'} · ${countNewTasks} new task${countNewTasks === 1 ? '' : 's'} · ${escapeHtml(proposal.quarter)} ${escapeHtml(proposal.year)}</div>
             </div>
             <button class="push-modal-close" type="button">&times;</button>
@@ -1735,7 +1735,7 @@ async function executePush(proposal, fields, opts) {
         if (results.projectsReused) bits.push(`${results.projectsReused} existing project${results.projectsReused === 1 ? '' : 's'} reused`);
         if (results.tasksCreated) bits.push(`${results.tasksCreated} task${results.tasksCreated === 1 ? '' : 's'}`);
         if (results.tasksSkipped) bits.push(`${results.tasksSkipped} task${results.tasksSkipped === 1 ? '' : 's'} skipped (already exist)`);
-        setStatus('success', `✓ ${bits.join(' · ')} in Tasks & Projects OS.`);
+        setStatus('success', `✓ ${bits.join(' · ')} in Tasks & Projects.`);
         pushOfferDismissedForRecord = currentRecord.id;
         setTimeout(() => setStatus('', ''), 6000);
     } else {
@@ -2338,7 +2338,7 @@ function showProjectDetailsPreview(step, parsed, previous) {
 
 async function boardroomParseProjectDetails(step, answer) {
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. Parsing Project ${step.qpIndex + 1} metadata.`,
+        `Strategy Plan — ${wizardState.businessName}. Parsing Project ${step.qpIndex + 1} metadata.`,
         `Parse the founder's answer into structured project metadata.
 
 Return a JSON object ONLY — no commentary, no code fence:
@@ -2447,7 +2447,7 @@ function applyListAndAdvance(step, list) {
 
 async function boardroomListRewrite(step, currentList, instruction) {
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. Restructuring a list field.`,
+        `Strategy Plan — ${wizardState.businessName}. Restructuring a list field.`,
         `You are restructuring the "${step.label}" list for the business.
 
 Context: ${step.descriptionForAI || ''}
@@ -2497,7 +2497,7 @@ Return the JSON object ONLY. No commentary. No code fence.`
 // input as an instruction.
 async function aiAddContent(existing, addition, step) {
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. Appending new content to an existing field.`,
+        `Strategy Plan — ${wizardState.businessName}. Appending new content to an existing field.`,
         `The founder has EXISTING text for "${step.label}" and NEW content they want added to it.
 
 Your job: return the full final text with the new content appended naturally.
@@ -2534,7 +2534,7 @@ RULES:
 
 async function aiMerge(existing, userInput, step) {
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}. Applying a founder's instruction to an existing field.`,
+        `Strategy Plan — ${wizardState.businessName}. Applying a founder's instruction to an existing field.`,
         `You have the EXISTING text for "${step.label}" and an INSTRUCTION from the founder. Your job is to return the full UPDATED text after applying the instruction.
 
 The instruction may be one of these kinds — figure out which before responding:
@@ -2698,7 +2698,7 @@ async function boardroomCritique(step, history) {
         : '';
     const attemptCount = history.filter(m => m.role === 'user').length;
     const system = buildCachedWizardSystem(
-        `Strategy Plan OS — ${wizardState.businessName}.${currentContext}${priorContext}${reflectionContext}`,
+        `Strategy Plan — ${wizardState.businessName}.${currentContext}${priorContext}${reflectionContext}`,
         `You are interviewing the founder to build this quarter's strategy plan, one field at a time.
 
 Section: "${step.label}"
@@ -2817,7 +2817,7 @@ function extractCurrentPlanFromForm() {
 }
 
 function finaliseWizard() {
-    appendWizMessage('assistant', 'All sections captured. I have pre-filled the form. Review, then hit "Save changes" at the top. After saving, I will offer to push the three Quarterly Projects into Projects OS as real project records with linked monthly Tasks.');
+    appendWizMessage('assistant', 'All sections captured. I have pre-filled the form. Review, then hit "Save changes" at the top. After saving, I will offer to push the three Quarterly Projects into the Projects table as real project records with linked monthly Tasks.');
     document.getElementById('wizStepLabel').textContent = 'Complete — review form';
     // Wizard finished cleanly — drop the saved session so the next open starts fresh.
     clearWizardSession();

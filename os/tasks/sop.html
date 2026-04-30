@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Task &amp; Project Management OS &mdash; Standard Operating Procedure</title>
+<title>Task &amp; Project Management &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -98,8 +98,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
 <div class="header">
   <div class="header-inner">
-    <a href="../index.html" class="header-back">&#x2190; Back to OS Hub</a>
-    <h1>&#x2705; Task and Project Management OS</h1>
+    <a href="../../index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
+    <h1>&#x2705; Task and Project Management</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Team task management, smart daily planning, calendar integration, and project tracking synced with Airtable</div>
     <div class="version">Version 1.1 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
   </div>
@@ -188,7 +188,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
   <div class="section" id="overview">
     <div class="section-title"><span class="icon">&#x1F4CB;</span> 1. Overview &amp; Purpose</div>
     <div class="card">
-      <p>The Task and Project Management OS is a self-contained web application that provides the operations team with a unified view of all tasks and projects stored in Airtable. It is designed for daily operational use by Kevin Brittain, Mica Albovias, and Ericamae Atenta, and provides a separate mobile-optimised view for contractors (Gary, Roy, Rob).</p>
+      <p>Task and Project Management is a self-contained web application that provides the operations team with a unified view of all tasks and projects stored in Airtable. It is designed for daily operational use by Kevin Brittain, Mica Albovias, and Ericamae Atenta, and provides a separate mobile-optimised view for contractors (Gary, Roy, Rob).</p>
       <p>The system fetches all non-completed, non-someday tasks from Airtable on every load and presents them across six specialist views. Tasks can be updated in real-time &mdash; status changes and due-date adjustments write directly back to Airtable via the REST API. No separate backend is required.</p>
       <h4 style="margin-top:1rem;font-size:0.95rem;font-weight:700;">Key capabilities</h4>
       <ul>
@@ -216,7 +216,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
       </div>
       <div class="wf-body">
         <ol class="steps">
-          <li>Open <strong>os/tasks/index.html</strong> in your browser (or via the OS Hub iframe).</li>
+          <li>Open <strong>os/tasks/index.html</strong> in your browser (or click <strong>Tasks &amp; Projects</strong> in the Operations section of the sidebar to load it as an iframe).</li>
           <li>If prompted, enter your <strong>Airtable Personal Access Token</strong> (starting with <code>pat_</code>) in the auth bar at the top and click <strong>Connect</strong>. The token is stored in <code>localStorage</code> under the key <code>_dlr_pat</code> and will not be asked for again on the same device.</li>
           <li>The <strong>identity overlay</strong> appears. Select your name (Kevin Brittain, Mica Albovias, or Ericamae Atenta). Your choice is saved to <code>localStorage</code> under <code>_task_user</code>. The system defaults to showing your tasks in the team filter.</li>
           <li>Data loads automatically. The top bar shows the sync timestamp once loading is complete.</li>
@@ -435,10 +435,10 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="card">
       <div class="card-header">Creating tasks</div>
-      <p>Tasks are created directly in <strong>Airtable</strong> (table <code>tblqB8b22hKBL4PF1</code>). The Task Manager OS does not provide a create-task form &mdash; it is a read and update interface only.</p>
+      <p>Tasks are created directly in <strong>Airtable</strong> (table <code>tblqB8b22hKBL4PF1</code>). The Task Manager does not provide a create-task form &mdash; it is a read and update interface only.</p>
       <div class="info-box warn">
         <span class="ib-icon">&#x26A0;</span>
-        <span>After creating a task in Airtable, click <strong>Refresh</strong> in the top bar to pull the latest data into the OS page.</span>
+        <span>After creating a task in Airtable, click <strong>Refresh</strong> in the top bar to pull the latest data into the page.</span>
       </div>
     </div>
 

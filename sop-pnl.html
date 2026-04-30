@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Profit &amp; Loss OS &mdash; Standard Operating Procedure</title>
+<title>Profit &amp; Loss &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="css/tokens.css?v=1">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -100,7 +100,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="header">
   <div class="header-inner">
     <a href="index.html#sitemap" class="header-back">&#x2190; Back to Site Map</a>
-    <h1>&#x1F4B0; Profit &amp; Loss OS</h1>
+    <h1>&#x1F4B0; Profit &amp; Loss</h1>
     <div class="subtitle">Standard Operating Procedure &mdash; Real-time P&amp;L reporting with AI analysis, interactive charts, and inline transaction editing</div>
     <div class="version">Version 2.12 &bull; 17 Apr 2026 &bull; Owner: Kevin Brittain</div>
   </div>
@@ -180,7 +180,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="section" id="overview">
   <h2 class="section-title"><span class="icon">&#x1F3AF;</span> 1. Overview &amp; Purpose</h2>
   <div class="card">
-    <p>The Profit &amp; Loss OS provides a real-time financial performance view for the business, built directly from reconciled transactions stored in Airtable. It renders a multi-section P&amp;L grid, nine KPI cards, four interactive charts, and an AI-powered analysis panel — all from the same underlying dataset.</p>
+    <p>The Profit &amp; Loss page provides a real-time financial performance view for the business, built directly from reconciled transactions stored in Airtable. It renders a multi-section P&amp;L grid, nine KPI cards, four interactive charts, and an AI-powered analysis panel — all from the same underlying dataset.</p>
     <div class="info-box info">
       <span class="ib-icon">&#x2139;&#xFE0F;</span>
       <div><strong>Scope:</strong> Covers Revenue, Cost of Goods Sold (COGS), and Operating Expenses (OpEx) for the <strong>Real Estate</strong> and <strong>Operations Director</strong> businesses. Capital expenditure, loans, transfers, balance-sheet items, and personal transactions are explicitly excluded — they carry sub-categories not in the allow-list and are silently skipped.</div>
@@ -258,7 +258,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="wf-body">
       <ol class="steps">
-        <li>In the left sidebar, click <strong>&#x1F4B0; Profit &amp; Loss OS</strong>. This calls <code>switchTab('pnl')</code>.</li>
+        <li>In the left sidebar, click <strong>&#x1F4B0; Profit &amp; Loss</strong>. This calls <code>switchTab('pnl')</code>.</li>
         <li>The tab panel <code>id="tab-pnl"</code> becomes visible and <code>renderPnL()</code> is called.</li>
         <li>The report builds immediately from the in-memory <code>allTransactions</code> array — no additional network request is made.</li>
         <li>Charts render on the next animation frame via <code>requestAnimationFrame</code> to avoid layout thrash.</li>

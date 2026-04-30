@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Objective &amp; Strategy OS &mdash; Standard Operating Procedure</title>
+<title>Objective &amp; Strategy &mdash; Standard Operating Procedure</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -70,7 +70,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
 <div class="header">
   <div class="header-inner">
     <a href="../../index.html" class="header-back">&larr; Back to Dashboard</a>
-    <h1>&#x1F3AF; Objective &amp; Strategy OS</h1>
+    <h1>&#x1F3AF; Objective &amp; Strategy</h1>
     <p class="subtitle">Standard Operating Procedure &mdash; how the page works, how the AI wizard works, and what gets written back to Airtable.</p>
     <p class="version">Version 1.0 &middot; Last updated April 2026</p>
   </div>
@@ -86,7 +86,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
     <div class="qr-item"><div class="qr-label">AI Model</div><div class="qr-value">Claude Haiku 4.5 for wizard critique (cheap, fast, JSON-mode)</div></div>
     <div class="qr-item"><div class="qr-label">System Prompt</div><div class="qr-value"><code>js/prompts/boardroom-mentor.js</code></div></div>
     <div class="qr-item"><div class="qr-label">Cadence</div><div class="qr-value">Objective: annual (quarterly tweak). Strategy: every quarter.</div></div>
-    <div class="qr-item"><div class="qr-label">Feeds Into</div><div class="qr-value">Projects OS &middot; Tasks OS (stepping stones)</div></div>
+    <div class="qr-item"><div class="qr-label">Feeds Into</div><div class="qr-value">Projects &middot; Tasks (stepping stones)</div></div>
   </div>
 </div>
 
@@ -110,7 +110,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
   <h2 class="section-title">&#x1F3AF; 1. Overview &amp; Purpose</h2>
   <div class="card">
     <div class="card-header">&#x1F4A1; What It Does</div>
-    <p>The Objective &amp; Strategy OS gives each business a single living document covering its <strong>9-year vision, 3-year target, 1-year target, quarterly priority projects, and monthly stepping stones</strong>. An AI wizard (&ldquo;Boardroom Mentor&rdquo;) interviews the founder section-by-section, pushes back on vague answers, and writes the finished plan straight into Airtable.</p>
+    <p>The Objective &amp; Strategy page gives each business a single living document covering its <strong>9-year vision, 3-year target, 1-year target, quarterly priority projects, and monthly stepping stones</strong>. An AI wizard (&ldquo;Boardroom Mentor&rdquo;) interviews the founder section-by-section, pushes back on vague answers, and writes the finished plan straight into Airtable.</p>
     <p>Each record is stored per <strong>Business &times; Quarter &times; Year</strong>. The plan is reviewed and iterated every quarter; prior quarters are preserved for reflection.</p>
     <div class="info-box tip"><span class="ib-icon">&#x1F4AC;</span><div><strong>Mental model:</strong> Objective = why we exist (annual). Strategy = how we win this quarter. Quarterly Projects = the three things that, if done, make the quarter a success.</div></div>
   </div>
@@ -126,7 +126,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
       <span class="flow-arrow">&#x27A1;</span>
       <div class="flow-step success"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F4BE;</span>Save to<br>Airtable</div>
       <span class="flow-arrow">&#x27A1;</span>
-      <div class="flow-step"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F680;</span>Push projects<br>to Projects OS</div>
+      <div class="flow-step"><span style="font-size:1.2rem;display:block;margin-bottom:0.2rem">&#x1F680;</span>Push projects<br>to Projects table</div>
     </div>
   </div>
 </div>
@@ -136,7 +136,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
   <div class="card">
     <ol class="steps">
       <li>Open the Operations Director dashboard and sign in with your Airtable Personal Access Token (PAT).</li>
-      <li>In the left sidebar, click <strong>&#x1F3AF; Objective &amp; Strategy OS</strong> (second entry, under Leadership Dashboard OS).</li>
+      <li>In the left sidebar, click <strong>&#x1F3AF; Objective &amp; Strategy</strong> (second entry, under Leadership Dashboard).</li>
       <li>Pick a <strong>Business</strong>, <strong>Quarter</strong>, and <strong>Year</strong>. If a record exists for that combination it loads; otherwise you see an empty-state prompt to start the AI Wizard.</li>
       <li>If you land here from a fresh session, the PAT is remembered via <code>localStorage</code> &mdash; no second sign-in needed.</li>
     </ol>
@@ -175,7 +175,7 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
 
   <div class="card">
     <div class="card-header">&#x1F3AD; Persona</div>
-    <p>The wizard speaks as <strong>Boardroom Mentor</strong> &mdash; a composite virtual board (Chair, CFO, COO, CMO, Head of People, Real Estate Strategist, Philanthropy Steward). Direct, analytical, UK English, no motivational fluff. The full prompt lives at <code>js/prompts/boardroom-mentor.js</code> and is shared across <em>every</em> AI feature on the platform, not just this OS.</p>
+    <p>The wizard speaks as <strong>Boardroom Mentor</strong> &mdash; a composite virtual board (Chair, CFO, COO, CMO, Head of People, Real Estate Strategist, Philanthropy Steward). Direct, analytical, UK English, no motivational fluff. The full prompt lives at <code>js/prompts/boardroom-mentor.js</code> and is shared across <em>every</em> AI feature on the platform, not just this page.</p>
     <div class="info-box info"><span class="ib-icon">&#x1F4CC;</span><div><strong>Why it matters:</strong> the rules of the critique (specific &middot; testable &middot; sized for the horizon) come from that single prompt file. Update the voice in one place, every wizard improves.</div></div>
   </div>
 
@@ -220,9 +220,9 @@ h3{font-size:1.05rem;color:var(--text-primary);margin:1rem 0 0.5rem}
 <div class="section" id="project-hook">
   <h2 class="section-title">&#x1F680; 6. Projects &amp; Tasks Hook</h2>
   <div class="card">
-    <p>After saving the quarter, the wizard offers to push the three Quarterly Projects into <strong>Projects OS</strong> as proper project records, and each monthly stepping stone becomes a linked <strong>Task</strong> due at the end of its month.</p>
+    <p>After saving the quarter, the wizard offers to push the three Quarterly Projects into the <strong>Projects table</strong> as proper project records, and each monthly stepping stone becomes a linked <strong>Task</strong> due at the end of its month.</p>
     <table class="grid">
-      <thead><tr><th>Projects OS field</th><th>Auto-filled</th><th>Asked by wizard</th></tr></thead>
+      <thead><tr><th>Projects field</th><th>Auto-filled</th><th>Asked by wizard</th></tr></thead>
       <tbody>
         <tr><td>Project Name</td><td>From <code>Quarterly Project N</code></td><td>&mdash;</td></tr>
         <tr><td>Business</td><td>From selected business</td><td>&mdash;</td></tr>

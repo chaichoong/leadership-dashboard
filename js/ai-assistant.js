@@ -71,7 +71,7 @@
     // fallback when a tab has no SOP file (os-strategy, fintable).
     const PAGE_PURPOSES = {
         'overview': 'Leadership Dashboard — financial overview, 31-day cash flow forecast, balance calculator, reconciliation accuracy, AI commentary. The single executive view of business health.',
-        'tasks': 'Task and Project Management OS — tasks and projects across the portfolio, with assignment, due dates, and Kanban-style flow.',
+        'tasks': 'Task and Project Management — tasks and projects across the portfolio, with assignment, due dates, and Kanban-style flow.',
         'cfv': 'CFVs (Cash Flow Voids) — detects tenancies where rent hasn\'t landed on time, runs a 3-stage chase sequence, tracks exposure.',
         'invoices': 'Invoices — pending invoices pulled from Gmail, AI-matched to vendors/jobs, approved and marked paid.',
         'pnl': 'Profit & Loss — business-level P&L with category breakdown, period comparison, and variance.',
@@ -79,7 +79,7 @@
         'compliance': 'Property Compliance — certificate tracking (gas, EICR, EPC, legionella, fire, PAT), expiry monitoring, renewal actions.',
         'airtable': 'Contractor Job List — active maintenance jobs, contractor assignment, status.',
         'os-bplan': 'Business Launch Plan Builder — AI-guided wizard that produces a complete launch plan for a new business.',
-        'os-strategy': 'Objective & Strategy OS — quarterly strategy plan per business with Boardroom Mentor wizard support.',
+        'os-strategy': 'Objective & Strategy — quarterly strategy plan per business with Boardroom Mentor wizard support.',
         'fintable': 'Fintable Sync Monitor — health of bank-account sync across all connected accounts; flags stale or disconnected feeds.',
         'sitemap': 'Site Map & Guides — registry of every page, current version, matching SOP/user-guide version, and sync status.',
     };

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inbound Comms OS</title>
+    <title>Inbound Comms</title>
     <link rel="stylesheet" href="css/tokens.css?v=1">
     <link rel="stylesheet" href="css/sync-bar.css?v=2">
     <style>
@@ -630,7 +630,7 @@
 <!-- Main App -->
 <div id="mainApp" style="display:none;">
     <div class="header">
-        <h1><span>Inbound Comms OS</span></h1>
+        <h1><span>Inbound Comms</span></h1>
         <div class="header-right">
             <select class="label-select" id="labelSelect" onchange="onLabelChange()">
                 <option value="">Loading labels...</option>
@@ -889,7 +889,7 @@
     const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
     const INBOX_VALUE = '__INBOX__';
     // Apps Script that pulls Gmail "3: to pay" → Airtable Invoice Records.
-    // Triggered ad-hoc when the team applies label 3 so Invoices OS reflects
+    // Triggered ad-hoc when the team applies label 3 so Invoices reflects
     // new invoices within seconds rather than waiting for the 15-min cron.
     const GMAIL_INVOICE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwzn-xAv2li7Qo8GrEEkELWzRNp0_4fcz9tiuxQdXiDDgwhCHpoRTTbDyF2K3Ks5wza/exec';
 

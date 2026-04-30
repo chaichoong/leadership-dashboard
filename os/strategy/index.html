@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Objective &amp; Strategy OS</title>
+    <title>Objective &amp; Strategy</title>
     <link rel="stylesheet" href="../../css/tokens.css?v=1">
     <link rel="stylesheet" href="../../css/sync-bar.css?v=2">
-    <script src="../../js/config.js?v=16"></script>
+    <script src="../../js/config.js?v=20"></script>
     <script src="../../js/prompts/boardroom-mentor.js?v=2"></script>
     <script src="../../js/sync-bar.js?v=4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -18,7 +18,7 @@
     <!-- Auth Screen -->
     <div id="authScreen" class="auth-screen">
         <div class="auth-box">
-            <h2>Objective &amp; Strategy OS</h2>
+            <h2>Objective &amp; Strategy</h2>
             <p>Enter your Airtable Personal Access Token to load live data.</p>
             <input type="password" id="patInput" class="auth-input" placeholder="pat...">
             <button onclick="authenticate()" class="auth-btn">Connect</button>
@@ -65,7 +65,7 @@
             </div>
             <div class="ctx-actions">
                 <button id="saveBtn" class="btn btn-ghost" onclick="saveRecord()" disabled>Save changes</button>
-                <button id="pushProjBtn" class="btn btn-ghost" onclick="pushProjectsManually()" title="Create one Project record per non-empty Quarterly Project in the Projects OS table">Push Projects →</button>
+                <button id="pushProjBtn" class="btn btn-ghost" onclick="pushProjectsManually()" title="Create one Project record per non-empty Quarterly Project in the Projects table">Push Projects →</button>
                 <button id="exportPdfBtn" class="btn btn-ghost" onclick="exportPlanToPDF()" title="Download the plan as a presentable PDF">Export PDF</button>
                 <button id="wizardBtn" class="btn btn-primary" onclick="openWizard()">AI Wizard ▸</button>
             </div>

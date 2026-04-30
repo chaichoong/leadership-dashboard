@@ -73,7 +73,7 @@
                     <span class="sidebar-section-coming">Coming</span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item disabled" title="No Marketing OS yet — coming"><span class="sidebar-icon">&#x1F4E3;</span><span class="sidebar-label">Marketing OS</span></div>
+                    <div class="sidebar-item disabled" title="No Marketing module yet — coming"><span class="sidebar-icon">&#x1F4E3;</span><span class="sidebar-label">Marketing</span></div>
                 </div>
             </div>
 
@@ -84,7 +84,7 @@
                     <span class="sidebar-section-coming">Coming</span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item disabled" title="No Sales OS yet — coming"><span class="sidebar-icon">&#x1F91D;</span><span class="sidebar-label">Sales / Pipeline OS</span></div>
+                    <div class="sidebar-item disabled" title="No Sales module yet — coming"><span class="sidebar-icon">&#x1F91D;</span><span class="sidebar-label">Sales / Pipeline</span></div>
                 </div>
             </div>
 
@@ -125,7 +125,7 @@
                     <span class="sidebar-section-coming">Coming</span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item disabled" title="No Team / HR OS yet — coming"><span class="sidebar-icon">&#x1F465;</span><span class="sidebar-label">HR Suite</span></div>
+                    <div class="sidebar-item disabled" title="No Team / HR module yet — coming"><span class="sidebar-icon">&#x1F465;</span><span class="sidebar-label">HR Suite</span></div>
                 </div>
             </div>
 
@@ -185,7 +185,7 @@
 
         <!-- Tabs Navigation (hidden — replaced by sidebar) -->
         <div class="tabs-nav">
-            <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard OS</button>
+            <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard</button>
             <button class="tab-btn" onclick="switchTab('invoices')">Accounts Payable Variable</button>
             <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids</button>
         </div>
@@ -196,7 +196,7 @@
         <div data-sync-bar="overview"></div>
 
         <div class="header">
-            <h1>Leadership Dashboard OS</h1>
+            <h1>Leadership Dashboard</h1>
             <p id="headerDate"></p>
             <div class="refresh-info">
                 <div class="refresh-dot"></div>
@@ -317,7 +317,7 @@
 
         </div><!-- end tab-overview -->
 
-        <!-- Tab: Task Manager OS -->
+        <!-- Tab: Tasks & Projects -->
         <div class="tab-panel" id="tab-tasks">
             <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
@@ -502,7 +502,7 @@
             </iframe>
         </div>
 
-        <!-- Tab: Operations OS (Tenants, Tenancies, Rental Units, Properties) -->
+        <!-- Tab: Operations (Tenants, Tenancies, Rental Units, Properties) -->
         <div class="tab-panel" id="tab-operations">
             <iframe class="tab-panel-iframe" id="operationsFrame" src="" data-src="os/operations/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
@@ -590,7 +590,7 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <script defer src="js/config.js?v=19"></script>
+    <script defer src="js/config.js?v=20"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
     <script defer src="js/shared.js?v=20"></script>
     <script defer src="js/sync-bar.js?v=4"></script>
@@ -599,12 +599,12 @@
     <script defer src="js/sitemap.js?v=25"></script>
     <script defer src="js/costs.js?v=1"></script>
     <script defer src="js/invoices.js?v=12"></script>
-    <script defer src="js/pnl.js?v=20"></script>
+    <script defer src="js/pnl.js?v=21"></script>
     <script defer src="js/transactions.js?v=5"></script>
     <script defer src="js/reconciliation.js?v=14"></script>
     <script defer src="js/cfv.js?v=14"></script>
     <script defer src="js/arrears.js?v=1"></script>
     <script defer src="js/fintable.js?v=13"></script>
-    <script defer src="js/ai-assistant.js?v=15"></script>
+    <script defer src="js/ai-assistant.js?v=16"></script>
 </body>
 </html>
