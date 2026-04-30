@@ -584,6 +584,36 @@
     // Runs in dry-run mode by default; click again to commit.
     let _costsBackfillState = { plan: null };
 
+    // Recency threshold for "In Payment" classification — costs with a transaction
+    // within this many days are considered active. Anything older (or never used)
+    // defaults to Inactive. Kevin reviews the dry-run before committing.
+    const ACTIVE_WINDOW_DAYS = 60;
+
+    function classifyCostStatus(cost) {
+        // Returns { status: 'In Payment' | 'Inactive', reason: string, daysSinceLastTx: number|null }
+        if (getField(cost, F.costInactive)) {
+            return { status: 'Inactive', reason: 'Inactive checkbox ticked' };
+        }
+        // Use ALL linked txs (reconciled or not) — gives best signal of recent activity
+        const linkedTxs = (allTransactions || []).filter(tx => {
+            const linked = getField(tx, F.txCost);
+            if (!Array.isArray(linked)) return false;
+            return linked.some(v => (v.id || v) === cost.id);
+        });
+        if (linkedTxs.length === 0) {
+            return { status: 'Inactive', reason: 'No linked transactions ever', daysSinceLastTx: null };
+        }
+        const sorted = [...linkedTxs].sort((a, b) =>
+            new Date(getField(b, F.txDate) || 0) - new Date(getField(a, F.txDate) || 0));
+        const latestDate = getField(sorted[0], F.txDate);
+        const today = new Date(); today.setHours(0,0,0,0);
+        const days = Math.floor((today - new Date(latestDate)) / 86400000);
+        if (days <= ACTIVE_WINDOW_DAYS) {
+            return { status: 'In Payment', reason: `Last tx ${days}d ago`, daysSinceLastTx: days };
+        }
+        return { status: 'Inactive', reason: `Last tx ${days}d ago (>${ACTIVE_WINDOW_DAYS}d threshold)`, daysSinceLastTx: days };
+    }
+
     async function runCostsBackfillDryRun() {
         const btn = document.getElementById('costsBackfillBtn');
         const out = document.getElementById('costsBackfillOutput');
@@ -593,22 +623,24 @@
 
         const plan = [];
         for (const c of (allCosts || [])) {
-            const inactive = !!getField(c, F.costInactive);
             const hasNewStatus = !!getPaymentStatusName(getField(c, F.costStatusNew));
             const hasReconDate = !!getField(c, F.costLastReconDate);
 
-            // Find most recent reconciled tx linked to this cost
-            const txs = (allTransactions || []).filter(tx => {
+            // Find most recent reconciled tx linked to this cost (for Last Reconciled fields)
+            const reconciledTxs = (allTransactions || []).filter(tx => {
                 if (!getField(tx, F.txReconciled)) return false;
                 const linked = getField(tx, F.txCost);
                 if (!Array.isArray(linked)) return false;
                 return linked.some(v => (v.id || v) === c.id);
             });
-            const newest = txs.length > 0 ? txs.sort((a, b) =>
+            const newest = reconciledTxs.length > 0 ? reconciledTxs.sort((a, b) =>
                 new Date(getField(b, F.txDate) || '') - new Date(getField(a, F.txDate) || ''))[0] : null;
 
+            // Classify status using recency heuristic
+            const classification = classifyCostStatus(c);
+
             const writes = {};
-            if (!hasNewStatus) writes[F.costStatusNew] = inactive ? 'Inactive' : 'In Payment';
+            if (!hasNewStatus) writes[F.costStatusNew] = classification.status;
             if (newest && !hasReconDate) {
                 writes[F.costLastReconDate] = getField(newest, F.txDate);
                 writes[F.costLastReconAmount] = Math.abs(Number(getField(newest, F.txReportAmount)) || 0);
@@ -619,7 +651,15 @@
             }
 
             if (Object.keys(writes).length > 0) {
-                plan.push({ id: c.id, name: getField(c, F.costName) || '(unnamed)', writes, txCount: txs.length });
+                plan.push({
+                    id: c.id,
+                    name: getField(c, F.costName) || '(unnamed)',
+                    writes,
+                    suggestedStatus: classification.status,
+                    reason: classification.reason,
+                    daysSinceLastTx: classification.daysSinceLastTx,
+                    reconciledCount: reconciledTxs.length,
+                });
             }
         }
 
@@ -632,19 +672,38 @@
             return;
         }
 
-        const summary = `<div style="font-weight:600;margin-bottom:8px">Dry-run plan: ${plan.length} cost record(s) will be updated</div>`;
-        const lines = plan.slice(0, 50).map(p => {
+        const inPayment = plan.filter(p => p.suggestedStatus === 'In Payment');
+        const inactive = plan.filter(p => p.suggestedStatus === 'Inactive');
+
+        const renderRow = (p) => {
             const w = p.writes;
             const parts = [];
-            if (w[F.costStatusNew]) parts.push(`Status → ${w[F.costStatusNew]}`);
+            if (w[F.costStatusNew]) parts.push(`<strong>Status → ${w[F.costStatusNew]}</strong>`);
             if (w[F.costLastReconDate]) parts.push(`Last Paid → ${formatCostDate(w[F.costLastReconDate])}`);
             if (w[F.costLastReconAmount] != null) parts.push(`Amount → ${fmt(w[F.costLastReconAmount])}`);
             if (w[F.costLastReconAccount]) parts.push(`Account → ${getAccountName(w[F.costLastReconAccount][0]) || '(linked)'}`);
             if (w[F.costLastReconSubCat]) parts.push(`Sub-Cat → ${getSubCatNameById(w[F.costLastReconSubCat][0]) || '(linked)'}`);
-            return `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px"><strong>${escHtml(p.name)}</strong> <span style="color:var(--text-muted)">(${p.txCount} reconciled txs)</span><br><span style="color:var(--text-secondary)">${parts.join(' · ')}</span></div>`;
-        }).join('');
-        const more = plan.length > 50 ? `<div style="color:var(--text-muted);font-size:11px;padding:4px 0">…and ${plan.length - 50} more</div>` : '';
-        out.innerHTML = summary + lines + more + `<div style="margin-top:12px;padding:8px;background:var(--info-bg);color:var(--info);border-radius:4px;font-size:12px">Review the plan above. If correct, click <strong>Commit Backfill</strong>. To re-generate the plan, click <strong>Re-run dry-run</strong>.</div>`;
+            return `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px"><strong>${escHtml(p.name)}</strong> <span style="color:var(--text-muted)">(${p.reconciledCount} reconciled · ${escHtml(p.reason)})</span><br><span style="color:var(--text-secondary)">${parts.join(' · ')}</span></div>`;
+        };
+
+        const summary = `
+            <div style="font-weight:600;margin-bottom:12px">Dry-run plan: ${plan.length} cost record(s) will be updated</div>
+            <div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px">
+                <div><strong style="color:var(--success)">In Payment:</strong> ${inPayment.length}</div>
+                <div><strong style="color:var(--text-muted)">Inactive:</strong> ${inactive.length}</div>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Heuristic: cost is "In Payment" if it has a linked transaction within the last ${ACTIVE_WINDOW_DAYS} days. Anything older or never used → Inactive. Review below; if any are wrongly classified, manually flip them in Airtable's <em>Cost Status (New)</em> column before committing (or after — they won't be auto-overwritten).</div>
+        `;
+
+        const sectionInPayment = inPayment.length > 0
+            ? `<details open style="margin-bottom:12px"><summary style="cursor:pointer;padding:6px 8px;background:var(--success-bg);color:var(--success);border-radius:4px;font-weight:600">▼ Will set to "In Payment" (${inPayment.length})</summary><div style="padding:8px 0">${inPayment.map(renderRow).join('')}</div></details>`
+            : '';
+
+        const sectionInactive = inactive.length > 0
+            ? `<details style="margin-bottom:12px"><summary style="cursor:pointer;padding:6px 8px;background:var(--bg-subtle);color:var(--text-secondary);border-radius:4px;font-weight:600">▶ Will set to "Inactive" (${inactive.length}) — click to expand and review</summary><div style="padding:8px 0">${inactive.map(renderRow).join('')}</div></details>`
+            : '';
+
+        out.innerHTML = summary + sectionInPayment + sectionInactive + `<div style="margin-top:12px;padding:8px;background:var(--info-bg);color:var(--info);border-radius:4px;font-size:12px">Review the lists above. If correct, click <strong>Commit Backfill</strong>. If anything is miscategorised, flip the wrongly-classified records in Airtable manually first (or after the commit — the dashboard never auto-overrides a deliberately-set status).</div>`;
         btn.disabled = false;
         btn.textContent = 'Re-run dry-run';
         document.getElementById('costsCommitBtn').style.display = 'inline-block';
@@ -678,16 +737,20 @@
                 const computedVarAmt = e.varianceFlag !== 'unknown' ? +(e.varianceAmount.toFixed(2)) : null;
                 const computedVarFlag = ({ match: 'Match', soft: 'Soft', hard: 'Hard', unknown: 'Unknown' })[e.varianceFlag] || 'Unknown';
 
-                // Compute desired status: Inactive (if checkbox), else Overdue (if past due), else In Payment.
-                // Only flips an existing status if the trigger condition genuinely changed.
-                let desiredStatus = storedStatus || (inactiveChecked ? 'Inactive' : 'In Payment');
+                // Compute desired status. RULES:
+                // - Inactive checkbox always wins → "Inactive".
+                // - Already-Inactive stays Inactive (never auto-promoted).
+                // - In Payment ↔ Overdue can flip both ways based on Days Overdue.
+                // - Empty status is left empty (only the backfill sets initial status,
+                //   to avoid silently activating paused costs).
+                let desiredStatus = storedStatus || '';
                 if (inactiveChecked) {
                     desiredStatus = 'Inactive';
-                } else if (computedDays !== null && computedDays > 0) {
+                } else if (storedStatus === 'Inactive') {
+                    desiredStatus = 'Inactive';
+                } else if (storedStatus === 'In Payment' && computedDays !== null && computedDays > 0) {
                     desiredStatus = 'Overdue';
                 } else if (storedStatus === 'Overdue' && computedDays !== null && computedDays <= 0) {
-                    desiredStatus = 'In Payment';
-                } else if (!storedStatus) {
                     desiredStatus = 'In Payment';
                 }
 
@@ -704,7 +767,7 @@
                 if (computedNext && storedNext !== computedNext) {
                     fields[F.costExpectedNext] = computedNext;
                 }
-                if (desiredStatus && desiredStatus !== storedStatus) {
+                if (desiredStatus && desiredStatus !== (storedStatus || '')) {
                     fields[F.costStatusNew] = desiredStatus;
                 }
 

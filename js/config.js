@@ -159,6 +159,8 @@
         costVarianceAmount:    'fldplK7AtAPJVlzyM',  // Variance Amount (£) — written by dashboard on load
         costVarianceFlag:      'fldQ4gNa9s36SyHHQ',  // Variance Flag: Match / Soft / Hard / Unknown
         costExpectedNext:      'fldiiWiiPLXkWg1Dc',  // Expected Next Payment (date) — written by dashboard on load
+        costLatestTxDate:      'fldDEWHeA35d8hYGf',  // Latest Transaction Date (rollup) — used by backfill heuristic
+        costTxCount:           'fldjPt9cgzywA6SZq',  // Transaction Count (count) — used by backfill heuristic
         // Transactions sub-category (already have txSubCategory = fldMRjSVzZVYeHb0A)
         // Tenancies
         tenRef:           'fldyNVvFn4x8GY14q',
