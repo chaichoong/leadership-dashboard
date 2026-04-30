@@ -42,9 +42,6 @@
     // Globals
     let allArrearsRecords = [];
     let arrearsLoadedAt = 0;
-    // Per-sweep guard: prevents duplicate creates if the engine fires twice
-    // in quick succession (e.g. switchTab + loadDashboard both triggering it).
-    const _refsBeingCreated = new Set();
 
     // ── Tenant-type accessor ──
     // Reads `Rent Payment Type` from the linked Tenant record. Returns one of
@@ -162,30 +159,42 @@
         return ARREARS_STAGES[idx + 1].name;
     }
 
-    // ── Build a Reference like AR-2026-04-XXXX ──
-    // We use openedDate year-month plus a short tenancy ref slice so it's
-    // human-readable in lists. No collision risk per (tenancy, due-date).
+    // ── Build a Reference like AR-2026-04-COLLIN-3KKR ──
+    // Year-month + 6-char ref slice + 4-char tenancy id suffix. The id suffix
+    // disambiguates tenancies whose ref starts with the same 6 chars (e.g. two
+    // "Collins" tenancies). The Reference is the upsert merge key — uniqueness
+    // here is the contract that prevents duplicate arrears records.
     function buildArrearsReference(tenancy, dueDate) {
         const yyyy = dueDate.getFullYear();
         const mm = String(dueDate.getMonth() + 1).padStart(2, '0');
         const tenRef = String(getField(tenancy, F.tenRef) || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase()
                     || tenancy.id.slice(-4).toUpperCase();
-        return `AR-${yyyy}-${mm}-${tenRef}`;
+        const idSuffix = tenancy.id.slice(-4).toUpperCase();
+        return `AR-${yyyy}-${mm}-${tenRef}-${idSuffix}`;
     }
 
-    // ── Airtable POST: create one arrears record ──
-    async function createArrearsRecord(payload) {
-        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.arrears}`, {
-            method: 'POST',
+    // ── Airtable PATCH with performUpsert: atomic create-or-update by Reference ──
+    // This is the dedup contract. Even if two sweeps fire concurrently, Airtable
+    // serialises upserts on the merge field so only one record per Reference can exist.
+    // Returns the canonical record (created or updated) with fields by ID for cache.
+    async function upsertArrearsRecord(payload) {
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.arrears}?returnFieldsByFieldId=true`;
+        const resp = await fetch(url, {
+            method: 'PATCH',
             headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields: payload, typecast: false }),
+            body: JSON.stringify({
+                performUpsert: { fieldsToMergeOn: [ARREARS.ref] },
+                records: [{ fields: payload }],
+                typecast: false,
+            }),
         });
         if (!resp.ok) {
             const err = await resp.text();
-            console.error('arrears: createArrearsRecord failed', resp.status, err);
+            console.error('arrears: upsertArrearsRecord failed', resp.status, err);
             return null;
         }
-        return await resp.json();
+        const data = await resp.json();
+        return (data.records && data.records[0]) || null;
     }
 
     // ── Airtable PATCH: update one arrears record ──
@@ -203,52 +212,50 @@
         return true;
     }
 
-    // ── Open a new arrears record at a given stage ──
-    // Triple-guarded against duplicate creation:
-    //   1. Cache check by Reference (after the pagination fix)
-    //   2. In-flight Set guard (prevents same-sweep races)
-    //   3. The Reference itself encodes (tenancy, due-month) so collisions
-    //      are deterministic and easy to detect on cleanup.
+    // ── Open or update an arrears record at a given stage ──
+    // Uses Airtable upsert (atomic at the database level) so duplicate creates
+    // are physically impossible. Cache check is now an optimisation only —
+    // the Reference uniqueness is enforced by the upsert merge key.
     async function openArrearsRecord(tenancy, tenantType, originalDueDate, stage, today) {
         const reference = buildArrearsReference(tenancy, originalDueDate);
 
-        // Guard 1: already in cache
-        if (findArrearsByReference(reference)) {
-            console.log(`arrears: skipping create — ${reference} already exists`);
-            return null;
+        // Optimisation: skip the API call if we already have this in the cache
+        // and it's at or past the requested stage. (Stage progression is handled
+        // by progressArrearsRecord — this guard just avoids redundant upserts.)
+        const existing = findArrearsByReference(reference);
+        if (existing) {
+            const currentStage = getStageName(getField(existing, ARREARS.stage));
+            if (arrearsStageIndex(currentStage) >= arrearsStageIndex(stage)) {
+                return existing;
+            }
+            // Existing is at an earlier stage — let progressArrearsRecord handle it.
+            return existing;
         }
-        // Guard 2: already being created in this sweep
-        if (_refsBeingCreated.has(reference)) {
-            console.log(`arrears: skipping create — ${reference} already in flight`);
-            return null;
-        }
-        _refsBeingCreated.add(reference);
 
-        try {
-            const rent = Number(getField(tenancy, F.tenRent)) || 0;
-            const nextDue = nextActionDueFor(stage, originalDueDate);
-            const payload = {
-                [ARREARS.ref]: reference,
-                [ARREARS.stage]: stage,
-                [ARREARS.status]: 'Active',
-                [ARREARS.openedDate]: today.toISOString().slice(0, 10),
-                [ARREARS.originalDueDate]: originalDueDate.toISOString().slice(0, 10),
-                [ARREARS.amountOwed]: rent,
-                [ARREARS.tenancy]: [tenancy.id],
-            };
-            if (nextDue) {
-                payload[ARREARS.nextActionDue] = nextDue.toISOString().slice(0, 10);
-                payload[ARREARS.nextActionType] = nextActionTypeFor(stage);
-            }
-            const created = await createArrearsRecord(payload);
-            if (created) {
-                console.log(`arrears: opened ${reference} at "${stage}" for ${tenancy.id} (${tenantType})`);
-                allArrearsRecords.push(created);
-            }
-            return created;
-        } finally {
-            _refsBeingCreated.delete(reference);
+        const rent = Number(getField(tenancy, F.tenRent)) || 0;
+        const nextDue = nextActionDueFor(stage, originalDueDate);
+        const payload = {
+            [ARREARS.ref]: reference,
+            [ARREARS.stage]: stage,
+            [ARREARS.status]: 'Active',
+            [ARREARS.openedDate]: today.toISOString().slice(0, 10),
+            [ARREARS.originalDueDate]: originalDueDate.toISOString().slice(0, 10),
+            [ARREARS.amountOwed]: rent,
+            [ARREARS.tenancy]: [tenancy.id],
+        };
+        if (nextDue) {
+            payload[ARREARS.nextActionDue] = nextDue.toISOString().slice(0, 10);
+            payload[ARREARS.nextActionType] = nextActionTypeFor(stage);
         }
+        const upserted = await upsertArrearsRecord(payload);
+        if (upserted) {
+            console.log(`arrears: upserted ${reference} at "${stage}" for ${tenancy.id} (${tenantType})`);
+            // Replace any stale cache entry with the canonical record (fields by ID).
+            const i = allArrearsRecords.findIndex(r => r.id === upserted.id);
+            if (i >= 0) allArrearsRecords[i] = upserted;
+            else allArrearsRecords.push(upserted);
+        }
+        return upserted;
     }
 
     // ── Progress an existing record to a later stage ──
