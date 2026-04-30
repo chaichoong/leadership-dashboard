@@ -155,6 +155,10 @@
         costLastReconAccount:  'fldFdBxF4EMABsg2v',  // Last Reconciled Account (new, links → Accounts)
         costLastReconSubCat:   'fld8jYp42Y7s3NbrM',  // Last Reconciled Sub-Category (new, links → Sub-Categories)
         costStatusNew:         'fldWl7mp9zTC2aaaQ',  // Cost Status (New): In Payment / Overdue / Inactive
+        costDaysOverdue:       'fldVV5SB9jHJx84IA',  // Days Overdue (number) — written by dashboard on load
+        costVarianceAmount:    'fldplK7AtAPJVlzyM',  // Variance Amount (£) — written by dashboard on load
+        costVarianceFlag:      'fldQ4gNa9s36SyHHQ',  // Variance Flag: Match / Soft / Hard / Unknown
+        costExpectedNext:      'fldiiWiiPLXkWg1Dc',  // Expected Next Payment (date) — written by dashboard on load
         // Transactions sub-category (already have txSubCategory = fldMRjSVzZVYeHb0A)
         // Tenancies
         tenRef:           'fldyNVvFn4x8GY14q',

@@ -239,10 +239,52 @@
     }
 
     function isCostActive(rec) {
-        const status = getPaymentStatusName(getField(rec, F.costPayStatus));
-        const validStatuses = ['In Payment', 'Active', 'Overdue', 'Due Today', 'Upcoming'];
         const inactive = getField(rec, F.costInactive);
-        return validStatuses.includes(status) && !inactive;
+        if (inactive) return false;
+        const newStatus = getPaymentStatusName(getField(rec, F.costStatusNew));
+        if (newStatus) return newStatus !== 'Inactive';
+        const legacyStatus = getPaymentStatusName(getField(rec, F.costPayStatus));
+        const validLegacy = ['In Payment', 'Active', 'Overdue', 'Due Today', 'Upcoming'];
+        return validLegacy.includes(legacyStatus);
+    }
+
+    // ── Cost reconciliation sync ──
+    // Updates a Cost record's "Last Reconciled" fields when a transaction is reconciled
+    // against it, but only if this tx is newer than the previously-recorded most-recent.
+    // Writes: Last Reconciled Payment Date, Last Reconciled Amount, Last Reconciled Account,
+    // Last Reconciled Sub-Category. Idempotent — safe to call multiple times.
+    async function syncCostFromReconciledTx(costId, txDate, txAmount, txAccountIds, txSubCatIds) {
+        if (!costId || !txDate) return { skipped: true, reason: 'missing costId or txDate' };
+        const cost = (allCosts || []).find(c => c.id === costId);
+        const existingDate = cost ? getField(cost, F.costLastReconDate) : null;
+        if (existingDate && new Date(existingDate) > new Date(txDate)) {
+            return { skipped: true, reason: 'existing reconciled date is newer' };
+        }
+        const fields = {
+            [F.costLastReconDate]: txDate,
+            [F.costLastReconAmount]: Math.abs(Number(txAmount) || 0),
+        };
+        if (Array.isArray(txAccountIds) && txAccountIds.length > 0) {
+            fields[F.costLastReconAccount] = txAccountIds.slice(0, 1);
+        }
+        if (Array.isArray(txSubCatIds) && txSubCatIds.length > 0) {
+            fields[F.costLastReconSubCat] = txSubCatIds.slice(0, 1);
+        }
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            console.warn('syncCostFromReconciledTx failed', err);
+            return { skipped: false, ok: false, error: err };
+        }
+        if (cost) {
+            if (!cost.fields) cost.fields = {};
+            Object.assign(cost.fields, fields);
+        }
+        return { skipped: false, ok: true };
     }
 
     function dayName(d) {

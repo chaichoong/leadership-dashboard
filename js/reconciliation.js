@@ -847,7 +847,30 @@
             localTx.fields[F.txReconciled] = true;
             if (catId) localTx.fields[F.txCategory] = [catId];
             if (tenancyId) localTx.fields[F.txTenancy] = [{ id: tenancyId }];
+            if (costId) localTx.fields[F.txCost] = [costId];
+            if (subCatId) localTx.fields[F.txSubCategory] = [subCatId];
         }
+
+        // ── Cost sync ──
+        // If this reconciliation linked a transaction to a cost, write the new
+        // "Last Reconciled *" fields back to that cost so the AP Fixed dashboard
+        // reflects the latest payment, account, sub-category and amount.
+        if (costId && localTx) {
+            const txDate = getField(localTx, F.txDate);
+            const txAmount = Number(getField(localTx, F.txReportAmount)) || 0;
+            const txAccountIds = (getField(localTx, F.txAccountLink) || []).map(v => v.id || v).filter(Boolean);
+            const finalSubCatIds = subCatId ? [subCatId] : ((getField(localTx, F.txSubCategory) || []).map(v => v.id || v).filter(Boolean));
+            try {
+                await syncCostFromReconciledTx(costId, txDate, txAmount, txAccountIds, finalSubCatIds);
+                // Also push derived fields (Days Overdue, Variance, Expected Next, Status)
+                if (typeof syncDerivedCostFields === 'function') {
+                    syncDerivedCostFields().catch(e => console.warn('Derived sync failed:', e));
+                }
+            } catch (e) {
+                console.warn('Cost sync after reconciliation failed (non-fatal):', e);
+            }
+        }
+
         // Re-run CFV sidebar badge count so cleared CFVs disappear immediately
         if (typeof updateCFVSidebarBadges === 'function' && typeof detectCFVs === 'function') {
             try {
