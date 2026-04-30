@@ -187,7 +187,7 @@
         <div class="tabs-nav">
             <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard OS</button>
             <button class="tab-btn" onclick="switchTab('invoices')">Accounts Payable Variable</button>
-            <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids OS</button>
+            <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids</button>
         </div>
 
         <!-- Tab 1: Leadership Dashboard -->
@@ -449,7 +449,7 @@
             <div data-sync-bar="cfv"></div>
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-                    <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids OS</h2>
+                    <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids</h2>
                     <span style="font-size:12px;color:var(--text-muted)">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
                 </div>
                 <div class="cards-grid" id="cfvSummaryCards"></div>
@@ -602,7 +602,8 @@
     <script defer src="js/pnl.js?v=20"></script>
     <script defer src="js/transactions.js?v=5"></script>
     <script defer src="js/reconciliation.js?v=14"></script>
-    <script defer src="js/cfv.js?v=13"></script>
+    <script defer src="js/cfv.js?v=14"></script>
+    <script defer src="js/arrears.js?v=1"></script>
     <script defer src="js/fintable.js?v=13"></script>
     <script defer src="js/ai-assistant.js?v=15"></script>
 </body>

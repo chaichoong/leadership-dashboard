@@ -47,6 +47,55 @@
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
+        arrears:       'tblzG0B9oRRpszcgC', // Arrears Records — 7-stage credit control pipeline
+        arrearsLog:    'tblik5VI5Jy6tO2yc', // Arrears Contact Log — audit trail per contact event
+    };
+
+    // ── Arrears Records field IDs (Airtable table: Arrears Records / tblzG0B9oRRpszcgC) ──
+    // 7-stage credit control pipeline. One record per arrears journey (per missed payment).
+    // Branches by tenant type (read from tenantPayType on linked Tenant): Working / Universal Credit / Agent-Managed.
+    const ARREARS = {
+        ref:              'fldYvuHyhYplblMJr',  // Reference (singleLineText, primary) — e.g. "AR-2026-0001"
+        stage:            'fldV7xA2UZJHmbCHj',  // Stage (singleSelect)
+        status:           'fld710smZ58a3ObWR',  // Status (singleSelect)
+        pauseReason:      'fldNIFtwOCkrUzjvV',  // Pause Reason (singleSelect)
+        openedDate:       'fldj7oboumezTCLbQ',  // Opened Date
+        originalDueDate:  'fldll8HpWOmYkyKea',  // Original Due Date
+        amountOwed:       'fldMc2ymgBmTsIEJN',  // Amount Owed (currency, £)
+        lastContactDate:  'fldn3zefQ5emjxKVD',  // Last Contact Date
+        lastContactChannel:'fldqdrFQCfLTUKnE8', // Last Contact Channel (singleSelect)
+        nextActionDue:    'fld0AVSdS7y1zpQua',  // Next Action Due
+        nextActionType:   'fldXxv8J1zfxCOrMZ',  // Next Action Type
+        ucCallOutcome:    'fldpqYu5nix98zrZe',  // UC Call Outcome (singleSelect)
+        resolutionDate:   'fld3PwylEW5dX29m1',  // Resolution Date
+        resolutionType:   'fldptjB4iPkhcD4ed',  // Resolution Type (singleSelect)
+        tenancyEndAction: 'fldGfDTOgsz10brA6',  // Tenancy End Action (singleSelect)
+        notes:            'fld4B5Lz7P9dpQS8H',  // Notes
+        tenancy:          'fldXx3YsQrm9k4sze',  // Tenancy (link → Tenancies)
+        linkedTasks:      'fldxYYCWnV9DGsBIo',  // Linked Tasks (link → Tasks)
+        contactLog:       'fldbUpHVBgtDrts6Q',  // Contact Log (reverse link from Arrears Contact Log)
+    };
+
+    // ── Arrears Contact Log field IDs (Airtable table: Arrears Contact Log / tblik5VI5Jy6tO2yc) ──
+    // One record per contact event. Court-ready audit trail.
+    const ARREARSLOG = {
+        ref:           'fldRS88D7pFGba9tq',  // Reference (singleLineText, primary)
+        date:          'flds0QuML8fJDwwex',  // Date (dateTime, Europe/London)
+        stage:         'fldfYdMyB8HpSC8u2',  // Stage (singleSelect)
+        channel:       'fldb1Rasz3YO0ukHl',  // Channel (singleSelect)
+        direction:     'fld64LgBaNRvuJ7HX',  // Direction (Outbound / Inbound)
+        initiator:     'fldeNbrnL7o8GYfvN',  // Initiator (System / Mica / Other Staff / Tenant / UC Office)
+        outcome:       'fldFO4RI2Vz7uk0s3',  // Outcome (singleSelect)
+        promiseDate:   'fldSEdzbOqDksQUmZ',  // Promise Date
+        notes:         'fld800seLgSTMPgme',  // Notes
+        emailMsgId:    'fldAkO0awEK0IS0kP',  // Email Message ID
+        arrearsRecord: 'fldSWyS6JYgnLtPzU',  // Arrears Record (link → Arrears Records)
+        linkedTask:    'fldBLuUTLMTq2o82X',  // Linked Task (link → Tasks)
+    };
+
+    // UC office contact details (used by auto-generated Mica tasks)
+    const UC_CONTACT = {
+        phone: '0800 328 5644',
     };
 
     // AI Recon Audit field IDs

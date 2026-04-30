@@ -71,7 +71,7 @@
                 if (localStorage.getItem('cfv_' + tenancy.id + '_returned')) return;
 
                 // Skip if the tenancy has ended — tenant status will be "Former" after
-                // the tenancy-ender skill runs. This keeps the CFV OS in sync with the
+                // the tenancy-ender skill runs. This keeps the CFV tab in sync with the
                 // Leadership Dashboard, which filters voids by active tenant status.
                 if (!isTenantStatusActive(tenancy)) return;
 
@@ -268,7 +268,29 @@
     }
 
     async function renderCFVTab() {
-        if (!allTenancies.length) return;
+        // Hard-refresh on the CFV tab can fire renderCFVTab BEFORE loadDashboard
+        // populates the global tenancy/transaction arrays. Show a loading state
+        // instead of a blank panel, and trigger a dashboard load so we self-heal
+        // without forcing the user back to the Leadership Dashboard.
+        if (!allTenancies.length) {
+            const summary = document.getElementById('cfvSummaryCards');
+            if (summary) {
+                summary.innerHTML = `<div class="kpi-card" style="grid-column:1/-1;text-align:center;padding:24px">
+                    <div class="spinner" style="margin:0 auto 12px"></div>
+                    <div class="kpi-card-label">Loading Cash Flow Voids…</div>
+                    <div class="kpi-card-sub">Fetching tenancies and transactions from Airtable</div>
+                </div>`;
+            }
+            // Kick off a dashboard load if one isn't already in flight, then re-render.
+            if (typeof loadDashboard === 'function' && !window._cfvSelfHealInFlight) {
+                window._cfvSelfHealInFlight = true;
+                loadDashboard().finally(() => {
+                    window._cfvSelfHealInFlight = false;
+                    if (allTenancies.length) renderCFVTab();
+                });
+            }
+            return;
+        }
 
         const cfvList = detectCFVs();
         const today = new Date();
