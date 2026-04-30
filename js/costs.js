@@ -78,9 +78,12 @@
             return 0;
         });
 
-        // Summary calculations on active set
+        // Summary calculations on active set.
+        // IMPORTANT: matches the Leadership Dashboard rule — raw sum of Expected Cost
+        // across all active costs, with no frequency normalisation. The two figures
+        // must always agree (single source of truth).
         const enrichedActive = activeCosts.map(r => enrichCost(r));
-        const totalMonthly = enrichedActive.reduce((s, e) => s + monthlyEquivalent(e.expected, e.frequency), 0);
+        const totalMonthly = enrichedActive.reduce((s, e) => s + e.expected, 0);
         const overdueCosts = enrichedActive.filter(e => e.daysOverdue !== null && e.daysOverdue > 0);
         const varianceCosts = enrichedActive.filter(e => e.varianceFlag !== 'match' && e.lastReconAmount != null);
         const hardVarianceCount = enrichedActive.filter(e => e.varianceFlag === 'hard').length;
@@ -90,7 +93,7 @@
         enrichedActive.forEach(e => {
             const cat = e.subCatName || 'Uncategorised';
             if (!byCat[cat]) byCat[cat] = { total: 0, count: 0 };
-            byCat[cat].total += monthlyEquivalent(e.expected, e.frequency);
+            byCat[cat].total += e.expected;
             byCat[cat].count++;
         });
         const catEntries = Object.entries(byCat).sort((a, b) => b[1].total - a[1].total);
@@ -104,9 +107,9 @@
                     <div class="kpi-card-sub">${inactiveCosts.length} inactive</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-card-label">Monthly Equivalent</div>
+                    <div class="kpi-card-label">Monthly Fixed Costs</div>
                     <div class="kpi-card-value text-red">${fmt(totalMonthly)}</div>
-                    <div class="kpi-card-sub">All frequencies normalised to monthly</div>
+                    <div class="kpi-card-sub">Sum of Expected Cost — matches Leadership Dashboard</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Overdue</div>
@@ -550,9 +553,8 @@
 
         if (sortedByExpected.length > 0) {
             const top = sortedByExpected[0];
-            const monthly = monthlyEquivalent(top.expected, top.frequency);
-            const pct = totalMonthly > 0 ? (monthly / totalMonthly * 100).toFixed(1) : '0.0';
-            insights.push(`<div class="cost-insight"><strong>Largest cost:</strong> ${escHtml(top.name)} at ${fmt(top.expected)} ${top.frequency.toLowerCase()} (${fmt(monthly)}/mo, ${pct}% of total)</div>`);
+            const pct = totalMonthly > 0 ? (top.expected / totalMonthly * 100).toFixed(1) : '0.0';
+            insights.push(`<div class="cost-insight"><strong>Largest cost:</strong> ${escHtml(top.name)} at ${fmt(top.expected)} ${top.frequency.toLowerCase()} (${pct}% of total)</div>`);
         }
 
         if (catEntries.length > 0 && totalMonthly > 0) {
@@ -572,16 +574,16 @@
             insights.push(`<div class="cost-insight" style="border-left-color:var(--danger)"><strong>Hard variance (${hardVar.length}):</strong> Reconciled amount differs from expected by &gt;10%. Either rate has changed (update Expected Cost) or wrong tx was reconciled (click variance badge to review).</div>`);
         }
 
-        const annual = totalMonthly * 12;
-        insights.push(`<div class="cost-insight"><strong>Annualised fixed costs:</strong> ${fmt(annual)} based on monthly equivalent of ${fmt(totalMonthly)}</div>`);
+        // True annual exposure across mixed frequencies (monthly × 12, annual × 1, quarterly × 4, etc.)
+        const trueAnnual = enrichedActive.reduce((s, e) => s + monthlyEquivalent(e.expected, e.frequency) * 12, 0);
+        insights.push(`<div class="cost-insight"><strong>True annual exposure:</strong> ${fmt(trueAnnual)} (frequency-aware: monthly × 12, annual × 1, quarterly × 4, etc.)</div>`);
 
         const smallCosts = enrichedActive.filter(e => {
-            const m = monthlyEquivalent(e.expected, e.frequency);
-            return m > 0 && m < 50;
+            return e.expected > 0 && e.expected < 50;
         });
         if (smallCosts.length >= 3) {
-            const smallTotal = smallCosts.reduce((s, e) => s + monthlyEquivalent(e.expected, e.frequency), 0);
-            insights.push(`<div class="cost-insight" style="border-left-color:var(--accent-gold)"><strong>Potential savings review:</strong> ${smallCosts.length} costs under £50/mo (total ${fmt(smallTotal)}/mo). Consider auditing subscriptions and small recurring charges.</div>`);
+            const smallTotal = smallCosts.reduce((s, e) => s + e.expected, 0);
+            insights.push(`<div class="cost-insight" style="border-left-color:var(--accent-gold)"><strong>Potential savings review:</strong> ${smallCosts.length} costs under £50 (total ${fmt(smallTotal)}). Consider auditing subscriptions and small recurring charges.</div>`);
         }
 
         el.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">${insights.join('')}</div>`;
