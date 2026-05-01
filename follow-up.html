@@ -1109,6 +1109,7 @@
     function runAllBackgroundSweeps() {
         sweepCompletedInboundTasks();
         sweepFollowUpReplies();
+        sweepUnlinkedTenancyDocs();
     }
 
     // Labels that should show a count in the dropdown
@@ -2831,6 +2832,132 @@ Body: ${bodyText}`;
             addAuditEntry('tenancy_doc_fallback', `Auto-link failed for "${truncate(email.subject, 40)}" — created Mica task. Reason: ${reason}`);
         } catch (err) {
             console.error('Fallback task creation failed:', err);
+        }
+    }
+
+    // ============================================================
+    // SWEEP — unlinked tenancy docs (label 11)
+    // ============================================================
+    // Catches tenancy docs that landed in label 11 without going through
+    // the dashboard's apply-label paths — most commonly emails arriving
+    // pre-tagged via a Gmail filter (Adobe Sign, signed AST returns,
+    // proof-of-residency replies, etc.) and historical emails from before
+    // the auto-link feature existed.
+    //
+    // Convention: a STAR on any message in the thread = "already linked".
+    // Threads with at least one starred message are skipped. Everything
+    // else is fed through processTenancyDocsEmail() which either appends
+    // to the matched tenancy's Document Links + stars the thread, or falls
+    // back to a Mica review task.
+    //
+    // Capped at 10 threads per sweep run so a sudden flood (e.g. a
+    // backlog Gmail filter dump) doesn't spike Airtable / Claude calls
+    // all at once. The next 5-min tick picks up the next 10.
+    let tenancyDocSweepInFlight = false;
+    async function sweepUnlinkedTenancyDocs() {
+        if (tenancyDocSweepInFlight) return;
+        tenancyDocSweepInFlight = true;
+        try {
+            if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) {
+                console.log('[tenancy-sweep] gapi not ready');
+                return;
+            }
+            if (!getAirtablePat()) {
+                console.log('[tenancy-sweep] Airtable PAT not configured — skipping');
+                return;
+            }
+
+            if (!allLabelsRaw || allLabelsRaw.length === 0) {
+                try {
+                    const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
+                    allLabelsRaw = labelsResp.result.labels || [];
+                } catch (err) {
+                    console.warn('[tenancy-sweep] failed to load labels:', err);
+                    return;
+                }
+            }
+            const label11 = allLabelsRaw.find(l => /^11[.:]\s/.test(l.name));
+            if (!label11) {
+                console.warn('[tenancy-sweep] no label "11: ..." found — skipping');
+                return;
+            }
+
+            // List threads in label 11
+            let listResp;
+            try {
+                listResp = await gapi.client.gmail.users.threads.list({
+                    userId: 'me',
+                    labelIds: [label11.id],
+                    maxResults: 100
+                });
+            } catch (err) {
+                console.warn('[tenancy-sweep] failed to list label-11 threads:', err);
+                return;
+            }
+            const threads = listResp.result.threads || [];
+            console.log(`[tenancy-sweep] ${threads.length} thread(s) in label 11`);
+            if (threads.length === 0) return;
+
+            const PROCESS_CAP = 10;
+            let processedCount = 0;
+            let skippedStarredCount = 0;
+
+            for (const t of threads) {
+                if (processedCount >= PROCESS_CAP) {
+                    console.log(`[tenancy-sweep] reached cap of ${PROCESS_CAP} — remaining ${threads.length - threads.indexOf(t)} thread(s) deferred to next sweep`);
+                    break;
+                }
+
+                let threadResp;
+                try {
+                    threadResp = await gapi.client.gmail.users.threads.get({
+                        userId: 'me', id: t.id, format: 'full'
+                    });
+                } catch (err) {
+                    console.warn(`[tenancy-sweep] failed to fetch thread ${t.id}:`, err);
+                    continue;
+                }
+
+                const messages = threadResp.result.messages || [];
+                if (messages.length === 0) continue;
+
+                // Already starred = already auto-linked → skip
+                const isStarred = messages.some(m => (m.labelIds || []).includes('STARRED'));
+                if (isStarred) {
+                    skippedStarredCount++;
+                    continue;
+                }
+
+                // Parse into the email shape that processTenancyDocsEmail expects
+                let parsedEmail;
+                try {
+                    parsedEmail = parseThread(threadResp.result);
+                } catch (err) {
+                    console.warn(`[tenancy-sweep] failed to parse thread ${t.id}:`, err);
+                    continue;
+                }
+
+                console.log(`[tenancy-sweep] processing unlinked thread "${(parsedEmail.subject || '').slice(0, 60)}"`);
+                try {
+                    await processTenancyDocsEmail(parsedEmail);
+                    processedCount++;
+                } catch (err) {
+                    console.warn(`[tenancy-sweep] auto-link threw for thread ${t.id}:`, err);
+                }
+
+                // Pace ourselves between iterations — each does an AI call + Airtable write
+                await new Promise(r => setTimeout(r, 1500));
+            }
+
+            console.log(`[tenancy-sweep] done — processed ${processedCount}, skipped ${skippedStarredCount} (already linked)`);
+            if (processedCount > 0) {
+                localStorage.setItem('last_tenancy_doc_sweep', new Date().toISOString());
+                scheduleLabelCountRefresh();
+            }
+        } catch (err) {
+            console.error('[tenancy-sweep] failed:', err);
+        } finally {
+            tenancyDocSweepInFlight = false;
         }
     }
 
