@@ -1,0 +1,243 @@
+/* ──────────────────────────────────────────────────────────────────
+   Quick Task — floating "+ Task" FAB + lightweight capture modal.
+   Loaded by every page (parent shell + standalone iframe pages) so
+   a task can be captured from anywhere in the platform with two
+   clicks. Self-contained — depends only on css/tokens.css.
+   ────────────────────────────────────────────────────────────────── */
+
+/* ── Floating Action Button ── */
+.qt-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 90px;        /* above the AI bubble (which sits at bottom:20px) */
+  z-index: 9998;       /* below modal overlays (10000) but above content */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 16px 0 12px;
+  border: none;
+  border-radius: var(--radius-full, 999px);
+  background: var(--accent, #2C6E49);
+  color: #fff;
+  font-family: var(--font-family-base, inherit);
+  font-size: 13px;
+  font-weight: var(--fw-semibold, 600);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(28, 36, 34, 0.18), 0 2px 6px rgba(28, 36, 34, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.qt-fab:hover {
+  background: var(--accent-hover, #1B4A30);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(28, 36, 34, 0.22), 0 3px 8px rgba(28, 36, 34, 0.15);
+}
+.qt-fab:active { transform: translateY(0); }
+.qt-fab-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.qt-fab-label { line-height: 1; }
+
+/* ── Modal overlay ── */
+.qt-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 36, 34, 0.42);
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 80px 16px 16px;
+  animation: qt-fade 0.15s ease;
+}
+@keyframes qt-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.qt-modal {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-surface, #FBFBF9);
+  color: var(--text-primary, #1C2422);
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid var(--border-default, #DDE1D9);
+  box-shadow: 0 20px 50px rgba(28, 36, 34, 0.25);
+  font-family: var(--font-family-base, inherit);
+  padding: 18px 20px 16px;
+  animation: qt-pop 0.18s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+@keyframes qt-pop {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.qt-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.qt-modal-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: var(--fw-semibold, 600);
+  letter-spacing: 0.01em;
+  color: var(--text-primary, #1C2422);
+}
+.qt-x {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-muted, #8A928C);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.qt-x:hover { background: var(--bg-surface-2, #F4F6F1); color: var(--text-primary, #1C2422); }
+
+.qt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.qt-row > label {
+  flex: 0 0 84px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #5A6660);
+  font-weight: var(--fw-medium, 500);
+}
+.qt-row-stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+.qt-row-stacked > label {
+  flex: 0 0 auto;
+  margin-bottom: 4px;
+}
+.qt-optional {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  color: var(--text-muted, #8A928C);
+  font-weight: var(--fw-regular, 400);
+  margin-left: 4px;
+}
+
+.qt-row input[type="text"],
+.qt-row input[type="date"],
+.qt-row select,
+.qt-row textarea {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-default, #DDE1D9);
+  border-radius: var(--radius-sm, 6px);
+  background: #fff;
+  color: var(--text-primary, #1C2422);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.qt-row input[type="text"]:focus,
+.qt-row input[type="date"]:focus,
+.qt-row select:focus,
+.qt-row textarea:focus {
+  border-color: var(--accent, #2C6E49);
+  box-shadow: 0 0 0 3px rgba(44, 110, 73, 0.15);
+}
+.qt-row textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+
+.qt-due-wrap {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.qt-due-wrap input[type="date"] { flex: 1; }
+.qt-hard {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--danger, #C0392B);
+  text-transform: none;
+  letter-spacing: 0;
+  flex: 0 0 auto !important;
+  font-weight: var(--fw-regular, 400) !important;
+  white-space: nowrap;
+}
+.qt-hard input[type="checkbox"] { margin: 0; }
+
+.qt-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle, #E5E8E1);
+}
+.qt-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-medium, 500);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.qt-btn-ghost {
+  background: transparent;
+  color: var(--text-secondary, #5A6660);
+  border-color: var(--border-default, #DDE1D9);
+}
+.qt-btn-ghost:hover { background: var(--bg-surface-2, #F4F6F1); color: var(--text-primary, #1C2422); }
+.qt-btn-primary {
+  background: var(--accent, #2C6E49);
+  color: #fff;
+}
+.qt-btn-primary:hover:not(:disabled) { background: var(--accent-hover, #1B4A30); }
+.qt-btn-primary:disabled { opacity: 0.55; cursor: progress; }
+
+/* ── Toast ── */
+.qt-toast {
+  position: fixed;
+  bottom: 152px;       /* above the FAB */
+  right: 20px;
+  z-index: 10001;
+  padding: 9px 14px;
+  background: var(--text-primary, #1C2422);
+  color: #fff;
+  border-radius: var(--radius-sm, 6px);
+  font-family: var(--font-family-base, inherit);
+  font-size: 12px;
+  font-weight: var(--fw-medium, 500);
+  box-shadow: 0 6px 18px rgba(28, 36, 34, 0.22);
+  animation: qt-toast-in 0.18s ease;
+}
+.qt-toast-error { background: var(--danger, #C0392B); }
+.qt-toast-fade { opacity: 0; transition: opacity 0.3s ease; }
+@keyframes qt-toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Compact mode for narrow viewports ── */
+@media (max-width: 540px) {
+  .qt-fab { padding: 0 14px; }
+  .qt-fab-label { display: none; }
+  .qt-row { flex-direction: column; align-items: stretch; }
+  .qt-row > label { flex: 0 0 auto; margin-bottom: 4px; }
+  .qt-due-wrap { flex-direction: column; align-items: stretch; }
+}
