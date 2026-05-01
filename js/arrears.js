@@ -46,6 +46,68 @@
     // Open / progressing statuses (records the engine acts on)
     const ARREARS_OPEN_STATUSES = new Set(['Active', 'Escalated']);
 
+    // ── Cumulative arrears calculation cutoff ──
+    // Reconciled transactions before this date aren't trustworthy enough to use
+    // for cumulative arrears maths (Kevin started reconciling on 2025-04-01).
+    // Tenancies that started before this date have their effective-arrears
+    // computed from this date forward; tenancies that started after use their
+    // tenancy start date.
+    const ARREARS_DATA_START = '2025-04-01';
+
+    // Count of expected monthly payments between two dates (inclusive of start month).
+    function monthsBetween(startDate, endDate) {
+        if (endDate < startDate) return 0;
+        const ys = startDate.getFullYear();
+        const ms = startDate.getMonth();
+        const ye = endDate.getFullYear();
+        const me = endDate.getMonth();
+        return Math.max(0, (ye - ys) * 12 + (me - ms) + 1);
+    }
+
+    // Number of expected payments since data start for a tenancy
+    function expectedPaymentsForTenancy(tenancy, today) {
+        const startStr = String(getField(tenancy, F.tenStartDate) || '');
+        const tenStart = startStr ? new Date(startStr) : null;
+        const dataStart = new Date(ARREARS_DATA_START);
+        const effectiveStart = tenStart && tenStart > dataStart ? tenStart : dataStart;
+        return monthsBetween(effectiveStart, today);
+    }
+
+    // Number of reconciled rent payments since data start linked to this tenancy
+    function actualPaymentsForTenancy(tenancyId) {
+        const dataStart = new Date(ARREARS_DATA_START);
+        let count = 0;
+        for (const tx of allTransactions) {
+            if (!getField(tx, F.txReconciled)) continue;
+            const linkedTenancy = getField(tx, F.txTenancy);
+            const linkedId = extractLinkedId(linkedTenancy);
+            if (linkedId !== tenancyId) continue;
+            const txDateStr = getField(tx, F.txDate);
+            if (!txDateStr) continue;
+            const txDate = new Date(txDateStr);
+            if (txDate >= dataStart) count++;
+        }
+        return count;
+    }
+
+    // Effective months in arrears for a tenancy, including the +1 UC shadow.
+    // Returns a number ≥ 0. Working/Agent: missed = expected - actual.
+    // UC: missed + 1 (always one month in arrears by payment-model design).
+    function computeEffectiveMonthsArrears(tenancy, tenantType, today) {
+        if (!tenantType || tenantType === 'Agent-Managed') return 0;
+        const expected = expectedPaymentsForTenancy(tenancy, today);
+        const actual = actualPaymentsForTenancy(tenancy.id);
+        const missed = Math.max(0, expected - actual);
+        return tenantType === 'Universal Credit' ? missed + 1 : missed;
+    }
+
+    // S8 readiness — fires at ≥ 2 effective months arrears.
+    // Working/Agent: needs 2+ missed payments.
+    // UC: needs 1+ missed payment (because of the +1 shadow).
+    function isS8Ready(tenancy, tenantType, today) {
+        return computeEffectiveMonthsArrears(tenancy, tenantType, today) >= 2;
+    }
+
     // ── Mica task config ──
     // Mirrored from cashflow.js's UC task pattern (which works in production).
     // Tasks land in Mica's queue, tied to the £12k Operating Cushion project,
@@ -621,8 +683,10 @@ Auto-generated from arrears engine.`,
             return;
         }
 
+        const today = new Date();
+        const todayMs = today.getTime();
+
         // Filter to non-closed and sort by days-overdue desc
-        const todayMs = Date.now();
         const visible = allArrearsRecords
             .map(r => {
                 const dueRaw = String(getField(r, ARREARS.originalDueDate) || '');
@@ -644,6 +708,41 @@ Auto-generated from arrears engine.`,
             byStage[stage] = (byStage[stage] || 0) + 1;
             totalAmount += Number(getField(rec, ARREARS.amountOwed)) || 0;
         });
+
+        // Per-tenant cumulative summary — uses transaction history since the
+        // data-start cutoff to compute effective months arrears (incl. UC +1).
+        const tenantLookup = {};
+        allTenants.forEach(t => { tenantLookup[t.id] = t; });
+        const perTenant = new Map(); // tenancyId → { tenancy, tenantType, tenantName, effectiveMonths, balance, openCount, hasUCPaused }
+        for (const { rec } of visible) {
+            const tenancyId = extractLinkedId(getField(rec, ARREARS.tenancy));
+            if (!tenancyId || perTenant.has(tenancyId)) continue;
+            const tenancy = findTenancyById(tenancyId);
+            if (!tenancy) continue;
+            const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
+            const tenant = getTenantForTenancy(tenancy, tenantLookup);
+            const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '—');
+            const rent = Number(getField(tenancy, F.tenRent)) || 0;
+            const effectiveMonths = computeEffectiveMonthsArrears(tenancy, tenantType, today);
+            perTenant.set(tenancyId, {
+                tenancy,
+                tenantType,
+                tenantName,
+                rent,
+                effectiveMonths,
+                s8Ready: effectiveMonths >= 2,
+                cumulativeBalance: effectiveMonths * rent,
+            });
+        }
+
+        // Total exposure including the UC shadow month for any tenant with arrears
+        let totalExposure = 0;
+        let s8ReadyCount = 0;
+        for (const t of perTenant.values()) {
+            totalExposure += t.cumulativeBalance;
+            if (t.s8Ready) s8ReadyCount++;
+        }
+
         const stageOrder = ['Preventive', 'Early Intervention', 'Soft Chase', 'Firm Contact', 'Formal Warning', 'Pre-Action', 'Section 8', 'Court', 'Resolved'];
         const summaryChips = stageOrder
             .filter(s => byStage[s])
@@ -686,16 +785,54 @@ Auto-generated from arrears engine.`,
             </tr>`;
         }).join('');
 
+        // Per-tenant summary table rows (cumulative position, S8 readiness)
+        const tenantSummaryRows = Array.from(perTenant.values())
+            .sort((a, b) => b.effectiveMonths - a.effectiveMonths)
+            .map(t => `<tr>
+                <td><div style="font-weight:600">${escHtml(t.tenantName)}</div></td>
+                <td>${t.tenantType ? badgeHtml(t.tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' }) : '—'}</td>
+                <td style="text-align:right;font-weight:${t.effectiveMonths >= 2 ? '700' : '500'};color:${t.effectiveMonths >= 2 ? 'var(--danger)' : 'var(--text-primary)'}">${t.effectiveMonths.toFixed(0)}</td>
+                <td style="text-align:right;font-weight:600">£${t.cumulativeBalance.toFixed(2)}</td>
+                <td>${t.s8Ready ? badgeHtml('S8 Ready', { bg: 'var(--danger-bg)', fg: 'var(--danger)' }) : '<span style="color:var(--text-muted);font-size:11px">—</span>'}</td>
+            </tr>`).join('');
+
         container.innerHTML = `
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Arrears Pipeline</h2>
                     <span style="font-size:12px;color:var(--text-muted)">
+                        ${perTenant.size} tenant${perTenant.size === 1 ? '' : 's'} in arrears &nbsp;·&nbsp;
                         ${visible.length} active record${visible.length === 1 ? '' : 's'} &nbsp;·&nbsp;
-                        Total exposure £${totalAmount.toFixed(2)}
+                        Total exposure <strong style="color:var(--text-primary)">£${totalExposure.toFixed(2)}</strong>
+                        ${s8ReadyCount > 0 ? `&nbsp;·&nbsp; <span style="color:var(--danger);font-weight:600">${s8ReadyCount} S8-ready</span>` : ''}
                     </span>
                 </div>
-                <div style="margin-bottom:12px">${summaryChips || '<span style="color:var(--text-muted);font-size:12px">No active records</span>'}</div>
+                <div style="margin-bottom:16px">${summaryChips || '<span style="color:var(--text-muted);font-size:12px">No active records</span>'}</div>
+                ${perTenant.size ? `
+                <div style="margin-bottom:24px">
+                    <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Per-tenant cumulative position</h3>
+                    <div style="overflow-x:auto">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;background:var(--bg-surface)">
+                            <thead>
+                                <tr style="text-align:left;border-bottom:2px solid var(--border-default);background:var(--bg-surface-2)">
+                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant</th>
+                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
+                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Effective Months Arrears</th>
+                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Cumulative Balance</th>
+                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Section 8</th>
+                                </tr>
+                            </thead>
+                            <tbody>${tenantSummaryRows}</tbody>
+                        </table>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+                            Computed from reconciled transactions since ${ARREARS_DATA_START}.
+                            UC tenants include +1 month shadow (UC pays in arrears).
+                            S8 readiness fires at ≥ 2 effective months.
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Active arrears records</h3>
                 <div style="overflow-x:auto">
                     <table style="width:100%;border-collapse:collapse;font-size:13px">
                         <thead>
