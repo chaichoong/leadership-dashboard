@@ -3386,7 +3386,7 @@ function renderMyDay(){
   }
 
   html+=`<div class="action-row" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-    <button class="btn btn-primary" onclick="openCreateTaskModal()" title="Create a new task">+ Add Task</button>
+    <button class="btn btn-primary" onclick="startQuickAddInline()" title="Type a task name, press Enter, then fill in the details in the Task Drawer">+ Add Task</button>
     <button class="btn btn-primary" data-autosched-btn onclick="safeAutoSchedule()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
     <button class="btn" onclick="toggleRoutineConfig()" title="Edit your daily routine blocks (wake, lunch, focus blocks, etc.)">Configure Routine</button>
   </div>`;
@@ -3680,7 +3680,12 @@ function tlDoubleClickAddTask(e){
           setTimeout(()=>{block.style.boxShadow='';block.style.transform=''},1500);
         }
       });
-      toast(`Added "${name}" — also showing in Task List`);
+      toast(`Added "${name}" — opening drawer to finish details`);
+      // Open the Task Drawer so the user can fill in the rest of the detail
+      // (project, business, hard deadline, description, etc.) without
+      // needing to find the new card and click it. Mirrors the flow on
+      // every other "add task" surface — name first, drawer second.
+      setTimeout(()=>{ try{ openTaskDrawer(created.id) }catch(e){ console.warn('[tlInlineAdd] drawer open failed',e) } }, 250);
     } else {
       // Failure: keep the placeholder red so the user knows it didn't save
       wrap.style.background='var(--danger-bg)';
@@ -4700,7 +4705,7 @@ function renderKanbanRollingWeeks(tasks,numWeeks){
     const oh=overdueTasks.reduce((s,t)=>s+t.minutes,0)/60;
     html+=`<div class="kanban-col" style="min-height:400px;border:2px solid var(--danger);border-radius:8px;background:var(--danger-bg)">
       <div class="kanban-col-header" style="background:var(--danger);color:#fff;padding:8px 10px;border-radius:6px 6px 0 0;margin:-8px -8px 8px -8px">⚠ Overdue<span class="week-range" style="color:rgba(255,255,255,0.8)">${overdueTasks.length} task${overdueTasks.length===1?'':'s'}</span><span class="week-hours" style="color:#fff">${oh.toFixed(1)}h</span></div>
-      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanOverdueCard(event)">`;
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanOverdueCard(event)" ondblclick="kanbanDblClickAdd(event,'overdue',null)" title="Double-click to add a task">`;
     overdueTasks.forEach(t=>{html+=renderKanbanCardHtml(t)});
     html+=`</div></div>`;
   }
@@ -4709,7 +4714,7 @@ function renderKanbanRollingWeeks(tasks,numWeeks){
     const wh=wt.reduce((s,t)=>s+t.minutes,0)/60;
     html+=`<div class="kanban-col" style="min-height:400px">
       <div class="kanban-col-header">${c.label}<span class="week-range">${c.range}</span><span class="week-hours">${wh.toFixed(1)}h</span></div>
-      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanRollingCard(event,${c.index})">`;
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanRollingCard(event,${c.index})" ondblclick="kanbanDblClickAdd(event,'rolling',${c.index})" title="Double-click to add a task in ${c.label}">`;
     wt.forEach(t=>{html+=renderKanbanCardHtml(t)});
     if(!wt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
     html+=`</div></div>`;
@@ -4771,7 +4776,7 @@ function renderKanbanWeeks(tasks){
     const wh=wt.reduce((s,t)=>s+t.minutes,0)/60;
     html+=`<div class="kanban-col">
       <div class="kanban-col-header">${w.label}<span class="week-range">${w.rangeDisplay}</span><span class="week-hours">${wh.toFixed(1)}h</span></div>
-      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanCard(event,${wi})">`;
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanCard(event,${wi})" ondblclick="kanbanDblClickAdd(event,'weeks',${wi})" title="Double-click to add a task in this week">`;
     wt.forEach(t=>{html+=renderKanbanCardHtml(t)});
     if(!wt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
     html+=`</div></div>`;
@@ -4793,7 +4798,7 @@ function renderKanbanMonths(tasks){
     const mh=mt.reduce((s,t)=>s+t.minutes,0)/60;
     html+=`<div class="kanban-col" style="min-height:400px">
       <div class="kanban-col-header">${label}<span class="week-hours">${mh.toFixed(1)}h</span></div>
-      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanMonthCard(event,${i})">`;
+      <div class="kanban-col-body" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropKanbanMonthCard(event,${i})" ondblclick="kanbanDblClickAdd(event,'months',${i})" title="Double-click to add a task in this month">`;
     mt.forEach(t=>{html+=renderKanbanCardHtml(t)});
     if(!mt.length)html+=`<div style="text-align:center;padding:12px;color:var(--text-secondary);font-size:11px">No tasks</div>`;
     html+=`</div></div>`;
@@ -6223,6 +6228,153 @@ function ctSyncStatusFromDue(){
 }
 window.ctOnProjectChange=ctOnProjectChange;
 window.ctSyncStatusFromDue=ctSyncStatusFromDue;
+
+// ======================================================
+// QUICK ADD — name-only inline input that creates a task
+// with sensible defaults and immediately opens the Task
+// Drawer for the user to fill in the rest of the detail.
+//
+// This is the canonical "add task" entry point used from:
+//   • the global floating "+ Task" FAB (postMessage from
+//     parent shell, or direct call when this page is open
+//     standalone)
+//   • the top-toolbar "+ Add Task" button on My Day
+//   • Kanban column double-click (via kanbanDblClickAdd)
+//   • Timeline double-click (existing tlDoubleClickAddTask
+//     also calls openTaskDrawer after createSimpleTask)
+// ======================================================
+function startQuickAddInline(opts){
+  opts=opts||{};
+  // Remove any existing inline-add bar so a second click doesn't stack them.
+  const old=document.getElementById('qaInlineBar');if(old)old.remove();
+  const bar=document.createElement('div');
+  bar.id='qaInlineBar';
+  bar.style.cssText=[
+    'position:fixed','top:16px','left:50%','transform:translateX(-50%)',
+    'z-index:10001',
+    'background:var(--bg-surface)','border:2px solid var(--accent)',
+    'border-radius:10px','box-shadow:0 12px 32px rgba(28,36,34,0.22)',
+    'padding:10px 14px','min-width:min(440px,90vw)',
+    'display:flex','flex-direction:column','gap:6px',
+    'animation:qaSlide 0.18s ease',
+  ].join(';');
+  bar.innerHTML=`
+    <div id="qaHint" style="font-size:10px;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;text-transform:uppercase">Quick Add &mdash; Enter to save &middot; Esc to cancel</div>
+    <input id="qaInput" type="text" placeholder="Task name…"
+           style="width:100%;border:none;outline:none;background:transparent;font-size:15px;font-weight:600;color:var(--text-primary);padding:0;font-family:inherit" />
+  `;
+  document.body.appendChild(bar);
+  // Inject @keyframes once so the slide-in animation is available.
+  if(!document.getElementById('qaSlideKf')){
+    const s=document.createElement('style');s.id='qaSlideKf';
+    s.textContent='@keyframes qaSlide{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
+    document.head.appendChild(s);
+  }
+  const input=document.getElementById('qaInput');
+  input.focus();
+  let settled=false;
+  const cancel=()=>{ if(!settled){ settled=true; bar.remove(); } };
+  const commit=async()=>{
+    if(settled)return;
+    const name=input.value.trim();
+    if(!name){ cancel(); return; }
+    settled=true;
+    input.disabled=true;
+    document.getElementById('qaHint').innerHTML='<span style="color:var(--accent)">⟳ Creating task…</span>';
+    // Defaults: dueDate = caller-provided OR today; assignee = whoever's
+    // day is currently being viewed (matches timeline behaviour so the
+    // task doesn't immediately get filtered off-screen).
+    const viewMember=(typeof TEAM!=='undefined'&&TEAM&&typeof activeTeam!=='undefined')?TEAM.find(m=>m.key===activeTeam):null;
+    const assigneeEmail=opts.assigneeEmail
+      ||(viewMember?viewMember.email:null)
+      ||(currentUser&&currentUser.email);
+    let created=null;
+    try{
+      created=await createSimpleTask({
+        name,
+        dueDate:opts.dueDate||todayStr(),
+        timeEst:opts.timeEst||'15 min',
+        assigneeEmail,
+        priority:opts.priority,
+        projectIds:opts.projectIds,
+        businessId:opts.businessId,
+      });
+    }catch(e){ console.error('[startQuickAddInline] failed',e); }
+    bar.remove();
+    if(created&&created.id){
+      // Refresh local state so the new card shows up everywhere; then
+      // open the drawer so the user can fill in the rest. Defer the
+      // drawer one frame so the renderAll repaint doesn't fight the
+      // overlay open.
+      try{ renderAll(); }catch(e){}
+      requestAnimationFrame(()=>{ try{ openTaskDrawer(created.id); }catch(e){ console.warn('[startQuickAddInline] drawer open failed',e); } });
+    } else {
+      toast('Failed to create task — check console',true);
+    }
+  };
+  input.addEventListener('keydown',(ev)=>{
+    if(ev.key==='Enter'&&!ev.shiftKey){ ev.preventDefault(); commit(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); cancel(); }
+  });
+  // Click outside the bar cancels — but ignore clicks on the bar itself.
+  setTimeout(()=>{
+    document.addEventListener('mousedown',function outsideClick(e){
+      if(!bar.contains(e.target)){ cancel(); document.removeEventListener('mousedown',outsideClick); }
+    });
+  },50);
+}
+window.startQuickAddInline=startQuickAddInline;
+
+// Kanban column double-click → name-input → create with column-appropriate
+// due date → openTaskDrawer. Mirrors the timeline double-click pattern.
+//   variant   meaning                          dueDate target
+//   --------  -------------------------------  ----------------------------
+//   overdue   the red "Overdue" column         today (no point creating overdue)
+//   rolling   one of the rolling-week columns  Monday of that rolling week
+//   weeks     a week within renderKanbanWeeks  Monday of that week
+//   months    a month within renderKanbanMonths 1st of that month
+function kanbanDblClickAdd(e,variant,index){
+  // Don't fire when the user double-clicks an existing card — that's the
+  // existing "open drawer" affordance on the card. Only handle when the
+  // click is on the column body itself (or the empty-state placeholder).
+  const target=e.target;
+  if(target&&target.closest&&target.closest('.kanban-card'))return;
+  e.preventDefault();
+  let dueDate=todayStr();
+  try{
+    if(variant==='rolling' && typeof kanbanWeeksStart!=='undefined'){
+      const s=new Date(kanbanWeeksStart);s.setDate(s.getDate()+(index||0)*7);
+      dueDate=`${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
+    } else if(variant==='weeks' && typeof kanbanMonth!=='undefined'){
+      const weeks=getWeeksOfMonth(kanbanMonth.getFullYear(),kanbanMonth.getMonth());
+      const w=weeks[index||0];
+      if(w&&w.startStr)dueDate=w.startStr;
+    } else if(variant==='months' && typeof kanbanMonthStart!=='undefined'){
+      const start=new Date(kanbanMonthStart);start.setDate(1);
+      const md=new Date(start);md.setMonth(start.getMonth()+(index||0));
+      dueDate=`${md.getFullYear()}-${String(md.getMonth()+1).padStart(2,'0')}-01`;
+    }
+  }catch(err){ console.warn('[kanbanDblClickAdd] date resolve failed',err); }
+  startQuickAddInline({dueDate});
+}
+window.kanbanDblClickAdd=kanbanDblClickAdd;
+
+// Listen for parent-shell post-messages from the global FAB. The parent
+// switches to the Tasks tab and posts {type:'qt:start-quick-add'}; we
+// just trigger the inline-add bar locally. Wrapped in try/catch because
+// some browsers throw on cross-origin postMessage — non-fatal here.
+try{
+  window.addEventListener('message',function(e){
+    const d=e&&e.data;
+    if(!d||typeof d!=='object')return;
+    if(d.type==='qt:start-quick-add'){
+      try{ startQuickAddInline(d.opts||{}); }
+      catch(err){ console.warn('[message qt:start-quick-add] failed',err); }
+    } else if(d.type==='qt:open-drawer'&&d.taskId){
+      try{ openTaskDrawer(d.taskId); }catch(err){ console.warn('[message qt:open-drawer] failed',err); }
+    }
+  });
+}catch(e){ console.warn('[message listener setup] failed',e); }
 
 // ======================================================
 // CREATE TASK MODAL

@@ -64,19 +64,35 @@
         return Math.max(0, (ye - ys) * 12 + (me - ms) + 1);
     }
 
-    // Number of expected payments since data start for a tenancy
-    function expectedPaymentsForTenancy(tenancy, today) {
+    // List of rent cycle dates (each one = one expected payment) between
+    // max(tenancy_start, ARREARS_DATA_START) and today. Anchored to the
+    // tenancy's `tenDueDay` so cycles align with how Airtable already tracks
+    // due dates. Returns Date[] in chronological order.
+    function cyclesForTenancy(tenancy, today) {
         const tenStart = getTenancyStartDate(tenancy);
+        if (!tenStart) return [];
         const dataStart = new Date(ARREARS_DATA_START);
-        // If tenancy has no start date we can't compute — caller should skip.
-        const effectiveStart = tenStart && tenStart > dataStart ? tenStart : dataStart;
-        return monthsBetween(effectiveStart, today);
+        const effectiveStart = tenStart > dataStart ? tenStart : dataStart;
+        const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
+
+        // First cycle is on/after effectiveStart at the due-day
+        let cycle = new Date(effectiveStart.getFullYear(), effectiveStart.getMonth(), dueDay);
+        if (cycle < effectiveStart) {
+            cycle = new Date(cycle.getFullYear(), cycle.getMonth() + 1, dueDay);
+        }
+        const cycles = [];
+        while (cycle <= today) {
+            cycles.push(new Date(cycle));
+            cycle = new Date(cycle.getFullYear(), cycle.getMonth() + 1, dueDay);
+        }
+        return cycles;
     }
 
-    // Number of reconciled rent payments since data start linked to this tenancy
-    function actualPaymentsForTenancy(tenancyId) {
+    // Reconciled rent payments linked to this tenancy since data-start.
+    // Returns full payment objects so the breakdown view can display them.
+    function paymentsForTenancy(tenancyId) {
         const dataStart = new Date(ARREARS_DATA_START);
-        let count = 0;
+        const payments = [];
         for (const tx of allTransactions) {
             if (!getField(tx, F.txReconciled)) continue;
             const linkedTenancy = getField(tx, F.txTenancy);
@@ -85,9 +101,17 @@
             const txDateStr = getField(tx, F.txDate);
             if (!txDateStr) continue;
             const txDate = new Date(txDateStr);
-            if (txDate >= dataStart) count++;
+            if (txDate < dataStart) continue;
+            const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
+            payments.push({ date: txDate, dateStr: String(txDateStr).slice(0, 10), amount });
         }
-        return count;
+        payments.sort((a, b) => a.date - b.date);
+        return payments;
+    }
+
+    // Convenience: count of payments
+    function actualPaymentsForTenancy(tenancyId) {
+        return paymentsForTenancy(tenancyId).length;
     }
 
     // ── New-tenant guard ──

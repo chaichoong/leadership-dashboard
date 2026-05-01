@@ -444,7 +444,7 @@
 
         return `<tr data-record-id="${e.id}" class="${e.inactive ? 'cost-inactive-row' : ''}">
             <td style="text-align:center;color:var(--text-muted);font-size:11px;font-weight:600">${idx + 1}</td>
-            <td style="font-weight:600;max-width:200px">${escHtml(e.name)}</td>
+            <td style="font-weight:600;max-width:200px"><span class="cost-editable" data-cost-id="${e.id}" data-field="${F.costName}" data-type="text" onclick="event.stopPropagation(); editCostField(this)" title="Click to edit Cost Name" style="cursor:pointer">${escHtml(e.name)}</span></td>
             <td style="text-align:right;white-space:nowrap;font-weight:600">${expectedCell}</td>
             <td style="text-align:right;white-space:nowrap">${lastAmtCell}</td>
             <td style="white-space:nowrap;color:var(--text-secondary)">${dueDayCell}</td>
@@ -1053,14 +1053,16 @@
         let oldValue;
         if (type === 'date') oldValue = span.dataset.raw || '';
         else if (type === 'dueday') oldValue = span.dataset.raw || '';
+        else if (type === 'text') oldValue = getField(cost, fieldId) || '';
         else oldValue = Number(getField(cost, fieldId)) || '';
 
         const input = document.createElement('input');
         if (type === 'number') { input.type = 'number'; input.step = '0.01'; }
         else if (type === 'dueday') { input.type = 'number'; input.min = '1'; input.max = '31'; input.step = '1'; }
+        else if (type === 'text') { input.type = 'text'; }
         else input.type = 'date';
         input.value = oldValue;
-        input.style.cssText = 'width:110px;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:12px;background:var(--bg-surface);color:var(--text-primary)';
+        input.style.cssText = `${type === 'text' ? 'width:240px' : 'width:110px'};padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:12px;background:var(--bg-surface);color:var(--text-primary)`;
         const parent = span.parentNode;
         parent.replaceChild(input, span);
         input.focus();
@@ -1080,6 +1082,7 @@
                 if (newRaw !== '' && (isNaN(n) || n < 1 || n > 31)) { alert('Due Day must be between 1 and 31'); renderCostsTab(); return; }
                 newValue = newRaw === '' ? null : String(n);
             }
+            else if (type === 'text') newValue = newRaw.trim() || null;
             else newValue = newRaw || null;
             if (String(newValue ?? '') === String(oldValue ?? '')) { renderCostsTab(); return; }
 
@@ -1094,6 +1097,7 @@
                 cost.fields[fieldId] = newValue;
                 const label = type === 'number' ? `Expected → ${fmt(newValue || 0)}`
                     : type === 'dueday' ? `Due Day → ${newValue || '—'}`
+                    : type === 'text' ? `Cost Name → ${newValue || '—'}`
                     : `End Date → ${formatCostDate(newValue)}`;
                 pushUndoAction({ kind: 'edit', costId, fieldId, oldValue, newValue, label });
                 renderCostsTab();
