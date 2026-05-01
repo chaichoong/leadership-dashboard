@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-01-1100 comment-count-instant</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-01-1230 team-bar-live</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -4322,7 +4322,12 @@ function inlineSelectCell(taskId,fieldKey,current,options,renderFn){
   // Preserve legacy values (e.g. priority="High") that are no longer offered
   const optList=current&&!options.includes(current)?[...options,current]:options;
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
-  return `<select class="inline-select" data-type="${fieldKey}" data-v="${escHtml(current||'')}" onchange="updateTaskField('${taskId}','${fieldKey}',this.value);renderTasks()" onclick="event.stopPropagation()">${opts}</select>`;
+  // renderAll (not renderTasks) so the team filter counts + KPI tiles +
+  // capacity view all update instantly when a row's status / priority /
+  // assignee / etc. changes via the grid dropdowns. Otherwise completing
+  // a task from the grid leaves the count next to the assignee's name
+  // stale until the next page action.
+  return `<select class="inline-select" data-type="${fieldKey}" data-v="${escHtml(current||'')}" onchange="updateTaskField('${taskId}','${fieldKey}',this.value).then(()=>renderAll()).catch(()=>renderAll())" onclick="event.stopPropagation()">${opts}</select>`;
 }
 // Inline project picker cell for the task list grid
 function inlineProjectPickerCell(t){
