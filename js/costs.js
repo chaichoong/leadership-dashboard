@@ -211,12 +211,32 @@
         const status = getPaymentStatusName(getField(r, F.costPayStatus)) || '';
         const inactive = !!getField(r, F.costInactive) || status === 'Inactive' || status === 'Paused';
 
-        // Compute expected next payment date and days overdue, client-side
-        const expectedNext = computeExpectedNextPayment(lastReconDate, dueDay, frequency);
+        // Expected payment date for THIS period (anchored on Due Day, weekend-shifted).
+        const expectedThisPeriod = computeExpectedNextPayment(lastReconDate, dueDay, frequency);
         const today = new Date(); today.setHours(0,0,0,0);
-        const daysOverdue = expectedNext ? Math.floor((today.getTime() - expectedNext.getTime()) / 86400000) : null;
 
-        // Variance against expected
+        // "Paid this period" — is the last reconciled date on/after the expected date?
+        const paidThisPeriod = expectedThisPeriod && lastReconDate
+            ? new Date(lastReconDate).getTime() >= expectedThisPeriod.getTime()
+            : false;
+
+        // Days overdue:
+        //   - If paid this period → 0 (or negative, but we'll show as paid)
+        //   - If today >= expected and not yet paid → today - expected (positive)
+        //   - If today < expected → negative (days until due)
+        let daysOverdue = null;
+        if (expectedThisPeriod) {
+            if (paidThisPeriod) {
+                daysOverdue = 0; // already paid this period
+            } else {
+                daysOverdue = Math.round((today.getTime() - expectedThisPeriod.getTime()) / 86400000);
+            }
+        }
+
+        // Drift: how late/early the last actual payment was vs its expected day in the month it was made.
+        const lastPaymentDrift = computeLastPaymentDrift(lastReconDate, dueDay);
+
+        // Variance against expected — respects sticky dismissal until next reconciliation.
         let varianceFlag = 'unknown';
         let varianceAmount = 0;
         let variancePct = 0;
@@ -228,6 +248,10 @@
             else if (variancePct > VAR_HARD_PCT) varianceFlag = 'hard';
             else varianceFlag = 'soft';
         }
+        // Dismissal: if the user dismissed at the same lastReconDate, treat as match for UI
+        const dismissedAt = getField(r, F.costVarianceDismissedAt);
+        const varianceDismissed = !!(dismissedAt && lastReconDate &&
+            new Date(dismissedAt).toDateString() === new Date(lastReconDate).toDateString());
 
         return {
             id: r.id,
@@ -237,20 +261,58 @@
             lastReconDate, lastReconAmount: lastReconAmountNum,
             lastReconAccountIds, lastReconSubCatIds, accountName, subCatName,
             status, inactive,
-            expectedNext, daysOverdue,
-            varianceFlag, varianceAmount, variancePct,
+            expectedNext: expectedThisPeriod,
+            daysOverdue,
+            paidThisPeriod,
+            lastPaymentDrift,
+            varianceFlag, varianceAmount, variancePct, varianceDismissed,
         };
     }
 
     function renderCostRow(e, idx) {
         const dueDayStr = e.dueDay ? `Day ${e.dueDay}` : '—';
-        const endDateStr = e.endDate ? formatCostDate(e.endDate) : '—';
-        const lastPaidStr = e.lastReconDate ? formatCostDate(e.lastReconDate) : '<span style="color:var(--text-muted)">—</span>';
-        const lastAmtStr = e.lastReconAmount != null ? fmt(e.lastReconAmount) : '<span style="color:var(--text-muted)">—</span>';
         const accountStr = e.accountName ? escHtml(e.accountName) : '<span style="color:var(--text-muted)">—</span>';
         const subCatStr = e.subCatName ? escHtml(e.subCatName) : '<span style="color:var(--text-muted)">—</span>';
 
-        // Status badge — reflects the legacy Payment Status field
+        // Editable Expected Cost
+        const expectedCell = `<span class="cost-editable" data-cost-id="${e.id}" data-field="${F.costExpected}" data-type="number" onclick="event.stopPropagation(); editCostField(this)" title="Click to edit Expected Cost" style="cursor:pointer">${fmt(e.expected)}</span>`;
+
+        // Editable End Date
+        const endDateInner = e.endDate ? formatCostDate(e.endDate) : '<span style="color:var(--text-muted)">— set —</span>';
+        const endDateCell = `<span class="cost-editable" data-cost-id="${e.id}" data-field="${F.costEndDate}" data-type="date" data-raw="${e.endDate || ''}" onclick="event.stopPropagation(); editCostField(this)" title="Click to edit End Date" style="cursor:pointer;font-size:11px;color:var(--text-muted)">${endDateInner}</span>`;
+
+        // Last Paid + drift badge
+        let lastPaidCell;
+        if (!e.lastReconDate) {
+            lastPaidCell = '<span style="color:var(--text-muted)">—</span>';
+        } else {
+            const drift = e.lastPaymentDrift;
+            let driftBadge = '';
+            if (drift !== null && drift !== 0) {
+                if (drift > 1) driftBadge = ` <span title="Last payment was ${drift} days after the expected day (weekend-adjusted)" style="font-size:10px;color:var(--warning);font-weight:600">+${drift}d</span>`;
+                else if (drift < -1) driftBadge = ` <span title="Last payment landed ${Math.abs(drift)} days BEFORE the expected day" style="font-size:10px;color:var(--info);font-weight:600">${drift}d</span>`;
+            }
+            lastPaidCell = `${formatCostDate(e.lastReconDate)}${driftBadge}`;
+        }
+
+        // Last Reconciled Amount + variance badge with actions menu
+        const lastAmtRaw = e.lastReconAmount != null ? fmt(e.lastReconAmount) : '<span style="color:var(--text-muted)">—</span>';
+        let varianceBadge = '';
+        if (e.lastReconAmount != null && e.varianceFlag !== 'unknown') {
+            if (e.varianceDismissed) {
+                varianceBadge = `<span style="color:var(--text-muted);font-size:10px;cursor:pointer;text-decoration:underline" title="Variance dismissed — click to undo" onclick="event.stopPropagation(); undismissCostVariance('${e.id}')">dismissed ↶</span>`;
+            } else if (e.varianceFlag === 'match') {
+                varianceBadge = '<span style="color:var(--success);font-size:11px" title="Reconciled amount matches expected">✓</span>';
+            } else {
+                const sign = e.varianceAmount >= 0 ? '+' : '−';
+                const cls = e.varianceFlag === 'hard' ? 'danger' : 'warning';
+                const tail = e.varianceFlag === 'hard' ? ' ⚠' : '';
+                varianceBadge = `<span class="inv-badge cost-variance-badge" style="background:var(--${cls}-bg);color:var(--${cls});cursor:pointer" title="${(e.variancePct*100).toFixed(1)}% variance — click for actions" onclick="event.stopPropagation(); openVarianceMenu(this, '${e.id}')">${sign}${fmt(Math.abs(e.varianceAmount))}${tail}</span>`;
+            }
+        }
+        const lastAmtCell = `<div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">${lastAmtRaw} ${varianceBadge}</div>`;
+
+        // Status badge
         const statusClass = e.status === 'Overdue' ? 'overdue'
             : e.status === 'In Payment' ? 'in-payment'
             : e.status === 'Paused' ? 'due-soon'
@@ -259,43 +321,33 @@
             ? `<span class="inv-badge ${statusClass}">${escHtml(e.status)}</span>`
             : '<span style="color:var(--text-muted);font-size:11px">— no status —</span>';
 
-        // Days overdue
+        // Days Overdue (Due-Day-anchored, paid-this-period aware)
         let overdueCell = '<span style="color:var(--text-muted)">—</span>';
         if (e.daysOverdue !== null && !e.inactive) {
-            if (e.daysOverdue > 0) {
+            if (e.paidThisPeriod) {
+                overdueCell = '<span style="color:var(--success);font-size:11px">✓ paid this period</span>';
+            } else if (e.daysOverdue > 0) {
                 overdueCell = `<span style="color:var(--danger);font-weight:600">${e.daysOverdue}d overdue</span>`;
             } else if (e.daysOverdue === 0) {
-                overdueCell = `<span style="color:var(--warning);font-weight:600">Due today</span>`;
+                overdueCell = '<span style="color:var(--warning);font-weight:600">Due today</span>';
             } else {
                 overdueCell = `<span style="color:var(--text-muted)">in ${Math.abs(e.daysOverdue)}d</span>`;
             }
         }
 
-        // Variance badge
-        let varianceBadge = '';
-        if (e.varianceFlag === 'match') {
-            varianceBadge = '<span style="color:var(--success);font-size:11px" title="Reconciled amount matches expected">✓</span>';
-        } else if (e.varianceFlag === 'soft') {
-            const sign = e.varianceAmount >= 0 ? '+' : '−';
-            varianceBadge = `<span class="inv-badge" style="background:var(--warning-bg);color:var(--warning);cursor:pointer" title="Soft variance ${(e.variancePct*100).toFixed(1)}% — possible rate change" onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')">${sign}${fmt(Math.abs(e.varianceAmount))}</span>`;
-        } else if (e.varianceFlag === 'hard') {
-            const sign = e.varianceAmount >= 0 ? '+' : '−';
-            varianceBadge = `<span class="inv-badge" style="background:var(--danger-bg);color:var(--danger);cursor:pointer" title="Hard variance ${(e.variancePct*100).toFixed(1)}% — review reconciliation" onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')">${sign}${fmt(Math.abs(e.varianceAmount))} ⚠</span>`;
-        }
-
         return `<tr data-record-id="${e.id}" class="${e.inactive ? 'cost-inactive-row' : ''}">
             <td style="text-align:center;color:var(--text-muted);font-size:11px;font-weight:600">${idx + 1}</td>
             <td style="font-weight:600;max-width:200px">${escHtml(e.name)}</td>
-            <td style="text-align:right;white-space:nowrap;font-weight:600">${fmt(e.expected)}</td>
-            <td style="text-align:right;white-space:nowrap">${lastAmtStr} ${varianceBadge}</td>
+            <td style="text-align:right;white-space:nowrap;font-weight:600">${expectedCell}</td>
+            <td style="text-align:right;white-space:nowrap">${lastAmtCell}</td>
             <td style="white-space:nowrap;color:var(--text-secondary)">${escHtml(dueDayStr)}</td>
-            <td style="white-space:nowrap">${lastPaidStr}</td>
+            <td style="white-space:nowrap">${lastPaidCell}</td>
             <td style="white-space:nowrap">${overdueCell}</td>
             <td style="white-space:nowrap">${statusBadge}</td>
             <td style="font-size:12px;color:var(--text-secondary)">${escHtml(e.frequency)}</td>
             <td style="font-size:12px;color:var(--text-secondary)">${accountStr}</td>
             <td style="font-size:12px;color:var(--text-secondary);max-width:140px">${subCatStr}</td>
-            <td style="white-space:nowrap;font-size:11px;color:var(--text-muted)">${endDateStr}</td>
+            <td style="white-space:nowrap">${endDateCell}</td>
             <td style="width:40px;text-align:center">
                 <button onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')" title="Show linked transactions" style="background:none;border:1px solid var(--border-default);border-radius:4px;cursor:pointer;padding:2px 6px;font-size:11px;color:var(--text-secondary)">▶</button>
             </td>
@@ -342,7 +394,11 @@
     function getAccountName(id) {
         const acc = (allAccounts || []).find(a => a.id === id);
         if (!acc) return '';
-        // Try common name fields — Airtable returns by field ID. Look for any short string field.
+        // Prefer Account Alias (human-friendly), fall back to *Name (coded), then any short string.
+        const alias = getField(acc, F.accountAlias);
+        if (typeof alias === 'string' && alias.trim()) return alias.trim();
+        const name = getField(acc, 'fldqr09KqLGGYCYkC'); // *Name
+        if (typeof name === 'string' && name.trim()) return name.trim();
         const fields = acc.fields || {};
         for (const k of Object.keys(fields)) {
             const v = fields[k];
@@ -373,19 +429,73 @@
         }
     }
 
-    // Compute the expected next payment date given last reconciled date + frequency
+    // Shift a date forward to the next business day if it lands on Sat/Sun.
+    // Most fixed costs are direct debits which honour banking days; standing
+    // orders fall on the literal due day. We default to DD behaviour because
+    // Kevin confirmed most are DDs.
+    function shiftWeekendToMonday(d) {
+        const day = d.getDay();
+        if (day === 6) d.setDate(d.getDate() + 2); // Sat → Mon
+        else if (day === 0) d.setDate(d.getDate() + 1); // Sun → Mon
+        return d;
+    }
+
+    // Compute the EXPECTED payment date for the current period, anchored on
+    // Due Day (not the actual last payment date). Weekend-shifted for DD.
+    //
+    // For monthly/sub-monthly: the most recent occurrence of Due Day in the
+    // current or previous month, on/before today.
+    // For quarterly/annually: anchored to the lastReconDate's month, advanced
+    // by the frequency interval; if no last recon, uses Due Day of current
+    // period as best-effort.
     function computeExpectedNextPayment(lastReconDate, dueDay, frequency) {
         const today = new Date(); today.setHours(0,0,0,0);
-        if (lastReconDate) {
-            const last = new Date(lastReconDate);
-            last.setHours(0,0,0,0);
-            return addFrequency(last, frequency);
-        }
-        // Never reconciled — fall back to upcoming due day this month or next
         if (!dueDay) return null;
-        const thisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
-        if (thisMonth >= today) return thisMonth;
-        return new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+
+        // Sub-monthly frequencies don't really fit the Due Day model — fall
+        // back to lastReconDate + interval (or today as starting point).
+        if (frequency === 'Daily' || frequency === 'Weekly' || frequency === 'Fortnightly' || frequency === '4-Weekly') {
+            if (!lastReconDate) return null;
+            const last = new Date(lastReconDate); last.setHours(0,0,0,0);
+            return shiftWeekendToMonday(addFrequency(last, frequency));
+        }
+
+        if (frequency === 'Monthly' || !frequency) {
+            // Most-recent occurrence of Due Day at or before today.
+            // If today's date < dueDay, the expectation is in this month but in the future,
+            // so the "expected this period" is last month's due day.
+            let expected = new Date(today.getFullYear(), today.getMonth(), dueDay);
+            shiftWeekendToMonday(expected);
+            if (expected > today) {
+                // Use previous month's due day as the relevant "expected this period"
+                expected = new Date(today.getFullYear(), today.getMonth() - 1, dueDay);
+                shiftWeekendToMonday(expected);
+            }
+            return expected;
+        }
+
+        if (frequency === 'Quarterly') {
+            // Anchored to lastReconDate's month, advanced by 3 months.
+            if (!lastReconDate) {
+                const expected = new Date(today.getFullYear(), today.getMonth(), dueDay);
+                return shiftWeekendToMonday(expected);
+            }
+            const last = new Date(lastReconDate); last.setHours(0,0,0,0);
+            const expected = new Date(last.getFullYear(), last.getMonth() + 3, dueDay);
+            return shiftWeekendToMonday(expected);
+        }
+
+        if (frequency === 'Annually') {
+            if (!lastReconDate) {
+                const expected = new Date(today.getFullYear(), today.getMonth(), dueDay);
+                return shiftWeekendToMonday(expected);
+            }
+            const last = new Date(lastReconDate); last.setHours(0,0,0,0);
+            const expected = new Date(last.getFullYear() + 1, last.getMonth(), dueDay);
+            return shiftWeekendToMonday(expected);
+        }
+
+        return null;
     }
 
     function addFrequency(d, frequency) {
@@ -401,6 +511,17 @@
             default:            out.setMonth(out.getMonth() + 1); break;
         }
         return out;
+    }
+
+    // Returns positive days late if last payment landed AFTER its expected weekend-shifted date.
+    // Returns negative if early. Null if no last payment or no due day.
+    function computeLastPaymentDrift(lastReconDate, dueDay) {
+        if (!lastReconDate || !dueDay) return null;
+        const paid = new Date(lastReconDate); paid.setHours(0,0,0,0);
+        // The expected date for THE month the payment was made in
+        let expected = new Date(paid.getFullYear(), paid.getMonth(), dueDay);
+        shiftWeekendToMonday(expected);
+        return Math.round((paid - expected) / 86400000);
     }
 
     function buildLinkedTransactionsHtml(e) {
@@ -732,11 +853,23 @@
                 const computedVarAmt = e.varianceFlag !== 'unknown' ? +(e.varianceAmount.toFixed(2)) : null;
                 const computedVarFlag = ({ match: 'Match', soft: 'Soft', hard: 'Hard', unknown: 'Unknown' })[e.varianceFlag] || 'Unknown';
 
-                // NOTE: Status is intentionally not synced here. The legacy
-                // Payment Status field is curated manually by Kevin and is the
-                // source of truth — the dashboard never overwrites it.
+                // Auto-flip Payment Status between "In Payment" and "Overdue"
+                // based on whether this period has been paid yet. Paused/Inactive
+                // are NEVER touched — only In Payment ↔ Overdue transitions.
+                const currentStatus = getPaymentStatusName(getField(c, F.costPayStatus));
+                let desiredStatus = currentStatus;
+                if (currentStatus === 'In Payment' || currentStatus === 'Overdue') {
+                    if (e.paidThisPeriod || (e.daysOverdue !== null && e.daysOverdue <= 0)) {
+                        desiredStatus = 'In Payment';
+                    } else if (e.daysOverdue !== null && e.daysOverdue > 0) {
+                        desiredStatus = 'Overdue';
+                    }
+                }
 
                 const fields = {};
+                if (desiredStatus && desiredStatus !== currentStatus) {
+                    fields[F.costPayStatus] = desiredStatus;
+                }
                 if (computedDays !== null && Number(storedDays) !== Number(computedDays)) {
                     fields[F.costDaysOverdue] = computedDays;
                 }
@@ -786,6 +919,204 @@
             return { ok: failed === 0, written, failed };
         } finally {
             _syncDerivedInFlight = false;
+        }
+    }
+
+    // ── Inline edit (Expected Cost, End Date) ──
+    // Replaces the clicked span with an input. On blur/Enter: PATCH to Airtable
+    // and re-render. Esc cancels. Undo toast for amend operations.
+    async function editCostField(span) {
+        const costId = span.dataset.costId;
+        const fieldId = span.dataset.field;
+        const type = span.dataset.type;
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const oldValue = type === 'date' ? (span.dataset.raw || '') : (Number(getField(cost, fieldId)) || '');
+        const input = document.createElement('input');
+        input.type = type === 'number' ? 'number' : 'date';
+        if (type === 'number') input.step = '0.01';
+        input.value = oldValue;
+        input.style.cssText = 'width:110px;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:12px;background:var(--bg-surface);color:var(--text-primary)';
+        const parent = span.parentNode;
+        parent.replaceChild(input, span);
+        input.focus();
+        if (type === 'number') input.select();
+
+        let done = false;
+        const finish = async (commit) => {
+            if (done) return; done = true;
+            if (!commit) { renderCostsTab(); return; }
+            const newRaw = input.value;
+            const newValue = type === 'number' ? (newRaw === '' ? null : Number(newRaw)) : (newRaw || null);
+            // No-op if unchanged
+            if (String(newValue ?? '') === String(oldValue ?? '')) { renderCostsTab(); return; }
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [fieldId]: newValue } })
+                });
+                if (!resp.ok) throw new Error('PATCH ' + resp.status);
+                if (!cost.fields) cost.fields = {};
+                cost.fields[fieldId] = newValue;
+                pushUndoAction({ kind: 'edit', costId, fieldId, oldValue, newValue, label: type === 'number' ? `Expected → ${fmt(newValue || 0)}` : `End Date → ${formatCostDate(newValue)}` });
+                renderCostsTab();
+            } catch (err) {
+                alert('Save failed: ' + err.message);
+                renderCostsTab();
+            }
+        };
+
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+            else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+        });
+        input.addEventListener('blur', () => finish(true));
+    }
+
+    // ── Variance actions menu ──
+    function openVarianceMenu(badge, costId) {
+        // Remove any open menu first
+        document.querySelectorAll('.cost-variance-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const e = enrichCost(cost);
+
+        const menu = document.createElement('div');
+        menu.className = 'cost-variance-menu';
+        menu.style.cssText = 'position:absolute;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;box-shadow:var(--shadow-md);padding:6px;z-index:1000;font-size:12px;min-width:240px';
+        menu.innerHTML = `
+            <div style="padding:6px 8px;font-size:11px;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle);margin-bottom:4px">
+                <strong>${escHtml(e.name)}</strong><br>
+                Expected ${fmt(e.expected)} · Last paid ${fmt(e.lastReconAmount)} · Diff ${e.varianceAmount >= 0 ? '+' : '−'}${fmt(Math.abs(e.varianceAmount))} (${(e.variancePct*100).toFixed(1)}%)
+            </div>
+            <button class="var-menu-btn" onclick="amendExpectedCost('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px">📝 Amend Expected to ${fmt(e.lastReconAmount)} <span style="color:var(--text-muted);font-size:10px">— rate has actually changed</span></button>
+            <button class="var-menu-btn" onclick="dismissCostVariance('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px">🚫 Dismiss this variance <span style="color:var(--text-muted);font-size:10px">— bulk payment / one-off explained</span></button>
+            <button class="var-menu-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-secondary)">Cancel</button>
+        `;
+        // Hover effect via inline JS (cleaner than adding CSS class)
+        menu.querySelectorAll('.var-menu-btn').forEach(b => {
+            b.addEventListener('mouseenter', () => b.style.background = 'var(--bg-surface-2)');
+            b.addEventListener('mouseleave', () => b.style.background = 'none');
+        });
+        document.body.appendChild(menu);
+        const rect = badge.getBoundingClientRect();
+        menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+        menu.style.left = (rect.left + window.scrollX) + 'px';
+        // Dismiss on outside click
+        setTimeout(() => {
+            const off = (ev) => {
+                if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', off); }
+            };
+            document.addEventListener('click', off);
+        }, 0);
+    }
+
+    async function amendExpectedCost(costId) {
+        document.querySelectorAll('.cost-variance-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const newAmount = Number(getField(cost, F.costLastReconAmount));
+        if (!newAmount) { alert('No reconciled amount to copy from'); return; }
+        const oldExpected = Number(getField(cost, F.costExpected)) || 0;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.costExpected]: newAmount } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            cost.fields[F.costExpected] = newAmount;
+            pushUndoAction({ kind: 'amend', costId, oldValue: oldExpected, newValue: newAmount, label: `Expected updated to ${fmt(newAmount)}` });
+            renderCostsTab();
+        } catch (err) {
+            alert('Amend failed: ' + err.message);
+        }
+    }
+
+    async function dismissCostVariance(costId) {
+        document.querySelectorAll('.cost-variance-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const lastReconDate = getField(cost, F.costLastReconDate);
+        if (!lastReconDate) return;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.costVarianceDismissedAt]: lastReconDate } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            cost.fields[F.costVarianceDismissedAt] = lastReconDate;
+            pushUndoAction({ kind: 'dismiss', costId, oldValue: null, newValue: lastReconDate, label: `Variance dismissed for ${getField(cost, F.costName)}` });
+            renderCostsTab();
+        } catch (err) {
+            alert('Dismiss failed: ' + err.message);
+        }
+    }
+
+    async function undismissCostVariance(costId) {
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const oldDismissed = getField(cost, F.costVarianceDismissedAt);
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.costVarianceDismissedAt]: null } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            cost.fields[F.costVarianceDismissedAt] = null;
+            pushUndoAction({ kind: 'undismiss', costId, oldValue: oldDismissed, newValue: null, label: `Variance dismissal cleared` });
+            renderCostsTab();
+        } catch (err) {
+            alert('Undismiss failed: ' + err.message);
+        }
+    }
+
+    // ── Undo system ──
+    // Sliding toast with Undo button. Last action only — keep it simple.
+    let _undoTimer = null;
+    function pushUndoAction(action) {
+        const existing = document.getElementById('costsUndoToast');
+        if (existing) existing.remove();
+        if (_undoTimer) clearTimeout(_undoTimer);
+
+        const toast = document.createElement('div');
+        toast.id = 'costsUndoToast';
+        toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-sidebar);color:var(--text-inverse);padding:10px 14px;border-radius:8px;box-shadow:var(--shadow-lg);font-size:13px;z-index:2000;display:flex;align-items:center;gap:12px;max-width:400px';
+        toast.innerHTML = `
+            <span>${escHtml(action.label)}</span>
+            <button onclick="performUndo()" style="background:var(--accent-gold);color:var(--bg-sidebar);border:none;padding:4px 10px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px">Undo</button>
+        `;
+        document.body.appendChild(toast);
+        window._lastCostUndo = action;
+        _undoTimer = setTimeout(() => { toast.remove(); window._lastCostUndo = null; }, 8000);
+    }
+
+    async function performUndo() {
+        const action = window._lastCostUndo;
+        if (!action) return;
+        const toast = document.getElementById('costsUndoToast');
+        if (toast) toast.remove();
+        if (_undoTimer) clearTimeout(_undoTimer);
+        window._lastCostUndo = null;
+        const cost = (allCosts || []).find(c => c.id === action.costId);
+        if (!cost) return;
+        const fieldId = action.kind === 'amend' ? F.costExpected
+            : (action.kind === 'dismiss' || action.kind === 'undismiss') ? F.costVarianceDismissedAt
+            : action.fieldId;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${action.costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [fieldId]: action.oldValue } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            cost.fields[fieldId] = action.oldValue;
+            renderCostsTab();
+        } catch (err) {
+            alert('Undo failed: ' + err.message);
         }
     }
 

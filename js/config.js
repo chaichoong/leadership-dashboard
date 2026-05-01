@@ -161,6 +161,9 @@
         costExpectedNext:      'fldiiWiiPLXkWg1Dc',  // Expected Next Payment (date) — written by dashboard on load
         costLatestTxDate:      'fldDEWHeA35d8hYGf',  // Latest Transaction Date (rollup) — used by backfill heuristic
         costTxCount:           'fldjPt9cgzywA6SZq',  // Transaction Count (count) — used by backfill heuristic
+        costVarianceDismissedAt: 'fldY5owE8PfjHO3ol', // Variance Dismissed At Recon — sticky dismissal anchor
+        // Account fields
+        accountAlias:          'fld21HAxSawQCxICj',  // Account Alias (singleLineText on Accounts table)
         // Transactions sub-category (already have txSubCategory = fldMRjSVzZVYeHb0A)
         // Tenancies
         tenRef:           'fldyNVvFn4x8GY14q',
