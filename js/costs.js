@@ -5,6 +5,64 @@
 // ══════════════════════════════════════════
     let costsTabRendered = false;
 
+    // ── Loading + sync indicators ──
+    // Shows a spinner overlay when costs haven't loaded yet, plus a small
+    // "Syncing…" pill when background syncDerivedCostFields is running.
+    function showCostsLoadingState() {
+        const panel = document.getElementById('tab-costs');
+        if (!panel) return;
+        let overlay = document.getElementById('costsLoadingOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'costsLoadingOverlay';
+            overlay.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 0;gap:16px;color:var(--text-secondary)';
+            overlay.innerHTML = `
+                <div style="width:40px;height:40px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:cost-spin 0.8s linear infinite"></div>
+                <div style="font-size:14px;font-weight:500">Loading Accounts Payable Fixed…</div>
+                <div style="font-size:12px;color:var(--text-muted)">If this hangs for more than a few seconds, click <strong>Refresh</strong> in the sync bar.</div>
+                <style>@keyframes cost-spin { to { transform: rotate(360deg); } }</style>
+            `;
+            panel.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+        // Hide the rest of the tab content while loading
+        ['costsSummaryCards', 'costsTable', 'costsBreakdown', 'costsAIAnalysis'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+    }
+
+    function hideCostsLoadingState() {
+        const overlay = document.getElementById('costsLoadingOverlay');
+        if (overlay) overlay.style.display = 'none';
+        ['costsSummaryCards', 'costsBreakdown', 'costsAIAnalysis'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = '';
+        });
+        const tbl = document.getElementById('costsTable');
+        if (tbl) tbl.style.display = '';
+    }
+
+    // Pill in the corner that shows during background syncs.
+    function showSyncPill(msg) {
+        let pill = document.getElementById('costsSyncPill');
+        if (!pill) {
+            pill = document.createElement('div');
+            pill.id = 'costsSyncPill';
+            pill.style.cssText = 'position:fixed;top:12px;right:12px;background:var(--info-bg);color:var(--info);padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px;z-index:1500;box-shadow:var(--shadow-sm)';
+            pill.innerHTML = '<span style="width:10px;height:10px;border:2px solid var(--info);border-top-color:transparent;border-radius:50%;animation:cost-spin 0.8s linear infinite"></span><span class="cost-sync-pill-msg"></span>';
+            document.body.appendChild(pill);
+        }
+        pill.querySelector('.cost-sync-pill-msg').textContent = msg;
+        pill.style.display = 'flex';
+    }
+
+    function hideSyncPill() {
+        const pill = document.getElementById('costsSyncPill');
+        if (pill) pill.style.display = 'none';
+    }
+
+
     const SUBCAT_NAME_FIELD = 'fldO4BTJhFv5EsN6i';
 
     // Match thresholds for variance check (Last Reconciled Amount vs Expected Cost)
@@ -20,6 +78,14 @@
 
         const panel = document.getElementById('tab-costs');
         if (!panel) return;
+
+        // Loading state: if no costs loaded yet, show a clear spinner with explainer.
+        if (costs.length === 0) {
+            showCostsLoadingState();
+            return;
+        } else {
+            hideCostsLoadingState();
+        }
 
         const filterText = (document.getElementById('costsFilterText')?.value || '').toLowerCase().trim();
         const sortBy = document.getElementById('costsSortBy')?.value || 'due-day';
@@ -165,13 +231,12 @@
                         if (n === 0) return { status: 'warn', detail: 'No costs loaded — data may still be fetching' };
                         return { status: 'pass', detail: `${n} cost records loaded` };
                     }},
-                    { name: 'Status field migrated', kind: 'sync', run: () => {
-                        const migrated = activeCosts.filter(r => getPaymentStatusName(getField(r, F.costStatusNew))).length;
+                    { name: 'Active costs found', kind: 'sync', run: () => {
                         const total = activeCosts.length;
-                        if (total === 0) return { status: 'pass', detail: 'No active costs' };
-                        if (migrated === 0) return { status: 'warn', detail: `Cost Status (New) is empty for all ${total} active costs — run backfill` };
-                        if (migrated < total) return { status: 'warn', detail: `${total - migrated}/${total} active costs missing Cost Status (New) — re-run backfill` };
-                        return { status: 'pass', detail: `${migrated}/${total} active costs migrated to Cost Status (New)` };
+                        const grand = (allCosts || []).length;
+                        if (grand === 0) return { status: 'warn', detail: 'No costs loaded yet' };
+                        if (total === 0) return { status: 'fail', detail: `0 of ${grand} costs are active. If you expect costs here, click Refresh — your local cache may be stale.` };
+                        return { status: 'pass', detail: `${total} active costs (Payment Status = In Payment or Overdue)` };
                     }},
                     { name: 'Overdue costs', kind: 'sync', run: () => {
                         if (overdueCosts.length > 0) return { status: 'fail', detail: `${overdueCosts.length} cost(s) overdue — review` };
@@ -890,6 +955,8 @@
 
             if (writes.length === 0) return { ok: true, written: 0 };
 
+            showSyncPill(`Syncing ${writes.length} cost field${writes.length !== 1 ? 's' : ''}…`);
+
             let written = 0, failed = 0;
             for (let i = 0; i < writes.length; i += 10) {
                 const batch = writes.slice(i, i + 10);
@@ -914,11 +981,13 @@
                     failed += batch.length;
                     console.warn('syncDerivedCostFields fetch error', e);
                 }
+                showSyncPill(`Syncing ${Math.min(i + 10, writes.length)} of ${writes.length}…`);
             }
             if (opts.verbose) console.log(`syncDerivedCostFields: ${written} written, ${failed} failed`);
             return { ok: failed === 0, written, failed };
         } finally {
             _syncDerivedInFlight = false;
+            hideSyncPill();
         }
     }
 
