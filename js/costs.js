@@ -367,7 +367,8 @@
     }
 
     function renderCostRow(e, idx) {
-        const dueDayStr = e.dueDay ? `Day ${e.dueDay}` : '—';
+        const dueDayStr = e.dueDay ? `Day ${e.dueDay}` : '— set —';
+        const dueDayCell = `<span class="cost-editable" data-cost-id="${e.id}" data-field="${F.costDueDay}" data-type="dueday" data-raw="${e.dueDay || ''}" onclick="event.stopPropagation(); editCostField(this)" title="Click to edit Due Day" style="cursor:pointer">${escHtml(dueDayStr)}</span>`;
         const accountStr = e.accountName ? escHtml(e.accountName) : '<span style="color:var(--text-muted)">—</span>';
         const subCatStr = e.subCatName ? escHtml(e.subCatName) : '<span style="color:var(--text-muted)">—</span>';
 
@@ -414,9 +415,14 @@
             : e.status === 'In Payment' ? 'in-payment'
             : e.status === 'Paused' ? 'due-soon'
             : 'estimate';
+        // Status badge — clickable to override. A small lock icon appears when manually overridden.
+        const statusLocked = !!getField(e.raw, F.costStatusLockedAt) &&
+            !!e.lastReconDate &&
+            new Date(getField(e.raw, F.costStatusLockedAt)).toDateString() === new Date(e.lastReconDate).toDateString();
+        const lockIcon = statusLocked ? ' <span title="Manually overridden — auto-flip disabled until next reconciliation" style="font-size:10px">🔒</span>' : '';
         const statusBadge = e.status
-            ? `<span class="inv-badge ${statusClass}">${escHtml(e.status)}</span>`
-            : '<span style="color:var(--text-muted);font-size:11px">— no status —</span>';
+            ? `<span class="inv-badge ${statusClass}" style="cursor:pointer" title="Click to change status" onclick="event.stopPropagation(); openStatusMenu(this, '${e.id}')">${escHtml(e.status)}${lockIcon}</span>`
+            : `<span style="color:var(--text-muted);font-size:11px;cursor:pointer;text-decoration:underline" title="Click to set status" onclick="event.stopPropagation(); openStatusMenu(this, '${e.id}')">— set status —</span>`;
 
         // Days Overdue (Due-Day-anchored, paid-this-period aware)
         let overdueCell = '<span style="color:var(--text-muted)">—</span>';
@@ -437,7 +443,7 @@
             <td style="font-weight:600;max-width:200px">${escHtml(e.name)}</td>
             <td style="text-align:right;white-space:nowrap;font-weight:600">${expectedCell}</td>
             <td style="text-align:right;white-space:nowrap">${lastAmtCell}</td>
-            <td style="white-space:nowrap;color:var(--text-secondary)">${escHtml(dueDayStr)}</td>
+            <td style="white-space:nowrap;color:var(--text-secondary)">${dueDayCell}</td>
             <td style="white-space:nowrap">${lastPaidCell}</td>
             <td style="white-space:nowrap">${overdueCell}</td>
             <td style="white-space:nowrap">${statusBadge}</td>
@@ -953,9 +959,16 @@
                 // Auto-flip Payment Status between "In Payment" and "Overdue"
                 // based on whether this period has been paid yet. Paused/Inactive
                 // are NEVER touched — only In Payment ↔ Overdue transitions.
+                // Manual override: if Status Locked Until Recon == current Last
+                // Reconciled Payment Date, the user has just overridden the status
+                // and we leave it alone until a new reconciliation arrives.
                 const currentStatus = getPaymentStatusName(getField(c, F.costPayStatus));
+                const lockAt = getField(c, F.costStatusLockedAt);
+                const lastRecon = getField(c, F.costLastReconDate);
+                const isLocked = !!lockAt && !!lastRecon &&
+                    new Date(lockAt).toDateString() === new Date(lastRecon).toDateString();
                 let desiredStatus = currentStatus;
-                if (currentStatus === 'In Payment' || currentStatus === 'Overdue') {
+                if (!isLocked && (currentStatus === 'In Payment' || currentStatus === 'Overdue')) {
                     if (e.paidThisPeriod || (e.daysOverdue !== null && e.daysOverdue <= 0)) {
                         desiredStatus = 'In Payment';
                     } else if (e.daysOverdue !== null && e.daysOverdue > 0) {
@@ -1032,25 +1045,40 @@
         const type = span.dataset.type;
         const cost = (allCosts || []).find(c => c.id === costId);
         if (!cost) return;
-        const oldValue = type === 'date' ? (span.dataset.raw || '') : (Number(getField(cost, fieldId)) || '');
+
+        let oldValue;
+        if (type === 'date') oldValue = span.dataset.raw || '';
+        else if (type === 'dueday') oldValue = span.dataset.raw || '';
+        else oldValue = Number(getField(cost, fieldId)) || '';
+
         const input = document.createElement('input');
-        input.type = type === 'number' ? 'number' : 'date';
-        if (type === 'number') input.step = '0.01';
+        if (type === 'number') { input.type = 'number'; input.step = '0.01'; }
+        else if (type === 'dueday') { input.type = 'number'; input.min = '1'; input.max = '31'; input.step = '1'; }
+        else input.type = 'date';
         input.value = oldValue;
         input.style.cssText = 'width:110px;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:12px;background:var(--bg-surface);color:var(--text-primary)';
         const parent = span.parentNode;
         parent.replaceChild(input, span);
         input.focus();
-        if (type === 'number') input.select();
+        if (type !== 'date') input.select();
 
         let done = false;
         const finish = async (commit) => {
             if (done) return; done = true;
             if (!commit) { renderCostsTab(); return; }
             const newRaw = input.value;
-            const newValue = type === 'number' ? (newRaw === '' ? null : Number(newRaw)) : (newRaw || null);
-            // No-op if unchanged
+            // Due Day is a singleSelect on Airtable — write as string name ("1".."31").
+            // Number → numeric value. Date → ISO or null.
+            let newValue;
+            if (type === 'number') newValue = newRaw === '' ? null : Number(newRaw);
+            else if (type === 'dueday') {
+                const n = parseInt(newRaw, 10);
+                if (newRaw !== '' && (isNaN(n) || n < 1 || n > 31)) { alert('Due Day must be between 1 and 31'); renderCostsTab(); return; }
+                newValue = newRaw === '' ? null : String(n);
+            }
+            else newValue = newRaw || null;
             if (String(newValue ?? '') === String(oldValue ?? '')) { renderCostsTab(); return; }
+
             try {
                 const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
                     method: 'PATCH',
@@ -1060,7 +1088,10 @@
                 if (!resp.ok) throw new Error('PATCH ' + resp.status);
                 if (!cost.fields) cost.fields = {};
                 cost.fields[fieldId] = newValue;
-                pushUndoAction({ kind: 'edit', costId, fieldId, oldValue, newValue, label: type === 'number' ? `Expected → ${fmt(newValue || 0)}` : `End Date → ${formatCostDate(newValue)}` });
+                const label = type === 'number' ? `Expected → ${fmt(newValue || 0)}`
+                    : type === 'dueday' ? `Due Day → ${newValue || '—'}`
+                    : `End Date → ${formatCostDate(newValue)}`;
+                pushUndoAction({ kind: 'edit', costId, fieldId, oldValue, newValue, label });
                 renderCostsTab();
             } catch (err) {
                 alert('Save failed: ' + err.message);
@@ -1073,6 +1104,97 @@
             else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
         });
         input.addEventListener('blur', () => finish(true));
+    }
+
+    // ── Status override menu ──
+    // Shows In Payment / Overdue / Paused / Inactive. Selecting any sets the
+    // Status Locked Until Recon = current Last Reconciled Payment Date so the
+    // auto-flip leaves it alone until a new reconciliation arrives.
+    function openStatusMenu(badge, costId) {
+        document.querySelectorAll('.cost-status-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const current = getPaymentStatusName(getField(cost, F.costPayStatus)) || '(unset)';
+
+        const menu = document.createElement('div');
+        menu.className = 'cost-status-menu';
+        menu.style.cssText = 'position:absolute;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;box-shadow:var(--shadow-md);padding:6px;z-index:1000;font-size:12px;min-width:200px';
+        const opts = [
+            { name: 'In Payment', color: 'var(--success)' },
+            { name: 'Overdue', color: 'var(--danger)' },
+            { name: 'Paused', color: 'var(--warning)' },
+            { name: 'Inactive', color: 'var(--text-muted)' },
+        ];
+        const buttons = opts.map(o => {
+            const tick = o.name === current ? '✓ ' : '&nbsp;&nbsp;';
+            return `<button onclick="setCostStatus('${costId}', '${o.name}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px;color:${o.color};font-weight:600">${tick}${o.name}</button>`;
+        }).join('');
+        const unlockBtn = `<button onclick="unlockCostStatus('${costId}')" style="display:block;width:100%;text-align:left;padding:6px 8px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-secondary);font-size:11px;border-top:1px solid var(--border-subtle);margin-top:4px">↶ Clear manual override (let auto-flip resume)</button>`;
+        menu.innerHTML = `<div style="padding:6px 8px;font-size:11px;color:var(--text-muted);border-bottom:1px solid var(--border-subtle);margin-bottom:4px">Override status for <strong>${escHtml(getField(cost, F.costName) || '')}</strong></div>${buttons}${unlockBtn}`;
+        menu.querySelectorAll('button').forEach(b => {
+            b.addEventListener('mouseenter', () => b.style.background = 'var(--bg-surface-2)');
+            b.addEventListener('mouseleave', () => b.style.background = 'none');
+        });
+        document.body.appendChild(menu);
+        const rect = badge.getBoundingClientRect();
+        menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+        menu.style.left = (rect.left + window.scrollX) + 'px';
+        setTimeout(() => {
+            const off = (ev) => {
+                if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', off); }
+            };
+            document.addEventListener('click', off);
+        }, 0);
+    }
+
+    async function setCostStatus(costId, newStatus) {
+        document.querySelectorAll('.cost-status-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const oldStatus = getPaymentStatusName(getField(cost, F.costPayStatus));
+        const lastReconDate = getField(cost, F.costLastReconDate);
+        // Lock ties to the current lastReconDate; if no payments yet, lock to today.
+        const lockDate = lastReconDate || toIsoDate(new Date());
+        const oldLock = getField(cost, F.costStatusLockedAt);
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.costPayStatus]: newStatus, [F.costStatusLockedAt]: lockDate } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            if (!cost.fields) cost.fields = {};
+            cost.fields[F.costPayStatus] = { name: newStatus };
+            cost.fields[F.costStatusLockedAt] = lockDate;
+            pushUndoAction({
+                kind: 'status', costId,
+                oldStatus, newStatus, oldLock, newLock: lockDate,
+                label: `Status → ${newStatus} (locked until next payment)`
+            });
+            renderCostsTab();
+        } catch (err) {
+            alert('Status update failed: ' + err.message);
+        }
+    }
+
+    async function unlockCostStatus(costId) {
+        document.querySelectorAll('.cost-status-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const oldLock = getField(cost, F.costStatusLockedAt);
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.costStatusLockedAt]: null } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            cost.fields[F.costStatusLockedAt] = null;
+            pushUndoAction({ kind: 'status-unlock', costId, oldLock, newLock: null, label: 'Manual status override cleared' });
+            renderCostsTab();
+        } catch (err) {
+            alert('Unlock failed: ' + err.message);
+        }
     }
 
     // ── Variance actions menu ──
@@ -1204,17 +1326,31 @@
         window._lastCostUndo = null;
         const cost = (allCosts || []).find(c => c.id === action.costId);
         if (!cost) return;
-        const fieldId = action.kind === 'amend' ? F.costExpected
-            : (action.kind === 'dismiss' || action.kind === 'undismiss') ? F.costVarianceDismissedAt
-            : action.fieldId;
+
+        // Status undo restores both the status name AND the lock anchor
+        // (so the auto-flip behaviour matches the pre-action state).
         try {
+            let fields;
+            if (action.kind === 'status') {
+                fields = { [F.costPayStatus]: action.oldStatus || null, [F.costStatusLockedAt]: action.oldLock || null };
+            } else if (action.kind === 'status-unlock') {
+                fields = { [F.costStatusLockedAt]: action.oldLock || null };
+            } else {
+                const fieldId = action.kind === 'amend' ? F.costExpected
+                    : (action.kind === 'dismiss' || action.kind === 'undismiss') ? F.costVarianceDismissedAt
+                    : action.fieldId;
+                fields = { [fieldId]: action.oldValue };
+            }
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${action.costId}`, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: { [fieldId]: action.oldValue } })
+                body: JSON.stringify({ fields })
             });
             if (!resp.ok) throw new Error('PATCH ' + resp.status);
-            cost.fields[fieldId] = action.oldValue;
+            if (!cost.fields) cost.fields = {};
+            Object.entries(fields).forEach(([k, v]) => {
+                cost.fields[k] = (k === F.costPayStatus && v) ? { name: v } : v;
+            });
             renderCostsTab();
         } catch (err) {
             alert('Undo failed: ' + err.message);
