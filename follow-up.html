@@ -2471,7 +2471,7 @@
 
     async function generateAirtableTaskContent(email) {
         // Use Claude to generate a concise task title and description from the email
-        const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 3000);
+        const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 3000);
         const prompt = `You are generating an Airtable task from an inbound email. Generate a JSON object with two fields:
 - "title": A concise task title starting with "INBOUND: " followed by a brief action item. Under 100 chars. Do NOT use em dashes or en dashes.
 - "description": A professional, actionable description of what needs to be done based on the email. Include key details and any deadlines mentioned. Do NOT use em dashes or en dashes. Keep under 500 chars.
@@ -2539,7 +2539,7 @@ Respond with ONLY the JSON object, no markdown.`;
         // Generate task content via AI
         const content = await generateAirtableTaskContent(email);
         const today = new Date().toISOString().slice(0, 10);
-        const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 5000);
+        const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 5000);
 
         // Build a self-contained Description so the assignee can action the
         // task without opening another tab: AI summary, then sender + Gmail
@@ -2622,8 +2622,10 @@ Respond with ONLY the JSON object, no markdown.`;
     //   4. If uncertain: fall back to creating an Airtable task for
     //      Mica with the Gmail URL, asking her to link manually.
     async function processTenancyDocsEmail(email) {
+        console.log(`[tenancy-link] starting auto-link for email "${(email.subject || '').slice(0, 60)}"`);
         const pat = getAirtablePat();
         if (!pat) {
+            console.warn('[tenancy-link] aborting — Airtable PAT not configured in Settings');
             showError('Airtable token not configured.');
             return;
         }
@@ -2632,12 +2634,14 @@ Respond with ONLY the JSON object, no markdown.`;
         let tenancies;
         try {
             tenancies = await fetchActiveTenancies();
+            console.log(`[tenancy-link] fetched ${tenancies.length} active tenancies`);
         } catch (err) {
-            console.error('Failed to fetch tenancies:', err);
+            console.error('[tenancy-link] failed to fetch tenancies:', err);
             await fallbackTenancyDocTask(email, 'Could not fetch tenancies from Airtable: ' + err.message);
             return;
         }
         if (tenancies.length === 0) {
+            console.warn('[tenancy-link] no active tenancies returned — falling back to Mica task');
             await fallbackTenancyDocTask(email, 'No active tenancies found in Airtable.');
             return;
         }
@@ -2646,13 +2650,15 @@ Respond with ONLY the JSON object, no markdown.`;
         let match;
         try {
             match = await matchEmailToTenancy(email, tenancies);
+            console.log('[tenancy-link] AI match result:', match);
         } catch (err) {
-            console.error('Tenancy match failed:', err);
+            console.error('[tenancy-link] AI match call failed:', err);
             await fallbackTenancyDocTask(email, 'AI tenancy-match failed: ' + err.message);
             return;
         }
 
         if (!match || !match.recordId || match.confidence === 'low') {
+            console.warn(`[tenancy-link] no confident match (confidence=${match?.confidence}, reason=${match?.reason}) — falling back to Mica task`);
             await fallbackTenancyDocTask(email, match?.reason || 'No confident tenancy match.');
             showError('Couldn\'t auto-match the tenancy — created a task for Mica to link manually.');
             return;
@@ -2660,18 +2666,22 @@ Respond with ONLY the JSON object, no markdown.`;
 
         const matched = tenancies.find(t => t.id === match.recordId);
         if (!matched) {
+            console.warn(`[tenancy-link] AI returned record ID "${match.recordId}" that isn't in the active tenancy list — falling back`);
             await fallbackTenancyDocTask(email, 'AI returned an invalid tenancy record ID.');
             return;
         }
 
         // 3. Append link to tenancy record + star Gmail message
         try {
+            console.log(`[tenancy-link] writing link to tenancy ${matched.id} (${matched.surname} – ${matched.unitRef})`);
             await appendTenancyDocLink(matched, email, match.label || email.subject);
+            console.log(`[tenancy-link] ✓ link written; starring Gmail thread`);
             await starGmailMessages(email);
+            console.log(`[tenancy-link] ✓ done — tenancy ${matched.surname} (${matched.unitRef}) updated`);
             showSuccess(`Tenancy doc linked → ${matched.surname} (${matched.unitRef})`);
             addAuditEntry('tenancy_doc_linked', `Linked email "${truncate(email.subject, 40)}" to tenancy ${matched.surname} (${matched.unitRef})`);
         } catch (err) {
-            console.error('Tenancy doc link failed:', err);
+            console.error('[tenancy-link] write failed:', err);
             await fallbackTenancyDocTask(email, 'Found tenancy but failed to write link: ' + err.message);
         }
     }
@@ -2698,7 +2708,7 @@ Respond with ONLY the JSON object, no markdown.`;
     }
 
     async function matchEmailToTenancy(email, tenancies) {
-        const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 2500);
+        const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 2500);
         const tenancyList = tenancies
             .map((t, i) => `${i + 1}. id=${t.id} | surname="${t.surname}" | unit="${t.unitRef}"`)
             .join('\n');
@@ -2794,7 +2804,7 @@ Body: ${bodyText}`;
             const pat = getAirtablePat();
             if (!pat) return;
             const today = new Date().toISOString().slice(0, 10);
-            const bodyText = email.messages.map(m => m.body || m.snippet || '').join('\n').substring(0, 3000);
+            const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 3000);
             const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#all/' + email.threadId);
             const record = {
                 fields: {
