@@ -3114,7 +3114,12 @@ Body: ${bodyText}`;
             const map = new Map();
             for (const rec of (data.records || [])) {
                 const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
-                const match = url.match(/#inbox\/([a-f0-9]+)$/i);
+                // Match both legacy #inbox/<id> URLs and the current #all/<id>
+                // format. Earlier we changed task creation to write #all/ links
+                // so they keep working after the email is labelled, but this
+                // extraction regex was missed and the sweep stopped finding
+                // any new completed tasks.
+                const match = url.match(/#(?:inbox|all)\/([a-f0-9]+)$/i);
                 if (match) {
                     map.set(match[1], rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task');
                 }
