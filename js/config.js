@@ -15,7 +15,7 @@
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.14', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.17', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
-        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.25', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.26', sopFile: 'inbound-comms-sop.html',      sopVer: '2.3', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.8', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.10', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // Plan Builder lives under the Leadership section in the sidebar.
