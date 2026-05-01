@@ -1664,6 +1664,13 @@ function openDrawer(entityKey, recId){
     mortgageBreakdownSection= renderPropertyMortgageBreakdown(rec);
   }
 
+  // Document Links section for Tenancies — shows the auto-linked tenancy
+  // docs (signed AST, proof of residency, etc.) with clickable Gmail links.
+  let tenancyDocLinksSection = '';
+  if (entityKey === 'tenancies') {
+    tenancyDocLinksSection = renderTenancyDocLinks(rec);
+  }
+
   // Linked units list for properties
   let linkedSection = '';
   if (entityKey === 'properties') {
@@ -1703,6 +1710,7 @@ function openDrawer(entityKey, recId){
           ${valuationSection}
           ${rentBreakdownSection}
           ${mortgageBreakdownSection}
+          ${tenancyDocLinksSection}
           <div class="drawer-section">
             <h3>Details</h3>
             ${mainRows}
@@ -1723,6 +1731,51 @@ function closeDrawer(){
 function fieldRow(fieldDef, record, entityKey){
   const cellHtml = renderCell(record, fieldDef, entityKey);
   return `<div class="field-row"><div class="field-label">${escapeHtml(fieldDef.label || fieldDef.name)}</div><div class="field-value">${cellHtml}</div></div>`;
+}
+
+// Document Links — drawer section for the Tenancies entity. The Inbound
+// Comms OS auto-populates this multilineText field on the Tenancies table
+// (field ID fldaJGnXuCOLTqAs1) when emails are filed under "11: tenancy
+// docs". Each entry is a single line in the format:
+//   "<YYYY-MM-DD> | <short description> | <Gmail URL>"
+// We parse each line and render it as a clean row with a clickable
+// "Open in Gmail" button so the assignee can jump straight to the email.
+const TENANCY_DOC_LINKS_FIELD_ID = 'fldaJGnXuCOLTqAs1';
+function renderTenancyDocLinks(rec){
+  const raw = rec.fields[TENANCY_DOC_LINKS_FIELD_ID];
+  if (!raw || typeof raw !== 'string' || !raw.trim()) {
+    // Hide the section entirely if no docs are linked yet — no clutter.
+    return '';
+  }
+
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return '';
+
+  const rows = lines.map(line => {
+    // Expected: "<date> | <label> | <url>". Tolerate manual edits that
+    // miss a separator — fall back to showing the raw line as the label.
+    const parts = line.split('|').map(p => p.trim());
+    const date  = parts[0] && /^\d{4}-\d{2}-\d{2}/.test(parts[0]) ? parts[0] : '';
+    const url   = parts.find(p => /^https?:\/\//i.test(p)) || '';
+    const label = parts.length >= 3
+      ? parts.slice(1, -1).join(' | ')
+      : (parts.find(p => p && !/^\d{4}-\d{2}-\d{2}/.test(p) && !/^https?:\/\//i.test(p)) || '(no label)');
+
+    const dateCell  = date ? `<td style="color:var(--text-secondary);white-space:nowrap;font-size:11px;width:90px">${escapeHtml(date)}</td>` : `<td style="width:90px"></td>`;
+    const labelCell = `<td style="word-break:break-word">${escapeHtml(label || '(no label)')}</td>`;
+    const linkCell  = url
+      ? `<td style="text-align:right;width:120px"><a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:12px;font-weight:500;">Open in Gmail ↗</a></td>`
+      : `<td style="text-align:right;width:120px;color:var(--text-muted);font-size:11px">no link</td>`;
+    return `<tr>${dateCell}${labelCell}${linkCell}</tr>`;
+  }).join('');
+
+  return `<div class="drawer-section">
+    <h3>Document Links (${lines.length})</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Auto-populated by Inbound Comms when emails are filed under "11: tenancy docs". Append-only — older entries are preserved.</div>
+    <table class="breakdown-table" style="font-size:13px">
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
 }
 
 // Fixed Cost Breakdown — list every cost record linked to this property
