@@ -379,16 +379,20 @@
         const endDateInner = e.endDate ? formatCostDate(e.endDate) : '<span style="color:var(--text-muted)">— set —</span>';
         const endDateCell = `<span class="cost-editable" data-cost-id="${e.id}" data-field="${F.costEndDate}" data-type="date" data-raw="${e.endDate || ''}" onclick="event.stopPropagation(); editCostField(this)" title="Click to edit End Date" style="cursor:pointer;font-size:11px;color:var(--text-muted)">${endDateInner}</span>`;
 
-        // Last Paid + drift badge
+        // Last Paid + drift badge (click for "amend Due Day" action)
         let lastPaidCell;
         if (!e.lastReconDate) {
             lastPaidCell = '<span style="color:var(--text-muted)">—</span>';
         } else {
             const drift = e.lastPaymentDrift;
             let driftBadge = '';
-            if (drift !== null && drift !== 0) {
-                if (drift > 1) driftBadge = ` <span title="Last payment was ${drift} days after the expected day (weekend-adjusted)" style="font-size:10px;color:var(--warning);font-weight:600">+${drift}d</span>`;
-                else if (drift < -1) driftBadge = ` <span title="Last payment landed ${Math.abs(drift)} days BEFORE the expected day" style="font-size:10px;color:var(--info);font-weight:600">${drift}d</span>`;
+            if (drift !== null && drift !== 0 && Math.abs(drift) > 1) {
+                const cls = drift > 1 ? 'warning' : 'info';
+                const sign = drift > 0 ? '+' : '';
+                const tip = drift > 1
+                    ? `Last payment was ${drift} days after the expected day — click for actions`
+                    : `Last payment landed ${Math.abs(drift)} days BEFORE the expected day — click for actions`;
+                driftBadge = ` <span class="cost-drift-badge" style="font-size:10px;color:var(--${cls});font-weight:600;cursor:pointer;text-decoration:underline" title="${tip}" onclick="event.stopPropagation(); openDriftMenu(this, '${e.id}')">${sign}${drift}d</span>`;
             }
             lastPaidCell = `${formatCostDate(e.lastReconDate)}${driftBadge}`;
         }
@@ -1175,6 +1179,78 @@
         } catch (err) {
             alert('Status update failed: ' + err.message);
         }
+    }
+
+    // ── Drift menu ──
+    // Same pattern as the variance menu, but on the Last Paid drift badge.
+    // Offers a one-click "Amend Due Day to N" using the actual day-of-month
+    // from the most recent reconciled payment.
+    function openDriftMenu(badge, costId) {
+        document.querySelectorAll('.cost-drift-menu, .cost-variance-menu, .cost-status-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const lastReconDate = getField(cost, F.costLastReconDate);
+        if (!lastReconDate) return;
+        const actualDay = new Date(lastReconDate).getDate(); // day-of-month
+        const currentDueDay = Number(getField(cost, F.costDueDay)) || null;
+
+        const menu = document.createElement('div');
+        menu.className = 'cost-drift-menu';
+        menu.style.cssText = 'position:absolute;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;box-shadow:var(--shadow-md);padding:6px;z-index:1000;font-size:12px;min-width:260px';
+        menu.innerHTML = `
+            <div style="padding:6px 8px;font-size:11px;color:var(--text-secondary);border-bottom:1px solid var(--border-subtle);margin-bottom:4px">
+                <strong>${escHtml(getField(cost, F.costName) || '')}</strong><br>
+                Recorded Due Day: ${currentDueDay || '—'} · Actual day paid: ${actualDay}
+            </div>
+            <button class="drift-menu-btn" onclick="amendDueDayFromLastPaid('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px">📅 Amend Due Day to ${actualDay} <span style="color:var(--text-muted);font-size:10px">— payments actually land on the ${actualDay}${ordinal(actualDay)}</span></button>
+            <button class="drift-menu-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-secondary)">Cancel</button>
+        `;
+        menu.querySelectorAll('.drift-menu-btn').forEach(b => {
+            b.addEventListener('mouseenter', () => b.style.background = 'var(--bg-surface-2)');
+            b.addEventListener('mouseleave', () => b.style.background = 'none');
+        });
+        document.body.appendChild(menu);
+        const rect = badge.getBoundingClientRect();
+        menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+        menu.style.left = (rect.left + window.scrollX) + 'px';
+        setTimeout(() => {
+            const off = (ev) => {
+                if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', off); }
+            };
+            document.addEventListener('click', off);
+        }, 0);
+    }
+
+    async function amendDueDayFromLastPaid(costId) {
+        document.querySelectorAll('.cost-drift-menu').forEach(m => m.remove());
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const lastReconDate = getField(cost, F.costLastReconDate);
+        if (!lastReconDate) return;
+        const actualDay = new Date(lastReconDate).getDate();
+        const oldValue = String(Number(getField(cost, F.costDueDay)) || '');
+        const newValue = String(actualDay);
+        if (oldValue === newValue) return;
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.costs}/${costId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.costDueDay]: newValue } })
+            });
+            if (!resp.ok) throw new Error('PATCH ' + resp.status);
+            if (!cost.fields) cost.fields = {};
+            cost.fields[F.costDueDay] = { name: newValue };
+            pushUndoAction({ kind: 'edit', costId, fieldId: F.costDueDay, oldValue, newValue, label: `Due Day → ${newValue}` });
+            renderCostsTab();
+        } catch (err) {
+            alert('Amend Due Day failed: ' + err.message);
+        }
+    }
+
+    function ordinal(n) {
+        const s = ['th', 'st', 'nd', 'rd'];
+        const v = n % 100;
+        return s[(v - 20) % 10] || s[v] || s[0];
     }
 
     async function unlockCostStatus(costId) {
