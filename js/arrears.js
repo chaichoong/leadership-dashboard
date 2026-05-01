@@ -584,6 +584,26 @@ Auto-generated from arrears engine.`,
         if (!allTenancies || !allTenancies.length) return;
         await loadArrearsRecords();
 
+        // One-time cleanup: close any open arrears records for tenancies that
+        // haven't yet had their first reconciled payment. These were created
+        // by an earlier engine version that didn't have the new-tenant guard.
+        for (const rec of allArrearsRecords) {
+            const status = getStatusName(getField(rec, ARREARS.status));
+            if (!ARREARS_OPEN_STATUSES.has(status)) continue;
+            const tenancyId = extractLinkedId(getField(rec, ARREARS.tenancy));
+            if (!tenancyId) continue;
+            if (!hasFirstPaymentLanded(tenancyId)) {
+                const ok = await updateArrearsRecord(rec.id, {
+                    [ARREARS.status]: 'Closed',
+                    [ARREARS.notes]: 'Auto-closed: tenancy has not yet had a first reconciled payment. Chase will resume after first payment lands.',
+                });
+                if (ok) {
+                    rec.fields[ARREARS.status] = { name: 'Closed' };
+                    console.log(`arrears: auto-closed orphan record ${getField(rec, ARREARS.ref)} (no first payment yet)`);
+                }
+            }
+        }
+
         // Stage events that fire this sweep — Mica tasks are created in a second
         // pass once all arrears records are settled, so we don't double-create
         // tasks if an upsert+progression both happen in the same sweep.
@@ -722,7 +742,8 @@ Auto-generated from arrears engine.`,
         const today = new Date();
         const todayMs = today.getTime();
 
-        // Filter to non-closed and sort by days-overdue desc
+        // Filter to non-closed AND linked to a tenancy that has had its first
+        // reconciled payment (otherwise the chase shouldn't apply yet).
         const visible = allArrearsRecords
             .map(r => {
                 const dueRaw = String(getField(r, ARREARS.originalDueDate) || '');
@@ -732,7 +753,10 @@ Auto-generated from arrears engine.`,
             })
             .filter(({ rec }) => {
                 const status = getStatusName(getField(rec, ARREARS.status));
-                return status !== 'Closed';
+                if (status === 'Closed') return false;
+                const tenancyId = extractLinkedId(getField(rec, ARREARS.tenancy));
+                if (!tenancyId) return false;
+                return hasFirstPaymentLanded(tenancyId);
             })
             .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
