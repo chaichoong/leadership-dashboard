@@ -96,6 +96,7 @@
 
 
     const SUBCAT_NAME_FIELD = 'fldO4BTJhFv5EsN6i';
+    const CAT_NAME_FIELD = 'fldii4oUzSfmplihO';
 
     // Match thresholds for variance check (Last Reconciled Amount vs Expected Cost)
     const VAR_TOL_ABS = 1;     // £1 absolute
@@ -647,23 +648,38 @@
             return db - da;
         });
 
+        const grid = '90px 1fr 85px 90px 130px 140px 90px 70px';
+
         const rows = txSorted.slice(0, 20).map(tx => {
             const date = getField(tx, F.txDate) || '';
             const amount = Number(getField(tx, F.txReportAmount)) || 0;
             const label = txLabel(tx);
             const account = getField(tx, F.txAccountAlias) || '';
             const reconciled = getField(tx, F.txReconciled);
+
+            // Category cell — click to edit (dropdown)
+            const catLinks = (getField(tx, F.txCategory) || []).map(v => v.id || v).filter(Boolean);
+            const catName = catLinks.length > 0 ? getCatNameById(catLinks[0]) : '';
+            const catCell = `<span class="tx-cat-editable" data-tx-id="${tx.id}" data-link-type="cat" onclick="event.stopPropagation(); editTxLinkField(this)" title="Click to set category" style="cursor:pointer;color:${catName ? 'var(--text-primary)' : 'var(--text-muted)'}">${catName ? escHtml(catName) : '— set —'}</span>`;
+
+            // Sub-Category cell
+            const scLinks = (getField(tx, F.txSubCategory) || []).map(v => v.id || v).filter(Boolean);
+            const scName = scLinks.length > 0 ? getSubCatNameById(scLinks[0]) : '';
+            const scCell = `<span class="tx-cat-editable" data-tx-id="${tx.id}" data-link-type="subcat" onclick="event.stopPropagation(); editTxLinkField(this)" title="Click to set sub-category" style="cursor:pointer;color:${scName ? 'var(--text-primary)' : 'var(--text-muted)'}">${scName ? escHtml(scName) : '— set —'}</span>`;
+
             const reconBadge = reconciled
                 ? '<span style="color:var(--success);font-size:10px;font-weight:600">✓ Reconciled</span>'
                 : '<span style="color:var(--text-muted);font-size:10px">Unreconciled</span>';
             const unlinkBtn = reconciled
                 ? `<button onclick="event.stopPropagation(); unlinkTxFromCost('${tx.id}', '${e.id}', this)" title="Unlink — wrong reconciliation" style="background:none;border:1px solid var(--border-default);border-radius:3px;cursor:pointer;padding:1px 6px;font-size:10px;color:var(--danger)">Unlink</button>`
                 : '';
-            return `<div style="display:grid;grid-template-columns:90px 1fr 90px 90px 90px 70px;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;align-items:center">
+            return `<div style="display:grid;grid-template-columns:${grid};gap:8px;padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;align-items:center">
                 <span style="color:var(--text-secondary)">${escHtml(formatCostDate(date))}</span>
                 <span style="color:var(--text-primary);font-weight:500">${escHtml(label)}</span>
                 <span style="text-align:right;font-weight:600;color:${amount < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt(Math.abs(amount))}</span>
-                <span style="color:var(--text-muted)">${escHtml(account)}</span>
+                <span style="color:var(--text-muted);font-size:11px">${escHtml(account)}</span>
+                <span style="font-size:11px">${catCell}</span>
+                <span style="font-size:11px">${scCell}</span>
                 <span>${reconBadge}</span>
                 <span style="text-align:right">${unlinkBtn}</span>
             </div>`;
@@ -672,11 +688,81 @@
         const totalLinked = txSorted.reduce((s, tx) => s + Math.abs(Number(getField(tx, F.txReportAmount)) || 0), 0);
 
         return `<div style="margin-bottom:4px;font-size:11px;font-weight:600;color:var(--text-secondary)">${txSorted.length} linked transaction${txSorted.length !== 1 ? 's' : ''} · Total: ${fmt(totalLinked)}</div>
-            <div style="display:grid;grid-template-columns:90px 1fr 90px 90px 90px 70px;gap:8px;padding:4px 0;font-size:10px;text-transform:uppercase;color:var(--text-muted);font-weight:600">
-                <span>Date</span><span>Description</span><span style="text-align:right">Amount</span><span>Account</span><span>Status</span><span></span>
+            <div style="display:grid;grid-template-columns:${grid};gap:8px;padding:4px 0;font-size:10px;text-transform:uppercase;color:var(--text-muted);font-weight:600">
+                <span>Date</span><span>Description</span><span style="text-align:right">Amount</span><span>Account</span><span>Category</span><span>Sub-Category</span><span>Status</span><span></span>
             </div>
             ${rows}
             ${txSorted.length > 20 ? `<div style="font-size:11px;color:var(--text-muted);padding:4px 0">Showing 20 of ${txSorted.length} — use Transactions tab for full list</div>` : ''}`;
+    }
+
+    function getCatNameById(id) {
+        const c = (allCategories || []).find(x => x.id === id);
+        if (!c) return '';
+        const n = getField(c, CAT_NAME_FIELD);
+        return typeof n === 'string' ? n : (n?.name || '');
+    }
+
+    // Dropdown editor for tx Category / Sub-Category. Replaces the span with
+    // a <select>, PATCHes Airtable on change, then re-renders the parent cost row.
+    async function editTxLinkField(span) {
+        const txId = span.dataset.txId;
+        const linkType = span.dataset.linkType; // 'cat' or 'subcat'
+        const tx = (allTransactions || []).find(t => t.id === txId);
+        if (!tx) return;
+        const fieldId = linkType === 'cat' ? F.txCategory : F.txSubCategory;
+        const records = linkType === 'cat' ? (allCategories || []) : (allSubCategories || []);
+        const nameField = linkType === 'cat' ? CAT_NAME_FIELD : SUBCAT_NAME_FIELD;
+        const currentLinks = (getField(tx, fieldId) || []).map(v => v.id || v).filter(Boolean);
+        const currentId = currentLinks[0] || '';
+
+        const select = document.createElement('select');
+        select.style.cssText = 'width:130px;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:11px;background:var(--bg-surface);color:var(--text-primary)';
+        const options = [{ id: '', name: '— none —' }, ...records.map(r => ({
+            id: r.id,
+            name: (typeof getField(r, nameField) === 'string' ? getField(r, nameField) : (getField(r, nameField)?.name || '')) || '(unnamed)'
+        }))].sort((a, b) => a.id === '' ? -1 : b.id === '' ? 1 : a.name.localeCompare(b.name));
+        options.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.id; opt.textContent = o.name;
+            if (o.id === currentId) opt.selected = true;
+            select.appendChild(opt);
+        });
+
+        const parent = span.parentNode;
+        parent.replaceChild(select, span);
+        select.focus();
+
+        let done = false;
+        const finish = async (commit) => {
+            if (done) return; done = true;
+            if (!commit) { renderCostsTab(); return; }
+            const newId = select.value;
+            if (newId === currentId) { renderCostsTab(); return; }
+            const newLinks = newId ? [newId] : [];
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [fieldId]: newLinks } })
+                });
+                if (!resp.ok) throw new Error('PATCH ' + resp.status);
+                if (!tx.fields) tx.fields = {};
+                tx.fields[fieldId] = newLinks;
+                const newName = newId ? options.find(o => o.id === newId)?.name : '— none —';
+                pushUndoAction({
+                    kind: 'tx-link', txId, fieldId,
+                    oldValue: currentLinks, newValue: newLinks,
+                    label: `${linkType === 'cat' ? 'Category' : 'Sub-Category'} → ${newName}`
+                });
+                renderCostsTab();
+            } catch (err) {
+                alert('Save failed: ' + err.message);
+                renderCostsTab();
+            }
+        };
+        select.addEventListener('change', () => finish(true));
+        select.addEventListener('blur', () => finish(false));
+        select.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') finish(false); });
     }
 
     function toggleCostTxRow(btn, costId) {
@@ -1410,6 +1496,19 @@
         // Status undo restores both the status name AND the lock anchor
         // (so the auto-flip behaviour matches the pre-action state).
         try {
+            // Tx-link undo writes back to the Transactions table, not Costs.
+            if (action.kind === 'tx-link') {
+                const tx = (allTransactions || []).find(t => t.id === action.txId);
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${action.txId}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields: { [action.fieldId]: action.oldValue || [] } })
+                });
+                if (!resp.ok) throw new Error('PATCH ' + resp.status);
+                if (tx) { if (!tx.fields) tx.fields = {}; tx.fields[action.fieldId] = action.oldValue || []; }
+                renderCostsTab();
+                return;
+            }
             let fields;
             if (action.kind === 'status') {
                 fields = { [F.costPayStatus]: action.oldStatus || null, [F.costStatusLockedAt]: action.oldLock || null };
