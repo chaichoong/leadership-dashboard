@@ -11,17 +11,17 @@ Airtable stays a clean database. Everything lives in Cloudflare workers.
 Slack Events API  →  contractor-bot Cloudflare Worker (self-contained)
                             │
                             ├── Anthropic API           (intent classification)
-                            ├── Airtable REST API       (read/write tasks)
-                            └── Slack chat.postMessage  (reply in thread)
+                            ├── Airtable REST API       (read/write tasks + collaborators)
+                            ├── Slack chat.postMessage  (channel reply + DMs)
+                            ├── Slack file download     (auth-gated, with bot token)
+                            ├── Cloudflare R2           (re-host Slack files for Airtable)
+                            └── Cloudflare KV           (multi-turn conversation state)
 ```
 
 The contractor-bot worker is fully self-contained — it calls Anthropic
 and Slack APIs directly. The dashboard's existing `claude-proxy` and
 `slack-notify` workers are untouched and still serve the dashboard,
-but the contractor-bot does not depend on them. (Worker-to-worker
-fetches between `*.workers.dev` workers hit Cloudflare error 1042
-in some configurations, plus claude-proxy is origin-gated to the
-GitHub Pages domain only — direct API calls bypass both issues.)
+but the contractor-bot does not depend on them.
 
 | Worker            | URL                                              | Purpose                              |
 | ----------------- | ------------------------------------------------ | ------------------------------------ |
@@ -29,17 +29,51 @@ GitHub Pages domain only — direct API calls bypass both issues.)
 | `slack-notify`    | `slack-notify.kevinbrittain.workers.dev`         | Dashboard's assignment DMs (unchanged) |
 | `contractor-bot`  | `contractor-bot.kevinbrittain.workers.dev`       | This bot — self-contained            |
 
+## Notification rules (mirrors the dashboard's existing behaviour)
+
+| Trigger                | Channel reply (in `#property-management` thread) | Direct messages                                |
+| ---------------------- | ------------------------------------------------ | ---------------------------------------------- |
+| New job created        | "✅ Logged, …"                                    | DM the contractor (assignee)                   |
+| Status: completed      | "✅ Marked complete, …"                           | DM Kevin/Mica/Erica (skip the contractor)      |
+| Status: in progress    | "👍 Got it — in progress"                        | None                                           |
+| Status: note appended  | "📝 Note added"                                  | None                                           |
+
+Kevin, Mica, and Erica are auto-added as **Collaborators** on every
+maintenance task the bot creates, so they get the completion DMs and
+can see the full task lifecycle in the dashboard.
+
+## Multi-turn conversation
+
+If the bot doesn't have enough info, it asks one clarifying question
+("Which property?", "Which job?") and remembers the unanswered request
+in Cloudflare KV for **10 minutes**. The contractor's next message is
+treated as the answer — no re-typing.
+
+If the contractor doesn't reply within 10 minutes, the state expires
+and the next message is treated as fresh.
+
+## Attachments
+
+Slack messages with files attached → bot downloads each file (with the
+bot token), uploads to a Cloudflare R2 bucket, and attaches the public
+worker URL (`https://contractor-bot.kevinbrittain.workers.dev/files/<key>`)
+to the Airtable task's Attachments field. Airtable then re-ingests the
+file into its own storage.
+
+R2 storage is pennies per month at this scale.
+
 ## Supabase migration path
 
 When the SaaS migration happens, port `contractor-bot.js` into
 `supabase/functions/contractor-bot/index.ts`:
 
-1. Replace the `airtable()` calls with Supabase client queries on the
-   equivalent tables/columns.
-2. Move secrets to `supabase secrets set`.
+1. Replace the `airtable()` calls with Supabase client queries.
+2. Replace the R2 binding with Supabase Storage.
+3. Replace the KV binding with a Supabase database table or Redis.
+4. Move secrets to `supabase secrets set`.
 
 Slack signature verification, Anthropic call, intent routing, Slack
-reply — all portable as-is.
+reply, multi-turn flow — all portable as-is.
 
 ## One-time setup
 
@@ -103,10 +137,46 @@ Slack app → **OAuth & Permissions** → **Bot Token Scopes**, add:
 - `channels:history` (public-channel messages)
 - `groups:history` (private-channel messages — required for
   `#property-management` because it's private)
+- `files:read` (so the bot can download Slack file attachments and
+  re-host them on R2 for Airtable)
+- `im:write` (so the bot can DM users — needed for assignment +
+  completion notifications)
 
 If you added scopes, click **Reinstall to Workspace** at the top. Note
 that this issues a fresh `xoxb-…` token; update both `SLACK_BOT_TOKEN`
 secrets (in **contractor-bot** AND **slack-notify**).
+
+### 5a. Create R2 bucket and KV namespace, bind to the worker
+
+The worker uses Cloudflare R2 to re-host Slack file attachments and
+Cloudflare KV to remember pending multi-turn conversations.
+
+**Create the R2 bucket:**
+
+1. Cloudflare dashboard → left sidebar → **R2 Object Storage** → **Create bucket**.
+2. Name: `contractor-bot-attachments`.
+3. Default settings (no public access — the worker proxies reads).
+4. **Create**.
+
+**Create the KV namespace:**
+
+1. Cloudflare dashboard → left sidebar → **Storage & Databases** → **KV** → **Create namespace**.
+2. Name: `contractor-bot-state`.
+3. **Create**.
+
+**Bind both to the contractor-bot worker:**
+
+1. Cloudflare → **Workers & Pages** → **contractor-bot** → **Settings** → **Bindings** → **Add**.
+2. Add an **R2 bucket binding**:
+   - Variable name: `ATTACHMENTS`
+   - R2 bucket: `contractor-bot-attachments`
+   - Save.
+3. Add a **KV namespace binding**:
+   - Variable name: `STATE`
+   - KV namespace: `contractor-bot-state`
+   - Save.
+
+The worker auto-restarts after each binding is saved.
 
 ### 6. Wire Slack Event Subscriptions
 
