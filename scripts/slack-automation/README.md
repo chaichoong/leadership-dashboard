@@ -82,7 +82,7 @@ reply, multi-turn flow — all portable as-is.
 1. Open https://airtable.com/create/tokens.
 2. Click **Create new token**.
 3. Name: `contractor-bot`.
-4. Scopes: tick **`data.records:read`** and **`data.records:write`**.
+4. Scopes: tick **`data.records:read`**, **`data.records:write`**, and **`data.recordComments:write`** (the comments scope is needed so the bot can post status-update comments on tasks).
 5. Access: tick the **Operations Director** base (`appnqjDpqDniH3IRl`).
 6. Click **Create token**, copy the value (starts `pat…`). You can't see it
    again after closing — paste somewhere safe.
@@ -258,7 +258,7 @@ Claude picks one of:
 
 - `completed`   → `Status = Completed`
 - `in_progress` → `Status = Today`
-- `note`        → appends a timestamped note to the Notes field
+- `note`        → posts a native Airtable record comment (visible in the dashboard's task-drawer Comments panel; requires PAT scope `data.recordComments:write`)
 
 Claude also picks *which* open job the update refers to, by comparing the
 message against the contractor's active tasks. If it's unsure, the bot

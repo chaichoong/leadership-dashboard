@@ -433,10 +433,14 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
         return reply(threadTs, env, `👍 Got it — *${target.taskName}* is now in progress.`);
     }
     if (action === 'note') {
-        const newNote = noteWithPrefix(contractor, noteText || text);
-        const combined = target.notes ? target.notes + '\n\n' + newNote : newNote;
-        await updateTask(env, target.id, { [FIELD.notes]: combined });
-        return reply(threadTs, env, `📝 Note added to *${target.taskName}*.`);
+        // Post a native Airtable record comment (visible in the dashboard's
+        // task-drawer Comments panel) rather than appending to the Notes
+        // field. Comments are timestamped + author-attributed by Airtable;
+        // the prefix here gives it the contractor's first name + "via Slack"
+        // so it's obvious where the comment came from.
+        const commentBody = `*${contractor.firstName} via Slack*\n${noteText || text}`;
+        await addComment(env, target.id, commentBody);
+        return reply(threadTs, env, `💬 Comment added to *${target.taskName}*.`);
     }
     return reply(threadTs, env, `I caught your message but wasn't sure what to do with it.`);
 }
@@ -707,12 +711,27 @@ async function updateTask(env, recordId, fields) {
     return airtable(env, 'PATCH', `/${TABLE_TASKS}/${recordId}`, { fields, typecast: true });
 }
 
+// Posts a record-level comment on the task. Different from the Notes
+// field — these are Airtable's native record comments, shown in the
+// dashboard's task-drawer Comments panel and in any Airtable interface.
+// Requires PAT scope `data.recordComments:write`.
+async function addComment(env, recordId, text) {
+    return airtable(env, 'POST', `/${TABLE_TASKS}/${recordId}/comments`, { text });
+}
+
 async function fetchOpenTasksFor(contractor, env) {
     const fields = [
         FIELD.taskName, FIELD.status, FIELD.priority,
         FIELD.properties, FIELD.notes, FIELD.maintenanceTick,
     ];
-    const formula = `AND({Status}!='Completed',{Assignee}='${escapeFormula(contractor.name)}')`;
+    // Contractors only see Maintenance-Ticket tasks — never non-maintenance
+    // work that might be incidentally assigned to them.
+    const formula =
+        `AND(` +
+            `{Status}!='Completed',` +
+            `{Assignee}='${escapeFormula(contractor.name)}',` +
+            `{Maintenance Ticket}=TRUE()` +
+        `)`;
     const url = `/${TABLE_TASKS}` +
         `?returnFieldsByFieldId=true` +
         `&filterByFormula=${encodeURIComponent(formula)}` +
