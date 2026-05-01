@@ -428,7 +428,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-01-0900 comment-notify</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-01-1100 comment-count-instant</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2240,7 +2240,7 @@ function openDrillDownTaskDetail(taskId){
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
-    <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
+    <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">Add &amp; view comments</button></div></div>
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
       <button class="btn btn-success" onclick="completeTaskFromDrillModal('${t.id}')">Complete</button>
       <button class="btn btn-danger" onclick="deleteTaskFromDrillModal('${t.id}')">Delete</button>
@@ -2332,7 +2332,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Description</label><div class="field-val"><textarea oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
-      <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">View Comments</button></div></div>
+      <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">Add &amp; view comments</button></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn btn-danger" onclick="deleteTask('${t.id}')">Delete</button>
@@ -2346,19 +2346,34 @@ function openTaskDrawer(taskId){
 // Fetch comment count and write it into the drawer's badge. Called on
 // drawer open and after every post / delete so the number stays in
 // sync without the user having to open the comments modal.
+// Update the comment-count badge in the drawer. Optimistic-first:
+// reads from the local _drawerComments cache for an instant render,
+// then kicks off a background fetch to reconcile if Airtable disagrees.
+// "Optimistic" because submitDrawerComment / submitModalComment have
+// already pushed the new comment into _drawerComments before calling
+// us, so the local count is the truth at the user's screen.
+function _renderCommentCountBadge(badge,n){
+  if(!badge)return;
+  badge.textContent=String(n);
+  badge.title=n===1?'1 comment':n+' comments';
+  badge.style.background=n>0?'var(--accent-soft)':'var(--bg-subtle)';
+  badge.style.color=n>0?'var(--accent)':'var(--text-secondary)';
+}
 async function loadCommentCountForDrawer(taskId){
   const badge=document.getElementById('drwCommentCount-'+taskId);
   if(!badge)return;
+  // Instant render from cache so the badge ticks the moment the user
+  // clicks Post — no waiting on the network round-trip.
+  const cached=_drawerComments[taskId];
+  if(Array.isArray(cached))_renderCommentCountBadge(badge,cached.length);
+  // Reconcile against Airtable in the background.
   try{
     const list=await fetchComments(taskId);
     const n=Array.isArray(list)?list.length:0;
-    badge.textContent=n===0?'0':String(n);
-    badge.title=n===1?'1 comment':n+' comments';
-    badge.style.background=n>0?'var(--accent-soft)':'var(--bg-subtle)';
-    badge.style.color=n>0?'var(--accent)':'var(--text-secondary)';
+    _renderCommentCountBadge(badge,n);
   }catch(e){
-    badge.textContent='?';
-    badge.title='Couldn\'t load comment count';
+    // Only show "?" if we never had a cached count to start with.
+    if(!Array.isArray(cached)){badge.textContent='?';badge.title='Couldn\'t load comment count'}
   }
 }
 window.loadCommentCountForDrawer=loadCommentCountForDrawer;
