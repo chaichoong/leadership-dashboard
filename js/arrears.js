@@ -136,27 +136,76 @@
         return isNaN(d.getTime()) ? null : d;
     }
 
-    // Effective months in arrears for a tenancy, including the +1 UC shadow.
-    // Returns a number ≥ 0. Working/Agent: missed = expected - actual.
-    // UC: missed + 1 (always one month in arrears by payment-model design).
-    // Returns 0 (not-yet-chaseable) if the tenancy has never been paid.
-    function computeEffectiveMonthsArrears(tenancy, tenantType, today) {
-        if (!tenantType || tenantType === 'Agent-Managed') return 0;
-        if (!getTenancyStartDate(tenancy)) return 0;
-        if (!hasFirstPaymentLanded(tenancy.id)) return 0;
-        const expected = expectedPaymentsForTenancy(tenancy, today);
-        const actual = actualPaymentsForTenancy(tenancy.id);
+    // Full arrears breakdown for a tenancy — the single source of truth that
+    // drives both the effective-months number and the audit view. Returns a
+    // structured object so the UI can show every component of the maths.
+    //
+    // Model:
+    //   cycles_passed = count of due-day dates between effectiveStart and today
+    //   expected      = cycles_passed for Working/Agent
+    //                 = cycles_passed - 1 for UC (UC pays one cycle in arrears,
+    //                   so first month is structurally "free")
+    //   actual        = reconciled rent payments linked to this tenancy
+    //   missed        = max(0, expected - actual)
+    //   effective     = missed for Working/Agent
+    //                 = missed + 1 for UC (the structural shadow)
+    //   s8_ready      = effective >= 2
+    function computeArrearsBreakdown(tenancy, tenantType, today) {
+        const tenStart = getTenancyStartDate(tenancy);
+        if (!tenantType || tenantType === 'Agent-Managed') {
+            return { applicable: false, reason: 'Agent-managed or unknown tenant type', tenStart, tenantType };
+        }
+        if (!tenStart) {
+            return { applicable: false, reason: 'No tenancy start date in Airtable', tenantType };
+        }
+
+        const dataStart = new Date(ARREARS_DATA_START);
+        const effectiveStart = tenStart > dataStart ? tenStart : dataStart;
+        const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
+        const rent = Number(getField(tenancy, F.tenRent)) || 0;
+        const cycles = cyclesForTenancy(tenancy, today);
+        const payments = paymentsForTenancy(tenancy.id);
+        const actual = payments.length;
+
+        // New-tenant guard: chase only kicks in after first payment lands.
+        if (actual === 0) {
+            return {
+                applicable: false,
+                reason: 'No reconciled payments yet — chase pipeline only starts after the first payment lands',
+                tenStart, effectiveStart, dueDay, rent, cycles, payments, actual,
+                tenantType, isUC: tenantType === 'Universal Credit',
+            };
+        }
+
+        const isUC = tenantType === 'Universal Credit';
+        const cyclesPassed = cycles.length;
+        const expected = isUC ? Math.max(0, cyclesPassed - 1) : cyclesPassed;
         const missed = Math.max(0, expected - actual);
-        return tenantType === 'Universal Credit' ? missed + 1 : missed;
+        const effectiveMonths = isUC ? missed + 1 : missed;
+        const cumulativeBalance = effectiveMonths * rent;
+
+        return {
+            applicable: true,
+            tenantType, isUC,
+            tenStart, effectiveStart, dueDay, rent,
+            cycles, cyclesPassed,
+            payments, actual,
+            expected, missed, effectiveMonths,
+            cumulativeBalance,
+            s8Ready: effectiveMonths >= 2,
+        };
     }
 
-    // S8 readiness — fires at ≥ 2 effective months arrears.
-    // Working/Agent: needs 2+ missed payments.
-    // UC: needs 1+ missed payment (because of the +1 shadow).
-    // Always false for tenancies that haven't yet had their first payment.
+    // Effective months in arrears (number ≥ 0; 0 means not chaseable).
+    function computeEffectiveMonthsArrears(tenancy, tenantType, today) {
+        const b = computeArrearsBreakdown(tenancy, tenantType, today);
+        return b.applicable ? b.effectiveMonths : 0;
+    }
+
+    // S8 readiness flag. Always false if the tenancy isn't chaseable yet.
     function isS8Ready(tenancy, tenantType, today) {
-        if (!hasFirstPaymentLanded(tenancy.id)) return false;
-        return computeEffectiveMonthsArrears(tenancy, tenantType, today) >= 2;
+        const b = computeArrearsBreakdown(tenancy, tenantType, today);
+        return b.applicable && b.s8Ready;
     }
 
     // ── Mica task config ──
@@ -751,6 +800,81 @@ Auto-generated from arrears engine.`,
         return allTenancies.find(t => t.id === id);
     }
 
+    // Render the calculation breakdown for a single tenant — drives the
+    // click-to-expand audit row in the per-tenant table.
+    function renderBreakdownHtml(t) {
+        const b = t.breakdown;
+        const fmtDate = d => d instanceof Date ? d.toISOString().slice(0, 10) : '';
+        const cyclesList = b.cycles.length
+            ? b.cycles.map(d => fmtDate(d)).join(', ')
+            : '<em style="color:var(--text-muted)">none</em>';
+        const paymentsList = b.payments.length
+            ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
+                <thead><tr style="text-align:left;background:var(--bg-surface)">
+                    <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">#</th>
+                    <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Date</th>
+                    <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary);text-align:right">Amount</th>
+                </tr></thead>
+                <tbody>${b.payments.map((p, i) => `<tr>
+                    <td style="padding:4px 8px;color:var(--text-muted)">${i + 1}</td>
+                    <td style="padding:4px 8px">${escHtml(p.dateStr)}</td>
+                    <td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums">£${p.amount.toFixed(2)}</td>
+                </tr>`).join('')}</tbody>
+              </table>`
+            : '<em style="color:var(--text-muted)">none</em>';
+
+        const ucNote = b.isUC
+            ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">UC pays one cycle in arrears, so expected = cycles − 1 (the first month is always structurally unpaid until tenancy ends).</div>'
+            : '';
+
+        return `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:12px;color:var(--text-secondary)">
+                <div>
+                    <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px">Inputs</div>
+                    <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
+                        <div>Tenancy start:</div><div>${fmtDate(b.tenStart)}</div>
+                        <div>Calculation start:</div><div>${fmtDate(b.effectiveStart)} <span style="color:var(--text-muted)">${b.tenStart >= new Date(ARREARS_DATA_START) ? '(tenancy start)' : `(reconciliation cutoff ${ARREARS_DATA_START})`}</span></div>
+                        <div>Due day:</div><div>${b.dueDay}${b.dueDay === 1 ? 'st' : b.dueDay === 2 ? 'nd' : b.dueDay === 3 ? 'rd' : 'th'} of each month</div>
+                        <div>Monthly rent:</div><div>£${b.rent.toFixed(2)}</div>
+                        <div>Tenant type:</div><div>${b.tenantType}</div>
+                    </div>
+                </div>
+                <div>
+                    <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px">Calculation</div>
+                    <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
+                        <div>Cycles passed:</div><div><strong>${b.cyclesPassed}</strong></div>
+                        <div>Expected payments:</div><div><strong>${b.expected}</strong> ${b.isUC ? '<span style="color:var(--text-muted)">(cycles − 1, UC structural)</span>' : '(= cycles)'}</div>
+                        <div>Actual payments:</div><div><strong>${b.actual}</strong></div>
+                        <div>Missed:</div><div><strong>${b.missed}</strong> = max(0, ${b.expected} − ${b.actual})</div>
+                        <div>Effective months arrears:</div><div><strong style="color:${b.s8Ready ? 'var(--danger)' : 'var(--text-primary)'}">${b.effectiveMonths}</strong> ${b.isUC ? '= missed + 1 (UC shadow)' : '= missed'}</div>
+                        <div>Cumulative balance:</div><div><strong>£${b.cumulativeBalance.toFixed(2)}</strong> = ${b.effectiveMonths} × £${b.rent.toFixed(2)}</div>
+                        <div>Section 8 ready:</div><div>${b.s8Ready ? '<strong style="color:var(--danger)">Yes</strong> (effective ≥ 2)' : 'No'}</div>
+                    </div>
+                    ${ucNote}
+                </div>
+                <div style="grid-column:1/-1">
+                    <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;margin-top:8px">Cycle dates (${b.cycles.length})</div>
+                    <div style="font-size:11px;color:var(--text-secondary);font-family:var(--font-family-mono,monospace)">${cyclesList}</div>
+                </div>
+                <div style="grid-column:1/-1">
+                    <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;margin-top:8px">Reconciled rent payments since ${ARREARS_DATA_START} (${b.payments.length})</div>
+                    ${paymentsList}
+                </div>
+            </div>
+        `;
+    }
+
+    // Toggle a breakdown row's visibility + flip the chevron in the parent row.
+    function toggleArrearsBreakdown(rowId, parentRow) {
+        const row = document.getElementById(rowId);
+        if (!row) return;
+        const isHidden = row.style.display === 'none';
+        row.style.display = isHidden ? 'table-row' : 'none';
+        const chevron = parentRow.querySelector('[data-chevron]');
+        if (chevron) chevron.innerHTML = isHidden ? '&#x25BE;' : '&#x25B8;';
+    }
+    window.toggleArrearsBreakdown = toggleArrearsBreakdown;
+
     function renderArrearsSection(containerId) {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -795,9 +919,11 @@ Auto-generated from arrears engine.`,
 
         // Per-tenant cumulative summary — uses transaction history since the
         // data-start cutoff to compute effective months arrears (incl. UC +1).
+        // Stores the full breakdown so the click-to-expand row can show the
+        // calculation steps without recomputing.
         const tenantLookup = {};
         allTenants.forEach(t => { tenantLookup[t.id] = t; });
-        const perTenant = new Map(); // tenancyId → { tenancy, tenantType, tenantName, effectiveMonths, balance, openCount, hasUCPaused }
+        const perTenant = new Map();
         for (const { rec } of visible) {
             const tenancyId = extractLinkedId(getField(rec, ARREARS.tenancy));
             if (!tenancyId || perTenant.has(tenancyId)) continue;
@@ -806,16 +932,15 @@ Auto-generated from arrears engine.`,
             const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
             const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '—');
-            const rent = Number(getField(tenancy, F.tenRent)) || 0;
-            const effectiveMonths = computeEffectiveMonthsArrears(tenancy, tenantType, today);
+            const breakdown = computeArrearsBreakdown(tenancy, tenantType, today);
+            if (!breakdown.applicable) continue;
             perTenant.set(tenancyId, {
-                tenancy,
-                tenantType,
-                tenantName,
-                rent,
-                effectiveMonths,
-                s8Ready: effectiveMonths >= 2,
-                cumulativeBalance: effectiveMonths * rent,
+                tenancyId, tenancy, tenantType, tenantName,
+                rent: breakdown.rent,
+                effectiveMonths: breakdown.effectiveMonths,
+                s8Ready: breakdown.s8Ready,
+                cumulativeBalance: breakdown.cumulativeBalance,
+                breakdown,
             });
         }
 
@@ -869,17 +994,23 @@ Auto-generated from arrears engine.`,
             </tr>`;
         }).join('');
 
-        // Per-tenant summary rows. Empty cells stay empty (no dash filler).
+        // Per-tenant summary rows with click-to-expand breakdown.
+        // Each tenant gets two <tr> elements: the summary row and a hidden
+        // breakdown row (toggled via the inline onclick handler).
         const tenantSummaryRows = Array.from(perTenant.values())
             .sort((a, b) => b.effectiveMonths - a.effectiveMonths)
             .map(t => {
                 const rowBg = t.s8Ready ? 'var(--danger-bg)' : 'transparent';
-                return `<tr style="background:${rowBg};border-bottom:1px solid var(--border-subtle)">
-                    <td style="padding:10px 12px"><div style="font-weight:600;color:var(--text-primary)">${escHtml(t.tenantName)}</div></td>
+                const breakdownId = `arrearsBreakdown_${t.tenancyId}`;
+                return `<tr style="background:${rowBg};border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="toggleArrearsBreakdown('${breakdownId}', this)">
+                    <td style="padding:10px 12px"><span style="display:inline-block;width:14px;color:var(--text-muted);font-size:10px" data-chevron>&#x25B8;</span> <span style="font-weight:600;color:var(--text-primary)">${escHtml(t.tenantName)}</span></td>
                     <td style="padding:10px 12px">${badgeHtml(t.tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' })}</td>
                     <td style="padding:10px 12px;text-align:right;font-weight:${t.effectiveMonths >= 2 ? '700' : '500'};color:${t.effectiveMonths >= 2 ? 'var(--danger)' : 'var(--text-primary)'};font-variant-numeric:tabular-nums">${t.effectiveMonths.toFixed(0)}</td>
                     <td style="padding:10px 12px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-primary)">£${t.cumulativeBalance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td style="padding:10px 12px">${t.s8Ready ? badgeHtml('S8 Ready', { bg: 'var(--danger)', fg: '#fff' }) : ''}</td>
+                </tr>
+                <tr id="${breakdownId}" style="display:none;background:var(--bg-surface-2)">
+                    <td colspan="5" style="padding:16px 24px">${renderBreakdownHtml(t)}</td>
                 </tr>`;
             }).join('');
 
