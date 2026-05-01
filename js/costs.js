@@ -19,7 +19,8 @@
             overlay.innerHTML = `
                 <div style="width:40px;height:40px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:cost-spin 0.8s linear infinite"></div>
                 <div style="font-size:14px;font-weight:500">Loading Accounts Payable Fixed…</div>
-                <div style="font-size:12px;color:var(--text-muted)">If this hangs for more than a few seconds, click <strong>Refresh</strong> in the sync bar.</div>
+                <div id="costsLoadingMessage" style="font-size:12px;color:var(--text-muted);text-align:center;max-width:480px">Fetching costs from Airtable. This usually takes a few seconds.</div>
+                <button id="costsLoadingRetryBtn" onclick="forceCostsRefresh()" style="margin-top:8px;padding:8px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:6px;cursor:pointer;display:none">Force Refresh from Airtable</button>
                 <style>@keyframes cost-spin { to { transform: rotate(360deg); } }</style>
             `;
             panel.appendChild(overlay);
@@ -30,9 +31,40 @@
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
         });
+
+        // After 8s of waiting, surface the manual refresh button + harder copy.
+        if (window._costsLoadingTimer) clearTimeout(window._costsLoadingTimer);
+        window._costsLoadingTimer = setTimeout(() => {
+            const msg = document.getElementById('costsLoadingMessage');
+            const btn = document.getElementById('costsLoadingRetryBtn');
+            if (msg) msg.innerHTML = 'Still loading after 8 seconds — something may be wrong. Click below to force a fresh fetch from Airtable. If that doesn\'t work, log out and back in.';
+            if (btn) btn.style.display = 'inline-block';
+        }, 8000);
+    }
+
+    // Manual escape hatch — clears the local cache and refetches everything.
+    async function forceCostsRefresh() {
+        const btn = document.getElementById('costsLoadingRetryBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+        try {
+            // Bust the dash cache (indexedDB)
+            if (typeof clearDashCache === 'function') {
+                try { await clearDashCache(); } catch (_) {}
+            }
+            // Re-run the full dashboard load
+            if (typeof loadDashboard === 'function') {
+                await loadDashboard();
+            }
+            renderCostsTab();
+        } catch (err) {
+            alert('Refresh failed: ' + err.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Force Refresh from Airtable'; }
+        }
     }
 
     function hideCostsLoadingState() {
+        if (window._costsLoadingTimer) { clearTimeout(window._costsLoadingTimer); window._costsLoadingTimer = null; }
         const overlay = document.getElementById('costsLoadingOverlay');
         if (overlay) overlay.style.display = 'none';
         ['costsSummaryCards', 'costsBreakdown', 'costsAIAnalysis'].forEach(id => {

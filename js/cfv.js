@@ -388,7 +388,7 @@
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
             return;
         }
 
@@ -424,11 +424,6 @@
                 : entry.status === 'potential'
                 ? '<span class="cfv-status-badge potential">Potential CFV</span>'
                 : '<span class="cfv-status-badge cfv">CFV</span>';
-
-            const chase = CFV_CHASE_STAGES[entry.chaseStage];
-            const chaseBadge = entry.status !== 'cfv actioned'
-                ? `<span class="cfv-chase-badge ${chase.cssClass}">${chase.label}</span>`
-                : '<span style="color:#94a3b8;font-size:10px">—</span>';
 
             // Contact info
             let contactHtml = '';
@@ -486,7 +481,6 @@
                 <td style="text-align:center">${entry.dueDay || '—'}</td>
                 <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? '#dc2626' : entry.daysOverdue > 3 ? '#d97706' : '#1e293b'}">${entry.daysOverdue}</td>
                 <td>${statusBadge}</td>
-                <td>${chaseBadge}</td>
                 <td>${contactHtml}</td>
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
             </tr>`;

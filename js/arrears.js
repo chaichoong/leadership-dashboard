@@ -66,9 +66,9 @@
 
     // Number of expected payments since data start for a tenancy
     function expectedPaymentsForTenancy(tenancy, today) {
-        const startStr = String(getField(tenancy, F.tenStartDate) || '');
-        const tenStart = startStr ? new Date(startStr) : null;
+        const tenStart = getTenancyStartDate(tenancy);
         const dataStart = new Date(ARREARS_DATA_START);
+        // If tenancy has no start date we can't compute — caller should skip.
         const effectiveStart = tenStart && tenStart > dataStart ? tenStart : dataStart;
         return monthsBetween(effectiveStart, today);
     }
@@ -90,11 +90,36 @@
         return count;
     }
 
+    // ── New-tenant guard ──
+    // The chase pipeline only kicks in once the tenancy has had its first
+    // reconciled rent payment. New tenants whose UC claim hasn't been set up
+    // yet (or whose first working/agent payment hasn't landed) shouldn't be
+    // chased — they're CFVs by default until they establish a baseline.
+    // This also avoids the false S8-readiness for brand-new UC tenants where
+    // expected payments looks like 3 months but they've literally been in the
+    // property a few weeks waiting for UC to process.
+    function hasFirstPaymentLanded(tenancyId) {
+        return actualPaymentsForTenancy(tenancyId) >= 1;
+    }
+
+    // Tenancy start sanity. Returns null if tenStartDate is missing — the
+    // arrears engine and view both skip such tenancies (you can't compute
+    // arrears against an unknown move-in date).
+    function getTenancyStartDate(tenancy) {
+        const raw = String(getField(tenancy, F.tenStartDate) || '');
+        if (!raw) return null;
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
     // Effective months in arrears for a tenancy, including the +1 UC shadow.
     // Returns a number ≥ 0. Working/Agent: missed = expected - actual.
     // UC: missed + 1 (always one month in arrears by payment-model design).
+    // Returns 0 (not-yet-chaseable) if the tenancy has never been paid.
     function computeEffectiveMonthsArrears(tenancy, tenantType, today) {
         if (!tenantType || tenantType === 'Agent-Managed') return 0;
+        if (!getTenancyStartDate(tenancy)) return 0;
+        if (!hasFirstPaymentLanded(tenancy.id)) return 0;
         const expected = expectedPaymentsForTenancy(tenancy, today);
         const actual = actualPaymentsForTenancy(tenancy.id);
         const missed = Math.max(0, expected - actual);
@@ -104,7 +129,9 @@
     // S8 readiness — fires at ≥ 2 effective months arrears.
     // Working/Agent: needs 2+ missed payments.
     // UC: needs 1+ missed payment (because of the +1 shadow).
+    // Always false for tenancies that haven't yet had their first payment.
     function isS8Ready(tenancy, tenantType, today) {
+        if (!hasFirstPaymentLanded(tenancy.id)) return false;
         return computeEffectiveMonthsArrears(tenancy, tenantType, today) >= 2;
     }
 
@@ -571,6 +598,15 @@ Auto-generated from arrears engine.`,
             const rent = Number(getField(tenancy, F.tenRent)) || 0;
             if (rent <= 0) continue;
 
+            // New-tenant guard: arrears chase only kicks in after the first
+            // reconciled payment lands. Until then the tenant lives in the
+            // legacy CFV view. Avoids over-flagging brand-new UC tenants
+            // whose claim is still being set up.
+            if (!hasFirstPaymentLanded(tenancy.id)) continue;
+
+            // Sanity: tenancies without a start date can't be evaluated.
+            if (!getTenancyStartDate(tenancy)) continue;
+
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
 
             const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
@@ -771,68 +807,87 @@ Auto-generated from arrears engine.`,
             const unitVal = tenancy ? getField(tenancy, F.tenUnitRef) : null;
             const unit = Array.isArray(unitVal) ? unitVal[0] : (unitVal || '');
 
-            return `<tr>
-                <td style="font-family:var(--font-family-mono,monospace);font-size:11px;color:var(--text-secondary)">${escHtml(reference)}</td>
-                <td><div style="font-weight:600">${escHtml(tenantName)}</div><div style="font-size:11px;color:var(--text-muted)">${escHtml(unit)}</div></td>
-                <td style="font-size:12px;color:var(--text-secondary)">${escHtml(property)}</td>
-                <td>${badgeHtml(stage, STAGE_BADGE[stage])}</td>
-                <td>${badgeHtml(status, STATUS_BADGE[status])}</td>
-                <td style="text-align:right;font-weight:${daysOverdue >= 21 ? '700' : '500'};color:${daysOverdue >= 14 ? 'var(--danger)' : 'var(--text-primary)'}">${daysOverdue}</td>
-                <td style="text-align:right;font-weight:600">£${amount.toFixed(2)}</td>
-                <td style="font-size:12px;color:var(--text-secondary)">${escHtml(lastContact || '—')}</td>
-                <td style="font-size:12px"><div>${escHtml(nextAction || '—')}</div><div style="color:var(--text-muted);font-size:11px">${escHtml(nextDue || '')}</div></td>
-                <td>${tenantType ? badgeHtml(tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' }) : '—'}</td>
+            return `<tr style="border-bottom:1px solid var(--border-subtle)">
+                <td style="padding:10px 12px;font-family:var(--font-family-mono,monospace);font-size:11px;color:var(--text-secondary)">${escHtml(reference)}</td>
+                <td style="padding:10px 12px"><div style="font-weight:600">${escHtml(tenantName)}</div>${unit ? `<div style="font-size:11px;color:var(--text-muted)">${escHtml(unit)}</div>` : ''}</td>
+                <td style="padding:10px 12px;font-size:12px;color:var(--text-secondary)">${escHtml(property)}</td>
+                <td style="padding:10px 12px">${badgeHtml(stage, STAGE_BADGE[stage])}</td>
+                <td style="padding:10px 12px">${badgeHtml(status, STATUS_BADGE[status])}</td>
+                <td style="padding:10px 12px;text-align:right;font-weight:${daysOverdue >= 21 ? '700' : '500'};color:${daysOverdue >= 14 ? 'var(--danger)' : 'var(--text-primary)'};font-variant-numeric:tabular-nums">${daysOverdue}</td>
+                <td style="padding:10px 12px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">£${amount.toFixed(2)}</td>
+                <td style="padding:10px 12px;font-size:12px;color:var(--text-secondary)">${escHtml(lastContact || '')}</td>
+                <td style="padding:10px 12px;font-size:12px">${nextAction ? `<div>${escHtml(nextAction)}</div>${nextDue ? `<div style="color:var(--text-muted);font-size:11px">${escHtml(nextDue)}</div>` : ''}` : ''}</td>
+                <td style="padding:10px 12px">${tenantType ? badgeHtml(tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' }) : ''}</td>
             </tr>`;
         }).join('');
 
-        // Per-tenant summary table rows (cumulative position, S8 readiness)
+        // Per-tenant summary rows. Empty cells stay empty (no dash filler).
         const tenantSummaryRows = Array.from(perTenant.values())
             .sort((a, b) => b.effectiveMonths - a.effectiveMonths)
-            .map(t => `<tr>
-                <td><div style="font-weight:600">${escHtml(t.tenantName)}</div></td>
-                <td>${t.tenantType ? badgeHtml(t.tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' }) : '—'}</td>
-                <td style="text-align:right;font-weight:${t.effectiveMonths >= 2 ? '700' : '500'};color:${t.effectiveMonths >= 2 ? 'var(--danger)' : 'var(--text-primary)'}">${t.effectiveMonths.toFixed(0)}</td>
-                <td style="text-align:right;font-weight:600">£${t.cumulativeBalance.toFixed(2)}</td>
-                <td>${t.s8Ready ? badgeHtml('S8 Ready', { bg: 'var(--danger-bg)', fg: 'var(--danger)' }) : '<span style="color:var(--text-muted);font-size:11px">—</span>'}</td>
-            </tr>`).join('');
+            .map(t => {
+                const rowBg = t.s8Ready ? 'var(--danger-bg)' : 'transparent';
+                return `<tr style="background:${rowBg};border-bottom:1px solid var(--border-subtle)">
+                    <td style="padding:10px 12px"><div style="font-weight:600;color:var(--text-primary)">${escHtml(t.tenantName)}</div></td>
+                    <td style="padding:10px 12px">${badgeHtml(t.tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' })}</td>
+                    <td style="padding:10px 12px;text-align:right;font-weight:${t.effectiveMonths >= 2 ? '700' : '500'};color:${t.effectiveMonths >= 2 ? 'var(--danger)' : 'var(--text-primary)'};font-variant-numeric:tabular-nums">${t.effectiveMonths.toFixed(0)}</td>
+                    <td style="padding:10px 12px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-primary)">£${t.cumulativeBalance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td style="padding:10px 12px">${t.s8Ready ? badgeHtml('S8 Ready', { bg: 'var(--danger)', fg: '#fff' }) : ''}</td>
+                </tr>`;
+            }).join('');
+
+        // KPI cards at the top — visually weightier than chip summary
+        const kpiCardsHtml = `
+            <div class="cards-grid" style="margin-bottom:16px">
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Tenants in arrears</div>
+                    <div class="kpi-card-value">${perTenant.size}</div>
+                    <div class="kpi-card-sub">${visible.length} active arrears record${visible.length === 1 ? '' : 's'}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Total exposure</div>
+                    <div class="kpi-card-value text-red">£${totalExposure.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    <div class="kpi-card-sub">Cumulative balance owed (UC includes +1 month shadow)</div>
+                </div>
+                <div class="kpi-card" style="${s8ReadyCount > 0 ? 'border-color:var(--danger);border-width:2px' : ''}">
+                    <div class="kpi-card-label" style="${s8ReadyCount > 0 ? 'color:var(--danger)' : ''}">Section 8 ready</div>
+                    <div class="kpi-card-value ${s8ReadyCount > 0 ? 'text-red' : ''}">${s8ReadyCount}</div>
+                    <div class="kpi-card-sub">${s8ReadyCount > 0 ? 'Tenants at ≥ 2 effective months' : 'No tenants have hit threshold'}</div>
+                </div>
+            </div>
+        `;
 
         container.innerHTML = `
             <div class="section">
-                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
                     <h2 class="section-title" style="margin-bottom:0">Arrears Pipeline</h2>
-                    <span style="font-size:12px;color:var(--text-muted)">
-                        ${perTenant.size} tenant${perTenant.size === 1 ? '' : 's'} in arrears &nbsp;·&nbsp;
-                        ${visible.length} active record${visible.length === 1 ? '' : 's'} &nbsp;·&nbsp;
-                        Total exposure <strong style="color:var(--text-primary)">£${totalExposure.toFixed(2)}</strong>
-                        ${s8ReadyCount > 0 ? `&nbsp;·&nbsp; <span style="color:var(--danger);font-weight:600">${s8ReadyCount} S8-ready</span>` : ''}
-                    </span>
+                    <span style="font-size:12px;color:var(--text-muted)">Calculated from reconciled transactions since ${ARREARS_DATA_START} &nbsp;·&nbsp; new tenants enter the chase only after their first payment lands</span>
                 </div>
-                <div style="margin-bottom:16px">${summaryChips || '<span style="color:var(--text-muted);font-size:12px">No active records</span>'}</div>
+                ${kpiCardsHtml}
                 ${perTenant.size ? `
-                <div style="margin-bottom:24px">
-                    <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Per-tenant cumulative position</h3>
+                <div style="margin-bottom:24px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);overflow:hidden">
+                    <div style="padding:12px 16px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px">
+                        Per-tenant cumulative position
+                    </div>
                     <div style="overflow-x:auto">
-                        <table style="width:100%;border-collapse:collapse;font-size:13px;background:var(--bg-surface)">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px">
                             <thead>
-                                <tr style="text-align:left;border-bottom:2px solid var(--border-default);background:var(--bg-surface-2)">
-                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant</th>
-                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
-                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Effective Months Arrears</th>
-                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Cumulative Balance</th>
-                                    <th style="padding:8px 10px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Section 8</th>
+                                <tr style="text-align:left;background:var(--bg-surface)">
+                                    <th style="padding:10px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border-subtle)">Tenant</th>
+                                    <th style="padding:10px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border-subtle)">Type</th>
+                                    <th style="padding:10px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border-subtle);text-align:right">Months arrears</th>
+                                    <th style="padding:10px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border-subtle);text-align:right">Balance</th>
+                                    <th style="padding:10px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border-subtle)">Section 8</th>
                                 </tr>
                             </thead>
                             <tbody>${tenantSummaryRows}</tbody>
                         </table>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
-                            Computed from reconciled transactions since ${ARREARS_DATA_START}.
-                            UC tenants include +1 month shadow (UC pays in arrears).
-                            S8 readiness fires at ≥ 2 effective months.
-                        </div>
                     </div>
                 </div>
                 ` : ''}
-                <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Active arrears records</h3>
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+                    <h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin:0">Active arrears records</h3>
+                    <div style="font-size:12px">${summaryChips}</div>
+                </div>
                 <div style="overflow-x:auto">
                     <table style="width:100%;border-collapse:collapse;font-size:13px">
                         <thead>
