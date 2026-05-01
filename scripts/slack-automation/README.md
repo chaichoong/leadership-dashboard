@@ -260,6 +260,17 @@ Claude picks one of:
 - `in_progress` → `Status = Today`
 - `note`        → posts a native Airtable record comment (visible in the dashboard's task-drawer Comments panel; requires PAT scope `data.recordComments:write`)
 
+### Contractor identity = single filter
+
+The bot's "what's on my list" returns every open task assigned to the
+contractor. There's deliberately no extra filter on Maintenance Ticket
+or Contractor singleSelect — anything Gary/Roy/Rob is assigned to is
+contractor work, whether it's a maintenance job, a gardening run, or
+a one-off callout. The bot writes Maintenance Ticket and Contractor
+singleSelect only for backwards-compatibility with the existing
+Contractor Tasks dashboard tab; future cleanup should switch that tab
+to filter by Assignee identity directly.
+
 Claude also picks *which* open job the update refers to, by comparing the
 message against the contractor's active tasks. If it's unsure, the bot
 lists the open jobs and asks the contractor to pick a number.

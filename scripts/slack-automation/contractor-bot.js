@@ -724,13 +724,14 @@ async function fetchOpenTasksFor(contractor, env) {
         FIELD.taskName, FIELD.status, FIELD.priority,
         FIELD.properties, FIELD.notes, FIELD.maintenanceTick,
     ];
-    // Contractors only see Maintenance-Ticket tasks — never non-maintenance
-    // work that might be incidentally assigned to them.
+    // Contractor identity is the only filter — anything assigned to them
+    // is contractor work by definition (maintenance, gardening, callouts,
+    // anything). Do NOT additionally filter by Maintenance Ticket — that
+    // would over-narrow and hide non-maintenance contractor work.
     const formula =
         `AND(` +
             `{Status}!='Completed',` +
-            `{Assignee}='${escapeFormula(contractor.name)}',` +
-            `{Maintenance Ticket}=TRUE()` +
+            `{Assignee}='${escapeFormula(contractor.name)}'` +
         `)`;
     const url = `/${TABLE_TASKS}` +
         `?returnFieldsByFieldId=true` +
