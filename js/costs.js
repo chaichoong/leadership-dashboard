@@ -702,8 +702,10 @@
         return typeof n === 'string' ? n : (n?.name || '');
     }
 
-    // Dropdown editor for tx Category / Sub-Category. Replaces the span with
-    // a <select>, PATCHes Airtable on change, then re-renders the parent cost row.
+    // Type-to-search editor for tx Category / Sub-Category. Replaces the span
+    // with an <input list="datalist"> so typing filters options inline (same
+    // pattern as the reconciliation dropdowns). PATCHes Airtable on commit.
+    let _txDlCounter = 0;
     async function editTxLinkField(span) {
         const txId = span.dataset.txId;
         const linkType = span.dataset.linkType; // 'cat' or 'subcat'
@@ -715,28 +717,44 @@
         const currentLinks = (getField(tx, fieldId) || []).map(v => v.id || v).filter(Boolean);
         const currentId = currentLinks[0] || '';
 
-        const select = document.createElement('select');
-        select.style.cssText = 'width:130px;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:11px;background:var(--bg-surface);color:var(--text-primary)';
-        const options = [{ id: '', name: '— none —' }, ...records.map(r => ({
+        const items = records.map(r => ({
             id: r.id,
             name: (typeof getField(r, nameField) === 'string' ? getField(r, nameField) : (getField(r, nameField)?.name || '')) || '(unnamed)'
-        }))].sort((a, b) => a.id === '' ? -1 : b.id === '' ? 1 : a.name.localeCompare(b.name));
-        options.forEach(o => {
-            const opt = document.createElement('option');
-            opt.value = o.id; opt.textContent = o.name;
-            if (o.id === currentId) opt.selected = true;
-            select.appendChild(opt);
-        });
+        })).sort((a, b) => a.name.localeCompare(b.name));
+        const currentName = items.find(i => i.id === currentId)?.name || '';
 
+        const dlId = 'tx-dl-' + (++_txDlCounter);
+        const wrapper = document.createElement('span');
+        wrapper.style.cssText = 'display:inline-flex;align-items:center;gap:2px';
+        wrapper.innerHTML = `
+            <input type="text" list="${dlId}" value="${escHtml(currentName)}" placeholder="Type to search…" autocomplete="off"
+                   style="width:140px;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;font-size:11px;background:var(--bg-surface);color:var(--text-primary)">
+            <datalist id="${dlId}">
+                ${items.map(i => `<option value="${escHtml(i.name)}" data-id="${i.id}">`).join('')}
+            </datalist>
+        `;
+        const input = wrapper.querySelector('input');
         const parent = span.parentNode;
-        parent.replaceChild(select, span);
-        select.focus();
+        parent.replaceChild(wrapper, span);
+        input.focus();
+        input.select();
 
         let done = false;
         const finish = async (commit) => {
             if (done) return; done = true;
             if (!commit) { renderCostsTab(); return; }
-            const newId = select.value;
+            const typed = input.value.trim();
+            // Match exact name (case-insensitive). If empty, clear the link.
+            // If typed but no match, refuse to save and re-render.
+            let newId = '';
+            if (typed) {
+                const match = items.find(i => i.name.toLowerCase() === typed.toLowerCase());
+                if (!match) {
+                    alert(`No ${linkType === 'cat' ? 'category' : 'sub-category'} matches "${typed}". Pick from the list.`);
+                    renderCostsTab(); return;
+                }
+                newId = match.id;
+            }
             if (newId === currentId) { renderCostsTab(); return; }
             const newLinks = newId ? [newId] : [];
             try {
@@ -748,7 +766,7 @@
                 if (!resp.ok) throw new Error('PATCH ' + resp.status);
                 if (!tx.fields) tx.fields = {};
                 tx.fields[fieldId] = newLinks;
-                const newName = newId ? options.find(o => o.id === newId)?.name : '— none —';
+                const newName = newId ? items.find(i => i.id === newId)?.name : '— none —';
                 pushUndoAction({
                     kind: 'tx-link', txId, fieldId,
                     oldValue: currentLinks, newValue: newLinks,
@@ -760,9 +778,14 @@
                 renderCostsTab();
             }
         };
-        select.addEventListener('change', () => finish(true));
-        select.addEventListener('blur', () => finish(false));
-        select.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') finish(false); });
+
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+            else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+        });
+        // Datalist suggestions fire 'change' on selection AND 'input' on typing.
+        // We commit on blur to give the user time to finish typing.
+        input.addEventListener('blur', () => finish(true));
     }
 
     function toggleCostTxRow(btn, costId) {
