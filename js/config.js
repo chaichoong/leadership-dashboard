@@ -9,7 +9,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.21', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.9', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Task and Project Management',   icon: '✅', pageVer: '1.55', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Task and Project Management',   icon: '✅', pageVer: '1.56', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.12', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.4', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.14', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
