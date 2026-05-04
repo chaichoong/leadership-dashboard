@@ -550,30 +550,85 @@
             window._reconResults[idx].subCatName = getSubCatName(sel.value);
         }
     }
-    // When tenancy input changes, auto-fill tenant, unit, property
-    // Attach this via onchange on the tenancy input
+    // When tenancy input changes, auto-fill tenant, unit, property.
+    // Attached via onchange on the tenancy <td>.
+    //
+    // CRITICAL: for unit, we must NOT just dump the tenancy's `tenUnitRef`
+    // lookup string into the unit input — the unit dropdown is deduped by
+    // unit record ID, and its option `value`s come from whichever tenancy
+    // was iterated FIRST when the dropdown was built. If the picked
+    // tenancy's lookup string differs even slightly (en-dash variants,
+    // trailing whitespace, capitalisation), it won't match any option and
+    // resolveDropdownId returns "" on Approve — so unit silently drops.
+    //
+    // The robust fix: get the unit's record ID from `tenUnit` (the link)
+    // and find the matching dropdown option by data-id, then use THAT
+    // option's value as the input value. Same approach for tenant.
     function reconTenancyChanged(idx) {
         const input = document.getElementById('recon-tenancy-' + idx);
         if (!input || !input.value) return;
         const tenancyId = resolveDropdownId('recon-tenancy-' + idx);
         const tenancy = allTenancies.find(t => t.id === tenancyId);
         if (!tenancy) return;
+
+        // ── Helper: set a datalist input by record-ID match ──
+        // Looks up the option whose data-id === id, sets the input value
+        // to that option's value. Falls back to fallbackName if no option
+        // matches (the unit/tenant might not be in any tenancy yet).
+        function setByRecordId(inputId, recId, fallbackName) {
+            const inp = document.getElementById(inputId);
+            if (!inp) return;
+            if (!recId) { inp.value = fallbackName || ''; return; }
+            const dl = document.getElementById(inp.getAttribute('list'));
+            const opt = dl ? [...dl.options].find(o => o.getAttribute('data-id') === recId) : null;
+            inp.value = opt ? opt.value : (fallbackName || '');
+        }
+
+        // ── Tenant ──
         const tLookup = buildTenantLookup();
         const tenant = getTenantForTenancy(tenancy, tLookup);
+        if (tenant) {
+            const tenantName = String(getField(tenant, F.tenantName) || '');
+            setByRecordId('recon-tenant-' + idx, tenant.id, tenantName);
+        } else {
+            const tenantInput = document.getElementById('recon-tenant-' + idx);
+            if (tenantInput) tenantInput.value = '';
+        }
 
-        // Set tenant input
-        const tenantInput = document.getElementById('recon-tenant-' + idx);
-        if (tenantInput && tenant) tenantInput.value = getField(tenant, F.tenantName) || '';
+        // ── Unit ──
+        // 1. Get unit ID from `tenUnit` link (preferred — record ID is canonical)
+        // 2. Use it to pick the matching dropdown option by data-id
+        // 3. Fallback name = rental unit's primary field, or the lookup string
+        const unitLink = getField(tenancy, F.tenUnit);
+        const unitId = Array.isArray(unitLink) ? unitLink[0] : unitLink;
+        let unitFallbackName = '';
+        if (unitId && typeof allRentalUnits !== 'undefined') {
+            const unitRec = (allRentalUnits || []).find(u => u.id === unitId);
+            if (unitRec) unitFallbackName = String(getField(unitRec, F.unitName) || '');
+        }
+        if (!unitFallbackName) {
+            const unitRef = getField(tenancy, F.tenUnitRef);
+            if (Array.isArray(unitRef) && unitRef.length && unitRef[0]) {
+                unitFallbackName = String(unitRef[0]);
+            } else if (unitRef && typeof unitRef === 'string') {
+                unitFallbackName = unitRef;
+            }
+        }
+        setByRecordId('recon-unit-' + idx, unitId, unitFallbackName);
 
-        // Set unit input
-        const unitRef = getField(tenancy, F.tenUnitRef);
-        const unitInput = document.getElementById('recon-unit-' + idx);
-        if (unitInput) unitInput.value = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
-
-        // Set property input
+        // ── Property — uses the lookup string as both ID and name in
+        //   buildPropertyDropdown, so matching by name is fine here.
         const propField = getField(tenancy, F.tenProperty);
         const propInput = document.getElementById('recon-property-' + idx);
-        if (propInput) propInput.value = Array.isArray(propField) ? propField[0] : (propField || '');
+        if (propInput) {
+            let propName = '';
+            if (Array.isArray(propField) && propField.length && propField[0]) {
+                propName = String(propField[0]);
+            } else if (propField && typeof propField === 'string') {
+                propName = propField;
+            }
+            propInput.value = propName;
+        }
 
         // Set sub-category to Rental Income if empty
         const subCatInput = document.getElementById('recon-subcat-' + idx);
