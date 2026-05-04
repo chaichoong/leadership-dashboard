@@ -501,10 +501,16 @@
 
         const actionHtml = r.status === 'approved'
             ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
-            : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
-                  <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
-                  <button onclick="openReconSplitModal(${i})" title="Split this transaction into multiple portions (e.g. agent payment covering several units, or one invoice across two businesses)" style="font-size:10px;font-weight:600;padding:3px 8px;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Split</button>
-              </div>`;
+            : `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>`;
+        // SPLIT BUTTON — temporarily REMOVED from the UI. The previous
+        // implementation duplicated records via POST, but Kevin's Airtable
+        // base has an existing automation that ALSO creates duplicates
+        // when Split Count changes — so every JS-driven split was
+        // producing 2× the dupes (5-way split → 25 records instead of 5).
+        // The openReconSplitModal/performReconSplit functions remain in
+        // the file but are unreachable from the UI until the duplication
+        // strategy is rewritten as PATCH-only (set Split Count + Override
+        // on the source, let the Airtable automation own duplication).
 
         const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
 
