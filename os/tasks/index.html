@@ -430,12 +430,13 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-01-1230 team-bar-live</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-04-0900 workflow-doc</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
     <div id="syncPill" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--success-bg);color:var(--success);border:1px solid var(--success);cursor:pointer;user-select:none" title="Click to run a sync check">✓ Saved</div>
+    <a class="btn" href="workflow.html" target="_blank" title="Visual map of how the Task &amp; Project Management OS works" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">📖 Workflow</a>
     <button class="btn" data-refresh-btn onclick="loadAllData()" title="Reload data from Airtable">Refresh</button>
     <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4" title="Undo last action (Cmd+Z) — Nothing to undo">
       <span>Undo</span><span id="undoBtnLabel" style="display:none"></span>

@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task &amp; Project Management OS — Workflow Map</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { line-height: 1.55; color: var(--text-primary); background: var(--bg-app); }
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+  color: #fff; padding: 3rem 2rem 4rem; position: relative; overflow: hidden;
+}
+.hero::after {
+  content: ''; position: absolute; top: -50%; right: -10%;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.hero-inner { max-width: 1200px; margin: 0 auto; position: relative; z-index: 1; }
+.hero-back { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; opacity: 0.8; text-decoration: none; color: #fff; margin-bottom: 1.25rem; transition: opacity 0.15s; }
+.hero-back:hover { opacity: 1; }
+.hero h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 0.5rem; }
+.hero p.lede { font-size: 1.1rem; opacity: 0.92; max-width: 720px; }
+
+/* Layout */
+.layout { max-width: 1200px; margin: -2rem auto 4rem; padding: 0 1.5rem; display: grid; grid-template-columns: 220px 1fr; gap: 2rem; align-items: start; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .nav { position: static !important; } }
+
+/* Side nav */
+.nav {
+  position: sticky; top: 1rem;
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl); padding: 1rem; box-shadow: var(--shadow-sm);
+}
+.nav h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.5rem; }
+.nav a { display: block; padding: 0.4rem 0.6rem; font-size: 0.88rem; color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md); margin-bottom: 0.15rem; }
+.nav a:hover { background: var(--bg-surface-2); color: var(--accent); }
+.nav .nav-grp { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 0.6rem 0.6rem 0.25rem; }
+
+/* Main content */
+.main { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-xl); box-shadow: var(--shadow-md); padding: 2rem 2.25rem; }
+.section { margin-top: 2.75rem; }
+.section:first-child { margin-top: 0; }
+.section > h2 {
+  font-size: 1.6rem; font-weight: 700; color: var(--accent);
+  padding-bottom: 0.5rem; border-bottom: 3px solid var(--accent-soft);
+  margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;
+}
+.section > h2 .num { font-size: 0.9rem; padding: 0.15rem 0.6rem; border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.subsection { margin-top: 1.5rem; }
+.subsection h3 { font-size: 1.15rem; color: var(--text-primary); margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.5rem; }
+
+/* Cards */
+.card { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem; }
+.card.hilite { border-left: 4px solid var(--accent); background: var(--bg-surface-2); }
+.card h4 { font-size: 1rem; font-weight: 600; margin-bottom: 0.5rem; }
+
+/* Tab cards grid */
+.tabs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.85rem; margin-top: 1rem; }
+.tab-card { background: var(--bg-surface); border: 2px solid var(--border-default); border-radius: var(--radius-lg); padding: 1rem 1.1rem; transition: border-color 0.15s, transform 0.15s; }
+.tab-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.tab-card .icon { font-size: 1.6rem; margin-bottom: 0.4rem; display: block; }
+.tab-card h4 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.3rem; color: var(--accent); }
+.tab-card p { font-size: 0.85rem; color: var(--text-secondary); }
+.tab-card a { display: inline-block; margin-top: 0.5rem; font-size: 0.8rem; color: var(--accent); font-weight: 600; text-decoration: none; }
+
+/* Color tags */
+.tag { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: var(--radius-full); margin-right: 0.3rem; letter-spacing: 0.03em; text-transform: uppercase; }
+.tag-user { background: var(--info-bg); color: var(--info); }
+.tag-auto { background: var(--accent-soft); color: var(--accent); }
+.tag-rule { background: var(--warning-bg); color: var(--warning); }
+.tag-ai { background: #F1ECF7; color: var(--tone-plum); }
+.tag-data { background: var(--bg-subtle); color: var(--text-secondary); }
+.tag-slack { background: #E1ECF4; color: #4A154B; }
+
+/* Step list */
+.steps { counter-reset: step; padding-left: 0; list-style: none; }
+.steps li { counter-increment: step; position: relative; padding: 0.45rem 0 0.45rem 2rem; font-size: 0.92rem; color: var(--text-primary); }
+.steps li::before { content: counter(step); position: absolute; left: 0; top: 0.45rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; }
+
+/* Tables */
+.tbl { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; font-size: 0.88rem; }
+.tbl th { text-align: left; padding: 0.6rem 0.8rem; background: var(--bg-subtle); font-weight: 600; color: var(--text-primary); border-bottom: 2px solid var(--border-default); }
+.tbl td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl code { font-family: ui-monospace, Menlo, monospace; background: var(--bg-subtle); padding: 1px 6px; border-radius: 4px; font-size: 0.82rem; color: var(--accent); }
+
+/* Mermaid container */
+.diagram { background: var(--bg-surface-2); border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 1.5rem; margin: 1rem 0; overflow-x: auto; }
+.diagram-cap { font-size: 0.85rem; color: var(--text-muted); text-align: center; margin-top: 0.6rem; font-style: italic; }
+
+/* Flow boxes — simple visual lifecycle without Mermaid */
+.flowline { display: flex; align-items: stretch; gap: 0; margin: 1.25rem 0; flex-wrap: wrap; }
+.flowbox {
+  flex: 1 1 140px; min-width: 130px; padding: 0.85rem 0.8rem;
+  background: var(--bg-surface); border: 2px solid var(--border-default); border-radius: var(--radius-lg);
+  text-align: center; position: relative;
+}
+.flowbox h5 { font-size: 0.85rem; font-weight: 700; color: var(--accent); margin-bottom: 0.25rem; }
+.flowbox p { font-size: 0.75rem; color: var(--text-secondary); }
+.flowbox + .flowbox::before {
+  content: '→'; position: absolute; left: -1.25rem; top: 50%; transform: translateY(-50%);
+  font-size: 1.4rem; color: var(--accent); font-weight: 700;
+}
+@media (max-width: 600px) {
+  .flowbox + .flowbox::before { content: '↓'; left: 50%; top: -1.1rem; transform: translateX(-50%); }
+}
+
+/* Highlight callout */
+.callout {
+  background: var(--info-bg); border-left: 4px solid var(--info); color: var(--info);
+  padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.9rem; margin: 1rem 0;
+}
+.callout strong { color: var(--info); }
+.callout.warn { background: var(--warning-bg); border-color: var(--warning); color: var(--warning); }
+.callout.warn strong { color: var(--warning); }
+.callout.green { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+.callout.green strong { color: var(--success); }
+
+/* Glossary */
+.gloss dt { font-weight: 600; color: var(--accent); margin-top: 0.85rem; }
+.gloss dd { font-size: 0.9rem; color: var(--text-secondary); margin-left: 0; padding-left: 0; }
+
+/* Section anchor offset */
+.section { scroll-margin-top: 1rem; }
+
+/* Mermaid theme override */
+.mermaid svg { max-width: 100%; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-inner">
+    <a class="hero-back" href="index.html">&larr; Back to Task &amp; Project Management OS</a>
+    <h1>How it all works</h1>
+    <p class="lede">A visual map of every tab, rule, and automation in the Task &amp; Project Management OS — written so anyone can follow along, even if they've never opened the dashboard before.</p>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="nav">
+    <h3>Sections</h3>
+    <a href="#big-picture">The big picture</a>
+    <a href="#lifecycle">Task lifecycle</a>
+    <div class="nav-grp">Tabs</div>
+    <a href="#tab-myday">My Day</a>
+    <a href="#tab-list">Task List</a>
+    <a href="#tab-kanban">Kanban</a>
+    <a href="#tab-projects">Projects</a>
+    <a href="#tab-capacity">Capacity</a>
+    <a href="#tab-recurring">Recurring</a>
+    <a href="#tab-jobs">Contractor Tasks</a>
+    <div class="nav-grp">Automations</div>
+    <a href="#auto-status">Status derivation</a>
+    <a href="#auto-scheduler">Auto-scheduler</a>
+    <a href="#auto-slack">Slack notifications</a>
+    <a href="#auto-collabs">Collaborator cascades</a>
+    <a href="#auto-recurring">Recurring rolling</a>
+    <a href="#auto-kpi">KPI compute</a>
+    <a href="#auto-sync">Sync &amp; health</a>
+    <div class="nav-grp">Other</div>
+    <a href="#ai">Where AI helps</a>
+    <a href="#data">The data model</a>
+    <a href="#glossary">Glossary</a>
+  </nav>
+
+  <main class="main">
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="big-picture">
+      <h2><span class="num">1</span> The big picture</h2>
+      <p>The Task &amp; Project Management OS is one screen with seven tabs. Each tab gives a different way to look at the same set of tasks and projects. Rules and automations run quietly in the background to keep everything tidy.</p>
+
+      <div class="callout"><strong>Mental model:</strong> Tasks live in Airtable. The dashboard is a window into them. Edits made anywhere — drawer, grid, Kanban, drag-drop — save directly to Airtable. Automations check rules and fire follow-up actions (a Slack DM, a status update, a re-render of the team count).</p>
+      </div>
+
+      <div class="tabs-grid">
+        <div class="tab-card"><span class="icon">📅</span><h4>My Day</h4><p>Today's calendar with tasks slotted in around your meetings. Default tab.</p><a href="#tab-myday">How it works ›</a></div>
+        <div class="tab-card"><span class="icon">📋</span><h4>Task List</h4><p>Spreadsheet view of every Urgent / High / Not Urgent task. Inline edit anything.</p><a href="#tab-list">How it works ›</a></div>
+        <div class="tab-card"><span class="icon">📊</span><h4>Kanban</h4><p>Project work laid out by week. Drag cards to reschedule.</p><a href="#tab-kanban">How it works ›</a></div>
+        <div class="tab-card"><span class="icon">🎯</span><h4>Projects</h4><p>Quarterly projects with KPI progress bars and drill-downs.</p><a href="#tab-projects">How it works ›</a></div>
+        <div class="tab-card"><span class="icon">📈</span><h4>Capacity</h4><p>Each team member's daily workload at a glance.</p><a href="#tab-capacity">How it works ›</a></div>
+        <div class="tab-card"><span class="icon">🔄</span><h4>Recurring</h4><p>Tasks that repeat (daily, weekly, monthly). Rolls forward on completion.</p><a href="#tab-recurring">How it works ›</a></div>
+        <div class="tab-card"><span class="icon">🔧</span><h4>Contractor Tasks</h4><p>Maintenance jobs grouped by property. Gary / Rob / Roy live here.</p><a href="#tab-jobs">How it works ›</a></div>
+      </div>
+
+      <h3 style="margin-top:2rem;font-size:1.1rem;color:var(--text-primary)">Reading the colour codes</h3>
+      <p style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.8rem">Throughout this doc:</p>
+      <p>
+        <span class="tag tag-user">User action</span> = a person clicks something<br>
+        <span class="tag tag-auto">Automation</span> = the app does it for you<br>
+        <span class="tag tag-rule">Rule</span> = a logical "if this then that" in the code<br>
+        <span class="tag tag-ai">AI</span> = a Claude model is called<br>
+        <span class="tag tag-slack">Slack</span> = sends a DM<br>
+        <span class="tag tag-data">Data</span> = reads from / writes to Airtable
+      </p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="lifecycle">
+      <h2><span class="num">2</span> Task lifecycle — start to finish</h2>
+      <p>Every task that ends up in this system goes through some or all of these stages.</p>
+
+      <div class="flowline">
+        <div class="flowbox"><h5>Created</h5><p>Add Task modal, inline timeline, KPI auto-spawn, or Strategy → Projects push</p></div>
+        <div class="flowbox"><h5>Assigned</h5><p>To a team member. Slack DM fires.</p></div>
+        <div class="flowbox"><h5>Scheduled</h5><p>Auto-placed on My Day or pinned to a Kanban week</p></div>
+        <div class="flowbox"><h5>Worked on</h5><p>Status auto-derives from due date</p></div>
+        <div class="flowbox"><h5>Completed</h5><p>All collaborators get a Slack DM</p></div>
+      </div>
+
+      <div class="callout green"><strong>Rules in play at every stage:</strong> assignee email goes on the record, the creator stamps as <code>Created By Email</code>, project link cascades into priority/business/collaborators, and a status is derived from the due date. None of this needs the user to do anything manual — it just happens on save.</div>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  A[Click + Add Task]:::user --> B[Fill modal]:::user
+  B --> C[Submit]:::user
+  C --> D[Cascade rules apply]:::auto
+  D --> E[POST to Airtable]:::data
+  E --> F[Slack DM fires<br/>to assignee]:::slack
+  E --> G[Stamp Created By]:::auto
+  E --> H[Re-render UI]:::auto
+  classDef user fill:#DBE5F5,stroke:#5A86CF,color:#1e3a8a
+  classDef auto fill:#DDE8DF,stroke:#2C6E49,color:#14532d
+  classDef data fill:#E5E8E1,stroke:#5A6660,color:#1C2422
+  classDef slack fill:#E1ECF4,stroke:#4A154B,color:#4A154B
+        </pre>
+        <p class="diagram-cap">What happens the moment you press "Add Task"</p>
+      </div>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-myday">
+      <h2><span class="num">3</span> Tab: My Day</h2>
+      <p><strong>For:</strong> the daily user — Kevin, Mica, Erica each on their own filtered view. <strong>Default tab on open.</strong></p>
+
+      <h3>What you see</h3>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary);">
+        <li><strong>Vertical timeline</strong> — your day from working start to end, with hour markers</li>
+        <li><strong>Calendar events</strong> in plum (pulled from Google Calendar via the gcal proxy)</li>
+        <li><strong>Routine blocks</strong> in amber (Run, Lunch, Get Ready — configurable per user)</li>
+        <li><strong>Tasks</strong> in their priority colour: Urgent (red), High (yellow), Project (blue), Not Urgent (green)</li>
+        <li><strong>Side panel</strong> on the right: today's other tasks not yet placed on the timeline</li>
+      </ul>
+
+      <h3>What you can do</h3>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary);">
+        <li><span class="tag tag-user">User</span> Drag a task between time slots → due date stays today, just changes start time</li>
+        <li><span class="tag tag-user">User</span> Drag the bottom edge of a task → resize duration</li>
+        <li><span class="tag tag-user">User</span> Drag a task into the side panel → reschedules to next available day with capacity</li>
+        <li><span class="tag tag-user">User</span> Drag from side panel onto timeline → schedules at that time</li>
+        <li><span class="tag tag-user">User</span> Double-click an empty slot → inline-add a task at that time (15-minute default)</li>
+        <li><span class="tag tag-user">User</span> Click the Auto-Schedule button → run the planner across the next two weeks</li>
+      </ul>
+
+      <h3>Automations fired here</h3>
+      <table class="tbl">
+        <thead><tr><th>When</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td>Page loads (Kevin only)</td><td><span class="tag tag-auto">Auto</span> Overdue tasks pulled forward to today (skips hard-deadline + project beyond this week)</td></tr>
+          <tr><td>Inline-add a task</td><td><span class="tag tag-auto">Auto</span> Task assigned to whoever's day you're viewing (not the logged-in user). Pinned at the clicked time. <span class="tag tag-slack">Slack</span> DM to assignee if not yourself.</td></tr>
+          <tr><td>Drag onto side panel</td><td><span class="tag tag-rule">Rule</span> Find the next workday (skip weekends) within capacity for that assignee → reschedule due date there</td></tr>
+          <tr><td>Click Auto-Schedule</td><td><span class="tag tag-auto">Auto</span> Run scheduler with the rules in <a href="#auto-scheduler">section 9</a></td></tr>
+        </tbody>
+      </table>
+
+      <h3>The colour-coded blocks</h3>
+      <p style="font-size:0.9rem;color:var(--text-secondary)">When two blocks land in the same time slot the timeline splits the column horizontally so they sit side-by-side instead of hiding each other.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-list">
+      <h2><span class="num">4</span> Tab: Task List</h2>
+      <p><strong>For:</strong> the spreadsheet view of operational work. Shows tasks with priority Urgent / High / Not Urgent. Project-priority tasks live on the Kanban tab, not here.</p>
+
+      <h3>Columns</h3>
+      <p><span class="tag tag-data">Data</span> Task · Assignee · Due Date · Hard? · Time Estimate · Priority · Project · Status · Business · Recurring · Actions</p>
+
+      <h3>What you can do</h3>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary);">
+        <li><span class="tag tag-user">User</span> Click any cell to inline-edit. Saves on blur.</li>
+        <li><span class="tag tag-user">User</span> Click anywhere on a row (outside an edit cell) to open the drawer</li>
+        <li><span class="tag tag-user">User</span> Filter by any column header — assignee, due, priority, project, business, recurring, status, time estimate</li>
+        <li><span class="tag tag-user">User</span> Bulk select with checkboxes → reassign / reschedule / mark complete / delete in one go</li>
+        <li><span class="tag tag-user">User</span> Sort by clicking column headers (default: due date then priority)</li>
+      </ul>
+
+      <h3>Automations fired here</h3>
+      <table class="tbl">
+        <thead><tr><th>Trigger</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td>Change Status to Completed</td><td><span class="tag tag-auto">Auto</span> Stamps Completion Date. <span class="tag tag-slack">Slack</span> DM to every collaborator (except you). If recurring → roll the due date by the cadence and flip back to Upcoming.</td></tr>
+          <tr><td>Change Due Date</td><td><span class="tag tag-auto">Auto</span> Status re-derives instantly (Overdue / Today / Upcoming). Patched back to Airtable.</td></tr>
+          <tr><td>Change Assignee</td><td><span class="tag tag-slack">Slack</span> DM to new assignee. <span class="tag tag-auto">Auto</span> The actor (whoever clicked) becomes a collaborator.</td></tr>
+          <tr><td>Pick a Project</td><td><span class="tag tag-rule">Rule</span> Priority flips to "Project". Business inherits from project. Project's collaborators merged in. The drawer's Priority + Business dropdowns update in real-time.</td></tr>
+          <tr><td>Any inline edit succeeds</td><td><span class="tag tag-auto">Auto</span> Team filter counts at the top + KPI tiles re-render to match</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-kanban">
+      <h2><span class="num">5</span> Tab: Kanban</h2>
+      <p><strong>For:</strong> planning project work week-by-week. Only Project-priority tasks appear here.</p>
+
+      <h3>Three view modes</h3>
+      <table class="tbl">
+        <thead><tr><th>Mode</th><th>Shows</th><th>Drag drops to</th></tr></thead>
+        <tbody>
+          <tr><td><strong>4 Weeks</strong> (default)</td><td>Rolling 4 weeks from this Monday</td><td>Monday of that week</td></tr>
+          <tr><td><strong>12 Weeks</strong></td><td>Rolling 12 weeks (horizontal scroll)</td><td>Monday of that week</td></tr>
+          <tr><td><strong>12 Months</strong></td><td>Calendar months from this month</td><td>1st of that month (or today if same month)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>The Overdue column</h3>
+      <p>If any open Project task has a due date <em>before</em> the visible window, a red-bordered <strong>Overdue</strong> column auto-appears at the front. Drop a card onto a week → moves it there. Disappears when nothing is overdue.</p>
+
+      <h3>The "leave my plan alone" rule</h3>
+      <div class="callout"><strong>Project tasks pinned to future weeks are immune to the My Day auto-scheduler.</strong> Once you drop a Project task onto Week 3 of the Kanban, the auto-scheduler will not pull it back into Week 1 — even if you have the capacity. Urgent / High / Not Urgent tasks are still movable.</div>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-projects">
+      <h2><span class="num">6</span> Tab: Projects</h2>
+      <p><strong>For:</strong> seeing how the strategic projects are progressing.</p>
+
+      <h3>What each card shows</h3>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary);">
+        <li>Project name + business</li>
+        <li>KPI progress bar — current value vs target</li>
+        <li>Linked tasks (active count + overdue)</li>
+        <li>Owner</li>
+        <li>Click to expand → details + auto-opens the KPI drill-down</li>
+      </ul>
+
+      <h3>The KPI drill-down</h3>
+      <p>For projects with computed KPIs, the drill-down has different shapes depending on what the compute returns:</p>
+      <table class="tbl">
+        <thead><tr><th>KPI kind</th><th>Drill-down shows</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Revenue / cost</td><td>Three cards (Revenue / Costs / Cushion) + transaction tables, plus per-month pills</td><td>Operating Cushion, MRR</td></tr>
+          <tr><td>Task completion</td><td>Three cards (Completed / Outstanding / Total) + tables of those task names</td><td>Web App module completion %</td></tr>
+        </tbody>
+      </table>
+
+      <p>Compute logic is hand-written JS stored in each project's <code>KPI Compute Code</code> field on Airtable. The Leadership Dashboard runs the compute and writes the result back as JSON in <code>KPI Detail JSON</code>. Task OS just reads what's already been computed — no compute happens here.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-capacity">
+      <h2><span class="num">7</span> Tab: Capacity</h2>
+      <p><strong>For:</strong> who has the most on their plate this week. Each team member shows allocated hours per day for the next 14 days.</p>
+      <p style="font-size:0.9rem;color:var(--text-secondary)">Configurable daily cap (default 6 hours) per person via localStorage. Coloured red when over capacity, amber when 80–100%, green below.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-recurring">
+      <h2><span class="num">8</span> Tab: Recurring</h2>
+      <p><strong>For:</strong> seeing every task with a cadence (Daily, Weekly, Fortnightly, Monthly, Quarterly, Bi-Annually, Annually). Grouped by person and frequency.</p>
+
+      <div class="callout"><strong>Option A — Single Rolling Record:</strong> we don't spawn a new record each cycle. Instead, the same task record advances its due date when you mark it Complete. A separate <code>Task Completions</code> log records each cycle for productivity reporting. This means deleting a recurring task is permanent — no phantom respawns.</div>
+
+      <p>Full lifecycle is in <a href="#auto-recurring">section 12</a>.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="tab-jobs">
+      <h2><span class="num">9</span> Tab: Contractor Tasks</h2>
+      <p><strong>For:</strong> Gary, Rob, and Roy — the maintenance team. Tabbed switcher between the three of them.</p>
+
+      <h3>How it differs from regular tasks</h3>
+      <table class="tbl">
+        <thead><tr><th>Aspect</th><th>Regular task</th><th>Contractor task</th></tr></thead>
+        <tbody>
+          <tr><td>Due date</td><td>Required</td><td>None — just a Created Date</td></tr>
+          <tr><td>Status</td><td>Derived from due date</td><td>Always Upcoming until Completed</td></tr>
+          <tr><td>Sort order</td><td>By due date then priority</td><td>By Priority Level then oldest Created Date</td></tr>
+          <tr><td>Grouped by</td><td>Nothing in the grid</td><td>Property (gradient sage card per property)</td></tr>
+          <tr><td>Identified by</td><td><span style="font-size:0.8rem">(any task)</span></td><td><code>Maintenance Ticket</code> = TRUE on Airtable</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <!-- ===== AUTOMATIONS — cross-cutting ===== -->
+
+    <section class="section" id="auto-status">
+      <h2><span class="num">10</span> Automation: Status derivation</h2>
+      <p>The Status field is <em>derived</em> from the due date for almost every task. It's not something you usually set manually.</p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  A[Task in scope]:::data --> B{Stored status<br/>= Completed<br/>or Approval?}:::rule
+  B -->|Yes| C[Keep stored status]:::auto
+  B -->|No| D{Maintenance ticket?}:::rule
+  D -->|Yes| E[Force Upcoming]:::auto
+  D -->|No| F{Has due date?}:::rule
+  F -->|No| G[Upcoming]:::auto
+  F -->|Yes| H{Due &lt; today?}:::rule
+  H -->|Yes| I[Overdue]:::auto
+  H -->|No| J{Due = today?}:::rule
+  J -->|Yes| K[Today]:::auto
+  J -->|No| L[Upcoming]:::auto
+  classDef rule fill:#FEF3C7,stroke:#C6A15B,color:#92400e
+  classDef auto fill:#DDE8DF,stroke:#2C6E49,color:#14532d
+  classDef data fill:#E5E8E1,stroke:#5A6660,color:#1C2422
+        </pre>
+        <p class="diagram-cap">How <code>deriveTaskStatus</code> decides what status to show</p>
+      </div>
+
+      <div class="callout"><strong>Why derived?</strong> Due dates roll past on their own — Airtable wouldn't update the status without an automation. Computing on the client every render means the grid always shows the truth, even if Airtable's stored value is stale.</div>
+
+      <p style="font-size:0.9rem;color:var(--text-secondary)">When you change a due date inline, the new status is also patched back to Airtable so downstream consumers (other automations, the dashboard, exports) see the same value. The Sync popover surfaces drift here as a "stale statuses" count with a one-click "Reconcile all" button.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="auto-scheduler">
+      <h2><span class="num">11</span> Automation: Auto-scheduler</h2>
+      <p>The "Auto-Schedule" button on My Day re-arranges your tasks across the next ~14 days, respecting calendar events, routine blocks, and capacity.</p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  A[Click Auto-Schedule]:::user --> B[Fetch calendar + routines]:::data
+  B --> C[Compute free slots per day]:::auto
+  C --> D[Walk tasks priority-first]:::auto
+  D --> E{Hard deadline?}:::rule
+  E -->|Yes| F[Skip — never moved]:::auto
+  E -->|No| G{Project priority<br/>past Sunday?}:::rule
+  G -->|Yes| H[Skip — Kanban-pinned]:::auto
+  G -->|No| I{Due &gt; 14 days?}:::rule
+  I -->|Yes| J[Skip — far future]:::auto
+  I -->|No| K[Place in next free slot<br/>within daily cap]:::auto
+  classDef user fill:#DBE5F5,stroke:#5A86CF,color:#1e3a8a
+  classDef rule fill:#FEF3C7,stroke:#C6A15B,color:#92400e
+  classDef auto fill:#DDE8DF,stroke:#2C6E49,color:#14532d
+  classDef data fill:#E5E8E1,stroke:#5A6660,color:#1C2422
+        </pre>
+        <p class="diagram-cap">Order of checks the scheduler runs against each task</p>
+      </div>
+
+      <h3>The four exclusions, in plain English</h3>
+      <ol style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-primary);line-height:1.7">
+        <li><strong>Hard deadline</strong> — never moves. If you flagged it immovable, the scheduler reserves capacity on its existing day and walks past.</li>
+        <li><strong>Project past this week</strong> — never pulled forward. If you put a Project task on Kanban Week 3, the scheduler respects that — you planned it deliberately.</li>
+        <li><strong>Far future (&gt;14 days)</strong> — left alone. If you intentionally pushed something out, don't pull it back.</li>
+        <li><strong>Within the horizon, no flags</strong> — fair game. Scheduler places it in the next free slot that has capacity.</li>
+      </ol>
+
+      <p style="font-size:0.9rem;color:var(--text-secondary)">For Kevin specifically: on dashboard load, overdue tasks (excluding hard-deadline + project-future) get a one-shot pull-forward to today. Other team members keep their overdue counts visible for accountability.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="auto-slack">
+      <h2><span class="num">12</span> Automation: Slack notifications</h2>
+      <p>Four event types fire DMs via the <code>slack-notify</code> Cloudflare Worker.</p>
+
+      <table class="tbl">
+        <thead><tr><th>Trigger</th><th>Recipient</th><th>DM reads</th><th>Skipped when</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Task assigned</strong> (created with assignee)</td>
+            <td>Assignee</td>
+            <td>"<em>Creator</em> assigned a task to you"</td>
+            <td>Self-assignment</td>
+          </tr>
+          <tr>
+            <td><strong>Task reassigned</strong></td>
+            <td>New assignee</td>
+            <td>"<em>Actor</em> reassigned to you"</td>
+            <td>Reassign to same person, or to actor</td>
+          </tr>
+          <tr>
+            <td><strong>Task completed</strong></td>
+            <td>Every collaborator (except completer)</td>
+            <td>"<em>Completer</em> completed a task you collaborate on"</td>
+            <td>No collaborators, or completer is the only one</td>
+          </tr>
+          <tr>
+            <td><strong>Comment added</strong></td>
+            <td>Every collaborator + assignee (except commenter)</td>
+            <td>"<em>Author</em> left a comment" + the comment quoted</td>
+            <td>No other collaborators</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  A[Web app event]:::user --> B[POST to Cloudflare Worker]:::auto
+  B --> C[Worker: lookup<br/>email → Slack user ID]:::auto
+  C --> D{Found?}:::rule
+  D -->|No| E[Return 404 — log to console]:::auto
+  D -->|Yes| F[chat.postMessage]:::slack
+  F --> G[DM lands in Slack]:::slack
+  classDef user fill:#DBE5F5,stroke:#5A86CF,color:#1e3a8a
+  classDef rule fill:#FEF3C7,stroke:#C6A15B,color:#92400e
+  classDef auto fill:#DDE8DF,stroke:#2C6E49,color:#14532d
+  classDef slack fill:#E1ECF4,stroke:#4A154B,color:#4A154B
+        </pre>
+        <p class="diagram-cap">From button click to Slack DM in &lt; 2 seconds</p>
+      </div>
+
+      <h3>The fail-safes</h3>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary);line-height:1.7">
+        <li><strong>📨 Resend Slack button</strong> on the drawer — manually re-fires the assignment DM. Uses the task's stored <code>Created By Email</code> as the actor name (falls back to current user, then "(unknown)").</li>
+        <li><strong>Sync popover diagnostic panel</strong> — "Send test DM" picks a member and sends a test ping. "Check all recipients" runs a lookup-only check across the whole TEAM with no DMs sent.</li>
+        <li><strong>Per-member <code>slackEmail</code> override</strong> — for people whose Airtable email differs from Slack (Gary). Translation happens on the way to the worker.</li>
+        <li><strong>Fire-and-forget</strong> — Slack failures never block the user's save. Errors log to browser console + Cloudflare Worker logs.</li>
+      </ul>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="auto-collabs">
+      <h2><span class="num">13</span> Automation: Collaborator cascades</h2>
+      <p>Three sources contribute to a task's collaborator list. They merge additively, deduplicated by email.</p>
+
+      <table class="tbl">
+        <thead><tr><th>Source</th><th>Triggers when</th><th>Adds</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Project inheritance</strong></td><td>Task gets a project link</td><td>Every member listed on that project's Project Collaborators field</td></tr>
+          <tr><td><strong>Creator-as-collaborator</strong></td><td>Task is created and assignee ≠ creator</td><td>The creator (current user)</td></tr>
+          <tr><td><strong>Reassigner-as-collaborator</strong></td><td>An existing task's assignee changes (and actor ≠ new assignee, ≠ already on list)</td><td>The actor (whoever clicked the dropdown)</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout"><strong>Why it matters:</strong> the <em>completed</em> Slack DM goes to every collaborator. So if Mica creates a task for Erica, Mica is automatically added → Mica gets the completion DM when Erica finishes. No manual collaborator management needed.</div>
+
+      <p style="font-size:0.9rem;color:var(--text-secondary)">The Sync popover's drift check verifies the collaborator list locally vs Airtable for every active task — surfaces anywhere a cascade silently dropped.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="auto-recurring">
+      <h2><span class="num">14</span> Automation: Recurring rolling</h2>
+      <p>Recurring tasks use the <strong>single rolling record</strong> model. One Airtable record per recurring task — its due date advances on completion.</p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  A[Recurring task with cadence]:::data --> B[User marks Completed]:::user
+  B --> C[Log completion to Task Completions table]:::auto
+  C --> D[Roll due date forward by cadence]:::auto
+  D --> E[Flip status back to Upcoming]:::auto
+  E --> F[Same record continues to live]:::auto
+  classDef user fill:#DBE5F5,stroke:#5A86CF,color:#1e3a8a
+  classDef auto fill:#DDE8DF,stroke:#2C6E49,color:#14532d
+  classDef data fill:#E5E8E1,stroke:#5A6660,color:#1C2422
+        </pre>
+        <p class="diagram-cap">Option A: one record forever, with an immutable completion log</p>
+      </div>
+
+      <h3>Why this model?</h3>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary);line-height:1.7">
+        <li><strong>Clean delete semantics</strong> — deleting a recurring task is permanent. No phantom respawn from auto-spawn logic.</li>
+        <li><strong>Permanent productivity record</strong> — every cycle's completion is logged to the <code>Task Completions</code> table, independent of the live task.</li>
+        <li><strong>Natural capacity projection</strong> — each task = one row, makes capacity calculation simple.</li>
+      </ul>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="auto-kpi">
+      <h2><span class="num">15</span> Automation: KPI computation</h2>
+      <p>Each Project record has two KPI fields wired:</p>
+
+      <table class="tbl">
+        <thead><tr><th>Field</th><th>Type</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>KPI Compute Code</code></td><td>multilineText</td><td>Hand-written JS function body. Receives <code>ctx</code> with transactions / costs / tasks / project / today + helpers. Returns a number or an object with <code>value</code> + <code>detail</code>.</td></tr>
+          <tr><td><code>KPI Detail JSON</code></td><td>multilineText</td><td>Most recent compute result, written by the Leadership Dashboard. Capped at ~95KB — long transaction lists trim progressively.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Where compute runs</h3>
+      <div class="flowline">
+        <div class="flowbox"><h5>Leadership Dashboard</h5><p>Loads. Fetches transactions + tasks. Builds <code>ctx</code>. Runs every project's compute code in a sandbox.</p></div>
+        <div class="flowbox"><h5>Result PATCHed</h5><p>Writes <code>kpiCurrent</code> + <code>kpiDetailJson</code> back to the Project record on Airtable.</p></div>
+        <div class="flowbox"><h5>Task OS reads</h5><p>Projects tab and Strategic KPIs section parse the JSON and render. No compute on this side.</p></div>
+      </div>
+
+      <p>Three KPI shapes currently live:</p>
+      <ul style="padding-left:1.2rem;font-size:0.92rem;color:var(--text-secondary)">
+        <li><strong>Operating Cushion</strong> (Real Estate) — Revenue minus Fixed Costs, rolling 31 days + monthly breakdown</li>
+        <li><strong>MRR</strong> (Operations Director) — Sum of Fixed Income transactions, monthly breakdown</li>
+        <li><strong>Task Completion %</strong> (Web App project) — Linked tasks completed / total × 100</li>
+      </ul>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="auto-sync">
+      <h2><span class="num">16</span> Automation: Sync &amp; health check</h2>
+      <p>The green <strong>✓ Saved</strong> pill in the top-right opens a popover with everything you need to know about save state and data integrity.</p>
+
+      <h3>What it monitors</h3>
+      <table class="tbl">
+        <thead><tr><th>Section</th><th>Tells you</th></tr></thead>
+        <tbody>
+          <tr><td>Save state</td><td>Pending / OK / Failed counts for the current session</td></tr>
+          <tr><td>Drift detection (Check Sync button)</td><td>Tasks where local state ≠ Airtable. Compares name, status, priority, due date, description, collaborators, Created By Email.</td></tr>
+          <tr><td>Stale statuses</td><td>Tasks where derived status ≠ Airtable's stored status. One-click "Reconcile all" to backfill at 5 req/s.</td></tr>
+          <tr><td>Missing creators</td><td>Active tasks without a Created By Email. One-click "Backfill with my email" to stamp the current user.</td></tr>
+          <tr><td>Slack diagnostic</td><td>Test DM to a single member, or batch lookup of every team member with no DMs sent (lookup-only mode).</td></tr>
+          <tr><td>Recent saves</td><td>Last 50 field-level edits with status. Persists across reloads via localStorage.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout green"><strong>Drift &ne; bug.</strong> The most common drift signal is "stale statuses" — Airtable holding an out-of-date value because the date rolled past without a touch. The Reconcile button isn't fixing data corruption; it's just propagating client-derived truth to the server.</div>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="ai">
+      <h2><span class="num">17</span> Where AI helps</h2>
+      <p>AI calls are limited to deliberate, scoped use cases — never a global "do my work" loop.</p>
+
+      <table class="tbl">
+        <thead><tr><th>Where</th><th>Model</th><th>What it does</th><th>Lives in</th></tr></thead>
+        <tbody>
+          <tr><td>Strategy → Projects push</td><td><span class="tag tag-ai">AI</span> Sonnet</td><td>Extracts discrete tasks from each Monthly Stepping Stone description</td><td><code>os/strategy/strategy.js</code></td></tr>
+          <tr><td>KPI compute generation</td><td><span class="tag tag-ai">AI</span> Sonnet (manual)</td><td>Drafts JS compute bodies. Stored in Airtable, runs sandboxed in dashboard.</td><td>Hand-written, not in-app wizard</td></tr>
+          <tr><td>Reconciliation suggestions</td><td><span class="tag tag-ai">AI</span> Sonnet</td><td>Suggests Chart of Accounts categories for unreconciled transactions</td><td>Reconciliation skill</td></tr>
+        </tbody>
+      </table>
+
+      <p style="font-size:0.9rem;color:var(--text-secondary)">All AI calls go through <code>claude-proxy.kevinbrittain.workers.dev</code> — Cloudflare Worker that holds the Anthropic API key server-side.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="data">
+      <h2><span class="num">18</span> The data model</h2>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  T[Tasks]:::data
+  P[Projects]:::data
+  B[Businesses]:::data
+  TM[Team Members]:::data
+  C[Task Completions]:::data
+  TX[Transactions]:::data
+  T -->|Assignee| TM
+  T -->|Collaborators| TM
+  T -->|Project link| P
+  T -->|Business link| B
+  T -->|Created By Email| TM
+  P -->|Project Collaborators| TM
+  P -->|Business| B
+  T -->|On complete, log| C
+  P -->|KPI compute reads| TX
+  classDef data fill:#E5E8E1,stroke:#5A6660,color:#1C2422
+        </pre>
+        <p class="diagram-cap">How tables relate. Everything written by the web app PATCHes to Airtable directly.</p>
+      </div>
+
+      <h3>Identity flow</h3>
+      <p style="font-size:0.9rem;color:var(--text-secondary)">On dashboard load you pick your identity ("Who are you?" overlay). That sets <code>currentUser</code> = name + email + key. Stored in localStorage so it sticks across reloads. Used everywhere the app needs to know "who is doing this": new task creator, comment author, complete actor, Slack DM sender, etc.</p>
+    </section>
+
+
+    <!-- ════════════════════════════════════════════════ -->
+    <section class="section" id="glossary">
+      <h2><span class="num">19</span> Glossary</h2>
+      <dl class="gloss">
+        <dt>Active task</dt>
+        <dd>Any task whose status isn't Completed and whose <code>Some Day</code> flag isn't set. The default filter for almost every list in the app.</dd>
+
+        <dt>Assignee</dt>
+        <dd>The single person responsible for completing a task. Stored as an Airtable singleCollaborator field. Changing this fires a Slack reassignment DM.</dd>
+
+        <dt>Cadence</dt>
+        <dd>The repeat interval on a recurring task: Daily, Weekly, Fortnightly, Monthly, Quarterly, Bi-Annually, Annually.</dd>
+
+        <dt>Collaborator</dt>
+        <dd>Anyone CC'd on a task — they get the completion + comment DMs. Auto-populated by the cascades in section 13. Distinct from Assignee.</dd>
+
+        <dt>Created By Email</dt>
+        <dd>Plain-text field stamped on every web-app-created task with the creator's email. Survives identity switching, app upgrades, localStorage clears. Not set on tasks created in Airtable's native UI.</dd>
+
+        <dt>Hard deadline</dt>
+        <dd>A task flag that immobilises it. The auto-scheduler will not move a hard-deadline task in either direction.</dd>
+
+        <dt>KPI Compute Code</dt>
+        <dd>Hand-written JavaScript function body stored on a Project record. Runs sandboxed in the Leadership Dashboard's KPI engine to compute the project's current KPI value.</dd>
+
+        <dt>Maintenance Ticket</dt>
+        <dd>Boolean flag on a task that marks it as a contractor job. Tasks with this flag appear on the Contractor Tasks tab and are sorted differently (priority + age, not due date).</dd>
+
+        <dt>Option A (recurring)</dt>
+        <dd>The single-rolling-record model for recurring tasks: one record per task, due date advances on completion, completions logged separately. Replaces older auto-spawn-on-complete logic.</dd>
+
+        <dt>Pull-in horizon</dt>
+        <dd>The 14-day window from today within which the auto-scheduler is allowed to move tasks forward. Past this, tasks are left alone.</dd>
+
+        <dt>Sync drift</dt>
+        <dd>A mismatch between local state and Airtable that the Sync popover surfaces. Most commonly stale statuses; rarely a real save failure.</dd>
+
+        <dt>currentUser</dt>
+        <dd>The identity selected at login. Used as the actor for Slack DMs, the value stamped into Created By Email, the collaborator added by reassign cascades, and the default assignee for inline-add.</dd>
+      </dl>
+    </section>
+
+  </main>
+</div>
+
+<!-- Mermaid: render diagrams -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#FBFBF9',
+      primaryTextColor: '#1C2422',
+      primaryBorderColor: '#2C6E49',
+      lineColor: '#5A6660',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '13px',
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true },
+  });
+</script>
+
+</body>
+</html>
