@@ -441,7 +441,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4" title="Undo last action (Cmd+Z) — Nothing to undo">
       <span>Undo</span><span id="undoBtnLabel" style="display:none"></span>
     </button>
-    <button class="btn btn-primary" onclick="openCreateTaskModal()">+ Add Task</button>
+    <button class="btn btn-primary" onclick="openNewTaskDrawer()" title="Open the Task Drawer to add a task — title field is focused, just start typing">+ Add Task</button>
   </div>
 </div>
 
@@ -553,7 +553,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
       </select>
       <button class="btn btn-sm" id="clearFiltersBtn" onclick="clearAllFilters()" title="Reset all filters and search">Clear Filters</button>
       <button class="btn btn-primary btn-sm" data-autosched-btn onclick="safeAutoSchedule()">Auto-Schedule</button>
-      <button class="btn btn-primary btn-sm" onclick="openCreateTaskModal()">+ Add Task</button>
+      <button class="btn btn-primary btn-sm" onclick="openNewTaskDrawer()" title="Open the Task Drawer to add a task — title field is focused, just start typing">+ Add Task</button>
     </div>
 
     <div class="task-table-wrap">
@@ -2338,6 +2338,7 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">Add &amp; view comments</button></div></div>
     </div>
     <div class="drawer-footer">
+      <button class="btn" onclick="cancelDrawerEdit('${t.id}')" title="${(typeof window!=='undefined'&&window._draftTaskId===t.id)?'Discard this draft task and close the drawer':'Close the drawer without making changes'}">Cancel</button>
       <button class="btn btn-danger" onclick="deleteTask('${t.id}')">Delete</button>
       <button class="btn btn-success" onclick="completeTaskFromDrawer('${t.id}')">Complete</button>
     </div>
@@ -2461,9 +2462,48 @@ function closeDrawer(){
   }catch(e){console.warn('drawer blur failed',e)}
   // Flush any debounced saves for the drawer's task
   if(drawerTaskId)flushPendingSaves(drawerTaskId);
+  // If the drawer is closed via X / outside-click while still in "draft"
+  // state, treat that as "user is keeping the task" — clear the draft
+  // flag so future Cancel clicks (e.g. reopening the same task later)
+  // don't unexpectedly delete it. Only the explicit Cancel button
+  // discards the placeholder.
+  if(window._draftTaskId&&window._draftTaskId===drawerTaskId)window._draftTaskId=null;
   const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();
   drawerTaskId=null;
 }
+
+// Drawer "Cancel" button. Behaviour depends on whether this task was
+// just created as a placeholder (window._draftTaskId === taskId):
+//   • Draft  → silently DELETE the placeholder + close drawer.
+//              No confirm dialog — the user explicitly asked to back
+//              out of an accidental "+ Task" click.
+//   • Saved  → just close the drawer (== same as the X button).
+function cancelDrawerEdit(taskId){
+  const isDraft=window._draftTaskId===taskId;
+  window._draftTaskId=null;
+  closeDrawer();
+  if(!isDraft)return;
+  // Silently delete the placeholder. Network failure here is non-
+  // fatal — at worst the user has an orphan "(Untitled)" they can
+  // clean up later. Don't show a delete-failed toast for a Cancel
+  // (that would be confusing — they cancelled, they don't care if
+  // the placeholder hangs around).
+  try{
+    const i=allTasks.findIndex(t=>t.id===taskId);
+    const removed=i>=0?allTasks.splice(i,1)[0]:null;
+    fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}`,{
+      method:'DELETE',
+      headers:{'Authorization':`Bearer ${PAT}`}
+    }).catch(err=>{
+      console.warn('[cancelDrawerEdit] delete failed (non-fatal)',err);
+      // Restore so the task isn't lost from local state if the DELETE
+      // failed — it'll show up on next refresh anyway.
+      if(removed)allTasks.push(removed);
+    });
+    renderAll();
+  }catch(e){ console.warn('[cancelDrawerEdit] failed',e); }
+}
+window.cancelDrawerEdit=cancelDrawerEdit;
 // drwSaveText now accepts explicit taskId so it works even after drawerTaskId
 // has been cleared (race: onblur fires as the drawer is being closed).
 // Pass immediate=true for discrete edits (name blur) so the save fires now
@@ -3036,6 +3076,12 @@ function openDeleteConfirm(task){
   document.body.appendChild(overlay);
   document.getElementById('confirmDeleteBtn').onclick=()=>{
     overlay.remove();
+    // Close the drawer immediately so the user sees an instant response
+    // — without this, the drawer hangs around for the duration of the
+    // DELETE round-trip (100–500ms), which feels broken. performDelete
+    // also calls closeDrawer on success but that's redundant once we've
+    // already closed; the second call is a no-op.
+    if(drawerTaskId===task.id)closeDrawer();
     performDeleteTask(task.id);
   };
 }
@@ -6340,8 +6386,12 @@ function startQuickAddInline(opts){
 }
 window.startQuickAddInline=startQuickAddInline;
 
-// Kanban column double-click → name-input → create with column-appropriate
-// due date → openTaskDrawer. Mirrors the timeline double-click pattern.
+// Kanban column double-click → INLINE name input rendered AT THE TOP
+// of the column body where the user clicked → Enter creates the task
+// with the column's date → drawer opens. Mirrors the My Day timeline
+// pattern — the input lives in the same place the user double-clicked,
+// not as a disconnected centered overlay.
+//
 //   variant   meaning                          dueDate target
 //   --------  -------------------------------  ----------------------------
 //   overdue   the red "Overdue" column         today (no point creating overdue)
@@ -6350,29 +6400,122 @@ window.startQuickAddInline=startQuickAddInline;
 //   months    a month within renderKanbanMonths 1st of that month
 function kanbanDblClickAdd(e,variant,index){
   // Don't fire when the user double-clicks an existing card — that's the
-  // existing "open drawer" affordance on the card. Only handle when the
-  // click is on the column body itself (or the empty-state placeholder).
+  // existing "open drawer" affordance. Only handle clicks on the column
+  // body itself or the empty-state placeholder.
   const target=e.target;
   if(target&&target.closest&&target.closest('.kanban-card'))return;
   e.preventDefault();
+  // Find the .kanban-col-body that received the dblclick. event.currentTarget
+  // is the body in the inline-handler case, but be defensive in case the
+  // handler ends up bubbled.
+  const colBody=(e.currentTarget&&e.currentTarget.classList&&e.currentTarget.classList.contains('kanban-col-body'))
+    ? e.currentTarget
+    : (target&&target.closest?target.closest('.kanban-col-body'):null);
+  if(!colBody){ console.warn('[kanbanDblClickAdd] no col body found'); return; }
+  // Resolve the column-appropriate dueDate + a friendly label for the
+  // hint text inside the inline input.
   let dueDate=todayStr();
+  let dateLabel='today';
   try{
     if(variant==='rolling' && typeof kanbanWeeksStart!=='undefined'){
       const s=new Date(kanbanWeeksStart);s.setDate(s.getDate()+(index||0)*7);
       dueDate=`${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
+      dateLabel=s.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
     } else if(variant==='weeks' && typeof kanbanMonth!=='undefined'){
       const weeks=getWeeksOfMonth(kanbanMonth.getFullYear(),kanbanMonth.getMonth());
       const w=weeks[index||0];
-      if(w&&w.startStr)dueDate=w.startStr;
+      if(w&&w.startStr){
+        dueDate=w.startStr;
+        const ws=new Date(w.startStr);
+        dateLabel=ws.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+      }
     } else if(variant==='months' && typeof kanbanMonthStart!=='undefined'){
       const start=new Date(kanbanMonthStart);start.setDate(1);
       const md=new Date(start);md.setMonth(start.getMonth()+(index||0));
       dueDate=`${md.getFullYear()}-${String(md.getMonth()+1).padStart(2,'0')}-01`;
+      dateLabel=md.toLocaleDateString('en-GB',{month:'long',year:'numeric'});
+    } else if(variant==='overdue'){
+      dateLabel='today';
     }
   }catch(err){ console.warn('[kanbanDblClickAdd] date resolve failed',err); }
-  startQuickAddInline({dueDate});
+  kanbanInlineAdd(colBody,dueDate,dateLabel);
 }
 window.kanbanDblClickAdd=kanbanDblClickAdd;
+
+// Render an inline name-input row at the top of a Kanban column body.
+// Same UX semantics as the timeline's tlDoubleClickAddTask:
+//   • Dashed-border placeholder card with "+ Add for <date>" hint
+//   • Single-line input, autofocused, Enter saves, Esc cancels
+//   • Blur (clicking outside) cancels if no name was entered
+//   • On commit: createSimpleTask + openTaskDrawer
+// Mirrors the timeline implementation rather than reusing it because
+// the timeline render is positioned absolutely against pixel-y
+// coordinates; the kanban variant is plain flow layout.
+function kanbanInlineAdd(colBody,dueDate,dateLabel){
+  // Remove any existing inline-add (across ALL kanban columns) so a
+  // second double-click doesn't stack two inputs.
+  document.querySelectorAll('.kanban-inline-add').forEach(el=>el.remove());
+  const wrap=document.createElement('div');
+  wrap.className='kanban-card kanban-inline-add';
+  wrap.style.cssText=[
+    'background:var(--bg-surface)',
+    'border:1.5px dashed var(--accent)',
+    'cursor:text',
+    'padding:8px 10px',
+    'display:flex','flex-direction:column','gap:4px',
+  ].join(';');
+  wrap.innerHTML=`
+    <div id="kqaHint" style="font-size:9px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.04em">+ Add for ${escHtml(dateLabel)}</div>
+    <input id="kqaInput" type="text" placeholder="Task name (Enter to save · Esc to cancel)"
+           style="width:100%;border:none;outline:none;background:transparent;font-size:12px;font-weight:600;color:var(--text-primary);padding:0;font-family:inherit" />
+  `;
+  colBody.insertBefore(wrap,colBody.firstChild);
+  const input=document.getElementById('kqaInput');
+  input.focus();
+  let settled=false;
+  const cancel=()=>{ if(!settled){ settled=true; wrap.remove(); } };
+  const commit=async()=>{
+    if(settled)return;
+    const name=input.value.trim();
+    if(!name){ cancel(); return; }
+    settled=true;
+    input.disabled=true;
+    wrap.style.background='var(--accent-soft)';
+    wrap.style.borderStyle='solid';
+    const hint=document.getElementById('kqaHint');
+    if(hint)hint.innerHTML=`<span style="color:var(--accent)">⟳ Creating "${escHtml(name)}"…</span>`;
+    // Assignee: whoever's day is currently being viewed (matches timeline).
+    const viewMember=(typeof TEAM!=='undefined'&&TEAM&&typeof activeTeam!=='undefined')?TEAM.find(m=>m.key===activeTeam):null;
+    const assigneeEmail=(viewMember?viewMember.email:null)||(currentUser&&currentUser.email);
+    let created=null;
+    try{
+      created=await createSimpleTask({name,dueDate,timeEst:'15 min',assigneeEmail});
+    }catch(err){ console.error('[kanbanInlineAdd] createSimpleTask exception',err); }
+    wrap.remove();
+    if(!created||!created.id){ toast('Failed to create task — check console',true); return; }
+    // Defensive: parseTask may have substituted "(Untitled)" — force the
+    // local task to match what the user typed so the drawer / kanban /
+    // grid render the right name.
+    const t=allTasks.find(x=>x.id===created.id);
+    if(t){
+      t.name=name;
+      if(!t.dueDate)t.dueDate=dueDate;
+      if(!t.priority)t.priority='Not Urgent';
+      if(!t.timeEst)t.timeEst='15 min';
+      try{ t.status=deriveTaskStatus(t.dueDate,t.storedStatus||t.status)||t.status||'Today'; }catch(e){}
+    }
+    try{ renderAll(); }catch(e){}
+    requestAnimationFrame(()=>{ try{ openTaskDrawer(created.id); }catch(e){ console.warn('[kanbanInlineAdd] drawer open failed',e); } });
+  };
+  input.addEventListener('keydown',(ev)=>{
+    if(ev.key==='Enter'&&!ev.shiftKey){ ev.preventDefault(); commit(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); cancel(); }
+  });
+  // Blur cancels — but defer so a click on Enter doesn't race with the
+  // blur (Enter triggers commit, blur shouldn't undo it).
+  input.addEventListener('blur',()=>{ setTimeout(()=>{ if(!settled)cancel(); },150); });
+}
+window.kanbanInlineAdd=kanbanInlineAdd;
 
 // Open the Task Drawer DIRECTLY for a brand-new task, with the H2
 // title contenteditable focused and its placeholder text fully
@@ -6417,6 +6560,11 @@ async function openNewTaskDrawer(opts){
     if(!t.timeEst)t.timeEst=opts.timeEst||'15 min';
     try{ t.status=deriveTaskStatus(t.dueDate,t.storedStatus||t.status)||t.status||'Today'; }catch(e){}
   }
+  // Mark this task as a "draft" so the drawer's Cancel button knows
+  // to silently delete the placeholder if the user backs out. Cleared
+  // when the drawer closes via X / outside-click (== "I'm keeping it")
+  // or when the user clicks Cancel (== "discard").
+  window._draftTaskId=created.id;
   try{ renderAll(); }catch(e){}
   requestAnimationFrame(()=>{
     try{ openTaskDrawer(created.id); }catch(e){ console.warn('[openNewTaskDrawer] drawer open failed',e); return; }
