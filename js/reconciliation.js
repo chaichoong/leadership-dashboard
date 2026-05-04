@@ -501,7 +501,10 @@
 
         const actionHtml = r.status === 'approved'
             ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
-            : `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>`;
+            : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
+                  <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
+                  <button onclick="openReconSplitModal(${i})" title="Split this transaction into multiple portions (e.g. agent payment covering several units, or one invoice across two businesses)" style="font-size:10px;font-weight:600;padding:3px 8px;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Split</button>
+              </div>`;
 
         const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
 
@@ -980,6 +983,353 @@
         if (typeof clearDashCache === 'function') clearDashCache();
         window._reconChanged = false; // consumed by this refresh
         setTimeout(() => loadDashboard(), 2000);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // SPLIT TRANSACTIONS
+    //
+    // The Airtable model: every duplicate of a split transaction carries
+    // the same raw `**GBP` (the bank record) and the same `Split Count`
+    // (N). The Report Amount formula derives per-portion value:
+    //   • If `Split Override Amount` is set → use it verbatim (uneven)
+    //   • Else if `Split Count` > 1 → raw / count (equal)
+    //   • Else → raw (whole)
+    //
+    // Two modes from the modal:
+    //   Equal mode (default): user enters N. Source row gets Split Count
+    //     = N; we POST N-1 duplicates with the same bank fields + same
+    //     Split Count. Categorisation stays empty so the user reconciles
+    //     each portion individually (existing flow).
+    //   Custom mode: user enters rows of {amount, sub-cat, business,
+    //     tenancy, ...}. Source gets Split Count + Override + categories
+    //     for portion[0]; remaining portions become new records each
+    //     pre-categorised. No need to reconcile after — they're already
+    //     categorised at create time.
+    // ════════════════════════════════════════════════════════════════════
+    function openReconSplitModal(idx) {
+        const r = window._reconResults[idx];
+        if (!r) return;
+        // Find the live tx record so we have access to all the bank fields
+        // we need to copy onto the duplicates.
+        const tx = (allTransactions || []).find(t => t.id === r.txId);
+        if (!tx) { alert('Cannot find the source transaction in memory. Refresh and try again.'); return; }
+        const totalRaw = Math.abs(Number(getField(tx, F.txAmount)) || 0);
+        if (totalRaw <= 0) { alert('Cannot split a £0 transaction.'); return; }
+
+        const existing = document.getElementById('reconSplitModal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'reconSplitModal';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px';
+        overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+        overlay.innerHTML = `
+            <div style="background:#fff;border-radius:12px;width:100%;max-width:760px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);font-family:var(--font-family-base)">
+                <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+                    <div style="flex:1;min-width:0">
+                        <h3 style="margin:0;font-size:15px;font-weight:700;color:#1e293b">Split Transaction</h3>
+                        <div style="margin-top:4px;font-size:11px;color:#64748b">
+                            <strong>${escHtml(r.txDate)}</strong> &middot;
+                            <strong>${escHtml(r.txVendor || '—')}</strong> &middot;
+                            <strong>${escHtml(r.txAccount || '—')}</strong> &middot;
+                            Original: <strong style="color:#1e293b">${fmt(totalRaw)}</strong>
+                        </div>
+                    </div>
+                    <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:#94a3b8;cursor:pointer;padding:0 4px">&times;</button>
+                </div>
+                <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;gap:6px">
+                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;cursor:pointer">Equal Split (default)</button>
+                    <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--border-default);background:#fff;color:var(--text-secondary);border-radius:6px;cursor:pointer">Custom Amounts</button>
+                </div>
+                <div id="splitModalBody" style="overflow:auto;padding:16px 20px;flex:1"></div>
+                <div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;background:#f8fafc">
+                    <button onclick="document.getElementById('reconSplitModal').remove()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:6px;cursor:pointer">Cancel</button>
+                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer">Save Split</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        // Stash modal state so the body renderers can read it
+        window._splitState = {
+            txIdx: idx,
+            txId: r.txId,
+            totalRaw,
+            mode: 'equal',
+            equalCount: 2,
+            customRows: [
+                { amount: '', subCatId: '', businessId: '', tenancyId: '', unitId: '', costId: '' },
+                { amount: '', subCatId: '', businessId: '', tenancyId: '', unitId: '', costId: '' },
+            ],
+        };
+        renderSplitModalBody();
+    }
+    window.openReconSplitModal = openReconSplitModal;
+
+    function setSplitMode(mode) {
+        const st = window._splitState; if (!st) return;
+        st.mode = mode;
+        // Toggle the tab visuals
+        const tEq = document.getElementById('splitTabEqual');
+        const tCu = document.getElementById('splitTabCustom');
+        if (tEq && tCu) {
+            const active = 'border:1px solid var(--accent);background:var(--accent);color:#fff';
+            const inactive = 'border:1px solid var(--border-default);background:#fff;color:var(--text-secondary)';
+            tEq.setAttribute('style', `flex:1;padding:8px 12px;font-size:12px;font-weight:600;${mode==='equal'?active:inactive};border-radius:6px;cursor:pointer`);
+            tCu.setAttribute('style', `flex:1;padding:8px 12px;font-size:12px;font-weight:600;${mode==='custom'?active:inactive};border-radius:6px;cursor:pointer`);
+        }
+        renderSplitModalBody();
+    }
+    window.setSplitMode = setSplitMode;
+
+    function renderSplitModalBody() {
+        const st = window._splitState; if (!st) return;
+        const body = document.getElementById('splitModalBody'); if (!body) return;
+        if (st.mode === 'equal') {
+            const each = st.totalRaw / Math.max(1, st.equalCount);
+            body.innerHTML = `
+                <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
+                    Equal split divides the original transaction into <strong>N identical portions</strong>. The original record
+                    is updated with <code>Split Count = N</code>; <code>N − 1</code> duplicates are created with the same bank fields. Each
+                    portion's Report Amount becomes <code>${fmt(st.totalRaw)} ÷ N</code>. After saving you can reconcile each portion independently.
+                </p>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <label style="font-size:12px;color:#1e293b;font-weight:600">Number of portions:
+                        <input id="splitEqualCount" type="number" min="2" max="50" value="${st.equalCount}" oninput="splitOnEqualCountChange(this.value)"
+                            style="margin-left:8px;width:70px;padding:6px 8px;font-size:13px;border:1px solid var(--border-default);border-radius:4px">
+                    </label>
+                    <span style="font-size:12px;color:var(--text-secondary)">Each portion: <strong style="color:#1e293b" id="splitEachLabel">${fmt(each)}</strong></span>
+                </div>
+            `;
+        } else {
+            // Custom mode rows
+            const rowsHtml = st.customRows.map((row, i) => `
+                <tr id="splitCustomRow-${i}">
+                    <td style="padding:4px 6px;font-size:11px;color:var(--text-muted);width:24px">${i + 1}</td>
+                    <td style="padding:4px 6px"><input type="number" step="0.01" value="${row.amount === '' ? '' : row.amount}" oninput="splitOnCustomAmountChange(${i}, this.value)" placeholder="0.00" style="width:100%;padding:6px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:4px;text-align:right"></td>
+                    <td style="padding:4px 6px">${buildSubCatDropdown('split-subcat-' + i, row.subCatId)}</td>
+                    <td style="padding:4px 6px">${buildBusinessDropdown('split-business-' + i, row.businessId)}</td>
+                    <td style="padding:4px 6px">${buildTenancyDropdown('split-tenancy-' + i, row.tenancyId)}</td>
+                    <td style="padding:4px 6px;text-align:center;width:32px">
+                        <button onclick="splitRemoveCustomRow(${i})" title="Remove this portion" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;padding:0 4px">&times;</button>
+                    </td>
+                </tr>
+            `).join('');
+            const total = st.customRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+            const remaining = st.totalRaw - total;
+            const remColor = Math.abs(remaining) < 0.005 ? '#16a34a' : (remaining < 0 ? 'var(--danger)' : 'var(--text-secondary)');
+            body.innerHTML = `
+                <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
+                    Enter each portion's amount and pre-categorise. The original record gets the first portion's amount + categories;
+                    each remaining portion becomes a new record. Sum of all portions must equal <strong>${fmt(st.totalRaw)}</strong>.
+                </p>
+                <table style="width:100%;border-collapse:collapse;font-size:11px">
+                    <thead>
+                        <tr style="border-bottom:1px solid #e2e8f0">
+                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">#</th>
+                            <th style="padding:5px;text-align:right;font-size:9px;color:#64748b;text-transform:uppercase;min-width:90px">Amount (£)</th>
+                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">Sub-Category</th>
+                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">Business</th>
+                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">Tenancy</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+                <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <button onclick="splitAddCustomRow()" style="padding:6px 12px;font-size:11px;font-weight:600;background:#fff;color:var(--accent);border:1px solid var(--accent);border-radius:4px;cursor:pointer">+ Add Portion</button>
+                    <div style="font-size:12px">
+                        <span style="color:var(--text-muted)">Total: <strong style="color:#1e293b">${fmt(total)}</strong></span>
+                        &nbsp;·&nbsp;
+                        <span style="color:${remColor}">Remaining: <strong>${fmt(remaining)}</strong></span>
+                    </div>
+                </div>
+            `;
+            // Wire up each row's Sub-Cat select to write back to state on change
+            // (built-in dropdowns don't auto-bind to splitState).
+            st.customRows.forEach((_, i) => {
+                const wire = (selId, key) => {
+                    const el = document.getElementById(selId);
+                    if (el) el.onchange = () => { st.customRows[i][key] = resolveDropdownId(selId); };
+                };
+                wire('split-subcat-' + i, 'subCatId');
+                wire('split-business-' + i, 'businessId');
+                wire('split-tenancy-' + i, 'tenancyId');
+            });
+        }
+        // Save button enabled-state hint
+        updateSplitSaveButton();
+    }
+
+    function updateSplitSaveButton() {
+        const st = window._splitState; if (!st) return;
+        const btn = document.getElementById('splitSaveBtn'); if (!btn) return;
+        let ok = false, label = 'Save Split';
+        if (st.mode === 'equal') {
+            ok = Number.isInteger(Number(st.equalCount)) && st.equalCount >= 2 && st.equalCount <= 50;
+            label = `Save · ${st.equalCount} equal portions`;
+        } else {
+            const total = st.customRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+            ok = st.customRows.length >= 2 && Math.abs(st.totalRaw - total) < 0.005 && st.customRows.every(r => Number(r.amount) > 0);
+            label = ok ? `Save · ${st.customRows.length} portions` : 'Save Split';
+        }
+        btn.disabled = !ok;
+        btn.style.opacity = ok ? '1' : '0.5';
+        btn.style.cursor = ok ? 'pointer' : 'not-allowed';
+        btn.textContent = label;
+    }
+
+    function splitOnEqualCountChange(v) {
+        const st = window._splitState; if (!st) return;
+        const n = Math.max(2, Math.min(50, Math.floor(Number(v) || 2)));
+        st.equalCount = n;
+        const each = st.totalRaw / n;
+        const lab = document.getElementById('splitEachLabel');
+        if (lab) lab.textContent = fmt(each);
+        updateSplitSaveButton();
+    }
+    window.splitOnEqualCountChange = splitOnEqualCountChange;
+
+    function splitOnCustomAmountChange(i, v) {
+        const st = window._splitState; if (!st) return;
+        st.customRows[i].amount = v === '' ? '' : Number(v);
+        // Re-render only the totals row to avoid trashing the user's focus
+        renderSplitModalBody();
+        // Restore focus to the input the user was typing in
+        const inp = document.querySelectorAll('#splitCustomRow-' + i + ' input[type="number"]')[0];
+        if (inp) { inp.focus(); inp.select(); }
+    }
+    window.splitOnCustomAmountChange = splitOnCustomAmountChange;
+
+    function splitAddCustomRow() {
+        const st = window._splitState; if (!st) return;
+        st.customRows.push({ amount: '', subCatId: '', businessId: '', tenancyId: '', unitId: '', costId: '' });
+        renderSplitModalBody();
+    }
+    window.splitAddCustomRow = splitAddCustomRow;
+
+    function splitRemoveCustomRow(i) {
+        const st = window._splitState; if (!st) return;
+        if (st.customRows.length <= 2) { alert('A split needs at least 2 portions. Cancel the split if you want to leave it as one transaction.'); return; }
+        st.customRows.splice(i, 1);
+        renderSplitModalBody();
+    }
+    window.splitRemoveCustomRow = splitRemoveCustomRow;
+
+    // Performs the actual split: PATCH the source record + POST N-1 dupes.
+    async function performReconSplit(idx) {
+        const st = window._splitState;
+        if (!st) return;
+        const r = window._reconResults[idx]; if (!r) return;
+        const tx = (allTransactions || []).find(t => t.id === r.txId); if (!tx) return;
+        const btn = document.getElementById('splitSaveBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; btn.style.opacity = '0.6'; }
+
+        // Bank-level fields that must be copied to every duplicate. These
+        // describe the bank record itself (date, raw amount, account,
+        // vendor, description) — NOT the categorisation.
+        const bankFields = {};
+        const copyField = (fid) => {
+            const v = getField(tx, fid);
+            if (v == null || (Array.isArray(v) && v.length === 0)) return;
+            // Linked records come back as [{id, name}] from getField — convert
+            // to plain ID array for write.
+            if (Array.isArray(v) && v.length && v[0] && typeof v[0] === 'object' && v[0].id) {
+                bankFields[fid] = v.map(x => x.id);
+            } else {
+                bankFields[fid] = v;
+            }
+        };
+        copyField(F.txDate);
+        copyField(F.txAmount);          // raw **GBP — same on every duplicate
+        copyField(F.txAccountLink);
+        copyField(F.txVendor);
+        copyField(F.txDescription);
+
+        const N = st.mode === 'equal' ? st.equalCount : st.customRows.length;
+
+        try {
+            if (st.mode === 'equal') {
+                // 1) PATCH source: just set Split Count = N. Categorisation
+                // left as-is so the user reconciles each portion afterwards.
+                await patchTx(tx.id, { [F.txSplitCount]: N });
+                // 2) POST N-1 duplicates with the same bank fields + Split Count = N.
+                const dupes = [];
+                for (let k = 0; k < N - 1; k++) {
+                    dupes.push({ fields: { ...bankFields, [F.txSplitCount]: N } });
+                }
+                await postTxRecords(dupes);
+            } else {
+                // Custom mode. Source row gets portion[0]; each remaining
+                // portion becomes a new record.
+                const rows = st.customRows;
+                const portion0Fields = {
+                    [F.txSplitCount]: N,
+                    [F.txSplitOverride]: Number(rows[0].amount) || 0,
+                };
+                if (rows[0].subCatId)   portion0Fields[F.txSubCategory] = [rows[0].subCatId];
+                if (rows[0].businessId) portion0Fields[F.txBusiness]    = [rows[0].businessId];
+                if (rows[0].tenancyId)  portion0Fields[F.txTenancy]     = [rows[0].tenancyId];
+                await patchTx(tx.id, portion0Fields);
+                // POST one duplicate per remaining portion
+                const dupes = [];
+                for (let k = 1; k < rows.length; k++) {
+                    const f = { ...bankFields, [F.txSplitCount]: N, [F.txSplitOverride]: Number(rows[k].amount) || 0 };
+                    if (rows[k].subCatId)   f[F.txSubCategory] = [rows[k].subCatId];
+                    if (rows[k].businessId) f[F.txBusiness]    = [rows[k].businessId];
+                    if (rows[k].tenancyId)  f[F.txTenancy]     = [rows[k].tenancyId];
+                    dupes.push({ fields: f });
+                }
+                await postTxRecords(dupes);
+            }
+
+            // Mark the panel as "changed" so closing it triggers a dashboard refresh.
+            window._reconChanged = true;
+            const overlay = document.getElementById('reconSplitModal');
+            if (overlay) overlay.remove();
+            // Easiest way to reflect the new rows in the recon panel is to
+            // close it and re-trigger reconciliation matching from scratch.
+            const panel = document.getElementById('reconPanel');
+            if (panel) panel.remove();
+            if (typeof clearDashCache === 'function') clearDashCache();
+            // Show a quick confirmation; rerun matching after the data refresh.
+            alert(`✓ Split into ${N} portion${N === 1 ? '' : 's'}.\n\nThe Reconciliation panel will reload with the new rows.`);
+            await loadDashboard();
+            setTimeout(() => { try { triggerReconciliation(); } catch (e) { console.warn('[split] re-trigger failed', e); } }, 800);
+        } catch (e) {
+            console.error('[performReconSplit] failed', e);
+            alert('Split failed: ' + (e && e.message ? e.message : 'unknown error') + '\n\nThe original transaction has not been modified. Check the console for details.');
+            if (btn) { btn.disabled = false; btn.textContent = 'Save Split'; btn.style.opacity = '1'; }
+        }
+    }
+    window.performReconSplit = performReconSplit;
+
+    // Helpers — PATCH a transaction and POST N records (in one Airtable batch).
+    async function patchTx(txId, fields) {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields, typecast: true }),
+        });
+        if (!res.ok) throw new Error('PATCH failed: HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200));
+        return res.json();
+    }
+    async function postTxRecords(records) {
+        if (!records.length) return [];
+        // Airtable batches up to 10 records per POST.
+        const out = [];
+        for (let i = 0; i < records.length; i += 10) {
+            const batch = records.slice(i, i + 10);
+            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}?returnFieldsByFieldId=true`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: batch, typecast: true }),
+            });
+            if (!res.ok) throw new Error('POST failed: HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200));
+            const data = await res.json();
+            out.push(...(data.records || []));
+        }
+        return out;
     }
 
     // Close the recon panel; if any rows were approved while it was open, trigger a dashboard refresh

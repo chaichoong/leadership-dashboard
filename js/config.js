@@ -185,6 +185,21 @@
         txDescription:    'fldsbuAJCTsXHug4C',
         txInvoiceData:    'fldT5qfiyt5DTLrp8',
         txTeamMember:     'fldMwliSwEhLuumvd',
+        // Split mechanism
+        // ------------------------------------------------------------------
+        // Splits are implemented as duplicate records. Every duplicate of a
+        // split transaction carries the same raw `**GBP` (the bank record)
+        // and the same `Split Count` (how many parts it was divided into).
+        // The Report Amount formula then derives the per-portion value:
+        //   • If `Split Override Amount` is set → use it verbatim (uneven splits)
+        //   • Else if `Split Count` > 1 → raw / count (equal splits)
+        //   • Else → raw (whole transaction)
+        // Downstream consumers (P&L, cashflow, balance calc, CFV, AI audit)
+        // all just read txReportAmount and don't need to know about splits.
+        txSplitCount:     'fld20FWX7yjM8P2Kz',   // number — N. Default 1 = whole transaction.
+        txSplitOverride:  'fldQ37YsyR9r3EbkP',   // currency — per-portion amount for UNEVEN splits.
+        txSplitStatus:    'fld7gZxUldVLZXnAB',   // formula → "Single" or "Split"
+        txOriginalAmount: 'fldh711ChnFGDvh1u',   // formula → echoes raw, for display
         // Tenancy — tenant active/former status (rollup from Tenants table)
         tenStatus:        'fldgWAyha1Uij1SZP',
         // Rental Units
