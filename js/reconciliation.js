@@ -1216,7 +1216,18 @@
     }
     window.splitRemoveCustomRow = splitRemoveCustomRow;
 
-    // Performs the actual split: PATCH the source record + POST N-1 dupes.
+    // Performs the split entirely in-place:
+    //   1. PATCH the source row + POST N-1 duplicates IN PARALLEL (one Airtable
+    //      round-trip total instead of a full dashboard reload).
+    //   2. Update local allTransactions so other features see the new records.
+    //   3. Splice the source row out of _reconResults and splice in N new rows
+    //      (one per portion) — each carrying inherited categorisation so the
+    //      user can hit Approve immediately, exactly like the original AI-matched
+    //      rows. New row indices are populated by re-rendering only the table
+    //      body, NOT the whole panel.
+    //   4. Briefly highlight the new rows + scroll the first into view so the
+    //      user sees the split landed.
+    // No alert popup. No dashboard reload. No matching re-run.
     async function performReconSplit(idx) {
         const st = window._splitState;
         if (!st) return;
@@ -1225,15 +1236,12 @@
         const btn = document.getElementById('splitSaveBtn');
         if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; btn.style.opacity = '0.6'; }
 
-        // Bank-level fields that must be copied to every duplicate. These
-        // describe the bank record itself (date, raw amount, account,
-        // vendor, description) — NOT the categorisation.
+        // Bank-level fields to copy to every duplicate. Date / raw amount /
+        // account / vendor / description describe the bank record itself.
         const bankFields = {};
         const copyField = (fid) => {
             const v = getField(tx, fid);
             if (v == null || (Array.isArray(v) && v.length === 0)) return;
-            // Linked records come back as [{id, name}] from getField — convert
-            // to plain ID array for write.
             if (Array.isArray(v) && v.length && v[0] && typeof v[0] === 'object' && v[0].id) {
                 bankFields[fid] = v.map(x => x.id);
             } else {
@@ -1249,53 +1257,154 @@
         const N = st.mode === 'equal' ? st.equalCount : st.customRows.length;
 
         try {
+            // ── Build per-portion amount + categorisation arrays ──
+            let portionAmounts, portionCats;
             if (st.mode === 'equal') {
-                // 1) PATCH source: just set Split Count = N. Categorisation
-                // left as-is so the user reconciles each portion afterwards.
-                await patchTx(tx.id, { [F.txSplitCount]: N });
-                // 2) POST N-1 duplicates with the same bank fields + Split Count = N.
-                const dupes = [];
-                for (let k = 0; k < N - 1; k++) {
-                    dupes.push({ fields: { ...bankFields, [F.txSplitCount]: N } });
-                }
-                await postTxRecords(dupes);
+                const each = st.totalRaw / N;
+                portionAmounts = Array(N).fill(each);
+                // Equal mode: inherit the source row's existing categorisation
+                // on EVERY portion. The user can override individual rows in
+                // the recon panel before approving.
+                portionCats = Array(N).fill({});
             } else {
-                // Custom mode. Source row gets portion[0]; each remaining
-                // portion becomes a new record.
-                const rows = st.customRows;
-                const portion0Fields = {
-                    [F.txSplitCount]: N,
-                    [F.txSplitOverride]: Number(rows[0].amount) || 0,
-                };
-                if (rows[0].subCatId)   portion0Fields[F.txSubCategory] = [rows[0].subCatId];
-                if (rows[0].businessId) portion0Fields[F.txBusiness]    = [rows[0].businessId];
-                if (rows[0].tenancyId)  portion0Fields[F.txTenancy]     = [rows[0].tenancyId];
-                await patchTx(tx.id, portion0Fields);
-                // POST one duplicate per remaining portion
-                const dupes = [];
-                for (let k = 1; k < rows.length; k++) {
-                    const f = { ...bankFields, [F.txSplitCount]: N, [F.txSplitOverride]: Number(rows[k].amount) || 0 };
-                    if (rows[k].subCatId)   f[F.txSubCategory] = [rows[k].subCatId];
-                    if (rows[k].businessId) f[F.txBusiness]    = [rows[k].businessId];
-                    if (rows[k].tenancyId)  f[F.txTenancy]     = [rows[k].tenancyId];
-                    dupes.push({ fields: f });
-                }
-                await postTxRecords(dupes);
+                portionAmounts = st.customRows.map(row => Number(row.amount) || 0);
+                portionCats = st.customRows.map(row => ({
+                    subCatId: row.subCatId, businessId: row.businessId,
+                    tenancyId: row.tenancyId, unitId: row.unitId, costId: row.costId,
+                }));
             }
 
-            // Mark the panel as "changed" so closing it triggers a dashboard refresh.
+            // ── Build the Airtable writes ──
+            // Source record (PATCH): set Split Count = N. For custom mode,
+            // also set portion[0]'s override + categorisation. Equal mode
+            // leaves categorisation untouched on the source so the user
+            // reconciles via the existing dropdowns.
+            const srcFields = { [F.txSplitCount]: N };
+            if (st.mode === 'custom') {
+                srcFields[F.txSplitOverride] = portionAmounts[0];
+                const c0 = portionCats[0];
+                if (c0.subCatId)   srcFields[F.txSubCategory] = [c0.subCatId];
+                if (c0.businessId) srcFields[F.txBusiness]    = [c0.businessId];
+                if (c0.tenancyId)  srcFields[F.txTenancy]     = [c0.tenancyId];
+                if (c0.unitId)     srcFields[F.txUnit]        = [c0.unitId];
+                if (c0.costId)     srcFields[F.txCost]        = [c0.costId];
+            }
+            // Duplicate records (POST × N-1): same bank fields, Split Count,
+            // and (custom mode) override + categorisation per portion.
+            const dupes = [];
+            for (let k = 1; k < N; k++) {
+                const f = { ...bankFields, [F.txSplitCount]: N };
+                if (st.mode === 'custom') {
+                    f[F.txSplitOverride] = portionAmounts[k];
+                    const c = portionCats[k];
+                    if (c.subCatId)   f[F.txSubCategory] = [c.subCatId];
+                    if (c.businessId) f[F.txBusiness]    = [c.businessId];
+                    if (c.tenancyId)  f[F.txTenancy]     = [c.tenancyId];
+                    if (c.unitId)     f[F.txUnit]        = [c.unitId];
+                    if (c.costId)     f[F.txCost]        = [c.costId];
+                }
+                dupes.push({ fields: f });
+            }
+
+            // ── Run PATCH and POST in parallel for speed ──
+            const [_patched, postedRecords] = await Promise.all([
+                patchTx(tx.id, srcFields),
+                postTxRecords(dupes),
+            ]);
+
+            // ── Update local allTransactions so downstream consumers
+            //    (CFV detection, P&L, balance calc) see the new records
+            //    without waiting for a refresh.
+            if (!tx.fields) tx.fields = {};
+            tx.fields[F.txSplitCount] = N;
+            if (st.mode === 'custom') {
+                tx.fields[F.txSplitOverride] = portionAmounts[0];
+                const c0 = portionCats[0];
+                if (c0.subCatId)   tx.fields[F.txSubCategory] = [{ id: c0.subCatId }];
+                if (c0.businessId) tx.fields[F.txBusiness]    = [{ id: c0.businessId }];
+                if (c0.tenancyId)  tx.fields[F.txTenancy]     = [{ id: c0.tenancyId }];
+                if (c0.unitId)     tx.fields[F.txUnit]        = [{ id: c0.unitId }];
+                if (c0.costId)     tx.fields[F.txCost]        = [{ id: c0.costId }];
+            }
+            postedRecords.forEach(rec => {
+                allTransactions.push({ id: rec.id, fields: rec.fields || {} });
+            });
+
+            // ── Build the N new _reconResults rows ──
+            // Equal mode: every portion inherits the source's existing
+            // categorisation (matchType / matched suggestions etc.).
+            // Custom mode: each portion gets exactly what the user entered
+            // in the modal — no inherited AI suggestions, since the user
+            // explicitly decided the breakdown.
+            const newResults = portionAmounts.map((amt, k) => {
+                const recId = k === 0 ? tx.id : (postedRecords[k - 1] && postedRecords[k - 1].id);
+                const inheritedFromSource = st.mode === 'equal' ? {
+                    categoryId: r.categoryId, categoryName: r.categoryName,
+                    subCatId: r.subCatId, subCatName: r.subCatName,
+                    businessId: r.businessId, businessName: r.businessName,
+                    tenantName: r.tenantName, tenantId: r.tenantId,
+                    tenancyLabel: r.tenancyLabel, tenancyId: r.tenancyId,
+                    unitName: r.unitName, unitId: r.unitId,
+                    propertyName: r.propertyName,
+                    costLabel: r.costLabel, costId: r.costId,
+                } : null;
+                const fromCustom = st.mode === 'custom' ? {
+                    categoryId: '', categoryName: '',
+                    subCatId: portionCats[k].subCatId || '',
+                    subCatName: portionCats[k].subCatId ? getSubCatName(portionCats[k].subCatId) : '',
+                    businessId: portionCats[k].businessId || '', businessName: '',
+                    tenantName: '', tenantId: '',
+                    tenancyLabel: '', tenancyId: portionCats[k].tenancyId || '',
+                    unitName: '', unitId: portionCats[k].unitId || '',
+                    propertyName: '',
+                    costLabel: '', costId: portionCats[k].costId || '',
+                } : null;
+                const cats = inheritedFromSource || fromCustom;
+                return {
+                    txId: recId,
+                    txDate: r.txDate, txVendor: r.txVendor, txDesc: r.txDesc,
+                    txAccount: r.txAccount,
+                    txAmount: amt,
+                    ...cats,
+                    matchType: `Split ${k + 1}/${N}` + (st.mode === 'custom' ? ' (custom)' : ''),
+                    score: 0,
+                    status: r.status === 'approved' ? 'approved' : (st.mode === 'custom' ? 'suggestion' : (r.status || 'unmatched')),
+                };
+            });
+
+            // ── Splice into _reconResults + _reconOriginals at the same idx ──
+            window._reconResults.splice(idx, 1, ...newResults);
+            const originals = window._reconOriginals || (window._reconOriginals = []);
+            originals.splice(idx, 1, ...newResults.map(nr => ({
+                categoryId: nr.categoryId, subCatId: nr.subCatId,
+                businessId: nr.businessId, tenancyId: nr.tenancyId,
+                unitId: nr.unitId, costId: nr.costId,
+                status: nr.status,
+            })));
+
+            // ── Re-render the table body (whole body — indices shift below the split) ──
+            const tbody = document.getElementById('reconTableBody');
+            if (tbody) {
+                tbody.innerHTML = window._reconResults.map((rr, i) => reconRowHtml(rr, i)).join('');
+                // Briefly tint the new rows green so the user sees them land
+                for (let k = 0; k < N; k++) {
+                    const row = document.getElementById('recon-row-' + (idx + k));
+                    if (row) {
+                        row.style.transition = 'background-color 0.4s ease';
+                        row.style.backgroundColor = 'var(--accent-soft, #DDE8DF)';
+                        setTimeout(() => { row.style.backgroundColor = ''; }, 1600);
+                    }
+                }
+                const firstNew = document.getElementById('recon-row-' + idx);
+                if (firstNew) firstNew.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            // Mark recon state as changed so closing the panel triggers a refresh
             window._reconChanged = true;
+
+            // Close the modal — instant
             const overlay = document.getElementById('reconSplitModal');
             if (overlay) overlay.remove();
-            // Easiest way to reflect the new rows in the recon panel is to
-            // close it and re-trigger reconciliation matching from scratch.
-            const panel = document.getElementById('reconPanel');
-            if (panel) panel.remove();
-            if (typeof clearDashCache === 'function') clearDashCache();
-            // Show a quick confirmation; rerun matching after the data refresh.
-            alert(`✓ Split into ${N} portion${N === 1 ? '' : 's'}.\n\nThe Reconciliation panel will reload with the new rows.`);
-            await loadDashboard();
-            setTimeout(() => { try { triggerReconciliation(); } catch (e) { console.warn('[split] re-trigger failed', e); } }, 800);
         } catch (e) {
             console.error('[performReconSplit] failed', e);
             alert('Split failed: ' + (e && e.message ? e.message : 'unknown error') + '\n\nThe original transaction has not been modified. Check the console for details.');
