@@ -499,18 +499,26 @@
         const catSelect = buildCatDropdown('recon-cat-' + i, r.categoryId);
         const subCatSelect = buildSubCatDropdown('recon-subcat-' + i, r.subCatId);
 
+        // Disable the Split button if the row's source is already split
+        // (Split Count > 1) OR if its name already carries "(Split 1 of"
+        // — both cases will be rejected by the modal's pre-flight checks
+        // anyway, but it's clearer UX to grey out the button up front.
+        const isAlreadySplit = (() => {
+            const tx = (allTransactions || []).find(t => t.id === r.txId);
+            if (!tx) return false;
+            const cnt = Number(getField(tx, F.txSplitCount)) || 1;
+            const nm = String(getField(tx, F.txName) || '');
+            return cnt > 1 || nm.includes('(Split 1 of');
+        })();
+        const splitBtnHtml = isAlreadySplit
+            ? `<button title="This transaction is already split — re-splitting is disabled" disabled style="font-size:10px;font-weight:600;padding:3px 8px;background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;border-radius:4px;cursor:not-allowed">Split</button>`
+            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N equal portions (the Airtable automation owns duplication)" style="font-size:10px;font-weight:600;padding:3px 8px;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Split</button>`;
         const actionHtml = r.status === 'approved'
             ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
-            : `<button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>`;
-        // SPLIT BUTTON — temporarily REMOVED from the UI. The previous
-        // implementation duplicated records via POST, but Kevin's Airtable
-        // base has an existing automation that ALSO creates duplicates
-        // when Split Count changes — so every JS-driven split was
-        // producing 2× the dupes (5-way split → 25 records instead of 5).
-        // The openReconSplitModal/performReconSplit functions remain in
-        // the file but are unreachable from the UI until the duplication
-        // strategy is rewritten as PATCH-only (set Split Count + Override
-        // on the source, let the Airtable automation own duplication).
+            : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
+                  <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
+                  ${splitBtnHtml}
+              </div>`;
 
         const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
 
@@ -992,25 +1000,28 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // SPLIT TRANSACTIONS
+    // SPLIT TRANSACTIONS — PATCH-ONLY (Airtable automation owns duplication)
     //
-    // The Airtable model: every duplicate of a split transaction carries
-    // the same raw `**GBP` (the bank record) and the same `Split Count`
-    // (N). The Report Amount formula derives per-portion value:
-    //   • If `Split Override Amount` is set → use it verbatim (uneven)
-    //   • Else if `Split Count` > 1 → raw / count (equal)
-    //   • Else → raw (whole)
+    // Kevin's Airtable base has a "Split Transactions" automation
+    // (Operations Director → Automations → Finance → Split Transactions)
+    // that triggers on `Split Count > 1` and creates N-1 child records
+    // with `**GBP = original / N`, `Split Count = 1`, names "Split X of N".
     //
-    // Two modes from the modal:
-    //   Equal mode (default): user enters N. Source row gets Split Count
-    //     = N; we POST N-1 duplicates with the same bank fields + same
-    //     Split Count. Categorisation stays empty so the user reconciles
-    //     each portion individually (existing flow).
-    //   Custom mode: user enters rows of {amount, sub-cat, business,
-    //     tenancy, ...}. Source gets Split Count + Override + categories
-    //     for portion[0]; remaining portions become new records each
-    //     pre-categorised. No need to reconcile after — they're already
-    //     categorised at create time.
+    // The JS Split feature is PATCH-ONLY:
+    //   1. PATCH the source's Split Count = N
+    //   2. Poll Airtable for the new children (filterByFormula on
+    //      vendor + date + child amount). Up to 15s.
+    //   3. Splice the source row out of _reconResults and the source +
+    //      children rows in (in-place, no panel reload, no popup).
+    //
+    // NEVER POST duplicate transactions from JS — both we AND the
+    // Airtable automation would create them, producing N × (N-1) extras.
+    // (See commit f5b7aad / data-loss incident on 2026-05-04.)
+    //
+    // Custom Amounts mode is currently DISABLED — it requires the
+    // Report Amount formula in Airtable to honor `Split Override Amount`.
+    // The MCP doesn't support updating formulas, so that's a manual step.
+    // Until it's done, the modal blocks Custom mode with a clear message.
     // ════════════════════════════════════════════════════════════════════
     function openReconSplitModal(idx) {
         const r = window._reconResults[idx];
@@ -1045,8 +1056,8 @@
                     <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:#94a3b8;cursor:pointer;padding:0 4px">&times;</button>
                 </div>
                 <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;gap:6px">
-                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;cursor:pointer">Equal Split (default)</button>
-                    <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--border-default);background:#fff;color:var(--text-secondary);border-radius:6px;cursor:pointer">Custom Amounts</button>
+                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;cursor:pointer">Equal Split</button>
+                    <button id="splitTabCustom" disabled title="Custom Amounts requires a one-time Airtable formula update — see message" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px dashed var(--border-default);background:#f8fafc;color:#94a3b8;border-radius:6px;cursor:not-allowed">Custom Amounts (coming soon)</button>
                 </div>
                 <div id="splitModalBody" style="overflow:auto;padding:16px 20px;flex:1"></div>
                 <div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;background:#f8fafc">
@@ -1095,9 +1106,11 @@
             const each = st.totalRaw / Math.max(1, st.equalCount);
             body.innerHTML = `
                 <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
-                    Equal split divides the original transaction into <strong>N identical portions</strong>. The original record
-                    is updated with <code>Split Count = N</code>; <code>N − 1</code> duplicates are created with the same bank fields. Each
-                    portion's Report Amount becomes <code>${fmt(st.totalRaw)} ÷ N</code>. After saving you can reconcile each portion independently.
+                    Sets <code>Split Count = N</code> on this transaction. The Airtable
+                    <strong>"Split Transactions"</strong> automation will then create <code>N − 1</code> child records
+                    with <code>**GBP = ${fmt(st.totalRaw)} ÷ N</code> and copy categorisation. Each portion's
+                    Report Amount becomes <code>${fmt(each)}</code>. The new rows appear in this panel within a
+                    few seconds — reconcile each one as normal.
                 </p>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <label style="font-size:12px;color:#1e293b;font-weight:600">Number of portions:
@@ -1106,6 +1119,9 @@
                     </label>
                     <span style="font-size:12px;color:var(--text-secondary)">Each portion: <strong style="color:#1e293b" id="splitEachLabel">${fmt(each)}</strong></span>
                 </div>
+                <p style="margin:14px 0 0 0;font-size:11px;color:var(--text-muted);line-height:1.4">
+                    <strong>JS does not duplicate records</strong> — only the Airtable automation does. This prevents the double-creation issue from the previous version.
+                </p>
             `;
         } else {
             // Custom mode rows
@@ -1222,129 +1238,103 @@
     }
     window.splitRemoveCustomRow = splitRemoveCustomRow;
 
-    // Performs the split entirely in-place:
-    //   1. PATCH the source row + POST N-1 duplicates IN PARALLEL (one Airtable
-    //      round-trip total instead of a full dashboard reload).
-    //   2. Update local allTransactions so other features see the new records.
-    //   3. Splice the source row out of _reconResults and splice in N new rows
-    //      (one per portion) — each carrying inherited categorisation so the
-    //      user can hit Approve immediately, exactly like the original AI-matched
-    //      rows. New row indices are populated by re-rendering only the table
-    //      body, NOT the whole panel.
-    //   4. Briefly highlight the new rows + scroll the first into view so the
-    //      user sees the split landed.
-    // No alert popup. No dashboard reload. No matching re-run.
+    // PATCH-ONLY split. Sets the source's Split Count = N, then polls
+    // Airtable for the N-1 children that the existing automation creates.
+    // Splices the new rows into the recon panel in-place when they appear.
+    //
+    // Custom mode is currently blocked — see top-of-section comment.
     async function performReconSplit(idx) {
         const st = window._splitState;
         if (!st) return;
         const r = window._reconResults[idx]; if (!r) return;
         const tx = (allTransactions || []).find(t => t.id === r.txId); if (!tx) return;
         const btn = document.getElementById('splitSaveBtn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; btn.style.opacity = '0.6'; }
 
-        // Bank-level fields to copy to every duplicate. Date / raw amount /
-        // account / vendor / description describe the bank record itself.
-        const bankFields = {};
-        const copyField = (fid) => {
-            const v = getField(tx, fid);
-            if (v == null || (Array.isArray(v) && v.length === 0)) return;
-            if (Array.isArray(v) && v.length && v[0] && typeof v[0] === 'object' && v[0].id) {
-                bankFields[fid] = v.map(x => x.id);
-            } else {
-                bankFields[fid] = v;
-            }
-        };
-        copyField(F.txDate);
-        copyField(F.txAmount);          // raw **GBP — same on every duplicate
-        copyField(F.txAccountLink);
-        copyField(F.txVendor);
-        copyField(F.txDescription);
+        // Block Custom Amounts mode — requires Airtable formula update.
+        if (st.mode === 'custom') {
+            alert('Custom Amounts mode isn\'t enabled yet — it requires a one-time Report Amount formula update in Airtable. Use Equal Split for now. (See me on Slack and I\'ll walk you through the 30-second formula paste.)');
+            return;
+        }
+        const N = st.equalCount;
+        if (!Number.isInteger(N) || N < 2 || N > 50) {
+            alert('Number of portions must be a whole number between 2 and 50.');
+            return;
+        }
 
-        const N = st.mode === 'equal' ? st.equalCount : st.customRows.length;
+        // ── Pre-flight safety checks ──
+        // 1. Source must not already be split. The Airtable automation
+        //    has its own idempotency check, but we want a clear UI
+        //    message before any write happens.
+        const currentSplitCount = Number(getField(tx, F.txSplitCount)) || 1;
+        if (currentSplitCount > 1) {
+            alert(`This transaction is already split into ${currentSplitCount} portions. To re-split, first reset its Split Count to 1 in Airtable (and clean any "(Split X of N)" suffix from its name).`);
+            return;
+        }
+        // 2. Source's name shouldn't already contain "(Split 1 of" — that's
+        //    the gate the Airtable automation uses to skip already-split records.
+        const currentName = String(getField(tx, F.txName) || '');
+        if (currentName.includes('(Split 1 of')) {
+            alert('This transaction\'s name already contains "(Split 1 of N)" from a previous split. The Airtable automation will skip it. Clean that suffix from the *Name field in Airtable, then try again.');
+            return;
+        }
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Splitting…'; btn.style.opacity = '0.6'; }
 
         try {
-            // ── Build per-portion amount + categorisation arrays ──
-            let portionAmounts, portionCats;
-            if (st.mode === 'equal') {
-                const each = st.totalRaw / N;
-                portionAmounts = Array(N).fill(each);
-                // Equal mode: inherit the source row's existing categorisation
-                // on EVERY portion. The user can override individual rows in
-                // the recon panel before approving.
-                portionCats = Array(N).fill({});
-            } else {
-                portionAmounts = st.customRows.map(row => Number(row.amount) || 0);
-                portionCats = st.customRows.map(row => ({
-                    subCatId: row.subCatId, businessId: row.businessId,
-                    tenancyId: row.tenancyId, unitId: row.unitId, costId: row.costId,
-                }));
-            }
+            // ── Step 1: PATCH the source's Split Count ──
+            // Just this single write. The Airtable automation will see
+            // Split Count > 1 fire its trigger, then create N-1 children
+            // with the right amounts, names, and copied categorisation.
+            await patchTx(tx.id, { [F.txSplitCount]: N });
 
-            // ── Build the Airtable writes ──
-            // Source record (PATCH): set Split Count = N. For custom mode,
-            // also set portion[0]'s override + categorisation. Equal mode
-            // leaves categorisation untouched on the source so the user
-            // reconciles via the existing dropdowns.
-            const srcFields = { [F.txSplitCount]: N };
-            if (st.mode === 'custom') {
-                srcFields[F.txSplitOverride] = portionAmounts[0];
-                const c0 = portionCats[0];
-                if (c0.subCatId)   srcFields[F.txSubCategory] = [c0.subCatId];
-                if (c0.businessId) srcFields[F.txBusiness]    = [c0.businessId];
-                if (c0.tenancyId)  srcFields[F.txTenancy]     = [c0.tenancyId];
-                if (c0.unitId)     srcFields[F.txUnit]        = [c0.unitId];
-                if (c0.costId)     srcFields[F.txCost]        = [c0.costId];
-            }
-            // Duplicate records (POST × N-1): same bank fields, Split Count,
-            // and (custom mode) override + categorisation per portion.
-            const dupes = [];
-            for (let k = 1; k < N; k++) {
-                const f = { ...bankFields, [F.txSplitCount]: N };
-                if (st.mode === 'custom') {
-                    f[F.txSplitOverride] = portionAmounts[k];
-                    const c = portionCats[k];
-                    if (c.subCatId)   f[F.txSubCategory] = [c.subCatId];
-                    if (c.businessId) f[F.txBusiness]    = [c.businessId];
-                    if (c.tenancyId)  f[F.txTenancy]     = [c.tenancyId];
-                    if (c.unitId)     f[F.txUnit]        = [c.unitId];
-                    if (c.costId)     f[F.txCost]        = [c.costId];
-                }
-                dupes.push({ fields: f });
-            }
-
-            // ── Run PATCH and POST in parallel for speed ──
-            const [_patched, postedRecords] = await Promise.all([
-                patchTx(tx.id, srcFields),
-                postTxRecords(dupes),
-            ]);
-
-            // ── Update local allTransactions so downstream consumers
-            //    (CFV detection, P&L, balance calc) see the new records
-            //    without waiting for a refresh.
-            if (!tx.fields) tx.fields = {};
-            tx.fields[F.txSplitCount] = N;
-            if (st.mode === 'custom') {
-                tx.fields[F.txSplitOverride] = portionAmounts[0];
-                const c0 = portionCats[0];
-                if (c0.subCatId)   tx.fields[F.txSubCategory] = [{ id: c0.subCatId }];
-                if (c0.businessId) tx.fields[F.txBusiness]    = [{ id: c0.businessId }];
-                if (c0.tenancyId)  tx.fields[F.txTenancy]     = [{ id: c0.tenancyId }];
-                if (c0.unitId)     tx.fields[F.txUnit]        = [{ id: c0.unitId }];
-                if (c0.costId)     tx.fields[F.txCost]        = [{ id: c0.costId }];
-            }
-            postedRecords.forEach(rec => {
-                allTransactions.push({ id: rec.id, fields: rec.fields || {} });
+            // ── Step 2: Poll for the children to appear ──
+            if (btn) btn.textContent = 'Waiting for Airtable…';
+            const sourceVendor = String(getField(tx, F.txVendor) || '');
+            const sourceDate = getField(tx, F.txDate);
+            const sourceRaw = Math.abs(Number(getField(tx, F.txAmount)) || 0);
+            const expectedChildAmount = sourceRaw / N;
+            const children = await pollForSplitChildren({
+                vendor: sourceVendor,
+                date: sourceDate,
+                childAmount: expectedChildAmount,
+                expectedCount: N - 1,
+                sourceTxId: tx.id,
+                timeoutMs: 18000,
             });
 
-            // ── Build the N new _reconResults rows ──
-            // Equal mode: every portion inherits the source's existing
-            // categorisation (matchType / matched suggestions etc.).
-            // Custom mode: each portion gets exactly what the user entered
-            // in the modal — no inherited AI suggestions, since the user
-            // explicitly decided the breakdown.
-            const newResults = portionAmounts.map((amt, k) => {
-                const recId = k === 0 ? tx.id : (postedRecords[k - 1] && postedRecords[k - 1].id);
-                const inheritedFromSource = st.mode === 'equal' ? {
+            // ── Step 3: Update local state to mirror Airtable ──
+            if (!tx.fields) tx.fields = {};
+            tx.fields[F.txSplitCount] = N;
+            // Mirror the rename the Airtable script just did, so the local
+            // copy stays in sync (avoids a future Split attempt re-tripping
+            // the "(Split 1 of" check that the recent PATCH produced).
+            if (currentName) tx.fields[F.txName] = `${currentName} (Split 1 of ${N})`;
+            children.forEach(child => {
+                if (!allTransactions.find(t => t.id === child.id)) {
+                    allTransactions.push(child);
+                }
+            });
+
+            // ── Step 4: Build the new _reconResults rows in-place ──
+            const portionAmount = expectedChildAmount;
+            const newResults = [];
+            // Source becomes Portion 1 — keep all its existing categorisation
+            // (the recon panel's AI-suggested values etc.).
+            newResults.push({
+                ...r,
+                txAmount: portionAmount,
+                matchType: `Split 1/${N}`,
+                score: 0,
+            });
+            // Children become Portions 2..N. Inherit categorisation from
+            // source so the user can immediately Approve each row exactly
+            // like an original AI-matched recon row.
+            children.forEach((child, k) => {
+                newResults.push({
+                    txId: child.id,
+                    txDate: r.txDate, txVendor: r.txVendor, txDesc: r.txDesc,
+                    txAccount: r.txAccount,
+                    txAmount: portionAmount,
                     categoryId: r.categoryId, categoryName: r.categoryName,
                     subCatId: r.subCatId, subCatName: r.subCatName,
                     businessId: r.businessId, businessName: r.businessName,
@@ -1353,32 +1343,36 @@
                     unitName: r.unitName, unitId: r.unitId,
                     propertyName: r.propertyName,
                     costLabel: r.costLabel, costId: r.costId,
-                } : null;
-                const fromCustom = st.mode === 'custom' ? {
-                    categoryId: '', categoryName: '',
-                    subCatId: portionCats[k].subCatId || '',
-                    subCatName: portionCats[k].subCatId ? getSubCatName(portionCats[k].subCatId) : '',
-                    businessId: portionCats[k].businessId || '', businessName: '',
-                    tenantName: '', tenantId: '',
-                    tenancyLabel: '', tenancyId: portionCats[k].tenancyId || '',
-                    unitName: '', unitId: portionCats[k].unitId || '',
-                    propertyName: '',
-                    costLabel: '', costId: portionCats[k].costId || '',
-                } : null;
-                const cats = inheritedFromSource || fromCustom;
-                return {
-                    txId: recId,
-                    txDate: r.txDate, txVendor: r.txVendor, txDesc: r.txDesc,
-                    txAccount: r.txAccount,
-                    txAmount: amt,
-                    ...cats,
-                    matchType: `Split ${k + 1}/${N}` + (st.mode === 'custom' ? ' (custom)' : ''),
+                    matchType: `Split ${k + 2}/${N}`,
                     score: 0,
-                    status: r.status === 'approved' ? 'approved' : (st.mode === 'custom' ? 'suggestion' : (r.status || 'unmatched')),
-                };
+                    status: r.status === 'approved' ? 'approved' : (r.status || 'unmatched'),
+                });
             });
+            // If polling timed out, surface a clear placeholder for any
+            // children that haven't appeared yet. The user can refresh
+            // the dashboard to pick them up.
+            const placeholdersNeeded = (N - 1) - children.length;
+            for (let k = 0; k < placeholdersNeeded; k++) {
+                newResults.push({
+                    txId: 'pending-' + idx + '-' + k,
+                    txDate: r.txDate, txVendor: r.txVendor,
+                    txDesc: '⏳ Airtable still creating this portion — refresh in a few seconds',
+                    txAccount: r.txAccount,
+                    txAmount: portionAmount,
+                    categoryId: '', categoryName: '',
+                    subCatId: '', subCatName: '',
+                    businessId: '', businessName: '',
+                    tenantName: '', tenantId: '',
+                    tenancyLabel: '', tenancyId: '',
+                    unitName: '', unitId: '', propertyName: '',
+                    costLabel: '', costId: '',
+                    matchType: 'Pending',
+                    score: 0,
+                    status: 'pending',
+                });
+            }
 
-            // ── Splice into _reconResults + _reconOriginals at the same idx ──
+            // ── Step 5: Splice into _reconResults + re-render in-place ──
             window._reconResults.splice(idx, 1, ...newResults);
             const originals = window._reconOriginals || (window._reconOriginals = []);
             originals.splice(idx, 1, ...newResults.map(nr => ({
@@ -1388,12 +1382,10 @@
                 status: nr.status,
             })));
 
-            // ── Re-render the table body (whole body — indices shift below the split) ──
             const tbody = document.getElementById('reconTableBody');
             if (tbody) {
                 tbody.innerHTML = window._reconResults.map((rr, i) => reconRowHtml(rr, i)).join('');
-                // Briefly tint the new rows green so the user sees them land
-                for (let k = 0; k < N; k++) {
+                for (let k = 0; k < newResults.length; k++) {
                     const row = document.getElementById('recon-row-' + (idx + k));
                     if (row) {
                         row.style.transition = 'background-color 0.4s ease';
@@ -1404,22 +1396,18 @@
                 const firstNew = document.getElementById('recon-row-' + idx);
                 if (firstNew) firstNew.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
-
-            // Mark recon state as changed so closing the panel triggers a refresh
             window._reconChanged = true;
-
-            // Close the modal — instant
             const overlay = document.getElementById('reconSplitModal');
             if (overlay) overlay.remove();
         } catch (e) {
             console.error('[performReconSplit] failed', e);
-            alert('Split failed: ' + (e && e.message ? e.message : 'unknown error') + '\n\nThe original transaction has not been modified. Check the console for details.');
+            alert('Split failed: ' + (e && e.message ? e.message : 'unknown error') + '\n\nThe Split Count PATCH may or may not have succeeded — check Airtable directly. The original transaction was NOT modified by JS beyond the Split Count field.');
             if (btn) { btn.disabled = false; btn.textContent = 'Save Split'; btn.style.opacity = '1'; }
         }
     }
     window.performReconSplit = performReconSplit;
 
-    // Helpers — PATCH a transaction and POST N records (in one Airtable batch).
+    // PATCH a single transaction record. Used to write Split Count.
     async function patchTx(txId, fields) {
         const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
             method: 'PATCH',
@@ -1429,22 +1417,70 @@
         if (!res.ok) throw new Error('PATCH failed: HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200));
         return res.json();
     }
-    async function postTxRecords(records) {
-        if (!records.length) return [];
-        // Airtable batches up to 10 records per POST.
-        const out = [];
-        for (let i = 0; i < records.length; i += 10) {
-            const batch = records.slice(i, i + 10);
-            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}?returnFieldsByFieldId=true`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ records: batch, typecast: true }),
-            });
-            if (!res.ok) throw new Error('POST failed: HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200));
-            const data = await res.json();
-            out.push(...(data.records || []));
+
+    // Poll Airtable for the N-1 child records that the Split Transactions
+    // automation creates. Filter: same Vendor + same Date + **GBP equals
+    // expected child amount (= original / N) within float tolerance + not
+    // the source itself. Returns up to expectedCount records.
+    //
+    // Polls every 600ms for up to timeoutMs. Tolerates partial success —
+    // returns what it has when the timeout fires so the recon panel can
+    // show progress instead of hanging.
+    async function pollForSplitChildren(opts) {
+        const { vendor, date, childAmount, expectedCount, sourceTxId, timeoutMs } = opts;
+        const startTime = Date.now();
+        // Escape single quotes in the vendor for the formula
+        const safeVendor = (vendor || '').replace(/'/g, "\\'");
+        // Date filter: IS_SAME on the **Date field. Date is YYYY-MM-DD string.
+        const formula = `AND(`
+            + `{*Vendor} = '${safeVendor}',`
+            + `IS_SAME({**Date}, '${date}', 'day'),`
+            + `ABS({**GBP} - ${childAmount}) < 0.01,`
+            + `RECORD_ID() != '${sourceTxId}'`
+            + `)`;
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}`
+            + `?filterByFormula=${encodeURIComponent(formula)}`
+            + `&returnFieldsByFieldId=true&pageSize=50`;
+
+        while (Date.now() - startTime < timeoutMs) {
+            try {
+                const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (res.ok) {
+                    const data = await res.json();
+                    const records = (data.records || []).filter(rec => {
+                        // Only count records created since we triggered the split
+                        // (avoid grabbing pre-existing same-amount records).
+                        const created = new Date(rec.createdTime).getTime();
+                        return created >= startTime - 5000; // 5s grace before our start
+                    });
+                    if (records.length >= expectedCount) {
+                        return records.slice(0, expectedCount).map(rec => ({
+                            id: rec.id, fields: rec.fields || {},
+                        }));
+                    }
+                }
+            } catch (e) {
+                console.warn('[pollForSplitChildren] fetch failed (will retry)', e);
+            }
+            await new Promise(resolve => setTimeout(resolve, 600));
         }
-        return out;
+        // Timeout — return whatever we've found in the last poll. Re-fetch
+        // one final time so we don't miss anything created right before the
+        // timeout fired.
+        try {
+            const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+            if (res.ok) {
+                const data = await res.json();
+                const records = (data.records || []).filter(rec => {
+                    const created = new Date(rec.createdTime).getTime();
+                    return created >= startTime - 5000;
+                });
+                return records.slice(0, expectedCount).map(rec => ({
+                    id: rec.id, fields: rec.fields || {},
+                }));
+            }
+        } catch (e) { /* swallow */ }
+        return [];
     }
 
     // Close the recon panel; if any rows were approved while it was open, trigger a dashboard refresh

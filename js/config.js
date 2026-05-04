@@ -182,22 +182,32 @@
         txSubCategory:    'fldMRjSVzZVYeHb0A',
         txAccountAlias:   'fldBrjlbeaKFm3WzQ',
         txVendor:         'fld0Xr8sboQ0ekJQJ',
-        txDescription:    'fldsbuAJCTsXHug4C',
+        txDescription:    'fldsbuAJCTsXHug4C',  // *Name — primary field on Transactions. The
+                                                  // Airtable "Split Transactions" automation
+                                                  // appends "(Split X of N)" to this field on splits.
+        txName:           'fldsbuAJCTsXHug4C',  // alias of txDescription — different intent (split logic)
         txInvoiceData:    'fldT5qfiyt5DTLrp8',
         txTeamMember:     'fldMwliSwEhLuumvd',
         // Split mechanism
         // ------------------------------------------------------------------
-        // Splits are implemented as duplicate records. Every duplicate of a
-        // split transaction carries the same raw `**GBP` (the bank record)
-        // and the same `Split Count` (how many parts it was divided into).
-        // The Report Amount formula then derives the per-portion value:
-        //   • If `Split Override Amount` is set → use it verbatim (uneven splits)
-        //   • Else if `Split Count` > 1 → raw / count (equal splits)
-        //   • Else → raw (whole transaction)
-        // Downstream consumers (P&L, cashflow, balance calc, CFV, AI audit)
-        // all just read txReportAmount and don't need to know about splits.
+        // Splits are owned by the Airtable "Split Transactions" automation
+        // (Operations Director base → Automations → Finance → Split
+        // Transactions). The automation triggers when `Split Count > 1` and
+        // an idempotency check on *Name passes (skips records already named
+        // "(Split 1 of N)"). It then renames the parent and creates N-1
+        // children with **GBP = original / N and Split Count = 1 each.
+        //
+        // The JS reconciliation Split feature is PATCH-ONLY — it sets
+        // `Split Count` on the source record and lets the automation own
+        // duplication. NEVER POST duplicate transactions from JS — that
+        // double-creates them and we end up with N × (N-1) extras. (See
+        // commit f5b7aad for the data-corruption incident this prevents.)
         txSplitCount:     'fld20FWX7yjM8P2Kz',   // number — N. Default 1 = whole transaction.
-        txSplitOverride:  'fldQ37YsyR9r3EbkP',   // currency — per-portion amount for UNEVEN splits.
+        txSplitOverride:  'fldQ37YsyR9r3EbkP',   // currency — per-portion amount for UNEVEN splits
+                                                  //   (only honored once the Report Amount formula
+                                                  //   in Airtable is updated to read this field;
+                                                  //   currently a placeholder for the Custom-Amounts
+                                                  //   mode coming in a follow-up).
         txSplitStatus:    'fld7gZxUldVLZXnAB',   // formula → "Single" or "Split"
         txOriginalAmount: 'fldh711ChnFGDvh1u',   // formula → echoes raw, for display
         // Tenancy — tenant active/former status (rollup from Tenants table)
