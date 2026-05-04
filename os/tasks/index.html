@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <link rel="stylesheet" href="../../css/sync-bar.css?v=2">
 <link rel="stylesheet" href="../../css/quick-task.css?v=2">
-<script defer src="../../js/quick-task.js?v=2"></script>
+<script defer src="../../js/quick-task.js?v=3"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
@@ -3387,7 +3387,7 @@ function renderMyDay(){
   }
 
   html+=`<div class="action-row" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-    <button class="btn btn-primary" onclick="startQuickAddInline()" title="Type a task name, press Enter, then fill in the details in the Task Drawer">+ Add Task</button>
+    <button class="btn btn-primary" onclick="openNewTaskDrawer()" title="Open the Task Drawer to create a task — title field is focused, just start typing">+ Add Task</button>
     <button class="btn btn-primary" data-autosched-btn onclick="safeAutoSchedule()" title="Spread tasks across multiple working days with a preview before applying. Manual only — click to generate a preview. Does not run automatically on refresh.">Auto-Schedule</button>
     <button class="btn" onclick="toggleRoutineConfig()" title="Edit your daily routine blocks (wake, lunch, focus blocks, etc.)">Configure Routine</button>
   </div>`;
@@ -6303,6 +6303,20 @@ function startQuickAddInline(opts){
     }catch(e){ console.error('[startQuickAddInline] failed',e); }
     bar.remove();
     if(created&&created.id){
+      // DEFENSIVE: parseTask substitutes "(Untitled)" when the POST
+      // response doesn't echo back the name field, which then surfaces
+      // as the drawer's H2 title. Force the local task to match what
+      // the user actually typed so the drawer / grid / kanban all
+      // display the right name immediately. (Same fix applied by
+      // tlInlineAdd at line ~3636 — keep them in sync.)
+      const t=allTasks.find(x=>x.id===created.id);
+      if(t){
+        t.name=name;
+        if(!t.dueDate)t.dueDate=opts.dueDate||todayStr();
+        if(!t.priority)t.priority=opts.priority||'Not Urgent';
+        if(!t.timeEst)t.timeEst=opts.timeEst||'15 min';
+        try{ t.status=deriveTaskStatus(t.dueDate,t.storedStatus||t.status)||t.status||'Today'; }catch(e){}
+      }
       // Refresh local state so the new card shows up everywhere; then
       // open the drawer so the user can fill in the rest. Defer the
       // drawer one frame so the renderAll repaint doesn't fight the
@@ -6360,15 +6374,87 @@ function kanbanDblClickAdd(e,variant,index){
 }
 window.kanbanDblClickAdd=kanbanDblClickAdd;
 
-// Listen for parent-shell post-messages from the global FAB. The parent
-// switches to the Tasks tab and posts {type:'qt:start-quick-add'}; we
-// just trigger the inline-add bar locally. Wrapped in try/catch because
-// some browsers throw on cross-origin postMessage — non-fatal here.
+// Open the Task Drawer DIRECTLY for a brand-new task, with the H2
+// title contenteditable focused and its placeholder text fully
+// selected. Used by:
+//   • the global floating "+ Task" FAB
+//   • the top-toolbar "+ Add Task" button on My Day
+// (Timeline + Kanban double-click stay on the name-input-first flow,
+// because they carry positional context — time slot or column — that
+// makes the inline bar more natural.)
+//
+// Implementation: we create a placeholder task in Airtable with name
+// "(Untitled)" first, so the drawer can use its standard
+// updateTaskField-by-id autosave wiring without any draft-mode
+// refactor. The user types over the selected "(Untitled)" text and
+// the H2's onblur fires drwSaveText to persist the real name.
+async function openNewTaskDrawer(opts){
+  opts=opts||{};
+  const viewMember=(typeof TEAM!=='undefined'&&TEAM&&typeof activeTeam!=='undefined')?TEAM.find(m=>m.key===activeTeam):null;
+  const assigneeEmail=opts.assigneeEmail
+    ||(viewMember?viewMember.email:null)
+    ||(currentUser&&currentUser.email);
+  let created=null;
+  try{
+    created=await createSimpleTask({
+      name:'(Untitled)',
+      dueDate:opts.dueDate||todayStr(),
+      timeEst:opts.timeEst||'15 min',
+      assigneeEmail,
+      priority:opts.priority,
+      projectIds:opts.projectIds,
+      businessId:opts.businessId,
+    });
+  }catch(e){ console.error('[openNewTaskDrawer] create failed',e); }
+  if(!created||!created.id){ toast('Failed to create task — check console',true); return; }
+  // Same defensive cleanup as startQuickAddInline so the drawer renders
+  // sensible defaults even if parseTask missed echoed fields.
+  const t=allTasks.find(x=>x.id===created.id);
+  if(t){
+    t.name='(Untitled)';
+    if(!t.dueDate)t.dueDate=opts.dueDate||todayStr();
+    if(!t.priority)t.priority=opts.priority||'Not Urgent';
+    if(!t.timeEst)t.timeEst=opts.timeEst||'15 min';
+    try{ t.status=deriveTaskStatus(t.dueDate,t.storedStatus||t.status)||t.status||'Today'; }catch(e){}
+  }
+  try{ renderAll(); }catch(e){}
+  requestAnimationFrame(()=>{
+    try{ openTaskDrawer(created.id); }catch(e){ console.warn('[openNewTaskDrawer] drawer open failed',e); return; }
+    // Defer focus + select-all by another tick so the drawer overlay
+    // animation has settled; otherwise focus can flicker back to body
+    // and the selection range gets cleared.
+    setTimeout(()=>{
+      try{
+        const h2=document.getElementById('drwName');
+        if(!h2)return;
+        h2.focus();
+        const range=document.createRange();
+        range.selectNodeContents(h2);
+        const sel=window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }catch(e){ console.warn('[openNewTaskDrawer] focus/select failed',e); }
+    },80);
+  });
+}
+window.openNewTaskDrawer=openNewTaskDrawer;
+
+// Listen for parent-shell post-messages from the global FAB. Wrapped
+// in try/catch because some browsers throw on cross-origin postMessage
+// — non-fatal here.
+//
+//   qt:open-new-task-drawer  → openNewTaskDrawer (FAB / toolbar flow)
+//   qt:start-quick-add       → startQuickAddInline (legacy / kanban
+//                              caller pattern; still supported)
+//   qt:open-drawer           → openTaskDrawer for an existing taskId
 try{
   window.addEventListener('message',function(e){
     const d=e&&e.data;
     if(!d||typeof d!=='object')return;
-    if(d.type==='qt:start-quick-add'){
+    if(d.type==='qt:open-new-task-drawer'){
+      try{ openNewTaskDrawer(d.opts||{}); }
+      catch(err){ console.warn('[message qt:open-new-task-drawer] failed',err); }
+    } else if(d.type==='qt:start-quick-add'){
       try{ startQuickAddInline(d.opts||{}); }
       catch(err){ console.warn('[message qt:start-quick-add] failed',err); }
     } else if(d.type==='qt:open-drawer'&&d.taskId){

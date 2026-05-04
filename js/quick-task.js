@@ -40,26 +40,29 @@
     if (attempts <= 0) { console.warn('[QuickTask] tasks iframe never became ready; posting anyway'); cb(); return; }
     try {
       const w = frame.contentWindow;
-      if (w && typeof w.startQuickAddInline === 'function') { cb(); return; }
+      if (w && typeof w.openNewTaskDrawer === 'function') { cb(); return; }
     } catch (e) { /* cross-origin or transient — fall through to retry */ }
     setTimeout(() => waitForTasksIframeReady(frame, cb, attempts - 1), 100);
   }
 
   function openOnTasksPage() {
-    // Parent shell: hop to the Tasks tab, then ping the iframe.
+    // Parent shell: hop to the Tasks tab, then ping the iframe to open
+    // the Task Drawer directly (cursor in the title, ready to type).
+    // Timeline + Kanban double-clicks still get the inline-name-first
+    // flow — those carry positional context that makes the bar useful.
     if (typeof window.switchTab === 'function' && document.getElementById('tasksFrame')) {
       const frame = document.getElementById('tasksFrame');
       try { window.switchTab('tasks'); } catch (e) { console.warn('[QuickTask] switchTab failed', e); }
       waitForTasksIframeReady(frame, () => {
         try {
-          frame.contentWindow.postMessage({ type: 'qt:start-quick-add' }, '*');
+          frame.contentWindow.postMessage({ type: 'qt:open-new-task-drawer' }, '*');
         } catch (e) { console.warn('[QuickTask] postMessage failed', e); }
       });
       return true;
     }
     // Tasks page open standalone — call the function directly.
-    if (typeof window.startQuickAddInline === 'function') {
-      window.startQuickAddInline();
+    if (typeof window.openNewTaskDrawer === 'function') {
+      window.openNewTaskDrawer();
       return true;
     }
     return false;
