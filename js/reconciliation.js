@@ -521,7 +521,7 @@
 
         const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
 
-        return `<tr id="recon-row-${i}" style="border-bottom:1px solid #f1f5f9;${r.status === 'approved' ? 'opacity:0.5;' : ''}">
+        return `<tr id="recon-row-${i}" oninput="persistReconRow(${i})" style="border-bottom:1px solid #f1f5f9;${r.status === 'approved' ? 'opacity:0.5;' : ''}">
             <td style="${cell};color:#94a3b8;font-weight:600">${i + 1}</td>
             <td style="${cell};white-space:nowrap">${escHtml(r.txDate)}</td>
             <td style="${cell};white-space:nowrap;font-size:10px;color:var(--text-secondary)">${escHtml(r.txAccount || '—')}</td>
@@ -539,17 +539,35 @@
         </tr>`;
     }
 
-    function reconCatChanged(idx) {
-        const sel = document.getElementById('recon-cat-' + idx);
-        if (sel) window._reconResults[idx].categoryId = sel.value;
+    // Persist every dropdown's resolved ID back to _reconResults[idx]
+    // immediately on change. This is wired via oninput on each row's <tr>
+    // so it fires for every dropdown change inside the row (input events
+    // bubble up).
+    //
+    // Why it matters: any re-render of the table body (Split operation,
+    // panel close/reopen, smart refresh) recreates the dropdown DOM from
+    // _reconResults — so without this, the user's manual edits silently
+    // revert to the AI-suggested values they were rendered with.
+    //
+    // Without this, Approve / Approve-All still works in the immediate
+    // case (resolveDropdownId reads from current DOM at click-time), but
+    // any re-render between manual edit and Approve loses the changes.
+    function persistReconRow(idx) {
+        const r = window._reconResults && window._reconResults[idx];
+        if (!r) return;
+        r.categoryId   = resolveDropdownId('recon-cat-' + idx)      || '';
+        r.subCatId     = resolveDropdownId('recon-subcat-' + idx)   || '';
+        r.businessId   = resolveDropdownId('recon-business-' + idx) || '';
+        r.tenantId     = resolveDropdownId('recon-tenant-' + idx)   || '';
+        r.tenancyId    = resolveDropdownId('recon-tenancy-' + idx)  || '';
+        r.unitId       = resolveDropdownId('recon-unit-' + idx)     || '';
+        r.propertyName = resolveDropdownId('recon-property-' + idx) || '';
+        r.costId       = resolveDropdownId('recon-cost-' + idx)     || '';
+        // Refresh display labels so re-render shows the right text
+        r.categoryName = r.categoryId ? getCatName(r.categoryId) : '';
+        r.subCatName   = r.subCatId   ? getSubCatName(r.subCatId) : '';
     }
-    function reconSubCatChanged(idx) {
-        const sel = document.getElementById('recon-subcat-' + idx);
-        if (sel) {
-            window._reconResults[idx].subCatId = sel.value;
-            window._reconResults[idx].subCatName = getSubCatName(sel.value);
-        }
-    }
+    window.persistReconRow = persistReconRow;
     // When tenancy input changes, auto-fill tenant, unit, property.
     // Attached via onchange on the tenancy <td>.
     //
@@ -633,6 +651,12 @@
         // Set sub-category to Rental Income if empty
         const subCatInput = document.getElementById('recon-subcat-' + idx);
         if (subCatInput && !subCatInput.value) subCatInput.value = getSubCatName(REC.subRentalInc);
+
+        // Persist the auto-filled values to _reconResults so a future
+        // re-render doesn't wipe them. tenancyChanged sets several fields
+        // (tenant, unit, property, sub-cat) without firing native input
+        // events on each, so we explicitly call the persistence helper.
+        persistReconRow(idx);
     }
 
     function toggleAmendRow(idx) {
