@@ -182,8 +182,11 @@
             renderCFVTab();
             if (typeof updateCFVSidebarBadges === 'function') {
                 const cfvList = detectCFVs();
+                // Only 'potential' entries are dismissable (matches the main
+                // render filter). Confirmed CFVs and CFV Actioned items always
+                // count toward the badge.
                 const visible = cfvList.filter(e => {
-                    if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
+                    if (e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
                     return true;
                 });
                 updateCFVSidebarBadges(
