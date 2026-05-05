@@ -1,0 +1,4 @@
+# Keep baseline + reference map; ignore nightly snapshots & reports
+# (they accumulate fast — the scheduled task commits them to main directly)
+schema-2*.json
+drift-2*.md
