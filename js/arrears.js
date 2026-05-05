@@ -239,20 +239,27 @@
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
         const tolerance = 2; // days after due date before flagging
 
-        // Most recent due-day on/before today
-        let mostRecentDue = new Date(today.getFullYear(), today.getMonth(), dueDay);
-        mostRecentDue.setHours(0, 0, 0, 0);
-        if (today < mostRecentDue) {
-            mostRecentDue = new Date(today.getFullYear(), today.getMonth() - 1, dueDay);
-            mostRecentDue.setHours(0, 0, 0, 0);
+        // Find the latest due-day that is at least `tolerance` days past today —
+        // i.e. the most recent "matured" cycle. Within-tolerance must roll back
+        // to the previous month so an unpaid prior cycle isn't silently cleared
+        // the moment a new due date passes.
+        let matureDue = new Date(today.getFullYear(), today.getMonth(), dueDay);
+        matureDue.setHours(0, 0, 0, 0);
+        if (Math.floor((today - matureDue) / 86400000) < tolerance) {
+            matureDue = new Date(today.getFullYear(), today.getMonth() - 1, dueDay);
+            matureDue.setHours(0, 0, 0, 0);
         }
 
-        // Not yet past tolerance window → not in arrears yet
-        const daysSinceDue = Math.floor((today - mostRecentDue) / 86400000);
-        if (daysSinceDue < tolerance) return false;
+        // No matured cycle yet (e.g. brand-new tenancy whose first due date is
+        // still in the future or within tolerance) → not in arrears.
+        if (Math.floor((today - matureDue) / 86400000) < tolerance) return false;
+
+        // Tenancy started after the matured cycle → tenant didn't exist yet.
+        const tenStart = getTenancyStartDate(tenancy);
+        if (tenStart && tenStart > matureDue) return false;
 
         // Cycle window: previous due date (exclusive) through today (inclusive)
-        const prevDue = new Date(mostRecentDue.getFullYear(), mostRecentDue.getMonth() - 1, dueDay);
+        const prevDue = new Date(matureDue.getFullYear(), matureDue.getMonth() - 1, dueDay);
         prevDue.setHours(0, 0, 0, 0);
 
         const paid = allTransactions.some(tx => {
