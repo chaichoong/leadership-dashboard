@@ -173,3 +173,23 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - A local pre-commit hook (`scripts/pre-commit`) also bumps versions at commit time if installed: `ln -sf ../../scripts/pre-commit .git/hooks/pre-commit`
 - The file-to-page mapping is in `scripts/pre-commit-action.py`. Update it when adding new pages.
 - When the SOP is updated to match, manually bump `sopVer` to match `pageVer`.
+
+## Airtable Conventions
+
+- Only show ACTIVE businesses in dropdowns (filter by Active field)
+- Use exact field names consistently between read and write paths (e.g., 'Quarter End' vs 'QuarterEnd' caused a sync bug)
+- When filtering linked record fields, filter by record ID, not ARRAYJOIN display names
+- Watch for pagination when bulk-creating records to avoid duplicates
+- Bulk operations on invoices/transactions: never mark legitimate unpaid items as paid without explicit reconcile logic
+
+## Verification Before Declaring Done
+
+- Always run a final audit pass after implementing changes — check for self-introduced bugs, badge/count mismatches, and filter logic errors
+- After UI changes that affect counts/badges, verify the count logic accounts for dismissed/filtered items, not just raw detected items
+- When fixing bugs across multiple functions, consider whether a global interceptor/wrapper would be more robust than per-function patches
+
+## Deployment & Git
+
+- After pushing changes, verify the deploy is live before declaring done (check for stale browser cache, hard reload if needed)
+- Be aware that parallel sessions can sweep uncommitted edits into other commits — commit before context-switching
+- When a feature gets overwritten by another commit, check git history before reimplementing

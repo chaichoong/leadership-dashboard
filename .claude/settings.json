@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{
+        "type": "command",
+        "command": "for f in $CLAUDE_FILE_PATHS; do [[ $f == *.html ]] && npx htmlhint \"$f\" 2>&1 || true; done"
+      }]
+    }]
+  }
+}

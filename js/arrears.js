@@ -88,6 +88,23 @@
         return cycles;
     }
 
+    // True if a transaction has this tenancy in its linked-tenancies field.
+    // Handles split transactions: a single bank tx may link to multiple
+    // tenancies (e.g. one transfer covering two units). `extractLinkedId`
+    // only returns the FIRST linked id, so it silently misses split-tx
+    // payments — we walk the full array here.
+    function txLinkedToTenancy(tx, tenancyId) {
+        const linked = getField(tx, F.txTenancy);
+        if (!linked) return false;
+        if (Array.isArray(linked)) {
+            return linked.some(item => {
+                const id = (typeof item === 'object' && item) ? item.id : item;
+                return id === tenancyId;
+            });
+        }
+        return (typeof linked === 'object' ? linked.id : linked) === tenancyId;
+    }
+
     // Reconciled rent payments linked to this tenancy since data-start.
     // Returns full payment objects so the breakdown view can display them.
     function paymentsForTenancy(tenancyId) {
@@ -95,9 +112,7 @@
         const payments = [];
         for (const tx of allTransactions) {
             if (!getField(tx, F.txReconciled)) continue;
-            const linkedTenancy = getField(tx, F.txTenancy);
-            const linkedId = extractLinkedId(linkedTenancy);
-            if (linkedId !== tenancyId) continue;
+            if (!txLinkedToTenancy(tx, tenancyId)) continue;
             const txDateStr = getField(tx, F.txDate);
             if (!txDateStr) continue;
             const txDate = new Date(txDateStr);
@@ -209,34 +224,48 @@
     }
 
     // ── Currently-in-arrears check (drives CFV detection) ──
-    // Asks: by today, given a reconciliation-lag tolerance, has this tenancy
-    // paid the number of times we'd expect them to have paid? Counts ALL
-    // cycles since reconciliation cutoff against ALL reconciled payments —
-    // so early payments, late payments, and payments dated in adjacent
-    // calendar months all count correctly.
+    // Kevin's simple rule: after 2 days past the most recent due date, if NO
+    // reconciled payment has landed against the tenancy in the current cycle
+    // window → CFV. ANY reconciled payment linked to the tenancy in that
+    // window → in-payment, regardless of value (split transactions can mean
+    // a partial amount lands).
     //
-    // Tolerance windows:
-    //   Working / Agent → 5 days (reconciliation lag)
-    //   Universal Credit → 14 days (UC processing time post-cycle)
-    //
-    // A cycle is "mature" if its due-day date is at least `tolerance` days in
-    // the past. If actual reconciled payments < count of mature cycles, the
-    // tenancy is currently in arrears.
+    // The "cycle window" is from the previous due date (exclusive) through
+    // today. A payment dated anywhere in that range counts. Early payments
+    // (e.g. April 28 for May 1 rent), on-time, and late payments all match.
     function isCurrentlyInArrears(tenancy, tenantType, today) {
         if (!getTenancyStartDate(tenancy)) return false;
-        if (tenantType === 'Agent-Managed') {
-            // Agent-managed tenants — same payment expectation as Working,
-            // we just don't chase them. Still flagged for visibility.
-            tenantType = 'Working';
-        }
-        const tolerance = tenantType === 'Universal Credit' ? 14 : 5;
-        const cutoff = new Date(today.getTime() - tolerance * 86400000);
-        cutoff.setHours(0, 0, 0, 0);
 
-        const cycles = cyclesForTenancy(tenancy, today);
-        const expected = cycles.filter(c => c <= cutoff).length;
-        const actual = actualPaymentsForTenancy(tenancy.id);
-        return actual < expected;
+        const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
+        const tolerance = 2; // days after due date before flagging
+
+        // Most recent due-day on/before today
+        let mostRecentDue = new Date(today.getFullYear(), today.getMonth(), dueDay);
+        mostRecentDue.setHours(0, 0, 0, 0);
+        if (today < mostRecentDue) {
+            mostRecentDue = new Date(today.getFullYear(), today.getMonth() - 1, dueDay);
+            mostRecentDue.setHours(0, 0, 0, 0);
+        }
+
+        // Not yet past tolerance window → not in arrears yet
+        const daysSinceDue = Math.floor((today - mostRecentDue) / 86400000);
+        if (daysSinceDue < tolerance) return false;
+
+        // Cycle window: previous due date (exclusive) through today (inclusive)
+        const prevDue = new Date(mostRecentDue.getFullYear(), mostRecentDue.getMonth() - 1, dueDay);
+        prevDue.setHours(0, 0, 0, 0);
+
+        const paid = allTransactions.some(tx => {
+            if (!getField(tx, F.txReconciled)) return false;
+            if (!txLinkedToTenancy(tx, tenancy.id)) return false;
+            const txDateStr = getField(tx, F.txDate);
+            if (!txDateStr) return false;
+            const txDate = new Date(txDateStr);
+            txDate.setHours(0, 0, 0, 0);
+            return txDate > prevDue && txDate <= today;
+        });
+
+        return !paid;
     }
 
     // ── Mica task config ──
