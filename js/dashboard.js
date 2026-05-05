@@ -360,8 +360,10 @@
         };
     }
 
+    const _KPI_BLOCKED = /\b(fetch|XMLHttpRequest|import|require|eval|Function|document|window|localStorage|sessionStorage|globalThis|navigator|location|cookie|postMessage|Worker|ServiceWorker|WebSocket)\b/;
     function runKpiComputeCode(code, ctx){
         if(!code||!String(code).trim())return null;
+        if(_KPI_BLOCKED.test(code)){console.warn('[runKpiComputeCode] blocked unsafe token in code');return null}
         try{
             // eslint-disable-next-line no-new-func
             const fn=new Function('ctx','"use strict";'+code);

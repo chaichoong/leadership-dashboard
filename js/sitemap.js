@@ -483,9 +483,9 @@
                 <td style="text-align:center;color:var(--text-muted);font-weight:600">${i + 1}</td>
                 <td style="font-weight:600">${p.icon} ${escHtml(p.name)}</td>
                 <td style="text-align:center">${pageVerCell}</td>
-                <td><a href="#${p.id}" onclick="switchTab('${p.id}')" style="font-size:12px">Open</a></td>
-                <td style="font-size:11px"><a href="${p.standalone}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.standalone}')">Copy</button></td>
-                <td>${p.sopFile ? `<a href="${p.sopFile}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.sopFile}')">Copy</button>` : '<span style="color:var(--text-muted);font-size:11px">no SOP</span>'}</td>
+                <td><a href="#${escHtml(p.id)}" onclick="switchTab('${escJs(p.id)}')" style="font-size:12px">Open</a></td>
+                <td style="font-size:11px"><a href="${escHtml(p.standalone)}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.standalone)}')">Copy</button></td>
+                <td>${p.sopFile ? `<a href="${escHtml(p.sopFile)}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.sopFile)}')">Copy</button>` : '<span style="color:var(--text-muted);font-size:11px">no SOP</span>'}</td>
                 <td style="text-align:center">${sopVerCell}</td>
                 <td style="text-align:center">${statusHtml}</td>
                 <td>${gitCell}</td>

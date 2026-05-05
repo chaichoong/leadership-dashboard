@@ -53,17 +53,24 @@
         if (spinner) spinner.style.display = 'flex';
         if (table) table.style.display = 'none';
         try {
-            const params = new URLSearchParams({
+            const baseParams = {
                 'filterByFormula': "{Status}='Unpaid'",
                 'sort[0][field]': 'Email Date',
                 'sort[0][direction]': 'asc',
                 'returnFieldsByFieldId': 'true',
-            });
-            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`;
-            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const data = await resp.json();
-            airtableInvoices = data.records.map(r => {
+            };
+            let allRecords = [], pageOffset = null;
+            do {
+                const params = new URLSearchParams(baseParams);
+                if (pageOffset) params.set('offset', pageOffset);
+                const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`;
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                allRecords.push(...data.records);
+                pageOffset = data.offset || null;
+            } while (pageOffset);
+            airtableInvoices = allRecords.map(r => {
                 const f = r.fields;
                 return {
                     recordId:      r.id,
@@ -340,7 +347,7 @@
                             <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
                             <div style="margin-left:auto;display:flex;gap:6px">
-                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${inv.recordId}','${threadId}','${match.txRecordId}','${gmailUrl}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
+                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${escJs(inv.recordId)}','${escJs(threadId)}','${escJs(match.txRecordId)}','${escJs(gmailUrl)}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
                                 <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch('${inv.recordId}',${idx})" title="Dismiss this suggestion">✗ Reject</button>
                             </div>
                         </div>
@@ -349,7 +356,7 @@
             }
 
             // Action column
-            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${inv.recordId}','${threadId}','','${gmailUrl}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
+            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${escJs(inv.recordId)}','${escJs(threadId)}','','${escJs(gmailUrl)}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
             return `<tr data-record-id="${inv.recordId}"${isSelected ? ' class="inv-row-selected"' : ''}>
                 <td style="text-align:center;width:32px">${checkboxHtml}</td>

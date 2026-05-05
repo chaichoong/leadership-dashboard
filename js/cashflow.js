@@ -362,7 +362,7 @@
         const tbody = document.getElementById('cashflowBody');
         tbody.innerHTML = rows.map((r, i) => {
             const wknd = isWeekend(r.date) ? ' weekend' : '';
-            const closingClass = r.closing < 500 ? 'text-amber' : r.closing < 0 ? 'text-red' : 'text-green';
+            const closingClass = r.closing < 0 ? 'text-red' : r.closing < 500 ? 'text-amber' : 'text-green';
 
             const daysFromToday = Math.round((r.date - today) / 86400000);
             const inflowsHtml = r.inflows.length > 0
@@ -371,7 +371,7 @@
                     const ucBtn = (f.isUC && daysFromToday >= 0 && daysFromToday <= 7)
                         ? (ucChecked
                             ? ` <button class="uc-check-btn done" disabled title="UC Check already requested">UC Check Requested</button>`
-                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escHtml(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Mica to call UC and confirm this payment">UC Check</button>`)
+                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escJs(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Mica to call UC and confirm this payment">UC Check</button>`)
                         : '';
                     const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';

@@ -401,9 +401,9 @@
             return;
         }
 
-        // Fetch comment counts for all CFV tenancies in parallel
+        // Fetch comment counts with concurrency limiter (Airtable: 5 req/sec)
         const commentCounts = {};
-        await Promise.all(filteredList.map(async entry => {
+        await Promise.all(filteredList.map(entry => limitedApiFetch(async () => {
             try {
                 const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${entry.tenancyId}/comments`, {
                     headers: { 'Authorization': 'Bearer ' + PAT }
@@ -415,7 +415,7 @@
                     commentCounts[entry.tenancyId] = 0;
                 }
             } catch (e) { commentCounts[entry.tenancyId] = 0; }
-        }));
+        })));
 
         // Sort: Potential first, then CFV, then CFV Actioned — by due day
         filteredList.sort((a, b) => {
@@ -456,28 +456,28 @@
             if (entry.status === 'potential') {
                 // Awaiting user review — confirm as CFV or dismiss
                 actionsHtml = `
-                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
-                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvDismissAsCFV('${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Not a CFV</button>
+                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvDismissAsCFV('${entry.tenancyId}','${escJs(entry.surname)}',this)" style="margin-top:4px">Not a CFV</button>
                 `;
             } else if (entry.status === 'cfv') {
                 // Confirmed CFV — can mark actioned
                 actionsHtml = `
-                    <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escHtml(entry.surname)}',this)">Mark Actioned</button>
-                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn primary" onclick="event.stopPropagation(); cfvConfirmAction('actioned','${entry.tenancyId}','${escJs(entry.surname)}',this)">Mark Actioned</button>
+                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else if (entry.reflagged) {
                 // CFV Actioned but re-flagged — confirm as CFV again or dismiss
                 actionsHtml = `
-                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escHtml(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
-                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             } else {
                 // CFV Actioned — can return to In Payment or move back to CFV
                 actionsHtml = `
-                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escHtml(entry.surname)}',this)">In Payment</button>
-                    <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escHtml(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
-                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escHtml(entry.surname)}','${escHtml(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
+                    <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escJs(entry.surname)}',this)">In Payment</button>
+                    <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escJs(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
+                    <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
 
@@ -663,7 +663,7 @@
     // lives permanently as a comment on the tenancy record, so we can restore it.
     async function syncDismissalsFromAirtable(potentialEntries) {
         if (!PAT || !potentialEntries.length) return;
-        await Promise.all(potentialEntries.map(async entry => {
+        await Promise.all(potentialEntries.map(entry => limitedApiFetch(async () => {
             if (localStorage.getItem('cfv_dismissed_' + entry.tenancyId)) return; // already have it
             let comments;
             try {
@@ -693,7 +693,7 @@
             if (Date.now() < expiryTime) {
                 localStorage.setItem('cfv_dismissed_' + entry.tenancyId, latest.toISOString());
             }
-        }));
+        })));
     }
 
     // Re-flag: confirm CFV Actioned back to CFV
@@ -835,7 +835,7 @@
                 <div class="cfv-comment-list" style="max-height:400px">${commentsHtml}</div>
                 <div style="margin-top:12px;padding-top:8px;border-top:1px solid #e2e8f0">
                     <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..."></textarea>
-                    <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escHtml(surname)}','${escHtml(ref)}')">Add Comment</button>
+                    <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escJs(surname)}','${escJs(ref)}')">Add Comment</button>
                 </div>
             </div>
         `;

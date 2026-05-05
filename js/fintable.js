@@ -109,10 +109,9 @@
         </div>`;
     }
 
-    async function loadFintableSyncMonitor() {
+    async function loadFintableSyncMonitor(forceRefresh) {
         if (!PAT) return;
-        // Use cached data if available, otherwise fetch fresh
-        if (!fintableAccountsCache) {
+        if (!fintableAccountsCache || forceRefresh) {
             fintableAccountsCache = await fetchFintableAccounts();
             updateFintableAlerts(fintableAccountsCache);
         }
@@ -200,8 +199,8 @@
 
             return `<tr style="border-bottom:1px solid #f1f5f9;${rowBg ? 'background:' + rowBg : ''}">
                 <td style="padding:10px 12px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
-                <td style="padding:10px 12px;font-weight:500">${a.alias}</td>
-                <td style="padding:10px 12px;color:#64748b">${a.institution}</td>
+                <td style="padding:10px 12px;font-weight:500">${escHtml(a.alias)}</td>
+                <td style="padding:10px 12px;color:#64748b">${escHtml(a.institution)}</td>
                 <td style="padding:10px 12px">${syncStr}</td>
                 <td style="padding:10px 12px;font-weight:500;color:${a.statusColor}">${agoStr}</td>
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${balStr}</td>
@@ -211,7 +210,7 @@
         // ── Sync Bar + Health Checks ──
         if (typeof registerSyncBar === 'function') {
             registerSyncBar('fintable', {
-                refreshFn: () => loadFintableSyncMonitor(),
+                refreshFn: () => loadFintableSyncMonitor(true),
                 checks: [
                     {
                         name: 'Account records fetched', kind: 'sync', run: () => {

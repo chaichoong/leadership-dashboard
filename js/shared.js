@@ -111,9 +111,18 @@
             });
             if (offset) url.searchParams.set('offset', offset);
 
-            const resp = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${PAT}` }
-            });
+            let resp;
+            for (let _attempt = 0; _attempt < 4; _attempt++) {
+                resp = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${PAT}` }
+                });
+                if (resp.status === 429) {
+                    const wait = Math.min(1000 * Math.pow(2, _attempt), 8000);
+                    await new Promise(r => setTimeout(r, wait));
+                    continue;
+                }
+                break;
+            }
             if (resp.status === 401 || resp.status === 403) {
                 localStorage.removeItem('_dlr_pat');
                 document.getElementById('authScreen').style.display = 'flex';
@@ -381,6 +390,7 @@
     // Listen for status pings from iframe pages.
     window.addEventListener('message', (e) => {
         if (!e.data || e.data.type !== 'syncBarStatus' || !e.data.tabId) return;
+        if (e.origin !== 'null' && e.origin !== window.location.origin) return;
         updateSidebarHealth(e.data.tabId, e.data.status);
     });
 
@@ -627,4 +637,32 @@ if (tabId === 'comms') {
         d.textContent = str;
         return d.innerHTML;
     }
+
+    function escJs(str) {
+        if (str == null) return '';
+        return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    }
+
+    // ── Concurrency limiter for Airtable API (5 req/sec rate limit) ──
+    const _apiQueue = [];
+    let _apiInFlight = 0;
+    const API_MAX_CONCURRENT = 4;
+    function _drainApiQueue() {
+        while (_apiQueue.length > 0 && _apiInFlight < API_MAX_CONCURRENT) {
+            const { fn, resolve, reject } = _apiQueue.shift();
+            _apiInFlight++;
+            fn().then(resolve, reject).finally(() => { _apiInFlight--; _drainApiQueue(); });
+        }
+    }
+    function limitedApiFetch(fn) {
+        return new Promise((resolve, reject) => {
+            _apiQueue.push({ fn, resolve, reject });
+            _drainApiQueue();
+        });
+    }
+
+    // ── Render generation guard — discard stale async renders ──
+    const _renderGen = {};
+    function nextRenderGen(tabId) { _renderGen[tabId] = (_renderGen[tabId] || 0) + 1; return _renderGen[tabId]; }
+    function isCurrentRender(tabId, gen) { return _renderGen[tabId] === gen; }
 

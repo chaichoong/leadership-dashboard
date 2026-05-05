@@ -242,6 +242,7 @@
 </div>
 <script src="js/sync-bar.js?v=4"></script>
 <script>
+function escHtml(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 const BASE_ID = 'appnqjDpqDniH3IRl';
 
 const T = {
@@ -551,7 +552,7 @@ async function loadData() {
             let h = '';
             for (const row of stdList) {
                 h += `<tr class="${rowClass(row.gsc, row.eicr, row.ins)}">
-                    <td class="prop-name">${row.name}${props[row.id]?.agent ? `<span class="unit-label">${props[row.id].agent}</span>` : ''}</td>
+                    <td class="prop-name">${escHtml(row.name)}${props[row.id]?.agent ? `<span class="unit-label">${escHtml(props[row.id].agent)}</span>` : ''}</td>
                     ${cell(row.gsc)}
                     ${cell(row.eicr)}
                     ${cell(row.ins)}
@@ -559,11 +560,11 @@ async function loadData() {
             }
             for (const [pid, unitRows] of Object.entries(blocksMap)) {
                 const pName = blockPropNames[pid] || pid;
-                const agentLabel = props[pid]?.agent ? ` &mdash; ${props[pid].agent}` : '';
-                h += `<tr class="section-header"><td colspan="4">${pName} (${unitRows.length} Apartments &mdash; No Gas${agentLabel})</td></tr>`;
+                const agentLabel = props[pid]?.agent ? ` &mdash; ${escHtml(props[pid].agent)}` : '';
+                h += `<tr class="section-header"><td colspan="4">${escHtml(pName)} (${unitRows.length} Apartments &mdash; No Gas${agentLabel})</td></tr>`;
                 for (const row of unitRows) {
                     h += `<tr class="${rowClass(null, row.eicr, row.ins)}">
-                        <td class="prop-name">${row.unitName}<span class="unit-label">${pName}</span></td>
+                        <td class="prop-name">${escHtml(row.unitName)}<span class="unit-label">${escHtml(pName)}</span></td>
                         <td class="cert-cell"><span class="tag tag-na">N/A</span></td>
                         ${cell(row.eicr)}
                         <td class="cert-cell"><span class="tag tag-na">See building</span></td>
@@ -593,7 +594,7 @@ async function loadData() {
         for (const agentName of sortedAgentNames) {
             const grp = agentGroups[agentName];
             const count = grp.std.length + Object.values(grp.blocks).reduce((n, r) => n + r.length, 0);
-            agentHtml += `<tr class="agent-group-header"><td colspan="4">${agentName} (${count})</td></tr>`;
+            agentHtml += `<tr class="agent-group-header"><td colspan="4">${escHtml(agentName)} (${count})</td></tr>`;
             agentHtml += renderRows(grp.std, grp.blocks);
         }
         document.getElementById('agentBody').innerHTML = agentHtml;
