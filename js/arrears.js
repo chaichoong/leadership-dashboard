@@ -208,6 +208,37 @@
         return b.applicable && b.s8Ready;
     }
 
+    // ── Currently-in-arrears check (drives CFV detection) ──
+    // Asks: by today, given a reconciliation-lag tolerance, has this tenancy
+    // paid the number of times we'd expect them to have paid? Counts ALL
+    // cycles since reconciliation cutoff against ALL reconciled payments —
+    // so early payments, late payments, and payments dated in adjacent
+    // calendar months all count correctly.
+    //
+    // Tolerance windows:
+    //   Working / Agent → 5 days (reconciliation lag)
+    //   Universal Credit → 14 days (UC processing time post-cycle)
+    //
+    // A cycle is "mature" if its due-day date is at least `tolerance` days in
+    // the past. If actual reconciled payments < count of mature cycles, the
+    // tenancy is currently in arrears.
+    function isCurrentlyInArrears(tenancy, tenantType, today) {
+        if (!getTenancyStartDate(tenancy)) return false;
+        if (tenantType === 'Agent-Managed') {
+            // Agent-managed tenants — same payment expectation as Working,
+            // we just don't chase them. Still flagged for visibility.
+            tenantType = 'Working';
+        }
+        const tolerance = tenantType === 'Universal Credit' ? 14 : 5;
+        const cutoff = new Date(today.getTime() - tolerance * 86400000);
+        cutoff.setHours(0, 0, 0, 0);
+
+        const cycles = cyclesForTenancy(tenancy, today);
+        const expected = cycles.filter(c => c <= cutoff).length;
+        const actual = actualPaymentsForTenancy(tenancy.id);
+        return actual < expected;
+    }
+
     // ── Mica task config ──
     // Mirrored from cashflow.js's UC task pattern (which works in production).
     // Tasks land in Mica's queue, tied to the £12k Operating Cushion project,
@@ -1095,3 +1126,4 @@ Auto-generated from arrears engine.`,
     window.loadArrearsRecords = loadArrearsRecords;
     window.getTenantTypeForTenancy = getTenantTypeForTenancy;
     window.renderArrearsSection = renderArrearsSection;
+    window.isCurrentlyInArrears = isCurrentlyInArrears;

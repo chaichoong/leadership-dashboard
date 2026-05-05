@@ -32,24 +32,39 @@
         return tenantId ? tenantLookup[tenantId] : null;
     }
 
-    // ── Core payment detection: uses direct tenancy link on transactions ──
-    // Returns true if there's a reconciled transaction linked to this tenancy
-    // in the current calendar month. No keyword matching, no formula dependency.
+    // ── Core "is this tenancy current?" check ──
+    // Old version checked "any reconciled transaction this calendar month"
+    // which produced both false positives (early payment dated in previous
+    // month → not matched → flagged as CFV despite being paid) and false
+    // negatives (any unrelated transaction in this month → matched → looked
+    // paid despite this month's rent never landing).
+    //
+    // New version delegates to the arrears engine's count-based check, which
+    // compares expected payments (cycles whose maturity window has passed)
+    // against actual reconciled payments — robust to date/month boundary
+    // edge cases.
     function hasLinkedPaymentThisMonth(tenancyId, today) {
-        const thisMonth = today.getMonth();
-        const thisYear = today.getFullYear();
-        return allTransactions.some(tx => {
-            if (!getField(tx, F.txReconciled)) return false;
-            // Check direct tenancy link
-            const linkedTenancy = getField(tx, F.txTenancy);
-            const linkedId = extractLinkedId(linkedTenancy);
-            if (linkedId !== tenancyId) return false;
-            // Check transaction is in the current month
-            const txDateStr = getField(tx, F.txDate);
-            if (!txDateStr) return false;
-            const txDate = new Date(txDateStr);
-            return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
-        });
+        const tenancy = allTenancies.find(t => t.id === tenancyId);
+        if (!tenancy) return true; // unknown — don't flag
+        const tenantLookup = buildTenantLookup();
+        const tenantType = (typeof getTenantTypeForTenancy === 'function')
+            ? getTenantTypeForTenancy(tenancy, tenantLookup)
+            : null;
+        if (typeof isCurrentlyInArrears !== 'function') {
+            // Fallback to old logic if arrears.js isn't loaded for some reason
+            const thisMonth = today.getMonth();
+            const thisYear = today.getFullYear();
+            return allTransactions.some(tx => {
+                if (!getField(tx, F.txReconciled)) return false;
+                const linkedId = extractLinkedId(getField(tx, F.txTenancy));
+                if (linkedId !== tenancyId) return false;
+                const txDateStr = getField(tx, F.txDate);
+                if (!txDateStr) return false;
+                const txDate = new Date(txDateStr);
+                return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
+            });
+        }
+        return !isCurrentlyInArrears(tenancy, tenantType, today);
     }
 
     // Detect CFVs using direct tenancy-linked transactions.
@@ -111,17 +126,11 @@
             const rent = Number(getField(tenancy, F.tenRent)) || 0;
             if (rent <= 0) return;
 
-            const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-            const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
-            let daysOverdue = 0;
-            if (today >= dueThisMonth) {
-                daysOverdue = Math.floor((today - dueThisMonth) / 86400000);
-            }
-
-            // Only check if due date has passed + tolerance
-            if (daysOverdue < CFV_TOLERANCE_DAYS) return;
-
-            // Check for linked reconciled payment this month
+            // Use the new count-based check (handles timing via tolerance
+            // windows: 5 days for Working/Agent, 14 days for UC). This
+            // catches prior-cycle misses for late-due-day tenants which the
+            // old daysOverdue gate missed (e.g. UC dueDay=27 on May 5 was
+            // invisible until May 27 passed).
             const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today);
             if (paidThisMonth) return; // Paid — not a CFV
 
