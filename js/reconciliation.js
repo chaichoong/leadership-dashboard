@@ -1016,9 +1016,26 @@
     async function approveAllRecon() {
         const results = window._reconResults || [];
 
-        // A row is approveable if it's not already done AND has at least one field filled in
-        // (either an AI suggestion OR a manually-picked dropdown value).
-        // This stops "Approve All" from silently skipping rows the user filled in by hand.
+        // ALL non-approved rows are eligible. The previous version filtered
+        // out rows with no AI suggestion and no manual dropdown values —
+        // that meant a batch of unmatched-and-untouched rows triggered a
+        // "No transactions to approve" toast (often missed) and the user
+        // assumed the button was broken. The behaviour now matches the
+        // per-row Approve button: PATCH `txReconciled = true` plus
+        // whatever dropdown values are filled. Empty rows still get
+        // marked reconciled (matching individual-Approve behaviour).
+        const approveIdxs = [];
+        for (let i = 0; i < results.length; i++) {
+            if (results[i].status !== 'approved') approveIdxs.push(i);
+        }
+
+        if (approveIdxs.length === 0) {
+            showToast('All transactions are already approved.', { type: 'info' });
+            return;
+        }
+
+        // Count rows with no data so we can warn the user up front rather
+        // than silently mark uncategorised transactions as reconciled.
         const rowHasData = (i) =>
             !!(resolveDropdownId('recon-cat-' + i) ||
                resolveDropdownId('recon-subcat-' + i) ||
@@ -1028,26 +1045,28 @@
                resolveDropdownId('recon-unit-' + i) ||
                resolveDropdownId('recon-property-' + i) ||
                resolveDropdownId('recon-cost-' + i));
+        const emptyCount = approveIdxs.filter(i => !rowHasData(i)).length;
+        const emptyMsg = emptyCount > 0
+            ? `\n\n⚠ ${emptyCount} of these row${emptyCount === 1 ? ' has' : 's have'} no categorisation. They'll be marked reconciled but with no Sub-Category / Business / Tenancy / etc. linked.`
+            : '';
 
-        const approveIdxs = [];
-        for (let i = 0; i < results.length; i++) {
-            if (results[i].status === 'approved') continue;
-            if (results[i].status === 'suggestion' || rowHasData(i)) approveIdxs.push(i);
-        }
-        const skipped = results.filter(r => r.status !== 'approved').length - approveIdxs.length;
-
-        if (approveIdxs.length === 0) { showToast('No transactions to approve. Fill in at least one field first.', { type: 'warning' }); return; }
-        const skipMsg = skipped > 0 ? `\n\n${skipped} empty row${skipped === 1 ? '' : 's'} will be skipped — fill in a field to include them.` : '';
-        if (!await showConfirm(`Approve ${approveIdxs.length} transaction${approveIdxs.length === 1 ? '' : 's'}?\n\nThis will mark them as reconciled in Airtable.${skipMsg}`, { title: 'Approve Transactions' })) return;
+        if (!await showConfirm(
+            `Approve ${approveIdxs.length} transaction${approveIdxs.length === 1 ? '' : 's'}?\n\nThis will mark them as reconciled in Airtable.${emptyMsg}`,
+            { title: 'Approve Transactions' }
+        )) return;
 
         let successCount = 0;
         let failCount = 0;
+        const failedRows = []; // 1-indexed row numbers for the user-facing report
         const statusEl = document.getElementById('reconStatus');
-        for (const i of approveIdxs) {
-            if (statusEl) statusEl.textContent = `Processing ${successCount + failCount + 1} of ${approveIdxs.length}...`;
+        const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt; };
 
-            // Try up to 3 attempts per transaction
+        for (const i of approveIdxs) {
+            setStatus(`Processing ${successCount + failCount + 1} of ${approveIdxs.length}…`);
+
+            // Up to 3 attempts per row, with backoff on rate-limit / 5xx
             let succeeded = false;
+            let lastErr = '';
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
                     await approveRecon(i);
@@ -1055,22 +1074,34 @@
                     succeeded = true;
                     break;
                 } catch (e) {
-                    const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('RATE_LIMIT'));
-                    const isServerError = e.message && (e.message.includes('500') || e.message.includes('502') || e.message.includes('503'));
+                    lastErr = (e && e.message) || 'unknown';
+                    const isRateLimit = lastErr.includes('429') || lastErr.includes('RATE_LIMIT');
+                    const isServerError = lastErr.includes('500') || lastErr.includes('502') || lastErr.includes('503');
                     if ((isRateLimit || isServerError) && attempt < 2) {
-                        // Wait longer on each retry: 2s, then 5s
                         await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 5000));
                     } else {
-                        console.error(`Row ${i} failed after ${attempt + 1} attempts:`, e.message);
+                        console.error(`[approveAllRecon] Row ${i + 1} failed after ${attempt + 1} attempts:`, lastErr);
                         failCount++;
+                        failedRows.push(i + 1);
                         break;
                     }
                 }
             }
-            // 500ms pause between requests — more conservative to avoid rate limits on large batches
+            // 500ms pause between requests to be friendly to Airtable's
+            // rate limiter on large batches.
             await new Promise(r => setTimeout(r, 500));
         }
-        document.getElementById('reconStatus').textContent = `Done: ${successCount} approved${failCount > 0 ? ', ' + failCount + ' failed' : ''} — refreshing...`;
+        setStatus(`Done: ${successCount} approved${failCount > 0 ? `, ${failCount} failed` : ''} — refreshing…`);
+        // Surface failures up front so the user knows which rows still need
+        // attention (instead of just seeing the dashboard reload silently).
+        if (failCount > 0) {
+            showToast(
+                `${failCount} of ${approveIdxs.length} rows failed (rows: ${failedRows.slice(0, 10).join(', ')}${failedRows.length > 10 ? '…' : ''}). Check the console for details.`,
+                { type: 'error', duration: 8000 }
+            );
+        } else if (successCount > 0) {
+            showToast(`✓ Approved ${successCount} transaction${successCount === 1 ? '' : 's'}.`, { type: 'success' });
+        }
         // Bust the stale-while-revalidate cache so the refresh shows fresh numbers, not the pre-approval ones
         if (typeof clearDashCache === 'function') clearDashCache();
         window._reconChanged = false; // consumed by this refresh
