@@ -1,0 +1,285 @@
+---
+name: build-feature
+description: End-to-end workflow for building or extending a feature on the Operations Director Platform. Reduces iteration loops by front-loading requirements, planning, and verification into a single structured pass. Use this whenever Kevin asks to build something new, add a tab, extend an existing feature, create a new page, or do any non-trivial implementation work on the dashboard. Also use when Kevin says "build", "create", "add", "implement", "wire up", or describes a feature he wants.
+---
+
+# Build Feature — Zero-Rework Workflow
+
+A structured build process that front-loads every decision and check so features ship right on the first pass. The entire point of this skill is to eliminate back-and-forth: gather everything upfront, plan precisely, build once, verify thoroughly.
+
+## Why this workflow exists
+
+Building features iteratively — code a bit, show Kevin, fix, repeat — burns tokens and time. Most rework comes from:
+1. **Missing requirements** discovered mid-build (field names, business rules, edge cases)
+2. **Forgetting platform conventions** (tokens.css, health bar, sidebar wiring, config.js entries)
+3. **Not testing thoroughly** before declaring done (stale cache, empty states, mobile layout)
+4. **Self-introduced bugs** from the fix itself (badge mismatches, filter logic, double-submit)
+
+This workflow eliminates those by making every step explicit.
+
+---
+
+## Phase 1: CAPTURE (do not write any code yet)
+
+Before touching a single file, build a complete picture. Ask Kevin targeted questions — but batch them into one message, not a drip-feed of follow-ups.
+
+### 1a. Understand the feature
+
+Extract from Kevin's request (or ask if missing):
+
+- **What it does** — the core user action and outcome
+- **Where it lives** — new tab, existing tab extension, new iframe page, or OS page
+- **Data source** — which Airtable table(s), which fields, any new fields needed
+- **Business rules** — filtering logic, status transitions, edge cases, thresholds
+- **Who uses it** — Kevin only, or delegated staff too (affects complexity)
+
+### 1b. Get the "done" picture
+
+Kevin often describes what the finished result looks like. Capture:
+
+- **Layout** — cards, table, kanban, dashboard grid, or something else
+- **Key metrics/counts** — what numbers appear, how are they calculated
+- **Actions** — what buttons exist, what do they do (Airtable write-back? status change? navigation?)
+- **Empty state** — what shows when there's no data
+- **Interactions** — expand/collapse, filters, search, modals, drawers
+
+### 1c. Identify constraints early
+
+- **File scope** — which file(s) will this touch? (check CLAUDE.md's file table)
+- **Shared dependencies** — does this need new entries in `config.js`, `shared.js`, or `index.html`?
+- **Existing patterns** — is there a similar feature already built that this should mirror?
+- **Airtable field names** — get EXACT field names (including capitalisation and spaces). Read `js/config.js` for existing field maps. If new fields are needed, confirm them before coding.
+
+### 1d. Confirm the plan in one message
+
+Present a short summary back to Kevin:
+
+```
+Building: [feature name]
+Location: [tab ID / page path]
+Files to edit: [list]
+Data: [table(s)] → [key fields]
+Layout: [description]
+Actions: [list]
+Health checks: [what sync bar will verify]
+```
+
+Wait for Kevin's "yes" or corrections before proceeding. This single confirmation replaces 3-4 mid-build check-ins.
+
+---
+
+## Phase 2: PLAN (still no code)
+
+### 2a. Read existing code first
+
+Before writing anything, read the files you'll modify end-to-end:
+- The target JS file (understand current structure, function names, globals used)
+- `js/config.js` (existing field maps, table IDs, page registry)
+- `index.html` (sidebar structure, tab panel containers — especially OS-INTEGRATION sections)
+- The most similar existing feature's JS file (copy proven patterns, not reinvent)
+
+### 2b. Map out every code change
+
+List every change needed, grouped by file:
+
+```
+index.html:
+  - Sidebar menu item (with health dot)
+  - Tab panel container (with data-sync-bar div)
+
+js/config.js:
+  - Field constants (F.xxx or new field map)
+  - PAGE_REGISTRY entry
+
+js/[feature].js:
+  - Data fetch function
+  - Render function
+  - Action handlers (button clicks, status changes)
+  - registerSyncBar + health checks
+  - Sidebar badge update
+
+css/styles.css (only if needed):
+  - Feature-specific styles using design tokens
+```
+
+### 2c. Identify the Airtable contract
+
+Before writing fetch/write code:
+- Confirm table IDs exist in `config.js` or add them
+- Confirm field names are exact — read them from existing code or ask Kevin
+- Note which fields are linked records (need record ID filtering, not ARRAYJOIN)
+- Note which fields are computed/formula (read-only)
+- Plan pagination if the table could exceed 100 records
+
+---
+
+## Phase 3: BUILD (one complete pass)
+
+Write all the code in a single pass. Don't commit partial work.
+
+### 3a. Order of implementation
+
+Follow this exact order — it prevents dependency issues:
+
+1. **config.js** — add constants, field maps, PAGE_REGISTRY entry
+2. **index.html** — sidebar item + tab panel container (respect OS-INTEGRATION markers)
+3. **Feature JS file** — data fetch → render → actions → health bar (all in one file)
+4. **css/styles.css** — only if feature needs styles beyond what tokens.css provides
+5. **shared.js** — only if adding a genuinely shared utility (not feature-specific logic)
+
+### 3b. Mandatory patterns (baked into every feature)
+
+Every feature MUST include all of these. Not "should" — MUST:
+
+**Data layer:**
+- [ ] Airtable fetch with pagination (`offset` handling)
+- [ ] Error handling on fetch (try/catch, show toast on failure, don't silently fail)
+- [ ] Filter by Active status where applicable
+- [ ] Field name constants from config.js (never hardcode field names in fetch URLs)
+
+**Render layer:**
+- [ ] Loading state shown during fetch
+- [ ] Empty state when no data matches filters
+- [ ] All colours from `tokens.css` custom properties (never hardcode hex)
+- [ ] All text uses `escHtml()` for any user-supplied data
+- [ ] Responsive — works on tablet width (no horizontal scroll below 1024px)
+
+**Action layer:**
+- [ ] Confirm before destructive actions (use the branded `confirmDialog` from shared.js)
+- [ ] Toast feedback on success/failure (use `showToast` from shared.js)
+- [ ] Disable button during async operation (prevent double-submit)
+- [ ] Optimistic UI where possible (update display immediately, roll back on error)
+
+**Health & monitoring:**
+- [ ] `registerSyncBar()` with 5-8 checks (see health-bar skill for check design)
+- [ ] `markTabSynced()` called after successful render
+- [ ] Sidebar badge (if the feature has a count worth showing)
+- [ ] Sidebar health dot wired up
+
+**Integration:**
+- [ ] `tabLabelMap` entry in shared.js (for tab label display)
+- [ ] PAGE_REGISTRY entry in config.js (for version tracking)
+- [ ] Sidebar menu item in index.html
+
+### 3c. Code quality gates (check as you write)
+
+- No `var` — use `const` / `let`
+- No `document.write` or `eval`
+- No inline event handlers (`onclick="..."`) — use `addEventListener` or delegated events
+- Template literals for HTML generation (not string concatenation)
+- Early returns for guard clauses (not deeply nested if/else)
+
+---
+
+## Phase 4: SELF-AUDIT (before showing Kevin anything)
+
+This is the step that eliminates most rework. After writing all the code, audit your own work:
+
+### 4a. Logic audit
+
+- [ ] **Badge/count mismatch** — does the sidebar badge count match what the user sees in the tab? Account for dismissed items, active filters, and pagination.
+- [ ] **Filter state persistence** — if the user filters data, does the filter survive a refresh? Does it reset on tab switch? Is that the right behaviour?
+- [ ] **Empty state** — what happens if Airtable returns zero records? What if the filter produces zero results from non-zero data?
+- [ ] **Stale data** — after an action (status change, dismiss), does the display update immediately? Does it refetch or locally mutate?
+- [ ] **Race conditions** — if the user clicks Refresh while a fetch is in progress, what happens? If they click an action button twice fast?
+
+### 4b. Integration audit
+
+- [ ] **Sidebar wiring** — is the menu item's `onclick` calling `switchTab('correct-id')`?
+- [ ] **Tab panel** — does the `id="tab-xxx"` match what `switchTab` expects?
+- [ ] **Health bar container** — is `data-sync-bar="xxx"` present and matching the `registerSyncBar` call?
+- [ ] **Globals** — are all globals you read (e.g. `allTenancies`) actually loaded before your code runs?
+- [ ] **OS-INTEGRATION** — did you accidentally modify or delete code between OS-INTEGRATION comment pairs?
+
+### 4c. Design token audit
+
+- [ ] Grep your new code for any hardcoded hex colour (`#[0-9a-fA-F]{3,8}`)
+- [ ] Grep for hardcoded font-family declarations
+- [ ] Grep for hardcoded pixel values that should use spacing tokens
+- [ ] Verify all status colours use semantic tokens (success/warning/danger/info)
+
+### 4d. Security audit
+
+- [ ] All user-facing text passed through `escHtml()`
+- [ ] No raw Airtable field values inserted into innerHTML without escaping
+- [ ] API tokens only accessed via `PAT` global (never hardcoded)
+- [ ] No `eval()`, no `innerHTML` with unsanitised input
+
+---
+
+## Phase 5: VERIFY (prove it works)
+
+### 5a. Dev server test
+
+Start the preview server and test the golden path:
+1. Load the page — does it render without console errors?
+2. Does data appear (or correct empty state)?
+3. Click every action button — do they work?
+4. Check the health bar — does it render, do checks pass?
+5. Click Refresh in the health bar — does it re-sync?
+6. Check sidebar badge — does the count match?
+
+### 5b. Edge case test
+
+- Empty data (no records match)
+- Large data (100+ records — does pagination work?)
+- Network error (temporarily wrong PAT — does it show an error toast, not crash?)
+- Rapid clicks (double-submit prevention)
+- Tab switch and return (does state persist correctly?)
+
+### 5c. Visual check
+
+- Screenshot the feature at desktop width
+- Check it at 1024px width (tablet)
+- Verify colours match the design system (no rogue greys or blues)
+
+---
+
+## Phase 6: SHIP
+
+### 6a. Commit
+
+- One logical commit per feature (not micro-commits per file)
+- Commit message: `<Feature name>: <what it does>` (match existing style from `git log`)
+- Include all files changed in the commit
+
+### 6b. Deploy
+
+```bash
+git pull --rebase origin main && git push origin main
+```
+
+Then verify the deploy is live (pageVer matches, hard reload).
+
+### 6c. Report to Kevin
+
+Short summary:
+
+```
+Done: [Feature name]
+Files changed: [list]
+What it does: [2-3 sentences]
+Health checks: [count] checks registered
+Live at: [URL if applicable]
+```
+
+Include a screenshot if the feature is visual.
+
+---
+
+## Quick reference: common mistakes to avoid
+
+| Mistake | Prevention |
+|---------|-----------|
+| Wrong Airtable field name (capitalisation/spaces) | Always read from config.js or confirm with Kevin |
+| Badge shows raw count, not filtered count | Badge logic must match the rendered/visible items |
+| Hardcoded colour | Grep for `#` in your new code |
+| Missing health bar | It's in the checklist — don't skip it |
+| Missing empty state | Test with zero records |
+| Missing loading state | Show spinner/skeleton before fetch resolves |
+| Double-submit on buttons | Disable button, re-enable after async completes |
+| Stale display after action | Locally mutate or refetch + rerender |
+| Missing escHtml on user data | Grep for `innerHTML` assignments, verify all have escHtml |
+| Forgot PAGE_REGISTRY entry | Auto-bump won't work without it |
+| Forgot tabLabelMap entry | Tab label will show raw ID instead of human name |
+| Broke OS-INTEGRATION section | Read index.html first, mark those sections as untouchable |
