@@ -673,3 +673,61 @@ if (tabId === 'comms') {
     function nextRenderGen(tabId) { _renderGen[tabId] = (_renderGen[tabId] || 0) + 1; return _renderGen[tabId]; }
     function isCurrentRender(tabId, gen) { return _renderGen[tabId] === gen; }
 
+    // ── Branded toast notification (replaces alert() for non-blocking messages) ──
+    let _toastTimer = null;
+    function showToast(msg, { type = 'info', duration = 4000 } = {}) {
+        let el = document.getElementById('appToast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'appToast';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-medium);box-shadow:var(--shadow-lg);z-index:10000;opacity:0;transition:opacity 0.2s;pointer-events:none;max-width:480px;text-align:center';
+            document.body.appendChild(el);
+        }
+        const colors = {
+            info:    { bg: 'var(--info-bg)',    fg: 'var(--info)',    border: 'var(--info)' },
+            success: { bg: 'var(--success-bg)', fg: 'var(--success)', border: 'var(--success)' },
+            warning: { bg: 'var(--warning-bg)', fg: 'var(--warning)', border: 'var(--warning)' },
+            error:   { bg: 'var(--danger-bg)',  fg: 'var(--danger)',  border: 'var(--danger)' },
+        };
+        const c = colors[type] || colors.info;
+        el.style.background = c.bg;
+        el.style.color = c.fg;
+        el.style.border = '1px solid ' + c.border;
+        el.textContent = msg;
+        el.style.opacity = '1';
+        clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => { el.style.opacity = '0'; }, duration);
+    }
+
+    // ── Branded confirm dialog (replaces confirm() with a promise-based modal) ──
+    function showConfirm(msg, { title = 'Confirm', okLabel = 'Confirm', cancelLabel = 'Cancel', danger = false } = {}) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:10001;display:flex;align-items:center;justify-content:center';
+            overlay.setAttribute('role', 'presentation');
+            const panel = document.createElement('div');
+            panel.setAttribute('role', 'alertdialog');
+            panel.setAttribute('aria-modal', 'true');
+            panel.setAttribute('aria-label', title);
+            panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:24px;max-width:420px;width:90%';
+            panel.innerHTML = `<div style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:12px">${escHtml(title)}</div><div style="font-size:var(--fs-sm);color:var(--text-secondary);white-space:pre-wrap;margin-bottom:20px">${escHtml(msg)}</div><div style="display:flex;gap:8px;justify-content:flex-end"></div>`;
+            const btnRow = panel.querySelector('div:last-child');
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = cancelLabel;
+            cancelBtn.style.cssText = 'padding:8px 16px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm)';
+            const okBtn = document.createElement('button');
+            okBtn.textContent = okLabel;
+            okBtn.style.cssText = `padding:8px 16px;border:none;background:${danger ? 'var(--danger)' : 'var(--accent)'};color:#fff;border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)`;
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            function close(result) { overlay.remove(); resolve(result); }
+            cancelBtn.onclick = () => close(false);
+            okBtn.onclick = () => close(true);
+            overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+            document.body.appendChild(overlay);
+            okBtn.focus();
+        });
+    }
+

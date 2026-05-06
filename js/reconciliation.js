@@ -1036,9 +1036,9 @@
         }
         const skipped = results.filter(r => r.status !== 'approved').length - approveIdxs.length;
 
-        if (approveIdxs.length === 0) { alert('No transactions to approve. Fill in at least one field on a row first.'); return; }
-        const skipMsg = skipped > 0 ? ` (${skipped} empty row${skipped === 1 ? '' : 's'} will be skipped — fill in a field to include them)` : '';
-        if (!confirm(`Approve ${approveIdxs.length} transaction${approveIdxs.length === 1 ? '' : 's'}? This will mark them as reconciled in Airtable.${skipMsg}`)) return;
+        if (approveIdxs.length === 0) { showToast('No transactions to approve. Fill in at least one field first.', { type: 'warning' }); return; }
+        const skipMsg = skipped > 0 ? `\n\n${skipped} empty row${skipped === 1 ? '' : 's'} will be skipped — fill in a field to include them.` : '';
+        if (!await showConfirm(`Approve ${approveIdxs.length} transaction${approveIdxs.length === 1 ? '' : 's'}?\n\nThis will mark them as reconciled in Airtable.${skipMsg}`, { title: 'Approve Transactions' })) return;
 
         let successCount = 0;
         let failCount = 0;

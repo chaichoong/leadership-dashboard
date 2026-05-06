@@ -567,7 +567,7 @@
     // ── CFV Actions ──
 
     async function updateTenancyStatus(tenancyId, statusSelectId) {
-        if (!PAT) { alert('No Airtable token — cannot update status'); return false; }
+        if (!PAT) { showToast('No Airtable token — cannot update status', { type: 'error' }); return false; }
         try {
             const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${tenancyId}`, {
                 method: 'PATCH',
@@ -577,22 +577,22 @@
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
                 console.error('Airtable PATCH failed:', resp.status, JSON.stringify(err));
-                alert(`Failed to update Airtable (${resp.status}): ${err.error?.message || 'Unknown error'}. Check your PAT has data.records:write scope.`);
+                showToast(`Failed to update Airtable (${resp.status}): ${err.error?.message || 'Unknown error'}`, { type: 'error', duration: 6000 });
                 return false;
             }
             return true;
         } catch (e) {
             console.error('Failed to update tenancy status:', e);
-            alert('Network error updating Airtable: ' + e.message);
+            showToast('Network error updating Airtable: ' + e.message, { type: 'error', duration: 6000 });
             return false;
         }
     }
 
     // Confirmation step before any status change
-    function cfvConfirmAction(action, tenancyId, surname, btn) {
+    async function cfvConfirmAction(action, tenancyId, surname, btn) {
         const labels = { actioned: 'Mark as CFV Actioned', inpayment: 'Return to In Payment', cfv: 'Move back to CFV' };
         const msg = `Are you sure you want to ${labels[action] || action} for ${surname}?`;
-        if (!confirm(msg)) return;
+        if (!await showConfirm(msg, { title: labels[action] || 'Confirm', danger: action === 'cfv' })) return;
         if (action === 'actioned') cfvMarkActioned(tenancyId, btn);
         else if (action === 'cfv') cfvMoveToCFV(tenancyId, btn);
         else cfvReturnToPayment(tenancyId, btn);
@@ -621,7 +621,7 @@
 
     // Confirm a potential CFV — update Airtable status to CFV
     async function cfvConfirmAsCFV(tenancyId, surname, btn) {
-        if (!confirm(`Confirm ${surname} as a Cash Flow Void? This will update the payment status to CFV in Airtable.`)) return;
+        if (!await showConfirm(`Confirm ${surname} as a Cash Flow Void?\n\nThis will update the payment status to CFV in Airtable.`, { title: 'Confirm CFV', danger: true })) return;
         btn.textContent = '...';
         btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
@@ -638,7 +638,7 @@
 
     // Dismiss a potential CFV — not a real CFV, return to In Payment
     async function cfvDismissAsCFV(tenancyId, surname, btn) {
-        if (!confirm(`Dismiss ${surname} as not a CFV? This will keep the tenancy as In Payment.`)) return;
+        if (!await showConfirm(`Dismiss ${surname} as not a CFV?\n\nThis will keep the tenancy as In Payment.`, { title: 'Dismiss CFV' })) return;
         btn.textContent = '...';
         btn.disabled = true;
         // Store dismissal locally so it doesn't reappear until next cycle
@@ -698,7 +698,7 @@
 
     // Re-flag: confirm CFV Actioned back to CFV
     async function cfvConfirmReflag(tenancyId, surname, btn) {
-        if (!confirm(`Re-flag ${surname} as CFV? Payment still hasn't come through.`)) return;
+        if (!await showConfirm(`Re-flag ${surname} as CFV?\n\nPayment still hasn't come through.`, { title: 'Re-flag as CFV', danger: true })) return;
         btn.textContent = '...';
         btn.disabled = true;
         const ok = await updateTenancyStatus(tenancyId, CFV_STATUS_IDS.cfv);
