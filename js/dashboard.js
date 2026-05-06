@@ -630,6 +630,18 @@
             label=`${monthNames[m]||m} ${y}`;
         }
         if(!detail){el.style.display='none';return}
+        // Recalculate headline totals from the actual transaction lists so that
+        // reversals (e.g. DD reversals) are netted off and the headline matches
+        // the per-row breakdown the user sees in the table.
+        if(detail.costTxs&&detail.costTxs.length){
+            detail.costs=detail.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
+        }
+        if(detail.revTxs&&detail.revTxs.length){
+            detail.revenue=detail.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0);
+        }
+        if(detail.costs!=null&&detail.revenue!=null){
+            detail.net=detail.revenue-detail.costs;
+        }
         // Task-completion KPIs have no transactions — render a tasks list instead.
         const displayHint0=(kRet&&kRet.display)||{};
         if(displayHint0.kind==='taskCompletion'){
