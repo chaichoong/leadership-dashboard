@@ -845,7 +845,7 @@
 
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
                 <label>Backfill Tenancy Docs</label>
-                <p class="settings-info" style="margin-bottom:10px;">Searches your Gmail (from 1 April 2025) for likely tenancy documents — Adobe Sign, DocuSign, DocHub, signed ASTs, deposit certificates, proof of residency — and links each one to the matching active tenancy. Use the dry run first to preview what will happen; the real run then actually writes to Airtable and stars the Gmail thread. Cost ~£0.10–0.30, time ~5–10 min depending on volume.</p>
+                <p class="settings-info" style="margin-bottom:10px;">Searches your Gmail (from 1 April 2025) for <strong>signed tenancy agreements / ASTs</strong> sent via e-signing platforms (Adobe Sign, DocuSign, DocHub, HelloSign, SignNow) and links each one to the matching active tenancy. Anything that isn't an AST or signed tenancy doc — proof-of-residency, utility forms, council letters, etc. — is skipped automatically. Use the dry run first to preview what will happen; the real run actually writes to Airtable and stars the Gmail thread. Cost ~£0.10–0.30, time ~5–10 min depending on volume.</p>
                 <div style="display:flex; gap:8px;">
                     <button class="kb-btn" id="backfillDryBtn" onclick="runTenancyDocBackfill(true)" style="flex:1;">▶ Dry run (preview only)</button>
                     <button class="kb-btn" id="backfillRealBtn" onclick="runTenancyDocBackfill(false)" style="flex:1; background:var(--accent); color:white; border-color:var(--accent);" disabled>⚡ Run for real</button>
@@ -3100,15 +3100,21 @@ Body: ${bodyText}`;
         progressEl.innerHTML = '<span style="color:var(--text-muted);">⏳ Searching Gmail…</span>';
 
         try {
-            // Build Gmail search — same patterns we'd manually look for
+            // Build Gmail search — STRICT: only emails from recognised
+            // e-signing platforms. Subject-based searches (AST, "tenancy
+            // agreement", deposit) are deliberately omitted because they
+            // pulled in too much noise (utility forms, council letters,
+            // proof-of-residency forms, etc.). The pre-filter below adds
+            // a second guard requiring the subject itself to look like a
+            // signed tenancy agreement.
             const queryParts = [
                 'from:adobesign.com',
+                'from:echosign.com',     // legacy Adobe Sign
                 'from:docusign.com',
+                'from:docusign.net',
                 'from:dochub.com',
-                'subject:AST',
-                '"tenancy agreement"',
-                'subject:deposit',
-                '"proof of residency"'
+                'from:hellosign.com',
+                'from:signnow.com'
             ];
             const query = `(${queryParts.join(' OR ')}) after:2025/04/01`;
 
@@ -3195,6 +3201,18 @@ Body: ${bodyText}`;
                     email = parseThread(threadResp.result);
                 } catch (err) {
                     skipped.push({ subject: '(parse failed)', reason: String(err.message || err) });
+                    continue;
+                }
+
+                // Pre-filter: only accept emails that LOOK like a signed
+                // tenancy agreement / AST. Skips utility forms, proof-of-
+                // residency, council letters etc. that occasionally come
+                // through e-sign platforms but aren't tenancy docs.
+                if (!looksLikeSignedTenancyDoc(email)) {
+                    skipped.push({
+                        subject: email.subject,
+                        reason: 'not a signed tenancy agreement (subject does not match AST / tenancy / lease patterns, or contains an excluded keyword)'
+                    });
                     continue;
                 }
 
@@ -3293,6 +3311,60 @@ Body: ${bodyText}`;
         const div = document.createElement('div');
         div.textContent = s == null ? '' : String(s);
         return div.innerHTML;
+    }
+
+    // Pre-filter for the backfill: does this email look like a SIGNED
+    // tenancy agreement / AST (vs a non-tenancy doc that happens to be
+    // sent through an e-sign platform)?
+    //
+    // Two gates:
+    //  1. Sender must be a recognised e-signing platform — the Gmail
+    //     search query already enforces this, but we re-check defensively
+    //     in case Gmail's search behaves unexpectedly.
+    //  2. Subject must match a tenancy/AST/lease pattern AND must NOT
+    //     contain an excluded keyword (proof of residency, council tax,
+    //     utility, etc.). The subject heuristic catches the vast majority
+    //     of false positives — utility forms and proof-of-residency emails
+    //     don't say "AST" or "tenancy agreement" in the subject.
+    //
+    // The live label-11 flow does NOT use this filter — Mica may
+    // deliberately apply label 11 to a different doc type and we respect
+    // that. This filter is backfill-only.
+    const _ESIGN_SENDERS = [
+        'adobesign.com', 'echosign.com', 'docusign.com', 'docusign.net',
+        'dochub.com', 'hellosign.com', 'signnow.com'
+    ];
+    const _TENANCY_SUBJECT_PATTERNS = [
+        /\bAST\b/i,
+        /\btenancy\b/i,
+        /\btenancy agreement\b/i,
+        /\blease\b/i,
+        /\bdeed of guarantee\b/i,
+        /\bguarantor agreement\b/i,
+        /\brenewal\b.*\b(tenanc|lease|AST)\b/i
+    ];
+    const _TENANCY_SUBJECT_EXCLUSIONS = [
+        /proof of resid/i,
+        /council tax/i,
+        /\butility\b/i,
+        /\butilities\b/i,
+        /right to rent/i,           // identity check, not the AST
+        /id verification/i,
+        /id check/i,
+        /referenc(e|ing)/i          // referencing checks
+    ];
+
+    function looksLikeSignedTenancyDoc(email) {
+        const sender = (email.fromEmail || email.from || '').toLowerCase();
+        const subject = email.subject || '';
+
+        const fromESignPlatform = _ESIGN_SENDERS.some(d => sender.includes(d));
+        if (!fromESignPlatform) return false;
+
+        if (_TENANCY_SUBJECT_EXCLUSIONS.some(p => p.test(subject))) return false;
+        if (!_TENANCY_SUBJECT_PATTERNS.some(p => p.test(subject))) return false;
+
+        return true;
     }
 
     // ============================================================
