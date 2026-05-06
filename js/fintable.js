@@ -198,7 +198,7 @@
             const rowBg = a.status === 'critical' ? 'rgba(239,68,68,0.06)' : a.status === 'alert' ? 'rgba(249,115,22,0.06)' : '';
 
             return `<tr style="border-bottom:1px solid var(--border-subtle);${rowBg ? 'background:' + rowBg : ''}">
-                <td style="padding:10px 12px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
+                <td style="padding:10px 12px"><span role="img" aria-label="${a.statusLabel}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
                 <td style="padding:10px 12px;font-weight:500">${escHtml(a.alias)}</td>
                 <td style="padding:10px 12px;color:var(--text-secondary)">${escHtml(a.institution)}</td>
                 <td style="padding:10px 12px">${syncStr}</td>

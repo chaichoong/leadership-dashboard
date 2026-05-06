@@ -410,8 +410,11 @@
         const sec = document.querySelector(`.sidebar-section[data-section="${name}"]`);
         if (!sec) return;
         sec.classList.toggle('collapsed');
+        const isCollapsed = sec.classList.contains('collapsed');
         const chev = sec.querySelector('.sidebar-section-chevron');
-        if (chev) chev.innerHTML = sec.classList.contains('collapsed') ? '&#x25B8;' : '&#x25BE;';
+        if (chev) chev.innerHTML = isCollapsed ? '&#x25B8;' : '&#x25BE;';
+        const header = sec.querySelector('.sidebar-section-header');
+        if (header) header.setAttribute('aria-expanded', String(!isCollapsed));
         const cur = _readCollapsedSections();
         const idx = cur.indexOf(name);
         if (sec.classList.contains('collapsed') && idx === -1) cur.push(name);
@@ -428,6 +431,8 @@
                 sec.classList.remove('collapsed');
                 const chev = sec.querySelector('.sidebar-section-chevron');
                 if (chev) chev.innerHTML = '&#x25BE;';
+                const hdr = sec.querySelector('.sidebar-section-header');
+                if (hdr) hdr.setAttribute('aria-expanded', 'true');
                 // Don't write to localStorage — auto-expand on navigation should be
                 // ephemeral. User-driven toggles still persist as before.
             }
@@ -442,6 +447,8 @@
             sec.classList.toggle('collapsed', isCollapsed);
             const chev = sec.querySelector('.sidebar-section-chevron');
             if (chev) chev.innerHTML = isCollapsed ? '&#x25B8;' : '&#x25BE;';
+            const hdr = sec.querySelector('.sidebar-section-header');
+            if (hdr) hdr.setAttribute('aria-expanded', String(!isCollapsed));
         });
     }
     // Worst-case rollup: section dot inherits the worst child's status.
