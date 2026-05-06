@@ -4941,6 +4941,23 @@ function renderProjects(){
     let headerValue=p.kpiCurrent||0;
     let headerPeriodLabel='Rolling 31 days';
     if(headerKpiDetail){
+      // Recalculate from transaction lists so DD reversals are netted off
+      // (the persisted JSON may contain stale gross figures).
+      if(headerKpiDetail.detail&&headerKpiDetail.detail.rolling){
+        const rd=headerKpiDetail.detail.rolling;
+        if(rd.costTxs&&rd.costTxs.length){
+          rd.costs=rd.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
+        }
+        if(rd.revTxs&&rd.revTxs.length){
+          rd.revenue=rd.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0);
+        }
+        if(rd.costs!=null&&rd.revenue!=null){
+          rd.net=rd.revenue-rd.costs;
+          const corrected=Math.round(rd.net*100)/100;
+          if(typeof headerKpiDetail.rolling==='number') headerKpiDetail.rolling=corrected;
+          if(typeof headerKpiDetail.value==='number') headerKpiDetail.value=corrected;
+        }
+      }
       if(selectedPeriod==='rolling'){
         headerValue=(headerKpiDetail.rolling??headerKpiDetail.value??p.kpiCurrent)||0;
         headerPeriodLabel='Rolling 31 days';

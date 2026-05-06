@@ -445,8 +445,26 @@
                 };
                 const ctx=buildAutomatedKpiContext(local);
                 ctx.tasks=tasksForKpi;
-                const value=runKpiComputeCode(code,ctx);
+                let value=runKpiComputeCode(code,ctx);
                 if(value==null)continue;
+                // If the compute returned a detail with transaction lists,
+                // recalculate the primary value so DD reversals are netted
+                // off. This keeps the headline KPI, progress bar, and
+                // persisted Airtable value in sync with the drill-down.
+                const _kd=ctx._lastKpiDetail;
+                if(_kd&&_kd.detail&&_kd.detail.rolling){
+                    const rd=_kd.detail.rolling;
+                    if(rd.costTxs&&rd.costTxs.length){
+                        const netCosts=rd.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
+                        const netRev=rd.revTxs&&rd.revTxs.length?rd.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0):(rd.revenue||0);
+                        rd.costs=netCosts;rd.revenue=netRev;rd.net=netRev-netCosts;
+                        value=rd.net;
+                        // Also update the top-level rolling value used for
+                        // the headline display on the strategic KPI row.
+                        if(typeof _kd.rolling==='number') _kd.rolling=value;
+                        if(typeof _kd.value==='number') _kd.value=value;
+                    }
+                }
                 const rounded=Math.round(value*100)/100;
                 local.kpiCurrent=rounded;
                 local.kpiReturn=ctx._lastKpiDetail||null;
