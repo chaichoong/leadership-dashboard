@@ -833,6 +833,17 @@
             </div>
 
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
+                <label>Clean up duplicate inbound tasks</label>
+                <p class="settings-info" style="margin-bottom:10px;">Finds inbound Airtable tasks that share the same Gmail thread (caused by the fallback creating a fresh task every 5-min sweep). Keeps the OLDEST task per thread, deletes the rest. Dry run lists what would be deleted; real run actually deletes them. Stars each affected thread so the sweep stops re-creating tasks.</p>
+                <div style="display:flex; gap:8px;">
+                    <button class="kb-btn" id="dedupeDryBtn" onclick="cleanupDuplicateInboundTasks(true)" style="flex:1;">▶ Dry run (preview only)</button>
+                    <button class="kb-btn" id="dedupeRealBtn" onclick="cleanupDuplicateInboundTasks(false)" style="flex:1; background:var(--danger); color:white; border-color:var(--danger);" disabled>🗑 Delete duplicates</button>
+                </div>
+                <div id="dedupeProgress" style="margin-top:12px; display:none; font-size:13px;"></div>
+                <div id="dedupeResults" style="margin-top:12px; display:none; font-size:13px; line-height:1.7;"></div>
+            </div>
+
+            <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
                 <label>Backfill Tenancy Docs</label>
                 <p class="settings-info" style="margin-bottom:10px;">Searches your Gmail (from 1 April 2025) for likely tenancy documents — Adobe Sign, DocuSign, DocHub, signed ASTs, deposit certificates, proof of residency — and links each one to the matching active tenancy. Use the dry run first to preview what will happen; the real run then actually writes to Airtable and stars the Gmail thread. Cost ~£0.10–0.30, time ~5–10 min depending on volume.</p>
                 <div style="display:flex; gap:8px;">
@@ -2813,12 +2824,40 @@ Body: ${bodyText}`;
 
     async function fallbackTenancyDocTask(email, reason) {
         // Couldn't auto-link — make a task for Mica with the Gmail URL.
+        // Two crucial guards before creating:
+        //   1. Dedupe — does an Airtable task already exist for this thread?
+        //      If yes, skip. Without this guard the 5-min sweep would re-run
+        //      and create a fresh task for the same stuck thread every cycle
+        //      (Mica reportedly received ~100 duplicates in one day).
+        //   2. Star the Gmail thread on the way out so the sweep's "skip
+        //      starred" guard catches it on the next pass even if dedupe
+        //      somehow misses (e.g. PAT lookup blip).
         try {
             const pat = getAirtablePat();
             if (!pat) return;
             const today = new Date().toISOString().slice(0, 10);
-            const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 3000);
             const gmailUrl = email.gmailUrl || ('https://mail.google.com/mail/u/0/#all/' + email.threadId);
+
+            // Dedupe: skip if any inbound task already references this threadId
+            // in its Gmail URL field.
+            try {
+                const checkUrl = `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&filterByFormula=${encodeURIComponent(`FIND("${email.threadId}", {${AIRTABLE_FIELDS.noteUrl}})`)}&maxRecords=1`;
+                const checkResp = await fetch(checkUrl, { headers: { 'Authorization': 'Bearer ' + pat } });
+                if (checkResp.ok) {
+                    const checkData = await checkResp.json();
+                    if (checkData.records && checkData.records.length > 0) {
+                        // A task already exists — DO NOT create another one.
+                        // Star the thread anyway so the sweep skips it next pass.
+                        await starGmailMessages(email);
+                        addAuditEntry('tenancy_doc_fallback_skip', `Skipped duplicate fallback task for "${truncate(email.subject, 40)}" (existing task ${checkData.records[0].id}); starred thread to stop the loop.`);
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.warn('Fallback dedupe check failed; proceeding to create:', err);
+            }
+
+            const bodyText = email.messages.map(m => getPlainText(m) || m.snippet || '').join('\n').substring(0, 3000);
             const record = {
                 fields: {
                     [AIRTABLE_FIELDS.taskName]: 'INBOUND: Link tenancy doc — ' + truncate(email.subject || '(no subject)', 60),
@@ -2841,11 +2880,179 @@ Body: ${bodyText}`;
                 headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ records: [record] })
             });
-            addAuditEntry('tenancy_doc_fallback', `Auto-link failed for "${truncate(email.subject, 40)}" — created Mica task. Reason: ${reason}`);
+            // Star the Gmail thread so the sweep treats it as "already
+            // processed" and never re-creates this task.
+            await starGmailMessages(email);
+            addAuditEntry('tenancy_doc_fallback', `Auto-link failed for "${truncate(email.subject, 40)}" — created Mica task and starred thread. Reason: ${reason}`);
         } catch (err) {
             console.error('Fallback task creation failed:', err);
         }
     }
+
+    // ============================================================
+    // CLEANUP — duplicate inbound Airtable tasks
+    // ============================================================
+    // The fallback used to create a fresh task each time the 5-min sweep
+    // hit a low-confidence thread (no dedupe + no star). Mica reportedly
+    // got ~100 dupes in a day. This helper:
+    //   1. Pulls all inbound Airtable tasks (isInbound=true) with a Gmail URL
+    //   2. Groups them by threadId (extracted from the Gmail URL)
+    //   3. For each group with 2+ tasks: keeps the OLDEST (lowest createdTime)
+    //      and lists the rest for deletion
+    //   4. In dry-run mode: just reports the plan
+    //   5. In real mode: deletes the duplicates in batches of 10 and stars
+    //      every affected Gmail thread so the sweep doesn't re-create them
+    async function cleanupDuplicateInboundTasks(dryRun) {
+        const dryBtn = document.getElementById('dedupeDryBtn');
+        const realBtn = document.getElementById('dedupeRealBtn');
+        const progressEl = document.getElementById('dedupeProgress');
+        const resultsEl = document.getElementById('dedupeResults');
+
+        if (!getAirtablePat()) {
+            showError('Airtable PAT not configured.');
+            return;
+        }
+        dryBtn.disabled = true;
+        realBtn.disabled = true;
+        progressEl.style.display = 'block';
+        resultsEl.style.display = 'none';
+        progressEl.innerHTML = '<span style="color:var(--text-muted);">⏳ Loading inbound tasks…</span>';
+
+        try {
+            const pat = getAirtablePat();
+            // Fetch all inbound tasks with a Gmail URL — paginate until exhausted.
+            const formula = encodeURIComponent(
+                'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
+            );
+            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.noteUrl, AIRTABLE_FIELDS.status]
+                .map(f => 'fields%5B%5D=' + f).join('&');
+            const records = [];
+            let offset = '';
+            for (let page = 0; page < 50; page++) {
+                const url = `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&pageSize=100${offset ? '&offset=' + encodeURIComponent(offset) : ''}`;
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + pat } });
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.error?.message || 'HTTP ' + resp.status);
+                }
+                const data = await resp.json();
+                records.push(...(data.records || []));
+                if (!data.offset) break;
+                offset = data.offset;
+            }
+
+            console.log(`[dedupe] loaded ${records.length} inbound task(s) with a Gmail URL`);
+
+            // Group by threadId extracted from the Gmail URL — supports both
+            // legacy "#inbox/<id>" and current "#all/<id>" formats.
+            const threadGroups = new Map();
+            for (const rec of records) {
+                const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
+                const m = url.match(/#(?:inbox|all)\/([a-f0-9]+)/i);
+                if (!m) continue;
+                const threadId = m[1];
+                if (!threadGroups.has(threadId)) threadGroups.set(threadId, []);
+                threadGroups.get(threadId).push(rec);
+            }
+
+            // For each group with 2+ tasks: oldest stays, others go.
+            const toDelete = [];
+            const affectedThreads = [];
+            for (const [threadId, group] of threadGroups) {
+                if (group.length < 2) continue;
+                // Sort ascending by createdTime — oldest first.
+                group.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+                const keep = group[0];
+                const dupes = group.slice(1);
+                affectedThreads.push({ threadId, keep, dupes });
+                for (const d of dupes) toDelete.push(d.id);
+            }
+
+            console.log(`[dedupe] found ${affectedThreads.length} thread(s) with duplicates; ${toDelete.length} record(s) to remove`);
+
+            if (toDelete.length === 0) {
+                progressEl.style.display = 'none';
+                resultsEl.style.display = 'block';
+                resultsEl.innerHTML = '<div style="color:var(--success);font-weight:500;">✓ No duplicate inbound tasks found — nothing to clean up.</div>';
+                dryBtn.disabled = false;
+                return;
+            }
+
+            // Render plan
+            const planRows = affectedThreads.map(g => {
+                const kt = (g.keep.fields[AIRTABLE_FIELDS.taskName] || '').slice(0, 60);
+                return `<tr><td style="padding:4px 8px;border-bottom:1px solid var(--border-subtle);font-size:12px;">${escHtmlSafe(kt)}</td>` +
+                       `<td style="padding:4px 8px;border-bottom:1px solid var(--border-subtle);font-size:12px;text-align:right;color:var(--danger);">${g.dupes.length} dupe(s) →</td></tr>`;
+            }).join('');
+
+            if (dryRun) {
+                progressEl.style.display = 'none';
+                resultsEl.style.display = 'block';
+                resultsEl.innerHTML =
+                    `<div style="color:var(--accent-gold);font-weight:500;margin-bottom:8px;">Plan: keep ${affectedThreads.length} oldest task(s), delete ${toDelete.length} duplicate(s).</div>` +
+                    `<details open style="margin-top:8px;"><summary style="cursor:pointer;font-weight:500;">${affectedThreads.length} thread(s) with duplicates</summary>` +
+                    `<table style="width:100%;border-collapse:collapse;margin-top:8px;"><tbody>${planRows}</tbody></table></details>` +
+                    `<div style="margin-top:12px;padding:8px;background:var(--accent-soft);border-radius:6px;font-size:12px;">Looks right? Click <strong>Delete duplicates</strong> below to actually remove the ${toDelete.length} duplicate record(s). The dashboard will also star each affected Gmail thread so the sweep doesn't recreate them.</div>`;
+                realBtn.disabled = false;
+                addAuditEntry('inbound_dedupe_dry', `Dry run: would delete ${toDelete.length} duplicate(s) across ${affectedThreads.length} thread(s).`);
+                return;
+            }
+
+            // Real run — delete in batches of 10
+            let deleted = 0;
+            for (let i = 0; i < toDelete.length; i += 10) {
+                const batch = toDelete.slice(i, i + 10);
+                progressEl.innerHTML = `<div style="font-weight:500;margin-bottom:4px;">Deleting duplicates — ${Math.min(i + 10, toDelete.length)} of ${toDelete.length}…</div>`;
+                const delUrl = new URL(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`);
+                batch.forEach(id => delUrl.searchParams.append('records[]', id));
+                try {
+                    const resp = await fetch(delUrl.toString(), {
+                        method: 'DELETE',
+                        headers: { 'Authorization': 'Bearer ' + pat }
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        deleted += (data.records || []).filter(r => r.deleted).length;
+                    }
+                } catch (err) {
+                    console.warn('[dedupe] batch delete failed:', err);
+                }
+                await new Promise(r => setTimeout(r, 250));
+            }
+
+            // Star every affected Gmail thread so the sweep stops recreating
+            let starred = 0;
+            for (const g of affectedThreads) {
+                progressEl.innerHTML = `<div style="font-weight:500;margin-bottom:4px;">Starring ${starred + 1} of ${affectedThreads.length} thread(s)…</div>`;
+                try {
+                    if (typeof gapi !== 'undefined' && gapi.client?.gmail) {
+                        await gapi.client.gmail.users.threads.modify({
+                            userId: 'me',
+                            id: g.threadId,
+                            resource: { addLabelIds: ['STARRED'] }
+                        });
+                        starred++;
+                    }
+                } catch (err) {
+                    console.warn('[dedupe] failed to star thread', g.threadId, err);
+                }
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            progressEl.style.display = 'none';
+            resultsEl.style.display = 'block';
+            resultsEl.innerHTML =
+                `<div style="color:var(--success);font-weight:500;margin-bottom:8px;">✓ Cleanup complete — deleted ${deleted} duplicate task(s) and starred ${starred} thread(s).</div>` +
+                `<div style="font-size:12px;color:var(--text-secondary);">${affectedThreads.length} oldest tasks kept. Future sweeps will skip these threads (they're now starred), so duplicates won't return.</div>`;
+            addAuditEntry('inbound_dedupe', `Deleted ${deleted} duplicate inbound task(s) across ${affectedThreads.length} thread(s); starred ${starred} thread(s).`);
+        } catch (err) {
+            console.error('[dedupe] failed:', err);
+            progressEl.innerHTML = `<span style="color:var(--danger);">Cleanup error: ${escHtmlSafe(err.message || String(err))}</span>`;
+        } finally {
+            dryBtn.disabled = false;
+        }
+    }
+
 
     // ============================================================
     // BACKFILL — historical tenancy docs from Gmail
