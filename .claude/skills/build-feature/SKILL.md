@@ -207,9 +207,25 @@ This is the step that eliminates most rework. After writing all the code, audit 
 
 ---
 
-## Phase 5: VERIFY (prove it works)
+## Phase 5: HEALTH BAR (invoke the health-bar skill)
 
-### 5a. Dev server test
+After the code is written and self-audited, wire up the health bar properly. Use the `/health-bar` skill for the full procedure, but at minimum:
+
+1. Read the target JS file and identify all data sources, computations, and automations
+2. Design 5-8 checks (mix of `sync` and `automation` kinds)
+3. Add `<div data-sync-bar="TAB_ID"></div>` to the tab panel
+4. Add sidebar health dot in index.html
+5. Write the `registerSyncBar()` call with all checks
+6. Call `markTabSynced()` after successful render
+7. Test: bar renders, checks pass, Re-run works, Refresh re-syncs, sidebar dot updates
+
+If the health bar was already included during Phase 3 (as it should be for experienced builds), this phase is a verification pass — confirm all 7 items above are working.
+
+---
+
+## Phase 6: VERIFY (prove it works)
+
+### 6a. Dev server test
 
 Start the preview server and test the golden path:
 1. Load the page — does it render without console errors?
@@ -219,7 +235,7 @@ Start the preview server and test the golden path:
 5. Click Refresh in the health bar — does it re-sync?
 6. Check sidebar badge — does the count match?
 
-### 5b. Edge case test
+### 6b. Edge case test
 
 - Empty data (no records match)
 - Large data (100+ records — does pagination work?)
@@ -227,7 +243,7 @@ Start the preview server and test the golden path:
 - Rapid clicks (double-submit prevention)
 - Tab switch and return (does state persist correctly?)
 
-### 5c. Visual check
+### 6c. Visual check
 
 - Screenshot the feature at desktop width
 - Check it at 1024px width (tablet)
@@ -235,15 +251,66 @@ Start the preview server and test the golden path:
 
 ---
 
-## Phase 6: SHIP
+## Phase 7: AUDIT (invoke the audit skill)
 
-### 6a. Commit
+Run `/audit` on the completed feature. This is a formal second pass that catches things the self-audit missed:
+
+1. Code-level checks + live site testing via Chrome MCP
+2. Bug list with severity and root cause
+3. Fix each issue found (commit per fix)
+4. Re-audit for self-introduced bugs (the audit-of-the-audit)
+5. Score readiness out of 100 (Correctness / Error handling / Performance / UX polish / Maintainability)
+
+The feature is not done until the audit score is reported. Target: 80+ before shipping. If below 80, fix the gaps before proceeding.
+
+---
+
+## Phase 8: SOP & SITEMAP
+
+Every new page or significant feature extension needs its documentation and registry updated.
+
+### 8a. Create or update the SOP
+
+- **New page/tab**: Create a new SOP file (e.g. `sop-[feature].html`) using the `/sop-generator` skill or by copying the structure from an existing SOP like `sop-cfvs.html`
+- **Extension of existing page**: Update the existing SOP file to cover the new functionality
+- SOP must import `css/tokens.css` (correct relative path) for design consistency
+- SOP should cover: purpose, data sources, key actions, troubleshooting, and the health bar checks
+- Set `sopVer` in PAGE_REGISTRY to match `pageVer` once the SOP is current
+
+### 8b. Update PAGE_REGISTRY
+
+Ensure the entry in `js/config.js` has:
+- Correct `sopFile` path pointing to the SOP HTML file
+- `sopVer` set to match `pageVer` (since both are current as of this build)
+- `standalone` URL for direct access
+
+### 8c. Update sitemap.xml
+
+Add the new page and its SOP to `sitemap.xml`:
+```xml
+<url><loc>https://chaichoong.github.io/leadership-dashboard/[page-path]</loc></url>
+<url><loc>https://chaichoong.github.io/leadership-dashboard/[sop-path]</loc></url>
+```
+
+### 8d. Update robots.txt (if needed)
+
+Only if the new page should be excluded from crawling.
+
+### 8e. Update pre-commit mapping
+
+Add the new file-to-page mapping in `scripts/pre-commit-action.py` so that the auto-bump workflow knows which PAGE_REGISTRY entry to bump when the file changes.
+
+---
+
+## Phase 9: SHIP
+
+### 9a. Commit
 
 - One logical commit per feature (not micro-commits per file)
 - Commit message: `<Feature name>: <what it does>` (match existing style from `git log`)
-- Include all files changed in the commit
+- Include all files changed in the commit (feature code + SOP + sitemap + config)
 
-### 6b. Deploy
+### 9b. Deploy
 
 ```bash
 git pull --rebase origin main && git push origin main
@@ -251,7 +318,7 @@ git pull --rebase origin main && git push origin main
 
 Then verify the deploy is live (pageVer matches, hard reload).
 
-### 6c. Report to Kevin
+### 9c. Report to Kevin
 
 Short summary:
 
@@ -260,6 +327,8 @@ Done: [Feature name]
 Files changed: [list]
 What it does: [2-3 sentences]
 Health checks: [count] checks registered
+Audit score: XX/100
+SOP: [created/updated] at [path]
 Live at: [URL if applicable]
 ```
 
