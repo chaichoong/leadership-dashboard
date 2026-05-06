@@ -131,22 +131,22 @@
     function triggerReconciliation(btn) {
         btn.textContent = 'Analysing...';
         btn.disabled = true;
-        btn.style.background = '#64748b';
+        btn.style.background = 'var(--text-secondary)';
         document.getElementById('reconStatus').textContent = 'Matching unreconciled transactions...';
         setTimeout(() => {
             try {
                 const results = runReconciliationMatching();
                 showReconciliationPanel(results);
                 btn.textContent = 'Run Reconciliation';
-                btn.style.background = '#2563eb';
+                btn.style.background = 'var(--info)';
                 btn.disabled = false;
                 document.getElementById('reconStatus').textContent = `Found ${results.length} transactions`;
             } catch (e) {
                 console.error('Reconciliation error:', e);
                 btn.textContent = 'Failed';
-                btn.style.background = '#dc2626';
+                btn.style.background = 'var(--danger)';
                 document.getElementById('reconStatus').textContent = 'Error: ' + e.message;
-                setTimeout(() => { btn.textContent = 'Run Reconciliation'; btn.style.background = '#2563eb'; btn.disabled = false; }, 3000);
+                setTimeout(() => { btn.textContent = 'Run Reconciliation'; btn.style.background = 'var(--info)'; btn.disabled = false; }, 3000);
             }
         }, 100);
     }
@@ -437,7 +437,7 @@
         if (existing) existing.remove();
         const matched = results.filter(r => r.status === 'suggestion').length;
         const unmatched = results.length - matched;
-        const thStyle = 'padding:6px;text-align:left;font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;white-space:nowrap';
+        const thStyle = 'padding:6px;text-align:left;font-size:9px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;white-space:nowrap';
 
         const panel = document.createElement('div');
         panel.id = 'reconPanel';
@@ -445,14 +445,14 @@
 
         panel.innerHTML = `
         <div style="background:white;border-radius:12px;max-width:98vw;width:100%;max-height:95vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,0.25)">
-            <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
                 <div>
-                    <h2 style="font-size:16px;font-weight:700;color:#1e293b;margin:0">Transaction Reconciliation</h2>
-                    <p style="font-size:11px;color:#64748b;margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
+                    <h2 style="font-size:16px;font-weight:700;color:var(--text-primary);margin:0">Transaction Reconciliation</h2>
+                    <p style="font-size:11px;color:var(--text-secondary);margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
                 </div>
                 <div style="display:flex;gap:6px">
-                    <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer">Approve All Transactions</button>
-                    <button onclick="closeReconPanel()" style="padding:6px 14px;font-size:11px;font-weight:600;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button>
+                    <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:var(--success);color:white;border:none;border-radius:6px;cursor:pointer">Approve All Transactions</button>
+                    <button onclick="closeReconPanel()" style="padding:6px 14px;font-size:11px;font-weight:600;background:var(--bg-surface-2);color:var(--text-secondary);border:1px solid var(--border-default);border-radius:6px;cursor:pointer">Close</button>
                 </div>
             </div>
             <div style="overflow:auto;padding:8px 12px">
@@ -495,7 +495,7 @@
     function reconRowHtml(r, i) {
         const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
         const cell = 'padding:5px 6px;vertical-align:top;font-size:11px';
-        const dim = 'color:#94a3b8;font-size:10px';
+        const dim = 'color:var(--text-muted);font-size:10px';
         const catSelect = buildCatDropdown('recon-cat-' + i, r.categoryId);
         const subCatSelect = buildSubCatDropdown('recon-subcat-' + i, r.subCatId);
 
@@ -510,19 +510,19 @@
             return cnt > 1;
         })();
         const splitBtnHtml = isAlreadySplit
-            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled style="font-size:10px;font-weight:600;padding:3px 8px;background:#f8fafc;color:#cbd5e1;border:1px solid #e2e8f0;border-radius:4px;cursor:not-allowed">Split</button>`
+            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled style="font-size:10px;font-weight:600;padding:3px 8px;background:var(--bg-surface);color:var(--text-muted);border:1px solid var(--border-default);border-radius:4px;cursor:not-allowed">Split</button>`
             : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" style="font-size:10px;font-weight:600;padding:3px 8px;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Split</button>`;
         const actionHtml = r.status === 'approved'
-            ? `<span style="color:#16a34a;font-weight:600;font-size:10px">Done ✓</span>`
+            ? `<span style="color:var(--success);font-weight:600;font-size:10px">Done ✓</span>`
             : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
                   <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
                   ${splitBtnHtml}
               </div>`;
 
-        const matchBadge = r.matchType ? `<span style="font-size:9px;color:#2563eb;font-weight:600">${escHtml(r.matchType)}</span>` : '';
+        const matchBadge = r.matchType ? `<span style="font-size:9px;color:var(--info);font-weight:600">${escHtml(r.matchType)}</span>` : '';
 
-        return `<tr id="recon-row-${i}" oninput="persistReconRow(${i})" style="border-bottom:1px solid #f1f5f9;${r.status === 'approved' ? 'opacity:0.5;' : ''}">
-            <td style="${cell};color:#94a3b8;font-weight:600">${i + 1}</td>
+        return `<tr id="recon-row-${i}" oninput="persistReconRow(${i})" style="border-bottom:1px solid var(--border-subtle);${r.status === 'approved' ? 'opacity:0.5;' : ''}">
+            <td style="${cell};color:var(--text-muted);font-weight:600">${i + 1}</td>
             <td style="${cell};white-space:nowrap">${escHtml(r.txDate)}</td>
             <td style="${cell};white-space:nowrap;font-size:10px;color:var(--text-secondary)">${escHtml(r.txAccount || '—')}</td>
             <td style="${cell};max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span style="${dim}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
@@ -754,7 +754,7 @@
                 <div style="margin-top:8px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
                     <div style="height:100%;width:${stats.pct}%;background:${stats.colour};border-radius:3px;transition:width 0.3s"></div>
                 </div>
-                <div style="margin-top:6px;font-size:10px;color:#94a3b8">Target: ≥90% <span style="color:#16a34a">●</span> 75–89% <span style="color:#d97706">●</span> &lt;75% <span style="color:#ef4444">●</span></div>
+                <div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Target: ≥90% <span style="color:var(--success)">●</span> 75–89% <span style="color:var(--warning)">●</span> &lt;75% <span style="color:var(--danger)">●</span></div>
             </div>`;
     }
 
@@ -794,7 +794,7 @@
             const total = records.length;
             const accurate = records.filter(r => r.fields && r.fields[RECAUDIT.wasAccurate]).length;
             const pct = Math.round((accurate / total) * 100);
-            const colour = pct >= 90 ? '#16a34a' : pct >= 75 ? '#d97706' : '#ef4444';
+            const colour = pct >= 90 ? 'var(--success)' : pct >= 75 ? 'var(--warning)' : 'var(--danger)';
             const label = pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red';
             const stats = { total, accurate, pct, colour, label };
             _reconStatsCache = stats;
@@ -1004,7 +1004,7 @@
             });
         }
 
-        if (btn) { btn.textContent = '✓'; btn.style.background = '#dcfce7'; btn.style.color = '#16a34a'; }
+        if (btn) { btn.textContent = '✓'; btn.style.background = 'var(--success-bg)'; btn.style.color = 'var(--success)'; }
         const row = document.getElementById('recon-row-' + idx);
         if (row) row.style.opacity = '0.5';
 
@@ -1128,24 +1128,24 @@
 
         overlay.innerHTML = `
             <div style="background:#fff;border-radius:12px;width:100%;max-width:760px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);font-family:var(--font-family-base)">
-                <div style="padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+                <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
                     <div style="flex:1;min-width:0">
-                        <h3 style="margin:0;font-size:15px;font-weight:700;color:#1e293b">Split Transaction</h3>
-                        <div style="margin-top:4px;font-size:11px;color:#64748b">
+                        <h3 style="margin:0;font-size:15px;font-weight:700;color:var(--text-primary)">Split Transaction</h3>
+                        <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
                             <strong>${escHtml(r.txDate)}</strong> &middot;
                             <strong>${escHtml(r.txVendor || '—')}</strong> &middot;
                             <strong>${escHtml(r.txAccount || '—')}</strong> &middot;
-                            Original: <strong style="color:#1e293b">${fmt(totalRaw)}</strong>
+                            Original: <strong style="color:var(--text-primary)">${fmt(totalRaw)}</strong>
                         </div>
                     </div>
-                    <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:#94a3b8;cursor:pointer;padding:0 4px">&times;</button>
+                    <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:var(--text-muted);cursor:pointer;padding:0 4px">&times;</button>
                 </div>
-                <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;gap:6px">
+                <div style="padding:14px 20px;border-bottom:1px solid var(--border-subtle);display:flex;gap:6px">
                     <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;cursor:pointer">Equal Split</button>
                     <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--border-default);background:#fff;color:var(--text-secondary);border-radius:6px;cursor:pointer">Custom Amounts</button>
                 </div>
                 <div id="splitModalBody" style="overflow:auto;padding:16px 20px;flex:1"></div>
-                <div style="padding:12px 20px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;gap:8px;background:#f8fafc">
+                <div style="padding:12px 20px;border-top:1px solid var(--border-default);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-surface)">
                     <button onclick="document.getElementById('reconSplitModal').remove()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:6px;cursor:pointer">Cancel</button>
                     <button id="splitSaveBtn" onclick="performReconSplit(${idx})" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer">Save Split</button>
                 </div>
@@ -1198,11 +1198,11 @@
                     few seconds — reconcile each one as normal.
                 </p>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <label style="font-size:12px;color:#1e293b;font-weight:600">Number of portions:
+                    <label style="font-size:12px;color:var(--text-primary);font-weight:600">Number of portions:
                         <input id="splitEqualCount" type="number" min="2" max="50" value="${st.equalCount}" oninput="splitOnEqualCountChange(this.value)"
                             style="margin-left:8px;width:70px;padding:6px 8px;font-size:13px;border:1px solid var(--border-default);border-radius:4px">
                     </label>
-                    <span style="font-size:12px;color:var(--text-secondary)">Each portion: <strong style="color:#1e293b" id="splitEachLabel">${fmt(each)}</strong></span>
+                    <span style="font-size:12px;color:var(--text-secondary)">Each portion: <strong style="color:var(--text-primary)" id="splitEachLabel">${fmt(each)}</strong></span>
                 </div>
                 <p style="margin:14px 0 0 0;font-size:11px;color:var(--text-muted);line-height:1.4">
                     <strong>JS does not duplicate records</strong> — only the Airtable automation does. This prevents the double-creation issue from the previous version.
@@ -1224,7 +1224,7 @@
             `).join('');
             const total = st.customRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
             const remaining = st.totalRaw - total;
-            const remColor = Math.abs(remaining) < 0.005 ? '#16a34a' : (remaining < 0 ? 'var(--danger)' : 'var(--text-secondary)');
+            const remColor = Math.abs(remaining) < 0.005 ? 'var(--success)' : (remaining < 0 ? 'var(--danger)' : 'var(--text-secondary)');
             body.innerHTML = `
                 <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
                     Enter each portion's amount and pre-categorise. The original record gets the first portion's amount + categories;
@@ -1232,12 +1232,12 @@
                 </p>
                 <table style="width:100%;border-collapse:collapse;font-size:11px">
                     <thead>
-                        <tr style="border-bottom:1px solid #e2e8f0">
-                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">#</th>
-                            <th style="padding:5px;text-align:right;font-size:9px;color:#64748b;text-transform:uppercase;min-width:90px">Amount (£)</th>
-                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">Sub-Category</th>
-                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">Business</th>
-                            <th style="padding:5px;text-align:left;font-size:9px;color:#64748b;text-transform:uppercase">Tenancy</th>
+                        <tr style="border-bottom:1px solid var(--border-default)">
+                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">#</th>
+                            <th style="padding:5px;text-align:right;font-size:9px;color:var(--text-secondary);text-transform:uppercase;min-width:90px">Amount (£)</th>
+                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">Sub-Category</th>
+                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">Business</th>
+                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">Tenancy</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -1246,7 +1246,7 @@
                 <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
                     <button onclick="splitAddCustomRow()" style="padding:6px 12px;font-size:11px;font-weight:600;background:#fff;color:var(--accent);border:1px solid var(--accent);border-radius:4px;cursor:pointer">+ Add Portion</button>
                     <div style="font-size:12px">
-                        <span style="color:var(--text-muted)">Total: <strong style="color:#1e293b">${fmt(total)}</strong></span>
+                        <span style="color:var(--text-muted)">Total: <strong style="color:var(--text-primary)">${fmt(total)}</strong></span>
                         &nbsp;·&nbsp;
                         <span style="color:${remColor}">Remaining: <strong>${fmt(remaining)}</strong></span>
                     </div>

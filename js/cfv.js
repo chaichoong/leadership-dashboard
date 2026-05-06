@@ -354,9 +354,9 @@
         const summaryCards = document.getElementById('cfvSummaryCards');
         if (summaryCards) {
             summaryCards.innerHTML = `
-                ${potentialCfvs.length > 0 ? `<div class="kpi-card" style="border-color:#d97706;border-width:2px">
-                    <div class="kpi-card-label" style="color:#d97706">⚠ Potential CFVs</div>
-                    <div class="kpi-card-value" style="color:#d97706">${potentialCfvs.length}</div>
+                ${potentialCfvs.length > 0 ? `<div class="kpi-card" style="border-color:var(--warning);border-width:2px">
+                    <div class="kpi-card-label" style="color:var(--warning)">⚠ Potential CFVs</div>
+                    <div class="kpi-card-value" style="color:var(--warning)">${potentialCfvs.length}</div>
                     <div class="kpi-card-sub">Awaiting your review — confirm or dismiss below</div>
                 </div>` : ''}
                 <div class="kpi-card">
@@ -376,7 +376,7 @@
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">CFV Actioned</div>
-                    <div class="kpi-card-value" style="color:#d97706">${cfvActioned.length}</div>
+                    <div class="kpi-card-value" style="color:var(--warning)">${cfvActioned.length}</div>
                     <div class="kpi-card-sub">${cfvActioned.length > 0 ? 'Awaiting payment confirmation' : 'No actioned CFVs'}</div>
                 </div>
             `;
@@ -397,7 +397,7 @@
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
             return;
         }
 
@@ -456,7 +456,7 @@
             if (entry.status === 'potential') {
                 // Awaiting user review — confirm as CFV or dismiss
                 actionsHtml = `
-                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn" style="background:var(--danger);color:white;border-color:var(--danger)" onclick="event.stopPropagation(); cfvConfirmAsCFV('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvDismissAsCFV('${entry.tenancyId}','${escJs(entry.surname)}',this)" style="margin-top:4px">Not a CFV</button>
                 `;
             } else if (entry.status === 'cfv') {
@@ -468,7 +468,7 @@
             } else if (entry.reflagged) {
                 // CFV Actioned but re-flagged — confirm as CFV again or dismiss
                 actionsHtml = `
-                    <button class="cfv-action-btn" style="background:#dc2626;color:white;border-color:#dc2626" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
+                    <button class="cfv-action-btn" style="background:var(--danger);color:white;border-color:var(--danger)" onclick="event.stopPropagation(); cfvConfirmReflag('${entry.tenancyId}','${escJs(entry.surname)}',this)">Confirm CFV</button>
                     <button class="cfv-action-btn" onclick="event.stopPropagation(); cfvDismissReflag('${entry.tenancyId}',this)" style="margin-top:4px">Dismiss</button>
                     <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
@@ -476,7 +476,7 @@
                 // CFV Actioned — can return to In Payment or move back to CFV
                 actionsHtml = `
                     <button class="cfv-action-btn success" onclick="event.stopPropagation(); cfvConfirmAction('inpayment','${entry.tenancyId}','${escJs(entry.surname)}',this)">In Payment</button>
-                    <button class="cfv-action-btn" style="border-color:#dc2626;color:#dc2626" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escJs(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
+                    <button class="cfv-action-btn" style="border-color:var(--danger);color:var(--danger)" onclick="event.stopPropagation(); cfvConfirmAction('cfv','${entry.tenancyId}','${escJs(entry.surname)}',this)" style="margin-top:4px">Move to CFV</button>
                     <button class="cfv-action-btn" data-comment-btn="${entry.tenancyId}" onclick="event.stopPropagation(); cfvShowComments('${entry.tenancyId}','${escJs(entry.surname)}','${escJs(entry.ref)}')" style="margin-top:4px">${commentBtnLabel}</button>
                 `;
             }
@@ -484,11 +484,11 @@
             // Payment detected banner removed — auto-return handles this now
 
             return `<tr>
-                <td style="font-weight:600">${escHtml(entry.surname)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.ref)}</span></td>
-                <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span style="font-size:10px;color:#94a3b8">${escHtml(entry.unitName)}</span></td>
+                <td style="font-weight:600">${escHtml(entry.surname)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.ref)}</span></td>
+                <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.unitName)}</span></td>
                 <td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${fmt(entry.rent)}</td>
                 <td style="text-align:center">${entry.dueDay || '—'}</td>
-                <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? '#dc2626' : entry.daysOverdue > 3 ? '#d97706' : '#1e293b'}">${entry.daysOverdue}</td>
+                <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? 'var(--danger)' : entry.daysOverdue > 3 ? 'var(--warning)' : 'var(--text-primary)'}">${entry.daysOverdue}</td>
                 <td>${statusBadge}</td>
                 <td>${contactHtml}</td>
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
@@ -607,8 +607,8 @@
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
         btn.textContent = 'Done ✓';
-        btn.style.background = '#fee2e2';
-        btn.style.color = '#dc2626';
+        btn.style.background = 'var(--danger-bg)';
+        btn.style.color = 'var(--danger)';
         setTimeout(() => renderCFVTab(), 1500);
         setTimeout(() => loadDashboard(), 3000);
     }
@@ -630,8 +630,8 @@
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfv, name: 'CFV' };
         btn.textContent = 'Confirmed ✓';
-        btn.style.background = '#fee2e2';
-        btn.style.color = '#dc2626';
+        btn.style.background = 'var(--danger-bg)';
+        btn.style.color = 'var(--danger)';
         setTimeout(() => renderCFVTab(), 1500);
         setTimeout(() => loadDashboard(), 3000);
     }
@@ -652,8 +652,8 @@
         const tag = `[CFV-DISMISSED:${now.toISOString().split('T')[0]}]`;
         await addTenancyComment(tenancyId, `${tag} Dismissed as not a CFV from Leadership Dashboard. Payment confirmed via other means.`);
         btn.textContent = 'Dismissed ✓';
-        btn.style.background = '#dcfce7';
-        btn.style.color = '#16a34a';
+        btn.style.background = 'var(--success-bg)';
+        btn.style.color = 'var(--success)';
         setTimeout(() => renderCFVTab(), 1500);
     }
 
@@ -726,8 +726,8 @@
         if (!ok) { btn.textContent = 'Failed'; btn.disabled = false; return; }
         await addTenancyComment(tenancyId, 'Status changed to CFV Actioned from Leadership Dashboard.');
         btn.textContent = 'Done ✓';
-        btn.style.background = '#dcfce7';
-        btn.style.color = '#16a34a';
+        btn.style.background = 'var(--success-bg)';
+        btn.style.color = 'var(--success)';
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned', color: 'yellowLight2' };
         setTimeout(() => renderCFVTab(), 1500);
@@ -756,8 +756,8 @@
         localStorage.setItem('cfv_' + tenancyId + '_returned', '1');
         await addTenancyComment(tenancyId, 'Returned to In Payment from Leadership Dashboard. Payment confirmed.');
         btn.textContent = 'Done ✓';
-        btn.style.background = '#dcfce7';
-        btn.style.color = '#16a34a';
+        btn.style.background = 'var(--success-bg)';
+        btn.style.color = 'var(--success)';
         setTimeout(() => renderCFVTab(), 1000);
         setTimeout(() => loadDashboard(), 3000);
     }
@@ -800,7 +800,7 @@
     }
 
     function formatCommentsList(comments, emptyMsg) {
-        if (comments.length === 0) return `<div style="color:#94a3b8;font-size:12px;padding:8px 0">${emptyMsg}</div>`;
+        if (comments.length === 0) return `<div style="color:var(--text-muted);font-size:12px;padding:8px 0">${emptyMsg}</div>`;
         return comments.map(c => {
             const d = new Date(c.createdTime);
             const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -813,7 +813,7 @@
         const section = document.getElementById('cfvCommentsSection');
         const container = document.getElementById('cfvCommentsContainer');
         section.style.display = 'block';
-        container.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8">Loading full comment history...</div>';
+        container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Loading full comment history...</div>';
 
         // Fetch all comments from the tenancy record
         const tenancyComments = await fetchAllComments(TABLES.tenancies, tenancyId);
@@ -822,7 +822,7 @@
         if (tenancyComments.length > 0) {
             commentsHtml = formatCommentsList(tenancyComments, '');
         } else {
-            commentsHtml = '<div style="color:#94a3b8;font-size:12px;padding:12px 0">No comments yet. Your Airtable PAT may need the <strong>data.recordComments:read</strong> scope — update at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>.</div>';
+            commentsHtml = '<div style="color:var(--text-muted);font-size:12px;padding:12px 0">No comments yet. Your Airtable PAT may need the <strong>data.recordComments:read</strong> scope — update at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>.</div>';
         }
 
         container.innerHTML = `
@@ -831,9 +831,9 @@
                     <span class="cfv-comment-tenant">${escHtml(surname)} — ${escHtml(ref)}</span>
                     <button class="cfv-action-btn" onclick="document.getElementById('cfvCommentsSection').style.display='none'">Close</button>
                 </div>
-                <div style="font-size:12px;font-weight:700;color:#1e293b;margin-bottom:6px;padding-top:8px">Tenancy Comments (${tenancyComments.length})</div>
+                <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:6px;padding-top:8px">Tenancy Comments (${tenancyComments.length})</div>
                 <div class="cfv-comment-list" style="max-height:400px">${commentsHtml}</div>
-                <div style="margin-top:12px;padding-top:8px;border-top:1px solid #e2e8f0">
+                <div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-default)">
                     <textarea class="cfv-comment-input" id="cfvNewComment" rows="2" placeholder="Add a comment..."></textarea>
                     <button class="cfv-action-btn primary cfv-comment-send" onclick="cfvAddComment('${tenancyId}','${escJs(surname)}','${escJs(ref)}')">Add Comment</button>
                 </div>

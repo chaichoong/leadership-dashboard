@@ -513,7 +513,7 @@
             let updateAllBtn = '';
             if (effectiveStalePages.length > 0) {
                 if (sopRequested) {
-                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${effectiveStalePages.length} SOPs)</button>`
+                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:var(--success-bg);color:var(--success);border-color:var(--success);cursor:default" disabled>✓ Update Requested — Processing (${effectiveStalePages.length} SOPs)</button>`
                         + ` <button class="cfv-action-btn" onclick="resetSOPRequestFlag()" style="font-size:11px;padding:8px 16px;margin-top:8px">Reset &amp; Re-enable</button>`;
                 } else {
                     updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${effectiveStalePages.length})</button>`;
@@ -717,8 +717,8 @@
             });
             if (resp.ok) {
                 btn.textContent = 'Queued ✓';
-                btn.style.background = '#dcfce7';
-                btn.style.color = '#16a34a';
+                btn.style.background = 'var(--success-bg)';
+                btn.style.color = 'var(--success)';
                 const toast = document.getElementById('shareToast');
                 toast.textContent = `SOP update queued for ${pageName} — will be processed automatically`;
                 toast.style.display = 'block';
@@ -762,9 +762,9 @@
         // Mark as requested in localStorage so it persists across refreshes
         localStorage.setItem('_sop_update_requested', new Date().toISOString());
         btn.textContent = '✓ Update Requested — Processing';
-        btn.style.background = '#dcfce7';
-        btn.style.color = '#16a34a';
-        btn.style.borderColor = '#16a34a';
+        btn.style.background = 'var(--success-bg)';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
         const toast = document.getElementById('shareToast');
         toast.textContent = 'All SOP updates queued — will be processed automatically';
         toast.style.display = 'block';
