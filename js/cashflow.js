@@ -411,6 +411,22 @@
         window._cfOpeningBalance = openingBalance;
         const whatIfData = buildWhatIfLine(rows, openingBalance);
 
+        // Resolve design tokens to concrete colour strings BEFORE handing
+        // them to Chart.js. Chart.js draws to a <canvas> and passes colour
+        // strings straight to the 2D context — it does not resolve CSS
+        // custom properties (`var(--success)`). Pre-resolving via
+        // getComputedStyle keeps the chart on the design palette without
+        // relying on hardcoded hex.
+        const docStyle = getComputedStyle(document.documentElement);
+        const cv = (name, fallback) => (docStyle.getPropertyValue(name) || '').trim() || fallback;
+        const successColor   = cv('--success',        '#16a34a');
+        const warningColor   = cv('--warning',        '#d97706');
+        const dangerColor    = cv('--danger',         '#dc2626');
+        const textPrimary    = cv('--text-primary',   '#1C2422');
+        const textSecondary  = cv('--text-secondary', '#5A6660');
+        const borderDefault  = cv('--border-default', '#DDE1D9');
+        const surfaceColor   = cv('--bg-surface',     '#FBFBF9');
+
         // Chart
         if (cashflowChartInstance) cashflowChartInstance.destroy();
         const ctx = document.getElementById('cashflowChart');
@@ -421,14 +437,14 @@
                 datasets: [{
                     label: 'Closing Balance (Fixed Costs Only — No Variable Reserves)',
                     data: chartData,
-                    borderColor: 'var(--success)',
+                    borderColor: successColor,
                     backgroundColor: 'rgba(22, 163, 74, 0.06)',
                     borderWidth: 2,
                     borderDash: [6, 3],
                     fill: true,
                     tension: 0.4,
                     pointRadius: 3.5,
-                    pointBackgroundColor: 'var(--success)',
+                    pointBackgroundColor: successColor,
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
@@ -436,13 +452,13 @@
                 }, {
                     label: 'After All Variable Costs (Maintenance + Wages + CFV Reserve)',
                     data: chartDataWorstCase,
-                    borderColor: 'var(--warning)',
+                    borderColor: warningColor,
                     backgroundColor: 'rgba(217, 119, 6, 0.05)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
                     pointRadius: 3.5,
-                    pointBackgroundColor: 'var(--warning)',
+                    pointBackgroundColor: warningColor,
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
@@ -450,14 +466,14 @@
                 }, {
                     label: 'What-If (Excludes Unchecked + Wages Only)',
                     data: whatIfData,
-                    borderColor: 'var(--danger)',
+                    borderColor: dangerColor,
                     backgroundColor: 'rgba(220, 38, 38, 0.05)',
                     borderWidth: 2,
                     borderDash: [4, 4],
                     fill: false,
                     tension: 0.4,
                     pointRadius: 3.5,
-                    pointBackgroundColor: 'var(--danger)',
+                    pointBackgroundColor: dangerColor,
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
@@ -472,16 +488,16 @@
                     legend: {
                         display: true,
                         labels: {
-                            color: 'var(--text-primary)',
+                            color: textPrimary,
                             font: { size: 12, family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
                             padding: 15,
                         }
                     },
                     tooltip: {
-                        backgroundColor: 'rgba(255,255,255,0.95)',
-                        titleColor: 'var(--text-primary)',
-                        bodyColor: 'var(--text-secondary)',
-                        borderColor: 'var(--border-default)',
+                        backgroundColor: surfaceColor,
+                        titleColor: textPrimary,
+                        bodyColor: textSecondary,
+                        borderColor: borderDefault,
                         borderWidth: 1,
                         padding: 12,
                         displayColors: true,
@@ -491,16 +507,16 @@
                 scales: {
                     y: {
                         suggestedMin: -2000,
-                        grid: { color: 'var(--border-default)', drawBorder: false },
+                        grid: { color: borderDefault, drawBorder: false },
                         ticks: {
-                            color: 'var(--text-primary)',
+                            color: textPrimary,
                             font: { size: 11 },
                             callback: v => '£' + v.toLocaleString()
                         }
                     },
                     x: {
                         grid: { display: false, drawBorder: false },
-                        ticks: { color: 'var(--text-primary)', font: { size: 10 } }
+                        ticks: { color: textPrimary, font: { size: 10 } }
                     }
                 }
             }
