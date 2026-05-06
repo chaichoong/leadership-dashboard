@@ -7,7 +7,7 @@
 
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
-        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.24', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
+        { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.25', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.12', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Task and Project Management',   icon: '✅', pageVer: '1.60', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.15', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
