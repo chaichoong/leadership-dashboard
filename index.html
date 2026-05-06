@@ -130,7 +130,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="system" data-tabs="sitemap">
+            <div class="sidebar-section" data-section="system" data-tabs="sitemap,skills">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('system')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('system')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">System</span>
@@ -138,6 +138,7 @@
                 </div>
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('sitemap')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('sitemap')}"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map &amp; Guides</span><span class="sidebar-health-dot unknown" data-sidebar-health="sitemap" title="No checks run yet"></span><span id="sitemapBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('skills')}"><span class="sidebar-icon">&#x1F9E0;</span><span class="sidebar-label">Skills Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="skills" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="shareCurrentPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();shareCurrentPage()}" title="Copy link to this page"><span class="sidebar-icon">&#x1F4CE;</span><span class="sidebar-label">Share Current Page</span></div>
                 </div>
             </div>
@@ -618,6 +619,28 @@
             </div>
         </div>
     </div>
+
+        <!-- Tab: Skills Library -->
+        <div class="tab-panel" id="tab-skills">
+            <div class="section">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+                    <div>
+                        <h2 class="section-title" style="margin-bottom:2px">Skills Library</h2>
+                        <p style="color:var(--text-secondary);font-size:13px;margin:0">All Claude Code and Cowork skills available in your setup. <span id="skillsTotalCount" style="font-weight:600"></span></p>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button onclick="expandAllSkills()" class="skills-toolbar-btn" title="Expand all">Expand All</button>
+                        <button onclick="collapseAllSkills()" class="skills-toolbar-btn" title="Collapse all">Collapse All</button>
+                    </div>
+                </div>
+                <div style="margin-bottom:16px">
+                    <input type="text" id="skillsSearchInput" class="skills-search-input" placeholder="Search skills by name, keyword, or category..." oninput="onSkillsSearch(event)" aria-label="Search skills">
+                </div>
+                <div class="skills-filter-bar" id="skillsFilterBar"></div>
+                <div id="skillsLibraryContent"></div>
+            </div>
+        </div>
+
     </div><!-- end main-content -->
     </div><!-- end app-layout -->
 
@@ -640,6 +663,8 @@
     <script defer src="js/cfv.js?v=18"></script>
     <script defer src="js/arrears.js?v=10"></script>
     <script defer src="js/fintable.js?v=13"></script>
+    <script defer src="js/skills-data.js?v=1"></script>
+    <script defer src="js/skills.js?v=1"></script>
     <script defer src="js/ai-assistant.js?v=16"></script>
     <script defer src="js/quick-task.js?v=3"></script>
 </body>

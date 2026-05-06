@@ -33,6 +33,8 @@ FILE_TO_PAGE = {
     'os/strategy/strategy.js': 'os-strategy',
     'os/strategy/strategy.css': 'os-strategy',
     'os/operations/index.html': 'operations',
+    'js/skills.js':             'skills',
+    'js/skills-data.js':        'skills',
 }
 
 CONFIG_FILE = 'js/config.js'
