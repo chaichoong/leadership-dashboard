@@ -171,12 +171,12 @@
 
     // ── Format helpers ──
     function pnlFmt(n) {
-        if (n === 0 || !n) return '<span style="color:#cbd5e1">–</span>';
+        if (n === 0 || !n) return '<span style="color:var(--text-muted)">–</span>';
         const abs = Math.abs(n).toLocaleString('en-GB', { maximumFractionDigits: 0 });
-        return n < 0 ? `<span style="color:#dc2626">(£${abs})</span>` : `£${abs}`;
+        return n < 0 ? `<span style="color:var(--danger)">(£${abs})</span>` : `£${abs}`;
     }
     function pnlPct(n) {
-        if (!isFinite(n) || n === 0) return '<span style="color:#cbd5e1">–</span>';
+        if (!isFinite(n) || n === 0) return '<span style="color:var(--text-muted)">–</span>';
         const cls = n >= 0 ? 'text-green' : 'text-red';
         return `<span class="${cls}">${n.toFixed(1)}%</span>`;
     }
@@ -225,7 +225,7 @@
         if (typedName === '' || typedName == null) return pnlEditTxField(txId, kind, '', inputEl);
         const id = pnlResolveNameToId(kind, typedName);
         const status = inputEl?.parentElement?.querySelector('.pnl-edit-status');
-        if (id === null) { if (status) { status.textContent = '✗ no match'; status.style.color = '#dc2626'; } return; }
+        if (id === null) { if (status) { status.textContent = '✗ no match'; status.style.color = 'var(--danger)'; } return; }
         return pnlEditTxField(txId, kind, id, inputEl);
     }
     async function pnlEditTxField(txId, kind, recordId, selectEl) {
@@ -233,7 +233,7 @@
         const fieldId = fieldMap[kind];
         if (!fieldId) return;
         const status = selectEl?.parentElement?.querySelector('.pnl-edit-status');
-        if (status) { status.textContent = '…'; status.style.color = '#94a3b8'; }
+        if (status) { status.textContent = '…'; status.style.color = 'var(--text-muted)'; }
         const fields = {};
         fields[fieldId] = recordId ? [recordId] : [];
         try {
@@ -247,10 +247,10 @@
             const tx = (allTransactions || []).find(t => t.id === txId);
             if (tx && updated.fields) Object.assign(tx.fields, updated.fields);
             _pnlEditsMade = true;
-            if (status) { status.textContent = '✓'; status.style.color = '#16a34a'; }
+            if (status) { status.textContent = '✓'; status.style.color = 'var(--success)'; }
         } catch (e) {
             console.error('pnlEditTxField failed', e);
-            if (status) { status.textContent = '✗ ' + (e.message || 'err'); status.style.color = '#dc2626'; }
+            if (status) { status.textContent = '✗ ' + (e.message || 'err'); status.style.color = 'var(--danger)'; }
         }
     }
 
@@ -278,7 +278,7 @@
                 <input list="${datalistId}" value="${escHtml(currentName)}"
                     onchange="pnlEditTxByName(${jsAttr(txId)}, ${jsAttr(kind)}, this.value, this)"
                     placeholder="Type to search…"
-                    style="font-size:11px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;width:150px">
+                    style="font-size:11px;padding:3px 6px;border:1px solid var(--border-default);border-radius:4px;background:#fff;width:150px">
                 <span class="pnl-edit-status" style="font-size:11px;min-width:12px"></span>
             </div>`;
         }
@@ -301,7 +301,7 @@
             const catId = pnlLinkId(getField(tx, F.txCategory));
             const subCatId = pnlLinkId(getField(tx, F.txSubCategory));
             const bizId = pnlLinkId(getField(tx, F.txBusiness));
-            const amtCls = amt < 0 ? 'color:#dc2626' : 'color:#065f46';
+            const amtCls = amt < 0 ? 'color:var(--danger)' : 'color:var(--success)';
             return `<tr>
                 <td style="padding:8px 10px;white-space:nowrap;vertical-align:top">${escHtml(date)}</td>
                 <td style="padding:8px 10px;vertical-align:top;min-width:180px">${escHtml(detail)}</td>
@@ -319,27 +319,27 @@
         overlay.onclick = (e) => { if (e.target === overlay) pnlCloseDrill(); };
         overlay.innerHTML = `${datalistHtml}
             <div style="background:#fff;border-radius:12px;max-width:1100px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,0.3)">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e2e8f0">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-default)">
                     <div>
-                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px">${escHtml(section)}</div>
-                        <div style="font-size:16px;font-weight:700;color:#0f172a">${escHtml(title)}</div>
-                        <div style="font-size:12px;color:#64748b;margin-top:2px">${txs.length} transaction${txs.length === 1 ? '' : 's'} · Sum: <strong>${sumFmt}</strong> · <span style="color:#94a3b8">Changes save instantly; report refreshes on close.</span></div>
+                        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px">${escHtml(section)}</div>
+                        <div style="font-size:16px;font-weight:700;color:var(--text-primary)">${escHtml(title)}</div>
+                        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${txs.length} transaction${txs.length === 1 ? '' : 's'} · Sum: <strong>${sumFmt}</strong> · <span style="color:var(--text-muted)">Changes save instantly; report refreshes on close.</span></div>
                     </div>
-                    <button onclick="pnlCloseDrill()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#64748b;padding:0 8px">&times;</button>
+                    <button onclick="pnlCloseDrill()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-secondary);padding:0 8px">&times;</button>
                 </div>
                 <div style="overflow:auto;flex:1">
                     <table style="width:100%;border-collapse:collapse;font-size:13px">
-                        <thead style="background:#f8fafc;position:sticky;top:0">
-                            <tr style="border-bottom:1px solid #e2e8f0">
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Date</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Transaction Detail</th>
-                                <th style="padding:8px 10px;text-align:right;font-weight:600;color:#475569">Report Amount</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Category</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Sub-Category</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:#475569">Business</th>
+                        <thead style="background:var(--bg-surface);position:sticky;top:0">
+                            <tr style="border-bottom:1px solid var(--border-default)">
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Date</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Transaction Detail</th>
+                                <th style="padding:8px 10px;text-align:right;font-weight:600;color:var(--text-secondary)">Report Amount</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Category</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Sub-Category</th>
+                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Business</th>
                             </tr>
                         </thead>
-                        <tbody>${rowsHtml || '<tr><td colspan="6" style="padding:40px;text-align:center;color:#94a3b8">No transactions for this slice.</td></tr>'}</tbody>
+                        <tbody>${rowsHtml || '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions for this slice.</td></tr>'}</tbody>
                     </table>
                 </div>
             </div>`;
@@ -379,7 +379,7 @@
         const sharedOptions = {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { font: { size: 11, family: fontFamily }, padding: 12, usePointStyle: true, pointStyle: 'circle' } } },
-            scales: { x: { grid: { display: false }, ticks: { font: { size: 10, family: fontFamily } } }, y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10, family: fontFamily } } } },
+            scales: { x: { grid: { display: false }, ticks: { font: { size: 10, family: fontFamily } } }, y: { grid: { color: 'var(--bg-surface-2)' }, ticks: { font: { size: 10, family: fontFamily } } } },
         };
 
         // 1. Revenue vs Expenses bar chart
@@ -390,7 +390,7 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Revenue', data: revData, backgroundColor: '#22c55e', borderRadius: 4, barPercentage: 0.7 },
+                        { label: 'Revenue', data: revData, backgroundColor: "#2C6E49", borderRadius: 4, barPercentage: 0.7 },
                         { label: 'COGS', data: cogsData.map(v => -v), backgroundColor: '#f87171', borderRadius: 4, barPercentage: 0.7 },
                         { label: 'OpEx', data: opexData.map(v => -v), backgroundColor: '#fb923c', borderRadius: 4, barPercentage: 0.7 },
                     ]
@@ -399,7 +399,7 @@
                     ...sharedOptions,
                     plugins: {
                         ...sharedOptions.plugins,
-                        title: { display: true, text: 'Revenue vs Expenses', font: { size: 13, weight: '600', family: fontFamily }, color: '#0f172a', padding: { bottom: 8 } },
+                        title: { display: true, text: 'Revenue vs Expenses', font: { size: 13, weight: '600', family: fontFamily }, color: '#1C2422', padding: { bottom: 8 } },
                         tooltip: { callbacks: { label: (c) => `${c.dataset.label}: £${Math.abs(c.raw).toLocaleString('en-GB', { maximumFractionDigits: 0 })}` } }
                     },
                     scales: {
@@ -418,16 +418,16 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Gross Profit', data: gpData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
-                        { label: 'Net Profit', data: npData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
-                        { label: `NP Target (£${(PNL_CLEAR_PROFIT_TARGET/1000).toFixed(0)}k/mo)`, data: keys.map(() => PNL_CLEAR_PROFIT_TARGET), borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+                        { label: 'Gross Profit', data: gpData, borderColor: "#3560A8", backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
+                        { label: 'Net Profit', data: npData, borderColor: "#2C6E49", backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
+                        { label: `NP Target (£${(PNL_CLEAR_PROFIT_TARGET/1000).toFixed(0)}k/mo)`, data: keys.map(() => PNL_CLEAR_PROFIT_TARGET), borderColor: "#A33B3B", borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
                     ]
                 },
                 options: {
                     ...sharedOptions,
                     plugins: {
                         ...sharedOptions.plugins,
-                        title: { display: true, text: 'Profit Trend', font: { size: 13, weight: '600', family: fontFamily }, color: '#0f172a', padding: { bottom: 8 } },
+                        title: { display: true, text: 'Profit Trend', font: { size: 13, weight: '600', family: fontFamily }, color: '#1C2422', padding: { bottom: 8 } },
                         tooltip: { callbacks: { label: (c) => `${c.dataset.label}: £${c.raw.toLocaleString('en-GB', { maximumFractionDigits: 0 })}` } }
                     },
                     scales: {
@@ -446,17 +446,17 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Gross Margin %', data: gpMData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
-                        { label: 'Net Margin %', data: npMData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
-                        { label: `GP Target (${PNL_GROSS_MARGIN_TARGET}%)`, data: keys.map(() => PNL_GROSS_MARGIN_TARGET), borderColor: '#3b82f6', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
-                        { label: `NP Target (${PNL_NET_MARGIN_TARGET}%)`, data: keys.map(() => PNL_NET_MARGIN_TARGET), borderColor: '#ef4444', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+                        { label: 'Gross Margin %', data: gpMData, borderColor: "#3560A8", backgroundColor: 'rgba(59,130,246,0.08)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
+                        { label: 'Net Margin %', data: npMData, borderColor: "#2C6E49", backgroundColor: 'rgba(16,185,129,0.08)', fill: true, tension: 0.3, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2 },
+                        { label: `GP Target (${PNL_GROSS_MARGIN_TARGET}%)`, data: keys.map(() => PNL_GROSS_MARGIN_TARGET), borderColor: "#3560A8", borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
+                        { label: `NP Target (${PNL_NET_MARGIN_TARGET}%)`, data: keys.map(() => PNL_NET_MARGIN_TARGET), borderColor: "#A33B3B", borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false },
                     ]
                 },
                 options: {
                     ...sharedOptions,
                     plugins: {
                         ...sharedOptions.plugins,
-                        title: { display: true, text: 'Profit Margin Trend', font: { size: 13, weight: '600', family: fontFamily }, color: '#0f172a', padding: { bottom: 8 } },
+                        title: { display: true, text: 'Profit Margin Trend', font: { size: 13, weight: '600', family: fontFamily }, color: '#1C2422', padding: { bottom: 8 } },
                         tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.raw.toFixed(1)}%` } }
                     },
                     scales: {
@@ -474,8 +474,8 @@
             const slices = [];
             const colours = [
                 '#f87171','#fb923c','#fbbf24','#a3e635','#34d399','#22d3ee','#60a5fa','#a78bfa','#f472b6','#e879f9',
-                '#f97316','#84cc16','#14b8a6','#06b6d4','#8b5cf6','#ec4899','#ef4444','#10b981','#6366f1','#d946ef',
-                '#f59e0b','#0ea5e9','#8b5cf6','#64748b'
+                '#d97706','#84cc16','#14b8a6','#06b6d4','#8b5cf6','#ec4899','#A33B3B','#2C6E49','#6366f1','#d946ef',
+                '#f59e0b','#0ea5e9','#8b5cf6','#5A6660'
             ];
             [pnl.cogs, pnl.opex].forEach(sec => {
                 sec.rows.forEach(r => { if (r.total > 0) slices.push({ label: r.subCat, value: r.total }); });
@@ -494,7 +494,7 @@
                     layout: { padding: { right: 10 } },
                     plugins: {
                         legend: { position: 'bottom', maxHeight: 120, labels: { font: { size: 10, family: fontFamily }, padding: 6, usePointStyle: true, pointStyle: 'circle', boxWidth: 8 } },
-                        title: { display: true, text: 'Expense Breakdown (Period Total)', font: { size: 13, weight: '600', family: fontFamily }, color: '#0f172a', padding: { bottom: 4 } },
+                        title: { display: true, text: 'Expense Breakdown (Period Total)', font: { size: 13, weight: '600', family: fontFamily }, color: '#1C2422', padding: { bottom: 4 } },
                         tooltip: { callbacks: { label: (c) => { const pct = totalExp ? ((c.raw / totalExp) * 100).toFixed(1) : 0; return `${c.label}: £${c.raw.toLocaleString('en-GB', { maximumFractionDigits: 0 })} (${pct}%)`; } } }
                     },
                     cutout: '55%'
@@ -544,7 +544,7 @@
         _pnlAiLoading = true;
         const panel = document.getElementById('pnlAiPanel');
         if (!panel) return;
-        panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:#64748b;font-size:13px;padding:16px"><div class="ai-typing-dot" style="animation:blink 1.4s infinite both"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.2s"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.4s"></div><span style="margin-left:8px">Analysing P&L data…</span></div>';
+        panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:13px;padding:16px"><div class="ai-typing-dot" style="animation:blink 1.4s infinite both"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.2s"></div><div class="ai-typing-dot" style="animation:blink 1.4s infinite both 0.4s"></div><span style="margin-left:8px">Analysing P&L data…</span></div>';
 
         const keys = _pnlCache.monthKeys;
         const ctx = pnlBuildAIContext(_pnlCache, keys);
@@ -570,13 +570,13 @@ RULES:
             if (!resp.ok) throw new Error(`API ${resp.status}`);
             const data = await resp.json();
             const text = data.content?.[0]?.text || 'No analysis available.';
-            panel.innerHTML = `<div style="font-size:13px;line-height:1.7;color:#1e293b">${typeof renderMarkdown === 'function' ? renderMarkdown(text) : text.replace(/\n/g, '<br>')}</div>
+            panel.innerHTML = `<div style="font-size:13px;line-height:1.7;color:var(--text-primary)">${typeof renderMarkdown === 'function' ? renderMarkdown(text) : text.replace(/\n/g, '<br>')}</div>
                 <div style="margin-top:8px;display:flex;gap:6px">
-                    <button onclick="pnlRunAIAnalysis()" style="font-size:10px;padding:3px 10px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;color:#64748b">↻ Refresh Analysis</button>
+                    <button onclick="pnlRunAIAnalysis()" style="font-size:10px;padding:3px 10px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:4px;cursor:pointer;color:var(--text-secondary)">↻ Refresh Analysis</button>
                 </div>`;
         } catch (e) {
             console.error('P&L AI analysis failed:', e);
-            panel.innerHTML = `<div style="color:#dc2626;font-size:12px;padding:12px">Analysis unavailable: ${escHtml(e.message)}. <button onclick="pnlRunAIAnalysis()" style="font-size:11px;padding:2px 8px;background:#fee2e2;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;color:#991b1b;margin-left:6px">Retry</button></div>`;
+            panel.innerHTML = `<div style="color:var(--danger);font-size:12px;padding:12px">Analysis unavailable: ${escHtml(e.message)}. <button onclick="pnlRunAIAnalysis()" style="font-size:11px;padding:2px 8px;background:var(--danger-bg);border:1px solid #fca5a5;border-radius:4px;cursor:pointer;color:var(--danger);margin-left:6px">Retry</button></div>`;
         } finally {
             _pnlAiLoading = false;
         }
@@ -592,7 +592,7 @@ RULES:
             const diff = actual - target;
             const good = invertComparison ? diff <= 0 : diff >= 0;
             const pct = target !== 0 ? Math.abs(diff / target * 100).toFixed(0) : 0;
-            const col = good ? '#16a34a' : '#dc2626';
+            const col = good ? 'var(--success)' : 'var(--danger)';
             const arrow = good ? '▲' : '▼';
             const diffFmt = isMargin ? `${Math.abs(diff).toFixed(1)}pp` : pnlGBP(Math.abs(diff));
             indicatorHtml = `<div style="font-size:10px;margin-top:2px;color:${col}">${arrow} ${diffFmt} ${good ? 'above' : 'below'} ${targetLabel || 'target'}</div>`;
@@ -618,7 +618,7 @@ RULES:
 
         if (!Array.isArray(allTransactions) || allTransactions.length === 0) {
             host.innerHTML = `<div class="section"><h2 class="section-title">Profit &amp; Loss</h2>
-                <p style="color:#64748b">Loading transactions… if this persists, open the Leadership Dashboard first.</p></div>`;
+                <p style="color:var(--text-secondary)">Loading transactions… if this persists, open the Leadership Dashboard first.</p></div>`;
             return;
         }
 
@@ -644,8 +644,8 @@ RULES:
         const avgMaint = (pnl.cogs.rows.find(r => r.subCat === 'COGS Property Reactive Maintenance')?.total || 0) / pnlMonths;
         const avgWages = ((pnl.cogs.rows.find(r => r.subCat === 'COGS Labour')?.total || 0) + (pnl.opex.rows.find(r => r.subCat === 'Opex Labour')?.total || 0)) / pnlMonths;
 
-        const headCells = keys.map(k => `<th style="text-align:right;min-width:88px;background:#f8fafc">${pnlMonthLabel(k)}</th>`).join('') +
-            `<th class="pnl-total-col" style="text-align:right;min-width:100px;background:#f1f5f9">Total</th>`;
+        const headCells = keys.map(k => `<th style="text-align:right;min-width:88px;background:var(--bg-surface)">${pnlMonthLabel(k)}</th>`).join('') +
+            `<th class="pnl-total-col" style="text-align:right;min-width:100px;background:var(--bg-surface-2)">Total</th>`;
 
         function jsAttr(v) { return JSON.stringify(v == null ? null : v).replace(/"/g, '&quot;'); }
 
@@ -656,27 +656,27 @@ RULES:
         }
         function subTotalTd(section, subCat, value) {
             const hasTx = Object.values(pnl.txIndex[section]?.[subCat] || {}).some(arr => arr.length);
-            const base = 'text-align:right;background:#f8fafc;font-weight:600';
+            const base = 'text-align:right;background:var(--bg-surface);font-weight:600';
             if (!hasTx) return `<td style="${base}">${pnlFmt(value)}</td>`;
             return `<td style="${base};cursor:pointer" onclick="pnlDrill('subTotal', ${jsAttr(section)}, ${jsAttr(subCat)}, null)" title="Show all">${pnlFmt(value)}</td>`;
         }
         function rowsFor(section, indent = 14) {
             return section.rows.map(r => {
                 const cells = keys.map(k => cellTd(section.name, r.subCat, k, r.monthly[k] || 0)).join('');
-                return `<tr><td class="pnl-first" style="padding-left:${indent}px;color:#475569;background:#fff">${escHtml(r.subCat)}</td>${cells}${subTotalTd(section.name, r.subCat, r.total)}</tr>`;
+                return `<tr><td class="pnl-first" style="padding-left:${indent}px;color:var(--text-secondary);background:#fff">${escHtml(r.subCat)}</td>${cells}${subTotalTd(section.name, r.subCat, r.total)}</tr>`;
             }).join('');
         }
-        function sectionTotalRow(label, sectionName, perMonth, grand, { bg = '#e2e8f0', color = '#0f172a' } = {}) {
+        function sectionTotalRow(label, sectionName, perMonth, grand, { bg = 'var(--border-default)', color = 'var(--text-primary)' } = {}) {
             const cells = keys.map(k => `<td style="text-align:right;cursor:pointer;background:${bg};color:${color}" onclick="pnlDrill('monthTotal', ${jsAttr(sectionName)}, null, ${jsAttr(k)})" title="Show ${escHtml(sectionName)}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
             return `<tr style="font-weight:700"><td class="pnl-first" style="padding:8px 10px;background:${bg};color:${color}">${escHtml(label)}</td>${cells}<td style="text-align:right;cursor:pointer;background:${bg};color:${color}" onclick="pnlDrill('sectionTotal', ${jsAttr(sectionName)}, null, null)">${pnlFmt(grand)}</td></tr>`;
         }
-        function totalRow(label, perMonth, grand, { bold = true, bg = '#e2e8f0', color = '#0f172a' } = {}) {
+        function totalRow(label, perMonth, grand, { bold = true, bg = 'var(--border-default)', color = 'var(--text-primary)' } = {}) {
             const cells = keys.map(k => `<td style="text-align:right;background:${bg};color:${color}">${pnlFmt(perMonth[k] || 0)}</td>`).join('');
             return `<tr style="${bold ? 'font-weight:700' : ''}"><td class="pnl-first" style="padding:8px 10px;background:${bg};color:${color}">${escHtml(label)}</td>${cells}<td style="text-align:right;background:${bg};color:${color}">${pnlFmt(grand)}</td></tr>`;
         }
         function marginRow(label, perMonth, grand) {
-            const cells = keys.map(k => `<td style="text-align:right;background:#fafafa">${pnlPct(perMonth[k] || 0)}</td>`).join('');
-            return `<tr style="font-style:italic;color:#475569"><td class="pnl-first" style="padding:6px 10px;background:#fafafa">${escHtml(label)}</td>${cells}<td style="text-align:right;background:#fafafa">${pnlPct(grand)}</td></tr>`;
+            const cells = keys.map(k => `<td style="text-align:right;background:var(--bg-surface)">${pnlPct(perMonth[k] || 0)}</td>`).join('');
+            return `<tr style="font-style:italic;color:var(--text-secondary)"><td class="pnl-first" style="padding:6px 10px;background:var(--bg-surface)">${escHtml(label)}</td>${cells}<td style="text-align:right;background:var(--bg-surface)">${pnlPct(grand)}</td></tr>`;
         }
         function sectionHeader(name) {
             return `<tr style="color:#fff"><td class="pnl-first" style="padding:8px 10px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:1px;background:#0f172a">${escHtml(name)}</td><td colspan="${keys.length + 1}" style="background:#0f172a"></td></tr>`;
@@ -691,26 +691,26 @@ RULES:
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:12px">
                     <div>
                         <h2 class="section-title" style="margin-bottom:4px">Profit &amp; Loss</h2>
-                        <span style="font-size:12px;color:#94a3b8">Live from reconciled transactions · ${pnlBusinessName}</span>
+                        <span style="font-size:12px;color:var(--text-muted)">Live from reconciled transactions · ${pnlBusinessName}</span>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                        <label style="font-size:12px;color:#64748b">Business:
-                            <select id="pnlBizSelect" onchange="pnlBusinessName=this.value;renderPnL()" style="font-size:12px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;margin-left:4px">${bizOptions}</select>
+                        <label style="font-size:12px;color:var(--text-secondary)">Business:
+                            <select id="pnlBizSelect" onchange="pnlBusinessName=this.value;renderPnL()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border-default);border-radius:4px;background:#fff;margin-left:4px">${bizOptions}</select>
                         </label>
-                        <label style="font-size:12px;color:#64748b">Period:
-                            <select id="pnlMonthsSelect" onchange="pnlMonths=Number(this.value);renderPnL()" style="font-size:12px;padding:4px 8px;border:1px solid #e2e8f0;border-radius:4px;background:#fff;margin-left:4px">${monthOptions}</select>
+                        <label style="font-size:12px;color:var(--text-secondary)">Period:
+                            <select id="pnlMonthsSelect" onchange="pnlMonths=Number(this.value);renderPnL()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border-default);border-radius:4px;background:#fff;margin-left:4px">${monthOptions}</select>
                         </label>
                     </div>
                 </div>
 
                 <!-- AI Analysis -->
-                <div style="background:linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%);border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-bottom:16px">
+                <div style="background:linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%);border:1px solid var(--border-default);border-radius:10px;padding:16px 20px;margin-bottom:16px">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:16px">🤖</span>
-                        <span style="font-size:13px;font-weight:700;color:#0f172a">AI Financial Analysis</span>
-                        <button onclick="pnlRunAIAnalysis()" style="margin-left:auto;font-size:11px;padding:4px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer;color:#64748b;font-weight:500">Generate Analysis</button>
+                        <span style="font-size:13px;font-weight:700;color:var(--text-primary)">AI Financial Analysis</span>
+                        <button onclick="pnlRunAIAnalysis()" style="margin-left:auto;font-size:11px;padding:4px 12px;background:#fff;border:1px solid var(--border-default);border-radius:6px;cursor:pointer;color:var(--text-secondary);font-weight:500">Generate Analysis</button>
                     </div>
-                    <div id="pnlAiPanel" style="color:#64748b;font-size:12px">Click <strong>Generate Analysis</strong> to get AI-powered insights into your P&amp;L trends, cost drivers, and path to ${PNL_NET_MARGIN_TARGET}% net margin.</div>
+                    <div id="pnlAiPanel" style="color:var(--text-secondary);font-size:12px">Click <strong>Generate Analysis</strong> to get AI-powered insights into your P&amp;L trends, cost drivers, and path to ${PNL_NET_MARGIN_TARGET}% net margin.</div>
                 </div>
 
                 <!-- Row 1: Revenue · COGS · OpEx — same format: period total + avg/mo -->
@@ -736,23 +736,23 @@ RULES:
 
                 <!-- Charts — 2 per row, taller for clarity -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:380px">
+                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartRevExp"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:380px">
+                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartProfit"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:380px">
+                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartMargin"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;height:420px">
+                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:420px">
                         <canvas id="pnlChartBreakdown"></canvas>
                     </div>
                 </div>
 
                 <!-- P&L Grid -->
                 <style>
-                    .pnl-grid-wrap { position:relative; overflow:auto; max-height:85vh; border:1px solid #e2e8f0; border-radius:8px; }
+                    .pnl-grid-wrap { position:relative; overflow:auto; max-height:85vh; border:1px solid var(--border-default); border-radius:8px; }
                     .pnl-grid { border-collapse:separate; border-spacing:0; }
                     .pnl-grid thead th { position:sticky; top:0; z-index:2; }
                     .pnl-grid tbody td.pnl-first, .pnl-grid thead th.pnl-first { position:sticky; left:0; z-index:1; }
@@ -764,33 +764,33 @@ RULES:
                     <table class="invoice-table pnl-grid" style="min-width:${160 + keys.length * 100}px;font-size:12px">
                         <thead>
                             <tr>
-                                <th class="pnl-first" style="min-width:220px;text-align:left;background:#f8fafc">Line Item</th>
+                                <th class="pnl-first" style="min-width:220px;text-align:left;background:var(--bg-surface)">Line Item</th>
                                 ${headCells}
                             </tr>
                         </thead>
                         <tbody>
                             ${sectionHeader('Revenue')}
                             ${rowsFor(pnl.revenue)}
-                            ${sectionTotalRow('Total Revenue', 'Revenue', pnl.revenue.totals, pnl.grand.revenue, { bg: '#dcfce7', color: '#065f46' })}
+                            ${sectionTotalRow('Total Revenue', 'Revenue', pnl.revenue.totals, pnl.grand.revenue, { bg: 'var(--success-bg)', color: 'var(--success)' })}
 
                             ${sectionHeader('Cost of Goods Sold')}
                             ${rowsFor(pnl.cogs)}
-                            ${sectionTotalRow('Total COGS', 'Cost of Goods Sold', pnl.cogs.totals, pnl.grand.cogs, { bg: '#fee2e2', color: '#991b1b' })}
+                            ${sectionTotalRow('Total COGS', 'Cost of Goods Sold', pnl.cogs.totals, pnl.grand.cogs, { bg: 'var(--danger-bg)', color: 'var(--danger)' })}
 
                             ${totalRow('Gross Profit', pnl.grossProfit, pnl.grand.grossProfit, { bg: '#e0f2fe', color: '#075985' })}
                             ${marginRow('Gross Profit Margin', pnl.grossMargin, pnl.grand.grossMargin)}
 
                             ${sectionHeader('Operating Expenses')}
                             ${rowsFor(pnl.opex)}
-                            ${sectionTotalRow('Total Operating Expenses', 'Operating Expenses', pnl.opex.totals, pnl.grand.opex, { bg: '#fee2e2', color: '#991b1b' })}
+                            ${sectionTotalRow('Total Operating Expenses', 'Operating Expenses', pnl.opex.totals, pnl.grand.opex, { bg: 'var(--danger-bg)', color: 'var(--danger)' })}
 
-                            ${totalRow('Net Profit', pnl.netProfit, pnl.grand.netProfit, { bg: '#d1fae5', color: '#065f46' })}
+                            ${totalRow('Net Profit', pnl.netProfit, pnl.grand.netProfit, { bg: '#d1fae5', color: 'var(--success)' })}
                             ${marginRow('Net Profit Margin', pnl.netMargin, pnl.grand.netMargin)}
                         </tbody>
                     </table>
                 </div>
 
-                <p style="color:#94a3b8;font-size:11px;margin-top:12px">
+                <p style="color:var(--text-muted);font-size:11px;margin-top:12px">
                     Revenue = transactions categorised <em>Revenue</em>. COGS = <em>Cost of Goods Sold</em>. OpEx = <em>Operating Expenses</em>.
                     Capital expenditure, loans, transfers, balance-sheet and personal transactions are excluded.
                     Targets: Revenue <strong>£${PNL_REVENUE_TARGET.toLocaleString()}/mo</strong> · Gross Margin <strong>${PNL_GROSS_MARGIN_TARGET}%</strong> · Net Profit <strong>£${PNL_CLEAR_PROFIT_TARGET.toLocaleString()}/mo</strong> · Net Margin <strong>${PNL_NET_MARGIN_TARGET}%</strong>.

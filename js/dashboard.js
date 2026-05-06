@@ -84,7 +84,7 @@
         if (!el) return;
         if (on) {
             const ageLabel = ageMs != null ? formatAge(ageMs) : '';
-            el.innerHTML = '<span class="refresh-dot" style="background:#2563eb"></span>Refreshing\u2026' +
+            el.innerHTML = '<span class="refresh-dot" style="background:var(--info)"></span>Refreshing\u2026' +
                 (ageLabel ? ' <span style="opacity:0.7">(showing data from ' + ageLabel + ')</span>' : '');
             el.style.display = 'inline-flex';
         } else {
@@ -174,10 +174,10 @@
     }
     // Returns a CSS value — uses design tokens so the colour set always stays on-brand.
     function _stratHealthColour(h){
-        if(h==='On-Target'||h==='Completed'||h==='On-Track')return'var(--success)';
-        if(h==='Off-Track')return'var(--danger)';
-        if(h==='Not Started')return'var(--text-muted)';
-        return'var(--warning)';
+        if(h==='On-Target'||h==='Completed'||h==='On-Track')return 'var(--success)';
+        if(h==='Off-Track')return 'var(--danger)';
+        if(h==='Not Started')return 'var(--text-muted)';
+        return 'var(--warning)';
     }
 
     async function loadStrategicKpis(){
@@ -360,8 +360,10 @@
         };
     }
 
+    const _KPI_BLOCKED = /\b(fetch|XMLHttpRequest|import|require|eval|Function|document|window|localStorage|sessionStorage|globalThis|navigator|location|cookie|postMessage|Worker|ServiceWorker|WebSocket)\b/;
     function runKpiComputeCode(code, ctx){
         if(!code||!String(code).trim())return null;
+        if(_KPI_BLOCKED.test(code)){console.warn('[runKpiComputeCode] blocked unsafe token in code');return null}
         try{
             // eslint-disable-next-line no-new-func
             const fn=new Function('ctx','"use strict";'+code);
@@ -633,22 +635,22 @@
         if(displayHint0.kind==='taskCompletion'){
             const done=detail.completedTasks||[];
             const open=detail.outstandingTasks||[];
-            const row=t=>`<tr style="border-top:1px solid #f1f5f9"><td style="padding:6px 8px;color:#1e293b">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:#64748b">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#64748b">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
-            const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px">
+            const row=t=>`<tr style="border-top:1px solid #f1f5f9"><td style="padding:6px 8px;color:var(--text-primary)">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-secondary)">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
+            const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
                 <div style="font-weight:600;color:${color};margin-bottom:6px">${title} · ${list.length} task${list.length===1?'':'s'}</div>
-                ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:#94a3b8;font-style:italic;font-size:12px">None</div>'}
+                ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:12px">None</div>'}
             </div>`;
             el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <div><strong>${escHtml(label)}</strong> · ${escHtml(detail.label||'')}</div>
-                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid #cbd5e1;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid var(--border-default);padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
-                <div style="padding:10px;background:#f0fdf4;border-radius:6px"><div style="font-size:10px;color:#14532d;font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:#14532d">${detail.completedCount||0}</div></div>
-                <div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Outstanding</div><div style="font-size:16px;font-weight:700;color:#991b1b">${detail.outstandingCount||0}</div></div>
-                <div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Total</div><div style="font-size:16px;font-weight:700;color:#1e3a8a">${detail.total||0}</div></div>
+                <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--accent-hover);font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:var(--accent-hover)">${detail.completedCount||0}</div></div>
+                <div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Outstanding</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${detail.outstandingCount||0}</div></div>
+                <div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Total</div><div style="font-size:16px;font-weight:700;color:var(--info)">${detail.total||0}</div></div>
               </div>
-              ${table('Completed',done,'#14532d')}
-              ${table('Outstanding',open,'#991b1b')}`;
+              ${table('Completed',done,'var(--accent-hover)')}
+              ${table('Outstanding',open,'var(--danger)')}`;
             el.style.display='block';el.setAttribute('data-expanded',bucket);
             return;
         }
@@ -658,7 +660,7 @@
             const num=Number(n)||0;
             const abs=Math.abs(num);
             const str=`${unitPrefix}${abs.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-            return num<0?`<span style="color:#991b1b">−${str}</span>`:str;
+            return num<0?`<span style="color:var(--danger)">−${str}</span>`:str;
         };
         // Determine column layout for revenue rows from the compute output's
         // display hint (if any). Default: Date / Tenancy / Description / Amount.
@@ -670,28 +672,28 @@
                 ? displayHint.revenueColumns
                 : ['date', kind==='revenue'?'tenancy':'cost', 'description', 'amount'];
             const headerFor={date:'Date',tenancy:'Tenancy',cost:'Cost',description:'Description',amount:'Amount'};
-            if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;color:#94a3b8;font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
+            if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid var(--border-default);border-radius:6px;color:var(--text-muted);font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
             const rows=list.map(t=>{
                 const isReversal=kind==='revenue'?t.amount<0:t.amount>0;
                 const rowBg=isReversal?'background:#fef9c3':'';
                 const reversalTag=isReversal?'<span style="font-size:10px;color:#a16207;background:#fde68a;padding:1px 5px;border-radius:3px;margin-right:4px">REVERSAL</span>':'';
                 const cellFor=(col,isFirst)=>{
                     const tag=isFirst?reversalTag:'';
-                    if(col==='date')return `<td style="padding:6px 8px;white-space:nowrap;color:#64748b;font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>`;
-                    if(col==='tenancy')return `<td style="padding:6px 8px;color:#1e293b">${tag}${escHtml(t.tenancy||t.vendor||'-')}</td>`;
-                    if(col==='cost')return `<td style="padding:6px 8px;color:#1e293b">${tag}${escHtml(t.cost||t.vendor||'-')}</td>`;
-                    if(col==='description')return `<td style="padding:6px 8px;color:#1e293b">${tag}${escHtml((t.description||'').slice(0,120))}</td>`;
-                    if(col==='amount')return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#1e293b">${fmtSigned(t.amount)}</td>`;
+                    if(col==='date')return `<td style="padding:6px 8px;white-space:nowrap;color:var(--text-secondary);font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>`;
+                    if(col==='tenancy')return `<td style="padding:6px 8px;color:var(--text-primary)">${tag}${escHtml(t.tenancy||t.vendor||'-')}</td>`;
+                    if(col==='cost')return `<td style="padding:6px 8px;color:var(--text-primary)">${tag}${escHtml(t.cost||t.vendor||'-')}</td>`;
+                    if(col==='description')return `<td style="padding:6px 8px;color:var(--text-primary)">${tag}${escHtml((t.description||'').slice(0,120))}</td>`;
+                    if(col==='amount')return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-primary)">${fmtSigned(t.amount)}</td>`;
                     return '<td></td>';
                 };
                 return `<tr style="border-top:1px solid #f1f5f9;${rowBg}">${columns.map((c,i)=>cellFor(c,i===1)).join('')}</tr>`;
             }).join('');
-            return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px">
+            return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
                     <div style="font-weight:600;color:${color}">${title} · ${list.length} tx · Net ${fmtAmt(kind==='revenue'?(list.reduce((s,t)=>s+(Number(t.amount)||0),0)):(list.reduce((s,t)=>s+(-Number(t.amount)||0),0)))}</div>
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:12px">
-                    <thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.5px">
+                    <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">
                         ${columns.map(c=>`<th style="padding:4px 8px;text-align:${c==='amount'?'right':'left'}">${headerFor[c]||c}</th>`).join('')}
                     </tr></thead>
                     <tbody>${rows}</tbody>
@@ -700,15 +702,15 @@
         };
         el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <div><strong>${escHtml(label)}</strong> · Window: ${escHtml(detail.windowStart||'-')} → ${escHtml(detail.windowEnd||'-')}</div>
-                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid #cbd5e1;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid var(--border-default);padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
             </div>
             <div style="display:grid;grid-template-columns:${displayHint.hideCosts?'1fr':'1fr 1fr 1fr'};gap:10px;margin-bottom:10px">
-                <div style="padding:10px;background:#f0fdf4;border-radius:6px"><div style="font-size:10px;color:#14532d;font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:#14532d">${fmtAmt(detail.revenue)}</div></div>
-                ${displayHint.hideCosts?'':`<div style="padding:10px;background:#fef2f2;border-radius:6px"><div style="font-size:10px;color:#991b1b;font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:#991b1b">${fmtAmt(detail.costs)}</div></div>`}
-                ${displayHint.hideCosts?'':`<div style="padding:10px;background:#eff6ff;border-radius:6px"><div style="font-size:10px;color:#1e3a8a;font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'#14532d':'#991b1b'}">${fmtAmt(detail.net)}</div></div>`}
+                <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--accent-hover);font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:var(--accent-hover)">${fmtAmt(detail.revenue)}</div></div>
+                ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${fmtAmt(detail.costs)}</div></div>`}
+                ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'var(--accent-hover)':'var(--danger)'}">${fmtAmt(detail.net)}</div></div>`}
             </div>
-            ${txTable(displayHint.revenueLabel||'Revenue', detail.revTxs, '#14532d', 'revenue')}
-            ${displayHint.hideCosts?'':txTable('Fixed Costs', detail.costTxs, '#991b1b', 'costs')}`;
+            ${txTable(displayHint.revenueLabel||'Revenue', detail.revTxs, 'var(--accent-hover)', 'revenue')}
+            ${displayHint.hideCosts?'':txTable('Fixed Costs', detail.costTxs, 'var(--danger)', 'costs')}`;
         el.style.display='block';
         el.setAttribute('data-expanded',bucket);
     }
@@ -854,7 +856,7 @@
             if (renderedFromCache) {
                 const el = document.getElementById('refreshingBadge');
                 if (el) {
-                    el.innerHTML = '<span class="refresh-dot" style="background:#dc2626"></span>' +
+                    el.innerHTML = '<span class="refresh-dot" style="background:var(--danger)"></span>' +
                         'Couldn\u2019t refresh \u2014 showing saved data';
                     el.style.display = 'inline-flex';
                 }
@@ -862,8 +864,8 @@
             }
             document.getElementById('loadingSpinner').style.display = 'none';
             document.getElementById('loadingText').innerHTML =
-                '<div style="font-size:20px;color:#dc2626;margin-bottom:8px">Couldn\u2019t load your dashboard</div>' +
-                '<div style="font-size:14px;color:#475569;max-width:480px;text-align:center">' +
+                '<div style="font-size:20px;color:var(--danger);margin-bottom:8px">Couldn\u2019t load your dashboard</div>' +
+                '<div style="font-size:14px;color:var(--text-secondary);max-width:480px;text-align:center">' +
                 (e.message || 'Unknown error') + '</div>';
             document.getElementById('loadingActions').style.display = 'block';
         }
@@ -936,9 +938,9 @@
                 (unreconciledTx.length === 0
                     ? '<div class="detail-item"><span><em>No unreconciled transactions</em></span></div>'
                     : unreconciledTx.map(r => `<div class="detail-item"><span class="detail-item-name">${escHtml(getField(r, F.txDate) || '')} — ${escHtml(txLabel(r))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.txReportAmount)) || 0)}</span></div>`).join(''))
-                + `<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    <button onclick="event.stopPropagation(); triggerReconciliation(this)" style="padding:8px 16px;font-size:12px;font-weight:600;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer">Run Reconciliation</button>
-                    <span style="font-size:11px;color:#94a3b8" id="reconStatus"></span>
+                + `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <button onclick="event.stopPropagation(); triggerReconciliation(this)" style="padding:8px 16px;font-size:12px;font-weight:600;background:var(--info);color:white;border:none;border-radius:6px;cursor:pointer">Run Reconciliation</button>
+                    <span style="font-size:11px;color:var(--text-muted)" id="reconStatus"></span>
                 </div>`
             )}
             <div id="accuracyKpiCard">${accCard}</div>
@@ -960,20 +962,20 @@
                 <div class="kpi-card-value">${fmt(openingBalance)}</div>
                 <div class="kpi-card-sub">Santander ${fmt(santBal)} | TNT Zempler ${fmt(zempBal)}</div>
             </div>
-            ${expandableCard('Monthly Income', `<span style="color:#d97706">£${Math.floor(inPaymentIncome).toLocaleString('en-GB')}</span> <span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span> <span style="color:#16a34a">£${Math.floor(monthlyIncome).toLocaleString('en-GB')}</span>`,
+            ${expandableCard('Monthly Income', `<span style="color:var(--warning)">£${Math.floor(inPaymentIncome).toLocaleString('en-GB')}</span> <span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span> <span style="color:var(--success)">£${Math.floor(monthlyIncome).toLocaleString('en-GB')}</span>`,
                 `${inPaymentCount} In Payment (confirmed) + ${cfvActionedCount} CFV Actioned (expected)`,
-                `<div style="margin-bottom:8px;font-weight:600;color:#1e293b">In Payment (${inPaymentCount})</div>` +
+                `<div style="margin-bottom:8px;font-weight:600;color:var(--text-primary)">In Payment (${inPaymentCount})</div>` +
                 [...inPaymentTenanciesS1].sort((a,b) => (Number(getField(a, F.tenDueDay))||99) - (Number(getField(b, F.tenDueDay))||99)).map(r => {
                     const dueDay = getNumVal(r, F.tenDueDay, null);
                     const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
-                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:var(--text-secondary);min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
                 }).join('') +
                 `<div class="detail-total"><span>In Payment Subtotal</span><span>${fmt(inPaymentIncome)}</span></div>` +
-                (cfvActionedCount > 0 ? `<div style="margin:12px 0 8px;font-weight:600;color:#d97706">CFV Actioned (${cfvActionedCount})</div>` +
+                (cfvActionedCount > 0 ? `<div style="margin:12px 0 8px;font-weight:600;color:var(--warning)">CFV Actioned (${cfvActionedCount})</div>` +
                 [...cfvActionedTenanciesS1].sort((a,b) => (Number(getField(a, F.tenDueDay))||99) - (Number(getField(b, F.tenDueDay))||99)).map(r => {
                     const dueDay = getNumVal(r, F.tenDueDay, null);
                     const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
-                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:var(--text-secondary);min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
                 }).join('') +
                 `<div class="detail-total"><span>Full Total (incl. CFV Actioned)</span><span>${fmt(monthlyIncome)}</span></div>` : ''),
                 ''
@@ -982,19 +984,19 @@
                 costSorted.map(r => {
                     const dueDay = getNumVal(r, F.costDueDay, null);
                     const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
-                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.costName) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.costExpected)) || 0)}</span></div>`;
+                    return `<div class="detail-item"><span class="detail-item-name"><span style="color:var(--text-secondary);min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.costName) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.costExpected)) || 0)}</span></div>`;
                 }).join('') +
                 `<div class="detail-total"><span>Total</span><span>${fmt(monthlyCosts)}</span></div>`,
                 'text-red'
             )}
             <div class="kpi-card">
                 <div class="kpi-card-label">Monthly Operating Cushion</div>
-                <div class="kpi-card-value"><span style="color:#d97706">£${Math.floor(operatingCushionLow).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span></div>
+                <div class="kpi-card-value"><span style="color:var(--warning)">£${Math.floor(operatingCushionLow).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span><span style="color:var(--success)">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span></div>
                 <div class="kpi-card-sub">Monthly income minus monthly fixed costs — In Payment only → incl. CFV Actioned</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label">Operating Cushion Margin</div>
-                <div class="kpi-card-value"><span style="color:#d97706">${operatingCushionMarginLow}%</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">–</span><span style="color:#16a34a">${operatingCushionMarginHigh}%</span></div>
+                <div class="kpi-card-value"><span style="color:var(--warning)">${operatingCushionMarginLow}%</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span><span style="color:var(--success)">${operatingCushionMarginHigh}%</span></div>
                 <div class="kpi-card-sub">Operating Cushion ÷ Monthly Income — In Payment only → incl. CFV Actioned</div>
             </div>
         `;
@@ -1080,7 +1082,7 @@
             .map(r => {
                 const dueDay = getNumVal(r, F.tenDueDay, null);
                 const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
-                return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                return `<div class="detail-item"><span class="detail-item-name"><span style="color:var(--text-secondary);min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
             })
             .join('');
 
@@ -1089,7 +1091,7 @@
             .map(r => {
                 const dueDay = getNumVal(r, F.tenDueDay, null);
                 const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
-                return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))} (${getPaymentStatusName(getField(r, F.tenPayStatus))})</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                return `<div class="detail-item"><span class="detail-item-name"><span style="color:var(--text-secondary);min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))} (${getPaymentStatusName(getField(r, F.tenPayStatus))})</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
             })
             .join('');
 
@@ -1113,10 +1115,10 @@
         });
 
         const potentialCfvAlert = potentialCfvCount > 0
-            ? `<div onclick="switchTab('cfv')" style="margin-top:8px;padding:8px 12px;background:#fef3c7;border:1px solid #d97706;border-radius:6px;cursor:pointer;font-size:12px;color:#92400e;display:flex;align-items:center;gap:6px">
+            ? `<div onclick="switchTab('cfv')" style="margin-top:8px;padding:8px 12px;background:var(--warning-bg);border:1px solid var(--warning);border-radius:6px;cursor:pointer;font-size:12px;color:var(--warning);display:flex;align-items:center;gap:6px">
                 <span style="font-size:16px">⚠️</span>
                 <span><strong>${potentialCfvCount} potential CFV${potentialCfvCount !== 1 ? 's' : ''}</strong> detected — click to review</span>
-                <span style="margin-left:auto;font-size:10px;color:#d97706">View CFVs →</span>
+                <span style="margin-left:auto;font-size:10px;color:var(--warning)">View CFVs →</span>
                </div>`
             : '';
 
@@ -1245,7 +1247,7 @@
                     .map(r => {
                         const dueDay = getNumVal(r, F.tenDueDay, null);
                         const dueDayStr = dueDay ? `Day ${dueDay}` : '—';
-                        return `<div class="detail-item"><span class="detail-item-name"><span style="color:#64748b;min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
+                        return `<div class="detail-item"><span class="detail-item-name"><span style="color:var(--text-secondary);min-width:52px;display:inline-block">${escHtml(dueDayStr)}</span>${escHtml(String(getField(r, F.tenSurname) || ''))} – ${escHtml(String(getField(r, F.tenRef) || ''))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.tenRent)) || 0)}</span></div>`;
                     })
                     .join('') + `<div class="detail-total"><span>Total</span><span>${fmt(cfvExposure)}</span></div>`,
                 trafficLightClass(cfvNum, CFV_TARGET_GBP),
@@ -1253,19 +1255,19 @@
             )}
             <div class="kpi-card clickable" onclick="toggleCard(this)">
                 <div class="kpi-card-label">Target Operating Cushion <span class="chevron">▸</span></div>
-                <div class="kpi-card-value"><span class="${ocOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span><span style="color:#94a3b8;font-size:20px;margin:0 4px">/</span><span style="color:#1e293b">£${Math.floor(requiredOperatingCushion).toLocaleString('en-GB')}</span></div>
+                <div class="kpi-card-value"><span class="${ocOnTrack ? 'text-green' : 'text-amber'}">£${Math.floor(operatingCushionHigh).toLocaleString('en-GB')}</span><span style="color:var(--text-muted);font-size:20px;margin:0 4px">/</span><span style="color:var(--text-primary)">£${Math.floor(requiredOperatingCushion).toLocaleString('en-GB')}</span></div>
                 <div class="kpi-card-sub">${ocProgressPct}% of target | ${ocOnTrack ? `<span class="text-green">On track — ${fmt(CLEAR_PROFIT_TARGET)} clear profit</span>` : `<span class="text-red">Shortfall: ${fmt(requiredOperatingCushion - operatingCushionHigh)}</span>`}</div>
                 <div class="progress-bar" style="position:relative">
                     <div class="progress-bar-fill ${ocOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(ocProgressPct), 100)}%"></div>
                 </div>
                 <div class="kpi-card-detail">
-                    <div style="font-size:12px;color:#64748b">
+                    <div style="font-size:12px;color:var(--text-secondary)">
                         <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Maintenance budget</span><span>${fmt(MAINT_TARGET_GBP)}</span></div>
                         <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Wages budget</span><span>${fmt(WAGES_TARGET_GBP)}</span></div>
                         <div style="display:flex;justify-content:space-between;padding:3px 0"><span>CFV allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
                         <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid #e2e8f0;margin-top:4px;padding-top:4px;font-weight:600;color:#1e293b"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px;font-weight:600;color:var(--text-primary)"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
                     </div>
                 </div>
             </div>
@@ -1461,48 +1463,48 @@
             const dayStr = p.date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 
             if (p.noFunds) {
-                return `<div style="padding:12px 0;border-bottom:1px solid #e2e8f0;">
+                return `<div style="padding:12px 0;border-bottom:1px solid var(--border-default);">
                     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                        <strong style="color:#1e293b;font-size:14px">${dayStr}</strong>
-                        <span style="color:#94a3b8;font-size:13px;font-weight:600">No payment this week</span>
+                        <strong style="color:var(--text-primary);font-size:14px">${dayStr}</strong>
+                        <span style="color:var(--text-muted);font-size:13px;font-weight:600">No payment this week</span>
                     </div>
-                    <div style="font-size:12px;color:#64748b;line-height:1.5">${p.reason}</div>
+                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.5">${p.reason}</div>
                 </div>`;
             }
 
             const paymentLines = p.payments.map(pay => {
                 const dueBadge = pay.dueDate
-                    ? `<span style="background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">due ${pay.dueDate.toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span>`
+                    ? `<span style="background:var(--danger-bg);color:var(--danger);font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">due ${pay.dueDate.toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span>`
                     : '';
                 const minBadge = pay.isMinimum
-                    ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">min. payment</span>`
+                    ? `<span style="background:var(--warning-bg);color:var(--warning);font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">min. payment</span>`
                     : '';
-                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;color:#475569;">
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;color:var(--text-secondary);">
                     <span>${escHtml(pay.name)}${dueBadge}${minBadge}</span>
                     <strong>${fmt(pay.pay)}</strong>
                 </div>`;
             }).join('');
 
-            return `<div style="padding:12px 0;border-bottom:1px solid #e2e8f0;">
+            return `<div style="padding:12px 0;border-bottom:1px solid var(--border-default);">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                    <strong style="color:#1e293b;font-size:14px">${dayStr}</strong>
-                    <span style="color:#16a34a;font-weight:700;font-size:15px">Pay ${fmt(p.totalPay)}</span>
+                    <strong style="color:var(--text-primary);font-size:14px">${dayStr}</strong>
+                    <span style="color:var(--success);font-weight:700;font-size:15px">Pay ${fmt(p.totalPay)}</span>
                 </div>
                 ${paymentLines}
-                <div style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;line-height:1.6">
+                <div style="margin-top:8px;padding:8px 10px;background:var(--bg-surface);border-radius:6px;font-size:12px;color:var(--text-secondary);line-height:1.6">
                     <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                        <span>Account balance on this date</span><strong style="color:#1e293b">${fmt(p.estBalance)}</strong>
+                        <span>Account balance on this date</span><strong style="color:var(--text-primary)">${fmt(p.estBalance)}</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                        <span>Credit card payment</span><strong style="color:#dc2626">-${fmt(p.totalPay)}</strong>
+                        <span>Credit card payment</span><strong style="color:var(--danger)">-${fmt(p.totalPay)}</strong>
                     </div>
-                    <div style="display:flex;justify-content:space-between;padding-top:4px;border-top:1px solid #e2e8f0;margin-top:2px">
-                        <span>Balance after payment</span><strong style="color:${p.balanceAfterPay >= p.buffer ? '#16a34a' : '#d97706'}">${fmt(p.balanceAfterPay)}</strong>
+                    <div style="display:flex;justify-content:space-between;padding-top:4px;border-top:1px solid var(--border-default);margin-top:2px">
+                        <span>Balance after payment</span><strong style="color:${p.balanceAfterPay >= p.buffer ? 'var(--success)' : 'var(--warning)'}">${fmt(p.balanceAfterPay)}</strong>
                     </div>
                     <div style="display:flex;justify-content:space-between">
                         <span>Safety buffer</span><span>${fmt(p.buffer)}</span>
                     </div>
-                    <div style="margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0;color:#475569;font-size:11px">${p.reason}</div>
+                    <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-default);color:var(--text-secondary);font-size:11px">${p.reason}</div>
                 </div>
             </div>`;
         }).join('');
@@ -1512,28 +1514,28 @@
         const wagesStatus = wagesSpend < WAGES_TARGET_GBP ? 'green' : wagesSpend <= WAGES_TARGET_GBP * 1.1 ? 'amber' : 'red';
 
         document.getElementById('aiCommentary').innerHTML = `
-            <h3 style="color:#1e293b;font-size:15px;margin:0 0 8px">Financial Health</h3>
+            <h3 style="color:var(--text-primary);font-size:15px;margin:0 0 8px">Financial Health</h3>
             <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
 
-            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Operating Cushion Target</h3>
+            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Operating Cushion Target</h3>
             <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
 
-            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
+            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
             <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
 
-            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Occupancy &amp; Voids</h3>
+            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Occupancy &amp; Voids</h3>
             <p>Occupancy is ${occupancyRate}% with ${voidUnits.length} void${voidUnits.length !== 1 ? 's' : ''}. Each void costs roughly £${voidCostPerMonth}/month in lost income. ${voidUnits.length > 0 ? `Filling ${Math.min(3, voidUnits.length)} void${Math.min(3, voidUnits.length) !== 1 ? 's' : ''} would add ${fmt(Math.min(3, voidUnits.length) * Number(voidCostPerMonth))}/month — the highest-ROI lever available.` : 'Full occupancy — excellent.'}</p>
 
-            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">CFV Risk</h3>
+            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">CFV Risk</h3>
             <p>CFV exposure is ${fmt(cfvExposure)} against a ${fmt(CFV_TARGET_GBP)} monthly allowance (${cfvExposure <= CFV_TARGET_GBP ? 'within budget' : 'over budget by ' + fmt(cfvExposure - CFV_TARGET_GBP)}). ${cfvTenancies.length > 0 ? `${cfvTenancies.length} remain unactioned (${fmt(cfvUnactioned)}) — actioning these improves income certainty.` : 'All CFVs actioned — good.'}</p>
 
-            <h3 style="color:#1e293b;font-size:15px;margin:16px 0 8px">Quick Wins</h3>
+            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Quick Wins</h3>
             <p>${voidUnits.length > 0 ? '(1) Fill voids — biggest revenue impact per action. ' : ''}${cfvTenancies.length > 0 ? `(${voidUnits.length > 0 ? '2' : '1'}) Action ${cfvTenancies.length} unactioned CFV${cfvTenancies.length !== 1 ? 's' : ''} to secure ${fmt(cfvUnactioned)}/month. ` : ''}${maintStatus !== 'green' ? `(${(voidUnits.length > 0 ? 1 : 0) + (cfvTenancies.length > 0 ? 1 : 0) + 1}) Reduce maintenance from ${fmt(maintSpend)} to below ${fmt(MAINT_TARGET_GBP)} budget. ` : ''}Monitor cash flow pinch points around mortgage payment clusters (typically days 1-6).</p>
 
             <hr style="border:none;border-top:1px solid #cbd5e1;margin:20px 0;">
-            <h3 style="color:#1e293b;font-size:16px;margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
+            <h3 style="color:var(--text-primary);font-size:16px;margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
             <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong> across ${ccRepaymentPlan.cards.length} card${ccRepaymentPlan.cards.length !== 1 ? 's' : ''}.</p>
-            <p style="margin:0 0 12px;font-size:13px;color:#475569">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
+            <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
             <div style="margin-bottom:16px">
                 ${ccRepaymentPlan.cards.map(c => {
                     // Proper English ordinal: 11/12/13 are always 'th'; otherwise
@@ -1547,16 +1549,16 @@
                         : last === 1 ? 'st'
                         : last === 2 ? 'nd'
                         : last === 3 ? 'rd' : 'th';
-                    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:14px;">
-                        <span style="color:#475569">${escHtml(c.name)} <span style="color:#94a3b8;font-size:12px">(due ${d}${suffix} | min. ${fmt(c.minPayment)})</span></span>
-                        <span style="font-weight:600;color:${c.owed > 5000 ? '#dc2626' : '#d97706'}">${fmt(c.owed)}</span>
+                    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:14px;">
+                        <span style="color:var(--text-secondary)">${escHtml(c.name)} <span style="color:var(--text-muted);font-size:12px">(due ${d}${suffix} | min. ${fmt(c.minPayment)})</span></span>
+                        <span style="font-weight:600;color:${c.owed > 5000 ? 'var(--danger)' : 'var(--warning)'}">${fmt(c.owed)}</span>
                     </div>`;
                 }).join('')}
             </div>
             <div>${ccTableRows}</div>
             ${ccRepaymentPlan.remaining.some(c => c.owed > 0.01)
-                ? `<p style="margin:12px 0 0;font-size:13px;color:#64748b">After 31 days, remaining: ${ccRepaymentPlan.remaining.filter(c=>c.owed>0.01).map(c=>`${c.name} ${fmt(c.owed)}`).join(', ')}.</p>`
-                : `<p style="margin:12px 0 0;font-size:13px;color:#16a34a">All credit card debt could be cleared within this 31-day window based on current projections.</p>`
+                ? `<p style="margin:12px 0 0;font-size:13px;color:var(--text-secondary)">After 31 days, remaining: ${ccRepaymentPlan.remaining.filter(c=>c.owed>0.01).map(c=>`${c.name} ${fmt(c.owed)}`).join(', ')}.</p>`
+                : `<p style="margin:12px 0 0;font-size:13px;color:var(--success)">All credit card debt could be cleared within this 31-day window based on current projections.</p>`
             }
         `;
 

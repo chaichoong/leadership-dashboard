@@ -18,9 +18,9 @@
         <div class="auth-box">
             <h2>Operations Director</h2>
             <p>Enter your Airtable Personal Access Token to connect</p>
-            <input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off">
+            <label for="patInput" class="sr-only">Airtable Personal Access Token</label><input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off" aria-label="Airtable Personal Access Token">
             <button class="auth-btn" onclick="authenticate()">Connect</button>
-            <div class="auth-error" id="authError">Invalid token. Please check and try again.</div>
+            <div class="auth-error" id="authError" role="alert">Invalid token. Please check and try again.</div>
             <div class="auth-note">Your token is saved in this browser so you stay logged in. Use "Logout" in the sidebar to clear it. No data is sent anywhere except Airtable's API.</div>
         </div>
     </div>
@@ -28,7 +28,7 @@
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay" style="display:none;">
         <div class="spinner" id="loadingSpinner"></div>
-        <div id="loadingText">Loading your dashboard...</div>
+        <div id="loadingText" aria-live="polite">Loading your dashboard...</div>
         <div id="loadingActions" style="display:none;margin-top:20px">
             <button class="loading-retry-btn" onclick="loadDashboard()">Retry</button>
             <button class="loading-retry-btn secondary" onclick="logout()">Re-enter PAT</button>
@@ -37,7 +37,7 @@
 
     <!-- Sidebar Toggle (mobile) -->
     <button class="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
-    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()" role="presentation"></div>
 
     <!-- Sidebar Navigation -->
     <div class="sidebar" id="sidebar">
@@ -55,20 +55,20 @@
         <nav class="sidebar-nav" id="sidebarNav">
 
             <div class="sidebar-section" data-section="leadership" data-tabs="overview,os-strategy,os-bplan">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('leadership')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('leadership')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('leadership')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Leadership</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="leadership"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item active" onclick="switchTab('overview')"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('os-strategy')"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('os-bplan')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Plan Builder</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-bplan" title="No checks run yet"></span></div>
+                    <div class="sidebar-item active" role="menuitem" tabindex="0" onclick="switchTab('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('overview')}"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-strategy')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-strategy')}"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-bplan')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-bplan')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Plan Builder</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-bplan" title="No checks run yet"></span></div>
                 </div>
             </div>
 
             <div class="sidebar-section coming-soon" data-section="marketing" data-tabs="">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('marketing')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('marketing')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('marketing')">
                     <span class="sidebar-section-chevron">&#x25B8;</span>
                     <span class="sidebar-section-name">Marketing</span>
                     <span class="sidebar-section-coming">Coming</span>
@@ -79,7 +79,7 @@
             </div>
 
             <div class="sidebar-section coming-soon" data-section="sales" data-tabs="">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('sales')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('sales')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('sales')">
                     <span class="sidebar-section-chevron">&#x25B8;</span>
                     <span class="sidebar-section-name">Sales</span>
                     <span class="sidebar-section-coming">Coming</span>
@@ -90,37 +90,37 @@
             </div>
 
             <div class="sidebar-section" data-section="operations" data-tabs="tasks,cfv,comms,operations,compliance">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('operations')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="operations"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('tasks')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('cfv')"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids</span><span class="sidebar-health-dot unknown" data-sidebar-health="cfv" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('comms')"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('operations')"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('compliance')"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span><span class="sidebar-health-dot unknown" data-sidebar-health="compliance" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('tasks')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('cfv')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('cfv')}"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids</span><span class="sidebar-health-dot unknown" data-sidebar-health="cfv" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('operations')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('operations')}"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('compliance')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('compliance')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span><span class="sidebar-health-dot unknown" data-sidebar-health="compliance" title="No checks run yet"></span></div>
                 </div>
             </div>
 
             <div class="sidebar-section" data-section="finance" data-tabs="costs,invoices,pnl,transactions,fintable">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('finance')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('finance')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('finance')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Finance</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('costs')"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Accounts Payable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="costs" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('invoices')"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Accounts Payable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('pnl')"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('transactions')"><span class="sidebar-icon">&#x1F50D;</span><span class="sidebar-label">Transactions</span><span class="sidebar-health-dot unknown" data-sidebar-health="transactions" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" onclick="switchTab('fintable')"><span class="sidebar-icon">&#x1F3E6;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="fintable" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('costs')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('costs')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Accounts Payable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="costs" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('invoices')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('invoices')}"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Accounts Payable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('pnl')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('pnl')}"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('transactions')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('transactions')}"><span class="sidebar-icon">&#x1F50D;</span><span class="sidebar-label">Transactions</span><span class="sidebar-health-dot unknown" data-sidebar-health="transactions" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('fintable')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('fintable')}"><span class="sidebar-icon">&#x1F3E6;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="fintable" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
                 </div>
             </div>
 
             <div class="sidebar-section coming-soon" data-section="team" data-tabs="">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('team')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('team')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('team')">
                     <span class="sidebar-section-chevron">&#x25B8;</span>
                     <span class="sidebar-section-name">Team / HR</span>
                     <span class="sidebar-section-coming">Coming</span>
@@ -131,14 +131,14 @@
             </div>
 
             <div class="sidebar-section" data-section="system" data-tabs="sitemap">
-                <div class="sidebar-section-header" onclick="toggleSidebarSection('system')">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('system')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('system')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">System</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="system"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" onclick="switchTab('sitemap')"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map &amp; Guides</span><span class="sidebar-health-dot unknown" data-sidebar-health="sitemap" title="No checks run yet"></span><span id="sitemapBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
-                    <div class="sidebar-item" onclick="shareCurrentPage()" title="Copy link to this page"><span class="sidebar-icon">&#x1F4CE;</span><span class="sidebar-label">Share Current Page</span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('sitemap')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('sitemap')}"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map &amp; Guides</span><span class="sidebar-health-dot unknown" data-sidebar-health="sitemap" title="No checks run yet"></span><span id="sitemapBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="shareCurrentPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();shareCurrentPage()}" title="Copy link to this page"><span class="sidebar-icon">&#x1F4CE;</span><span class="sidebar-label">Share Current Page</span></div>
                 </div>
             </div>
 
@@ -149,10 +149,10 @@
     <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
 
     <!-- AI Assistant -->
-    <div class="ai-bubble" id="aiBubble" onclick="toggleAIPanel()" title="AI Assistant (Cmd+K)">
+    <div class="ai-bubble" id="aiBubble" role="button" tabindex="0" onclick="toggleAIPanel()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIPanel()}" title="AI Assistant (Cmd+K)" aria-label="Open AI Assistant">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
     </div>
-    <div class="ai-panel" id="aiPanel">
+    <div class="ai-panel" id="aiPanel" role="dialog" aria-label="AI Assistant" aria-modal="false">
       <div class="ai-panel-header">
         <div>
           <div style="font-size:14px;font-weight:700">AI Assistant</div>
@@ -172,9 +172,9 @@
       </div>
     </div>
     <!-- Command Palette -->
-    <div class="ai-cmd-overlay" id="aiCmdOverlay" onclick="closeCmdPalette()" style="display:none">
-      <div class="ai-cmd-panel" onclick="event.stopPropagation()">
-        <input class="ai-cmd-input" id="aiCmdInput" placeholder="Search commands..." oninput="filterCmdPalette()">
+    <div class="ai-cmd-overlay" id="aiCmdOverlay" onclick="closeCmdPalette()" style="display:none" role="presentation">
+      <div class="ai-cmd-panel" role="dialog" aria-label="Command Palette" aria-modal="true" onclick="event.stopPropagation()">
+        <input class="ai-cmd-input" id="aiCmdInput" placeholder="Search commands..." aria-label="Search commands" oninput="filterCmdPalette()">
         <div class="ai-cmd-list" id="aiCmdList"></div>
       </div>
     </div>

@@ -70,15 +70,15 @@
         const badge = document.getElementById('fintableBadge');
         if (critical.length > 0) {
             badge.style.display = 'inline-block';
-            badge.style.background = '#ef4444';
+            badge.style.background = 'var(--danger)';
             badge.textContent = critical.length;
         } else if (alert.length > 0) {
             badge.style.display = 'inline-block';
-            badge.style.background = '#f97316';
+            badge.style.background = 'var(--warning)';
             badge.textContent = alert.length;
         } else if (warning.length > 0) {
             badge.style.display = 'inline-block';
-            badge.style.background = '#eab308';
+            badge.style.background = 'var(--warning)';
             badge.textContent = warning.length;
         } else {
             badge.style.display = 'none';
@@ -95,24 +95,23 @@
         if (critical.length > 0) parts.push(`<strong>${critical.length}</strong> need${critical.length === 1 ? 's' : ''} reconnecting (7+ days)`);
         if (alert.length > 0) parts.push(`<strong>${alert.length}</strong> stale (3–7 days)`);
 
-        const bgColor = critical.length > 0 ? '#fef2f2' : '#fff7ed';
-        const borderColor = critical.length > 0 ? '#fecaca' : '#fed7aa';
-        const iconColor = critical.length > 0 ? '#dc2626' : '#ea580c';
+        const bgColor = critical.length > 0 ? 'var(--danger-bg)' : 'var(--warning-bg)';
+        const borderColor = critical.length > 0 ? 'var(--danger-bg)' : 'var(--warning-bg)';
+        const iconColor = critical.length > 0 ? 'var(--danger)' : 'var(--warning)';
 
         banner.style.display = 'block';
         banner.innerHTML = `<div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="switchTab('fintable')">
             <span style="font-size:20px">&#x1F50C;</span>
             <div style="flex:1">
                 <div style="font-weight:600;font-size:13px;color:${iconColor}">Account Sync Alert</div>
-                <div style="font-size:12px;color:#64748b">${parts.join(' · ')} — <span style="color:${iconColor};text-decoration:underline">View Sync Monitor</span></div>
+                <div style="font-size:12px;color:var(--text-secondary)">${parts.join(' · ')} — <span style="color:${iconColor};text-decoration:underline">View Sync Monitor</span></div>
             </div>
         </div>`;
     }
 
-    async function loadFintableSyncMonitor() {
+    async function loadFintableSyncMonitor(forceRefresh) {
         if (!PAT) return;
-        // Use cached data if available, otherwise fetch fresh
-        if (!fintableAccountsCache) {
+        if (!fintableAccountsCache || forceRefresh) {
             fintableAccountsCache = await fetchFintableAccounts();
             updateFintableAlerts(fintableAccountsCache);
         }
@@ -144,13 +143,13 @@
 
             let status, statusColor, statusLabel;
             if (hoursAgo <= 24) {
-                status = 'ok'; statusColor = '#22c55e'; statusLabel = 'OK';
+                status = 'ok'; statusColor = 'var(--success)'; statusLabel = 'OK';
             } else if (hoursAgo <= 72) {
-                status = 'warning'; statusColor = '#eab308'; statusLabel = 'Warning';
+                status = 'warning'; statusColor = 'var(--warning)'; statusLabel = 'Warning';
             } else if (hoursAgo <= 168) {
-                status = 'alert'; statusColor = '#f97316'; statusLabel = 'Alert';
+                status = 'alert'; statusColor = 'var(--warning)'; statusLabel = 'Alert';
             } else {
-                status = 'critical'; statusColor = '#ef4444'; statusLabel = 'Critical';
+                status = 'critical'; statusColor = 'var(--danger)'; statusLabel = 'Critical';
             }
 
             return { alias, institution, lastSync, balance, hoursAgo, status, statusColor, statusLabel };
@@ -165,25 +164,25 @@
 
         const summaryEl = document.getElementById('fintableSummary');
         summaryEl.innerHTML = `
-            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:#16a34a">${ok}</div>
-                <div style="font-size:12px;color:#15803d">Healthy</div>
+            <div style="background:var(--success-bg);border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:var(--success)">${ok}</div>
+                <div style="font-size:12px;color:var(--success)">Healthy</div>
             </div>
             <div style="background:#fefce8;border:1px solid #fef08a;border-radius:10px;padding:16px;text-align:center">
                 <div style="font-size:28px;font-weight:700;color:#ca8a04">${warning}</div>
                 <div style="font-size:12px;color:#a16207">1–3 Days</div>
             </div>
-            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px;text-align:center">
+            <div style="background:var(--warning-bg);border:1px solid #fed7aa;border-radius:10px;padding:16px;text-align:center">
                 <div style="font-size:28px;font-weight:700;color:#ea580c">${alert}</div>
                 <div style="font-size:12px;color:#c2410c">3–7 Days</div>
             </div>
-            <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:#dc2626">${critical}</div>
-                <div style="font-size:12px;color:#b91c1c">Needs Reconnect</div>
+            <div style="background:var(--danger-bg);border:1px solid #fecaca;border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:var(--danger)">${critical}</div>
+                <div style="font-size:12px;color:var(--danger)">Needs Reconnect</div>
             </div>
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:#334155">${total}</div>
-                <div style="font-size:12px;color:#64748b">Total Active</div>
+            <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:28px;font-weight:700;color:var(--text-primary)">${total}</div>
+                <div style="font-size:12px;color:var(--text-secondary)">Total Active</div>
             </div>
         `;
 
@@ -198,10 +197,10 @@
             const balStr = a.balance != null ? '£' + a.balance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
             const rowBg = a.status === 'critical' ? 'rgba(239,68,68,0.06)' : a.status === 'alert' ? 'rgba(249,115,22,0.06)' : '';
 
-            return `<tr style="border-bottom:1px solid #f1f5f9;${rowBg ? 'background:' + rowBg : ''}">
-                <td style="padding:10px 12px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
-                <td style="padding:10px 12px;font-weight:500">${a.alias}</td>
-                <td style="padding:10px 12px;color:#64748b">${a.institution}</td>
+            return `<tr style="border-bottom:1px solid var(--border-subtle);${rowBg ? 'background:' + rowBg : ''}">
+                <td style="padding:10px 12px"><span role="img" aria-label="${a.statusLabel}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
+                <td style="padding:10px 12px;font-weight:500">${escHtml(a.alias)}</td>
+                <td style="padding:10px 12px;color:var(--text-secondary)">${escHtml(a.institution)}</td>
                 <td style="padding:10px 12px">${syncStr}</td>
                 <td style="padding:10px 12px;font-weight:500;color:${a.statusColor}">${agoStr}</td>
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${balStr}</td>
@@ -211,7 +210,7 @@
         // ── Sync Bar + Health Checks ──
         if (typeof registerSyncBar === 'function') {
             registerSyncBar('fintable', {
-                refreshFn: () => loadFintableSyncMonitor(),
+                refreshFn: () => loadFintableSyncMonitor(true),
                 checks: [
                     {
                         name: 'Account records fetched', kind: 'sync', run: () => {

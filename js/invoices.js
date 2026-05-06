@@ -33,12 +33,12 @@
             label.appendChild(badge);
         }
         if (newCount > 0) {
-            badge.style.background = '#dc2626';
+            badge.style.background = 'var(--danger)';
             badge.style.color = 'white';
             badge.textContent = `${unpaid.length} • ${newCount} new`;
         } else if (unpaid.length > 0) {
-            badge.style.background = '#e2e8f0';
-            badge.style.color = '#475569';
+            badge.style.background = 'var(--border-default)';
+            badge.style.color = 'var(--text-secondary)';
             badge.textContent = `${unpaid.length}`;
         } else {
             badge.textContent = '';
@@ -53,17 +53,24 @@
         if (spinner) spinner.style.display = 'flex';
         if (table) table.style.display = 'none';
         try {
-            const params = new URLSearchParams({
+            const baseParams = {
                 'filterByFormula': "{Status}='Unpaid'",
                 'sort[0][field]': 'Email Date',
                 'sort[0][direction]': 'asc',
                 'returnFieldsByFieldId': 'true',
-            });
-            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`;
-            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const data = await resp.json();
-            airtableInvoices = data.records.map(r => {
+            };
+            let allRecords = [], pageOffset = null;
+            do {
+                const params = new URLSearchParams(baseParams);
+                if (pageOffset) params.set('offset', pageOffset);
+                const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?${params}`;
+                const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PAT } });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                allRecords.push(...data.records);
+                pageOffset = data.offset || null;
+            } while (pageOffset);
+            airtableInvoices = allRecords.map(r => {
                 const f = r.fields;
                 return {
                     recordId:      r.id,
@@ -127,11 +134,11 @@
         if (!el) return;
         const unpaidCount = airtableInvoices.filter(inv => inv.status === 'Unpaid').length;
         if (lastGmailCount === null) {
-            el.innerHTML = `<span style="color:#64748b">Dashboard: <strong>${unpaidCount}</strong> unpaid</span>`;
+            el.innerHTML = `<span style="color:var(--text-secondary)">Dashboard: <strong>${unpaidCount}</strong> unpaid</span>`;
         } else if (unpaidCount === lastGmailCount) {
-            el.innerHTML = `<span style="color:#16a34a">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ✓ In sync</span>`;
+            el.innerHTML = `<span style="color:var(--success)">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ✓ In sync</span>`;
         } else {
-            el.innerHTML = `<span style="color:#d97706">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ⚠️ Mismatch</span>`;
+            el.innerHTML = `<span style="color:var(--warning)">Dashboard: <strong>${unpaidCount}</strong> | Gmail: <strong>${lastGmailCount}</strong> ⚠️ Mismatch</span>`;
         }
     }
 
@@ -198,9 +205,9 @@
                 ? invoiceRefreshedAt.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
                 : 'Not yet loaded';
             const statusLabel = airtableInvoices.length > 0
-                ? '<span style="color:#16a34a;font-weight:600">Airtable</span>'
-                : '<span style="color:#d97706;font-weight:600">Loading…</span>';
-            refreshSpan.innerHTML = `Source: <strong style="color:#64748b">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:#64748b">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:#2563eb;font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceReconcile(); this.textContent='Reconciling…'; setTimeout(()=>this.textContent='Reconcile with Gmail',4000)" style="color:#7c3aed;font-size:11px;text-decoration:underline" title="Realign dashboard against Gmail '3: to pay' label">Reconcile with Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
+                ? '<span style="color:var(--success);font-weight:600">Airtable</span>'
+                : '<span style="color:var(--warning);font-weight:600">Loading…</span>';
+            refreshSpan.innerHTML = `Source: <strong style="color:var(--text-secondary)">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:var(--info);font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceReconcile(); this.textContent='Reconciling…'; setTimeout(()=>this.textContent='Reconcile with Gmail',4000)" style="color:#7c3aed;font-size:11px;text-decoration:underline" title="Realign dashboard against Gmail '3: to pay' label">Reconcile with Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
         }
         updateSyncHealthIndicator();
 
@@ -250,7 +257,7 @@
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Amount Unknown</div>
-                    <div class="kpi-card-value" style="color:#94a3b8">${unknownCount}</div>
+                    <div class="kpi-card-value" style="color:var(--text-muted)">${unknownCount}</div>
                     <div class="kpi-card-sub">${unknownCount > 0 ? 'Click to enter amounts on table below' : 'All amounts populated'}</div>
                 </div>
                 <div class="kpi-card">
@@ -287,7 +294,7 @@
             }
             const isNew = inv.createdTime && new Date(inv.createdTime) > lastSeenBeforeRender;
             if (isNew) {
-                badge += ' <span class="inv-badge" style="background:#dcfce7;color:#15803d;border:1px solid #16a34a">NEW</span>';
+                badge += ' <span class="inv-badge" style="background:var(--success-bg);color:var(--success);border:1px solid #16a34a">NEW</span>';
             }
 
             const displayAmt = inv.amount;
@@ -335,12 +342,12 @@
             let matchRow = '';
             if (match && !inv.matchRejected) {
                 matchRow = `<tr class="inv-match-suggestion" id="inv-match-${idx}">
-                    <td colspan="9" style="padding:6px 12px;background:#eff6ff;border-left:3px solid #2563eb">
+                    <td colspan="9" style="padding:6px 12px;background:var(--info-bg);border-left:3px solid var(--info)">
                         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                            <span style="font-size:11px;font-weight:700;color:#2563eb">🤖 AI Match Found:</span>
-                            <span style="font-size:12px;color:#1e293b">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
+                            <span style="font-size:11px;font-weight:700;color:var(--info)">🤖 AI Match Found:</span>
+                            <span style="font-size:12px;color:var(--text-primary)">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
                             <div style="margin-left:auto;display:flex;gap:6px">
-                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${inv.recordId}','${threadId}','${match.txRecordId}','${gmailUrl}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
+                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${escJs(inv.recordId)}','${escJs(threadId)}','${escJs(match.txRecordId)}','${escJs(gmailUrl)}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
                                 <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch('${inv.recordId}',${idx})" title="Dismiss this suggestion">✗ Reject</button>
                             </div>
                         </div>
@@ -349,11 +356,11 @@
             }
 
             // Action column
-            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${inv.recordId}','${threadId}','','${gmailUrl}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
+            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${escJs(inv.recordId)}','${escJs(threadId)}','','${escJs(gmailUrl)}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
             return `<tr data-record-id="${inv.recordId}"${isSelected ? ' class="inv-row-selected"' : ''}>
                 <td style="text-align:center;width:32px">${checkboxHtml}</td>
-                <td style="text-align:center;color:#94a3b8;font-size:11px;font-weight:600">${idx + 1}</td>
+                <td style="text-align:center;color:var(--text-muted);font-size:11px;font-weight:600">${idx + 1}</td>
                 <td style="white-space:nowrap;min-width:120px">${dateCell}${gmailLinkHtml}<br>${badge}</td>
                 <td style="max-width:180px">${payeeHtml}</td>
                 <td style="max-width:280px">${descHtml}</td>
@@ -749,7 +756,7 @@
             }
         }
         const w = inputType === 'number' ? '90px' : (fieldId === INV.ref ? '110px' : '170px');
-        input.style.cssText = `width:${w};padding:3px 6px;font-size:12px;border:1px solid #2563eb;border-radius:4px;${inputType === 'number' ? 'text-align:right;' : ''}`;
+        input.style.cssText = `width:${w};padding:3px 6px;font-size:12px;border:1px solid var(--info);border-radius:4px;${inputType === 'number' ? 'text-align:right;' : ''}`;
 
         async function save() {
             const val = input.value.trim();
@@ -816,7 +823,7 @@
         const inv = airtableInvoices.find(i => i.recordId === recordId);
         const currentBizId = (inv && inv.businessIds && inv.businessIds[0]) || '';
         const select = document.createElement('select');
-        select.style.cssText = 'padding:3px 6px;font-size:12px;border:1px solid #2563eb;border-radius:4px;background:#fff;color:#1e293b;cursor:pointer';
+        select.style.cssText = 'padding:3px 6px;font-size:12px;border:1px solid var(--info);border-radius:4px;background:#fff;color:var(--text-primary);cursor:pointer';
         // Empty option for "no business assigned"
         const blank = document.createElement('option');
         blank.value = ''; blank.textContent = '— None —';
@@ -946,9 +953,9 @@
             }
 
             btn.textContent = 'Done';
-            btn.style.background = '#dcfce7';
-            btn.style.color = '#16a34a';
-            btn.style.borderColor = '#16a34a';
+            btn.style.background = 'var(--success-bg)';
+            btn.style.color = 'var(--success)';
+            btn.style.borderColor = 'var(--success)';
 
             // Remove from local array and re-render
             airtableInvoices = airtableInvoices.filter(i => i.recordId !== recordId);
@@ -968,7 +975,7 @@
             // Record failure for the health checks panel — this is what the user will see
             lastApprovalAttempt = { ok: false, when: new Date(), error: e.message || String(e), action: txRecordId ? 'approveMatch' : 'markPaid' };
             btn.textContent = 'Failed';
-            btn.style.background = '#fee2e2';
+            btn.style.background = 'var(--danger-bg)';
             btn.classList.remove('loading');
             setTimeout(() => { btn.textContent = 'Mark Paid'; btn.style.background = ''; }, 3000);
         }
