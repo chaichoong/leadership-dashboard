@@ -134,32 +134,54 @@ Every feature MUST include all of these. Not "should" — MUST:
 **Data layer:**
 - [ ] Airtable fetch with pagination (`offset` handling)
 - [ ] Error handling on fetch (try/catch, show toast on failure, don't silently fail)
+- [ ] Rate-limit handling — catch 429 responses, pause 500ms between bulk writes, exponential backoff on retries (see `reconciliation.js` for the pattern)
 - [ ] Filter by Active status where applicable
 - [ ] Field name constants from config.js (never hardcode field names in fetch URLs)
+- [ ] Prefer shared global arrays (`allTenancies`, `allTransactions`, `allCosts`, etc.) over independent fetches when the data is already loaded by `dashboard.js`. Only make a separate Airtable call if the feature needs data from a table not already cached globally
+- [ ] If the feature makes expensive fetches (multiple tables, 100+ records), add IndexedDB caching with TTL — follow the `dashboard.js` pattern: `_idbSet(key, { savedAt: Date.now(), data })`, check age on load, bypass cache on manual refresh
 
 **Render layer:**
-- [ ] Loading state shown during fetch
+- [ ] Loading state shown during fetch (spinner + explainer text if load takes >3s — see `costs.js` pattern)
 - [ ] Empty state when no data matches filters
 - [ ] All colours from `tokens.css` custom properties (never hardcode hex)
 - [ ] All text uses `escHtml()` for any user-supplied data
 - [ ] Responsive — works on tablet width (no horizontal scroll below 1024px)
+- [ ] Print-friendly — hide non-essential UI in `@media print` if the feature contains data users might print (tables, reports, summaries)
 
 **Action layer:**
 - [ ] Confirm before destructive actions (use the branded `confirmDialog` from shared.js)
 - [ ] Toast feedback on success/failure (use `showToast` from shared.js)
 - [ ] Disable button during async operation (prevent double-submit)
 - [ ] Optimistic UI where possible (update display immediately, roll back on error)
+- [ ] Undo pattern for reversible destructive actions — sliding toast with "Undo" button, auto-dismiss after 8s (see `costs.js` `pushUndoAction` pattern). Use for: status changes, dismissals, field edits. Don't use for: Airtable record deletion (not reversible)
+
+**State persistence (when the feature needs to remember things across page loads):**
+- [ ] Use localStorage for UI state: dismissed items, filter selections, user preferences, chase/stage tracking
+- [ ] Namespace all keys with the feature prefix (e.g. `cfv_`, `recon_`) to avoid collisions
+- [ ] Handle the "cleared site data" case — if localStorage is empty, the feature should still work (degrade gracefully, re-derive state from Airtable where possible)
+- [ ] Consider what happens on a different device — localStorage is per-browser. If the state matters across devices, write it back to Airtable instead
+
+**Accessibility:**
+- [ ] `aria-expanded` on expandable/collapsible sections (cards, drawers)
+- [ ] `aria-modal="true"` on modal dialogs
+- [ ] `aria-live="polite"` on regions that update dynamically (counts, status messages)
+- [ ] Keyboard navigation — Escape closes drawers/modals, Enter submits, Tab order is logical
+- [ ] Interactive elements have visible focus styles (`:focus-visible`)
+- [ ] Icons/emoji used decoratively get `aria-hidden="true"`; meaningful ones get `aria-label`
 
 **Health & monitoring:**
 - [ ] `registerSyncBar()` with 5-8 checks (see health-bar skill for check design)
 - [ ] `markTabSynced()` called after successful render
 - [ ] Sidebar badge (if the feature has a count worth showing)
 - [ ] Sidebar health dot wired up
+- [ ] Feature integrates with idle auto-refresh — if `loadDashboard()` is called by the idle timer in `shared.js`, does your feature's data update too? If your feature has its own fetch, consider whether it should also refresh on idle return
 
 **Integration:**
 - [ ] `tabLabelMap` entry in shared.js (for tab label display)
 - [ ] PAGE_REGISTRY entry in config.js (for version tracking)
 - [ ] Sidebar menu item in index.html
+- [ ] **AI Assistant context** — if the feature exposes data Kevin might ask the AI about, add a context block in `js/ai-assistant.js` so the AI panel can reference it (see existing `ctx.compliancePage`, `ctx.commsPage` patterns)
+- [ ] **Iframe communication** (iframe pages only) — `postMessage` status up to parent shell, listen for messages from parent (e.g. `qt:open-new-task-drawer`). Sync bar handles health broadcasting automatically, but feature-specific messages need manual wiring
 
 ### 3c. Code quality gates (check as you write)
 
@@ -198,7 +220,26 @@ This is the step that eliminates most rework. After writing all the code, audit 
 - [ ] Grep for hardcoded pixel values that should use spacing tokens
 - [ ] Verify all status colours use semantic tokens (success/warning/danger/info)
 
-### 4d. Security audit
+### 4d. Cross-feature regression check
+
+When a feature writes back to Airtable (status changes, field updates, record creation), check which other features read that same data:
+
+- [ ] **Dashboard KPIs** — does changing a tenancy status affect rent roll, void count, arrears totals?
+- [ ] **Cash flow** — does marking an invoice paid or changing a cost amount affect the forecast?
+- [ ] **Reconciliation** — does a transaction status change break the matching logic?
+- [ ] **CFV detection** — does a tenancy status change cause a false positive or miss a real CFV?
+- [ ] **Sidebar badges** — do counts on OTHER tabs update correctly after your feature's write-back?
+
+If your feature only reads data (no Airtable writes), this check is N/A.
+
+### 4e. Performance check
+
+- [ ] **API call count** — how many Airtable requests does the feature make on initial load? Target: 1-3 calls. If >5, consider whether shared globals can be reused
+- [ ] **Payload size** — are you fetching all fields when you only need 3? Use `fields[]` parameter in the Airtable URL to limit the response
+- [ ] **Render cost** — if rendering 100+ rows, use a table (not 100 expandable cards). Consider virtual scrolling or "show more" pagination for >200 items
+- [ ] **No N+1 queries** — don't fetch related records one-by-one inside a loop. Batch them into a single `filterByFormula=OR(...)` call, or resolve from global arrays
+
+### 4f. Security audit
 
 - [ ] All user-facing text passed through `escHtml()`
 - [ ] No raw Airtable field values inserted into innerHTML without escaping
@@ -352,3 +393,12 @@ Include a screenshot if the feature is visual.
 | Forgot PAGE_REGISTRY entry | Auto-bump won't work without it |
 | Forgot tabLabelMap entry | Tab label will show raw ID instead of human name |
 | Broke OS-INTEGRATION section | Read index.html first, mark those sections as untouchable |
+| Airtable 429 rate limit on bulk writes | 500ms pause between requests, exponential backoff on retry |
+| N+1 query pattern (fetch in a loop) | Batch into single `filterByFormula=OR(...)` or resolve from globals |
+| Redundant Airtable fetch when global array exists | Check if `allTenancies`, `allTransactions`, etc. already have the data |
+| localStorage collision with another feature | Namespace all keys with feature prefix (`cfv_`, `recon_`, `inv_`) |
+| Feature write-back breaks another tab's counts | Run cross-feature regression check (Phase 4d) |
+| No undo on destructive actions | Add sliding undo toast for dismiss/status-change/field-edit |
+| Missing accessibility (no keyboard nav) | Escape closes, Enter submits, aria-expanded on collapsibles |
+| AI assistant can't answer questions about new feature | Add context block in `ai-assistant.js` |
+| Forgot SOP / sitemap update | Phase 8 — it's not done until the SOP exists |
