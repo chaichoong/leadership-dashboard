@@ -194,10 +194,17 @@
                 const ownerObj=getField(r,STRAT_PF.owner);
                 const businessLinks=getField(r,STRAT_PF.business)||[];
                 let businessName='';
-                if(Array.isArray(businessLinks)&&businessLinks[0]){
-                    const b=businessLinks[0];
-                    if(typeof b==='object'&&b.name)businessName=b.name;
-                    else if(typeof b==='string')businessName=_strategicBusinessIdToName[b]||'';
+                const businessRecIds=[];
+                if(Array.isArray(businessLinks)){
+                    businessLinks.forEach(b=>{
+                        if(typeof b==='object'){
+                            if(b.id)businessRecIds.push(b.id);
+                            if(!businessName&&b.name)businessName=b.name;
+                        }else if(typeof b==='string'){
+                            businessRecIds.push(b);
+                            if(!businessName)businessName=_strategicBusinessIdToName[b]||'';
+                        }
+                    });
                 }
                 return {
                     id:r.id,
@@ -211,6 +218,7 @@
                     kpiCurrent:Number(getField(r,STRAT_PF.kpiCurrent))||0,
                     kpiUnit:_stratSelName(getField(r,STRAT_PF.kpiUnit)),
                     business:businessName,
+                    _businessRecIds:businessRecIds,
                     owner:ownerObj?{name:ownerObj.name||'',email:ownerObj.email||''}:null,
                     kpiAutomated:!!getField(r,STRAT_PF.kpiAutomated),
                     kpiSource:getField(r,STRAT_PF.kpiSource)||'',
@@ -531,6 +539,22 @@
         const pills=document.getElementById('strategicKpiPills');
         const countEl=document.getElementById('strategicKpiCount');
         if(!section||!list||!pills)return;
+        // Re-resolve empty business names — on the first render allBusinesses
+        // may not have loaded yet, so the ID→name map was empty. By the second
+        // render (after compute) the globals are populated.
+        if(allBusinesses&&allBusinesses.length&&Object.keys(_strategicBusinessIdToName).length===0){
+            allBusinesses.forEach(b=>{
+                const name=getField(b,'fldbbRqVxLxUdHwIR');
+                if(name)_strategicBusinessIdToName[b.id]=typeof name==='string'?name:(name.name||'');
+            });
+        }
+        if(Object.keys(_strategicBusinessIdToName).length>0){
+            _strategicKpiProjects.forEach(p=>{
+                if(p.business||!p._businessRecIds)return;
+                const id=p._businessRecIds[0];
+                if(id&&_strategicBusinessIdToName[id])p.business=_strategicBusinessIdToName[id];
+            });
+        }
         const active=_strategicKpiProjects.filter(p=>p.kpiName&&!p.completed&&p.status!=='Completed');
         if(!active.length){section.style.display='none';return}
         section.style.display='block';
