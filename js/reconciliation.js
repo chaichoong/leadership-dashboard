@@ -1223,10 +1223,12 @@
             body.innerHTML = `
                 <p style="margin:0 0 14px 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
                     Sets <code>Split Count = N</code> on this transaction. The Airtable
-                    <strong>"Split Transactions"</strong> automation will then create <code>N − 1</code> child records
-                    with <code>**GBP = ${fmt(st.totalRaw)} ÷ N</code> and copy categorisation. Each portion's
-                    Report Amount becomes <code>${fmt(each)}</code>. The new rows appear in this panel within a
-                    few seconds — reconcile each one as normal.
+                    <strong>"Split Transactions"</strong> automation creates <code>N − 1</code> child records
+                    each with <code>Report Amount = ${fmt(each)}</code>.
+                    <br><br>
+                    <strong style="color:var(--accent-gold)">⚠ Tenancy, Unit and Tenant are cleared on every portion.</strong>
+                    You must assign a tenancy to each row before approving — silent inheritance was causing every
+                    portion of bulk rent payments to link to the same unit.
                 </p>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <label style="font-size:12px;color:var(--text-primary);font-weight:600">Number of portions:
@@ -1461,6 +1463,25 @@
                 await Promise.all(childPatches);
             }
 
+            // ── Step 3 (Equal mode): break the parent's tenancy/unit/tenant
+            //     inheritance on parent + every child. The Airtable automation
+            //     copies every field from parent → child, so without this all N
+            //     portions silently end up linked to whatever single tenancy
+            //     the parent was matched to (e.g. an IMMO LTD bulk rent
+            //     transfer covers 5 units but every child inherits Unit 2).
+            //     We also flip Reconciled=false so the user MUST re-approve
+            //     each portion with its correct per-portion tenancy.
+            if (st.mode === 'equal') {
+                const clearFields = {
+                    [F.txReconciled]: false,
+                    [F.txTenancy]: [],
+                    [F.txUnit]: [],
+                };
+                if (F.txTenant)         clearFields[F.txTenant] = [];
+                const allToClear = [tx.id, ...children.map(c => c.id)];
+                await Promise.all(allToClear.map(id => patchTx(id, clearFields)));
+            }
+
             // ── Step 4: Update local allTransactions to mirror Airtable ──
             if (!tx.fields) tx.fields = {};
             tx.fields[F.txSplitCount] = N;
@@ -1474,10 +1495,23 @@
                 if (c0.tenancyId)  tx.fields[F.txTenancy]     = [{ id: c0.tenancyId }];
                 if (c0.unitId)     tx.fields[F.txUnit]        = [{ id: c0.unitId }];
                 if (c0.costId)     tx.fields[F.txCost]        = [{ id: c0.costId }];
+            } else {
+                // Equal mode: mirror the per-row clears we PATCHed above
+                tx.fields[F.txReconciled] = false;
+                tx.fields[F.txTenancy] = [];
+                tx.fields[F.txUnit] = [];
+                if (F.txTenant) tx.fields[F.txTenant] = [];
             }
             children.forEach(child => {
                 if (!allTransactions.find(t => t.id === child.id)) {
                     allTransactions.push(child);
+                }
+                if (st.mode === 'equal') {
+                    if (!child.fields) child.fields = {};
+                    child.fields[F.txReconciled] = false;
+                    child.fields[F.txTenancy] = [];
+                    child.fields[F.txUnit] = [];
+                    if (F.txTenant) child.fields[F.txTenant] = [];
                 }
             });
 
@@ -1498,10 +1532,20 @@
                 matchType: `Split 1/${N} (custom)`,
                 score: 0,
             } : {
+                // Equal mode: clear the parent's per-portion fields (tenancy,
+                // unit, tenant) so the user must explicitly classify each row.
+                // Without this, all N rows default to whatever single tenancy
+                // the auto-matcher pre-filled on the parent — causing every
+                // child to silently end up linked to the same tenancy.
                 ...r,
                 txAmount: sourceTxAmount,
+                tenantName: '', tenantId: '',
+                tenancyLabel: '', tenancyId: '',
+                unitName: '', unitId: '',
+                propertyName: '',
                 matchType: `Split 1/${N}`,
                 score: 0,
+                status: 'unmatched',
             };
             newResults.push(portion0);
             // Children become Portions 2..N
@@ -1519,13 +1563,18 @@
                     propertyName: '',
                     costLabel: '', costId: portionCats[portionIdx].costId || '',
                 } : {
+                    // Equal mode: keep parent's category/sub-cat/business/cost
+                    // (those usually apply to every portion) but CLEAR the
+                    // per-tenancy fields. Children must each be assigned a
+                    // tenancy explicitly — silent inheritance was the bug
+                    // that left every IMMO LTD split linked to one unit.
                     categoryId: r.categoryId, categoryName: r.categoryName,
                     subCatId: r.subCatId, subCatName: r.subCatName,
                     businessId: r.businessId, businessName: r.businessName,
-                    tenantName: r.tenantName, tenantId: r.tenantId,
-                    tenancyLabel: r.tenancyLabel, tenancyId: r.tenancyId,
-                    unitName: r.unitName, unitId: r.unitId,
-                    propertyName: r.propertyName,
+                    tenantName: '', tenantId: '',
+                    tenancyLabel: '', tenancyId: '',
+                    unitName: '', unitId: '',
+                    propertyName: '',
                     costLabel: r.costLabel, costId: r.costId,
                 };
                 newResults.push({
@@ -1536,7 +1585,9 @@
                     ...cats,
                     matchType: `Split ${portionIdx + 1}/${N}` + (st.mode === 'custom' ? ' (custom)' : ''),
                     score: 0,
-                    status: st.mode === 'custom' ? 'suggestion' : (r.status === 'approved' ? 'approved' : (r.status || 'unmatched')),
+                    // Equal mode: ALWAYS unmatched, regardless of parent's
+                    // prior status. Forces user to set per-portion tenancy.
+                    status: st.mode === 'custom' ? 'suggestion' : 'unmatched',
                 });
             });
             // Placeholders for any children polling missed
