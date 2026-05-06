@@ -1164,9 +1164,77 @@ Auto-generated from arrears engine.`,
         `;
     }
 
+    // ── Debug helper: explain why a tenancy is/isn't flagged as a CFV ──
+    // Console: explainCFV('Smith') or explainCFV('recXYZ')
+    // Lists the eval calendar month, every reconciled tx linked to the tenancy,
+    // and which ones counted toward the in-payment check. Use to diagnose
+    // mis-linked Immo Limited (or any) payments.
+    function explainCFV(query) {
+        if (!query) {
+            console.log('Usage: explainCFV("Smith") or explainCFV("recXYZ")');
+            return;
+        }
+        const q = String(query).toLowerCase();
+        const matches = allTenancies.filter(t => {
+            if (t.id.toLowerCase() === q) return true;
+            const surname = String(getField(t, F.tenSurname) || '').toLowerCase();
+            const ref = String(getField(t, F.tenRef) || '').toLowerCase();
+            return surname.includes(q) || ref.includes(q);
+        });
+        if (matches.length === 0) {
+            console.log(`No tenancies matched "${query}". Try a surname or record ID.`);
+            return;
+        }
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        matches.forEach(tenancy => {
+            const surname = getField(tenancy, F.tenSurname) || '?';
+            const ref = getField(tenancy, F.tenRef) || '?';
+            const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
+            const tolerance = 2;
+            const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
+            dueThisMonth.setHours(0, 0, 0, 0);
+            const daysSinceDue = Math.floor((today - dueThisMonth) / 86400000);
+            const evalMonth = daysSinceDue >= tolerance
+                ? new Date(today.getFullYear(), today.getMonth(), 1)
+                : new Date(today.getFullYear(), today.getMonth() - 1, 1);
+
+            console.group(`▸ ${surname} (${ref}) — ${tenancy.id}`);
+            console.log('Due day:', dueDay, '· Today:', today.toISOString().slice(0, 10),
+                        '· Days since due:', daysSinceDue,
+                        '· Eval month:', evalMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }));
+
+            const allLinked = allTransactions.filter(tx => txLinkedToTenancy(tx, tenancy.id));
+            const reconciled = allLinked.filter(tx => getField(tx, F.txReconciled));
+            const unreconciled = allLinked.filter(tx => !getField(tx, F.txReconciled));
+
+            console.log(`Total tx linked to this tenancy: ${allLinked.length} (${reconciled.length} reconciled, ${unreconciled.length} unreconciled)`);
+            if (unreconciled.length) {
+                console.warn(`⚠ ${unreconciled.length} tx linked but NOT reconciled — these don't count:`);
+                unreconciled.forEach(tx => console.log('  · ' + (getField(tx, F.txDate) || '?') +
+                    ' £' + (getField(tx, F.txAmount) || 0) +
+                    ' — ' + (getField(tx, F.txVendor) || getField(tx, F.txName) || '?')));
+            }
+            const evalY = evalMonth.getFullYear(), evalM = evalMonth.getMonth();
+            const inEvalMonth = reconciled.filter(tx => {
+                const ds = getField(tx, F.txDate); if (!ds) return false;
+                const td = new Date(ds);
+                return td.getFullYear() === evalY && td.getMonth() === evalM;
+            });
+            console.log(`Reconciled tx dated in eval month: ${inEvalMonth.length}`);
+            inEvalMonth.forEach(tx => console.log('  ✓ ' + (getField(tx, F.txDate) || '?') +
+                ' £' + (getField(tx, F.txAmount) || 0) +
+                ' — ' + (getField(tx, F.txVendor) || getField(tx, F.txName) || '?')));
+            const arrears = isCurrentlyInArrears(tenancy, null, today);
+            console.log(arrears ? '🔴 RESULT: in arrears (CFV)' : '🟢 RESULT: in payment');
+            console.groupEnd();
+        });
+    }
+
     // Expose to other modules
     window.runArrearsEngine = runArrearsEngine;
     window.loadArrearsRecords = loadArrearsRecords;
     window.getTenantTypeForTenancy = getTenantTypeForTenancy;
     window.renderArrearsSection = renderArrearsSection;
     window.isCurrentlyInArrears = isCurrentlyInArrears;
+    window.explainCFV = explainCFV;
+    window.txLinkedToTenancy = txLinkedToTenancy;
