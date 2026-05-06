@@ -224,52 +224,59 @@
     }
 
     // ── Currently-in-arrears check (drives CFV detection) ──
-    // Kevin's simple rule: after 2 days past the most recent due date, if NO
-    // reconciled payment has landed against the tenancy in the current cycle
-    // window → CFV. ANY reconciled payment linked to the tenancy in that
-    // window → in-payment, regardless of value (split transactions can mean
-    // a partial amount lands).
+    // Kevin's simple rule, calendar-month based:
     //
-    // The "cycle window" is from the previous due date (exclusive) through
-    // today. A payment dated anywhere in that range counts. Early payments
-    // (e.g. April 28 for May 1 rent), on-time, and late payments all match.
+    //   • Status is sticky between cycles. Once we mark a tenant as "paid" or
+    //     "missed" for calendar month X, that status carries forward until
+    //     calendar month X+1's due-day plus 2 days has elapsed.
+    //
+    //   • At due-day + 2 of the current month, re-evaluate: did ANY reconciled
+    //     payment linked to the tenancy land in the current calendar month?
+    //     If yes → in payment. If no → CFV.
+    //
+    //   • Before due-day + 2 of the current month, the tenant's status reflects
+    //     the previous calendar month: paid in prev month → in payment;
+    //     unpaid in prev month → still in arrears.
+    //
+    // Payment matching is purely by transaction date's calendar month, NOT by
+    // cycle window. A 28th-of-prior-month payment counts for prior month, not
+    // for the new month — Kevin's mental model is "did they pay this month
+    // yet?", anchored on calendar month boundaries.
     function isCurrentlyInArrears(tenancy, tenantType, today) {
         if (!getTenancyStartDate(tenancy)) return false;
 
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-        const tolerance = 2; // days after due date before flagging
+        const tolerance = 2; // days after the due-day before re-evaluating
 
-        // Find the latest due-day that is at least `tolerance` days past today —
-        // i.e. the most recent "matured" cycle. Within-tolerance must roll back
-        // to the previous month so an unpaid prior cycle isn't silently cleared
-        // the moment a new due date passes.
-        let matureDue = new Date(today.getFullYear(), today.getMonth(), dueDay);
-        matureDue.setHours(0, 0, 0, 0);
-        if (Math.floor((today - matureDue) / 86400000) < tolerance) {
-            matureDue = new Date(today.getFullYear(), today.getMonth() - 1, dueDay);
-            matureDue.setHours(0, 0, 0, 0);
+        // Decide which calendar month to evaluate.
+        //   today ≥ this-month-due-day + tolerance → evaluate THIS month
+        //   else                                   → evaluate PREVIOUS month
+        const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
+        dueThisMonth.setHours(0, 0, 0, 0);
+        const daysSinceDue = Math.floor((today - dueThisMonth) / 86400000);
+
+        let evalY, evalM;
+        if (daysSinceDue >= tolerance) {
+            evalY = today.getFullYear();
+            evalM = today.getMonth();
+        } else {
+            const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            evalY = prev.getFullYear();
+            evalM = prev.getMonth();
         }
 
-        // No matured cycle yet (e.g. brand-new tenancy whose first due date is
-        // still in the future or within tolerance) → not in arrears.
-        if (Math.floor((today - matureDue) / 86400000) < tolerance) return false;
-
-        // Tenancy started after the matured cycle → tenant didn't exist yet.
+        // Tenancy hasn't started yet (future move-in) → don't flag.
         const tenStart = getTenancyStartDate(tenancy);
-        if (tenStart && tenStart > matureDue) return false;
+        if (tenStart && tenStart > today) return false;
 
-        // Cycle window: previous due date (exclusive) through today (inclusive)
-        const prevDue = new Date(matureDue.getFullYear(), matureDue.getMonth() - 1, dueDay);
-        prevDue.setHours(0, 0, 0, 0);
-
+        // Did ANY reconciled payment land for this tenancy in the eval calendar month?
         const paid = allTransactions.some(tx => {
             if (!getField(tx, F.txReconciled)) return false;
             if (!txLinkedToTenancy(tx, tenancy.id)) return false;
             const txDateStr = getField(tx, F.txDate);
             if (!txDateStr) return false;
             const txDate = new Date(txDateStr);
-            txDate.setHours(0, 0, 0, 0);
-            return txDate > prevDue && txDate <= today;
+            return txDate.getFullYear() === evalY && txDate.getMonth() === evalM;
         });
 
         return !paid;
