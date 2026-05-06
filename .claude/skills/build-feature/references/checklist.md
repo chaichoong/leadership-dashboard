@@ -48,3 +48,17 @@ Use this as a final gate before committing. Every box must be checked.
 - [ ] Template literals for HTML (no string concatenation)
 - [ ] Early returns (not deep nesting)
 - [ ] No dead code or commented-out blocks left behind
+
+## Audit (run /audit skill)
+- [ ] Audit score reported (target 80+)
+- [ ] All HIGH-severity bugs fixed
+- [ ] Re-audit confirms no self-introduced bugs
+- [ ] Deploy verified live (pageVer matches)
+
+## SOP & Sitemap
+- [ ] SOP file created or updated (`sop-[feature].html`)
+- [ ] SOP imports `css/tokens.css` with correct relative path
+- [ ] `sopFile` path set in PAGE_REGISTRY entry
+- [ ] `sopVer` set to match `pageVer`
+- [ ] `sitemap.xml` updated with new page URL and SOP URL
+- [ ] `scripts/pre-commit-action.py` mapping updated for auto-bump
