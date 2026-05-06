@@ -111,9 +111,18 @@
             });
             if (offset) url.searchParams.set('offset', offset);
 
-            const resp = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${PAT}` }
-            });
+            let resp;
+            for (let _attempt = 0; _attempt < 4; _attempt++) {
+                resp = await fetch(url, {
+                    headers: { 'Authorization': `Bearer ${PAT}` }
+                });
+                if (resp.status === 429) {
+                    const wait = Math.min(1000 * Math.pow(2, _attempt), 8000);
+                    await new Promise(r => setTimeout(r, wait));
+                    continue;
+                }
+                break;
+            }
             if (resp.status === 401 || resp.status === 403) {
                 localStorage.removeItem('_dlr_pat');
                 document.getElementById('authScreen').style.display = 'flex';
@@ -381,6 +390,7 @@
     // Listen for status pings from iframe pages.
     window.addEventListener('message', (e) => {
         if (!e.data || e.data.type !== 'syncBarStatus' || !e.data.tabId) return;
+        if (e.origin !== 'null' && e.origin !== window.location.origin) return;
         updateSidebarHealth(e.data.tabId, e.data.status);
     });
 
@@ -400,8 +410,11 @@
         const sec = document.querySelector(`.sidebar-section[data-section="${name}"]`);
         if (!sec) return;
         sec.classList.toggle('collapsed');
+        const isCollapsed = sec.classList.contains('collapsed');
         const chev = sec.querySelector('.sidebar-section-chevron');
-        if (chev) chev.innerHTML = sec.classList.contains('collapsed') ? '&#x25B8;' : '&#x25BE;';
+        if (chev) chev.innerHTML = isCollapsed ? '&#x25B8;' : '&#x25BE;';
+        const header = sec.querySelector('.sidebar-section-header');
+        if (header) header.setAttribute('aria-expanded', String(!isCollapsed));
         const cur = _readCollapsedSections();
         const idx = cur.indexOf(name);
         if (sec.classList.contains('collapsed') && idx === -1) cur.push(name);
@@ -418,6 +431,8 @@
                 sec.classList.remove('collapsed');
                 const chev = sec.querySelector('.sidebar-section-chevron');
                 if (chev) chev.innerHTML = '&#x25BE;';
+                const hdr = sec.querySelector('.sidebar-section-header');
+                if (hdr) hdr.setAttribute('aria-expanded', 'true');
                 // Don't write to localStorage — auto-expand on navigation should be
                 // ephemeral. User-driven toggles still persist as before.
             }
@@ -432,6 +447,8 @@
             sec.classList.toggle('collapsed', isCollapsed);
             const chev = sec.querySelector('.sidebar-section-chevron');
             if (chev) chev.innerHTML = isCollapsed ? '&#x25B8;' : '&#x25BE;';
+            const hdr = sec.querySelector('.sidebar-section-header');
+            if (hdr) hdr.setAttribute('aria-expanded', String(!isCollapsed));
         });
     }
     // Worst-case rollup: section dot inherits the worst child's status.
@@ -626,5 +643,91 @@ if (tabId === 'comms') {
         const d = document.createElement('div');
         d.textContent = str;
         return d.innerHTML;
+    }
+
+    function escJs(str) {
+        if (str == null) return '';
+        return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    }
+
+    // ── Concurrency limiter for Airtable API (5 req/sec rate limit) ──
+    const _apiQueue = [];
+    let _apiInFlight = 0;
+    const API_MAX_CONCURRENT = 4;
+    function _drainApiQueue() {
+        while (_apiQueue.length > 0 && _apiInFlight < API_MAX_CONCURRENT) {
+            const { fn, resolve, reject } = _apiQueue.shift();
+            _apiInFlight++;
+            fn().then(resolve, reject).finally(() => { _apiInFlight--; _drainApiQueue(); });
+        }
+    }
+    function limitedApiFetch(fn) {
+        return new Promise((resolve, reject) => {
+            _apiQueue.push({ fn, resolve, reject });
+            _drainApiQueue();
+        });
+    }
+
+    // ── Render generation guard — discard stale async renders ──
+    const _renderGen = {};
+    function nextRenderGen(tabId) { _renderGen[tabId] = (_renderGen[tabId] || 0) + 1; return _renderGen[tabId]; }
+    function isCurrentRender(tabId, gen) { return _renderGen[tabId] === gen; }
+
+    // ── Branded toast notification (replaces alert() for non-blocking messages) ──
+    let _toastTimer = null;
+    function showToast(msg, { type = 'info', duration = 4000 } = {}) {
+        let el = document.getElementById('appToast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'appToast';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-medium);box-shadow:var(--shadow-lg);z-index:10000;opacity:0;transition:opacity 0.2s;pointer-events:none;max-width:480px;text-align:center';
+            document.body.appendChild(el);
+        }
+        const colors = {
+            info:    { bg: 'var(--info-bg)',    fg: 'var(--info)',    border: 'var(--info)' },
+            success: { bg: 'var(--success-bg)', fg: 'var(--success)', border: 'var(--success)' },
+            warning: { bg: 'var(--warning-bg)', fg: 'var(--warning)', border: 'var(--warning)' },
+            error:   { bg: 'var(--danger-bg)',  fg: 'var(--danger)',  border: 'var(--danger)' },
+        };
+        const c = colors[type] || colors.info;
+        el.style.background = c.bg;
+        el.style.color = c.fg;
+        el.style.border = '1px solid ' + c.border;
+        el.textContent = msg;
+        el.style.opacity = '1';
+        clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => { el.style.opacity = '0'; }, duration);
+    }
+
+    // ── Branded confirm dialog (replaces confirm() with a promise-based modal) ──
+    function showConfirm(msg, { title = 'Confirm', okLabel = 'Confirm', cancelLabel = 'Cancel', danger = false } = {}) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:10001;display:flex;align-items:center;justify-content:center';
+            overlay.setAttribute('role', 'presentation');
+            const panel = document.createElement('div');
+            panel.setAttribute('role', 'alertdialog');
+            panel.setAttribute('aria-modal', 'true');
+            panel.setAttribute('aria-label', title);
+            panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:24px;max-width:420px;width:90%';
+            panel.innerHTML = `<div style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:12px">${escHtml(title)}</div><div style="font-size:var(--fs-sm);color:var(--text-secondary);white-space:pre-wrap;margin-bottom:20px">${escHtml(msg)}</div><div style="display:flex;gap:8px;justify-content:flex-end"></div>`;
+            const btnRow = panel.querySelector('div:last-child');
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = cancelLabel;
+            cancelBtn.style.cssText = 'padding:8px 16px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm)';
+            const okBtn = document.createElement('button');
+            okBtn.textContent = okLabel;
+            okBtn.style.cssText = `padding:8px 16px;border:none;background:${danger ? 'var(--danger)' : 'var(--accent)'};color:#fff;border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)`;
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            function close(result) { overlay.remove(); resolve(result); }
+            cancelBtn.onclick = () => close(false);
+            okBtn.onclick = () => close(true);
+            overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+            document.body.appendChild(overlay);
+            okBtn.focus();
+        });
     }
 

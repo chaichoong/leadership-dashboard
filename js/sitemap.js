@@ -483,9 +483,9 @@
                 <td style="text-align:center;color:var(--text-muted);font-weight:600">${i + 1}</td>
                 <td style="font-weight:600">${p.icon} ${escHtml(p.name)}</td>
                 <td style="text-align:center">${pageVerCell}</td>
-                <td><a href="#${p.id}" onclick="switchTab('${p.id}')" style="font-size:12px">Open</a></td>
-                <td style="font-size:11px"><a href="${p.standalone}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.standalone}')">Copy</button></td>
-                <td>${p.sopFile ? `<a href="${p.sopFile}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${p.sopFile}')">Copy</button>` : '<span style="color:var(--text-muted);font-size:11px">no SOP</span>'}</td>
+                <td><a href="#${escHtml(p.id)}" onclick="switchTab('${escJs(p.id)}')" style="font-size:12px">Open</a></td>
+                <td style="font-size:11px"><a href="${escHtml(p.standalone)}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.standalone)}')">Copy</button></td>
+                <td>${p.sopFile ? `<a href="${escHtml(p.sopFile)}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.sopFile)}')">Copy</button>` : '<span style="color:var(--text-muted);font-size:11px">no SOP</span>'}</td>
                 <td style="text-align:center">${sopVerCell}</td>
                 <td style="text-align:center">${statusHtml}</td>
                 <td>${gitCell}</td>
@@ -513,7 +513,7 @@
             let updateAllBtn = '';
             if (effectiveStalePages.length > 0) {
                 if (sopRequested) {
-                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:#dcfce7;color:#16a34a;border-color:#16a34a;cursor:default" disabled>✓ Update Requested — Processing (${effectiveStalePages.length} SOPs)</button>`
+                    updateAllBtn = `<button class="cfv-action-btn" style="font-size:11px;padding:8px 16px;margin-top:8px;background:var(--success-bg);color:var(--success);border-color:var(--success);cursor:default" disabled>✓ Update Requested — Processing (${effectiveStalePages.length} SOPs)</button>`
                         + ` <button class="cfv-action-btn" onclick="resetSOPRequestFlag()" style="font-size:11px;padding:8px 16px;margin-top:8px">Reset &amp; Re-enable</button>`;
                 } else {
                     updateAllBtn = `<button class="cfv-action-btn primary" onclick="requestAllSOPUpdates(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Update All Out-of-Sync SOPs (${effectiveStalePages.length})</button>`;
@@ -717,8 +717,8 @@
             });
             if (resp.ok) {
                 btn.textContent = 'Queued ✓';
-                btn.style.background = '#dcfce7';
-                btn.style.color = '#16a34a';
+                btn.style.background = 'var(--success-bg)';
+                btn.style.color = 'var(--success)';
                 const toast = document.getElementById('shareToast');
                 toast.textContent = `SOP update queued for ${pageName} — will be processed automatically`;
                 toast.style.display = 'block';
@@ -762,9 +762,9 @@
         // Mark as requested in localStorage so it persists across refreshes
         localStorage.setItem('_sop_update_requested', new Date().toISOString());
         btn.textContent = '✓ Update Requested — Processing';
-        btn.style.background = '#dcfce7';
-        btn.style.color = '#16a34a';
-        btn.style.borderColor = '#16a34a';
+        btn.style.background = 'var(--success-bg)';
+        btn.style.color = 'var(--success)';
+        btn.style.borderColor = 'var(--success)';
         const toast = document.getElementById('shareToast');
         toast.textContent = 'All SOP updates queued — will be processed automatically';
         toast.style.display = 'block';

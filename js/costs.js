@@ -57,7 +57,7 @@
             }
             renderCostsTab();
         } catch (err) {
-            alert('Refresh failed: ' + err.message);
+            showToast('Refresh failed: ' + err.message, { type: 'error' });
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = 'Force Refresh from Airtable'; }
         }

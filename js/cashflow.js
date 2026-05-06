@@ -348,12 +348,12 @@
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance (after Reserves)</div>
-                <div class="kpi-card-value" style="color:#d97706">${fmt(finalBalanceAfterVar)}</div>
+                <div class="kpi-card-value" style="color:var(--warning)">${fmt(finalBalanceAfterVar)}</div>
                 <div class="kpi-card-sub">Day 31 on the orange line</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance (after Reserves)</div>
-                <div class="kpi-card-value ${lowestBalAfterVar >= 0 ? '' : 'text-red'}" style="${lowestBalAfterVar >= 0 ? 'color:#d97706' : ''}">${fmtAccounting(lowestBalAfterVar)}</div>
+                <div class="kpi-card-value ${lowestBalAfterVar >= 0 ? '' : 'text-red'}" style="${lowestBalAfterVar >= 0 ? 'color:var(--warning)' : ''}">${fmtAccounting(lowestBalAfterVar)}</div>
                 <div class="kpi-card-sub">${lowestDayAfterVar}</div>
             </div>
         `;
@@ -362,7 +362,7 @@
         const tbody = document.getElementById('cashflowBody');
         tbody.innerHTML = rows.map((r, i) => {
             const wknd = isWeekend(r.date) ? ' weekend' : '';
-            const closingClass = r.closing < 500 ? 'text-amber' : r.closing < 0 ? 'text-red' : 'text-green';
+            const closingClass = r.closing < 0 ? 'text-red' : r.closing < 500 ? 'text-amber' : 'text-green';
 
             const daysFromToday = Math.round((r.date - today) / 86400000);
             const inflowsHtml = r.inflows.length > 0
@@ -371,7 +371,7 @@
                     const ucBtn = (f.isUC && daysFromToday >= 0 && daysFromToday <= 7)
                         ? (ucChecked
                             ? ` <button class="uc-check-btn done" disabled title="UC Check already requested">UC Check Requested</button>`
-                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escHtml(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Mica to call UC and confirm this payment">UC Check</button>`)
+                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escJs(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Mica to call UC and confirm this payment">UC Check</button>`)
                         : '';
                     const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
@@ -421,14 +421,14 @@
                 datasets: [{
                     label: 'Closing Balance (Fixed Costs Only — No Variable Reserves)',
                     data: chartData,
-                    borderColor: '#16a34a',
+                    borderColor: 'var(--success)',
                     backgroundColor: 'rgba(22, 163, 74, 0.06)',
                     borderWidth: 2,
                     borderDash: [6, 3],
                     fill: true,
                     tension: 0.4,
                     pointRadius: 3.5,
-                    pointBackgroundColor: '#16a34a',
+                    pointBackgroundColor: 'var(--success)',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
@@ -436,13 +436,13 @@
                 }, {
                     label: 'After All Variable Costs (Maintenance + Wages + CFV Reserve)',
                     data: chartDataWorstCase,
-                    borderColor: '#d97706',
+                    borderColor: 'var(--warning)',
                     backgroundColor: 'rgba(217, 119, 6, 0.05)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
                     pointRadius: 3.5,
-                    pointBackgroundColor: '#d97706',
+                    pointBackgroundColor: 'var(--warning)',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
@@ -450,14 +450,14 @@
                 }, {
                     label: 'What-If (Excludes Unchecked + Wages Only)',
                     data: whatIfData,
-                    borderColor: '#dc2626',
+                    borderColor: 'var(--danger)',
                     backgroundColor: 'rgba(220, 38, 38, 0.05)',
                     borderWidth: 2,
                     borderDash: [4, 4],
                     fill: false,
                     tension: 0.4,
                     pointRadius: 3.5,
-                    pointBackgroundColor: '#dc2626',
+                    pointBackgroundColor: 'var(--danger)',
                     pointBorderColor: '#ffffff',
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
@@ -472,16 +472,16 @@
                     legend: {
                         display: true,
                         labels: {
-                            color: '#1e293b',
+                            color: 'var(--text-primary)',
                             font: { size: 12, family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
                             padding: 15,
                         }
                     },
                     tooltip: {
                         backgroundColor: 'rgba(255,255,255,0.95)',
-                        titleColor: '#1e293b',
-                        bodyColor: '#475569',
-                        borderColor: '#e2e8f0',
+                        titleColor: 'var(--text-primary)',
+                        bodyColor: 'var(--text-secondary)',
+                        borderColor: 'var(--border-default)',
                         borderWidth: 1,
                         padding: 12,
                         displayColors: true,
@@ -491,16 +491,16 @@
                 scales: {
                     y: {
                         suggestedMin: -2000,
-                        grid: { color: '#e2e8f0', drawBorder: false },
+                        grid: { color: 'var(--border-default)', drawBorder: false },
                         ticks: {
-                            color: '#1e293b',
+                            color: 'var(--text-primary)',
                             font: { size: 11 },
                             callback: v => '£' + v.toLocaleString()
                         }
                     },
                     x: {
                         grid: { display: false, drawBorder: false },
-                        ticks: { color: '#1e293b', font: { size: 10 } }
+                        ticks: { color: 'var(--text-primary)', font: { size: 10 } }
                     }
                 }
             }
@@ -704,7 +704,7 @@
     function renderCalcList(checkedSet) {
         const list = document.getElementById('calcTxList');
         if (!calcItems.length) {
-            list.innerHTML = '<div style="color:#94a3b8;font-size:13px;padding:20px;text-align:center">No forecast items found</div>';
+            list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:20px;text-align:center">No forecast items found</div>';
             return;
         }
         list.innerHTML = calcItems.map((item, i) => {
@@ -712,8 +712,8 @@
             const prefix = item.isInflow ? '+' : '-';
             const isChecked = checkedSet && checkedSet.has(i) ? ' checked' : '';
             const typeTag = item.isInflow
-                ? '<span style="font-size:10px;background:#dcfce7;color:#16a34a;padding:1px 5px;border-radius:3px;margin-left:6px">Inflow</span>'
-                : '<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px;margin-left:6px">Outflow</span>';
+                ? '<span style="font-size:10px;background:var(--success-bg);color:var(--success);padding:1px 5px;border-radius:3px;margin-left:6px">Inflow</span>'
+                : '<span style="font-size:10px;background:var(--danger-bg);color:var(--danger);padding:1px 5px;border-radius:3px;margin-left:6px">Outflow</span>';
             return `<div class="calc-tx-item">
                 <input type="checkbox" class="calc-tx-cb" id="calc-cb-${i}" data-idx="${i}"${isChecked} onchange="updateCalcTotals()">
                 <span class="calc-tx-date">${escHtml(item.dateStr)}</span>
@@ -900,7 +900,7 @@
             console.error('UC task creation failed:', e);
             btn.textContent = 'Failed';
             btn.title = String(e.message || e);
-            btn.style.background = '#dc2626';
+            btn.style.background = 'var(--danger)';
             setTimeout(() => {
                 btn.textContent = 'UC Check';
                 btn.style.background = '';
