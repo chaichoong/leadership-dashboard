@@ -23,6 +23,7 @@
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.10', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.15', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app

@@ -540,6 +540,10 @@ if (tabId === 'comms') {
         if (tabId === 'fintable') {
             loadFintableSyncMonitor();
         }
+        // Render Skills Library on switch
+        if (tabId === 'skills') {
+            if (typeof renderSkillsTab === 'function') renderSkillsTab();
+        }
         // Task Manager lazy-load
         if (tabId === 'tasks') {
             const frame = document.getElementById('tasksFrame');
