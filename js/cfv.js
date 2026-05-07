@@ -613,7 +613,12 @@
         btn.style.background = 'var(--danger-bg)';
         btn.style.color = 'var(--danger)';
         setTimeout(() => renderCFVTab(), 1500);
-        setTimeout(() => loadDashboard(), 3000);
+        // Bust the IDB cache before reloading. Without this, loadDashboard's
+        // "instant render from cache" path returns stale data from before the
+        // PATCH and overwrites our in-memory mutation, reverting the action.
+        // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
+        // A to flip back to Potential CFV when B's loadDashboard fired.)
+        setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
     }
 
     function cfvDismissReturn(tenancyId, btn) {
@@ -636,7 +641,12 @@
         btn.style.background = 'var(--danger-bg)';
         btn.style.color = 'var(--danger)';
         setTimeout(() => renderCFVTab(), 1500);
-        setTimeout(() => loadDashboard(), 3000);
+        // Bust the IDB cache before reloading. Without this, loadDashboard's
+        // "instant render from cache" path returns stale data from before the
+        // PATCH and overwrites our in-memory mutation, reverting the action.
+        // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
+        // A to flip back to Potential CFV when B's loadDashboard fired.)
+        setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
     }
 
     // Dismiss a potential CFV — not a real CFV, return to In Payment
@@ -712,7 +722,12 @@
         localStorage.removeItem('cfv_reflag_dismissed_' + tenancyId);
         btn.textContent = 'Confirmed ✓';
         setTimeout(() => renderCFVTab(), 1500);
-        setTimeout(() => loadDashboard(), 3000);
+        // Bust the IDB cache before reloading. Without this, loadDashboard's
+        // "instant render from cache" path returns stale data from before the
+        // PATCH and overwrites our in-memory mutation, reverting the action.
+        // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
+        // A to flip back to Potential CFV when B's loadDashboard fired.)
+        setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
     }
 
     // Dismiss re-flag — keep as CFV Actioned
@@ -734,7 +749,12 @@
         const rec = allTenancies.find(t => t.id === tenancyId);
         if (rec) rec.fields[F.tenPayStatus] = { id: CFV_STATUS_IDS.cfvActioned, name: 'CFV Actioned', color: 'yellowLight2' };
         setTimeout(() => renderCFVTab(), 1500);
-        setTimeout(() => loadDashboard(), 3000);
+        // Bust the IDB cache before reloading. Without this, loadDashboard's
+        // "instant render from cache" path returns stale data from before the
+        // PATCH and overwrites our in-memory mutation, reverting the action.
+        // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
+        // A to flip back to Potential CFV when B's loadDashboard fired.)
+        setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
     }
 
     async function cfvReturnToPayment(tenancyId, btn) {
@@ -762,7 +782,12 @@
         btn.style.background = 'var(--success-bg)';
         btn.style.color = 'var(--success)';
         setTimeout(() => renderCFVTab(), 1000);
-        setTimeout(() => loadDashboard(), 3000);
+        // Bust the IDB cache before reloading. Without this, loadDashboard's
+        // "instant render from cache" path returns stale data from before the
+        // PATCH and overwrites our in-memory mutation, reverting the action.
+        // (Symptom: clicking Confirm CFV on Tenancy A then Tenancy B caused
+        // A to flip back to Potential CFV when B's loadDashboard fired.)
+        setTimeout(async () => { if (typeof clearDashCache === 'function') await clearDashCache(); loadDashboard(); }, 3000);
     }
 
     // ── Comments ──
