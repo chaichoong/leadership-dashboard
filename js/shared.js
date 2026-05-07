@@ -730,6 +730,12 @@ if (tabId === 'comms') {
             cancelBtn.onclick = () => close(false);
             okBtn.onclick = () => close(true);
             overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+            overlay.appendChild(panel);   // BUG FIX: panel was orphaned, so the
+                                           // backdrop appeared but the dialog body
+                                           // (title, message, buttons) was never
+                                           // visible. Every CFV action button silently
+                                           // failed because the user couldn't click
+                                           // an OK button that wasn't in the DOM.
             document.body.appendChild(overlay);
             okBtn.focus();
         });
