@@ -227,12 +227,15 @@ function shouldHandle(evt) {
     // Skip structured notifications posted by the dashboard's
     // contractor-job-creator skill — without this we'd interpret them as
     // a contractor reporting new work.
+    //
+    // We deliberately do NOT filter on "Sent using @Claude" — Slack
+    // appends that suffix to EVERY message posted via Claude's MCP,
+    // including legitimate test posts, so it would block all of them.
+    // The skill-specific markers below are unique to the skill's
+    // notification format.
     const text = evt.text || '';
-    if (
-        text.includes('Sent using @Claude') ||
-        text.includes('🆕 New job added') ||
-        text.includes('View your job list')
-    ) return false;
+    if (text.includes('🆕 New job added')) return false;
+    if (text.includes('View your job list')) return false;
     return true;
 }
 
@@ -638,17 +641,49 @@ async function matchProperty(hint, env) {
     if (!hint) return [];
     const all = await listAllProperties(env);
     const needle = hint.toLowerCase().trim();
-    // Match if either side contains the other. The contractor's hint can be
-    // either MORE specific than the property record name (e.g. "Unit 4, 13
-    // Chedburgh Place" hint vs "13 Chedburgh Place" record) or LESS specific
-    // (e.g. "Elmdon" hint matching "55 Elmdon Place"). One-way `includes`
-    // misses the more-specific case and was forcing the bot to ask for the
-    // property even when the contractor had given the full address.
-    return all.filter(p => {
+
+    // Pass 1 — exact substring either way. Fast-path for the common cases:
+    //   "55 Elmdon"            → "55 Elmdon Place, …"        (prop includes hint)
+    //   "13 Chedburgh Place"   → "13 Chedburgh Place, …"     (prop includes hint)
+    //   "Roofline cottage"     → "Roofline Cottage"          (exact)
+    const substringMatches = all.filter(p => {
         if (!p.name) return false;
         const propName = p.name.toLowerCase();
         return propName.includes(needle) || needle.includes(propName);
     });
+    if (substringMatches.length > 0) return substringMatches;
+
+    // Pass 2 — token-based scoring for hints where neither side strictly
+    // contains the other. Catches:
+    //   "Unit 4, 13 Chedburgh Place" → "13 Chedburgh Place, Haverhill, …"
+    //     (hint adds "Unit 4", record adds postcode + town — overlap on
+    //      ["13", "chedburgh", "place"] = 3 tokens.)
+    // Returns the property/properties with the highest token overlap, so
+    // long as that overlap is ≥ 2 distinct tokens (otherwise too weak to
+    // be confident — fall back to asking the contractor).
+    const hintTokens = tokenize(hint);
+    if (hintTokens.length === 0) return [];
+    const scored = all.map(p => ({
+        record: p,
+        score: tokenOverlap(hintTokens, tokenize(p.name)),
+    }));
+    const maxScore = scored.reduce((m, s) => s.score > m ? s.score : m, 0);
+    if (maxScore < 2) return [];
+    return scored.filter(s => s.score === maxScore).map(s => s.record);
+}
+
+function tokenize(s) {
+    return (s || '')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(t => t.length > 1); // skip "" and single chars ("a", "i")
+}
+
+function tokenOverlap(aTokens, bTokens) {
+    const bSet = new Set(bTokens);
+    let n = 0;
+    for (const t of aTokens) if (bSet.has(t)) n++;
+    return n;
 }
 
 // ─── HANDLER 2: STATUS UPDATE ─────────────────────────────────────────
