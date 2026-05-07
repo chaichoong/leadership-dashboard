@@ -5001,23 +5001,8 @@ function renderProjects(){
     let headerValue=p.kpiCurrent||0;
     let headerPeriodLabel='Rolling 31 days';
     if(headerKpiDetail){
-      // Recalculate from transaction lists so DD reversals are netted off
-      // (the persisted JSON may contain stale gross figures).
-      if(headerKpiDetail.detail&&headerKpiDetail.detail.rolling){
-        const rd=headerKpiDetail.detail.rolling;
-        if(rd.costTxs&&rd.costTxs.length){
-          rd.costs=rd.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
-        }
-        if(rd.revTxs&&rd.revTxs.length){
-          rd.revenue=rd.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0);
-        }
-        if(rd.costs!=null&&rd.revenue!=null){
-          rd.net=rd.revenue-rd.costs;
-          const corrected=Math.round(rd.net*100)/100;
-          if(typeof headerKpiDetail.rolling==='number') headerKpiDetail.rolling=corrected;
-          if(typeof headerKpiDetail.value==='number') headerKpiDetail.value=corrected;
-        }
-      }
+      // The compute code already handles reversals correctly. Do NOT
+      // recalculate from costTxs/revTxs — they may be truncated at 60.
       if(selectedPeriod==='rolling'){
         headerValue=(headerKpiDetail.rolling??headerKpiDetail.value??p.kpiCurrent)||0;
         headerPeriodLabel='Rolling 31 days';
@@ -5414,18 +5399,8 @@ function renderProjKpiDrill(pid,bucket){
     label=`${monthNames[m]||m} ${y}`;
   }
   if(!detail){el.style.display='none';return}
-  // Recalculate headline totals from the actual transaction lists so that
-  // reversals (e.g. DD reversals) are netted off and the headline matches
-  // the per-row breakdown the user sees in the table.
-  if(detail.costTxs&&detail.costTxs.length){
-    detail.costs=detail.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
-  }
-  if(detail.revTxs&&detail.revTxs.length){
-    detail.revenue=detail.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0);
-  }
-  if(detail.costs!=null&&detail.revenue!=null){
-    detail.net=detail.revenue-detail.costs;
-  }
+  // The compute code already handles reversals correctly in its totals.
+  // Do NOT recalculate from costTxs/revTxs — they may be truncated at 60.
   const _displayHint0=(data&&data.display)||{};
   if(_displayHint0.kind==='taskCompletion'){
     const done=detail.completedTasks||[];
@@ -5475,10 +5450,13 @@ function renderProjKpiDrill(pid,bucket){
       const firstTextIdx=columns.findIndex(c=>c!=='date'&&c!=='amount');
       return `<tr style="border-top:1px solid var(--border-subtle);${rowBg}">${columns.map((c,i)=>cellFor(c,i===firstTextIdx)).join('')}</tr>`;
     }).join('');
-    const netTotal=kind==='revenue'?(list.reduce((s,t)=>s+(Number(t.amount)||0),0)):(list.reduce((s,t)=>s+(-Number(t.amount)||0),0));
+    const totalCount=kind==='revenue'?(detail.revCount||list.length):(detail.costCount||list.length);
+    const authTotal=kind==='revenue'?(detail.revenue||0):(detail.costs||0);
+    const isTruncated=totalCount>list.length;
+    const truncNote=isTruncated?` <span style="font-size:10px;color:var(--text-muted)">(showing ${list.length} of ${totalCount})</span>`:'';
     return `<div style="margin-top:8px;padding:10px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-        <div style="font-weight:600;color:${color}">${title} · ${list.length} tx · Net ${fmtAmt(netTotal)}</div>
+        <div style="font-weight:600;color:${color}">${title} · ${totalCount} tx · Total ${fmtAmt(authTotal)}${truncNote}</div>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">
