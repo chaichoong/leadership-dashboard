@@ -368,10 +368,14 @@
             if (indicator) { indicator.textContent = '✓'; indicator.style.color = 'var(--success)'; }
             setTimeout(() => { if (indicator) indicator.textContent = ''; }, 2000);
 
-            const tenancyCleared = fieldId === F.txTenancy && (!value || (Array.isArray(value) && !value.length));
-            if (tenancyCleared) {
-                rsRefreshBreakdownForTx(txId);
-                rsShowUndoToast(txId, fieldId, oldRaw, 'Tenancy removed from payment');
+            if (fieldId === F.txTenancy) {
+                const oldId = Array.isArray(oldRaw) ? (oldRaw[0]?.id || oldRaw[0] || '') : '';
+                const newId = Array.isArray(value) ? (value[0] || '') : '';
+                if (oldId !== newId) {
+                    rsRefreshAllOpenBreakdowns();
+                    const label = !newId ? 'Tenancy removed from payment' : 'Payment moved to different tenancy';
+                    rsShowUndoToast(txId, fieldId, oldRaw, label);
+                }
             }
         } catch (err) {
             if (indicator) { indicator.textContent = '✗'; indicator.style.color = 'var(--danger)'; }
@@ -380,16 +384,17 @@
     }
     window.rsSaveTxField = rsSaveTxField;
 
-    // After clearing a tenancy link, refresh the breakdown panel that contained the payment.
-    // Finds the open breakdown row, recomputes the statement, and re-renders the detail.
-    function rsRefreshBreakdownForTx(txId) {
+    // Refresh every open breakdown panel and its parent summary row.
+    // Called after tenancy reassignment so both source and destination update.
+    function rsRefreshAllOpenBreakdowns() {
+        const tenantLookup = buildTenantLookup();
+        const today = new Date(); today.setHours(0, 0, 0, 0);
         const openBreakdowns = document.querySelectorAll('[id^="rentBreakdown_"]');
         for (const row of openBreakdowns) {
             if (row.style.display === 'none') continue;
             const tenancyId = row.id.replace('rentBreakdown_', '');
             const tenancy = allTenancies.find(t => t.id === tenancyId);
             if (!tenancy) continue;
-            const tenantLookup = buildTenantLookup();
             const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
             const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '—');
@@ -397,13 +402,11 @@
             const unit = Array.isArray(unitVal) ? unitVal[0] : (unitVal || '');
             const propertyVal = getField(tenancy, F.tenProperty);
             const property = Array.isArray(propertyVal) ? propertyVal[0] : (propertyVal || '');
-            const today = new Date(); today.setHours(0, 0, 0, 0);
             const stmt = computeRentStatement(tenancy, tenantType, today);
             if (!stmt.applicable) continue;
             const entry = { tenancyId, tenancy, tenantName, unit, property, stmt };
             const td = row.querySelector('td');
             if (td) td.innerHTML = renderBreakdownDetail(entry);
-            // Update the parent summary row's balance and days columns
             const parentRow = row.previousElementSibling;
             if (parentRow) {
                 const cells = parentRow.querySelectorAll('td');
@@ -415,7 +418,6 @@
                     cells[4].innerHTML = `<span style="font-weight:${daysWeight};color:${daysColour};font-variant-numeric:tabular-nums">${stmt.daysInArrears}</span>`;
                 }
             }
-            break;
         }
     }
 
