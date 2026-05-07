@@ -117,6 +117,43 @@ const CONTRACTORS = {
     U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',  airtableEmail: 'rjm320@hotmail.com',                   contractorFieldValue: 'Rob Jackson' },
 };
 
+// Slack user ID → office team identity. Team members can post in
+// #property-management to log new contractor jobs and assign them
+// (e.g. "boiler broken at 55 Elmdon, give it to Gary"). Status updates
+// and list requests from team members are deflected — those flows stay
+// contractor-only because they need contractor-context (whose list,
+// whose work).
+const TEAM_MEMBERS = {
+    U08HW8F1MA8: { name: 'Kevin Brittain',  firstName: 'Kevin', airtableEmail: 'kevin@runpreneur.org.uk' },
+    U08HW0TAWAE: { name: 'Mica Albovias',   firstName: 'Mica',  airtableEmail: 'micaa.work@gmail.com' },
+    U08J38Y0PTN: { name: 'Ericamae Atenta', firstName: 'Erica', airtableEmail: 'atentaerica@gmail.com' },
+};
+
+// Resolve a Slack user ID to either a contractor or a team-member sender,
+// or null if neither. Used by shouldHandle + routing to know how to treat
+// the message.
+function senderFor(slackUserId) {
+    const c = CONTRACTORS[slackUserId];
+    if (c) return { kind: 'contractor', ...c };
+    const t = TEAM_MEMBERS[slackUserId];
+    if (t) return { kind: 'team', ...t };
+    return null;
+}
+
+// First-name → contractor lookup, used when a team member writes "assign
+// to Gary" and we need to map "Gary" to Gary Marsh's contractor record.
+function findContractorByFirstName(firstName) {
+    if (!firstName) return null;
+    const needle = firstName.trim().toLowerCase();
+    for (const slackId of Object.keys(CONTRACTORS)) {
+        const c = CONTRACTORS[slackId];
+        if (c.firstName.toLowerCase() === needle) {
+            return { kind: 'contractor', slackUserId: slackId, ...c };
+        }
+    }
+    return null;
+}
+
 // Multi-turn pending state kept in KV for this many seconds. After expiry
 // the contractor's next message is treated as a fresh request.
 const PENDING_TTL_SECONDS = 600;
@@ -228,7 +265,9 @@ function shouldHandle(evt) {
     if (evt.channel_type === 'im' && evt.thread_ts && evt.text) return true;
     // BRANCH 2 — contractor channel message (legacy / primary flow).
     if (evt.channel !== PROPERTY_CHANNEL_ID) return false;
-    if (!CONTRACTORS[evt.user]) return false;
+    // Accept messages from BOTH contractors and team members. Contractors
+    // do their own work; team members can log new jobs and assign them.
+    if (!CONTRACTORS[evt.user] && !TEAM_MEMBERS[evt.user]) return false;
     // Skip structured notifications posted by the dashboard's
     // contractor-job-creator skill — without this we'd interpret them as
     // a contractor reporting new work.
@@ -252,30 +291,49 @@ async function routeMessage(evt, env) {
     if (evt.channel_type === 'im' && evt.thread_ts) {
         return handleDmThreadReply(evt, env);
     }
-    const contractor = CONTRACTORS[evt.user];
+    const sender = senderFor(evt.user);
+    if (!sender) return;
     const text = (evt.text || '').trim();
     const threadTs = evt.thread_ts || evt.ts;
     const hasFiles = evt.files && evt.files.length > 0;
     if (!text && !hasFiles) return;
 
-    // If the bot recently asked this contractor a clarifying question,
+    // If the bot recently asked this user a clarifying question,
     // treat the new message as the answer instead of classifying it fresh.
     if (env.STATE) {
         const pending = await getPendingState(env, evt.user);
         if (pending) {
-            return resolvePending(contractor, text, pending, evt, threadTs, env);
+            return resolvePending(sender, text, pending, evt, threadTs, env);
         }
     }
 
     // Fresh message — classify intent and route.
     const intent = await classifyIntent(text || '(file uploaded)', env);
+
+    // Team-member messages: only new_job is supported. Status updates and
+    // list requests need contractor-context (whose work, whose list) and
+    // are deflected to the dashboard for now.
+    if (sender.kind === 'team' && intent !== 'new_job') {
+        if (intent === 'unknown') {
+            return reply(threadTs, env,
+                `Hi ${sender.firstName}, I only handle new contractor task assignments here. ` +
+                `Describe the work and (optionally) say who to assign it to — e.g. ` +
+                `"boiler broken at 55 Elmdon, give it to Gary".`
+            );
+        }
+        return reply(threadTs, env,
+            `Hi ${sender.firstName}, I only handle new contractor task assignments from the office team. ` +
+            `For task updates or to see what's open, please use the dashboard.`
+        );
+    }
+
     switch (intent) {
-        case 'new_job':       return handleNewJob(contractor, text, evt, threadTs, env);
-        case 'status_update': return handleStatusUpdate(contractor, text, evt, threadTs, env);
-        case 'list_request':  return handleListRequest(contractor, threadTs, env);
+        case 'new_job':       return handleNewJob(sender, text, evt, threadTs, env);
+        case 'status_update': return handleStatusUpdate(sender, text, evt, threadTs, env);
+        case 'list_request':  return handleListRequest(sender, threadTs, env);
         default:
             return reply(threadTs, env,
-                `Hi ${contractor.firstName}, I'm not sure what you need. Try:\n` +
+                `Hi ${sender.firstName}, I'm not sure what you need. Try:\n` +
                 `• *New job* — describe what needs doing and at which property\n` +
                 `• *Update* — tell me if you've started or finished a job\n` +
                 `• *My list* — ask "what's on my list" to see your open jobs`
@@ -540,26 +598,55 @@ async function classifyIntent(text, env) {
 // ─── HANDLER 1: NEW JOB ───────────────────────────────────────────────
 
 // `override` lets resolvePending re-enter this handler with a property
-// already chosen (so we don't ask the contractor twice).
-async function handleNewJob(contractor, text, evt, threadTs, env, override) {
+// or assignee already chosen (so we don't ask twice).
+//
+// Assignee resolution:
+//   1. Use override.resolvedAssignee if present (multi-turn flow).
+//   2. Else use the AI-extracted assigneeHint mapped to a contractor
+//      (handles "boiler at Elmdon, give it to Gary" from a team member).
+//   3. Else if the sender is a contractor, assign to themselves.
+//   4. Else (team member sender, no hint) — ask who.
+async function handleNewJob(sender, text, evt, threadTs, env, override) {
     override = override || {};
     const extraction = override.extraction || await extractNewJobFields(text, env);
 
-    let property = override.resolvedProperty || null;
+    // ── Step 1: resolve assignee (which contractor will own this task)
+    let assignee = override.resolvedAssignee || null;
+    if (!assignee && extraction.assigneeHint) {
+        assignee = findContractorByFirstName(extraction.assigneeHint);
+    }
+    if (!assignee && sender.kind === 'contractor') {
+        assignee = sender;
+    }
+    if (!assignee) {
+        // Team-member sender with no explicit assignee in the message.
+        // Ask, then resume on their reply.
+        await setPendingState(env, evt.user, {
+            kind: 'awaiting_assignee',
+            originalMessage: text,
+            extraction,
+            eventTs: evt.ts,
+        });
+        return reply(threadTs, env,
+            `Hi ${sender.firstName}, who should I assign this to?\n` +
+            `Reply with one of: *Gary*, *Roy*, or *Rob*.`
+        );
+    }
 
+    // ── Step 2: resolve property (existing logic, unchanged)
+    let property = override.resolvedProperty || null;
     if (!property) {
         const matches = await matchProperty(extraction.propertyHint, env);
         if (matches.length === 0) {
-            // Ask the contractor for a property; remember the original message
-            // so we can resume on their next reply.
             await setPendingState(env, evt.user, {
                 kind: 'awaiting_property',
                 originalMessage: text,
                 extraction,
+                resolvedAssignee: assignee, // remember the assignee we just resolved
                 eventTs: evt.ts,
             });
             return reply(threadTs, env,
-                `Hi ${contractor.firstName}, which property is that at? Reply with the name or address.`
+                `Thanks ${sender.firstName} — which property is that at? Reply with the name or address.`
             );
         }
         if (matches.length > 1) {
@@ -568,6 +655,7 @@ async function handleNewJob(contractor, text, evt, threadTs, env, override) {
                 kind: 'awaiting_property_choice',
                 originalMessage: text,
                 extraction,
+                resolvedAssignee: assignee,
                 candidates,
                 eventTs: evt.ts,
             });
@@ -581,27 +669,28 @@ async function handleNewJob(contractor, text, evt, threadTs, env, override) {
 
     const priority = extraction.priority === 'High Priority' ? 'Urgent' : 'Not Urgent';
 
-    // Ingest any Slack files into R2 → Airtable attachments.
+    // ── Step 3: ingest Slack file attachments (R2 → Airtable)
     const attachments = await ingestSlackFiles(env, evt.files, evt.ts);
 
-    // Auto-add Kevin/Mica/Erica as Collaborators (skip if the contractor's
-    // own email matches one — they're the assignee, not a collaborator).
+    // ── Step 4: collaborators — Kevin/Mica/Erica + the sender (if a team
+    //   member they're already in TEAM_COLLABORATOR_EMAILS). Skip the
+    //   assignee email (they're already the Assignee, not a collaborator).
     const collaboratorEmails = TEAM_COLLABORATOR_EMAILS
-        .filter(e => e.toLowerCase() !== contractor.airtableEmail.toLowerCase());
+        .filter(e => e.toLowerCase() !== assignee.airtableEmail.toLowerCase());
 
     const fields = {
         [FIELD.taskName]:        extraction.taskName,
         [FIELD.description]:     text || '(uploaded file)',
         [FIELD.status]:          'Upcoming',
         [FIELD.priority]:        priority,
-        [FIELD.assignee]:        { email: contractor.airtableEmail },
+        [FIELD.assignee]:        { email: assignee.airtableEmail },
         [FIELD.properties]:      [property.id],
         [FIELD.business]:        [BUSINESS_REAL_ESTATE_ID],
         [FIELD.maintenanceTick]: true,
         [FIELD.collaborators]:   collaboratorEmails.map(email => ({ email })),
     };
-    if (contractor.contractorFieldValue) {
-        fields[FIELD.contractor] = contractor.contractorFieldValue;
+    if (assignee.contractorFieldValue) {
+        fields[FIELD.contractor] = assignee.contractorFieldValue;
     }
     if (attachments.length) {
         fields[FIELD.attachments] = attachments;
@@ -611,15 +700,19 @@ async function handleNewJob(contractor, text, evt, threadTs, env, override) {
     const newTaskId = created && created.records && created.records[0] && created.records[0].id;
 
     // Remember which task this thread is about, so any future thread reply
-    // (status update, comment, completion) targets THIS task and isn't
-    // fuzzy-matched to an unrelated one.
+    // targets THIS task and isn't fuzzy-matched to an unrelated one.
     if (newTaskId) {
         await setThreadTask(env, threadTs, newTaskId);
     }
 
-    // 1. Reply in #property-management thread (visible to the team).
+    // ── Step 5: channel reply (visible to the team in #property-management)
+    const senderIsAssignee = sender.kind === 'contractor'
+        && sender.airtableEmail.toLowerCase() === assignee.airtableEmail.toLowerCase();
+    const headerLine = senderIsAssignee
+        ? `✅ Logged, ${assignee.firstName}.`
+        : `✅ Logged for ${assignee.firstName}.`;
     const channelLines = [
-        `✅ Logged, ${contractor.firstName}.`,
+        headerLine,
         `*${extraction.taskName}*`,
         `📍 ${property.name}`,
         `⚡ Priority: ${priority}`,
@@ -627,12 +720,14 @@ async function handleNewJob(contractor, text, evt, threadTs, env, override) {
     if (attachments.length) {
         channelLines.push(`📎 ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}`);
     }
-    channelLines.push(`Added to your list.`);
+    channelLines.push(senderIsAssignee ? `Added to your list.` : `Added to ${assignee.firstName}'s list.`);
     await reply(threadTs, env, channelLines.join('\n'));
 
-    // 2. DM the contractor with the same confirmation (mirrors the
-    // dashboard's existing assignee-DM behaviour).
-    await dmUser(env, evt.user,
+    // ── Step 6: DM the assignee (the contractor doing the work) so they
+    //   get a personal heads-up in their DMs, mirroring the dashboard's
+    //   existing assignee-DM flow. We DM by email lookup so this works
+    //   whether the sender is the assignee or a team member.
+    await dmUserByEmail(env, assignee.airtableEmail,
         `*Operations Director* assigned to you:\n` +
         `*${extraction.taskName}*\n` +
         `📍 ${property.name}\n` +
@@ -642,26 +737,50 @@ async function handleNewJob(contractor, text, evt, threadTs, env, override) {
 
 async function extractNewJobFields(text, env) {
     const system =
-        `Extract structured fields from a maintenance contractor's Slack message about a new job.\n\n` +
+        `Extract structured fields from a Slack message about a new property/maintenance job.\n\n` +
         `Respond with ONLY valid JSON (no markdown, no code fences) matching:\n` +
         `{\n` +
-        `  "taskName": "short 3-7 word title, e.g. 'Fix boiler - no hot water'",\n` +
+        `  "taskName":     "short 3-7 word title, e.g. 'Fix boiler - no hot water'",\n` +
         `  "propertyHint": "the property name/address mentioned, or empty string",\n` +
-        `  "priority": "High Priority" or "Low Priority"\n` +
+        `  "priority":     "High Priority" or "Low Priority",\n` +
+        `  "assigneeHint": "first name of the contractor to assign (Gary, Roy, or Rob), or empty string"\n` +
         `}\n\n` +
-        `High Priority = health/safety risk, no heating/hot water, water leaks, structural,\n` +
-        `security, electrical faults, gas, fire safety, flooding, sewage.\n` +
-        `Low Priority = cosmetic, non-urgent, wear and tear, painting, external/garden.`;
+        `Priority:\n` +
+        `  High Priority = health/safety risk, no heating/hot water, water leaks, structural,\n` +
+        `                  security, electrical faults, gas, fire safety, flooding, sewage.\n` +
+        `  Low Priority  = cosmetic, non-urgent, wear and tear, painting, external/garden.\n\n` +
+        `Assignee hint — only fill this when the message EXPLICITLY says who to assign\n` +
+        `the job to. Common patterns:\n` +
+        `  "assign to Gary"          → "Gary"\n` +
+        `  "give it to Roy"          → "Roy"\n` +
+        `  "for Rob"                 → "Rob"\n` +
+        `  "Gary can do this one"    → "Gary"\n` +
+        `  "let's get Roy on it"     → "Roy"\n\n` +
+        `Do NOT fill assigneeHint just because a contractor is mentioned in the body of\n` +
+        `the description — e.g. "as discussed with Gary yesterday" doesn't mean assign\n` +
+        `to Gary. Only fill it when the intent to assign is unmistakable. Empty string\n` +
+        `if there's no explicit assignment.`;
 
     const raw = await callClaude(env, {
         system,
         messages: [{ role: 'user', content: text }],
-        maxTokens: 200,
+        maxTokens: 250,
     });
     try {
-        return JSON.parse(raw.trim().replace(/^```json\s*|\s*```$/g, ''));
+        const parsed = JSON.parse(raw.trim().replace(/^```json\s*|\s*```$/g, ''));
+        return {
+            taskName:     parsed.taskName     || (text.slice(0, 60) || 'Untitled job'),
+            propertyHint: parsed.propertyHint || '',
+            priority:     parsed.priority     || 'Low Priority',
+            assigneeHint: parsed.assigneeHint || '',
+        };
     } catch (e) {
-        return { taskName: text.slice(0, 60) || 'Untitled job', propertyHint: '', priority: 'Low Priority' };
+        return {
+            taskName:     text.slice(0, 60) || 'Untitled job',
+            propertyHint: '',
+            priority:     'Low Priority',
+            assigneeHint: '',
+        };
     }
 }
 
@@ -854,9 +973,24 @@ async function handleListRequest(contractor, threadTs, env) {
 
 // ─── MULTI-TURN: pending-state resolution ─────────────────────────────
 
-async function resolvePending(contractor, text, pending, evt, threadTs, env) {
+async function resolvePending(sender, text, pending, evt, threadTs, env) {
     // Optimistic clear — if the resolution fails we re-store below.
     await clearPendingState(env, evt.user);
+
+    // NEW: team-member supplied the assignee for a job.
+    if (pending.kind === 'awaiting_assignee') {
+        const assignee = findContractorByFirstName(text);
+        if (!assignee) {
+            await setPendingState(env, evt.user, pending);
+            return reply(threadTs, env,
+                `I don't know who that is. Reply with one of: *Gary*, *Roy*, or *Rob*.`
+            );
+        }
+        return handleNewJob(
+            sender, pending.originalMessage, evt, threadTs, env,
+            { extraction: pending.extraction, resolvedAssignee: assignee }
+        );
+    }
 
     if (pending.kind === 'awaiting_property') {
         // Use the new message as the property name.
@@ -880,8 +1014,12 @@ async function resolvePending(contractor, text, pending, evt, threadTs, env) {
             );
         }
         return handleNewJob(
-            contractor, pending.originalMessage, evt, threadTs, env,
-            { extraction: pending.extraction, resolvedProperty: matches[0] }
+            sender, pending.originalMessage, evt, threadTs, env,
+            {
+                extraction: pending.extraction,
+                resolvedProperty: matches[0],
+                resolvedAssignee: pending.resolvedAssignee, // preserve through the flow
+            }
         );
     }
 
@@ -895,14 +1033,22 @@ async function resolvePending(contractor, text, pending, evt, threadTs, env) {
             );
         }
         return handleNewJob(
-            contractor, pending.originalMessage, evt, threadTs, env,
-            { extraction: pending.extraction, resolvedProperty: chosen }
+            sender, pending.originalMessage, evt, threadTs, env,
+            {
+                extraction: pending.extraction,
+                resolvedProperty: chosen,
+                resolvedAssignee: pending.resolvedAssignee,
+            }
         );
     }
 
     if (pending.kind === 'awaiting_task_choice') {
-        // Refetch tasks to be safe (the contractor's open list may have moved on).
-        const openTasks = await fetchOpenTasksFor(contractor, env);
+        // Status-update flow only fires for contractor senders — team
+        // members don't have an open jobs list to match against.
+        if (sender.kind !== 'contractor') {
+            return reply(threadTs, env, `(Status updates are contractor-only — please use the dashboard.)`);
+        }
+        const openTasks = await fetchOpenTasksFor(sender, env);
         const candidates = openTasks.filter(t => pending.taskIds.includes(t.id));
         const chosen = pickFromCandidates(text, candidates, t => t.taskName);
         if (!chosen) {
@@ -911,11 +1057,9 @@ async function resolvePending(contractor, text, pending, evt, threadTs, env) {
                 `That didn't match any of your open jobs. Try the number or the job name.`
             );
         }
-        // Re-classify the original message now we know which job — so we
-        // capture the action (done / in_progress / note).
         const match = await matchStatusUpdate(pending.originalMessage, [chosen], env);
         return handleStatusUpdate(
-            contractor, pending.originalMessage, evt, threadTs, env,
+            sender, pending.originalMessage, evt, threadTs, env,
             { openTasks, resolvedTask: chosen, action: match.action, noteText: match.noteText }
         );
     }
@@ -1019,6 +1163,20 @@ async function lookupSlackUserByEmail(env, email) {
     });
     const data = await resp.json();
     return data.ok ? (data.user && data.user.id) : null;
+}
+
+// DM by Airtable email — useful when we have the assignee's record but
+// not their Slack user ID (e.g. when a team member assigns a job to a
+// contractor we need to DM). Falls back silently if the email doesn't
+// resolve to a Slack user.
+async function dmUserByEmail(env, email, text) {
+    const slackEmail = commentSlackEmailFor(email); // honour Gary's slackEmail override
+    const userId = await lookupSlackUserByEmail(env, slackEmail);
+    if (!userId) {
+        console.error(`dmUserByEmail: no Slack user for ${slackEmail} (Airtable: ${email})`);
+        return false;
+    }
+    return dmUser(env, userId, text);
 }
 
 // ─── MULTI-TURN: KV pending-state helpers ─────────────────────────────
