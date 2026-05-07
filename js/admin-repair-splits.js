@@ -29,20 +29,20 @@
     //   `reco249SRxTpLJ0X0` is the deleted record (Unit 4 - 28 Chedburgh) — handled
     //   separately at the end with a manual flag.
     const FIXES = [
-        // 28 Chedburgh — £324.338 per child
-        ['rec092k8deHh32G89', 1, '28 Chedburgh', 1621.69],   // parent (Split 1, holds bulk amount)
+        // 28 Chedburgh — £324.338 per portion (5-way equal split of £1,621.69)
+        ['rec092k8deHh32G89', 1, '28 Chedburgh', 324.338],    // parent (Split Override corrects bulk **GBP)
         ['recSYgDIpHCbojuXy', 2, '28 Chedburgh', 324.338],
         ['recrSe1uH0aFtVIMG', 3, '28 Chedburgh', 324.338],
         // ['reco249SRxTpLJ0X0', 4, '28 Chedburgh', 324.338], // DELETED in Airtable
         ['recTAdm8jPTg6o1f5', 5, '28 Chedburgh', 324.338],
-        // 42 Elmdon — £277.36 per child
-        ['recvYcYFKWftNy8ou', 1, '42 Elmdon', 1386.80],      // parent
+        // 42 Elmdon — £277.36 per portion (5-way equal split of £1,386.80)
+        ['recvYcYFKWftNy8ou', 1, '42 Elmdon', 277.36],        // parent (Split Override corrects bulk **GBP)
         ['recT13JDNKI9A6Vr4', 2, '42 Elmdon', 277.36],
         ['recitGfhZZMxqgbGf', 3, '42 Elmdon', 277.36],
         ['rec5ty78ZDRLPZUoG', 4, '42 Elmdon', 277.36],
         ['recWjkcaTNX294aKP', 5, '42 Elmdon', 277.36],
-        // 32 Elmdon — £251.68 per child
-        ['recq9YLUN3hIiDYmO', 1, '32 Elmdon', 1258.40],      // parent
+        // 32 Elmdon — £251.68 per portion (5-way equal split of £1,258.40)
+        ['recq9YLUN3hIiDYmO', 1, '32 Elmdon', 251.68],        // parent (Split Override corrects bulk **GBP)
         ['recAfnUFwH5vn2cgF', 2, '32 Elmdon', 251.68],
         ['recQ4DkHzhX2il6Yn', 3, '32 Elmdon', 251.68],
         ['recASbqel8AR2SAIZ', 4, '32 Elmdon', 251.68],
@@ -387,4 +387,48 @@
     }
 
     window.closeFormerTenancies = closeFormerTenancies;
+
+    // ══════════════════════════════════════════
+    // Fix Split Override on parent records.
+    //
+    // The original adminRepairSplits set Split Override to the FULL bulk
+    // amount on parent records (Split 1 of 5). This caused rent statements
+    // to credit the entire payment to Unit 1 instead of the per-portion
+    // amount. This function corrects the three parent records.
+    //
+    // Usage: fixSplitParentOverrides()
+    // ══════════════════════════════════════════
+    const PARENT_FIXES = [
+        { id: 'rec092k8deHh32G89', label: '28 Chedburgh Unit 1', correctAmount: 324.338 },
+        { id: 'recvYcYFKWftNy8ou', label: '42 Elmdon Unit 1',   correctAmount: 277.36 },
+        { id: 'recq9YLUN3hIiDYmO', label: '32 Elmdon Unit 1',   correctAmount: 251.68 },
+    ];
+
+    async function fixSplitParentOverrides() {
+        if (typeof PAT !== 'string' || !PAT) {
+            console.error('No PAT loaded. Log in first.');
+            return;
+        }
+        console.log('━━━ FIX SPLIT PARENT OVERRIDES ━━━');
+        const ok = [], fail = [];
+        for (const fix of PARENT_FIXES) {
+            console.log(`  PATCH ${fix.id} (${fix.label}) → Split Override = ${fix.correctAmount}`);
+            const r = await patchTx(fix.id, { [F.txSplitOverride]: fix.correctAmount });
+            if (r.ok) {
+                ok.push(fix.label);
+                console.log(`    ✓ done`);
+                const localTx = (allTransactions || []).find(t => t.id === fix.id);
+                if (localTx) {
+                    if (!localTx.fields) localTx.fields = {};
+                    localTx.fields[F.txSplitOverride] = fix.correctAmount;
+                }
+            } else {
+                fail.push({ label: fix.label, error: r.body?.error?.message || r.status });
+                console.error(`    ✗ failed:`, r.body?.error?.message || r.status);
+            }
+        }
+        console.log(`Done: ${ok.length} fixed, ${fail.length} failed.`);
+        return { fixed: ok, failed: fail };
+    }
+    window.fixSplitParentOverrides = fixSplitParentOverrides;
 })();

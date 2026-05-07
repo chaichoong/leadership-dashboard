@@ -1476,15 +1476,23 @@
             //     transfer covers 5 units but every child inherits Unit 2).
             //     We also flip Reconciled=false so the user MUST re-approve
             //     each portion with its correct per-portion tenancy.
+            //     The parent gets Split Override = totalRaw / N so its Report
+            //     Amount shows the per-portion amount (the automation doesn't
+            //     change the parent's **GBP, which stays at the bulk total).
             if (st.mode === 'equal') {
+                const perPortion = st.totalRaw / N;
                 const clearFields = {
                     [F.txReconciled]: false,
                     [F.txTenancy]: [],
                     [F.txUnit]: [],
                 };
-                if (F.txTenant)         clearFields[F.txTenant] = [];
-                const allToClear = [tx.id, ...children.map(c => c.id)];
-                await Promise.all(allToClear.map(id => patchTx(id, clearFields)));
+                if (F.txTenant) clearFields[F.txTenant] = [];
+                const childIds = children.map(c => c.id);
+                const parentFields = { ...clearFields, [F.txSplitOverride]: perPortion };
+                await Promise.all([
+                    patchTx(tx.id, parentFields),
+                    ...childIds.map(id => patchTx(id, clearFields)),
+                ]);
             }
 
             // ── Step 4: Update local allTransactions to mirror Airtable ──
@@ -1501,10 +1509,11 @@
                 if (c0.unitId)     tx.fields[F.txUnit]        = [{ id: c0.unitId }];
                 if (c0.costId)     tx.fields[F.txCost]        = [{ id: c0.costId }];
             } else {
-                // Equal mode: mirror the per-row clears we PATCHed above
+                // Equal mode: mirror the per-row clears + Split Override we PATCHed above
                 tx.fields[F.txReconciled] = false;
                 tx.fields[F.txTenancy] = [];
                 tx.fields[F.txUnit] = [];
+                tx.fields[F.txSplitOverride] = st.totalRaw / N;
                 if (F.txTenant) tx.fields[F.txTenant] = [];
             }
             children.forEach(child => {

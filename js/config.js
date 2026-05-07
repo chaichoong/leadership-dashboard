@@ -204,11 +204,10 @@
         // double-creates them and we end up with N × (N-1) extras. (See
         // commit f5b7aad for the data-corruption incident this prevents.)
         txSplitCount:     'fld20FWX7yjM8P2Kz',   // number — N. Default 1 = whole transaction.
-        txSplitOverride:  'fldQ37YsyR9r3EbkP',   // currency — per-portion amount for UNEVEN splits
-                                                  //   (only honored once the Report Amount formula
-                                                  //   in Airtable is updated to read this field;
-                                                  //   currently a placeholder for the Custom-Amounts
-                                                  //   mode coming in a follow-up).
+        txSplitOverride:  'fldQ37YsyR9r3EbkP',   // currency — per-portion amount. Set on split parents
+                                                  //   (whose raw **GBP stays at the bulk total) and on
+                                                  //   custom-amount children. txDisplayAmount() in
+                                                  //   shared.js reads this field for correct display.
         txSplitStatus:    'fld7gZxUldVLZXnAB',   // formula → "Single" or "Split"
         txOriginalAmount: 'fldh711ChnFGDvh1u',   // formula → echoes raw, for display
         // Tenancy — tenant active/former status (rollup from Tenants table)
