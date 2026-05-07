@@ -275,14 +275,32 @@
             console.error('Could not find Pay Status field on Tenancies table');
             return;
         }
-        const formerOption = payStatusField.options?.choices?.find(c =>
-            c.name.toLowerCase() === 'former' || c.name.toLowerCase() === 'ended');
+        // Pay Status field on Tenancies uses these choices in this base:
+        //   ['In Payment', 'CFV', 'CFV Actioned', 'Void']
+        // 'Void' is the inactive sentinel (matches isTenancyActive's exclusion
+        // list). Older duplicates get Pay Status = Void so detection ignores
+        // them. Also try 'Former' / 'Ended' first if a future schema adds them.
+        const choices = payStatusField.options?.choices || [];
+        const formerOption =
+            choices.find(c => /^former$/i.test(c.name)) ||
+            choices.find(c => /^ended$/i.test(c.name)) ||
+            choices.find(c => /^void$/i.test(c.name));
         if (!formerOption) {
-            console.error('No "Former" option on Pay Status field. Available:',
-                payStatusField.options?.choices?.map(c => c.name));
+            console.error('No suitable inactive option on Pay Status field. Available:',
+                choices.map(c => c.name));
             return;
         }
         console.log(`Will mark older duplicates as "${formerOption.name}" (id ${formerOption.id})`);
+
+        // Find the Tenancy End Date field so we can set it alongside Pay
+        // Status — keeps the data consistent rather than just the dashboard.
+        const endDateField = tenanciesTable.fields.find(f =>
+            /tenancy\s*end|end\s*date|tenancy\s*finish/i.test(f.name) && f.type === 'date');
+        if (endDateField) {
+            console.log(`Will also set ${endDateField.name} (${endDateField.id}) to (newer tenancy start − 1 day)`);
+        } else {
+            console.warn('No End Date field found on Tenancies — only Pay Status will be set');
+        }
 
         // Group active tenancies by unit id
         const byUnit = new Map();
@@ -306,11 +324,22 @@
                 return db - da; // newest first
             });
             const [keep, ...older] = tenants;
+            // End date for older tenancies = day before newer tenancy started.
+            const keepStartStr = getField(keep, F.tenStartDate);
+            let computedEndIso = null;
+            if (keepStartStr) {
+                const d = new Date(keepStartStr);
+                if (!isNaN(d.getTime())) {
+                    d.setDate(d.getDate() - 1);
+                    computedEndIso = d.toISOString().slice(0, 10); // yyyy-mm-dd
+                }
+            }
             older.forEach(t => toClose.push({
                 id: t.id,
                 surname: getField(t, F.tenSurname),
                 unit: getField(t, F.tenUnitRef)?.[0],
                 start: getField(t, F.tenStartDate),
+                computedEndDate: computedEndIso,
                 kept: { id: keep.id, surname: getField(keep, F.tenSurname), start: getField(keep, F.tenStartDate) },
             }));
         });
@@ -322,13 +351,17 @@
         console.log(`Found ${toClose.length} older duplicate active tenancies to close:`);
         console.table(toClose.map(t => ({ id: t.id, surname: t.surname, unit: t.unit, start: t.start, will_keep: `${t.kept.surname} (${t.kept.start})` })));
 
-        // PATCH each — set Pay Status to Former
+        // PATCH each — set Pay Status to inactive sentinel + End Date if available
         const ok = [], fail = [];
         for (const t of toClose) {
+            const fields = { [F.tenPayStatus]: { id: formerOption.id } };
+            if (endDateField && t.computedEndDate) {
+                fields[endDateField.id] = t.computedEndDate;
+            }
             const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${t.id}?returnFieldsByFieldId=true`, {
                 method: 'PATCH',
                 headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: { [F.tenPayStatus]: { id: formerOption.id } } })
+                body: JSON.stringify({ fields })
             });
             if (r.ok) {
                 ok.push(t.id);
@@ -337,8 +370,9 @@
                 if (localTen) {
                     if (!localTen.fields) localTen.fields = {};
                     localTen.fields[F.tenPayStatus] = { id: formerOption.id, name: formerOption.name };
+                    if (endDateField && t.computedEndDate) localTen.fields[endDateField.id] = t.computedEndDate;
                 }
-                console.log(`  ✓ ${t.surname} | ${t.unit} → Former`);
+                console.log(`  ✓ ${t.surname} | ${t.unit} → ${formerOption.name}${t.computedEndDate ? ` (end ${t.computedEndDate})` : ''}`);
             } else {
                 const j = await r.json().catch(() => ({}));
                 fail.push({ id: t.id, error: j.error?.message || r.status });
