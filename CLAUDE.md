@@ -161,6 +161,15 @@ The git repo IS the source of truth. Edit files directly here.
 - Push to `main` branch → auto-deploys in 2-3 minutes
 - Always `git pull` before starting work, and push promptly after committing
 
+### MANDATORY: Confirm Deploy is Live
+
+After every `git push origin main`, you MUST:
+1. Push the code
+2. Poll the GitHub Pages deployment until it completes (use the deploy monitor script or check the GitHub Actions status)
+3. Only THEN tell the user the work is done and the changes are live
+
+Never say "done" after pushing and leave the user waiting. The task is not complete until the deploy is confirmed live. If the deploy takes longer than expected, keep the user informed with a short status update.
+
 ## Design System — Sage Executive (light)
 
 The platform uses a **single design-token stylesheet** so every page — main shell, iframe pages, OS pages, SOPs — looks like part of the same software.
