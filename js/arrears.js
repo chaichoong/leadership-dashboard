@@ -814,7 +814,23 @@ Auto-generated from arrears engine.`,
                 }
 
                 const status = getStatusName(getField(existing, ARREARS.status));
-                if (!ARREARS_OPEN_STATUSES.has(status)) continue;
+                if (!ARREARS_OPEN_STATUSES.has(status)) {
+                    // Record was previously Resolved/Paused/Closed but the tenant
+                    // has missed payment again. Reopen it at the current expected
+                    // stage so the chase pipeline resumes.
+                    const ok = await updateArrearsRecord(existing.id, {
+                        [ARREARS.status]: 'Active',
+                        [ARREARS.stage]: expectedStage,
+                        [ARREARS.openedDate]: today.toISOString().slice(0, 10),
+                    });
+                    if (ok) {
+                        existing.fields[ARREARS.status] = { name: 'Active' };
+                        existing.fields[ARREARS.stage] = { name: expectedStage };
+                        console.log(`arrears: reopened ${getField(existing, ARREARS.ref)} at "${expectedStage}" (was ${status})`);
+                        stageEvents.push({ record: existing, stage: expectedStage, tenancy, tenant, tenantType, daysFromDue });
+                    }
+                    continue;
+                }
 
                 const currentStage = getStageName(getField(existing, ARREARS.stage));
                 if (arrearsStageIndex(expectedStage) > arrearsStageIndex(currentStage)) {
@@ -989,31 +1005,42 @@ Auto-generated from arrears engine.`,
             totalAmount += Number(getField(rec, ARREARS.amountOwed)) || 0;
         });
 
-        // Per-tenant cumulative summary — uses transaction history since the
-        // data-start cutoff to compute effective months arrears (incl. UC +1).
-        // Stores the full breakdown so the click-to-expand row can show the
-        // calculation steps without recomputing.
+        // Per-tenant cumulative summary, grouped by tenant (not tenancy).
+        // A single tenant with multiple units gets one row whose totals
+        // aggregate across all their tenancies. Click-to-expand shows a
+        // breakdown per tenancy so each unit's maths is auditable.
         const tenantLookup = {};
         allTenants.forEach(t => { tenantLookup[t.id] = t; });
+        const seenTenancies = new Set();
         const perTenant = new Map();
         for (const { rec } of visible) {
             const tenancyId = extractLinkedId(getField(rec, ARREARS.tenancy));
-            if (!tenancyId || perTenant.has(tenancyId)) continue;
+            if (!tenancyId || seenTenancies.has(tenancyId)) continue;
+            seenTenancies.add(tenancyId);
             const tenancy = findTenancyById(tenancyId);
             if (!tenancy) continue;
             const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
             const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '—');
+            const tenantId = tenant ? tenant.id : tenancyId;
             const breakdown = computeArrearsBreakdown(tenancy, tenantType, today);
             if (!breakdown.applicable) continue;
-            perTenant.set(tenancyId, {
-                tenancyId, tenancy, tenantType, tenantName,
-                rent: breakdown.rent,
-                effectiveMonths: breakdown.effectiveMonths,
-                s8Ready: breakdown.s8Ready,
-                cumulativeBalance: breakdown.cumulativeBalance,
-                breakdown,
-            });
+            if (breakdown.missed === 0) continue;
+            if (perTenant.has(tenantId)) {
+                const existing = perTenant.get(tenantId);
+                existing.tenancies.push({ tenancyId, tenancy, breakdown });
+                existing.effectiveMonths = Math.max(existing.effectiveMonths, breakdown.effectiveMonths);
+                existing.cumulativeBalance += breakdown.cumulativeBalance;
+                existing.s8Ready = existing.s8Ready || breakdown.s8Ready;
+            } else {
+                perTenant.set(tenantId, {
+                    tenantId, tenantType, tenantName,
+                    tenancies: [{ tenancyId, tenancy, breakdown }],
+                    effectiveMonths: breakdown.effectiveMonths,
+                    s8Ready: breakdown.s8Ready,
+                    cumulativeBalance: breakdown.cumulativeBalance,
+                });
+            }
         }
 
         // Total exposure including the UC shadow month for any tenant with arrears
@@ -1067,22 +1094,33 @@ Auto-generated from arrears engine.`,
         }).join('');
 
         // Per-tenant summary rows with click-to-expand breakdown.
-        // Each tenant gets two <tr> elements: the summary row and a hidden
-        // breakdown row (toggled via the inline onclick handler).
+        // Grouped by tenant: one row per person, expanding to show per-tenancy breakdowns.
         const tenantSummaryRows = Array.from(perTenant.values())
             .sort((a, b) => b.effectiveMonths - a.effectiveMonths)
             .map(t => {
                 const rowBg = t.s8Ready ? 'var(--danger-bg)' : 'transparent';
-                const breakdownId = `arrearsBreakdown_${t.tenancyId}`;
+                const breakdownId = `arrearsBreakdown_${t.tenantId}`;
+                const unitCount = t.tenancies.length;
+                const nameLabel = unitCount > 1
+                    ? `${escHtml(t.tenantName)} <span style="font-size:11px;color:var(--text-muted)">(${unitCount} units)</span>`
+                    : escHtml(t.tenantName);
+                const breakdownsHtml = t.tenancies.map(entry => {
+                    const unitRef = getField(entry.tenancy, F.tenUnitRef);
+                    const unit = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+                    const header = unitCount > 1
+                        ? `<div style="font-weight:600;font-size:13px;color:var(--text-primary);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border-subtle)">${escHtml(unit || entry.tenancyId)}</div>`
+                        : '';
+                    return header + renderBreakdownHtml({ breakdown: entry.breakdown });
+                }).join('<div style="margin-top:16px"></div>');
                 return `<tr style="background:${rowBg};border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="toggleArrearsBreakdown('${breakdownId}', this)">
-                    <td style="padding:10px 12px"><span style="display:inline-block;width:14px;color:var(--text-muted);font-size:10px" data-chevron>&#x25B8;</span> <span style="font-weight:600;color:var(--text-primary)">${escHtml(t.tenantName)}</span></td>
+                    <td style="padding:10px 12px"><span style="display:inline-block;width:14px;color:var(--text-muted);font-size:10px" data-chevron>&#x25B8;</span> <span style="font-weight:600;color:var(--text-primary)">${nameLabel}</span></td>
                     <td style="padding:10px 12px">${badgeHtml(t.tenantType, { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' })}</td>
                     <td style="padding:10px 12px;text-align:right;font-weight:${t.effectiveMonths >= 2 ? '700' : '500'};color:${t.effectiveMonths >= 2 ? 'var(--danger)' : 'var(--text-primary)'};font-variant-numeric:tabular-nums">${t.effectiveMonths.toFixed(0)}</td>
                     <td style="padding:10px 12px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-primary)">£${t.cumulativeBalance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td style="padding:10px 12px">${t.s8Ready ? badgeHtml('S8 Ready', { bg: 'var(--danger)', fg: '#fff' }) : ''}</td>
                 </tr>
                 <tr id="${breakdownId}" style="display:none;background:var(--bg-surface-2)">
-                    <td colspan="5" style="padding:16px 24px">${renderBreakdownHtml(t)}</td>
+                    <td colspan="5" style="padding:16px 24px">${breakdownsHtml}</td>
                 </tr>`;
             }).join('');
 
