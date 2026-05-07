@@ -298,12 +298,23 @@
     }
     function rsPropertyItems() {
         const seen = new Set(), items = [];
+        const unitPropertyField = 'fldUJNRGgzgyAwwjt';
+        const propNameByRecId = {};
         (allTenancies || []).forEach(r => {
-            const prop = getField(r, F.tenProperty);
-            const name = Array.isArray(prop) ? prop[0] : (prop || '');
-            if (!name || seen.has(name)) return;
-            seen.add(name);
-            items.push({ id: name, name });
+            const propName = getField(r, F.tenProperty);
+            const name = Array.isArray(propName) ? propName[0] : (propName || '');
+            const unitRaw = getField(r, F.tenUnit);
+            const unitId = Array.isArray(unitRaw) ? unitRaw[0] : unitRaw;
+            if (!name || !unitId) return;
+            const unit = (allRentalUnits || []).find(u => u.id === unitId);
+            if (!unit) return;
+            const propLinked = unit.fields[unitPropertyField];
+            const propRecId = Array.isArray(propLinked) ? propLinked[0] : propLinked;
+            if (propRecId && !seen.has(propRecId)) {
+                seen.add(propRecId);
+                propNameByRecId[propRecId] = name;
+                items.push({ id: propRecId, name });
+            }
         });
         return items;
     }
@@ -366,16 +377,21 @@
         const cellStyle = 'padding:4px 4px;vertical-align:middle;position:relative';
         const indicatorHtml = '<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span>';
 
+        const accountLookup = {};
+        (allAccounts || []).forEach(r => { accountLookup[r.id] = getField(r, F.accountAlias) || r.id; });
+
         const paymentRows = s.payments.length
             ? s.payments.map((p, i) => {
                 const prefix = `rstx_${p.txId}_`;
                 const bg = i % 2 ? 'background:var(--bg-surface-2)' : '';
+                const roStyle = 'font-size:10px;color:var(--text-secondary)';
+                const accountName = accountLookup[p.accountLinkId] || p.accountAlias || '';
                 return `<tr style="${bg}">
                     <td style="${cellStyle};color:var(--text-muted);font-size:11px;width:24px">${i + 1}</td>
-                    <td style="${cellStyle};width:90px"><input id="${prefix}date" type="date" value="${escHtml(p.dateStr)}" style="font-size:10px;padding:2px;width:85px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)" onchange="rsSaveTxField('${p.txId}','${F.txDate}','${prefix}date',false)">${indicatorHtml}</td>
-                    <td style="${cellStyle};width:160px"><input id="${prefix}desc" type="text" value="${escHtml(p.description)}" style="font-size:10px;padding:2px 4px;width:150px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)" onblur="rsSaveTxField('${p.txId}','${F.txDescription}','${prefix}desc',false)">${indicatorHtml}</td>
-                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'account', rsAccountItems(), p.accountLinkId, '90px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};text-align:right;width:70px;font-variant-numeric:tabular-nums">${fmtMoney(p.amount)}</td>
+                    <td style="${cellStyle};width:80px;${roStyle}">${escHtml(p.dateStr)}</td>
+                    <td style="${cellStyle};width:160px;${roStyle};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px" title="${escHtml(p.description)}">${escHtml(p.description)}</td>
+                    <td style="${cellStyle};width:90px;${roStyle}">${escHtml(accountName)}</td>
+                    <td style="${cellStyle};text-align:right;width:70px;font-variant-numeric:tabular-nums;${roStyle}">${fmtMoney(p.amount)}</td>
                     <td style="${cellStyle};width:110px">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
                     <td style="${cellStyle};width:120px">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
                     <td style="${cellStyle};width:140px">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
@@ -584,12 +600,6 @@
         const btn = event && event.target;
         if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
         const fields = {};
-        const dateInput = document.getElementById(prefix + 'date');
-        if (dateInput) fields[F.txDate] = dateInput.value;
-        const descInput = document.getElementById(prefix + 'desc');
-        if (descInput) fields[F.txDescription] = descInput.value;
-        const accountId = rsResolveId(prefix + 'account');
-        if (accountId) fields[F.txAccountLink] = [accountId]; else fields[F.txAccountLink] = [];
         const catId = rsResolveId(prefix + 'cat');
         if (catId) fields[F.txCategory] = [catId]; else fields[F.txCategory] = [];
         const subCatId = rsResolveId(prefix + 'subcat');
@@ -676,11 +686,7 @@
     window.rsOpenPrintStatement = rsOpenPrintStatement;
 
     function rsGeneratePrintStatement(tenancy, tenantName, unit, property, tenantType, monthlyRent, startDate, endDate) {
-        const dailyRent = monthlyRent / 31;
-        const tenStart = getTenancyStartDate(tenancy);
-        const effectiveStart = tenStart && tenStart > startDate ? tenStart : startDate;
-        const days = Math.floor((endDate - effectiveStart) / 86400000);
-        const totalOwed = dailyRent * Math.max(days, 0);
+        const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
 
         const payments = [];
         let totalPaid = 0;
@@ -690,39 +696,47 @@
             const dateStr = String(getField(tx, F.txDate) || '');
             const txDate = dateStr ? new Date(dateStr) : null;
             if (!txDate) continue;
-            if (txDate < effectiveStart || txDate > endDate) continue;
+            if (txDate < startDate || txDate > endDate) continue;
             const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
             const desc = String(getField(tx, F.txDescription) || '').trim();
             payments.push({ date: txDate, dateStr: dateStr.slice(0, 10), amount, description: desc });
             totalPaid += amount;
         }
         payments.sort((a, b) => a.date - b.date);
-        const balance = totalOwed - totalPaid;
-        const daysInArrears = dailyRent > 0 ? Math.round(balance / dailyRent) : 0;
         const fmtDateStr = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        const rentDues = [];
+        let cursor = new Date(startDate);
+        let firstDue = new Date(cursor.getFullYear(), cursor.getMonth(), dueDay);
+        if (firstDue < startDate) firstDue.setMonth(firstDue.getMonth() + 1);
+        let d = new Date(firstDue);
+        while (d <= endDate) {
+            rentDues.push({ type: 'rent', date: new Date(d), amount: monthlyRent });
+            d.setMonth(d.getMonth() + 1);
+        }
+        const totalOwed = rentDues.length * monthlyRent;
+
+        const allEvents = [
+            ...rentDues.map(r => ({ ...r, desc: `Monthly rent due` })),
+            ...payments.map(p => ({ type: 'payment', date: p.date, amount: p.amount, desc: p.description || 'Payment received' })),
+        ];
+        allEvents.sort((a, b) => a.date - b.date || (a.type === 'rent' ? -1 : 1));
 
         let runningBalance = 0;
         const ledgerRows = [];
-        const daysBetween = (a, b) => Math.floor((b - a) / 86400000);
-
-        let cursor = new Date(effectiveStart);
-        const allEvents = payments.map(p => ({ type: 'payment', date: p.date, amount: p.amount, desc: p.description }));
-        allEvents.push({ type: 'end', date: endDate });
-        allEvents.sort((a, b) => a.date - b.date);
-
         for (const ev of allEvents) {
-            const rentDays = daysBetween(cursor, ev.date);
-            if (rentDays > 0) {
-                const rentCharge = dailyRent * rentDays;
-                runningBalance += rentCharge;
-                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: `Rent: ${rentDays} days @ ${fmtMoney(dailyRent)}/day`, debit: fmtMoney(rentCharge), credit: '', balance: fmtMoney(runningBalance) });
-            }
-            if (ev.type === 'payment') {
+            if (ev.type === 'rent') {
+                runningBalance += ev.amount;
+                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: ev.desc, debit: fmtMoney(ev.amount), credit: '', balance: fmtMoney(runningBalance) });
+            } else {
                 runningBalance -= ev.amount;
-                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: ev.desc || 'Payment received', debit: '', credit: fmtMoney(ev.amount), balance: fmtMoney(runningBalance) });
+                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: ev.desc, debit: '', credit: fmtMoney(ev.amount), balance: fmtMoney(runningBalance) });
             }
-            cursor = new Date(ev.date);
         }
+
+        const balance = totalOwed - totalPaid;
+        const dailyRent = monthlyRent / 31;
+        const daysInArrears = dailyRent > 0 ? Math.round(balance / dailyRent) : 0;
 
         const printWin = window.open('', '_blank', 'width=800,height=900');
         printWin.document.write(`<!DOCTYPE html><html><head><title>Rent Statement — ${escHtml(tenantName)}</title>
@@ -748,7 +762,7 @@
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
             <div>
                 <h1>Rent Statement</h1>
-                <div class="meta">${fmtDateStr(effectiveStart)} to ${fmtDateStr(endDate)}</div>
+                <div class="meta">${fmtDateStr(startDate)} to ${fmtDateStr(endDate)}</div>
             </div>
             <button class="no-print" onclick="window.print()" style="padding:8px 20px;border:1px solid #2C6E49;border-radius:6px;background:#2C6E49;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Print</button>
         </div>
@@ -768,8 +782,8 @@
         </table>
         <div class="footer">
             Generated ${new Date().toLocaleDateString('en-GB', { day:'numeric',month:'long',year:'numeric' })} at ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}.
-            Daily rent rate: ${fmtMoney(dailyRent)} (${fmtMoney(monthlyRent)} / 31 days).
-            Statement period: ${days} days. Payments: ${payments.length} transactions totalling ${fmtMoney(totalPaid)}.
+            Monthly rent: ${fmtMoney(monthlyRent)}, due on the ${dueDay}${dueDay===1?'st':dueDay===2?'nd':dueDay===3?'rd':'th'} of each month.
+            Rent charges: ${rentDues.length} months totalling ${fmtMoney(totalOwed)}. Payments: ${payments.length} transactions totalling ${fmtMoney(totalPaid)}.
         </div>
         </body></html>`);
         printWin.document.close();
