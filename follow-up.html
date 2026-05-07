@@ -3362,20 +3362,25 @@ Body: ${bodyText}`;
         /id check/i,
         /referenc(e|ing)/i          // referencing checks
     ];
-    // Completion-stage allowlist — a subject MUST contain at least one
-    // of these to be considered a fully-signed tenancy agreement. Each
-    // pattern represents a common e-sign platform's "all signers done"
-    // notification. Adobe Sign uses "Signed and Filed!"; DocuSign uses
-    // "Completed: <doc>"; some platforms use "fully signed" / "fully
-    // executed" in the subject. Add more here if Kevin spots a
-    // completion email that doesn't match.
-    const _COMPLETION_PATTERNS = [
-        /signed and filed/i,    // Adobe Sign — primary signal
+    // Completion-stage allowlist — sender-specific because each
+    // e-signing platform uses a different "all signers done" subject.
+    //
+    //   Adobe Sign / EchoSign — Kevin's primary platform — ONLY emits
+    //   "Signed and Filed!" as the final notification. Nothing else
+    //   counts as completion for these senders.
+    //
+    //   DocuSign / DocHub / HelloSign / SignNow — broader patterns
+    //   accepted because we don't have a confirmed "only this exact
+    //   string" rule for Kevin's usage of these platforms. If Kevin
+    //   spots false positives for one of them, narrow it like Adobe
+    //   Sign above.
+    const _ADOBE_SIGN_COMPLETION = /signed and filed/i;
+    const _OTHER_PLATFORM_COMPLETION_PATTERNS = [
+        /signed and filed/i,
         /^\s*completed[:\s]/i,  // DocuSign — "Completed: <doc>"
         /fully signed/i,
         /fully executed/i,
-        /all parties have signed/i,
-        /agreement complete/i
+        /all parties have signed/i
     ];
     // Intermediate-stage denylist — subjects that look "AST-y" but are
     // partway through the signing flow, not final.
@@ -3400,19 +3405,22 @@ Body: ${bodyText}`;
         if (_TENANCY_SUBJECT_EXCLUSIONS.some(p => p.test(subject))) return false;
         if (!_TENANCY_SUBJECT_PATTERNS.some(p => p.test(subject))) return false;
 
-        // Gate 3: completion stage
-        const isCompletion = _COMPLETION_PATTERNS.some(p => p.test(subject));
+        // Gate 3: completion stage — sender-specific.
+        // Adobe Sign / EchoSign — must contain "Signed and Filed".
+        // Other e-sign platforms — broader completion patterns accepted.
+        const isAdobeSign = sender.includes('adobesign.com') || sender.includes('echosign.com');
+        const isCompletion = isAdobeSign
+            ? _ADOBE_SIGN_COMPLETION.test(subject)
+            : _OTHER_PLATFORM_COMPLETION_PATTERNS.some(p => p.test(subject));
         if (!isCompletion) return false;
 
         // Belt-and-braces: even if a completion phrase appears, reject
-        // if any intermediate pattern is present (some Adobe Sign
-        // "Reminder: Signed and Filed!" edge cases could otherwise slip
-        // through). The completion check has already required the
-        // positive signal; this just stops false positives.
+        // if any intermediate pattern is present (some "Reminder:
+        // Signed and Filed!" edge cases could otherwise slip through).
         const hasIntermediate = _INTERMEDIATE_PATTERNS.some(p => p.test(subject));
         // Intermediate "X has signed" is allowed only when the
         // completion phrase is also present — that means it's the
-        // final "fully signed and filed" email.
+        // final "Signed and Filed" email.
         if (hasIntermediate && !/signed and filed|fully signed|fully executed|all parties have signed/i.test(subject)) {
             return false;
         }
