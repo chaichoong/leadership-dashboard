@@ -75,15 +75,19 @@
         return { tenancyId: ten.id, unitId, propertyId };
     }
 
+    // IMPORTANT: append returnFieldsByFieldId=true so the response keys
+    // are field IDs (matching F.* constants). Without this, Airtable
+    // returns keys by NAME and our F.txTenancy / F.txReconciled lookups
+    // miss every time, falsely reporting "reverted by automation".
     async function fetchTx(txId) {
-        const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?cb=${Date.now()}`, {
+        const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true&cb=${Date.now()}`, {
             headers: { 'Authorization': 'Bearer ' + PAT }
         });
         return r.ok ? r.json() : null;
     }
 
     async function patchTx(txId, fields) {
-        const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+        const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
             method: 'PATCH',
             headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
             body: JSON.stringify({ fields })
