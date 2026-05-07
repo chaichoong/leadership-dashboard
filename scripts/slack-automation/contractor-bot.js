@@ -62,6 +62,11 @@ const PROPERTY_CHANNEL_ID = 'C09EMKREPJL';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const MODEL_FAST        = 'claude-haiku-4-5-20251001';
+// Used for the intent classifier specifically — Sonnet handles the
+// fault-vs-progress distinction (e.g. "blocked drain" = new fault, not
+// a contractor status report) reliably where Haiku trips up. Single
+// short call per inbound message.
+const MODEL_ACCURATE    = 'claude-sonnet-4-5-20250929';
 
 const SLACK_POST_URL    = 'https://slack.com/api/chat.postMessage';
 const SLACK_LOOKUP_URL  = 'https://slack.com/api/users.lookupByEmail';
@@ -492,34 +497,43 @@ async function dispatchCommentDm(env, recipientEmail, payload) {
 
 async function classifyIntent(text, env) {
     const system =
-        `You classify short Slack messages from maintenance/property contractors into exactly one of:\n\n` +
-        `  new_job        — reporting a NEW job that needs doing. Describes a fault, a piece of work, or something that needs attention. Usually mentions a property and what's wrong / what's needed.\n` +
-        `  status_update  — reporting progress on an EXISTING job they're already working on. Announces completion, that they've started, that they're stuck/waiting, or adds a note about the work in progress.\n` +
-        `  list_request   — asking to see their open jobs / current workload.\n` +
-        `  unknown        — anything else, or too ambiguous.\n\n` +
-        `Critical disambiguation:\n` +
-        `Words like "blocked", "broken", "leaking", "not working", "stopped", "stuck" are normally describing FAULTS — that's a new_job (the thing is in that state). They're status_update only when clearly referring to the contractor's own progress ("I'm blocked waiting for parts", "I'm stuck on the wiring").\n\n` +
+        `You classify Slack messages from maintenance/property contractors.\n\n` +
+        `Decision procedure (apply IN ORDER, take the first that fits):\n\n` +
+        `1. Is the contractor describing THEIR OWN work activity — that they've started, finished, are stuck on, are waiting on parts for, are working on right now? → status_update\n` +
+        `2. Is the contractor reporting that SOMETHING is broken / blocked / leaking / not working / damaged / needs fixing? → new_job (the THING is in that state; it's a fault to fix)\n` +
+        `3. Is the contractor asking what's on their list / their workload / their jobs? → list_request\n` +
+        `4. Otherwise → unknown\n\n` +
+        `Important: words like "blocked", "broken", "leaking", "stopped", "not working" describe the OBJECT'S state — they almost always mean new_job. Only treat them as status_update when the SUBJECT is clearly the contractor themselves ("I'm blocked", "I'm stuck", "I'm waiting on parts").\n\n` +
+        `Output JSON: {"reasoning": "one sentence on why", "label": "new_job" | "status_update" | "list_request" | "unknown"}\n\n` +
         `Examples:\n` +
-        `  "boiler broken at 55 Elmdon"             → new_job (fault description)\n` +
-        `  "blocked drain at 5 Woodcock"            → new_job (fault description; "blocked" describes the drain)\n` +
-        `  "tap leaking in kitchen at Chedburgh"    → new_job (fault description)\n` +
-        `  "no hot water at Northfield"             → new_job (fault description)\n` +
-        `  "done with the boiler"                   → status_update (announcing completion)\n` +
-        `  "finished at Elmdon"                     → status_update (announcing completion)\n` +
-        `  "started on the front door"              → status_update (announcing progress)\n` +
-        `  "waiting on parts for the boiler"       → status_update (note on existing work)\n` +
-        `  "stuck on the wiring at 12 Oldham"       → status_update (own progress, blocked)\n` +
-        `  "what's on my list"                      → list_request\n` +
-        `  "show my jobs"                           → list_request\n\n` +
-        `Respond with ONLY the single label, no other text.`;
+        `  "boiler broken at 55 Elmdon" → {"reasoning": "boiler is in a broken state — fault report", "label": "new_job"}\n` +
+        `  "blocked drain at 5 Woodcock" → {"reasoning": "drain is blocked — fault description, not contractor progress", "label": "new_job"}\n` +
+        `  "tap leaking in kitchen" → {"reasoning": "tap is leaking — fault report", "label": "new_job"}\n` +
+        `  "done with the boiler" → {"reasoning": "contractor announcing completion of their work", "label": "status_update"}\n` +
+        `  "I'm stuck on the wiring" → {"reasoning": "contractor reporting own progress is blocked", "label": "status_update"}\n` +
+        `  "waiting on parts" → {"reasoning": "contractor describing own work-in-progress state", "label": "status_update"}\n` +
+        `  "what's on my list" → {"reasoning": "asking for their open jobs", "label": "list_request"}`;
 
-    const label = await callClaude(env, {
+    // Use Sonnet for this — Haiku gets confused by polysemous words like
+    // "blocked" and consistently mis-routed fault reports as status updates.
+    // Sonnet handles the fault-vs-progress distinction reliably. 50-token
+    // call, runs once per inbound message — pennies.
+    const raw = await callClaude(env, {
+        model: MODEL_ACCURATE,
         system,
         messages: [{ role: 'user', content: text }],
-        maxTokens: 10,
+        maxTokens: 100,
     });
-    const clean = (label || '').trim().toLowerCase().replace(/[^a-z_]/g, '');
-    if (['new_job', 'status_update', 'list_request', 'unknown'].includes(clean)) return clean;
+    let label = 'unknown';
+    try {
+        const parsed = JSON.parse((raw || '').trim().replace(/^```json\s*|\s*```$/g, ''));
+        label = (parsed.label || '').trim().toLowerCase();
+    } catch (e) {
+        // Fall back to scanning the raw response for one of the known labels.
+        const m = (raw || '').toLowerCase().match(/\b(new_job|status_update|list_request|unknown)\b/);
+        if (m) label = m[1];
+    }
+    if (['new_job', 'status_update', 'list_request', 'unknown'].includes(label)) return label;
     return 'unknown';
 }
 
@@ -1157,7 +1171,7 @@ function escapeFormula(s) {
 
 // ─── EXTERNAL: Anthropic API ──────────────────────────────────────────
 
-async function callClaude(env, { system, messages, maxTokens }) {
+async function callClaude(env, { system, messages, maxTokens, model }) {
     if (!env.ANTHROPIC_API_KEY) {
         throw new Error('ANTHROPIC_API_KEY not configured');
     }
@@ -1169,7 +1183,7 @@ async function callClaude(env, { system, messages, maxTokens }) {
             'anthropic-version': ANTHROPIC_VERSION,
         },
         body: JSON.stringify({
-            model: MODEL_FAST,
+            model: model || MODEL_FAST,
             max_tokens: maxTokens,
             system,
             messages,
