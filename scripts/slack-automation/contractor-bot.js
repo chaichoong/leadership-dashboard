@@ -154,11 +154,36 @@ export default {
         // Slack expects an ack within 3 seconds. Process events asynchronously
         // via ctx.waitUntil so the worker returns immediately.
         if (payload.type === 'event_callback') {
-            const evt = payload.event;
-            if (shouldHandle(evt)) {
+            const evt = payload.event || {};
+            // Diagnostic: log every event we receive plus whether we'll
+            // route it. Keeps a clear breadcrumb of "Slack sent X, we
+            // did Y" in the worker logs without dumping full payloads.
+            const why = shouldHandle(evt);
+            console.log('[event_callback]',
+                'type=', evt.type,
+                'channel_type=', evt.channel_type,
+                'channel=', evt.channel,
+                'user=', evt.user,
+                'thread_ts=', evt.thread_ts ? 'yes' : 'no',
+                'subtype=', evt.subtype || 'none',
+                'bot_id=', evt.bot_id ? 'yes' : 'no',
+                'will_route=', why);
+            if (why) {
                 ctx.waitUntil(routeMessage(evt, env).catch(err => {
                     console.error('contractor-bot:', err && err.stack || err);
                 }));
+            } else {
+                // Spell out the rejection reason — most useful when an
+                // event reaches the worker but doesn't match either branch.
+                if (!evt || evt.type !== 'message') console.log('[skip] not a message event');
+                else if (evt.bot_id) console.log('[skip] bot message');
+                else if (evt.subtype && evt.subtype !== 'file_share') console.log('[skip] subtype=', evt.subtype);
+                else if (!evt.user) console.log('[skip] no user');
+                else if (evt.channel_type === 'im' && !evt.thread_ts) console.log('[skip] DM but not a thread reply');
+                else if (evt.channel_type === 'im' && !evt.text) console.log('[skip] DM thread reply with no text');
+                else if (evt.channel !== PROPERTY_CHANNEL_ID) console.log('[skip] channel', evt.channel, 'is not property-management');
+                else if (!CONTRACTORS[evt.user]) console.log('[skip] user', evt.user, 'is not in CONTRACTORS map');
+                else console.log('[skip] structured-notification text filter matched');
             }
         }
 
