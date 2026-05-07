@@ -324,8 +324,7 @@
                 if (!isNaN(endDate.getTime()) && endDate < today) continue;
             }
 
-            const tenStatusRaw = getField(ten, F.tenStatus);
-            if (!isTenantStatusActive(tenStatusRaw)) continue;
+            if (!isTenantStatusActive(ten)) continue;
 
             const dueDay = Number(getField(ten, F.tenDueDay)) || 0;
             if (!dueDay) continue;
