@@ -676,29 +676,68 @@ async function handleNewJob(sender, text, evt, threadTs, env, override) {
     }
 
     const priority = extraction.priority === 'High Priority' ? 'Urgent' : 'Not Urgent';
+    const senderIsAssignee = sender.kind === 'contractor'
+        && sender.airtableEmail.toLowerCase() === assignee.airtableEmail.toLowerCase();
 
-    // ── Step 3: ingest Slack file attachments (R2 → Airtable)
-    const attachments = await ingestSlackFiles(env, evt.files, evt.ts);
+    // ── Step 3: ASK FOR CONFIRMATION before creating anything.
+    //   Stash everything we'd need to actually create the task in KV;
+    //   resolvePending('confirm_create') runs the actual write on yes.
+    const fileCount = (evt.files && evt.files.length) || 0;
+    const summaryLines = [
+        senderIsAssignee
+            ? `Just to confirm — should I log this${fileCount ? ` (and attach ${fileCount} file${fileCount > 1 ? 's' : ''})` : ''}?`
+            : `Just to confirm — should I log this for ${assignee.firstName}${fileCount ? ` (and attach ${fileCount} file${fileCount > 1 ? 's' : ''})` : ''}?`,
+        ``,
+        `*${extraction.taskName}*`,
+        `📍 ${property.name}`,
+        `⚡ Priority: ${priority}`,
+        ``,
+        `Reply *yes* to log it, *no* to cancel.`,
+    ];
+    await setPendingState(env, evt.user, {
+        kind: 'confirm_create',
+        // Everything we need to actually create the task on confirmation.
+        // Stored as plain JSON in KV (no functions/non-serialisable values).
+        plan: {
+            taskName: extraction.taskName,
+            description: text || '(uploaded file)',
+            priority,
+            propertyId: property.id,
+            propertyName: property.name,
+            assigneeEmail: assignee.airtableEmail,
+            assigneeFirstName: assignee.firstName,
+            contractorFieldValue: assignee.contractorFieldValue || null,
+            collaboratorEmails: TEAM_COLLABORATOR_EMAILS
+                .filter(e => e.toLowerCase() !== assignee.airtableEmail.toLowerCase()),
+            files: evt.files || [], // re-ingested on confirmation
+            messageTs: evt.ts,
+            threadTs,
+            senderIsAssignee,
+            // Forward to assignee DM (resolved via email lookup at write time).
+            assigneeAirtableEmail: assignee.airtableEmail,
+        },
+        eventTs: evt.ts,
+    });
+    return reply(threadTs, env, summaryLines.join('\n'));
+}
 
-    // ── Step 4: collaborators — Kevin/Mica/Erica + the sender (if a team
-    //   member they're already in TEAM_COLLABORATOR_EMAILS). Skip the
-    //   assignee email (they're already the Assignee, not a collaborator).
-    const collaboratorEmails = TEAM_COLLABORATOR_EMAILS
-        .filter(e => e.toLowerCase() !== assignee.airtableEmail.toLowerCase());
-
+// Called by resolvePending when the user answers "yes" to a confirm_create
+// prompt. Performs the actual Airtable write, channel reply, and assignee DM.
+async function executeConfirmedCreate(env, plan, threadTs) {
+    const attachments = await ingestSlackFiles(env, plan.files, plan.messageTs);
     const fields = {
-        [FIELD.taskName]:        extraction.taskName,
-        [FIELD.description]:     text || '(uploaded file)',
+        [FIELD.taskName]:        plan.taskName,
+        [FIELD.description]:     plan.description,
         [FIELD.status]:          'Upcoming',
-        [FIELD.priority]:        priority,
-        [FIELD.assignee]:        { email: assignee.airtableEmail },
-        [FIELD.properties]:      [property.id],
+        [FIELD.priority]:        plan.priority,
+        [FIELD.assignee]:        { email: plan.assigneeEmail },
+        [FIELD.properties]:      [plan.propertyId],
         [FIELD.business]:        [BUSINESS_REAL_ESTATE_ID],
         [FIELD.maintenanceTick]: true,
-        [FIELD.collaborators]:   collaboratorEmails.map(email => ({ email })),
+        [FIELD.collaborators]:   plan.collaboratorEmails.map(email => ({ email })),
     };
-    if (assignee.contractorFieldValue) {
-        fields[FIELD.contractor] = assignee.contractorFieldValue;
+    if (plan.contractorFieldValue) {
+        fields[FIELD.contractor] = plan.contractorFieldValue;
     }
     if (attachments.length) {
         fields[FIELD.attachments] = attachments;
@@ -706,40 +745,30 @@ async function handleNewJob(sender, text, evt, threadTs, env, override) {
 
     const created = await createTask(env, fields);
     const newTaskId = created && created.records && created.records[0] && created.records[0].id;
-
-    // Remember which task this thread is about, so any future thread reply
-    // targets THIS task and isn't fuzzy-matched to an unrelated one.
     if (newTaskId) {
         await setThreadTask(env, threadTs, newTaskId);
     }
 
-    // ── Step 5: channel reply (visible to the team in #property-management)
-    const senderIsAssignee = sender.kind === 'contractor'
-        && sender.airtableEmail.toLowerCase() === assignee.airtableEmail.toLowerCase();
-    const headerLine = senderIsAssignee
-        ? `✅ Logged, ${assignee.firstName}.`
-        : `✅ Logged for ${assignee.firstName}.`;
+    const headerLine = plan.senderIsAssignee
+        ? `✅ Logged, ${plan.assigneeFirstName}.`
+        : `✅ Logged for ${plan.assigneeFirstName}.`;
     const channelLines = [
         headerLine,
-        `*${extraction.taskName}*`,
-        `📍 ${property.name}`,
-        `⚡ Priority: ${priority}`,
+        `*${plan.taskName}*`,
+        `📍 ${plan.propertyName}`,
+        `⚡ Priority: ${plan.priority}`,
     ];
     if (attachments.length) {
         channelLines.push(`📎 ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}`);
     }
-    channelLines.push(senderIsAssignee ? `Added to your list.` : `Added to ${assignee.firstName}'s list.`);
+    channelLines.push(plan.senderIsAssignee ? `Added to your list.` : `Added to ${plan.assigneeFirstName}'s list.`);
     await reply(threadTs, env, channelLines.join('\n'));
 
-    // ── Step 6: DM the assignee (the contractor doing the work) so they
-    //   get a personal heads-up in their DMs, mirroring the dashboard's
-    //   existing assignee-DM flow. We DM by email lookup so this works
-    //   whether the sender is the assignee or a team member.
-    await dmUserByEmail(env, assignee.airtableEmail,
+    await dmUserByEmail(env, plan.assigneeAirtableEmail,
         `*Operations Director* assigned to you:\n` +
-        `*${extraction.taskName}*\n` +
-        `📍 ${property.name}\n` +
-        `⚡ Priority: ${priority}`
+        `*${plan.taskName}*\n` +
+        `📍 ${plan.propertyName}\n` +
+        `⚡ Priority: ${plan.priority}`
     );
 }
 
@@ -899,34 +928,78 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
         noteText = match.noteText;
     }
 
+    // ASK FOR CONFIRMATION before any write. Stash plan in KV and wait
+    // for "yes" or "no". On yes the matching action helper runs.
+    const propertyTag = target.propertyName ? ` — ${target.propertyName}` : '';
     if (action === 'completed') {
-        await updateTask(env, target.id, { [FIELD.status]: 'Completed' });
-        await reply(threadTs, env,
-            `✅ Marked complete: *${target.taskName}*. Nice one ${contractor.firstName}.`
+        await setPendingState(env, evt.user, {
+            kind: 'confirm_complete',
+            plan: {
+                taskId: target.id,
+                taskName: target.taskName,
+                propertyName: target.propertyName || '',
+                contractorAirtableEmail: contractor.airtableEmail,
+                contractorName: contractor.name,
+            },
+            eventTs: evt.ts,
+        });
+        return reply(threadTs, env,
+            `Just to confirm — mark *${target.taskName}*${propertyTag} as completed?\n` +
+            `Reply *yes* to mark it done, *no* to cancel.`
         );
-        // DM the OTHER team collaborators (skip whoever just completed it).
-        await dmTeamExcept(env, contractor.airtableEmail,
-            `*${contractor.name}* completed a task you collaborate on:\n` +
-            `*${target.taskName}*` +
-            (target.propertyName ? `\n📍 ${target.propertyName}` : '')
-        );
-        return;
     }
     if (action === 'in_progress') {
-        await updateTask(env, target.id, { [FIELD.status]: 'Today' });
-        return reply(threadTs, env, `👍 Got it — *${target.taskName}* is now in progress.`);
+        await setPendingState(env, evt.user, {
+            kind: 'confirm_in_progress',
+            plan: { taskId: target.id, taskName: target.taskName },
+            eventTs: evt.ts,
+        });
+        return reply(threadTs, env,
+            `Just to confirm — mark *${target.taskName}*${propertyTag} as in progress?\n` +
+            `Reply *yes* to start it, *no* to cancel.`
+        );
     }
     if (action === 'note') {
-        // Post a native Airtable record comment (visible in the dashboard's
-        // task-drawer Comments panel) rather than appending to the Notes
-        // field. Comments are timestamped + author-attributed by Airtable;
-        // the prefix here gives it the contractor's first name + "via Slack"
-        // so it's obvious where the comment came from.
         const commentBody = `*${contractor.firstName} via Slack*\n${noteText || text}`;
-        await addComment(env, target.id, commentBody);
-        return reply(threadTs, env, `💬 Comment added to *${target.taskName}*.`);
+        await setPendingState(env, evt.user, {
+            kind: 'confirm_note',
+            plan: { taskId: target.id, taskName: target.taskName, commentBody },
+            eventTs: evt.ts,
+        });
+        return reply(threadTs, env,
+            `Just to confirm — add this comment to *${target.taskName}*${propertyTag}?\n\n` +
+            `> ${noteText || text}\n\n` +
+            `Reply *yes* to add, *no* to cancel.`
+        );
     }
     return reply(threadTs, env, `I caught your message but wasn't sure what to do with it.`);
+}
+
+// Helpers called by resolvePending after the user answers "yes" to a
+// confirmation prompt. Each performs the actual Airtable write + reply.
+
+async function executeConfirmedComplete(env, plan, threadTs) {
+    await updateTask(env, plan.taskId, { [FIELD.status]: 'Completed' });
+    // Pull contractor's first name out of "Gary Marsh" → "Gary" for the reply.
+    const firstName = (plan.contractorName || '').split(' ')[0] || 'there';
+    await reply(threadTs, env,
+        `✅ Marked complete: *${plan.taskName}*. Nice one ${firstName}.`
+    );
+    await dmTeamExcept(env, plan.contractorAirtableEmail,
+        `*${plan.contractorName}* completed a task you collaborate on:\n` +
+        `*${plan.taskName}*` +
+        (plan.propertyName ? `\n📍 ${plan.propertyName}` : '')
+    );
+}
+
+async function executeConfirmedInProgress(env, plan, threadTs) {
+    await updateTask(env, plan.taskId, { [FIELD.status]: 'Today' });
+    await reply(threadTs, env, `👍 Got it — *${plan.taskName}* is now in progress.`);
+}
+
+async function executeConfirmedNote(env, plan, threadTs) {
+    await addComment(env, plan.taskId, plan.commentBody);
+    await reply(threadTs, env, `💬 Comment added to *${plan.taskName}*.`);
 }
 
 async function matchStatusUpdate(text, openTasks, env) {
@@ -984,6 +1057,40 @@ async function handleListRequest(contractor, threadTs, env) {
 async function resolvePending(sender, text, pending, evt, threadTs, env) {
     // Optimistic clear — if the resolution fails we re-store below.
     await clearPendingState(env, evt.user);
+
+    // CONFIRMATION FLOWS — every write goes through one of these. The
+    // user replies "yes" / "no" to a previously-sent summary; on yes we
+    // run the action helpers, on no we cancel cleanly, otherwise re-ask.
+    if (
+        pending.kind === 'confirm_create' ||
+        pending.kind === 'confirm_complete' ||
+        pending.kind === 'confirm_in_progress' ||
+        pending.kind === 'confirm_note'
+    ) {
+        const answer = parseYesNo(text);
+        if (answer === null) {
+            await setPendingState(env, evt.user, pending);
+            return reply(threadTs, env,
+                `Sorry, I didn't catch that — reply *yes* to go ahead, *no* to cancel.`
+            );
+        }
+        if (answer === 'no') {
+            return reply(threadTs, env, `Cancelled — nothing changed. Send a fresh message any time.`);
+        }
+        // yes — execute the appropriate action.
+        try {
+            if (pending.kind === 'confirm_create')      await executeConfirmedCreate(env, pending.plan, threadTs);
+            if (pending.kind === 'confirm_complete')    await executeConfirmedComplete(env, pending.plan, threadTs);
+            if (pending.kind === 'confirm_in_progress') await executeConfirmedInProgress(env, pending.plan, threadTs);
+            if (pending.kind === 'confirm_note')        await executeConfirmedNote(env, pending.plan, threadTs);
+        } catch (err) {
+            console.error(`confirm execute (${pending.kind}) failed:`, err && err.stack || err);
+            await reply(threadTs, env,
+                `Something went wrong on my end while saving that. Please try again or use the dashboard.`
+            );
+        }
+        return;
+    }
 
     // NEW: team-member supplied the assignee for a job.
     if (pending.kind === 'awaiting_assignee') {
@@ -1085,6 +1192,18 @@ function pickFromCandidates(text, candidates, nameOf) {
     }
     const lower = trimmed.toLowerCase();
     return candidates.find(c => nameOf(c).toLowerCase().includes(lower)) || null;
+}
+
+// Parses a contractor's reply to a confirmation prompt as 'yes' / 'no' /
+// null (didn't understand). Tolerant of surrounding text + Slack's
+// auto-appended "Sent using @Claude" footer.
+function parseYesNo(text) {
+    const t = String(text || '').toLowerCase();
+    // Word-boundary match — handles "yes please", "no thanks", "go ahead",
+    // "cancel that", and ignores the Slack-appended "*Sent using*" footer.
+    if (/\b(yes|y|yeah|yep|yup|sure|confirm|confirmed|correct|go ahead|do it|ok|okay|👍)\b/.test(t)) return 'yes';
+    if (/\b(no|n|nope|nah|cancel|stop|don't|skip|wrong|👎)\b/.test(t)) return 'no';
+    return null;
 }
 
 // ─── ATTACHMENTS: Slack → R2 → Airtable ───────────────────────────────
