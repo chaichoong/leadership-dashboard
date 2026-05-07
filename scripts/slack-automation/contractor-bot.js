@@ -141,13 +141,21 @@ function senderFor(slackUserId) {
 }
 
 // First-name → contractor lookup, used when a team member writes "assign
-// to Gary" and we need to map "Gary" to Gary Marsh's contractor record.
-function findContractorByFirstName(firstName) {
-    if (!firstName) return null;
-    const needle = firstName.trim().toLowerCase();
+// to Gary" or replies "Gary" to the bot's "who should I assign this to?"
+// prompt. Lenient on purpose — uses a word-boundary search so it copes
+// with extra wrapping text:
+//   "Gary"                                          → Gary  ✓
+//   "Gary please"                                   → Gary  ✓
+//   "Gary\n*Sent using* <@U0ALEDV9XNK|Claude>"      → Gary  ✓
+//   "let's get Roy on it"                           → Roy   ✓
+//   "Gargantua"                                     → null  (word boundary)
+function findContractorByFirstName(text) {
+    if (!text) return null;
+    const haystack = String(text);
     for (const slackId of Object.keys(CONTRACTORS)) {
         const c = CONTRACTORS[slackId];
-        if (c.firstName.toLowerCase() === needle) {
+        const re = new RegExp(`\\b${c.firstName}\\b`, 'i');
+        if (re.test(haystack)) {
             return { kind: 'contractor', slackUserId: slackId, ...c };
         }
     }
