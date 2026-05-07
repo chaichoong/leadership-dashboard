@@ -103,10 +103,15 @@
             const txDate = dateStr ? new Date(dateStr) : null;
             if (txDate && txDate < effectiveStart) continue;
             const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
+            const description = String(getField(tx, F.txDescription) || '').trim();
+            const accountAlias = String(getField(tx, F.txAccountAlias) || '').trim();
             payments.push({
+                txId: tx.id,
                 date: txDate,
                 dateStr: dateStr.slice(0, 10),
                 amount,
+                description,
+                accountAlias,
             });
             totalRentPaid += amount;
         }
@@ -232,13 +237,19 @@
 
         const paymentRows = s.payments.length
             ? s.payments.map((p, i) => {
+                const reassignBtn = p.txId
+                    ? `<button onclick="event.stopPropagation();rentStmtReassignTx('${p.txId}','${entry.tenancyId}')" style="font-size:10px;padding:2px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer">Reassign</button>`
+                    : '';
                 return `<tr style="${i % 2 ? 'background:var(--bg-surface-2)' : ''}">
                     <td style="padding:4px 8px;color:var(--text-muted);font-size:11px">${i + 1}</td>
                     <td style="padding:4px 8px">${escHtml(p.dateStr)}</td>
+                    <td style="padding:4px 8px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.description)}">${escHtml(p.description || '—')}</td>
+                    <td style="padding:4px 8px;color:var(--text-muted)">${escHtml(p.accountAlias || '—')}</td>
                     <td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums">${fmtMoney(p.amount)}</td>
+                    <td style="padding:4px 8px;text-align:center">${reassignBtn}</td>
                 </tr>`;
             }).join('')
-            : '<tr><td colspan="3" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
+            : '<tr><td colspan="6" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
 
         const balanceColour = s.balance > 0 ? 'var(--danger)' : 'var(--success)';
         const balanceLabel = s.balance > 0 ? 'Tenant owes' : 'Tenant in credit';
@@ -272,7 +283,10 @@
                         <thead><tr style="text-align:left;background:var(--bg-surface)">
                             <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">#</th>
                             <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Date</th>
+                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Description</th>
+                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Account</th>
                             <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary);text-align:right">Amount</th>
+                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary);text-align:center"></th>
                         </tr></thead>
                         <tbody>${paymentRows}</tbody>
                     </table>
@@ -421,6 +435,99 @@
             console.groupEnd();
         });
     }
+
+    // ── Reassign transaction to a different tenancy ──
+    async function rentStmtReassignTx(txId, currentTenancyId) {
+        const activeTenancies = allTenancies.filter(t => isTenantStatusActive(t));
+        const tenantLookup = buildTenantLookup();
+        const options = activeTenancies
+            .map(t => {
+                const tenant = getTenantForTenancy(t, tenantLookup);
+                const name = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(t, F.tenSurname) || '—');
+                const unitVal = getField(t, F.tenUnitRef);
+                const unit = Array.isArray(unitVal) ? unitVal[0] : (unitVal || '');
+                return { id: t.id, label: `${name} — ${unit}`.trim() };
+            })
+            .sort((a, b) => a.label.localeCompare(b.label));
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);padding:24px;max-width:480px;width:90%;max-height:70vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)';
+        panel.innerHTML = `
+            <div style="font-weight:600;margin-bottom:12px">Reassign transaction to tenancy</div>
+            <input id="rsSearchInput" type="text" placeholder="Search tenancies..." style="width:100%;padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);margin-bottom:8px;font-size:13px;box-sizing:border-box">
+            <div id="rsOptionsList" style="overflow-y:auto;flex:1;border:1px solid var(--border-subtle);border-radius:var(--radius-md);max-height:300px"></div>
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+                <button id="rsCancelBtn" style="padding:6px 16px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);cursor:pointer;font-size:13px">Cancel</button>
+            </div>
+        `;
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        const searchInput = panel.querySelector('#rsSearchInput');
+        const optionsList = panel.querySelector('#rsOptionsList');
+        const cancelBtn = panel.querySelector('#rsCancelBtn');
+
+        function renderOptions(filter) {
+            const q = (filter || '').toLowerCase();
+            const filtered = q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+            optionsList.innerHTML = filtered.map(o => {
+                const isCurrent = o.id === currentTenancyId;
+                return `<div data-tid="${o.id}" style="padding:8px 12px;cursor:${isCurrent ? 'default' : 'pointer'};font-size:13px;border-bottom:1px solid var(--border-subtle);${isCurrent ? 'background:var(--accent-soft);color:var(--text-muted)' : ''}" ${isCurrent ? '' : 'class="rs-option"'}>${escHtml(o.label)}${isCurrent ? ' <span style="font-size:11px">(current)</span>' : ''}</div>`;
+            }).join('');
+        }
+        renderOptions('');
+        searchInput.focus();
+        searchInput.addEventListener('input', () => renderOptions(searchInput.value));
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) { overlay.remove(); return; }
+        });
+        cancelBtn.addEventListener('click', () => overlay.remove());
+
+        optionsList.addEventListener('click', async (e) => {
+            const opt = e.target.closest('[data-tid]');
+            if (!opt || !opt.classList.contains('rs-option')) return;
+            const newTenancyId = opt.dataset.tid;
+            if (newTenancyId === currentTenancyId) return;
+
+            opt.style.background = 'var(--accent-soft)';
+            opt.textContent = 'Reassigning...';
+
+            try {
+                const fields = {};
+                fields[F.txTenancy] = [newTenancyId];
+                const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fields, typecast: true }),
+                });
+                if (!res.ok) throw new Error('PATCH failed: HTTP ' + res.status);
+
+                const localTx = allTransactions.find(t => t.id === txId);
+                if (localTx) localTx.fields[F.txTenancy] = [{ id: newTenancyId }];
+
+                overlay.remove();
+                if (typeof showToast === 'function') showToast('Transaction reassigned', 'success');
+                renderArrearsSection('arrearsPipelineContainer');
+            } catch (err) {
+                opt.textContent = 'Failed — try again';
+                opt.style.background = 'var(--danger-bg)';
+                if (typeof showToast === 'function') showToast('Reassign failed: ' + err.message, 'error');
+            }
+        });
+
+        optionsList.addEventListener('mouseover', (e) => {
+            const opt = e.target.closest('.rs-option');
+            if (opt) opt.style.background = 'var(--bg-surface-2)';
+        });
+        optionsList.addEventListener('mouseout', (e) => {
+            const opt = e.target.closest('.rs-option');
+            if (opt) opt.style.background = '';
+        });
+    }
+    window.rentStmtReassignTx = rentStmtReassignTx;
 
     // ── Expose to other modules ──
     window.runArrearsEngine = runArrearsEngine;
