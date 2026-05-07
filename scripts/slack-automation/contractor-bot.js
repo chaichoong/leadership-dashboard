@@ -219,8 +219,24 @@ export default {
                 'bot_id=', evt.bot_id ? 'yes' : 'no',
                 'will_route=', why);
             if (why) {
-                ctx.waitUntil(routeMessage(evt, env).catch(err => {
+                ctx.waitUntil(routeMessage(evt, env).catch(async err => {
                     console.error('contractor-bot:', err && err.stack || err);
+                    // Don't leave the contractor staring at an unresponsive
+                    // bot — drop a generic error in the channel thread so
+                    // they know to try again or use the dashboard. Best-effort:
+                    // if THIS reply also fails (e.g. SLACK_BOT_TOKEN issue),
+                    // the inner catch keeps the worker from crashing.
+                    try {
+                        const threadTs = evt && (evt.thread_ts || evt.ts);
+                        if (threadTs && evt.channel === PROPERTY_CHANNEL_ID) {
+                            await reply(threadTs, env,
+                                `Sorry — something went wrong on my end and I couldn't process that. ` +
+                                `Try sending it again, or use the dashboard if the problem keeps happening.`
+                            );
+                        }
+                    } catch (replyErr) {
+                        console.error('contractor-bot: failed to send error reply:', replyErr && replyErr.stack || replyErr);
+                    }
                 }));
             } else {
                 // Spell out the rejection reason — most useful when an
