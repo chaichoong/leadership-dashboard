@@ -845,7 +845,7 @@
 
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
                 <label>Backfill Tenancy Docs</label>
-                <p class="settings-info" style="margin-bottom:10px;">Searches your Gmail (from 1 April 2025) for <strong>signed tenancy agreements / ASTs</strong> sent via e-signing platforms (Adobe Sign, DocuSign, DocHub, HelloSign, SignNow) and links each one to the matching active tenancy. Anything that isn't an AST or signed tenancy doc — proof-of-residency, utility forms, council letters, etc. — is skipped automatically. Use the dry run first to preview what will happen; the real run actually writes to Airtable and stars the Gmail thread. Cost ~£0.10–0.30, time ~5–10 min depending on volume.</p>
+                <p class="settings-info" style="margin-bottom:10px;">Searches your Gmail (from 1 April 2025) for <strong>fully-signed</strong> tenancy agreements / ASTs from e-signing platforms (Adobe Sign, DocuSign, DocHub, HelloSign, SignNow) — i.e. the final "Signed and Filed!" / "Completed:" email per document, NOT the initial-send, partial-signing, or reminder notifications. Each match is linked to the corresponding tenancy. Use the dry run first to preview; the real run writes to Airtable and stars the Gmail thread. Cost ~£0.10–0.30, time ~5–10 min depending on volume.</p>
                 <div style="display:flex; gap:8px;">
                     <button class="kb-btn" id="backfillDryBtn" onclick="runTenancyDocBackfill(true)" style="flex:1;">▶ Dry run (preview only)</button>
                     <button class="kb-btn" id="backfillRealBtn" onclick="runTenancyDocBackfill(false)" style="flex:1; background:var(--accent); color:white; border-color:var(--accent);" disabled>⚡ Run for real</button>
@@ -3320,19 +3320,21 @@ Body: ${bodyText}`;
         return div.innerHTML;
     }
 
-    // Pre-filter for the backfill: does this email look like a SIGNED
-    // tenancy agreement / AST (vs a non-tenancy doc that happens to be
-    // sent through an e-sign platform)?
+    // Pre-filter for the backfill: does this email look like a FULLY
+    // SIGNED, COMPLETED tenancy agreement / AST?
     //
-    // Two gates:
+    // Three gates (all must pass):
     //  1. Sender must be a recognised e-signing platform — the Gmail
-    //     search query already enforces this, but we re-check defensively
-    //     in case Gmail's search behaves unexpectedly.
-    //  2. Subject must match a tenancy/AST/lease pattern AND must NOT
-    //     contain an excluded keyword (proof of residency, council tax,
-    //     utility, etc.). The subject heuristic catches the vast majority
-    //     of false positives — utility forms and proof-of-residency emails
-    //     don't say "AST" or "tenancy agreement" in the subject.
+    //     search query already enforces this, but we re-check defensively.
+    //  2. Subject must mention a tenancy doc type (AST / tenancy / lease /
+    //     deed of guarantee / guarantor agreement) AND must NOT contain
+    //     an excluded keyword (proof of residency, council tax, utility,
+    //     right to rent, ID check, referencing).
+    //  3. Subject must indicate the COMPLETION stage. Adobe Sign sends
+    //     ~5 emails per document (initial send → each signer's partial
+    //     signing → reminders → final "Signed and Filed!"). We only want
+    //     the last one. Without this gate the dry run pulled in every
+    //     intermediate notification too.
     //
     // The live label-11 flow does NOT use this filter — Mica may
     // deliberately apply label 11 to a different doc type and we respect
@@ -3360,16 +3362,60 @@ Body: ${bodyText}`;
         /id check/i,
         /referenc(e|ing)/i          // referencing checks
     ];
+    // Completion-stage allowlist — a subject MUST contain at least one
+    // of these to be considered a fully-signed tenancy agreement. Each
+    // pattern represents a common e-sign platform's "all signers done"
+    // notification. Adobe Sign uses "Signed and Filed!"; DocuSign uses
+    // "Completed: <doc>"; some platforms use "fully signed" / "fully
+    // executed" in the subject. Add more here if Kevin spots a
+    // completion email that doesn't match.
+    const _COMPLETION_PATTERNS = [
+        /signed and filed/i,    // Adobe Sign — primary signal
+        /^\s*completed[:\s]/i,  // DocuSign — "Completed: <doc>"
+        /fully signed/i,
+        /fully executed/i,
+        /all parties have signed/i,
+        /agreement complete/i
+    ];
+    // Intermediate-stage denylist — subjects that look "AST-y" but are
+    // partway through the signing flow, not final.
+    const _INTERMEDIATE_PATTERNS = [
+        /sent out for signature/i,           // initial send
+        /signature requested/i,              // initial send
+        /^\s*reminder[:\s]/i,                // reminder chase
+        /please sign/i,                      // signer-facing
+        /awaiting (your )?signature/i,       // signer-facing
+        /\bsigned\b(?!.*\b(and filed|completed|fully)\b)/i  // "X has signed" partial — but allow "signed and filed"
+    ];
 
     function looksLikeSignedTenancyDoc(email) {
         const sender = (email.fromEmail || email.from || '').toLowerCase();
         const subject = email.subject || '';
 
+        // Gate 1: e-sign platform
         const fromESignPlatform = _ESIGN_SENDERS.some(d => sender.includes(d));
         if (!fromESignPlatform) return false;
 
+        // Gate 2: tenancy-flavoured subject (allow + deny)
         if (_TENANCY_SUBJECT_EXCLUSIONS.some(p => p.test(subject))) return false;
         if (!_TENANCY_SUBJECT_PATTERNS.some(p => p.test(subject))) return false;
+
+        // Gate 3: completion stage
+        const isCompletion = _COMPLETION_PATTERNS.some(p => p.test(subject));
+        if (!isCompletion) return false;
+
+        // Belt-and-braces: even if a completion phrase appears, reject
+        // if any intermediate pattern is present (some Adobe Sign
+        // "Reminder: Signed and Filed!" edge cases could otherwise slip
+        // through). The completion check has already required the
+        // positive signal; this just stops false positives.
+        const hasIntermediate = _INTERMEDIATE_PATTERNS.some(p => p.test(subject));
+        // Intermediate "X has signed" is allowed only when the
+        // completion phrase is also present — that means it's the
+        // final "fully signed and filed" email.
+        if (hasIntermediate && !/signed and filed|fully signed|fully executed|all parties have signed/i.test(subject)) {
+            return false;
+        }
 
         return true;
     }
