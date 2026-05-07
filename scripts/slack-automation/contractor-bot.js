@@ -192,6 +192,17 @@ function shouldHandle(evt) {
     if (evt.subtype && evt.subtype !== 'file_share') return false;
     if (evt.bot_id) return false;
     if (!CONTRACTORS[evt.user]) return false;
+    // Skip messages that look like structured notifications posted by the
+    // dashboard's contractor-job-creator Claude skill (or any other
+    // automation that pastes a formatted job announcement into the
+    // channel). Without this, the bot would interpret those notifications
+    // as contractors reporting new work and create duplicate tasks.
+    const text = evt.text || '';
+    if (
+        text.includes('Sent using @Claude') ||
+        text.includes('🆕 New job added') ||
+        text.includes('View your job list')
+    ) return false;
     return true;
 }
 
@@ -320,7 +331,15 @@ async function handleNewJob(contractor, text, evt, threadTs, env, override) {
         fields[FIELD.attachments] = attachments;
     }
 
-    await createTask(env, fields);
+    const created = await createTask(env, fields);
+    const newTaskId = created && created.records && created.records[0] && created.records[0].id;
+
+    // Remember which task this thread is about, so any future thread reply
+    // (status update, comment, completion) targets THIS task and isn't
+    // fuzzy-matched to an unrelated one.
+    if (newTaskId) {
+        await setThreadTask(env, threadTs, newTaskId);
+    }
 
     // 1. Reply in #property-management thread (visible to the team).
     const channelLines = [
@@ -373,8 +392,18 @@ async function extractNewJobFields(text, env) {
 async function matchProperty(hint, env) {
     if (!hint) return [];
     const all = await listAllProperties(env);
-    const needle = hint.toLowerCase();
-    return all.filter(p => p.name && p.name.toLowerCase().includes(needle));
+    const needle = hint.toLowerCase().trim();
+    // Match if either side contains the other. The contractor's hint can be
+    // either MORE specific than the property record name (e.g. "Unit 4, 13
+    // Chedburgh Place" hint vs "13 Chedburgh Place" record) or LESS specific
+    // (e.g. "Elmdon" hint matching "55 Elmdon Place"). One-way `includes`
+    // misses the more-specific case and was forcing the bot to ask for the
+    // property even when the contractor had given the full address.
+    return all.filter(p => {
+        if (!p.name) return false;
+        const propName = p.name.toLowerCase();
+        return propName.includes(needle) || needle.includes(propName);
+    });
 }
 
 // ─── HANDLER 2: STATUS UPDATE ─────────────────────────────────────────
@@ -391,6 +420,26 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
     let target = override.resolvedTask || null;
     let action = override.action || null;
     let noteText = override.noteText || null;
+
+    // If this is a thread reply AND we have a remembered task for that
+    // thread, use it directly. Only Claude's job here is to classify the
+    // ACTION (completed / in_progress / note) — no fuzzy task matching.
+    // This stops the bot picking a semantically-similar but wrong task
+    // (e.g. "Struggling to schedule" → "Source solicitor and arrange
+    // meeting" when the contractor was clearly talking about the task
+    // logged earlier in the same thread).
+    if (!target && evt.thread_ts) {
+        const threadTaskId = await getThreadTask(env, evt.thread_ts);
+        if (threadTaskId) {
+            const threadTask = openTasks.find(t => t.id === threadTaskId);
+            if (threadTask) {
+                const match = await matchStatusUpdate(text, [threadTask], env);
+                target = threadTask;
+                action = match.action;
+                noteText = match.noteText;
+            }
+        }
+    }
 
     if (!target) {
         const match = await matchStatusUpdate(text, openTasks, env);
@@ -681,6 +730,27 @@ async function setPendingState(env, slackUserId, state) {
 async function clearPendingState(env, slackUserId) {
     if (!env.STATE) return;
     await env.STATE.delete(`pending:${slackUserId}`);
+}
+
+// ─── THREAD → TASK MAPPING ────────────────────────────────────────────
+// When the bot creates a task in response to a message in a thread, it
+// remembers `thread_ts → task_id`. When the contractor later replies in
+// that same thread (e.g. "ran into delays" or "done"), the bot uses
+// the remembered task directly instead of asking Claude to guess which
+// of the contractor's open jobs the message is about. Stops the bot
+// from fuzzy-matching to a totally unrelated task.
+const THREAD_TASK_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
+async function setThreadTask(env, threadTs, taskId) {
+    if (!env.STATE || !threadTs || !taskId) return;
+    await env.STATE.put(`thread:${threadTs}`, taskId, {
+        expirationTtl: THREAD_TASK_TTL_SECONDS,
+    });
+}
+
+async function getThreadTask(env, threadTs) {
+    if (!env.STATE || !threadTs) return null;
+    return await env.STATE.get(`thread:${threadTs}`);
 }
 
 // ─── AIRTABLE REST API ────────────────────────────────────────────────
