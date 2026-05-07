@@ -67,6 +67,11 @@
 
     const S8_THRESHOLD_DAYS = 62;
 
+    // Reconciled transactions before this date aren't trustworthy.
+    // Both rent owed and payments are calculated from this cutoff
+    // (or tenancy start, whichever is later).
+    const DATA_START = new Date('2025-04-01');
+
     // Compute the rent statement for a single tenancy.
     // Returns a structured object with every component of the maths.
     function computeRentStatement(tenancy, tenantType, today) {
@@ -83,19 +88,21 @@
             return { applicable: false, reason: 'No rent amount set' };
         }
 
+        const effectiveStart = tenStart > DATA_START ? tenStart : DATA_START;
         const dailyRent = monthlyRent / 31;
-        const daysSinceStart = Math.floor((today - tenStart) / 86400000);
+        const daysSinceStart = Math.floor((today - effectiveStart) / 86400000);
         const totalRentOwed = dailyRent * daysSinceStart;
 
-        // All reconciled transactions linked to this tenancy
+        // Reconciled transactions linked to this tenancy since the effective start
         const payments = [];
         let totalRentPaid = 0;
         for (const tx of allTransactions) {
             if (!getField(tx, F.txReconciled)) continue;
             if (!txLinkedToTenancy(tx, tenancy.id)) continue;
-            const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
             const dateStr = String(getField(tx, F.txDate) || '');
             const txDate = dateStr ? new Date(dateStr) : null;
+            if (txDate && txDate < effectiveStart) continue;
+            const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
             payments.push({
                 date: txDate,
                 dateStr: dateStr.slice(0, 10),
@@ -106,13 +113,14 @@
         payments.sort((a, b) => (a.date || 0) - (b.date || 0));
 
         const balance = totalRentOwed - totalRentPaid;
-        const daysInArrears = balance > 0 ? Math.round(balance / dailyRent) : Math.round(balance / dailyRent);
+        const daysInArrears = Math.round(balance / dailyRent);
         const s8Ready = daysInArrears >= S8_THRESHOLD_DAYS;
 
         return {
             applicable: true,
             tenantType: tenantType || 'Unknown',
             tenStart,
+            effectiveStart,
             monthlyRent,
             dailyRent,
             daysSinceStart,
@@ -241,9 +249,10 @@
                     <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px">Tenancy details</div>
                     <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
                         <div>Tenancy start:</div><div>${fmtDate(s.tenStart)}</div>
+                        <div>Calculation from:</div><div>${fmtDate(s.effectiveStart)} ${s.effectiveStart > s.tenStart ? '<span style="color:var(--text-muted)">(data cutoff)</span>' : '<span style="color:var(--text-muted)">(tenancy start)</span>'}</div>
                         <div>Monthly rent:</div><div>${fmtMoney(s.monthlyRent)}</div>
                         <div>Daily rent:</div><div>${fmtMoney(s.dailyRent)}</div>
-                        <div>Days since start:</div><div>${s.daysSinceStart.toLocaleString()}</div>
+                        <div>Days since calc start:</div><div>${s.daysSinceStart.toLocaleString()}</div>
                         <div>Tenant type:</div><div>${escHtml(s.tenantType)}</div>
                     </div>
                 </div>
@@ -401,6 +410,7 @@
             } else {
                 console.log('Type:', stmt.tenantType);
                 console.log('Monthly rent:', fmtMoney(stmt.monthlyRent));
+                console.log('Effective start:', stmt.effectiveStart.toISOString().slice(0,10));
                 console.log('Days since start:', stmt.daysSinceStart);
                 console.log('Total owed:', fmtMoney(stmt.totalRentOwed));
                 console.log('Total paid:', fmtMoney(stmt.totalRentPaid), `(${stmt.payments.length} payments)`);
