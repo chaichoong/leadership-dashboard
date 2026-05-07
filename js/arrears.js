@@ -102,7 +102,7 @@
             const dateStr = String(getField(tx, F.txDate) || '');
             const txDate = dateStr ? new Date(dateStr) : null;
             if (txDate && txDate < effectiveStart) continue;
-            const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
+            const amount = txDisplayAmount(tx);
             const description = String(getField(tx, F.txDescription) || '').trim();
             const accountAlias = String(getField(tx, F.txAccountAlias) || '').trim();
             const vendor = String(getField(tx, F.txVendor) || '').trim();
@@ -818,7 +818,7 @@
             const txDate = dateStr ? new Date(dateStr) : null;
             if (!txDate) continue;
             if (txDate < startDate || txDate > endDate) continue;
-            const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
+            const amount = txDisplayAmount(tx);
             const desc = String(getField(tx, F.txDescription) || '').trim();
             payments.push({ date: txDate, dateStr: dateStr.slice(0, 10), amount, description: desc });
             totalPaid += amount;

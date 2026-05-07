@@ -173,6 +173,24 @@
     function getField(rec, fieldId) {
         return rec.fields?.[fieldId];
     }
+    window.getField = getField;
+
+    // Split-aware amount: returns the correct per-portion amount for any
+    // transaction, whether it is a normal record, a split parent, or a
+    // split child. Split parents keep their original bulk **GBP; this
+    // helper divides by Split Count (or uses Split Override if set).
+    function txDisplayAmount(rec) {
+        const splitCount = Number(getField(rec, F.txSplitCount)) || 1;
+        if (splitCount > 1) {
+            const override = getField(rec, F.txSplitOverride);
+            if (override != null && override !== '') return Number(override) || 0;
+            return (Number(getField(rec, F.txAmount)) || 0) / splitCount;
+        }
+        const report = getField(rec, F.txReportAmount);
+        if (report != null && report !== '') return Number(report) || 0;
+        return Number(getField(rec, F.txAmount)) || 0;
+    }
+    window.txDisplayAmount = txDisplayAmount;
 
     // Active businesses only — every user-facing business picker/filter calls this
     // so deactivated businesses (Active checkbox unticked in Airtable) disappear from
