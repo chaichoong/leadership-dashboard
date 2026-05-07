@@ -309,7 +309,7 @@
     }
     function rsAccountItems() {
         return (allAccounts || []).map(r => {
-            const name = getField(r, 'fldBrjlbeaKFm3WzQ') || getField(r, 'fld5icN3XqcYr09LT') || r.id;
+            const name = getField(r, F.accountAlias) || r.id;
             return { id: r.id, name: String(name) };
         });
     }
