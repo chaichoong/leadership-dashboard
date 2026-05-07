@@ -430,7 +430,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-07-1100 comment-count-ungated</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-07-1300 self-test-comment-dm</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -984,6 +984,61 @@ async function testAllSlackRecipients(){
   out.innerHTML=head+rows+note;
 }
 window.testAllSlackRecipients=testAllSlackRecipients;
+// DM yourself a comment-style Slack message anchored to a real Task ID,
+// so you can reply in the thread and test the WHOLE inbound chain solo
+// — without needing another team member to send the DM.
+//
+// Round-trip:
+//   1. Click → worker DMs your Slack with action='comment' + a real Task ID
+//   2. You reply in the DM thread
+//   3. contractor-bot receives the message.im event, fetches the parent
+//      message, extracts the Task ID, posts your reply as a comment on
+//      that Airtable task, and reacts ✅ on your reply
+//   4. Refresh the dashboard — the comment appears on the chosen task
+//      prefixed "[via Slack — Kevin Brittain]"
+//
+// Pick a real, open task you own so the comment lands somewhere
+// observable; if nothing matches, fall back to any first task.
+async function testSelfCommentDm(){
+  const out=document.getElementById('slackTestResult');
+  if(!out)return;
+  if(!currentUser||!currentUser.email){out.innerHTML='<span style="color:var(--danger)">Not signed in — pick your identity first.</span>';return}
+  const myEmail=currentUser.email;
+  // Pick a task: first preference = a non-completed task you assigned/created.
+  // Fallback: any non-completed task.
+  let task=(allTasks||[]).find(t=>t.status!=='Completed'&&!t.someDay&&(t.assigneeEmail===myEmail||t.createdByEmail===myEmail));
+  if(!task)task=(allTasks||[]).find(t=>t.status!=='Completed'&&!t.someDay);
+  if(!task){out.innerHTML='<span style="color:var(--danger)">No open task to anchor the test against. Create one first.</span>';return}
+  const slackTarget=slackEmailFor(myEmail);
+  const note=slackTarget!==myEmail?` (Slack: ${escHtml(slackTarget)})`:'';
+  out.innerHTML=`<span style="color:var(--info)">⟳ Sending self-test comment DM anchored to <code>${escHtml(task.id)}</code>${note}…</span>`;
+  let res,body;
+  try{
+    res=await fetch(SLACK_NOTIFY_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        recipientEmail:slackTarget,
+        taskName:task.name||'Task',
+        taskId:task.id,
+        actorName:'(self-test)',
+        action:'comment',
+        commentText:`Self-test comment at ${new Date().toLocaleTimeString()} — reply in this thread to confirm the inbound chain works.`,
+      }),
+    });
+    body=await res.text();
+  }catch(e){
+    out.innerHTML=`<span style="color:var(--danger)">✗ Network error: ${escHtml((e&&e.message)||'unknown')}</span>`;
+    return;
+  }
+  let parsed=null;try{parsed=JSON.parse(body)}catch(_){}
+  if(res.ok&&parsed&&parsed.ok){
+    out.innerHTML=`<span style="color:var(--success);font-weight:600">✓ DM sent</span> — open Slack, find the new DM, reply in its thread.<div style="margin-top:6px;font-size:11px;color:var(--text-secondary)"><b>What to check next:</b><br>• ✅ reaction appears on your reply within ~3s → contractor-bot received it<br>• Refresh this dashboard → the reply shows as a comment on <code>${escHtml(task.id)}</code> prefixed <code>[via Slack — ${escHtml(currentUser.name||currentUser.email)}]</code><br>• If nothing happens, check Cloudflare → contractor-bot → Logs for <code>[event_callback]</code> lines</div>`;
+  }else{
+    out.innerHTML=`<span style="color:var(--danger);font-weight:600">✗ Failed (${res.status})</span><div style="margin-top:4px;font-size:11px">${escHtml((parsed&&parsed.error)||body||(res.status+' '+res.statusText))}</div>`;
+  }
+}
+window.testSelfCommentDm=testSelfCommentDm;
 function renderSyncPill(){
   const pill=document.getElementById('syncPill');if(!pill)return;
   if(_saveState.pending>0){
@@ -1041,6 +1096,7 @@ function syncPillClick(){
           <button class="btn btn-sm" onclick="testSlackNotification()" style="font-size:11px;flex:1">Send test DM</button>
           <button class="btn btn-sm" onclick="testAllSlackRecipients()" style="font-size:11px;flex:1" title="Run a Slack lookup for every team member, no DMs sent">Check all recipients</button>
         </div>
+        <button class="btn btn-sm" onclick="testSelfCommentDm()" style="font-size:11px;width:100%;margin-top:4px" title="DM yourself a comment-style Slack message anchored to a real task. Reply in the thread to test the inbound flow end-to-end without needing another team member.">Send myself a test comment DM (for thread-reply testing)</button>
         <div id="slackTestResult" style="font-size:11px;color:var(--text-secondary)"></div>
       </div>
     </details>
