@@ -372,9 +372,12 @@
                 const oldId = Array.isArray(oldRaw) ? (oldRaw[0]?.id || oldRaw[0] || '') : '';
                 const newId = Array.isArray(value) ? (value[0] || '') : '';
                 if (oldId !== newId) {
+                    const oldUnit = localTx ? localTx.fields[F.txUnit] : undefined;
+                    const oldProperty = localTx ? localTx.fields[F.txProperty] : undefined;
+                    await rsCascadeFromTenancy(txId, newId, inputId);
                     rsRefreshAllOpenBreakdowns();
                     const label = !newId ? 'Tenancy removed from payment' : 'Payment moved to different tenancy';
-                    rsShowUndoToast(txId, fieldId, oldRaw, label);
+                    rsShowUndoToast(txId, fieldId, oldRaw, label, oldUnit, oldProperty);
                 }
             }
         } catch (err) {
@@ -383,6 +386,67 @@
         }
     }
     window.rsSaveTxField = rsSaveTxField;
+
+    // When tenancy changes, auto-populate unit and property from the tenancy record.
+    async function rsCascadeFromTenancy(txId, newTenancyId, tenancyInputId) {
+        const prefix = tenancyInputId.replace(/tenancy$/, '');
+        const unitInput = document.getElementById(prefix + 'unit');
+        const propertyInput = document.getElementById(prefix + 'property');
+        const localTx = allTransactions.find(t => t.id === txId);
+
+        if (!newTenancyId) {
+            // Cleared: blank out unit and property
+            if (unitInput) unitInput.value = '';
+            if (propertyInput) propertyInput.value = '';
+            const fields = {};
+            fields[F.txUnit] = [];
+            fields[F.txProperty] = [];
+            await rsPatchTxField(txId, F.txUnit, []);
+            await rsPatchTxField(txId, F.txProperty, []);
+            if (localTx) {
+                localTx.fields[F.txUnit] = [];
+                localTx.fields[F.txProperty] = [];
+            }
+            return;
+        }
+
+        const tenancy = allTenancies.find(t => t.id === newTenancyId);
+        if (!tenancy) return;
+
+        // Resolve unit
+        const unitRaw = getField(tenancy, F.tenUnit);
+        const unitId = Array.isArray(unitRaw) ? unitRaw[0] : (unitRaw || '');
+        const unitRefRaw = getField(tenancy, F.tenUnitRef);
+        const unitName = Array.isArray(unitRefRaw) ? unitRefRaw[0] : (unitRefRaw || '');
+
+        // Resolve property via unit → property chain
+        const unitPropertyField = 'fldUJNRGgzgyAwwjt';
+        let propRecId = '';
+        let propName = '';
+        if (unitId) {
+            const unitRec = (allRentalUnits || []).find(u => u.id === unitId);
+            if (unitRec) {
+                const propLinked = unitRec.fields[unitPropertyField];
+                propRecId = Array.isArray(propLinked) ? propLinked[0] : (propLinked || '');
+            }
+            const propNameRaw = getField(tenancy, F.tenProperty);
+            propName = Array.isArray(propNameRaw) ? propNameRaw[0] : (propNameRaw || '');
+        }
+
+        // Update DOM inputs
+        if (unitInput) unitInput.value = unitName;
+        if (propertyInput) propertyInput.value = propName;
+
+        // Save both to Airtable
+        const unitValue = unitId ? [unitId] : [];
+        const propValue = propRecId ? [propRecId] : [];
+        await rsPatchTxField(txId, F.txUnit, unitValue);
+        await rsPatchTxField(txId, F.txProperty, propValue);
+        if (localTx) {
+            localTx.fields[F.txUnit] = unitId ? [{ id: unitId }] : [];
+            localTx.fields[F.txProperty] = propRecId ? [{ id: propRecId }] : [];
+        }
+    }
 
     // Refresh every open breakdown panel and its parent summary row.
     // Called after tenancy reassignment so both source and destination update.
@@ -423,12 +487,12 @@
 
     // Undo toast for rent statement actions
     let _rsUndoTimer = null;
-    function rsShowUndoToast(txId, fieldId, oldValue, label) {
+    function rsShowUndoToast(txId, fieldId, oldValue, label, oldUnit, oldProperty) {
         const existing = document.getElementById('rsUndoToast');
         if (existing) existing.remove();
         if (_rsUndoTimer) clearTimeout(_rsUndoTimer);
 
-        window._rsLastUndo = { txId, fieldId, oldValue };
+        window._rsLastUndo = { txId, fieldId, oldValue, oldUnit, oldProperty };
         const toast = document.createElement('div');
         toast.id = 'rsUndoToast';
         toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-sidebar);color:#fff;padding:10px 14px;border-radius:8px;box-shadow:var(--shadow-lg);font-size:13px;z-index:2000;display:flex;align-items:center;gap:12px;max-width:400px';
@@ -449,6 +513,15 @@
             await rsPatchTxField(action.txId, action.fieldId, action.oldValue || []);
             const localTx = allTransactions.find(t => t.id === action.txId);
             if (localTx) localTx.fields[action.fieldId] = action.oldValue || [];
+            // Restore cascaded unit and property if they were captured
+            if (action.oldUnit !== undefined) {
+                await rsPatchTxField(action.txId, F.txUnit, action.oldUnit || []);
+                if (localTx) localTx.fields[F.txUnit] = action.oldUnit || [];
+            }
+            if (action.oldProperty !== undefined) {
+                await rsPatchTxField(action.txId, F.txProperty, action.oldProperty || []);
+                if (localTx) localTx.fields[F.txProperty] = action.oldProperty || [];
+            }
             renderArrearsSection('arrearsPipelineContainer');
             if (typeof showToast === 'function') showToast('Change undone', 'success');
         } catch (err) {
