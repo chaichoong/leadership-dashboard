@@ -52,12 +52,21 @@
     const sleep = ms => new Promise(r => setTimeout(r, ms));
 
     function resolveTenancy(unitNumber, propertyMatch) {
-        const ten = allTenancies.find(t => {
+        // Prefer ACTIVE tenancies. Properties often have older "Former" or
+        // unstatused tenancies left around (e.g. Serco prior to IMMO LTD on
+        // 42 Elmdon) which silently win Array.find() if iteration order
+        // happens to put them first. Filter to active before matching.
+        const matches = allTenancies.filter(t => {
             const propName = String(getField(t, F.tenProperty)?.[0] || '');
             const unitRef = String(getField(t, F.tenUnitRef)?.[0] || '');
             return propName.toLowerCase().includes(propertyMatch.toLowerCase())
                 && new RegExp(`\\bunit\\s*${unitNumber}\\b`, 'i').test(unitRef);
         });
+        const active = matches.filter(t => {
+            if (typeof isTenancyActive !== 'function') return true;
+            return isTenancyActive(getField(t, F.tenPayStatus));
+        });
+        const ten = (active.length > 0 ? active : matches)[0];
         if (!ten) return null;
         const unitLink = getField(ten, F.tenUnit);
         const unitId = Array.isArray(unitLink)
@@ -231,4 +240,117 @@
     }
 
     window.adminRepairSplits = adminRepairSplits;
+
+    // ══════════════════════════════════════════
+    // Close former tenancies on units that have a newer active tenancy.
+    //
+    // The trigger for this tool: 42 Elmdon Place had both Serco (started
+    // 2024-08-13) AND IMMO LTD (started 2025-10/11) tenancies on every
+    // unit, neither with a Pay Status of "Former". Auto-match logic
+    // sometimes routed payments to the older Serco tenancy, leaving the
+    // active IMMO LTD tenancy with no May payments and false-flagged as CFV.
+    //
+    // Rule: if a unit has more than one tenancy whose Pay Status counts
+    // as active, the OLDER one(s) get Pay Status set to "Former".
+    // ══════════════════════════════════════════
+    async function closeFormerTenancies() {
+        if (typeof PAT !== 'string' || !PAT) {
+            console.error('No PAT — log in first.'); return;
+        }
+        if (typeof isTenancyActive !== 'function') {
+            console.error('isTenancyActive helper not available'); return;
+        }
+
+        // Find the "Former" select option ID on the Tenancy Pay Status field
+        const meta = await fetch(`https://api.airtable.com/v0/meta/bases/${BASE_ID}/tables`, {
+            headers: { 'Authorization': 'Bearer ' + PAT }
+        }).then(r => r.json());
+        const tenanciesTable = meta.tables?.find(t => t.id === TABLES.tenancies);
+        if (!tenanciesTable) {
+            console.error('Could not find Tenancies table in metadata. TABLES.tenancies =', TABLES.tenancies);
+            return;
+        }
+        const payStatusField = tenanciesTable.fields.find(f => f.id === F.tenPayStatus);
+        if (!payStatusField) {
+            console.error('Could not find Pay Status field on Tenancies table');
+            return;
+        }
+        const formerOption = payStatusField.options?.choices?.find(c =>
+            c.name.toLowerCase() === 'former' || c.name.toLowerCase() === 'ended');
+        if (!formerOption) {
+            console.error('No "Former" option on Pay Status field. Available:',
+                payStatusField.options?.choices?.map(c => c.name));
+            return;
+        }
+        console.log(`Will mark older duplicates as "${formerOption.name}" (id ${formerOption.id})`);
+
+        // Group active tenancies by unit id
+        const byUnit = new Map();
+        allTenancies.forEach(t => {
+            if (!isTenancyActive(getField(t, F.tenPayStatus))) return;
+            const unitLink = getField(t, F.tenUnit);
+            const unitId = Array.isArray(unitLink) ? (unitLink[0]?.id || unitLink[0]) : (unitLink?.id || unitLink);
+            if (!unitId) return;
+            if (!byUnit.has(unitId)) byUnit.set(unitId, []);
+            byUnit.get(unitId).push(t);
+        });
+
+        // For every unit with more than one active tenancy, mark all but the
+        // newest (latest start date) as Former.
+        const toClose = [];
+        byUnit.forEach((tenants, unitId) => {
+            if (tenants.length < 2) return;
+            tenants.sort((a, b) => {
+                const da = new Date(getField(a, F.tenStartDate) || 0).getTime() || 0;
+                const db = new Date(getField(b, F.tenStartDate) || 0).getTime() || 0;
+                return db - da; // newest first
+            });
+            const [keep, ...older] = tenants;
+            older.forEach(t => toClose.push({
+                id: t.id,
+                surname: getField(t, F.tenSurname),
+                unit: getField(t, F.tenUnitRef)?.[0],
+                start: getField(t, F.tenStartDate),
+                kept: { id: keep.id, surname: getField(keep, F.tenSurname), start: getField(keep, F.tenStartDate) },
+            }));
+        });
+
+        if (toClose.length === 0) {
+            console.log('No duplicate active tenancies found. Nothing to close.');
+            return;
+        }
+        console.log(`Found ${toClose.length} older duplicate active tenancies to close:`);
+        console.table(toClose.map(t => ({ id: t.id, surname: t.surname, unit: t.unit, start: t.start, will_keep: `${t.kept.surname} (${t.kept.start})` })));
+
+        // PATCH each — set Pay Status to Former
+        const ok = [], fail = [];
+        for (const t of toClose) {
+            const r = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${t.id}?returnFieldsByFieldId=true`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: { [F.tenPayStatus]: { id: formerOption.id } } })
+            });
+            if (r.ok) {
+                ok.push(t.id);
+                // Update local cache so detection reflects immediately
+                const localTen = allTenancies.find(x => x.id === t.id);
+                if (localTen) {
+                    if (!localTen.fields) localTen.fields = {};
+                    localTen.fields[F.tenPayStatus] = { id: formerOption.id, name: formerOption.name };
+                }
+                console.log(`  ✓ ${t.surname} | ${t.unit} → Former`);
+            } else {
+                const j = await r.json().catch(() => ({}));
+                fail.push({ id: t.id, error: j.error?.message || r.status });
+                console.error(`  ✗ ${t.id}:`, j.error?.message || r.status);
+            }
+        }
+        console.log(`\nDone: ${ok.length} closed, ${fail.length} failed.`);
+        if (typeof renderCFVTab === 'function') {
+            try { renderCFVTab(); } catch (e) { console.warn(e); }
+        }
+        return { closed: ok, failed: fail };
+    }
+
+    window.closeFormerTenancies = closeFormerTenancies;
 })();

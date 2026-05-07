@@ -689,8 +689,13 @@
             const name = (getField(t, F.tenantName) || '').toLowerCase();
             if (name && name.length >= 3 && text.includes(name)) { r.tenantName = getField(t, F.tenantName); r.tenantId = t.id; }
         });
-        // Match against tenancy references
+        // Match against tenancy references — ONLY active tenancies (Former
+        // tenancies left without an end-date were silently winning matches
+        // on units that had a newer current tenancy, e.g. the Serco/IMMO LTD
+        // dupes on 42 Elmdon Place. Filter ensures we never auto-match a
+        // payment to a former tenancy, regardless of array iteration order.
         allTenancies.forEach(ten => {
+            if (!isTenancyActive(getField(ten, F.tenPayStatus))) return;
             const surname = (getField(ten, F.tenSurname) || '').toLowerCase();
             if (surname && surname.length >= 3 && text.includes(surname)) {
                 r.tenancyLabel = getField(ten, F.tenRef) || '';
