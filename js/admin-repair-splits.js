@@ -99,9 +99,10 @@
     }
 
     async function diagnoseWritability() {
-        // Use the first IMMO target — patch Reconciled to its current value
-        // (no-op functionally but exercises the write path).
-        const probe = FIXES[0][0];
+        // Probe against a CHILD record (Split Count = 1) so the Split
+        // Transactions automation doesn't fire and confound the result.
+        // Uses a non-linked, simple-typed field (Reconciled checkbox).
+        const probe = 'recSYgDIpHCbojuXy'; // 28CP Split 2 of 5 — child
         const before = await fetchTx(probe);
         if (!before) {
             return { ok: false, reason: 'GET failed for probe record — record may be deleted or PAT lacks read access' };
@@ -112,13 +113,21 @@
         if (!patchResult.ok) {
             return { ok: false, reason: `PATCH rejected with HTTP ${patchResult.status}: ${patchResult.body?.error?.message || 'unknown'}` };
         }
-        // Immediate read-back (within ~ms — too fast for any automation)
+        // Inspect the PATCH response itself first — Airtable returns the
+        // full record state in the response body. If our field isn't there,
+        // it means the value was rejected silently.
+        const patchEcho = patchResult.body?.fields?.[F.txReconciled] === true;
+        // Then settle for 500ms and re-read (eventual consistency cushion)
+        await sleep(500);
         const immediate = await fetchTx(probe);
         const immediateVal = immediate?.fields?.[F.txReconciled] === true;
-        // Restore original value
+        // Restore original value regardless of result
         await patchTx(probe, { [F.txReconciled]: wasReconciled });
+        if (patchEcho !== targetVal) {
+            return { ok: false, reason: `PATCH response itself echoes Reconciled=${patchEcho} (we sent ${targetVal}). Airtable rejected the write silently — likely PAT lacks data.records:write on this base, OR the field has a token-scope-blocking config.`, evidence: patchResult.body };
+        }
         if (immediateVal !== targetVal) {
-            return { ok: false, reason: `PAT cannot write Reconciled field — PATCH returned 200 but value didn't change (was ${wasReconciled}, set ${targetVal}, immediate read shows ${immediateVal})` };
+            return { ok: false, reason: `PATCH echoed correctly (Reconciled=${targetVal}) but 500ms-later read shows ${immediateVal}. An automation reverted the field within 500ms — investigate base automations.`, evidence: { patchEcho, immediate: immediate?.fields } };
         }
         return { ok: true };
     }
