@@ -7096,19 +7096,21 @@ function renderJobs(){
     {name:'Rob Jackson', email:'rjm320@hotmail.com',                   key:'rob',  colour:'#a855f7'},
     {name:'Roy Lavin',   email:'roy.lavin1978@gmail.com',              key:'roy',  colour:'#14b8a6'},
   ];
-  const contractorEmails=new Set(CONTRACTORS.map(c=>c.email));
-  // Pool = all open tasks assigned to one of the three contractors.
-  const pool=allTasks.filter(t=>t.status!=='Completed'&&contractorEmails.has(t.assigneeEmail));
+  // Email matching is intentionally case-insensitive — Airtable doesn't
+  // guarantee case stability on collaborator emails, so a "Gary@..." vs
+  // "gary@..." mismatch would silently hide tasks from the tab.
+  const contractorEmailsLc=new Set(CONTRACTORS.map(c=>c.email.toLowerCase()));
+  const pool=allTasks.filter(t=>t.status!=='Completed' && t.assigneeEmail && contractorEmailsLc.has(t.assigneeEmail.toLowerCase()));
   // Header tabs with counts (matches teamBar count for the same person).
   let tabs=CONTRACTORS.map(c=>{
-    const n=pool.filter(t=>t.assigneeEmail===c.email).length;
+    const n=pool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===c.email.toLowerCase()).length;
     const active=activeContractor===c.name;
     return `<button class="view-tab ${active?'active':''}" onclick="setActiveContractor('${c.name}')" style="${active?`border-bottom:2px solid ${c.colour};`:''}">
       <span class="avatar avatar-${c.key}" style="width:20px;height:20px;font-size:11px;margin-right:6px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff">${c.name[0]}</span>${escHtml(c.name)} <span style="color:var(--text-secondary);font-weight:400">(${n})</span>
     </button>`;
   }).join('');
-  const activeEmail=(CONTRACTORS.find(c=>c.name===activeContractor)||{}).email;
-  const list=pool.filter(t=>t.assigneeEmail===activeEmail);
+  const activeEmail=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();
+  const list=pool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===activeEmail);
   // Contractor tasks don't carry due dates — so status should always
   // read as Upcoming (unless Completed / Approval). parseTask already
   // derives that for the UI; here we also persist it back to Airtable
