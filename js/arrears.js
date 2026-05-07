@@ -246,40 +246,38 @@
         if (!getTenancyStartDate(tenancy)) return false;
 
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
-        const tolerance = 2; // days after the due-day before re-evaluating
-
-        // Decide which calendar month to evaluate.
-        //   today ≥ this-month-due-day + tolerance → evaluate THIS month
-        //   else                                   → evaluate PREVIOUS month
-        const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
-        dueThisMonth.setHours(0, 0, 0, 0);
-        const daysSinceDue = Math.floor((today - dueThisMonth) / 86400000);
-
-        let evalY, evalM;
-        if (daysSinceDue >= tolerance) {
-            evalY = today.getFullYear();
-            evalM = today.getMonth();
-        } else {
-            const prev = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-            evalY = prev.getFullYear();
-            evalM = prev.getMonth();
-        }
+        const tolerance = 2; // days after the due-day before flagging
 
         // Tenancy hasn't started yet (future move-in) → don't flag.
         const tenStart = getTenancyStartDate(tenancy);
         if (tenStart && tenStart > today) return false;
 
-        // Did ANY reconciled payment land for this tenancy in the eval calendar month?
-        const paid = allTransactions.some(tx => {
+        // Helper — did ANY reconciled tx land for this tenancy in (year, month)?
+        const paidIn = (y, m) => allTransactions.some(tx => {
             if (!getField(tx, F.txReconciled)) return false;
             if (!txLinkedToTenancy(tx, tenancy.id)) return false;
             const txDateStr = getField(tx, F.txDate);
             if (!txDateStr) return false;
             const txDate = new Date(txDateStr);
-            return txDate.getFullYear() === evalY && txDate.getMonth() === evalM;
+            return txDate.getFullYear() === y && txDate.getMonth() === m;
         });
 
-        return !paid;
+        // Rule 1: paid this calendar month → in payment, regardless of due-day position.
+        // (Kevin's stated rule: "If a payment comes in for any day within the current
+        //  calendar month, the tenancy is marked as in payment.")
+        if (paidIn(today.getFullYear(), today.getMonth())) return false;
+
+        // Rule 2: no current-month payment, and we're past due-day + tolerance → CFV.
+        const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
+        dueThisMonth.setHours(0, 0, 0, 0);
+        const daysSinceDue = Math.floor((today - dueThisMonth) / 86400000);
+        if (daysSinceDue >= tolerance) return true;
+
+        // Rule 3: no current-month payment, still pre-(due + tolerance) — status carries
+        // from previous calendar month. Paid prev month → in payment; missed → still CFV.
+        const prevY = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
+        const prevM = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
+        return !paidIn(prevY, prevM);
     }
 
     // ── Mica task config ──
