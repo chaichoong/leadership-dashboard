@@ -83,6 +83,12 @@ All JS files share a global scope (loaded as plain `<script>` tags). Key globals
 - `F`, `TABLES`, `INV`, `REC`, `PS` — field/table/record ID constants in `config.js`
 - Helper functions (`getField`, `fmt`, `escHtml`, `expandableCard`, etc.) in `shared.js`
 
+## Verification Before Declaring Done
+
+- Always run a final audit pass after implementing changes — check for self-introduced bugs, badge/count mismatches, and filter logic errors
+- After UI changes that affect counts/badges, verify the count logic accounts for dismissed/filtered items, not just raw detected items
+- When fixing bugs across multiple functions, consider whether a global interceptor/wrapper would be more robust than per-function patches
+
 ## Deployment
 
 The git repo IS the source of truth. Edit files directly here.
@@ -181,12 +187,6 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - When filtering linked record fields, filter by record ID, not ARRAYJOIN display names
 - Watch for pagination when bulk-creating records to avoid duplicates
 - Bulk operations on invoices/transactions: never mark legitimate unpaid items as paid without explicit reconcile logic
-
-## Verification Before Declaring Done
-
-- Always run a final audit pass after implementing changes — check for self-introduced bugs, badge/count mismatches, and filter logic errors
-- After UI changes that affect counts/badges, verify the count logic accounts for dismissed/filtered items, not just raw detected items
-- When fixing bugs across multiple functions, consider whether a global interceptor/wrapper would be more robust than per-function patches
 
 ## Deployment & Git
 

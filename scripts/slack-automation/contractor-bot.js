@@ -186,17 +186,22 @@ async function serveR2File(key, env) {
 
 function shouldHandle(evt) {
     if (!evt || evt.type !== 'message') return false;
-    if (evt.channel !== PROPERTY_CHANNEL_ID) return false;
-    // Ignore message subtypes (edits, joins, channel_join, bot messages, etc),
-    // EXCEPT 'file_share' — that's how Slack signals a message with files.
-    if (evt.subtype && evt.subtype !== 'file_share') return false;
     if (evt.bot_id) return false;
+    if (evt.subtype && evt.subtype !== 'file_share') return false;
+    if (!evt.user) return false;
+    // BRANCH 1 — DM thread reply.
+    // The dashboard sends comment-DMs to collaborators; users can reply in
+    // the thread of those DMs and we post their reply as a comment on the
+    // task. We accept ANY DM thread reply here; downstream code verifies
+    // the parent was actually a comment-DM (Task ID embedded in context
+    // block) before doing anything.
+    if (evt.channel_type === 'im' && evt.thread_ts && evt.text) return true;
+    // BRANCH 2 — contractor channel message (legacy / primary flow).
+    if (evt.channel !== PROPERTY_CHANNEL_ID) return false;
     if (!CONTRACTORS[evt.user]) return false;
-    // Skip messages that look like structured notifications posted by the
-    // dashboard's contractor-job-creator Claude skill (or any other
-    // automation that pastes a formatted job announcement into the
-    // channel). Without this, the bot would interpret those notifications
-    // as contractors reporting new work and create duplicate tasks.
+    // Skip structured notifications posted by the dashboard's
+    // contractor-job-creator skill — without this we'd interpret them as
+    // a contractor reporting new work.
     const text = evt.text || '';
     if (
         text.includes('Sent using @Claude') ||
@@ -209,6 +214,11 @@ function shouldHandle(evt) {
 // ─── ROUTING ──────────────────────────────────────────────────────────
 
 async function routeMessage(evt, env) {
+    // DM thread-reply flow — handled by a separate code path so the
+    // contractor-channel logic below stays untouched.
+    if (evt.channel_type === 'im' && evt.thread_ts) {
+        return handleDmThreadReply(evt, env);
+    }
     const contractor = CONTRACTORS[evt.user];
     const text = (evt.text || '').trim();
     const threadTs = evt.thread_ts || evt.ts;
@@ -238,6 +248,216 @@ async function routeMessage(evt, env) {
                 `• *My list* — ask "what's on my list" to see your open jobs`
             );
     }
+}
+
+// ─── HANDLER 0: DM THREAD REPLY → AIRTABLE COMMENT ────────────────────
+//
+// When the dashboard DMs a collaborator about a comment / assignment,
+// the user can reply in the thread to add their own comment on the
+// task. We:
+//   1. Fetch the parent message to extract the embedded Task ID.
+//   2. Resolve the Slack user to a TEAM member (handles slackEmail
+//      overrides like Gary's two-email setup).
+//   3. POST the reply to Airtable's comments API on that task,
+//      prefixed "[via Slack — <Name>]" so it's attributable.
+//   4. Fan out a comment-DM to every other collaborator + assignee.
+//   5. React ✅ on the user's reply to confirm receipt.
+
+// TEAM map mirrors the dashboard's TEAM constant — used for Airtable↔Slack
+// email translation when a member's two emails differ.
+const COMMENT_TEAM = [
+    { name: 'Kevin Brittain',   email: 'kevin@runpreneur.org.uk' },
+    { name: 'Mica Albovias',    email: 'micaa.work@gmail.com' },
+    { name: 'Ericamae Atenta',  email: 'atentaerica@gmail.com' },
+    { name: 'Gary Marsh',       email: 'gkm.property.maintenance@outlook.com', slackEmail: 'roofline@outlook.com' },
+    { name: 'Rob Jackson',      email: 'rjm320@hotmail.com' },
+    { name: 'Roy Lavin',        email: 'roy.lavin1978@gmail.com' },
+];
+function commentSlackEmailFor(airtableEmail) {
+    if (!airtableEmail) return airtableEmail;
+    const m = COMMENT_TEAM.find(t => t.email.toLowerCase() === airtableEmail.toLowerCase());
+    return (m && m.slackEmail) || airtableEmail;
+}
+function commentTeamBySlackEmail(slackEmail) {
+    if (!slackEmail) return null;
+    const lc = slackEmail.toLowerCase();
+    return COMMENT_TEAM.find(t =>
+        t.email.toLowerCase() === lc ||
+        (t.slackEmail && t.slackEmail.toLowerCase() === lc)
+    ) || null;
+}
+
+async function handleDmThreadReply(evt, env) {
+    // 1. Look up the parent DM — find the embedded Task ID.
+    const parentRes = await fetch(
+        `https://slack.com/api/conversations.replies?channel=${encodeURIComponent(evt.channel)}&ts=${encodeURIComponent(evt.thread_ts)}&limit=1`,
+        { headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN } }
+    );
+    const parent = await parentRes.json();
+    if (!parent.ok || !parent.messages || !parent.messages.length) {
+        console.warn('[dm-thread] could not fetch parent', parent.error || parent);
+        return;
+    }
+    const taskId = extractTaskIdFromMessage(parent.messages[0]);
+    if (!taskId) {
+        console.warn('[dm-thread] no Task ID in parent — ignoring', parent.messages[0].ts);
+        return;
+    }
+
+    // 2. Resolve the Slack user → Airtable email + display name.
+    const userInfoRes = await fetch(
+        'https://slack.com/api/users.info?user=' + encodeURIComponent(evt.user),
+        { headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN } }
+    );
+    const userInfo = await userInfoRes.json();
+    if (!userInfo.ok) {
+        console.warn('[dm-thread] users.info failed', userInfo.error);
+        return;
+    }
+    const slackEmail = userInfo.user && userInfo.user.profile && userInfo.user.profile.email;
+    const slackDisplay = userInfo.user && userInfo.user.real_name;
+    const teamMember = commentTeamBySlackEmail(slackEmail);
+    const actorName = (teamMember && teamMember.name) || slackDisplay || slackEmail || 'Slack user';
+    const actorAirtableEmail = (teamMember && teamMember.email) || slackEmail || '';
+
+    // 3. Strip Slack mrkdwn from the reply text.
+    const replyText = cleanSlackText(evt.text);
+    if (!replyText) return;
+
+    // 4. POST as a comment on the Airtable task.
+    const commentBody = `[via Slack — ${actorName}] ${replyText}`;
+    const commentRes = await fetch(
+        `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TASKS}/${taskId}/comments`,
+        {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + env.AIRTABLE_PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: commentBody }),
+        }
+    );
+    if (!commentRes.ok) {
+        const errText = await commentRes.text();
+        console.error('[dm-thread] Airtable comment POST failed', commentRes.status, errText);
+        try {
+            await fetch(SLACK_POST_URL, {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN, 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({
+                    channel: evt.channel,
+                    thread_ts: evt.thread_ts,
+                    text: '⚠️ Couldn\'t post your reply as a comment on the task. Airtable returned ' + commentRes.status + '.',
+                }),
+            });
+        } catch (_) {}
+        return;
+    }
+
+    // 5. Fetch the task to get name + collaborators for fan-out.
+    const taskRes = await fetch(
+        `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TASKS}/${taskId}?returnFieldsByFieldId=true`,
+        { headers: { Authorization: 'Bearer ' + env.AIRTABLE_PAT } }
+    );
+    if (!taskRes.ok) {
+        console.error('[dm-thread] task fetch failed', await taskRes.text());
+        return;
+    }
+    const task = await taskRes.json();
+    const fields = task.fields || {};
+    const taskName = fields[FIELD.taskName] || '(Untitled)';
+    const recipients = new Set();
+    const collabs = fields[FIELD.collaborators] || [];
+    if (Array.isArray(collabs)) collabs.forEach(c => { if (c && c.email) recipients.add(c.email) });
+    const assignee = fields[FIELD.assignee];
+    if (assignee && assignee.email) recipients.add(assignee.email);
+    if (actorAirtableEmail) recipients.delete(actorAirtableEmail);
+
+    // 6. Fan out a 'comment' DM to each remaining recipient.
+    for (const email of recipients) {
+        try {
+            const slackTarget = commentSlackEmailFor(email);
+            await dispatchCommentDm(env, slackTarget, { taskName, taskId, actorName, commentText: replyText });
+        } catch (e) {
+            console.warn('[dm-thread] fan-out failed for', email, e);
+        }
+    }
+
+    // 7. ✅ reaction so the user knows we received the reply.
+    try {
+        await fetch('https://slack.com/api/reactions.add', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: evt.channel, timestamp: evt.ts, name: 'white_check_mark' }),
+        });
+    } catch (_) { /* non-critical */ }
+}
+
+function extractTaskIdFromMessage(msg) {
+    if (msg.blocks && Array.isArray(msg.blocks)) {
+        for (const blk of msg.blocks) {
+            const els = (blk.elements || []);
+            for (const el of els) {
+                const t = (el && el.text) || '';
+                const m = t.match(/Task ID:\s*`?(rec[A-Za-z0-9]{14})`?/);
+                if (m) return m[1];
+            }
+            const txt = (blk.text && blk.text.text) || '';
+            const m2 = txt.match(/Task ID:\s*`?(rec[A-Za-z0-9]{14})`?/);
+            if (m2) return m2[1];
+        }
+    }
+    const m = (msg.text || '').match(/Task ID:\s*`?(rec[A-Za-z0-9]{14})`?/);
+    return m ? m[1] : null;
+}
+
+function cleanSlackText(text) {
+    if (!text) return '';
+    let s = String(text);
+    s = s.replace(/<@[A-Z0-9]+(?:\|[^>]+)?>/g, '');
+    s = s.replace(/<!channel>/g, '@channel').replace(/<!here>/g, '@here');
+    s = s.replace(/<([^|>]+)\|([^>]+)>/g, '$2');
+    s = s.replace(/<([^>]+)>/g, '$1');
+    return s.trim();
+}
+
+async function dispatchCommentDm(env, recipientEmail, payload) {
+    const lookupRes = await fetch(
+        SLACK_LOOKUP_URL + '?email=' + encodeURIComponent(recipientEmail),
+        { headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN } }
+    );
+    const lookup = await lookupRes.json();
+    if (!lookup.ok || !lookup.user) {
+        console.warn('[fan-out] no Slack user for', recipientEmail, lookup.error);
+        return;
+    }
+    const userId = lookup.user.id;
+    const escape = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const headerLine = '*' + escape(payload.actorName) + '* left a comment on a task you collaborate on:';
+    const cleanComment = String(payload.commentText || '').trim().slice(0, 500);
+    const text = headerLine + '\n\n• ' + escape(payload.taskName) +
+        (cleanComment ? '\n\n> ' + escape(cleanComment).split('\n').join('\n> ') : '');
+    const blocks = [
+        { type: 'section', text: { type: 'mrkdwn', text: headerLine } },
+        { type: 'section', text: { type: 'mrkdwn', text: '*' + escape(payload.taskName) + '*' } },
+    ];
+    if (cleanComment) {
+        blocks.push({
+            type: 'section',
+            text: { type: 'mrkdwn', text: '> ' + escape(cleanComment).split('\n').join('\n> ') },
+        });
+    }
+    if (payload.taskId) {
+        blocks.push({
+            type: 'context',
+            elements: [
+                { type: 'mrkdwn', text: '💬 Reply in this thread to add a comment on the task.' },
+                { type: 'mrkdwn', text: 'Task ID: `' + escape(payload.taskId) + '`' },
+            ],
+        });
+    }
+    await fetch(SLACK_POST_URL, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + env.SLACK_BOT_TOKEN, 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ channel: userId, text, blocks }),
+    });
 }
 
 // ─── INTENT CLASSIFICATION ────────────────────────────────────────────
