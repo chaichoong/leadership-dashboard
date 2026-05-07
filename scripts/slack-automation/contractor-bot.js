@@ -1408,12 +1408,18 @@ function pickFromCandidates(text, candidates, nameOf) {
 // Parses a contractor's reply to a confirmation prompt as 'yes' / 'no' /
 // null (didn't understand). Tolerant of surrounding text + Slack's
 // auto-appended "Sent using @Claude" footer.
+//
+// Deliberately conservative on the "no" side: words like "don't",
+// "skip", "wrong" are NOT treated as cancels on their own, because
+// they're easy false-positives ("I don't know", "let me skip ahead",
+// "that's wrong, the property is X"). Better to ask again than to
+// cancel a contractor's intent because of an off-hand phrase. They
+// can always type a clean "no" or "cancel" to back out.
 function parseYesNo(text) {
     const t = String(text || '').toLowerCase();
-    // Word-boundary match — handles "yes please", "no thanks", "go ahead",
-    // "cancel that", and ignores the Slack-appended "*Sent using*" footer.
     if (/\b(yes|y|yeah|yep|yup|sure|confirm|confirmed|correct|go ahead|do it|ok|okay|👍)\b/.test(t)) return 'yes';
-    if (/\b(no|n|nope|nah|cancel|stop|don't|skip|wrong|👎)\b/.test(t)) return 'no';
+    if (/\b(no|n|nope|nah|cancel)\b/.test(t)) return 'no';
+    if (/👎/.test(t)) return 'no';
     return null;
 }
 
