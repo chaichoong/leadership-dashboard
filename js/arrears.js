@@ -250,13 +250,14 @@
 
     // ── Searchable dropdown builder (mirrors reconciliation.js pattern) ──
     let _rsDlCounter = 0;
-    function rsDropdown(id, items, selectedId, width) {
+    function rsDropdown(id, items, selectedId, width, onchangeAttr) {
         const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
         const dlId = 'rsdl_' + (++_rsDlCounter);
         const selected = sorted.find(i => i.id === selectedId);
         const val = selected ? selected.name : '';
         const style = `font-size:10px;padding:2px 4px;width:${width};border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)`;
-        return `<datalist id="${dlId}">${sorted.map(i => `<option value="${escHtml(i.name)}" data-id="${i.id}">`).join('')}</datalist><input id="${id}" list="${dlId}" value="${escHtml(val)}" style="${style}" autocomplete="off" placeholder="Search...">`;
+        const onChange = onchangeAttr ? ` onchange="${onchangeAttr}"` : '';
+        return `<datalist id="${dlId}">${sorted.map(i => `<option value="${escHtml(i.name)}" data-id="${i.id}">`).join('')}</datalist><input id="${id}" list="${dlId}" value="${escHtml(val)}" style="${style}" autocomplete="off" placeholder="Search..."${onChange}>`;
     }
 
     function rsResolveId(inputId) {
@@ -338,11 +339,11 @@
         return res.json();
     }
 
-    // Save a single editable cell on blur/change
     async function rsSaveTxField(txId, fieldId, inputId, isLinked) {
         const input = document.getElementById(inputId);
         if (!input) return;
         const indicator = input.parentElement.querySelector('.rs-save-indicator');
+        if (indicator) { indicator.textContent = '⏳'; indicator.style.color = 'var(--text-muted)'; }
         try {
             let value;
             if (isLinked) {
@@ -363,7 +364,6 @@
             }
             if (indicator) { indicator.textContent = '✓'; indicator.style.color = 'var(--success)'; }
             setTimeout(() => { if (indicator) indicator.textContent = ''; }, 2000);
-            if (fieldId === F.txTenancy) renderArrearsSection('arrearsPipelineContainer');
         } catch (err) {
             if (indicator) { indicator.textContent = '✗'; indicator.style.color = 'var(--danger)'; }
             if (typeof showToast === 'function') showToast('Save failed: ' + err.message, 'error');
@@ -386,21 +386,21 @@
                 const bg = i % 2 ? 'background:var(--bg-surface-2)' : '';
                 const roStyle = 'font-size:10px;color:var(--text-secondary)';
                 const accountName = accountLookup[p.accountLinkId] || p.accountAlias || '';
+                const saveFn = (field) => `rsSaveTxField('${p.txId}','${field}','${prefix}${field === F.txCategory ? 'cat' : field === F.txSubCategory ? 'subcat' : field === F.txTenancy ? 'tenancy' : field === F.txUnit ? 'unit' : 'property'}',true)`;
                 return `<tr style="${bg}">
                     <td style="${cellStyle};color:var(--text-muted);font-size:11px;width:24px">${i + 1}</td>
                     <td style="${cellStyle};width:80px;${roStyle}">${escHtml(p.dateStr)}</td>
                     <td style="${cellStyle};width:160px;${roStyle};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px" title="${escHtml(p.description)}">${escHtml(p.description)}</td>
                     <td style="${cellStyle};width:90px;${roStyle}">${escHtml(accountName)}</td>
                     <td style="${cellStyle};text-align:right;width:70px;font-variant-numeric:tabular-nums;${roStyle}">${fmtMoney(p.amount)}</td>
-                    <td style="${cellStyle};width:110px">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:120px">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:140px">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'unit', rsUnitItems(), p.unitId, '90px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'property', rsPropertyItems(), p.propertyId, '90px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:40px"><button onclick="event.stopPropagation();rsSaveAllTxFields('${p.txId}','${prefix}')" style="font-size:9px;padding:2px 6px;border:1px solid var(--accent);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent);cursor:pointer;white-space:nowrap">Save</button></td>
+                    <td style="${cellStyle};width:110px">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px', saveFn(F.txCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:120px">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px', saveFn(F.txSubCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:140px">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px', saveFn(F.txTenancy))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'unit', rsUnitItems(), p.unitId, '90px', saveFn(F.txUnit))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'property', rsPropertyItems(), p.propertyId, '90px', saveFn(F.txProperty))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
                 </tr>`;
             }).join('')
-            : '<tr><td colspan="11" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
+            : '<tr><td colspan="10" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
 
         const balanceColour = s.balance > 0 ? 'var(--danger)' : 'var(--success)';
         const balanceLabel = s.balance > 0 ? 'Tenant owes' : 'Tenant in credit';
@@ -445,7 +445,6 @@
                             <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Tenancy</th>
                             <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Unit</th>
                             <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Property</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px"></th>
                         </tr></thead>
                         <tbody>${paymentRows}</tbody>
                     </table>
@@ -594,43 +593,6 @@
             console.groupEnd();
         });
     }
-
-    // ── Save all editable fields on a single tx row ──
-    async function rsSaveAllTxFields(txId, prefix) {
-        const btn = event && event.target;
-        if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
-        const fields = {};
-        const catId = rsResolveId(prefix + 'cat');
-        if (catId) fields[F.txCategory] = [catId]; else fields[F.txCategory] = [];
-        const subCatId = rsResolveId(prefix + 'subcat');
-        if (subCatId) fields[F.txSubCategory] = [subCatId]; else fields[F.txSubCategory] = [];
-        const tenancyId = rsResolveId(prefix + 'tenancy');
-        if (tenancyId) fields[F.txTenancy] = [tenancyId]; else fields[F.txTenancy] = [];
-        const unitId = rsResolveId(prefix + 'unit');
-        if (unitId) fields[F.txUnit] = [unitId]; else fields[F.txUnit] = [];
-        const propertyId = rsResolveId(prefix + 'property');
-        if (propertyId) fields[F.txProperty] = [propertyId]; else fields[F.txProperty] = [];
-
-        try {
-            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields, typecast: true }),
-            });
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const updated = await res.json();
-            const localTx = allTransactions.find(t => t.id === txId);
-            if (localTx && updated.fields) Object.assign(localTx.fields, updated.fields);
-            if (btn) { btn.textContent = 'Saved'; btn.style.background = 'var(--success-bg)'; btn.style.color = 'var(--success)'; btn.style.borderColor = 'var(--success)'; }
-            if (typeof showToast === 'function') showToast('Transaction updated', 'success');
-            setTimeout(() => renderArrearsSection('arrearsPipelineContainer'), 1500);
-        } catch (err) {
-            if (btn) { btn.textContent = 'Failed'; btn.style.background = 'var(--danger-bg)'; btn.style.color = 'var(--danger)'; }
-            if (typeof showToast === 'function') showToast('Save failed: ' + err.message, 'error');
-        }
-        if (btn) setTimeout(() => { btn.disabled = false; btn.textContent = 'Save'; btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = ''; }, 3000);
-    }
-    window.rsSaveAllTxFields = rsSaveAllTxFields;
 
     // ── Printable Rent Statement ──
     function rsOpenPrintStatement(tenancyId) {
