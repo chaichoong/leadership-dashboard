@@ -455,24 +455,8 @@
                 ctx.tasks=tasksForKpi;
                 let value=runKpiComputeCode(code,ctx);
                 if(value==null)continue;
-                // If the compute returned a detail with transaction lists,
-                // recalculate the primary value so DD reversals are netted
-                // off. This keeps the headline KPI, progress bar, and
-                // persisted Airtable value in sync with the drill-down.
-                const _kd=ctx._lastKpiDetail;
-                if(_kd&&_kd.detail&&_kd.detail.rolling){
-                    const rd=_kd.detail.rolling;
-                    if(rd.costTxs&&rd.costTxs.length){
-                        const netCosts=rd.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
-                        const netRev=rd.revTxs&&rd.revTxs.length?rd.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0):(rd.revenue||0);
-                        rd.costs=netCosts;rd.revenue=netRev;rd.net=netRev-netCosts;
-                        value=rd.net;
-                        // Also update the top-level rolling value used for
-                        // the headline display on the strategic KPI row.
-                        if(typeof _kd.rolling==='number') _kd.rolling=value;
-                        if(typeof _kd.value==='number') _kd.value=value;
-                    }
-                }
+                // The compute code already handles DD reversals correctly
+                // in its totals (costs += -amt). No recalculation needed.
                 const rounded=Math.round(value*100)/100;
                 local.kpiCurrent=rounded;
                 local.kpiReturn=ctx._lastKpiDetail||null;
@@ -672,18 +656,9 @@
             label=`${monthNames[m]||m} ${y}`;
         }
         if(!detail){el.style.display='none';return}
-        // Recalculate headline totals from the actual transaction lists so that
-        // reversals (e.g. DD reversals) are netted off and the headline matches
-        // the per-row breakdown the user sees in the table.
-        if(detail.costTxs&&detail.costTxs.length){
-            detail.costs=detail.costTxs.reduce((s,t)=>s+(-Number(t.amount)||0),0);
-        }
-        if(detail.revTxs&&detail.revTxs.length){
-            detail.revenue=detail.revTxs.reduce((s,t)=>s+(Number(t.amount)||0),0);
-        }
-        if(detail.costs!=null&&detail.revenue!=null){
-            detail.net=detail.revenue-detail.costs;
-        }
+        // The compute code already handles reversals correctly in its totals.
+        // Only recalculate from costTxs/revTxs when the list is NOT truncated,
+        // because truncated lists are capped at MAX_TX (60) and would undercount.
         // Task-completion KPIs have no transactions — render a tasks list instead.
         const displayHint0=(kRet&&kRet.display)||{};
         if(displayHint0.kind==='taskCompletion'){
@@ -742,9 +717,16 @@
                 };
                 return `<tr style="border-top:1px solid #f1f5f9;${rowBg}">${columns.map((c,i)=>cellFor(c,i===1)).join('')}</tr>`;
             }).join('');
+            // Use the authoritative total from the compute (detail.costs/revenue)
+            // rather than recalculating from the visible rows, which may be
+            // truncated (capped at 60 per bucket).
+            const totalCount=kind==='revenue'?(detail.revCount||list.length):(detail.costCount||list.length);
+            const authTotal=kind==='revenue'?(detail.revenue||0):(detail.costs||0);
+            const isTruncated=totalCount>list.length;
+            const truncNote=isTruncated?` <span style="font-size:10px;color:var(--text-muted)">(showing ${list.length} of ${totalCount})</span>`:'';
             return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-                    <div style="font-weight:600;color:${color}">${title} · ${list.length} tx · Net ${fmtAmt(kind==='revenue'?(list.reduce((s,t)=>s+(Number(t.amount)||0),0)):(list.reduce((s,t)=>s+(-Number(t.amount)||0),0)))}</div>
+                    <div style="font-weight:600;color:${color}">${title} · ${totalCount} tx · Total ${fmtAmt(authTotal)}${truncNote}</div>
                 </div>
                 <table style="width:100%;border-collapse:collapse;font-size:12px">
                     <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">
