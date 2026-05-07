@@ -1806,9 +1806,14 @@
                         // These do real Airtable writes-then-deletes and external system pings.
                         // Marked `active: true` so they DON'T run automatically on every sync —
                         // only when the user hits Re-run in the drawer.
+                        //
+                        // PAT-dependent checks return `warn` (amber) when the PAT isn't
+                        // configured rather than `fail` (red) — failing should mean "we
+                        // tried and Airtable rejected us", not "we couldn't even try".
                         {
                             name: 'Tasks table create+delete (Mica assignee)', kind: 'automation', active: true,
                             run: async () => {
+                                if (!getAirtablePat()) return { status: 'warn', detail: 'Skipped — set the Airtable PAT in Settings to enable this check' };
                                 const r = await healthCheckAirtable();
                                 return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
                             }
@@ -1816,6 +1821,7 @@
                         {
                             name: 'Tasks table create+delete (Kevin assignee)', kind: 'automation', active: true,
                             run: async () => {
+                                if (!getAirtablePat()) return { status: 'warn', detail: 'Skipped — set the Airtable PAT in Settings to enable this check' };
                                 const r = await healthCheckKevinTask();
                                 return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
                             }
@@ -1823,6 +1829,7 @@
                         {
                             name: 'Tenancy doc-link write (Tenancies table)', kind: 'automation', active: true,
                             run: async () => {
+                                if (!getAirtablePat()) return { status: 'warn', detail: 'Skipped — set the Airtable PAT in Settings to enable this check' };
                                 const r = await healthCheckTenancies();
                                 return { status: r.ok ? 'pass' : 'fail', detail: r.detail };
                             }
