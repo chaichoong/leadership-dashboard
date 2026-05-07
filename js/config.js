@@ -232,6 +232,7 @@
         tenUnitRef:       'fldql2nyQlPfkPP4p',  // Unit Reference (lookup)
         tenProperty:      'fldxfIa0W1nqCbLo2',  // Property (lookup)
         tenStartDate:     'fld2rPXwwV8dXb1zF',  // Tenancy Start Date
+        tenEndDate:       'fldwHhhKAq4f1nY9e',  // Tenancy End Date
         // Tenant contact fields
         tenantPhone:      'fldraHUkWfqo4olLF',  // Contact Number
         tenantEmail:      'fldybEduFY3DWWTfT',  // Email Address

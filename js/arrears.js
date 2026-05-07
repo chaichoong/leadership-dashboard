@@ -224,9 +224,274 @@
         return !paidIn(prevY, prevM);
     }
 
-    // No-op: the old arrears engine is removed. This stub prevents
-    // errors from dashboard.js which calls runArrearsEngine on load.
-    async function runArrearsEngine() {}
+    // ══════════════════════════════════════════
+    // UC RECURRING TASK AUTOMATION
+    // ══════════════════════════════════════════
+    //
+    // On every dashboard load, scans UC tenancies that are "In Payment"
+    // or "CFV Actioned" and ensures a task exists for 7 days before the
+    // next rent due date. Pauses when status flips to CFV/Potential CFV.
+    // Stops when tenancy has an end date in the past.
+
+    const UC_TASK = {
+        assigneeEmail:  'micaa.work@gmail.com',
+        collaborators:  [
+            { email: 'kevin@runpreneur.org.uk' },
+            { email: 'atentaerica@gmail.com' },
+        ],
+        priority:       'Urgent',
+        status:         'Upcoming',
+        timeEstimate:   '15 min',
+        hardDeadline:   true,
+    };
+
+    const ELIGIBLE_PAY_STATUSES = ['In Payment', 'CFV Actioned'];
+
+    function ucTaskDateKey(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    function ucCalcNextDueDate(dueDay, today) {
+        if (!dueDay || dueDay < 1 || dueDay > 31) return null;
+        const y = today.getFullYear();
+        const m = today.getMonth();
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const clampedDay = Math.min(dueDay, daysInMonth);
+        let nextDue = new Date(y, m, clampedDay);
+        if (nextDue <= today) {
+            const nextM = m + 1;
+            const daysInNext = new Date(y, nextM + 1, 0).getDate();
+            nextDue = new Date(y, nextM, Math.min(dueDay, daysInNext));
+        }
+        return nextDue;
+    }
+
+    function ucCalcTaskDueDate(rentDueDate) {
+        const d = new Date(rentDueDate);
+        d.setDate(d.getDate() - 7);
+        return d;
+    }
+
+    function ucTaskNameForTenancy(tenantName, rent, rentDueDate) {
+        const dueStr = rentDueDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        return `UC verification: ${tenantName}, £${rent.toFixed(2)} due ${dueStr}`;
+    }
+
+    function ucTaskDescription(tenantName, rent, rentDueDate, unitName, propertyName) {
+        const dueStr = rentDueDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        return [
+            'UC Payment Verification (7 days before due)',
+            '',
+            `Tenant: ${tenantName}`,
+            `Expected rent: £${rent.toFixed(2)}`,
+            `Rent due date: ${dueStr}`,
+            unitName ? `Unit: ${unitName}` : '',
+            propertyName ? `Property: ${propertyName}` : '',
+            '',
+            `UC Office: ${UC_CONTACT.phone}`,
+            '',
+            'Confirm with UC:',
+            '1. The payment is scheduled',
+            '2. It is being processed',
+            '3. It will be paid to the landlord',
+            '',
+            'If delayed, suspended, or reduced: escalate to Kevin immediately.',
+        ].filter(Boolean).join('\n');
+    }
+
+    async function syncUCRecurringTasks() {
+        if (!PAT || !allTenancies?.length || !allTenants?.length) return;
+
+        const tenantLookup = buildTenantLookup();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const candidates = [];
+        for (const ten of allTenancies) {
+            const tenantType = getTenantTypeForTenancy(ten, tenantLookup);
+            if (tenantType !== 'Universal Credit') continue;
+
+            const statusRaw = getField(ten, F.tenPayStatus);
+            const statusName = typeof statusRaw === 'object' && statusRaw ? statusRaw.name : statusRaw;
+            if (!ELIGIBLE_PAY_STATUSES.includes(statusName)) continue;
+
+            const endDateStr = getField(ten, F.tenEndDate);
+            if (endDateStr) {
+                const endDate = new Date(endDateStr);
+                if (!isNaN(endDate.getTime()) && endDate < today) continue;
+            }
+
+            const tenStatusRaw = getField(ten, F.tenStatus);
+            if (!isTenantStatusActive(tenStatusRaw)) continue;
+
+            const dueDay = Number(getField(ten, F.tenDueDay)) || 0;
+            if (!dueDay) continue;
+
+            const nextDue = ucCalcNextDueDate(dueDay, today);
+            if (!nextDue) continue;
+
+            const taskDue = ucCalcTaskDueDate(nextDue);
+
+            const tenant = getTenantForTenancy(ten, tenantLookup);
+            const tenantName = tenant ? (getField(tenant, F.tenantName) || 'Unknown') : 'Unknown';
+            const rent = Number(getField(ten, F.tenRent)) || 0;
+
+            const unitRef = getField(ten, F.tenUnitRef);
+            const unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+            const propRef = getField(ten, F.tenProperty);
+            const propertyName = Array.isArray(propRef) ? propRef[0] : (propRef || '');
+
+            const unitRaw = getField(ten, F.tenUnit);
+            const unitId = Array.isArray(unitRaw) ? (unitRaw[0]?.id || unitRaw[0]) : '';
+            const tenantId = tenant ? tenant.id : '';
+
+            const linkedTenantRaw = getField(ten, F.tenLinkedTenant);
+            const linkedTenantId = Array.isArray(linkedTenantRaw)
+                ? (typeof linkedTenantRaw[0] === 'string' ? linkedTenantRaw[0] : linkedTenantRaw[0]?.id)
+                : '';
+
+            candidates.push({
+                tenancyId: ten.id,
+                tenantId: linkedTenantId,
+                unitId,
+                tenantName,
+                rent,
+                nextDue,
+                taskDue,
+                unitName,
+                propertyName,
+            });
+        }
+
+        if (!candidates.length) return;
+
+        const existingTasks = await ucFetchExistingTasks(candidates.map(c => c.tenancyId));
+
+        let created = 0;
+        for (const c of candidates) {
+            const candidateTaskDueKey = ucTaskDateKey(c.taskDue);
+            const already = existingTasks.some(t => {
+                const linked = t.fields?.['fldmne4RYJU22ICub'];
+                if (!linked) return false;
+                const ids = Array.isArray(linked) ? linked.map(x => x?.id || x) : [];
+                if (!ids.includes(c.tenancyId)) return false;
+                const tDue = t.fields?.['fld7XP8w8kbxfETV4'] || '';
+                return tDue === candidateTaskDueKey;
+            });
+
+            if (already) continue;
+
+            try {
+                if (created > 0) await new Promise(r => setTimeout(r, 500));
+                await ucCreateTask(c);
+                created++;
+            } catch (err) {
+                console.warn('UC task create failed for', c.tenantName, err);
+            }
+        }
+
+        if (created > 0) {
+            console.log(`UC tasks: created ${created} new verification tasks`);
+        }
+    }
+
+    async function ucFetchExistingTasks(tenancyIds) {
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}?returnFieldsByFieldId=true&pageSize=100`
+            + `&fields[]=fldgFjGBw6bTKJFCD&fields[]=fld7XP8w8kbxfETV4&fields[]=fldmne4RYJU22ICub&fields[]=fldx4qCw17UfrKpaN`;
+
+        const all = [];
+        let offset = '';
+        do {
+            const sep = url.includes('?') ? '&' : '?';
+            const fetchUrl = offset ? `${url}${sep}offset=${offset}` : url;
+            const resp = await fetch(fetchUrl, {
+                headers: { 'Authorization': `Bearer ${PAT}` },
+            });
+            if (!resp.ok) break;
+            const data = await resp.json();
+            if (data.records) all.push(...data.records);
+            offset = data.offset || '';
+        } while (offset);
+
+        return all.filter(t => {
+            const name = t.fields?.['fldgFjGBw6bTKJFCD'] || '';
+            return name.startsWith('UC verification:');
+        });
+    }
+
+    async function ucCreateTask(c) {
+        const taskName = ucTaskNameForTenancy(c.tenantName, c.rent, c.nextDue);
+        const description = ucTaskDescription(c.tenantName, c.rent, c.nextDue, c.unitName, c.propertyName);
+        const dueDateStr = ucTaskDateKey(c.taskDue);
+
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`;
+
+        const createResp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fields: {
+                    'fldgFjGBw6bTKJFCD': taskName,
+                    'fldELMncVJYPDRJNc': { email: UC_TASK.assigneeEmail },
+                },
+                typecast: true,
+            }),
+        });
+
+        if (!createResp.ok) {
+            const err = await createResp.json();
+            throw new Error(err.error?.message || createResp.statusText);
+        }
+
+        const created = await createResp.json();
+        const recordId = created.id;
+
+        const patchFields = {
+            'fldRGhBQViKZKtkQ6': description,
+            'fld10VzzbiNNgRmIi': UC_TASK.timeEstimate,
+            'fld7XP8w8kbxfETV4': dueDateStr,
+            'fldx4qCw17UfrKpaN': UC_TASK.status,
+            'fldS21RwmwOqt71LI': UC_TASK.priority,
+            'fldZKzIxgyrQ8CG8a': UC_TASK.hardDeadline,
+            'fldcq3t6uAPgWSOP8': UC_TASK.collaborators,
+            'fldmne4RYJU22ICub': [c.tenancyId],
+        };
+
+        if (c.tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [c.tenantId];
+        if (c.unitId) patchFields['fldEW648YtTZ6j01n'] = [c.unitId];
+
+        if (c.unitId && allRentalUnits?.length) {
+            const unitRec = allRentalUnits.find(u => u.id === c.unitId);
+            if (unitRec) {
+                const propLinked = unitRec.fields?.['fldUJNRGgzgyAwwjt'] || unitRec.fields?.[F.unitProperty];
+                const propId = Array.isArray(propLinked) ? (propLinked[0]?.id || propLinked[0]) : propLinked;
+                if (propId) patchFields['fldZKFvEpJ6NZeFKz'] = [propId];
+            }
+        }
+
+        const patchResp = await fetch(`${url}/${recordId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: patchFields, typecast: true }),
+        });
+
+        if (!patchResp.ok) {
+            console.warn('UC task patch failed for', c.tenantName);
+        }
+
+        return recordId;
+    }
+
+    async function runArrearsEngine() {
+        try {
+            await syncUCRecurringTasks();
+        } catch (err) {
+            console.warn('UC recurring task sync failed:', err);
+        }
+    }
 
     // ══════════════════════════════════════════
     // RENT STATEMENTS VIEW
