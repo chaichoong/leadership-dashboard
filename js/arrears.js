@@ -105,13 +105,30 @@
             const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
             const description = String(getField(tx, F.txDescription) || '').trim();
             const accountAlias = String(getField(tx, F.txAccountAlias) || '').trim();
+            const vendor = String(getField(tx, F.txVendor) || '').trim();
+            const categoryRaw = getField(tx, F.txCategory);
+            const categoryId = Array.isArray(categoryRaw) ? (categoryRaw[0]?.id || categoryRaw[0] || '') : '';
+            const subCatRaw = getField(tx, F.txSubCategory);
+            const subCatId = Array.isArray(subCatRaw) ? (subCatRaw[0]?.id || subCatRaw[0] || '') : '';
+            const unitRaw = getField(tx, F.txUnit);
+            const unitId = Array.isArray(unitRaw) ? (unitRaw[0]?.id || unitRaw[0] || '') : '';
+            const propertyRaw = getField(tx, F.txProperty);
+            const propertyId = Array.isArray(propertyRaw) ? (propertyRaw[0]?.id || propertyRaw[0] || '') : '';
+            const accountLinkRaw = getField(tx, F.txAccountLink);
+            const accountLinkId = Array.isArray(accountLinkRaw) ? (accountLinkRaw[0]?.id || accountLinkRaw[0] || '') : '';
             payments.push({
                 txId: tx.id,
                 date: txDate,
                 dateStr: dateStr.slice(0, 10),
                 amount,
                 description,
+                vendor,
                 accountAlias,
+                categoryId,
+                subCatId,
+                unitId,
+                propertyId,
+                accountLinkId,
             });
             totalRentPaid += amount;
         }
@@ -231,25 +248,143 @@
     }
     window.toggleRentBreakdown = toggleRentBreakdown;
 
+    // ── Searchable dropdown builder (mirrors reconciliation.js pattern) ──
+    let _rsDlCounter = 0;
+    function rsDropdown(id, items, selectedId, width) {
+        const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
+        const dlId = 'rsdl_' + (++_rsDlCounter);
+        const selected = sorted.find(i => i.id === selectedId);
+        const val = selected ? selected.name : '';
+        const style = `font-size:10px;padding:2px 4px;width:${width};border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)`;
+        return `<datalist id="${dlId}">${sorted.map(i => `<option value="${escHtml(i.name)}" data-id="${i.id}">`).join('')}</datalist><input id="${id}" list="${dlId}" value="${escHtml(val)}" style="${style}" autocomplete="off" placeholder="Search...">`;
+    }
+
+    function rsResolveId(inputId) {
+        const input = document.getElementById(inputId);
+        if (!input || !input.value) return '';
+        const dl = document.getElementById(input.getAttribute('list'));
+        if (!dl) return input.value;
+        const opt = [...dl.options].find(o => o.value === input.value);
+        return opt ? opt.getAttribute('data-id') : '';
+    }
+
+    function rsCatItems() { return (allCategories || []).map(r => ({ id: r.id, name: getField(r, 'fldii4oUzSfmplihO') || '' })); }
+    function rsSubCatItems() { return (allSubCategories || []).map(r => ({ id: r.id, name: getField(r, 'fldO4BTJhFv5EsN6i') || '' })); }
+    function rsTenantItems() {
+        return (allTenants || []).filter(t => {
+            const s = getField(t, F.tenantStatus);
+            return s && (typeof s === 'object' ? s.name === 'Active' : String(s).toLowerCase() === 'active');
+        }).map(t => ({ id: t.id, name: getField(t, F.tenantName) || '' }));
+    }
+    function rsTenancyItems() {
+        return (allTenancies || []).filter(t => isTenantStatusActive(t)).map(t => {
+            const ref = getField(t, F.tenRef) || '';
+            const surname = getField(t, F.tenSurname) || '';
+            return { id: t.id, name: ref ? `${ref} (${surname})` : surname };
+        });
+    }
+    function rsUnitItems() {
+        const seen = new Set(), items = [];
+        (allTenancies || []).forEach(r => {
+            const unitField = getField(r, F.tenUnit);
+            const unitId = Array.isArray(unitField) ? unitField[0] : unitField;
+            const unitRef = getField(r, F.tenUnitRef);
+            const unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+            if (!unitId || seen.has(unitId)) return;
+            seen.add(unitId);
+            items.push({ id: unitId, name: unitName });
+        });
+        return items;
+    }
+    function rsPropertyItems() {
+        const seen = new Set(), items = [];
+        (allTenancies || []).forEach(r => {
+            const prop = getField(r, F.tenProperty);
+            const name = Array.isArray(prop) ? prop[0] : (prop || '');
+            if (!name || seen.has(name)) return;
+            seen.add(name);
+            items.push({ id: name, name });
+        });
+        return items;
+    }
+    function rsAccountItems() {
+        return (allAccounts || []).map(r => {
+            const name = getField(r, 'fldBrjlbeaKFm3WzQ') || getField(r, 'fld5icN3XqcYr09LT') || r.id;
+            return { id: r.id, name: String(name) };
+        });
+    }
+
+    // ── PATCH a single transaction field ──
+    async function rsPatchTxField(txId, fieldId, value) {
+        const fields = {};
+        fields[fieldId] = value;
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields, typecast: true }),
+        });
+        if (!res.ok) throw new Error('PATCH failed: HTTP ' + res.status);
+        return res.json();
+    }
+
+    // Save a single editable cell on blur/change
+    async function rsSaveTxField(txId, fieldId, inputId, isLinked) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        const indicator = input.parentElement.querySelector('.rs-save-indicator');
+        try {
+            let value;
+            if (isLinked) {
+                const resolvedId = rsResolveId(inputId);
+                value = resolvedId ? [resolvedId] : [];
+            } else {
+                value = input.value;
+            }
+            await rsPatchTxField(txId, fieldId, value);
+            const localTx = allTransactions.find(t => t.id === txId);
+            if (localTx) {
+                if (isLinked) {
+                    const resolvedId = rsResolveId(inputId);
+                    localTx.fields[fieldId] = resolvedId ? [{ id: resolvedId }] : [];
+                } else {
+                    localTx.fields[fieldId] = value;
+                }
+            }
+            if (indicator) { indicator.textContent = '✓'; indicator.style.color = 'var(--success)'; }
+            setTimeout(() => { if (indicator) indicator.textContent = ''; }, 2000);
+            if (fieldId === F.txTenancy) renderArrearsSection('arrearsPipelineContainer');
+        } catch (err) {
+            if (indicator) { indicator.textContent = '✗'; indicator.style.color = 'var(--danger)'; }
+            if (typeof showToast === 'function') showToast('Save failed: ' + err.message, 'error');
+        }
+    }
+    window.rsSaveTxField = rsSaveTxField;
+
     function renderBreakdownDetail(entry) {
         const s = entry.stmt;
         const fmtDate = d => d instanceof Date ? d.toISOString().slice(0, 10) : '';
+        const cellStyle = 'padding:4px 4px;vertical-align:middle;position:relative';
+        const indicatorHtml = '<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span>';
 
         const paymentRows = s.payments.length
             ? s.payments.map((p, i) => {
-                const reassignBtn = p.txId
-                    ? `<button onclick="event.stopPropagation();rentStmtReassignTx('${p.txId}','${entry.tenancyId}')" style="font-size:10px;padding:2px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer">Reassign</button>`
-                    : '';
-                return `<tr style="${i % 2 ? 'background:var(--bg-surface-2)' : ''}">
-                    <td style="padding:4px 8px;color:var(--text-muted);font-size:11px">${i + 1}</td>
-                    <td style="padding:4px 8px">${escHtml(p.dateStr)}</td>
-                    <td style="padding:4px 8px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.description)}">${escHtml(p.description || '—')}</td>
-                    <td style="padding:4px 8px;color:var(--text-muted)">${escHtml(p.accountAlias || '—')}</td>
-                    <td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums">${fmtMoney(p.amount)}</td>
-                    <td style="padding:4px 8px;text-align:center">${reassignBtn}</td>
+                const prefix = `rstx_${p.txId}_`;
+                const bg = i % 2 ? 'background:var(--bg-surface-2)' : '';
+                return `<tr style="${bg}">
+                    <td style="${cellStyle};color:var(--text-muted);font-size:11px;width:24px">${i + 1}</td>
+                    <td style="${cellStyle};width:90px"><input id="${prefix}date" type="date" value="${escHtml(p.dateStr)}" style="font-size:10px;padding:2px;width:85px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)" onchange="rsSaveTxField('${p.txId}','${F.txDate}','${prefix}date',false)">${indicatorHtml}</td>
+                    <td style="${cellStyle};width:160px"><input id="${prefix}desc" type="text" value="${escHtml(p.description)}" style="font-size:10px;padding:2px 4px;width:150px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface)" onblur="rsSaveTxField('${p.txId}','${F.txDescription}','${prefix}desc',false)">${indicatorHtml}</td>
+                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'account', rsAccountItems(), p.accountLinkId, '90px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};text-align:right;width:70px;font-variant-numeric:tabular-nums">${fmtMoney(p.amount)}</td>
+                    <td style="${cellStyle};width:110px">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:120px">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:140px">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'unit', rsUnitItems(), p.unitId, '90px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'property', rsPropertyItems(), p.propertyId, '90px')}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="${cellStyle};width:40px"><button onclick="event.stopPropagation();rsSaveAllTxFields('${p.txId}','${prefix}')" style="font-size:9px;padding:2px 6px;border:1px solid var(--accent);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent);cursor:pointer;white-space:nowrap">Save</button></td>
                 </tr>`;
             }).join('')
-            : '<tr><td colspan="6" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
+            : '<tr><td colspan="11" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
 
         const balanceColour = s.balance > 0 ? 'var(--danger)' : 'var(--success)';
         const balanceLabel = s.balance > 0 ? 'Tenant owes' : 'Tenant in credit';
@@ -277,16 +412,24 @@
                         <div>Section 8 ready:</div><div>${s.s8Ready ? '<strong style="color:var(--danger)">Yes</strong> (>= 62 days)' : 'No'}</div>
                     </div>
                 </div>
-                <div style="grid-column:1/-1">
-                    <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;margin-top:8px">Reconciled payments (${s.payments.length})</div>
-                    <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+                    <div style="font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;color:var(--text-muted)">Reconciled payments (${s.payments.length})</div>
+                    <button onclick="event.stopPropagation();rsOpenPrintStatement('${entry.tenancyId}')" style="font-size:11px;padding:4px 12px;border:1px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);color:var(--accent);cursor:pointer;font-weight:600">Print Statement</button>
+                </div>
+                <div style="grid-column:1/-1;overflow-x:auto">
+                    <table style="width:100%;border-collapse:collapse;font-size:11px">
                         <thead><tr style="text-align:left;background:var(--bg-surface)">
-                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">#</th>
-                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Date</th>
-                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Description</th>
-                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary)">Account</th>
-                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary);text-align:right">Amount</th>
-                            <th style="padding:4px 8px;font-weight:600;color:var(--text-secondary);text-align:center"></th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">#</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Date</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Description</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Account</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px;text-align:right">Amount</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Category</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Sub-Category</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Tenancy</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Unit</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Property</th>
+                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px"></th>
                         </tr></thead>
                         <tbody>${paymentRows}</tbody>
                     </table>
@@ -436,7 +579,203 @@
         });
     }
 
-    // ── Reassign transaction to a different tenancy ──
+    // ── Save all editable fields on a single tx row ──
+    async function rsSaveAllTxFields(txId, prefix) {
+        const btn = event && event.target;
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+        const fields = {};
+        const dateInput = document.getElementById(prefix + 'date');
+        if (dateInput) fields[F.txDate] = dateInput.value;
+        const descInput = document.getElementById(prefix + 'desc');
+        if (descInput) fields[F.txDescription] = descInput.value;
+        const accountId = rsResolveId(prefix + 'account');
+        if (accountId) fields[F.txAccountLink] = [accountId]; else fields[F.txAccountLink] = [];
+        const catId = rsResolveId(prefix + 'cat');
+        if (catId) fields[F.txCategory] = [catId]; else fields[F.txCategory] = [];
+        const subCatId = rsResolveId(prefix + 'subcat');
+        if (subCatId) fields[F.txSubCategory] = [subCatId]; else fields[F.txSubCategory] = [];
+        const tenancyId = rsResolveId(prefix + 'tenancy');
+        if (tenancyId) fields[F.txTenancy] = [tenancyId]; else fields[F.txTenancy] = [];
+        const unitId = rsResolveId(prefix + 'unit');
+        if (unitId) fields[F.txUnit] = [unitId]; else fields[F.txUnit] = [];
+        const propertyId = rsResolveId(prefix + 'property');
+        if (propertyId) fields[F.txProperty] = [propertyId]; else fields[F.txProperty] = [];
+
+        try {
+            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}?returnFieldsByFieldId=true`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields, typecast: true }),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const updated = await res.json();
+            const localTx = allTransactions.find(t => t.id === txId);
+            if (localTx && updated.fields) Object.assign(localTx.fields, updated.fields);
+            if (btn) { btn.textContent = 'Saved'; btn.style.background = 'var(--success-bg)'; btn.style.color = 'var(--success)'; btn.style.borderColor = 'var(--success)'; }
+            if (typeof showToast === 'function') showToast('Transaction updated', 'success');
+            setTimeout(() => renderArrearsSection('arrearsPipelineContainer'), 1500);
+        } catch (err) {
+            if (btn) { btn.textContent = 'Failed'; btn.style.background = 'var(--danger-bg)'; btn.style.color = 'var(--danger)'; }
+            if (typeof showToast === 'function') showToast('Save failed: ' + err.message, 'error');
+        }
+        if (btn) setTimeout(() => { btn.disabled = false; btn.textContent = 'Save'; btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = ''; }, 3000);
+    }
+    window.rsSaveAllTxFields = rsSaveAllTxFields;
+
+    // ── Printable Rent Statement ──
+    function rsOpenPrintStatement(tenancyId) {
+        const tenancy = allTenancies.find(t => t.id === tenancyId);
+        if (!tenancy) return;
+        const tenantLookup = buildTenantLookup();
+        const tenant = getTenantForTenancy(tenancy, tenantLookup);
+        const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '');
+        const unitVal = getField(tenancy, F.tenUnitRef);
+        const unit = Array.isArray(unitVal) ? unitVal[0] : (unitVal || '');
+        const propertyVal = getField(tenancy, F.tenProperty);
+        const property = Array.isArray(propertyVal) ? propertyVal[0] : (propertyVal || '');
+        const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
+        const monthlyRent = Number(getField(tenancy, F.tenRent)) || 0;
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);padding:24px;max-width:440px;width:90%;box-shadow:var(--shadow-lg)';
+        const today = new Date();
+        const defaultStart = DATA_START.toISOString().slice(0, 10);
+        const defaultEnd = today.toISOString().slice(0, 10);
+        panel.innerHTML = `
+            <div style="font-weight:600;font-size:15px;margin-bottom:4px">Generate Rent Statement</div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">${escHtml(tenantName)} — ${escHtml(unit)}, ${escHtml(property)}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Start date</label>
+                    <input id="rsStmtStart" type="date" value="${defaultStart}" style="width:100%;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:13px;box-sizing:border-box">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">End date</label>
+                    <input id="rsStmtEnd" type="date" value="${defaultEnd}" style="width:100%;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:13px;box-sizing:border-box">
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button id="rsStmtCancel" style="padding:6px 16px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);cursor:pointer;font-size:13px">Cancel</button>
+                <button id="rsStmtGenerate" style="padding:6px 16px;border:1px solid var(--accent);border-radius:var(--radius-md);background:var(--accent);color:#fff;cursor:pointer;font-size:13px;font-weight:600">Generate</button>
+            </div>
+        `;
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        panel.querySelector('#rsStmtCancel').addEventListener('click', () => overlay.remove());
+        panel.querySelector('#rsStmtGenerate').addEventListener('click', () => {
+            const startDate = new Date(panel.querySelector('#rsStmtStart').value);
+            const endDate = new Date(panel.querySelector('#rsStmtEnd').value);
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) { alert('Select valid dates'); return; }
+            overlay.remove();
+            rsGeneratePrintStatement(tenancy, tenantName, unit, property, tenantType, monthlyRent, startDate, endDate);
+        });
+    }
+    window.rsOpenPrintStatement = rsOpenPrintStatement;
+
+    function rsGeneratePrintStatement(tenancy, tenantName, unit, property, tenantType, monthlyRent, startDate, endDate) {
+        const dailyRent = monthlyRent / 31;
+        const tenStart = getTenancyStartDate(tenancy);
+        const effectiveStart = tenStart && tenStart > startDate ? tenStart : startDate;
+        const days = Math.floor((endDate - effectiveStart) / 86400000);
+        const totalOwed = dailyRent * Math.max(days, 0);
+
+        const payments = [];
+        let totalPaid = 0;
+        for (const tx of allTransactions) {
+            if (!getField(tx, F.txReconciled)) continue;
+            if (!txLinkedToTenancy(tx, tenancy.id)) continue;
+            const dateStr = String(getField(tx, F.txDate) || '');
+            const txDate = dateStr ? new Date(dateStr) : null;
+            if (!txDate) continue;
+            if (txDate < effectiveStart || txDate > endDate) continue;
+            const amount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
+            const desc = String(getField(tx, F.txDescription) || '').trim();
+            payments.push({ date: txDate, dateStr: dateStr.slice(0, 10), amount, description: desc });
+            totalPaid += amount;
+        }
+        payments.sort((a, b) => a.date - b.date);
+        const balance = totalOwed - totalPaid;
+        const daysInArrears = dailyRent > 0 ? Math.round(balance / dailyRent) : 0;
+        const fmtDateStr = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        let runningBalance = 0;
+        const ledgerRows = [];
+        const daysBetween = (a, b) => Math.floor((b - a) / 86400000);
+
+        let cursor = new Date(effectiveStart);
+        const allEvents = payments.map(p => ({ type: 'payment', date: p.date, amount: p.amount, desc: p.description }));
+        allEvents.push({ type: 'end', date: endDate });
+        allEvents.sort((a, b) => a.date - b.date);
+
+        for (const ev of allEvents) {
+            const rentDays = daysBetween(cursor, ev.date);
+            if (rentDays > 0) {
+                const rentCharge = dailyRent * rentDays;
+                runningBalance += rentCharge;
+                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: `Rent: ${rentDays} days @ ${fmtMoney(dailyRent)}/day`, debit: fmtMoney(rentCharge), credit: '', balance: fmtMoney(runningBalance) });
+            }
+            if (ev.type === 'payment') {
+                runningBalance -= ev.amount;
+                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: ev.desc || 'Payment received', debit: '', credit: fmtMoney(ev.amount), balance: fmtMoney(runningBalance) });
+            }
+            cursor = new Date(ev.date);
+        }
+
+        const printWin = window.open('', '_blank', 'width=800,height=900');
+        printWin.document.write(`<!DOCTYPE html><html><head><title>Rent Statement — ${escHtml(tenantName)}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family:'Inter',sans-serif; color:#1C2422; padding:40px; font-size:12px; line-height:1.5; }
+            h1 { font-size:20px; margin-bottom:4px; }
+            .meta { color:#5A6660; font-size:12px; margin-bottom:24px; }
+            .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
+            .summary-box { border:1px solid #DDE1D9; border-radius:8px; padding:12px; }
+            .summary-box .label { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#5A6660; font-weight:600; }
+            .summary-box .value { font-size:16px; font-weight:700; margin-top:4px; }
+            table { width:100%; border-collapse:collapse; margin-bottom:24px; }
+            th { text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#5A6660; font-weight:600; border-bottom:2px solid #DDE1D9; }
+            td { padding:6px 8px; border-bottom:1px solid #E5E8E1; font-size:11px; }
+            .text-right { text-align:right; }
+            .text-danger { color:#C53030; }
+            .text-success { color:#2C6E49; }
+            .footer { margin-top:32px; font-size:10px; color:#8A928C; border-top:1px solid #E5E8E1; padding-top:12px; }
+            @media print { body { padding:20px; } .no-print { display:none; } }
+        </style></head><body>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
+            <div>
+                <h1>Rent Statement</h1>
+                <div class="meta">${fmtDateStr(effectiveStart)} to ${fmtDateStr(endDate)}</div>
+            </div>
+            <button class="no-print" onclick="window.print()" style="padding:8px 20px;border:1px solid #2C6E49;border-radius:6px;background:#2C6E49;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Print</button>
+        </div>
+        <div class="summary-grid">
+            <div class="summary-box"><div class="label">Tenant</div><div class="value">${escHtml(tenantName)}</div></div>
+            <div class="summary-box"><div class="label">Property / Unit</div><div class="value">${escHtml(property)} — ${escHtml(unit)}</div></div>
+            <div class="summary-box"><div class="label">Monthly rent</div><div class="value">${fmtMoney(monthlyRent)}</div></div>
+            <div class="summary-box"><div class="label">Tenant type</div><div class="value">${escHtml(tenantType || 'Unknown')}</div></div>
+            <div class="summary-box"><div class="label">Total rent owed</div><div class="value">${fmtMoney(totalOwed)}</div></div>
+            <div class="summary-box"><div class="label">Total paid</div><div class="value">${fmtMoney(totalPaid)}</div></div>
+            <div class="summary-box"><div class="label">Balance</div><div class="value ${balance > 0 ? 'text-danger' : 'text-success'}">${fmtMoney(balance)}</div></div>
+            <div class="summary-box"><div class="label">Days in arrears</div><div class="value ${daysInArrears > 0 ? 'text-danger' : ''}">${daysInArrears}</div></div>
+        </div>
+        <table>
+            <thead><tr><th>Date</th><th>Description</th><th class="text-right">Debit</th><th class="text-right">Credit</th><th class="text-right">Balance</th></tr></thead>
+            <tbody>${ledgerRows.map(r => `<tr><td>${r.date}</td><td>${escHtml(r.desc)}</td><td class="text-right">${r.debit}</td><td class="text-right">${r.credit}</td><td class="text-right" style="font-weight:600">${r.balance}</td></tr>`).join('')}</tbody>
+        </table>
+        <div class="footer">
+            Generated ${new Date().toLocaleDateString('en-GB', { day:'numeric',month:'long',year:'numeric' })} at ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}.
+            Daily rent rate: ${fmtMoney(dailyRent)} (${fmtMoney(monthlyRent)} / 31 days).
+            Statement period: ${days} days. Payments: ${payments.length} transactions totalling ${fmtMoney(totalPaid)}.
+        </div>
+        </body></html>`);
+        printWin.document.close();
+    }
+
+    // ── Reassign transaction to a different tenancy (legacy modal) ──
     async function rentStmtReassignTx(txId, currentTenancyId) {
         const activeTenancies = allTenancies.filter(t => isTenantStatusActive(t));
         const tenantLookup = buildTenantLookup();
