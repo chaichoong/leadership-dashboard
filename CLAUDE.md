@@ -83,11 +83,76 @@ All JS files share a global scope (loaded as plain `<script>` tags). Key globals
 - `F`, `TABLES`, `INV`, `REC`, `PS` — field/table/record ID constants in `config.js`
 - Helper functions (`getField`, `fmt`, `escHtml`, `expandableCard`, etc.) in `shared.js`
 
-## Verification Before Declaring Done
+## MANDATORY: Quality Gate (Every Task, No Exceptions)
 
-- Always run a final audit pass after implementing changes — check for self-introduced bugs, badge/count mismatches, and filter logic errors
-- After UI changes that affect counts/badges, verify the count logic accounts for dismissed/filtered items, not just raw detected items
-- When fixing bugs across multiple functions, consider whether a global interceptor/wrapper would be more robust than per-function patches
+The user is a non-technical operator. Every task must be delivered working and verified. Do NOT ask the user to check the console, run commands, test manually, or debug. If Claude Code can do it, Claude Code does it.
+
+### Rule: No "Done" Without Proof
+
+Never say a task is complete until you have personally verified it works. "I've made the changes" is not done. "I've verified in the browser that the feature works correctly" is done.
+
+### The Verification Checklist (run EVERY time before declaring done)
+
+**Phase 1: Code Quality (before saving)**
+1. Re-read every line you changed. Look for typos, missing brackets, unclosed tags, wrong variable names
+2. Check every function you modified still has correct parameters and return values
+3. Verify all field names match exactly between read and write paths (this project has been burned by mismatches before)
+4. Check for undefined variables, unreachable code, and broken references
+5. Ensure no hardcoded colours, fonts, or values that should use design tokens
+
+**Phase 2: Integration Check**
+6. Read the surrounding code context. Does your change break any callers or dependencies?
+7. If you changed shared.js or config.js, grep for every usage of what you modified across ALL js/ files
+8. If you added/removed HTML elements, check that any JS targeting those elements by ID/class still works
+9. If you changed data fetching or filtering, verify the filter logic handles edge cases (empty arrays, null fields, missing records)
+
+**Phase 3: Browser Verification (REQUIRED for any UI or JS change)**
+10. Start the dev server or use preview tools to load the page in a real browser
+11. Navigate to the affected tab/feature and verify it renders correctly
+12. Test the primary action (click buttons, open modals, submit forms, expand cards)
+13. Check the browser console for errors or warnings. Fix any you find
+14. If the change affects counts, badges, or summaries, verify the numbers are correct
+15. Check that no other tabs or features are broken by your change (regression check)
+
+**Phase 4: Edge Cases & Robustness**
+16. What happens with empty data? (no transactions, no tenants, no records)
+17. What happens with malformed data? (null fields, missing linked records)
+18. Are loading states handled? (spinners, "no data" messages)
+19. Do error paths show user-friendly messages, not raw errors?
+
+**Phase 5: Security & XSS**
+20. Any user-supplied or Airtable-sourced text rendered in HTML must use `escHtml()`
+21. No `innerHTML` with unescaped external data
+22. API keys, PAT tokens must never appear in console logs or error messages
+
+**Phase 6: UX/UI Polish**
+23. Text is readable, not clipped, not overflowing
+24. Buttons and interactive elements are clearly clickable
+25. Mobile/responsive: if the feature should work on smaller screens, check it
+26. Colours use design tokens from tokens.css
+
+### When You Find Issues During Verification
+
+Fix them immediately. Do not report "I found 3 issues" and wait for the user to ask you to fix them. Fix first, then report what you found and fixed.
+
+### Regression Protocol
+
+After any change to a shared file (config.js, shared.js, index.html, styles.css):
+- Load the Leadership Dashboard tab and verify it renders
+- Spot-check at least one other tab that uses the shared code
+- Check the browser console across tabs for new errors
+
+### The "No Handoff" Rule
+
+Do NOT ask the user to:
+- Check the browser console
+- Run any terminal commands
+- Test something manually
+- Look up field names or IDs
+- Debug error messages
+- Clear cache or hard-reload
+
+If any of these are needed, do them yourself. The user's role is to describe what they want and review the working result.
 
 ## Deployment
 
