@@ -492,11 +492,25 @@ async function dispatchCommentDm(env, recipientEmail, payload) {
 
 async function classifyIntent(text, env) {
     const system =
-        `You classify short Slack messages from maintenance contractors into exactly one of:\n` +
-        `  new_job        — reporting a new job that needs doing\n` +
-        `  status_update  — reporting progress on an existing job (started, done, blocked, adding a note)\n` +
-        `  list_request   — asking to see their open jobs / current workload\n` +
-        `  unknown        — anything else, or too ambiguous\n\n` +
+        `You classify short Slack messages from maintenance/property contractors into exactly one of:\n\n` +
+        `  new_job        — reporting a NEW job that needs doing. Describes a fault, a piece of work, or something that needs attention. Usually mentions a property and what's wrong / what's needed.\n` +
+        `  status_update  — reporting progress on an EXISTING job they're already working on. Announces completion, that they've started, that they're stuck/waiting, or adds a note about the work in progress.\n` +
+        `  list_request   — asking to see their open jobs / current workload.\n` +
+        `  unknown        — anything else, or too ambiguous.\n\n` +
+        `Critical disambiguation:\n` +
+        `Words like "blocked", "broken", "leaking", "not working", "stopped", "stuck" are normally describing FAULTS — that's a new_job (the thing is in that state). They're status_update only when clearly referring to the contractor's own progress ("I'm blocked waiting for parts", "I'm stuck on the wiring").\n\n` +
+        `Examples:\n` +
+        `  "boiler broken at 55 Elmdon"             → new_job (fault description)\n` +
+        `  "blocked drain at 5 Woodcock"            → new_job (fault description; "blocked" describes the drain)\n` +
+        `  "tap leaking in kitchen at Chedburgh"    → new_job (fault description)\n` +
+        `  "no hot water at Northfield"             → new_job (fault description)\n` +
+        `  "done with the boiler"                   → status_update (announcing completion)\n` +
+        `  "finished at Elmdon"                     → status_update (announcing completion)\n` +
+        `  "started on the front door"              → status_update (announcing progress)\n` +
+        `  "waiting on parts for the boiler"       → status_update (note on existing work)\n` +
+        `  "stuck on the wiring at 12 Oldham"       → status_update (own progress, blocked)\n` +
+        `  "what's on my list"                      → list_request\n` +
+        `  "show my jobs"                           → list_request\n\n` +
         `Respond with ONLY the single label, no other text.`;
 
     const label = await callClaude(env, {
