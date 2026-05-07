@@ -318,6 +318,19 @@ async function routeMessage(evt, env) {
     // Fresh message — classify intent and route.
     const intent = await classifyIntent(text || '(file uploaded)', env);
 
+    // FILE-ONLY / unclear-text-with-files → treat as a photo attachment to
+    // an existing job. Routed BEFORE the team-member deflection below so
+    // contractors can attach photos without descriptive text. Skipped when
+    // the intent clearly fits another flow (new_job carries its photos
+    // along; status_update will too, see handleStatusUpdate).
+    if (
+        sender.kind === 'contractor' &&
+        hasFiles &&
+        (intent === 'unknown' || intent === 'list_request' || !text)
+    ) {
+        return handleAttachPhoto(sender, text, evt, threadTs, env);
+    }
+
     // Team-member messages: only new_job is supported. Status updates and
     // list requests need contractor-context (whose work, whose list) and
     // are deflected to the dashboard for now.
@@ -928,9 +941,21 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
         noteText = match.noteText;
     }
 
-    // ASK FOR CONFIRMATION before any write. Stash plan in KV and wait
-    // for "yes" or "no". On yes the matching action helper runs.
+    // ASK FOR CONFIRMATION before any write. Stash plan in KV (including
+    // any attached files for later ingestion). On "yes" the matching
+    // execute helper runs the writes. The optional `files` block carries
+    // Slack file metadata through KV; ingestSlackFiles is called only on
+    // confirmation so we don't write unwanted files to R2.
     const propertyTag = target.propertyName ? ` — ${target.propertyName}` : '';
+    const files = (evt.files || []);
+    const fileCount = files.length;
+    const fileSuffix = fileCount > 0
+        ? ` (and attach ${fileCount} file${fileCount > 1 ? 's' : ''})`
+        : '';
+    const filePlan = fileCount > 0
+        ? { files, messageTs: evt.ts }
+        : null;
+
     if (action === 'completed') {
         await setPendingState(env, evt.user, {
             kind: 'confirm_complete',
@@ -940,22 +965,23 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
                 propertyName: target.propertyName || '',
                 contractorAirtableEmail: contractor.airtableEmail,
                 contractorName: contractor.name,
+                attachmentPlan: filePlan,
             },
             eventTs: evt.ts,
         });
         return reply(threadTs, env,
-            `Just to confirm — mark *${target.taskName}*${propertyTag} as completed?\n` +
+            `Just to confirm — mark *${target.taskName}*${propertyTag} as completed${fileSuffix}?\n` +
             `Reply *yes* to mark it done, *no* to cancel.`
         );
     }
     if (action === 'in_progress') {
         await setPendingState(env, evt.user, {
             kind: 'confirm_in_progress',
-            plan: { taskId: target.id, taskName: target.taskName },
+            plan: { taskId: target.id, taskName: target.taskName, attachmentPlan: filePlan },
             eventTs: evt.ts,
         });
         return reply(threadTs, env,
-            `Just to confirm — mark *${target.taskName}*${propertyTag} as in progress?\n` +
+            `Just to confirm — mark *${target.taskName}*${propertyTag} as in progress${fileSuffix}?\n` +
             `Reply *yes* to start it, *no* to cancel.`
         );
     }
@@ -963,11 +989,11 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
         const commentBody = `*${contractor.firstName} via Slack*\n${noteText || text}`;
         await setPendingState(env, evt.user, {
             kind: 'confirm_note',
-            plan: { taskId: target.id, taskName: target.taskName, commentBody },
+            plan: { taskId: target.id, taskName: target.taskName, commentBody, attachmentPlan: filePlan },
             eventTs: evt.ts,
         });
         return reply(threadTs, env,
-            `Just to confirm — add this comment to *${target.taskName}*${propertyTag}?\n\n` +
+            `Just to confirm — add this comment to *${target.taskName}*${propertyTag}${fileSuffix}?\n\n` +
             `> ${noteText || text}\n\n` +
             `Reply *yes* to add, *no* to cancel.`
         );
@@ -980,10 +1006,13 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
 
 async function executeConfirmedComplete(env, plan, threadTs) {
     await updateTask(env, plan.taskId, { [FIELD.status]: 'Completed' });
-    // Pull contractor's first name out of "Gary Marsh" → "Gary" for the reply.
+    const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
     const firstName = (plan.contractorName || '').split(' ')[0] || 'there';
+    const attachLine = attachedCount > 0
+        ? `📎 ${attachedCount} attachment${attachedCount > 1 ? 's' : ''} added.\n`
+        : '';
     await reply(threadTs, env,
-        `✅ Marked complete: *${plan.taskName}*. Nice one ${firstName}.`
+        `✅ Marked complete: *${plan.taskName}*. Nice one ${firstName}.\n${attachLine}`.trim()
     );
     await dmTeamExcept(env, plan.contractorAirtableEmail,
         `*${plan.contractorName}* completed a task you collaborate on:\n` +
@@ -994,12 +1023,60 @@ async function executeConfirmedComplete(env, plan, threadTs) {
 
 async function executeConfirmedInProgress(env, plan, threadTs) {
     await updateTask(env, plan.taskId, { [FIELD.status]: 'Today' });
-    await reply(threadTs, env, `👍 Got it — *${plan.taskName}* is now in progress.`);
+    const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
+    const attachLine = attachedCount > 0
+        ? ` (📎 ${attachedCount} attachment${attachedCount > 1 ? 's' : ''} added)`
+        : '';
+    await reply(threadTs, env, `👍 Got it — *${plan.taskName}* is now in progress${attachLine}.`);
 }
 
 async function executeConfirmedNote(env, plan, threadTs) {
     await addComment(env, plan.taskId, plan.commentBody);
-    await reply(threadTs, env, `💬 Comment added to *${plan.taskName}*.`);
+    const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
+    const attachLine = attachedCount > 0
+        ? ` (📎 ${attachedCount} attachment${attachedCount > 1 ? 's' : ''} added)`
+        : '';
+    await reply(threadTs, env, `💬 Comment added to *${plan.taskName}*${attachLine}.`);
+}
+
+// Standalone-photo execute: just appends the files to the task's
+// Attachments field. Used when the contractor uploads a photo without
+// any other action (no completion, no comment text).
+async function executeConfirmedAttach(env, plan, threadTs) {
+    const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
+    if (attachedCount === 0) {
+        return reply(threadTs, env, `Hmm, I couldn't read the file from Slack. Try uploading again?`);
+    }
+    await reply(threadTs, env,
+        `📎 ${attachedCount} file${attachedCount > 1 ? 's' : ''} attached to *${plan.taskName}*.`
+    );
+}
+
+// Ingests Slack files (R2 upload) and APPENDS them to the task's existing
+// Attachments — Airtable PATCH on attachment fields REPLACES by default,
+// so we fetch the current attachments first and merge. Returns the number
+// of files actually added (0 if the plan is null/empty).
+async function maybeAppendAttachments(env, taskId, attachmentPlan) {
+    if (!attachmentPlan || !attachmentPlan.files || attachmentPlan.files.length === 0) return 0;
+    const newAttachments = await ingestSlackFiles(env, attachmentPlan.files, attachmentPlan.messageTs);
+    if (newAttachments.length === 0) return 0;
+    // Fetch existing attachments. With returnFieldsByFieldId=true Airtable
+    // returns existing attachments as objects with `id` — which we need to
+    // include unchanged in the PATCH so they're preserved.
+    const url = `/${TABLE_TASKS}/${taskId}?returnFieldsByFieldId=true&fields%5B%5D=${FIELD.attachments}`;
+    let existing = [];
+    try {
+        const got = await airtable(env, 'GET', url);
+        existing = (got && got.fields && got.fields[FIELD.attachments]) || [];
+    } catch (e) {
+        console.error('append-attachments: read failed', e && e.stack || e);
+    }
+    const merged = [
+        ...existing.map(a => ({ id: a.id })), // preserve existing by id only
+        ...newAttachments,                    // add new (objects with url)
+    ];
+    await updateTask(env, taskId, { [FIELD.attachments]: merged });
+    return newAttachments.length;
 }
 
 async function matchStatusUpdate(text, openTasks, env) {
@@ -1052,6 +1129,84 @@ async function handleListRequest(contractor, threadTs, env) {
     );
 }
 
+// ─── HANDLER 4: STANDALONE PHOTO ATTACHMENT ───────────────────────────
+//
+// Triggered when the contractor uploads a photo (or other file) without
+// describing a new job and without an obvious status-update intent. The
+// photo needs to be attached to one of their existing open tasks, but
+// we don't yet know which one. We try in order:
+//   1. Thread context — if they replied to a known task's thread.
+//   2. AI matching against the surrounding text (if any) + open tasks.
+//   3. Ask explicitly with a numbered list of open jobs.
+// Followed always by a yes/no confirmation before the actual attach.
+async function handleAttachPhoto(contractor, text, evt, threadTs, env, override) {
+    override = override || {};
+    const openTasks = override.openTasks || await fetchOpenTasksFor(contractor, env);
+    if (openTasks.length === 0) {
+        return reply(threadTs, env,
+            `${contractor.firstName}, you don't have any open jobs to attach this to. ` +
+            `Log a new job first by describing what's wrong and where.`
+        );
+    }
+
+    let target = override.resolvedTask || null;
+
+    // 1. Try thread context first — if this photo is a reply in a thread
+    //    that the bot logged a task in, we can target that task directly.
+    if (!target && evt.thread_ts) {
+        const threadTaskId = await getThreadTask(env, evt.thread_ts);
+        if (threadTaskId) {
+            target = openTasks.find(t => t.id === threadTaskId) || null;
+        }
+    }
+
+    // 2. If text is non-trivial, ask Claude to match it across open tasks.
+    if (!target && text && text.length > 2) {
+        const match = await matchStatusUpdate(text, openTasks, env);
+        if (match.matchedTaskIndex >= 0) {
+            target = openTasks[match.matchedTaskIndex];
+        }
+    }
+
+    // 3. Couldn't match — ask the contractor which job. List their
+    //    open tasks; their reply (number or job name) resolves it.
+    if (!target) {
+        await setPendingState(env, evt.user, {
+            kind: 'awaiting_attach_task_choice',
+            taskIds: openTasks.map(t => t.id),
+            // Persist the file metadata so we can run the attach on resume.
+            attachmentPlan: { files: evt.files || [], messageTs: evt.ts },
+            eventTs: evt.ts,
+        });
+        const list = openTasks.map((t, i) =>
+            `${i + 1}. ${t.taskName}${t.propertyName ? ' — ' + t.propertyName : ''}`
+        ).join('\n');
+        const fileCount = (evt.files && evt.files.length) || 0;
+        return reply(threadTs, env,
+            `Got the file${fileCount > 1 ? 's' : ''}. Which job should I attach ` +
+            `${fileCount > 1 ? 'them' : 'it'} to, ${contractor.firstName}?\n${list}\n` +
+            `Reply with the number or job name.`
+        );
+    }
+
+    // We know the target — ask for confirmation, then attach.
+    const fileCount = (evt.files && evt.files.length) || 0;
+    const propertyTag = target.propertyName ? ` — ${target.propertyName}` : '';
+    await setPendingState(env, evt.user, {
+        kind: 'confirm_attach',
+        plan: {
+            taskId: target.id,
+            taskName: target.taskName,
+            attachmentPlan: { files: evt.files || [], messageTs: evt.ts },
+        },
+        eventTs: evt.ts,
+    });
+    return reply(threadTs, env,
+        `Just to confirm — attach ${fileCount === 1 ? 'this file' : `these ${fileCount} files`} to *${target.taskName}*${propertyTag}?\n` +
+        `Reply *yes* to attach, *no* to cancel.`
+    );
+}
+
 // ─── MULTI-TURN: pending-state resolution ─────────────────────────────
 
 async function resolvePending(sender, text, pending, evt, threadTs, env) {
@@ -1065,7 +1220,8 @@ async function resolvePending(sender, text, pending, evt, threadTs, env) {
         pending.kind === 'confirm_create' ||
         pending.kind === 'confirm_complete' ||
         pending.kind === 'confirm_in_progress' ||
-        pending.kind === 'confirm_note'
+        pending.kind === 'confirm_note' ||
+        pending.kind === 'confirm_attach'
     ) {
         const answer = parseYesNo(text);
         if (answer === null) {
@@ -1083,6 +1239,7 @@ async function resolvePending(sender, text, pending, evt, threadTs, env) {
             if (pending.kind === 'confirm_complete')    await executeConfirmedComplete(env, pending.plan, threadTs);
             if (pending.kind === 'confirm_in_progress') await executeConfirmedInProgress(env, pending.plan, threadTs);
             if (pending.kind === 'confirm_note')        await executeConfirmedNote(env, pending.plan, threadTs);
+            if (pending.kind === 'confirm_attach')      await executeConfirmedAttach(env, pending.plan, threadTs);
         } catch (err) {
             console.error(`confirm execute (${pending.kind}) failed:`, err && err.stack || err);
             await reply(threadTs, env,
@@ -1090,6 +1247,33 @@ async function resolvePending(sender, text, pending, evt, threadTs, env) {
             );
         }
         return;
+    }
+
+    // Standalone-photo flow: contractor sent a file without context, the
+    // bot asked which open job to attach it to. Their reply (number or
+    // job name) resolves the target — then we ask for the yes/no confirm.
+    if (pending.kind === 'awaiting_attach_task_choice') {
+        if (sender.kind !== 'contractor') {
+            return reply(threadTs, env, `(That flow is contractor-only — please use the dashboard.)`);
+        }
+        const openTasks = await fetchOpenTasksFor(sender, env);
+        const candidates = openTasks.filter(t => pending.taskIds.includes(t.id));
+        const chosen = pickFromCandidates(text, candidates, t => t.taskName);
+        if (!chosen) {
+            await setPendingState(env, evt.user, pending);
+            return reply(threadTs, env,
+                `That didn't match any of your open jobs. Try the number or the job name.`
+            );
+        }
+        // Re-enter handleAttachPhoto with the chosen task as override + the
+        // remembered files. Reusing the handler keeps the confirmation
+        // prompt format consistent with the direct path.
+        return handleAttachPhoto(
+            sender, '', // text empty here — the photo is the payload
+            { ...evt, files: pending.attachmentPlan.files, ts: pending.attachmentPlan.messageTs },
+            threadTs, env,
+            { openTasks, resolvedTask: chosen }
+        );
     }
 
     // NEW: team-member supplied the assignee for a job.
