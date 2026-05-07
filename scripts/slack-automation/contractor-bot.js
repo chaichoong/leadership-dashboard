@@ -936,7 +936,14 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
 
     if (!target) {
         const match = await matchStatusUpdate(text, openTasks, env);
-        if (match.matchedTaskIndex === -1) {
+        // Treat "not matched" as ANY index outside the valid range, not
+        // just -1. Claude has occasionally returned a stale or invented
+        // index (e.g. 99 when there are 5 tasks) — without this guard
+        // we'd dereference openTasks[99] and crash on `.taskName`.
+        const inRange = Number.isInteger(match.matchedTaskIndex)
+            && match.matchedTaskIndex >= 0
+            && match.matchedTaskIndex < openTasks.length;
+        if (!inRange) {
             // Save pending state, ask which job.
             await setPendingState(env, evt.user, {
                 kind: 'awaiting_task_choice',
@@ -1180,7 +1187,10 @@ async function handleAttachPhoto(contractor, text, evt, threadTs, env, override)
     // 2. If text is non-trivial, ask Claude to match it across open tasks.
     if (!target && text && text.length > 2) {
         const match = await matchStatusUpdate(text, openTasks, env);
-        if (match.matchedTaskIndex >= 0) {
+        const inRange = Number.isInteger(match.matchedTaskIndex)
+            && match.matchedTaskIndex >= 0
+            && match.matchedTaskIndex < openTasks.length;
+        if (inRange) {
             target = openTasks[match.matchedTaskIndex];
         }
     }
