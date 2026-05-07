@@ -176,14 +176,16 @@
     window.getField = getField;
 
     // Split-aware amount: returns the correct per-portion amount for any
-    // transaction, whether it is a normal record, a split parent, or a
-    // split child. Split parents keep their original bulk **GBP; this
-    // helper divides by Split Count (or uses Split Override if set).
+    // transaction. Checks Split Override first (set on split parents and
+    // custom-amount children) so we never need to rely on Split Count > 1
+    // for display purposes. Changing Split Count triggers the Airtable
+    // "Split Transactions" automation, so existing parents that only need
+    // an amount correction should set Override with Split Count = 1.
     function txDisplayAmount(rec) {
+        const override = getField(rec, F.txSplitOverride);
+        if (override != null && override !== '') return Number(override) || 0;
         const splitCount = Number(getField(rec, F.txSplitCount)) || 1;
         if (splitCount > 1) {
-            const override = getField(rec, F.txSplitOverride);
-            if (override != null && override !== '') return Number(override) || 0;
             return (Number(getField(rec, F.txAmount)) || 0) / splitCount;
         }
         const report = getField(rec, F.txReportAmount);
