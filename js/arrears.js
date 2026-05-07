@@ -344,6 +344,10 @@
         if (!input) return;
         const indicator = input.parentElement.querySelector('.rs-save-indicator');
         if (indicator) { indicator.textContent = '⏳'; indicator.style.color = 'var(--text-muted)'; }
+
+        const localTx = allTransactions.find(t => t.id === txId);
+        const oldRaw = localTx ? localTx.fields[fieldId] : undefined;
+
         try {
             let value;
             if (isLinked) {
@@ -353,7 +357,6 @@
                 value = input.value;
             }
             await rsPatchTxField(txId, fieldId, value);
-            const localTx = allTransactions.find(t => t.id === txId);
             if (localTx) {
                 if (isLinked) {
                     const resolvedId = rsResolveId(inputId);
@@ -364,12 +367,93 @@
             }
             if (indicator) { indicator.textContent = '✓'; indicator.style.color = 'var(--success)'; }
             setTimeout(() => { if (indicator) indicator.textContent = ''; }, 2000);
+
+            const tenancyCleared = fieldId === F.txTenancy && (!value || (Array.isArray(value) && !value.length));
+            if (tenancyCleared) {
+                rsRefreshBreakdownForTx(txId);
+                rsShowUndoToast(txId, fieldId, oldRaw, 'Tenancy removed from payment');
+            }
         } catch (err) {
             if (indicator) { indicator.textContent = '✗'; indicator.style.color = 'var(--danger)'; }
             if (typeof showToast === 'function') showToast('Save failed: ' + err.message, 'error');
         }
     }
     window.rsSaveTxField = rsSaveTxField;
+
+    // After clearing a tenancy link, refresh the breakdown panel that contained the payment.
+    // Finds the open breakdown row, recomputes the statement, and re-renders the detail.
+    function rsRefreshBreakdownForTx(txId) {
+        const openBreakdowns = document.querySelectorAll('[id^="rentBreakdown_"]');
+        for (const row of openBreakdowns) {
+            if (row.style.display === 'none') continue;
+            const tenancyId = row.id.replace('rentBreakdown_', '');
+            const tenancy = allTenancies.find(t => t.id === tenancyId);
+            if (!tenancy) continue;
+            const tenantLookup = buildTenantLookup();
+            const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
+            const tenant = getTenantForTenancy(tenancy, tenantLookup);
+            const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '—');
+            const unitVal = getField(tenancy, F.tenUnitRef);
+            const unit = Array.isArray(unitVal) ? unitVal[0] : (unitVal || '');
+            const propertyVal = getField(tenancy, F.tenProperty);
+            const property = Array.isArray(propertyVal) ? propertyVal[0] : (propertyVal || '');
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const stmt = computeRentStatement(tenancy, tenantType, today);
+            if (!stmt.applicable) continue;
+            const entry = { tenancyId, tenancy, tenantName, unit, property, stmt };
+            const td = row.querySelector('td');
+            if (td) td.innerHTML = renderBreakdownDetail(entry);
+            // Update the parent summary row's balance and days columns
+            const parentRow = row.previousElementSibling;
+            if (parentRow) {
+                const cells = parentRow.querySelectorAll('td');
+                if (cells.length >= 5) {
+                    const balanceColour = stmt.balance > 0 ? 'var(--danger)' : stmt.balance < 0 ? 'var(--success)' : 'var(--text-primary)';
+                    cells[3].innerHTML = `<span style="font-weight:600;color:${balanceColour};font-variant-numeric:tabular-nums">${fmtMoney(stmt.balance)}</span>`;
+                    const daysColour = stmt.daysInArrears >= S8_THRESHOLD_DAYS ? 'var(--danger)' : stmt.daysInArrears > 0 ? 'var(--warning)' : 'var(--success)';
+                    const daysWeight = stmt.daysInArrears >= S8_THRESHOLD_DAYS ? '700' : '500';
+                    cells[4].innerHTML = `<span style="font-weight:${daysWeight};color:${daysColour};font-variant-numeric:tabular-nums">${stmt.daysInArrears}</span>`;
+                }
+            }
+            break;
+        }
+    }
+
+    // Undo toast for rent statement actions
+    let _rsUndoTimer = null;
+    function rsShowUndoToast(txId, fieldId, oldValue, label) {
+        const existing = document.getElementById('rsUndoToast');
+        if (existing) existing.remove();
+        if (_rsUndoTimer) clearTimeout(_rsUndoTimer);
+
+        window._rsLastUndo = { txId, fieldId, oldValue };
+        const toast = document.createElement('div');
+        toast.id = 'rsUndoToast';
+        toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-sidebar);color:#fff;padding:10px 14px;border-radius:8px;box-shadow:var(--shadow-lg);font-size:13px;z-index:2000;display:flex;align-items:center;gap:12px;max-width:400px';
+        toast.innerHTML = `<span>${escHtml(label)}</span><button onclick="rsPerformUndo()" style="background:var(--accent-gold);color:var(--bg-sidebar);border:none;padding:4px 10px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px">Undo</button>`;
+        document.body.appendChild(toast);
+        _rsUndoTimer = setTimeout(() => { toast.remove(); window._rsLastUndo = null; }, 8000);
+    }
+
+    async function rsPerformUndo() {
+        const action = window._rsLastUndo;
+        if (!action) return;
+        const toast = document.getElementById('rsUndoToast');
+        if (toast) toast.remove();
+        if (_rsUndoTimer) clearTimeout(_rsUndoTimer);
+        window._rsLastUndo = null;
+
+        try {
+            await rsPatchTxField(action.txId, action.fieldId, action.oldValue || []);
+            const localTx = allTransactions.find(t => t.id === action.txId);
+            if (localTx) localTx.fields[action.fieldId] = action.oldValue || [];
+            renderArrearsSection('arrearsPipelineContainer');
+            if (typeof showToast === 'function') showToast('Change undone', 'success');
+        } catch (err) {
+            if (typeof showToast === 'function') showToast('Undo failed: ' + err.message, 'error');
+        }
+    }
+    window.rsPerformUndo = rsPerformUndo;
 
     function renderBreakdownDetail(entry) {
         const s = entry.stmt;
