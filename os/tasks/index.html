@@ -430,7 +430,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="topbar">
   <div>
     <h1>Task &amp; Project Management</h1>
-    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-04-0900 workflow-doc</span></div>
+    <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-07-1100 comment-count-ungated</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
@@ -2837,7 +2837,11 @@ async function submitDrawerComment(taskId){
     _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
-    if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+    // Always refresh the count badge — loadCommentCountForDrawer is a
+    // no-op when the badge element isn't present, so dropping the gate
+    // closes a class of timing bugs (e.g. a Promise resolving after the
+    // drawer was closed but the user re-opens before the next render).
+    loadCommentCountForDrawer(taskId);
     // Fan-out Slack DM to every collaborator + assignee, skipping the commenter.
     const task=allTasks.find(x=>x.id===taskId);
     if(task)notifyCollabsOnComment(task,text);
@@ -2860,7 +2864,7 @@ async function doDeleteComment(taskId,commentId){
     _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
     pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
     if(drawerTaskId===taskId)renderCommentsInDrawer(taskId);
-    if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+    loadCommentCountForDrawer(taskId);
     toast('Comment deleted');
   }catch(e){
     console.warn(e);toast('Failed to delete comment',true);
@@ -3011,7 +3015,7 @@ async function submitModalComment(taskId){
     _drawerComments[taskId]=[c,...(_drawerComments[taskId]||[])];
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     renderCommentsInModal(taskId);
-    if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+    loadCommentCountForDrawer(taskId);
     // Fan-out Slack DM (modal path uses the same task store as the drawer).
     const task=allTasks.find(x=>x.id===taskId);
     if(task)notifyCollabsOnComment(task,text);
@@ -3031,7 +3035,7 @@ function confirmDeleteCommentModal(taskId,commentId){
       _drawerComments[taskId]=list.filter(x=>x.id!==commentId);
       pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
       renderCommentsInModal(taskId);
-      if(drawerTaskId===taskId)loadCommentCountForDrawer(taskId);
+      loadCommentCountForDrawer(taskId);
       toast('Comment deleted');
     }catch(e){console.error(e);toast('Failed to delete',true)}
   })();
