@@ -1022,7 +1022,7 @@ Auto-generated from arrears engine.`,
             const tenantType = getTenantTypeForTenancy(tenancy, tenantLookup);
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
             const tenantName = tenant ? String(getField(tenant, F.tenantName) || '') : String(getField(tenancy, F.tenSurname) || '—');
-            const tenantId = tenant ? tenant.id : tenancyId;
+            const tenantId = tenantName || tenancyId;
             const breakdown = computeArrearsBreakdown(tenancy, tenantType, today);
             if (!breakdown.applicable) continue;
             if (breakdown.missed === 0) continue;
