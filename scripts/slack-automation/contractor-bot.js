@@ -1056,21 +1056,22 @@ async function executeConfirmedAttach(env, plan, threadTs) {
 // Attachments — Airtable PATCH on attachment fields REPLACES by default,
 // so we fetch the current attachments first and merge. Returns the number
 // of files actually added (0 if the plan is null/empty).
+//
+// SAFETY: if the existing-attachments read fails for any reason we throw
+// rather than continue. Continuing with `existing = []` would silently
+// destroy any prior photos on the task — that bug is exactly what an
+// "append" function must not do. The caller already has a try/catch and
+// reports a generic "something went wrong" to the contractor, who can
+// retry from the dashboard if needed.
 async function maybeAppendAttachments(env, taskId, attachmentPlan) {
     if (!attachmentPlan || !attachmentPlan.files || attachmentPlan.files.length === 0) return 0;
     const newAttachments = await ingestSlackFiles(env, attachmentPlan.files, attachmentPlan.messageTs);
     if (newAttachments.length === 0) return 0;
-    // Fetch existing attachments. With returnFieldsByFieldId=true Airtable
-    // returns existing attachments as objects with `id` — which we need to
-    // include unchanged in the PATCH so they're preserved.
+    // Read existing attachments first — letting GET errors propagate so a
+    // failed read never leads to a destructive PATCH.
     const url = `/${TABLE_TASKS}/${taskId}?returnFieldsByFieldId=true&fields%5B%5D=${FIELD.attachments}`;
-    let existing = [];
-    try {
-        const got = await airtable(env, 'GET', url);
-        existing = (got && got.fields && got.fields[FIELD.attachments]) || [];
-    } catch (e) {
-        console.error('append-attachments: read failed', e && e.stack || e);
-    }
+    const got = await airtable(env, 'GET', url);
+    const existing = (got && got.fields && got.fields[FIELD.attachments]) || [];
     const merged = [
         ...existing.map(a => ({ id: a.id })), // preserve existing by id only
         ...newAttachments,                    // add new (objects with url)
