@@ -77,6 +77,11 @@ const MODEL_ACCURATE    = 'claude-sonnet-4-5-20250929';
 
 const SLACK_POST_URL    = 'https://slack.com/api/chat.postMessage';
 const SLACK_LOOKUP_URL  = 'https://slack.com/api/users.lookupByEmail';
+// The dashboard's slack-notify worker. Used by fanOutCommentDM so
+// Slack-originated comments produce the same comment-DM format as
+// dashboard-originated ones (so contractor in-thread replies route
+// back through handleDmThreadReply identically).
+const SLACK_NOTIFY_URL  = 'https://slack-notify.kevinbrittain.workers.dev/';
 
 const AIRTABLE_BASE      = 'appnqjDpqDniH3IRl';
 const TABLE_TASKS        = 'tblqB8b22hKBL4PF1';
