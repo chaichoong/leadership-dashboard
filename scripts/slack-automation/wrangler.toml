@@ -1,0 +1,18 @@
+name = "contractor-bot"
+main = "contractor-bot.js"
+compatibility_date = "2024-12-01"
+
+# Bindings already configured in the live worker (Cloudflare dashboard).
+# Listing them here so `wrangler deploy` doesn't drop them on push.
+
+[[kv_namespaces]]
+binding = "STATE"
+id = "1f33ad79aceb4520baec24f31435f9e2"
+
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "contractor-bot-attachments"
+
+# Secrets (AIRTABLE_PAT, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN,
+# ANTHROPIC_API_KEY, INTERNAL_BEARER) are NOT listed here — they're
+# managed via `wrangler secret put` and persist across deploys.
