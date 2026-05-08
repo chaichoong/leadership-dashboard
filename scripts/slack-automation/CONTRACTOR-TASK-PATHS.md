@@ -17,23 +17,31 @@ message in `#property-management`. The bot classifies intent, asks for
 confirmation, and writes the task on "yes". Since the bot owns this path
 end-to-end it's always been the most consistent.
 
-### 2. The `contractor-job-creator` Claude skill (Code / Co-Work)
+### 2. The `contractor-job-creator` Claude skill — RETIRED
 
-Someone on the office team — most often Mica or Erica — describes a
-task to Claude Code or Co-Work, and the skill creates the task. **This
-is where the drift came from.** Each user has a local copy of the
-SKILL.md in `~/.claude/skills/`; updating one machine doesn't update
-the others. Two specific failures resulted:
+**Status: removed.** Used to be a local skill on each office team
+member's machine. Caused the drift bug that triggered this whole
+audit (skill on Mica's machine was stale → tasks misassigned to
+Kevin → no Business field → not visible in Contractor Tasks tab).
 
-- The skill wrote tasks with **Assignee = Kevin** when the user didn't
-  explicitly name a contractor (or the local SKILL.md was a stale
-  pre-fix version).
-- The skill never wrote the `Business` field at all, so contractor
-  tasks landed without the Real Estate link, which broke filters and
-  reports downstream.
+Replacement: office team uses the Slack channel (path 1) or the
+dashboard form (path 3). Zero local setup, no SKILL.md to keep in
+sync, no bearer tokens to distribute. New customers / team members
+get added to the Slack workspace and they're done — that's the
+SaaS-ready shape.
 
-Both issues showed up on real records — see the two repaired tasks at
-`reccTZF9yVPDyzRoR` and `recdV45Rt9Peleq0q`.
+The bot's `/create-task` HTTP endpoint stays as infrastructure for
+future integrations (dashboard form refactor, partner integrations,
+admin scripts) but no end-user skill now calls it directly.
+
+### 2a. Generic task-creating skills — guardrails added
+
+The local `airtable-task-creator` and `weekly-checkin-task-manager`
+skills can also create tasks in the same Airtable Tasks table, and
+without protection could create contractor tasks that bypass the
+unified flow. Both SKILL.md files now carry an explicit contractor
+guardrail at the top: if the assignee is Gary / Roy / Rob, STOP and
+redirect the user to Slack `#property-management`.
 
 ### 3. The dashboard `Add Task` form (web app)
 
@@ -44,9 +52,9 @@ in scope for this commit; future work would have it call the same
 `/create-task` endpoint so the per-contractor business resolution +
 auto-collaborator setup happens automatically.
 
-## What the three paths wrote (before this work)
+## What the paths wrote (before this work)
 
-| Field | Slack bot | Skill (Mica's stale copy) | Dashboard form |
+| Field | Slack bot | Skill (RETIRED) | Dashboard form |
 |---|---|---|---|
 | Task Name | ✅ AI-generated | ✅ AI-generated | ✅ user-typed |
 | Description | ✅ | ✅ | ✅ |
@@ -54,30 +62,38 @@ auto-collaborator setup happens automatically.
 | Priority | ✅ Urgent / Not Urgent | ✅ Urgent / Not Urgent | manual |
 | Assignee | ✅ Contractor email | ❌ Often Kevin's email | manual |
 | Properties | ✅ Linked record | ✅ Linked record | manual |
-| **Business** | ⚠️ Hard-coded Real Estate | ❌ Not set at all | manual |
-| Maintenance Ticket | ✅ true | ✅ true | manual |
-| Collaborators | ✅ Kevin/Mica/Erica | ❌ Not added | manual |
-| Slack channel notify | ✅ via bot's reply | ❌ Skill posts a SEPARATE notification (filtered out by the bot now) | n/a |
-| Contractor DM | ✅ via slack-notify worker | ❌ Not done | n/a |
+| **Business** | ⚠️ Hard-coded Real Estate (now per-contractor) | ❌ Not set at all | manual (RE default) |
+| Maintenance Ticket | ✅ true | ✅ true | manual (not asked) |
+| Collaborators | ✅ Kevin/Mica/Erica | ❌ Not added | partial (creator + project) |
+| Slack channel notify | ✅ via bot's reply | ❌ Skill posted SEPARATE notification (filtered now) | n/a |
+| Contractor DM | ✅ via slack-notify worker | ❌ Not done | ✅ via slack-notify worker |
 
-Two columns of red-cross is exactly what produced the misassigned-task
-incident.
+Skill column is the failure mode that produced the misassigned-task
+incident — it's been removed.
 
 ## The unified architecture (now in place)
 
 ```
-Slack #property-management  ──►  contractor-bot worker
-                                       ▲
-                                       │ POST /create-task
-                                       │ Authorization: Bearer <INTERNAL_BEARER>
-                                       │
-contractor-job-creator skill  ─────────┘
-(Mica / Erica / Kevin running                     ▲
- Claude Code or Co-Work)                          │  (future)
-                                                  │
-                          dashboard "Add Task" ───┘
-                          form (os/tasks/index.html)
+Slack #property-management  ──►  contractor-bot worker  ◄──  HTTP /create-task
+                                                              (bearer-authenticated;
+                                                               admin scripts /
+                                                               future dashboard
+                                                               form refactor)
+dashboard "Add Task" form
+(os/tasks/index.html)        ──►  Airtable directly  +  notifyAssigneeSlack
+                                                          (slack-notify worker)
 ```
+
+Two end-user paths today:
+- **Slack** — office team and contractors all use the same channel.
+  Best for natural-language descriptions and conversational follow-up.
+- **Dashboard form** — power users adding from the web app. Triggers
+  the existing assignee-DM via slack-notify, so the contractor still
+  gets pinged.
+
+The `/create-task` HTTP endpoint exists as infrastructure but is not
+wired to any end-user surface today — it's the integration seam for
+the future dashboard form refactor and any admin tooling.
 
 The worker owns:
 
@@ -98,47 +114,36 @@ The worker owns:
 When the rules need to change, change them ONCE in `contractor-bot.js`
 and every path picks the change up immediately.
 
-## Migration path for office team's local skill installs
+## Office team onboarding — what to tell them
 
-The repo has the canonical SKILL.md at:
+> "From now on, when you want to add a contractor task:
+> • **Slack** — post in `#property-management` and tell the bot who to
+>   assign it to. Example: *'boiler broken at 55 Elmdon, give it to Gary'*.
+>   The bot asks you to confirm, then logs it and DMs the contractor.
+> • **Dashboard** — click *Add Task* on the Tasks OS, set Assignee to
+>   the contractor, leave Business as *Real Estate* (change to
+>   *Operations Director* only if it's a non-property task for Roy).
+>   Saving the task automatically DMs the contractor.
+>
+> Both paths produce the same end state. There's nothing to install
+> on your machine."
 
-```
-scripts/slack-automation/contractor-job-creator.SKILL.md
-```
-
-After pulling latest, each office team member runs:
-
-```bash
-cp ~/Projects/leadership-dashboard/scripts/slack-automation/contractor-job-creator.SKILL.md \
-   ~/.claude/skills/contractor-job-creator/SKILL.md
-```
-
-(Kevin's local file is at a different path because of how Claude
-Co-Work stores plugin skills — adjust the destination accordingly if
-needed.)
-
-Each user also needs the bearer token in `~/.contractor-bot-bearer.txt`:
-
-```bash
-echo "<paste-bearer-from-kevin>" > ~/.contractor-bot-bearer.txt
-chmod 600 ~/.contractor-bot-bearer.txt
-```
-
-Distribute the bearer via password manager (1Password etc.), not via
-Slack/email.
+That's the whole onboarding. No bearer tokens, no SKILL.md to copy,
+no `~/.claude/` rituals. Multi-user / multi-customer ready.
 
 ## Whoever onboards a new office team member
 
-Three things to do:
+Two code-side updates:
 
 1. Their email goes into the `TEAM_COLLABORATOR_EMAILS` array in
    `contractor-bot.js` so they get auto-added as a collaborator on
-   every contractor task.
+   every bot-created contractor task.
 2. Their email goes into the `TEAM_MEMBERS` map in `contractor-bot.js`
    so the bot recognises their Slack messages.
-3. They get the canonical SKILL.md and the bearer token (steps above).
 
-Long-term, all three should be driven by an Airtable Team Members table
+Then bot redeploy. That's it — no skill installs, no bearer tokens.
+
+Long-term, both should be driven by an Airtable Team Members table
 with an `internal` / `contractor` flag — that's a future cleanup
 already on the parked list.
 
