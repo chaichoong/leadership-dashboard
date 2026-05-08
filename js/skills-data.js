@@ -62,15 +62,13 @@ const SKILLS_LIBRARY = [
         source: 'cowork',
         tags: ['tenant', 'documents', 'letters', 'agreements']
     },
-    {
-        id: 'contractor-job-creator',
-        name: 'Contractor Job Creator',
-        command: 'anthropic-skills:contractor-job-creator',
-        description: 'Add contractor maintenance jobs to the system — captures job details, assigns contractor, sets priority, and creates the Airtable task record.',
-        category: 'Property Management',
-        source: 'cowork',
-        tags: ['contractor', 'maintenance', 'jobs', 'tasks']
-    },
+    // contractor-job-creator skill RETIRED 2026-05-08 — superseded by the
+    // contractor-bot Slack flow (#property-management) which has the same
+    // capabilities (per-contractor business resolution, property matching,
+    // confirmation prompt, contractor DM) without needing a local install
+    // or a bearer token. Office team logs contractor jobs via Slack on the
+    // go, or via the dashboard's "Add Task" form for power-user entry.
+    // See scripts/slack-automation/CONTRACTOR-TASK-PATHS.md.
     {
         id: 'schedule-of-works',
         name: 'Schedule of Works',

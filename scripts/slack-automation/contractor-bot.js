@@ -1251,10 +1251,18 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
         );
     }
     if (action === 'note') {
-        const commentBody = `*${contractor.firstName} via Slack*\n${noteText || text}`;
+        const rawCommentText = noteText || text;
+        const commentBody = `*${contractor.firstName} via Slack*\n${rawCommentText}`;
         await setPendingState(env, evt.user, {
             kind: 'confirm_note',
-            plan: { taskId: target.id, taskName: target.taskName, commentBody, attachmentPlan: filePlan },
+            plan: {
+                taskId: target.id,
+                taskName: target.taskName,
+                commentBody,
+                commentText: rawCommentText,        // for the fan-out DM (without the "via Slack" prefix)
+                commenterEmail: contractor.airtableEmail, // skip self when fanning out
+                attachmentPlan: filePlan,
+            },
             eventTs: evt.ts,
         });
         return reply(threadTs, env,
@@ -1302,6 +1310,69 @@ async function executeConfirmedNote(env, plan, threadTs) {
         ? ` (📎 ${attachedCount} attachment${attachedCount > 1 ? 's' : ''} added)`
         : '';
     await reply(threadTs, env, `💬 Comment added to *${plan.taskName}*${attachLine}.`);
+    // Mirror the dashboard's notifyCollabsOnComment fan-out: when a
+    // comment lands on a task, every collaborator on that task plus the
+    // assignee gets a Slack DM with the comment text — except whoever
+    // wrote it. Without this, Slack-added comments are invisible to the
+    // office team unless they refresh the dashboard. Best-effort: a
+    // failure to fan out shouldn't fail the comment itself, which has
+    // already been written above.
+    try {
+        await fanOutCommentDM(env, plan.taskId, plan.commenterEmail, plan.commentText, plan.taskName);
+    } catch (err) {
+        console.error('fanOutCommentDM failed (non-blocking):', err && err.stack || err);
+    }
+}
+
+// Fans out a "comment on a task you collaborate on" Slack DM to every
+// collaborator + assignee on the task, skipping the commenter. Reads
+// the task fresh from Airtable so the collab list is current.
+async function fanOutCommentDM(env, taskId, commenterEmail, commentText, taskName) {
+    if (!env.SLACK_BOT_TOKEN) return;
+    // Fetch the task's collaborators + assignee.
+    const url = `/${TABLE_TASKS}/${taskId}?returnFieldsByFieldId=true` +
+        `&fields%5B%5D=${FIELD.collaborators}` +
+        `&fields%5B%5D=${FIELD.assignee}`;
+    let recipients = new Set();
+    try {
+        const got = await airtable(env, 'GET', url);
+        const collabs = (got && got.fields && got.fields[FIELD.collaborators]) || [];
+        const assignee = got && got.fields && got.fields[FIELD.assignee];
+        for (const c of collabs) {
+            if (c && c.email) recipients.add(c.email.toLowerCase());
+        }
+        if (assignee && assignee.email) recipients.add(assignee.email.toLowerCase());
+    } catch (e) {
+        console.error('fanOutCommentDM: read task failed:', e && e.stack || e);
+        return;
+    }
+    if (commenterEmail) recipients.delete(commenterEmail.toLowerCase());
+    if (recipients.size === 0) return;
+
+    // Use slack-notify worker's `comment` action so the format matches
+    // dashboard-originated comment DMs exactly (and contractor replies
+    // in-thread route back via the bot's handleDmThreadReply flow).
+    for (const email of recipients) {
+        const slackEmail = commentSlackEmailFor(email);
+        try {
+            const resp = await fetch(SLACK_NOTIFY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    recipientEmail: slackEmail,
+                    taskName: taskName || '(no name)',
+                    taskId,
+                    actorName: '(via Slack)',
+                    action: 'comment',
+                    commentText: String(commentText || '').slice(0, 500),
+                }),
+            });
+            const data = await resp.json();
+            if (!data.ok) console.error(`fanOutCommentDM: slack-notify failed for ${email}: ${data.error}`);
+        } catch (e) {
+            console.error(`fanOutCommentDM: slack-notify call failed for ${email}:`, e && e.stack || e);
+        }
+    }
 }
 
 // Standalone-photo execute: just appends the files to the task's
