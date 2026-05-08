@@ -457,6 +457,7 @@
             'fldZKzIxgyrQ8CG8a': UC_TASK.hardDeadline,
             'fldcq3t6uAPgWSOP8': UC_TASK.collaborators,
             'fldmne4RYJU22ICub': [c.tenancyId],
+            'fldLu1Y4GzyWcDoxr': ['recoGcXRXCniyJsTz'],  // Business → Real Estate
         };
 
         if (c.tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [c.tenantId];
