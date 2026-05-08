@@ -95,6 +95,27 @@ const FIELD = {
 
 // Defaults written on every contractor-created task.
 const BUSINESS_REAL_ESTATE_ID = 'recoGcXRXCniyJsTz';
+const BUSINESS_OPS_DIRECTOR_ID = 'reca9ofzhuw13ZzGE'; // Operations Director — used for Roy's non-property work (sales, lead follow-ups, customer prospecting)
+
+// Per-contractor business resolution rules:
+//   - Gary, Rob → ALWAYS Real Estate. Both only do property maintenance.
+//   - Roy + property linked → Real Estate (any property work is RE by definition).
+//   - Roy + no property + sales/customer/lead/client/prospect vocabulary → Operations Director.
+//   - Roy + ambiguous → Real Estate (default), the confirmation prompt mentions
+//                       this so the user can override before the write.
+function resolveBusinessId(assignee, hasResolvedProperty, descriptionText) {
+    const fn = (assignee.firstName || '').toLowerCase();
+    if (fn === 'gary' || fn === 'rob') return { id: BUSINESS_REAL_ESTATE_ID, name: 'Real Estate', confident: true };
+    if (fn === 'roy') {
+        if (hasResolvedProperty) return { id: BUSINESS_REAL_ESTATE_ID, name: 'Real Estate', confident: true };
+        const t = (descriptionText || '').toLowerCase();
+        const opsKeywords = /\b(sales|customer|client|prospect|lead|follow[- ]?up|enquiry|inquiry|appointment|deal|call back|cold call|outreach|pitch|demo|onboard)\b/;
+        if (opsKeywords.test(t)) return { id: BUSINESS_OPS_DIRECTOR_ID, name: 'Operations Director', confident: true };
+        return { id: BUSINESS_REAL_ESTATE_ID, name: 'Real Estate', confident: false };
+    }
+    // Unknown contractor — safest fallback.
+    return { id: BUSINESS_REAL_ESTATE_ID, name: 'Real Estate', confident: false };
+}
 
 // Auto-added as Collaborators on every task the bot creates. Same set
 // receives completion DMs (excluding whoever did the completion).
@@ -707,6 +728,10 @@ async function handleNewJob(sender, text, evt, threadTs, env, override) {
     const priority = extraction.priority === 'High Priority' ? 'Urgent' : 'Not Urgent';
     const senderIsAssignee = sender.kind === 'contractor'
         && sender.airtableEmail.toLowerCase() === assignee.airtableEmail.toLowerCase();
+    // Per-contractor business resolution. Property linked here always means
+    // hasResolvedProperty=true (we resolved one above). For Gary/Rob this is
+    // always Real Estate; for Roy it depends on the description vocabulary.
+    const businessRes = resolveBusinessId(assignee, !!property, text);
 
     // ── Step 3: ASK FOR CONFIRMATION before creating anything.
     //   Stash everything we'd need to actually create the task in KV;
@@ -720,6 +745,7 @@ async function handleNewJob(sender, text, evt, threadTs, env, override) {
         `*${extraction.taskName}*`,
         `📍 ${property.name}`,
         `⚡ Priority: ${priority}`,
+        `🏢 Business: ${businessRes.name}` + (businessRes.confident ? '' : ` _(if you wanted Operations Director, reply *no, ops* and I'll switch)_`),
         ``,
         `Reply *yes* to log it, *no* to cancel.`,
     ];
@@ -733,6 +759,8 @@ async function handleNewJob(sender, text, evt, threadTs, env, override) {
             priority,
             propertyId: property.id,
             propertyName: property.name,
+            businessId: businessRes.id,
+            businessName: businessRes.name,
             assigneeEmail: assignee.airtableEmail,
             assigneeFirstName: assignee.firstName,
             contractorFieldValue: assignee.contractorFieldValue || null,
@@ -761,7 +789,7 @@ async function executeConfirmedCreate(env, plan, threadTs) {
         [FIELD.priority]:        plan.priority,
         [FIELD.assignee]:        { email: plan.assigneeEmail },
         [FIELD.properties]:      [plan.propertyId],
-        [FIELD.business]:        [BUSINESS_REAL_ESTATE_ID],
+        [FIELD.business]:        [plan.businessId || BUSINESS_REAL_ESTATE_ID],
         [FIELD.maintenanceTick]: true,
         [FIELD.collaborators]:   plan.collaboratorEmails.map(email => ({ email })),
     };
@@ -1250,6 +1278,28 @@ async function resolvePending(sender, text, pending, evt, threadTs, env) {
         pending.kind === 'confirm_note' ||
         pending.kind === 'confirm_attach'
     ) {
+        // Special case for confirm_create only: "no, ops" / "no, operations"
+        // overrides the suggested business to Operations Director and
+        // proceeds with the write. Lets the user fix an ambiguous Roy
+        // classification without restarting the whole flow.
+        if (pending.kind === 'confirm_create' && /\b(no|n)\b[\s,]*\b(ops|operations)\b/i.test(text)) {
+            try {
+                const overriddenPlan = {
+                    ...pending.plan,
+                    businessId: BUSINESS_OPS_DIRECTOR_ID,
+                    businessName: 'Operations Director',
+                };
+                await reply(threadTs, env, `Switching business to *Operations Director* and logging…`);
+                await executeConfirmedCreate(env, overriddenPlan, threadTs);
+            } catch (err) {
+                console.error('confirm execute (override-ops) failed:', err && err.stack || err);
+                await reply(threadTs, env,
+                    `Something went wrong on my end while saving that. Please try again or use the dashboard.`
+                );
+            }
+            return;
+        }
+
         const answer = parseYesNo(text);
         if (answer === null) {
             await setPendingState(env, evt.user, pending);
