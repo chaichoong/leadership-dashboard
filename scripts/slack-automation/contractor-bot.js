@@ -77,11 +77,6 @@ const MODEL_ACCURATE    = 'claude-sonnet-4-5-20250929';
 
 const SLACK_POST_URL    = 'https://slack.com/api/chat.postMessage';
 const SLACK_LOOKUP_URL  = 'https://slack.com/api/users.lookupByEmail';
-// The dashboard's slack-notify worker. Used by fanOutCommentDM so
-// Slack-originated comments produce the same comment-DM format as
-// dashboard-originated ones (so contractor in-thread replies route
-// back through handleDmThreadReply identically).
-const SLACK_NOTIFY_URL  = 'https://slack-notify.kevinbrittain.workers.dev/';
 
 const AIRTABLE_BASE      = 'appnqjDpqDniH3IRl';
 const TABLE_TASKS        = 'tblqB8b22hKBL4PF1';
@@ -1321,10 +1316,11 @@ async function executeConfirmedNote(env, plan, threadTs) {
 // the task fresh from Airtable so the collab list is current.
 async function fanOutCommentDM(env, taskId, commenterEmail, commentText, taskName) {
     if (!env.SLACK_BOT_TOKEN) return;
-    // Fetch the task's collaborators + assignee.
-    const url = `/${TABLE_TASKS}/${taskId}?returnFieldsByFieldId=true` +
-        `&fields%5B%5D=${FIELD.collaborators}` +
-        `&fields%5B%5D=${FIELD.assignee}`;
+    // Fetch the task's collaborators + assignee. Airtable's single-record
+    // GET endpoint returns ALL fields and rejects requests that include a
+    // `fields[]` selector with HTTP 422 — fields[] is only valid on the
+    // list endpoint. Just read the whole record and pluck what we need.
+    const url = `/${TABLE_TASKS}/${taskId}?returnFieldsByFieldId=true`;
     let recipients = new Set();
     try {
         const got = await airtable(env, 'GET', url);
@@ -1341,28 +1337,22 @@ async function fanOutCommentDM(env, taskId, commenterEmail, commentText, taskNam
     if (commenterEmail) recipients.delete(commenterEmail.toLowerCase());
     if (recipients.size === 0) return;
 
-    // Use slack-notify worker's `comment` action so the format matches
-    // dashboard-originated comment DMs exactly (and contractor replies
-    // in-thread route back via the bot's handleDmThreadReply flow).
+    // Reuse the local dispatchCommentDm helper — same DM format the
+    // dashboard's slack-notify worker would produce, but called direct
+    // from this worker. We can NOT call slack-notify worker-to-worker
+    // (Cloudflare returns error 1042 on `*.workers.dev` cross-worker
+    // fetches), so we replicate the format inline.
     for (const email of recipients) {
         const slackEmail = commentSlackEmailFor(email);
         try {
-            const resp = await fetch(SLACK_NOTIFY_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    recipientEmail: slackEmail,
-                    taskName: taskName || '(no name)',
-                    taskId,
-                    actorName: '(via Slack)',
-                    action: 'comment',
-                    commentText: String(commentText || '').slice(0, 500),
-                }),
+            await dispatchCommentDm(env, slackEmail, {
+                taskName: taskName || '(no name)',
+                taskId,
+                actorName: '(via Slack)',
+                commentText: String(commentText || '').slice(0, 500),
             });
-            const data = await resp.json();
-            if (!data.ok) console.error(`fanOutCommentDM: slack-notify failed for ${email}: ${data.error}`);
         } catch (e) {
-            console.error(`fanOutCommentDM: slack-notify call failed for ${email}:`, e && e.stack || e);
+            console.error(`fanOutCommentDM: DM dispatch failed for ${email}:`, e && e.stack || e);
         }
     }
 }
