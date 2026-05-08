@@ -1012,33 +1012,19 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 <div class="section" id="post-management">
   <h2 class="section-title"><span class="icon">&#x1F4EC;</span> 16. Post Management</h2>
   <div class="card">
-    <p>The Post section handles physical post that arrives at the office. It sits within Inbound Comms as a separate mode, toggled via the <strong>Email | Post</strong> button in the header.</p>
+    <p>Physical post is processed through the same email workflow as all other inbound comms. The <code>/anthropic-skills:post-manager</code> Claude skill handles the conversion from scanned PDF to individual emails.</p>
 
     <h3 style="margin-top:16px;">Workflow</h3>
     <ol style="margin:8px 0 12px 20px; line-height:1.8;">
-      <li><strong>Scan:</strong> Kevin scans all actionable post into a single PDF (one scan session, multiple senders) and saves it to the designated Evernote notebook.</li>
-      <li><strong>Process:</strong> Run the <code>/anthropic-skills:post-manager</code> skill. It fetches the PDF from Evernote, uses AI vision to split it by sender, extracts metadata (sender, summary, recommended action), and creates Airtable task records with sourceType = "Post" and status = "Incoming".</li>
-      <li><strong>Triage:</strong> An executive assistant switches to the Post view in Inbound Comms, reviews the Incoming section, and assigns each item to a team member using the dropdown.</li>
-      <li><strong>Action:</strong> The assigned team member completes the task in Airtable (or clicks "Mark Complete" in the Post view).</li>
-      <li><strong>Close:</strong> Completed items move to the Completed section automatically.</li>
+      <li><strong>Scan:</strong> Kevin scans all actionable post into a single PDF (one scan session, multiple senders).</li>
+      <li><strong>Save:</strong> Export the PDF to <code>~/Documents/ScannedPost/</code> on the Mac.</li>
+      <li><strong>Process:</strong> Run <code>/anthropic-skills:post-manager</code>. It reads the PDF, uses AI vision to split it by sender, extracts metadata (sender, summary, recommended action), and emails each split document to Kevin's inbox with the PDF attached.</li>
+      <li><strong>Triage:</strong> The emails appear in Inbound Comms alongside regular emails. An executive assistant labels and assigns them through the normal workflow.</li>
+      <li><strong>Action:</strong> Tasks are completed through the standard Inbound Comms label progression.</li>
     </ol>
 
-    <h3>Post View Sections</h3>
-    <ul style="margin:8px 0 12px 20px; line-height:1.8;">
-      <li><strong>Incoming:</strong> Items processed by the post-manager skill, awaiting triage. Shows sender, AI summary, urgency badge, and an assign dropdown.</li>
-      <li><strong>Assigned:</strong> Items assigned to a team member. Shows assignee name and a "Mark Complete" button.</li>
-      <li><strong>Completed:</strong> Finished items (collapsed by default). Shows who completed the task.</li>
-    </ul>
-
-    <h3>Data Storage</h3>
-    <p>Post items are stored as records in the existing Airtable Tasks table with <code>sourceType = "Post"</code> and <code>isInbound = true</code>. This means they also appear in the Tasks &amp; Project Management page alongside email-originated tasks.</p>
-
-    <h3>Urgency Levels</h3>
-    <ul style="margin:8px 0 12px 20px; line-height:1.8;">
-      <li><span style="color:var(--danger); font-weight:600;">HIGH</span> &mdash; Deadline within 7 days or legal/compliance matter</li>
-      <li><span style="color:var(--warning); font-weight:600;">MEDIUM</span> &mdash; Action needed but no immediate deadline</li>
-      <li><span style="color:var(--success); font-weight:600;">LOW</span> &mdash; Informational, can wait</li>
-    </ul>
+    <h3>Email Format</h3>
+    <p>Each email sent by the skill has subject line <code>POST: {Sender} - {Summary}</code> and includes the split PDF as an attachment. The email body contains the sender name, document summary, recommended action, and urgency level.</p>
   </div>
 </div>
 
@@ -1053,7 +1039,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
           <tr>
             <td><strong>2.4</strong></td>
             <td>8 May 2026</td>
-            <td>Added Post Management section (section 16). New Email/Post mode toggle in header. Three-state workflow (Incoming/Assigned/Completed) for scanned physical post. Integrated with existing Airtable Tasks table via sourceType="Post". Dynamic team member assignment from Airtable. Linked to post-manager Claude skill for PDF processing.</td>
+            <td>Post Management reworked: removed separate Post/Email mode toggle and in-page Post UI. Scanned post now flows through the email pipeline. The post-manager skill splits PDFs by sender and emails each document to the inbox for triage through the normal label workflow.</td>
           </tr>
           <tr>
             <td><strong>2.3</strong></td>
