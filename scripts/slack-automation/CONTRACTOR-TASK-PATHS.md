@@ -17,6 +17,20 @@ message in `#property-management`. The bot classifies intent, asks for
 confirmation, and writes the task on "yes". Since the bot owns this path
 end-to-end it's always been the most consistent.
 
+The bot supports the same actions for both senders:
+- **New job** — describe the work and (for team senders) say who it's
+  for. Bot logs the task and DMs the contractor.
+- **Status update** — "completed boiler at 55 Elmdon" or "started the
+  garden clear-out". Bot fuzzy-matches the open job, confirms, and
+  marks it complete / in progress. Comments are appended too.
+- **Attach photo** — drop a photo in the channel; bot asks which open
+  job to attach it to (or uses the thread-task mapping if you're in a
+  thread the bot logged a task in).
+- **List request** — "what's on my list?" returns the sender's open
+  jobs (for contractors: their assigned work; for team members: every
+  task they're Assignee or Collaborator on, which covers every
+  contractor task).
+
 ### 2. The `contractor-job-creator` Claude skill — RETIRED
 
 **Status: removed.** Used to be a local skill on each office team
@@ -116,11 +130,23 @@ and every path picks the change up immediately.
 
 ## Office team onboarding — what to tell them
 
-> "From now on, when you want to add a contractor task:
-> • **Slack** — post in `#property-management` and tell the bot who to
->   assign it to. Example: *'boiler broken at 55 Elmdon, give it to Gary'*.
->   The bot asks you to confirm, then logs it and DMs the contractor.
-> • **Dashboard** — click *Add Task* on the Tasks OS, set Assignee to
+> "Use `#property-management` in Slack as your one-stop shop for
+> contractor work, or the dashboard if you'd rather click through a
+> form. The bot understands plain English in the channel:
+>
+> • **New job** — *'boiler broken at 55 Elmdon, give it to Gary'*.
+>   Bot logs the task and DMs Gary.
+> • **Mark something done** — *'completed the boiler at 55 Elmdon'*.
+>   Bot fuzzy-matches one of the open jobs and asks you to confirm.
+> • **Add a comment** — *'tenant says the heating is back on'*. Bot
+>   asks which job, then posts the comment (visible on the dashboard
+>   and DM'd to every collaborator).
+> • **Attach a photo** — drop the photo in the channel; bot asks which
+>   open job to attach it to.
+>
+> Or use the dashboard:
+>
+> • **Add Task** — click *Add Task* on the Tasks OS, set Assignee to
 >   the contractor, leave Business as *Real Estate* (change to
 >   *Operations Director* only if it's a non-property task for Roy).
 >   Saving the task automatically DMs the contractor.

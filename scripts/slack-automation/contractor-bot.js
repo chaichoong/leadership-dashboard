@@ -146,11 +146,15 @@ const CONTRACTORS = {
 };
 
 // Slack user ID → office team identity. Team members can post in
-// #property-management to log new contractor jobs and assign them
-// (e.g. "boiler broken at 55 Elmdon, give it to Gary"). Status updates
-// and list requests from team members are deflected — those flows stay
-// contractor-only because they need contractor-context (whose list,
-// whose work).
+// #property-management to:
+//   - log new contractor jobs and assign them
+//     (e.g. "boiler broken at 55 Elmdon, give it to Gary"),
+//   - mark a contractor task complete / in progress on their behalf,
+//   - add a comment, or attach a photo.
+// The pool of "open tasks" for a team member in fetchOpenTasksFor is
+// every task where they're the Assignee OR a Collaborator — which
+// covers every contractor task, since the bot auto-adds Kevin/Mica/
+// Erica as collaborators on each one.
 const TEAM_MEMBERS = {
     U08HW8F1MA8: { name: 'Kevin Brittain',  firstName: 'Kevin', airtableEmail: 'kevin@runpreneur.org.uk' },
     U08HW0TAWAE: { name: 'Mica Albovias',   firstName: 'Mica',  airtableEmail: 'micaa.work@gmail.com' },
@@ -372,33 +376,16 @@ async function routeMessage(evt, env) {
     const intent = await classifyIntent(text || '(file uploaded)', env);
 
     // FILE-ONLY / unclear-text-with-files → treat as a photo attachment to
-    // an existing job. Routed BEFORE the team-member deflection below so
-    // contractors can attach photos without descriptive text. Skipped when
-    // the intent clearly fits another flow (new_job carries its photos
-    // along; status_update will too, see handleStatusUpdate).
+    // an existing job. Skipped when the intent clearly fits another flow
+    // (new_job carries its photos along; status_update will too, see
+    // handleStatusUpdate). Works for both contractors (their own jobs)
+    // and team members (tasks they're Assignee or Collaborator on — which
+    // includes every contractor task because of auto-collab).
     if (
-        sender.kind === 'contractor' &&
         hasFiles &&
         (intent === 'unknown' || intent === 'list_request' || !text)
     ) {
         return handleAttachPhoto(sender, text, evt, threadTs, env);
-    }
-
-    // Team-member messages: only new_job is supported. Status updates and
-    // list requests need contractor-context (whose work, whose list) and
-    // are deflected to the dashboard for now.
-    if (sender.kind === 'team' && intent !== 'new_job') {
-        if (intent === 'unknown') {
-            return reply(threadTs, env,
-                `Hi ${sender.firstName}, I only handle new contractor task assignments here. ` +
-                `Describe the work and (optionally) say who to assign it to — e.g. ` +
-                `"boiler broken at 55 Elmdon, give it to Gary".`
-            );
-        }
-        return reply(threadTs, env,
-            `Hi ${sender.firstName}, I only handle new contractor task assignments from the office team. ` +
-            `For task updates or to see what's open, please use the dashboard.`
-        );
     }
 
     switch (intent) {
@@ -1143,12 +1130,12 @@ function tokenOverlap(aTokens, bTokens) {
 
 // ─── HANDLER 2: STATUS UPDATE ─────────────────────────────────────────
 
-async function handleStatusUpdate(contractor, text, evt, threadTs, env, override) {
+async function handleStatusUpdate(sender, text, evt, threadTs, env, override) {
     override = override || {};
-    const openTasks = override.openTasks || await fetchOpenTasksFor(contractor, env);
+    const openTasks = override.openTasks || await fetchOpenTasksFor(sender, env);
     if (openTasks.length === 0) {
         return reply(threadTs, env,
-            `${contractor.firstName}, you don't have any open jobs right now.`
+            `${sender.firstName}, you don't have any open jobs right now.`
         );
     }
 
@@ -1197,7 +1184,7 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
                 `${i + 1}. ${t.taskName}${t.propertyName ? ' — ' + t.propertyName : ''}`
             ).join('\n');
             return reply(threadTs, env,
-                `I can't tell which job you mean, ${contractor.firstName}. Your open jobs:\n${list}\n` +
+                `I can't tell which job you mean, ${sender.firstName}. Your open jobs:\n${list}\n` +
                 `Reply with the number or job name.`
             );
         }
@@ -1228,8 +1215,8 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
                 taskId: target.id,
                 taskName: target.taskName,
                 propertyName: target.propertyName || '',
-                contractorAirtableEmail: contractor.airtableEmail,
-                contractorName: contractor.name,
+                actorAirtableEmail: sender.airtableEmail,
+                actorName: sender.name,
                 attachmentPlan: filePlan,
             },
             eventTs: evt.ts,
@@ -1252,15 +1239,15 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
     }
     if (action === 'note') {
         const rawCommentText = noteText || text;
-        const commentBody = `*${contractor.firstName} via Slack*\n${rawCommentText}`;
+        const commentBody = `*${sender.firstName} via Slack*\n${rawCommentText}`;
         await setPendingState(env, evt.user, {
             kind: 'confirm_note',
             plan: {
                 taskId: target.id,
                 taskName: target.taskName,
                 commentBody,
-                commentText: rawCommentText,        // for the fan-out DM (without the "via Slack" prefix)
-                commenterEmail: contractor.airtableEmail, // skip self when fanning out
+                commentText: rawCommentText,    // for the fan-out DM (without the "via Slack" prefix)
+                commenterEmail: sender.airtableEmail, // skip self when fanning out
                 attachmentPlan: filePlan,
             },
             eventTs: evt.ts,
@@ -1280,15 +1267,15 @@ async function handleStatusUpdate(contractor, text, evt, threadTs, env, override
 async function executeConfirmedComplete(env, plan, threadTs) {
     await updateTask(env, plan.taskId, { [FIELD.status]: 'Completed' });
     const attachedCount = await maybeAppendAttachments(env, plan.taskId, plan.attachmentPlan);
-    const firstName = (plan.contractorName || '').split(' ')[0] || 'there';
+    const firstName = (plan.actorName || '').split(' ')[0] || 'there';
     const attachLine = attachedCount > 0
         ? `📎 ${attachedCount} attachment${attachedCount > 1 ? 's' : ''} added.\n`
         : '';
     await reply(threadTs, env,
         `✅ Marked complete: *${plan.taskName}*. Nice one ${firstName}.\n${attachLine}`.trim()
     );
-    await dmTeamExcept(env, plan.contractorAirtableEmail,
-        `*${plan.contractorName}* completed a task you collaborate on:\n` +
+    await dmTeamExcept(env, plan.actorAirtableEmail,
+        `*${plan.actorName}* completed a task you collaborate on:\n` +
         `*${plan.taskName}*` +
         (plan.propertyName ? `\n📍 ${plan.propertyName}` : '')
     );
@@ -1422,8 +1409,9 @@ async function matchStatusUpdate(text, openTasks, env) {
     ).join('\n');
 
     const system =
-        `A contractor has sent a Slack message about their work. Match it to one of the open jobs\n` +
-        `below and classify the action.\n\n` +
+        `Someone has sent a Slack message about a job (could be the contractor doing\n` +
+        `the work or a team member updating on their behalf). Match it to one of the\n` +
+        `open jobs below and classify the action.\n\n` +
         `OPEN JOBS:\n${taskList}\n\n` +
         `Respond with ONLY valid JSON (no markdown):\n` +
         `{\n` +
@@ -1451,10 +1439,10 @@ async function matchStatusUpdate(text, openTasks, env) {
 
 // ─── HANDLER 3: LIST REQUEST ──────────────────────────────────────────
 
-async function handleListRequest(contractor, threadTs, env) {
-    const tasks = await fetchOpenTasksFor(contractor, env);
+async function handleListRequest(sender, threadTs, env) {
+    const tasks = await fetchOpenTasksFor(sender, env);
     if (tasks.length === 0) {
-        return reply(threadTs, env, `✨ Nothing on your list, ${contractor.firstName}. All clear.`);
+        return reply(threadTs, env, `✨ Nothing on your list, ${sender.firstName}. All clear.`);
     }
     const lines = tasks.map((t, i) => {
         const pri = t.priority === 'Urgent' ? ' 🔴' : '';
@@ -1462,7 +1450,7 @@ async function handleListRequest(contractor, threadTs, env) {
         return `${i + 1}. *${t.taskName}*${prop}${pri}`;
     });
     return reply(threadTs, env,
-        `${contractor.firstName}, here's your list (${tasks.length}):\n${lines.join('\n')}`
+        `${sender.firstName}, here's your list (${tasks.length}):\n${lines.join('\n')}`
     );
 }
 
@@ -1476,12 +1464,12 @@ async function handleListRequest(contractor, threadTs, env) {
 //   2. AI matching against the surrounding text (if any) + open tasks.
 //   3. Ask explicitly with a numbered list of open jobs.
 // Followed always by a yes/no confirmation before the actual attach.
-async function handleAttachPhoto(contractor, text, evt, threadTs, env, override) {
+async function handleAttachPhoto(sender, text, evt, threadTs, env, override) {
     override = override || {};
-    const openTasks = override.openTasks || await fetchOpenTasksFor(contractor, env);
+    const openTasks = override.openTasks || await fetchOpenTasksFor(sender, env);
     if (openTasks.length === 0) {
         return reply(threadTs, env,
-            `${contractor.firstName}, you don't have any open jobs to attach this to. ` +
+            `${sender.firstName}, you don't have any open jobs to attach this to. ` +
             `Log a new job first by describing what's wrong and where.`
         );
     }
@@ -1524,7 +1512,7 @@ async function handleAttachPhoto(contractor, text, evt, threadTs, env, override)
         const fileCount = (evt.files && evt.files.length) || 0;
         return reply(threadTs, env,
             `Got the file${fileCount > 1 ? 's' : ''}. Which job should I attach ` +
-            `${fileCount > 1 ? 'them' : 'it'} to, ${contractor.firstName}?\n${list}\n` +
+            `${fileCount > 1 ? 'them' : 'it'} to, ${sender.firstName}?\n${list}\n` +
             `Reply with the number or job name.`
         );
     }
@@ -1615,9 +1603,6 @@ async function resolvePending(sender, text, pending, evt, threadTs, env) {
     // bot asked which open job to attach it to. Their reply (number or
     // job name) resolves the target — then we ask for the yes/no confirm.
     if (pending.kind === 'awaiting_attach_task_choice') {
-        if (sender.kind !== 'contractor') {
-            return reply(threadTs, env, `(That flow is contractor-only — please use the dashboard.)`);
-        }
         const openTasks = await fetchOpenTasksFor(sender, env);
         const candidates = openTasks.filter(t => pending.taskIds.includes(t.id));
         const chosen = pickFromCandidates(text, candidates, t => t.taskName);
@@ -1704,11 +1689,6 @@ async function resolvePending(sender, text, pending, evt, threadTs, env) {
     }
 
     if (pending.kind === 'awaiting_task_choice') {
-        // Status-update flow only fires for contractor senders — team
-        // members don't have an open jobs list to match against.
-        if (sender.kind !== 'contractor') {
-            return reply(threadTs, env, `(Status updates are contractor-only — please use the dashboard.)`);
-        }
         const openTasks = await fetchOpenTasksFor(sender, env);
         const candidates = openTasks.filter(t => pending.taskIds.includes(t.id));
         const chosen = pickFromCandidates(text, candidates, t => t.taskName);
@@ -1934,20 +1914,34 @@ async function addComment(env, recordId, text) {
     return airtable(env, 'POST', `/${TABLE_TASKS}/${recordId}/comments`, { text });
 }
 
-async function fetchOpenTasksFor(contractor, env) {
+async function fetchOpenTasksFor(sender, env) {
     const fields = [
         FIELD.taskName, FIELD.status, FIELD.priority,
         FIELD.properties, FIELD.notes, FIELD.maintenanceTick,
     ];
-    // Contractor identity is the only filter — anything assigned to them
-    // is contractor work by definition (maintenance, gardening, callouts,
-    // anything). Do NOT additionally filter by Maintenance Ticket — that
-    // would over-narrow and hide non-maintenance contractor work.
-    const formula =
-        `AND(` +
-            `{Status}!='Completed',` +
-            `{Assignee}='${escapeFormula(contractor.name)}'` +
-        `)`;
+    // Pool of open tasks the sender can act on:
+    //   - Contractor: tasks where they're the Assignee. Anything assigned
+    //     to them is contractor work by definition (maintenance, gardening,
+    //     callouts, anything). Do NOT additionally filter by Maintenance
+    //     Ticket — that would over-narrow and hide non-maintenance work.
+    //   - Team member: tasks where they're the Assignee OR a Collaborator.
+    //     Because the bot auto-adds Kevin/Mica/Erica as collaborators on
+    //     every contractor task, this pool covers every open contractor
+    //     task plus the team member's own work — letting them comment on,
+    //     complete, or attach photos to any of them via Slack.
+    const safeName = escapeFormula(sender.name);
+    const formula = sender.kind === 'team'
+        ? `AND(` +
+              `{Status}!='Completed',` +
+              `OR(` +
+                  `{Assignee}='${safeName}',` +
+                  `FIND('${safeName}', ARRAYJOIN({Collaborators}, ','))` +
+              `)` +
+          `)`
+        : `AND(` +
+              `{Status}!='Completed',` +
+              `{Assignee}='${safeName}'` +
+          `)`;
     const url = `/${TABLE_TASKS}` +
         `?returnFieldsByFieldId=true` +
         `&filterByFormula=${encodeURIComponent(formula)}` +
