@@ -212,6 +212,35 @@
             return reconForecastKeys.includes(dk);
         }
 
+        // Build tenancy → last account alias and cost → last account alias maps
+        // from transaction history so each forecast item shows which bank account
+        // the last real payment came through.
+        const tenancyLastAccount = {};
+        const costLastAccount = {};
+        const sortedTxByDate = [...(transactions || [])].sort((a, b) => {
+            const da = getField(a, F.txDate) || '';
+            const db = getField(b, F.txDate) || '';
+            return db.localeCompare(da);
+        });
+        sortedTxByDate.forEach(r => {
+            const alias = getField(r, F.txAccountAlias);
+            if (!alias) return;
+            const aliasStr = Array.isArray(alias) ? String(alias[0] || '') : String(alias);
+            if (!aliasStr) return;
+
+            const ten = getField(r, F.txTenancy);
+            if (ten) {
+                const tenIds = Array.isArray(ten) ? ten.map(t => (t && typeof t === 'object') ? t.id : t).filter(Boolean) : [];
+                tenIds.forEach(tid => { if (!tenancyLastAccount[tid]) tenancyLastAccount[tid] = aliasStr; });
+            }
+
+            const cost = getField(r, F.txCost);
+            if (cost) {
+                const costIds = Array.isArray(cost) ? cost.map(c => (c && typeof c === 'object') ? c.id : c).filter(Boolean) : [];
+                costIds.forEach(cid => { if (!costLastAccount[cid]) costLastAccount[cid] = aliasStr; });
+            }
+        });
+
         // Build 31 days using LOCAL date parts to avoid DST duplicates
         for (let i = 0; i < 31; i++) {
             const d = new Date(today);
@@ -244,7 +273,7 @@
                 if (dayMap[dk]) {
                     if (isInReconWindow(dk) && isInflowAlreadyCleared(rent, label, r.id)) return;
                     const isUC = tenancyIsUC[r.id] || false;
-                    dayMap[dk].inflows.push({ name: label, amount: rent, isUC, tenancyId: r.id, tenantId, unitId, dueDate: dk });
+                    dayMap[dk].inflows.push({ name: label, amount: rent, isUC, tenancyId: r.id, tenantId, unitId, dueDate: dk, account: tenancyLastAccount[r.id] || '' });
                 }
             });
         });
@@ -269,7 +298,7 @@
                 if (dayMap[dk]) {
                     // Check today..today+3: keyword + amount + sub-category match against reconciled outflows
                     if (isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds)) return;
-                    dayMap[dk].outflows.push({ name, amount });
+                    dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '' });
                 }
             });
         });
@@ -364,27 +393,33 @@
             const wknd = isWeekend(r.date) ? ' weekend' : '';
             const closingClass = r.closing < 0 ? 'text-red' : r.closing < 500 ? 'text-amber' : 'text-green';
 
-            const daysFromToday = Math.round((r.date - today) / 86400000);
+            // Account tag helper
+            const acctTag = (acct) => acct
+                ? `<span style="font-size:10px;background:var(--bg-subtle);color:var(--text-secondary);padding:1px 6px;border-radius:3px;margin-left:6px;white-space:nowrap">${escHtml(acct)}</span>`
+                : '';
+
             const inflowsHtml = r.inflows.length > 0
                 ? r.inflows.map((f, fi) => {
-                    const ucChecked = isUCCheckRequested(f.tenancyId);
-                    const ucBtn = (f.isUC && daysFromToday >= 0 && daysFromToday <= 7)
-                        ? (ucChecked
-                            ? ` <button class="uc-check-btn done" disabled title="UC Check already requested">UC Check Requested</button>`
-                            : ` <button class="uc-check-btn" id="uc-${i}-${fi}" onclick="event.stopPropagation(); createUCTask('${escJs(f.name)}', ${f.amount}, '${f.dueDate}', '${f.tenancyId}', '${f.tenantId || ''}', '${f.unitId || ''}', 'uc-${i}-${fi}')" title="Create task for Mica to call UC and confirm this payment">UC Check</button>`)
-                        : '';
                     const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
-                    return `<div class="cashflow-detail-item in"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="in" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${ucBtn}</span></label><span class="cashflow-detail-item-value">+${fmt(f.amount)}</span></div>`;
+                    return `<div class="cashflow-detail-item in"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="in" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value">+${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
             const outflowsHtml = r.outflows.length > 0
                 ? r.outflows.map((f, fi) => {
                     const cbId = cfStableKey(r.key, 'out', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
-                    return `<div class="cashflow-detail-item out"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}</span></label><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`;
+                    return `<div class="cashflow-detail-item out"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
+
+            // Collect unique account aliases for this day's summary column
+            const dayAccounts = new Set();
+            r.inflows.forEach(f => { if (f.account) dayAccounts.add(f.account); });
+            r.outflows.forEach(f => { if (f.account) dayAccounts.add(f.account); });
+            const acctSummary = dayAccounts.size > 0
+                ? [...dayAccounts].map(a => escHtml(a)).join(', ')
+                : '';
 
             return `
                 <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}')">
@@ -394,9 +429,10 @@
                     <td class="text-red">-${fmt(r.dayOut)}</td>
                     <td class="${r.net >= 0 ? 'text-green' : 'text-red'}">${r.net >= 0 ? '+' : '-'}${fmt(r.net)}</td>
                     <td class="${closingClass}"><strong>${fmtAccounting(r.closing)}</strong></td>
+                    <td style="font-size:11px;color:var(--text-secondary);white-space:nowrap">${acctSummary}</td>
                 </tr>
                 <tr class="cashflow-table-row-detail" id="cfrow-${i}">
-                    <td colspan="6"><div class="cashflow-detail-list">
+                    <td colspan="7"><div class="cashflow-detail-list">
                         <div style="margin-bottom:8px;"><strong>Inflows:</strong></div>
                         ${inflowsHtml}
                         <div style="margin-top:8px;margin-bottom:8px;"><strong>Outflows:</strong></div>
@@ -799,133 +835,6 @@
         });
         updateCalcTotals();
     }
-
-    // ── UC Check Task Creator ──
-    // Creates a task in Airtable assigned to Mica to call Universal Credit
-    // Track which UC checks have been requested (persists across auto-refresh)
-    function isUCCheckRequested(tenancyId) {
-        try {
-            const stored = JSON.parse(localStorage.getItem('_uc_checks') || '{}');
-            // Auto-expire after 30 days
-            const ts = stored[tenancyId];
-            if (!ts) return false;
-            if (Date.now() - new Date(ts).getTime() > 30 * 86400000) { delete stored[tenancyId]; localStorage.setItem('_uc_checks', JSON.stringify(stored)); return false; }
-            return true;
-        } catch { return false; }
-    }
-    function markUCCheckRequested(tenancyId) {
-        try {
-            const stored = JSON.parse(localStorage.getItem('_uc_checks') || '{}');
-            stored[tenancyId] = new Date().toISOString();
-            localStorage.setItem('_uc_checks', JSON.stringify(stored));
-        } catch {}
-    }
-
-    const UC_TASK_CONFIG = {
-        assigneeEmail: 'micaa.work@gmail.com',
-        teamMemberId: 'rec4b5MDoaxEC7WRE',     // Mica Albovias
-        projectId: 'recyJDDWaEAzMXMxw',        // £12,000 Monthly Operating Cushion project
-        priorityName: 'Project',
-        statusName: 'Today',
-    };
-
-    async function createUCTask(tenantLabel, amount, dueDate, tenancyId, tenantId, unitId, btnId) {
-        const btn = document.getElementById(btnId);
-        if (!btn || btn.disabled) return;
-        btn.disabled = true;
-        btn.textContent = 'Creating...';
-
-        const taskName = `Call UC to confirm payment of £${amount.toFixed(2)} for ${tenantLabel}, due ${dueDate}`;
-        const description = `UC Payment Verification\n\nTenant: ${tenantLabel}\nExpected Rent: £${amount.toFixed(2)}\nRent Due Date: ${dueDate}\n\nPlease call the Universal Credit call centre to confirm:\n1. The payment is in place\n2. It is being processed\n3. It will be paid to us as the landlord\n\nCreated automatically from Leadership Dashboard on ${new Date().toLocaleDateString('en-GB')}`;
-
-        const todayStr = dateKey(new Date());
-
-        try {
-            const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`;
-
-            // Step 1: Create with Task Name + Assignee (confirmed working)
-            const fields = {
-                'fldgFjGBw6bTKJFCD': taskName,
-                'fldELMncVJYPDRJNc': { email: UC_TASK_CONFIG.assigneeEmail },
-            };
-
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields, typecast: true }),
-            });
-
-            if (!resp.ok) {
-                const errData = await resp.json();
-                console.error('Create error:', JSON.stringify(errData));
-                throw new Error(errData.error?.message || resp.statusText);
-            }
-
-            const created = await resp.json();
-            const recordId = created.id;
-            console.log('Step 1 done — created:', recordId);
-
-            // Step 2: Immediately PATCH with Time Estimate + Projects + Due Date + Status + Hard Deadline + linked records
-            btn.textContent = 'Linking...';
-            const patchFields = {};
-            patchFields['fld10VzzbiNNgRmIi'] = '15 min';                     // Time Estimate
-            patchFields['fldBg0rQy0FrOAkRN'] = [UC_TASK_CONFIG.projectId];   // Projects → £12k Operating Cushion
-            patchFields['fld7XP8w8kbxfETV4'] = todayStr;                     // Due Date = today (Kevin's local), so it lands in Mica's Today queue
-            patchFields['fldx4qCw17UfrKpaN'] = 'Today';                      // Status — explicit "Today" so the task sorts correctly the moment it's created (don't rely on Airtable status-from-due-date automation timing)
-            patchFields['fldZKzIxgyrQ8CG8a'] = true;                         // Hard Deadline — UC verification must happen before the rent cycle, so this task can't be auto-rescheduled out of today
-            patchFields['fldmne4RYJU22ICub'] = [tenancyId];                  // Tenancies
-            if (tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [tenantId];    // Tenants
-            if (unitId) patchFields['fldEW648YtTZ6j01n'] = [unitId];        // Rental Units
-
-            // Look up property from rental unit
-            if (unitId) {
-                try {
-                    const uResp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.rentalUnits}/${unitId}?returnFieldsByFieldId=true`, {
-                        headers: { 'Authorization': `Bearer ${PAT}` },
-                    });
-                    if (uResp.ok) {
-                        const uData = await uResp.json();
-                        const pf = uData.fields?.['fldUJNRGgzgyAwwjt'];
-                        if (Array.isArray(pf)) {
-                            const pid = typeof pf[0] === 'string' ? pf[0] : pf[0]?.id;
-                            if (pid) patchFields['fldZKFvEpJ6NZeFKz'] = [pid]; // Properties
-                        }
-                    }
-                } catch (e) { console.warn('Property lookup:', e); }
-            }
-
-            console.log('Step 2 — patching:', JSON.stringify(patchFields, null, 2));
-            const pResp = await fetch(`${url}/${recordId}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: patchFields, typecast: true }),
-            });
-            if (!pResp.ok) {
-                const pErr = await pResp.json();
-                console.error('Step 2 error:', JSON.stringify(pErr));
-                // Task still created, just missing some links
-            } else {
-                console.log('Step 2 done');
-            }
-
-            markUCCheckRequested(tenancyId);
-            btn.textContent = 'UC Check Requested';
-            btn.classList.add('done');
-            btn.disabled = true;
-        } catch (e) {
-            console.error('UC task creation failed:', e);
-            btn.textContent = 'Failed';
-            btn.title = String(e.message || e);
-            btn.style.background = 'var(--danger)';
-            setTimeout(() => {
-                btn.textContent = 'UC Check';
-                btn.style.background = '';
-                btn.title = 'Create task for Mica to call UC and confirm this payment';
-                btn.disabled = false;
-            }, 5000);
-        }
-    }
-
 
     // WHAT-IF CASH FLOW EXCLUSIONS
     // ══════════════════════════════════════════
