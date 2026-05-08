@@ -931,7 +931,7 @@
                     recordId: tenantId,
                 }, '*');
             } catch (e) { /* iframe not ready */ }
-            if (attempts > 30) clearInterval(poll);  // give up after 3s
+            if (attempts > 100) clearInterval(poll);  // give up after 10s
         }, 100);
 
         // Stop polling once we get an ack
