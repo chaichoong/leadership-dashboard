@@ -1042,6 +1042,20 @@ function bindHashRouting(){
   apply();
 }
 
+// ── Deep-link from parent shell (CFV tab, etc.) ──
+// Parent sends { type:'ops:crossNav', entity, recordId } via postMessage.
+// We navigate to the entity sub-tab and scroll/flash the matching row.
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'ops:crossNav') {
+    const { entity, recordId } = e.data;
+    if (entity && recordId) {
+      crossNav(entity, recordId);
+      // Ack so parent stops polling
+      window.parent.postMessage({ type: 'ops:crossNavAck' }, '*');
+    }
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════
 // Cell helpers — read raw value, render display, link cross-nav
 // ═══════════════════════════════════════════════════════════════════════

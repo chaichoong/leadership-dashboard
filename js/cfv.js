@@ -487,7 +487,9 @@
             // Payment detected banner removed — auto-return handles this now
 
             return `<tr>
-                <td style="font-weight:600">${escHtml(entry.surname)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.ref)}</span></td>
+                <td style="font-weight:600">${entry.tenantId
+                    ? `<a href="#" onclick="event.preventDefault();event.stopPropagation();cfvNavToTenant('${entry.tenantId}')" style="color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent)" title="View in Operations">${escHtml(entry.surname)}</a>`
+                    : escHtml(entry.surname)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.ref)}</span></td>
                 <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.unitName)}</span></td>
                 <td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${fmt(entry.rent)}</td>
                 <td style="text-align:center">${entry.dueDay || '—'}</td>
@@ -903,4 +905,41 @@
         } catch (e) { /* non-fatal — label will refresh on next render */ }
     }
 
-// test
+    // ── Navigate to tenant record in Operations tab ──
+    // Switches to the Operations iframe, waits for it to load, then sends
+    // a postMessage to crossNav to the tenant row.
+    function cfvNavToTenant(tenantId) {
+        if (!tenantId) return;
+        switchTab('operations');
+        const frame = document.getElementById('operationsFrame');
+        if (!frame) return;
+
+        // Ensure the iframe src is loaded
+        const src = frame.getAttribute('data-src') || frame.getAttribute('src');
+        if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('operations')) {
+            frame.setAttribute('src', src);
+        }
+
+        // Poll until iframe is ready, then send the crossNav message
+        let attempts = 0;
+        const poll = setInterval(() => {
+            attempts++;
+            try {
+                frame.contentWindow.postMessage({
+                    type: 'ops:crossNav',
+                    entity: 'tenants',
+                    recordId: tenantId,
+                }, '*');
+            } catch (e) { /* iframe not ready */ }
+            if (attempts > 30) clearInterval(poll);  // give up after 3s
+        }, 100);
+
+        // Stop polling once we get an ack
+        const onAck = (e) => {
+            if (e.data?.type === 'ops:crossNavAck') {
+                clearInterval(poll);
+                window.removeEventListener('message', onAck);
+            }
+        };
+        window.addEventListener('message', onAck);
+    }
