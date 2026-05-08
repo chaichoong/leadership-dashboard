@@ -562,7 +562,7 @@ const SKILLS_LIBRARY = [
         id: 'post-manager',
         name: 'Post Manager',
         command: 'anthropic-skills:post-manager',
-        description: 'Processes scanned post documents — extracts key information, categorises by type (invoice, letter, notice), and creates appropriate follow-up tasks.',
+        description: 'Processes scanned post from Evernote. Splits combined PDFs by sender using AI vision, extracts metadata (sender, summary, action), and creates Airtable task records for triage in the Inbound Comms Post section.',
         category: 'Productivity',
         source: 'cowork',
         tags: ['post', 'mail', 'scanning', 'document processing']
