@@ -15,7 +15,7 @@
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.15', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.18', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
-        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.33', sopFile: 'inbound-comms-sop.html',      sopVer: '2.4', standalone: 'follow-up.html' },
+        { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.34', sopFile: 'inbound-comms-sop.html',      sopVer: '2.4', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.10', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
         { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.14', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // Plan Builder lives under the Leadership section in the sidebar.
@@ -23,7 +23,7 @@
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.10', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.15', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
-        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
+        { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.1', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
