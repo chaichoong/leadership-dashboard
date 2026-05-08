@@ -44,11 +44,18 @@
 // SECRETS (Cloudflare → contractor-bot → Settings → Variables and Secrets)
 // ────────────────────────────────────────────────────────────────────────
 //   AIRTABLE_PAT          — PAT with data.records:read + data.records:write
-//                           on base appnqjDpqDniH3IRl
+//                           + data.recordComments:write on base
+//                           appnqjDpqDniH3IRl
 //   SLACK_SIGNING_SECRET  — Slack app → Basic Information → App Credentials
 //   ANTHROPIC_API_KEY     — sk-ant-… from console.anthropic.com
 //   SLACK_BOT_TOKEN       — xoxb-… bot token from the Operations Director
 //                           Slack app (same as in slack-notify worker)
+//   INTERNAL_BEARER       — Shared secret for the /create-task endpoint.
+//                           Used by the contractor-job-creator Claude
+//                           skill (Mica/Erica/Kevin run it locally) to
+//                           authenticate task-creation calls. Generate
+//                           any random string ≥ 32 chars and distribute
+//                           via password manager.
 //
 // BINDINGS (Cloudflare → contractor-bot → Settings → Bindings)
 // ───────────────────────────────────────────────────────────
@@ -202,6 +209,15 @@ export default {
 
         if (request.method !== 'POST') {
             return new Response('Method not allowed', { status: 405 });
+        }
+
+        // POST /create-task — internal endpoint used by the
+        // contractor-job-creator Claude skill (and eventually the
+        // dashboard "Add Task" form). Authenticated by a bearer token
+        // shared with the office team. Different auth from the Slack
+        // event flow because there's no Slack signature to verify.
+        if (url.pathname === '/create-task') {
+            return handleInternalCreateTask(request, env);
         }
 
         // Read raw body once — needed verbatim for signature verification.
@@ -397,6 +413,204 @@ async function routeMessage(evt, env) {
                 `• *My list* — ask "what's on my list" to see your open jobs`
             );
     }
+}
+
+// ─── INTERNAL ENDPOINT: /create-task ──────────────────────────────────
+//
+// Used by the contractor-job-creator Claude skill (Mica/Erica/Kevin
+// running Claude Code/Co-Work) and — eventually — the dashboard's
+// "Add Task" form. Single source-of-truth for contractor task creation:
+// the same business resolution, property matching, assignee email
+// handling, channel reply, contractor DM and team-collaborator setup
+// that the Slack flow uses.
+//
+// Auth: shared INTERNAL_BEARER token. NOT a per-user identity, just a
+// "did this come from someone who's allowed to call us" gate. Office
+// team stores it locally (e.g. ~/.contractor-bot-bearer.txt) and the
+// skill reads it via Bash before POSTing.
+//
+// Request body:
+//   {
+//     "description":         "Tenant says boiler at 55 Elmdon broken, no hot water",
+//     "propertyHint":        "55 Elmdon",                       // optional — bot will extract from description if omitted
+//     "assigneeFirstName":   "Gary",                            // required: Gary | Roy | Rob
+//     "actorName":           "Mica Albovias",                   // optional — used in channel reply ("Logged for X — added by Mica")
+//     "actorEmail":          "micaa.work@gmail.com",            // optional — added as a Collaborator on the task if recognised
+//     "businessOverride":    "operations" | "real_estate"       // optional — forces business; otherwise auto-resolved
+//   }
+//
+// Response:
+//   200 { "ok": true, taskId, taskName, propertyName, businessName, priority, assigneeName }
+//   400 { "ok": false, "error": "..." }   // bad input
+//   401 { "ok": false, "error": "..." }   // bad / missing bearer
+//   404 { "ok": false, "error": "..." }   // contractor or property not found
+//   500 { "ok": false, "error": "..." }   // unexpected failure
+async function handleInternalCreateTask(request, env) {
+    const respondJson = (status, body) => new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+    });
+
+    // Auth.
+    const authHeader = request.headers.get('Authorization') || '';
+    const presentedToken = authHeader.replace(/^Bearer\s+/i, '');
+    if (!env.INTERNAL_BEARER) {
+        return respondJson(500, { ok: false, error: 'INTERNAL_BEARER not configured on the worker' });
+    }
+    if (!presentedToken || presentedToken !== env.INTERNAL_BEARER) {
+        return respondJson(401, { ok: false, error: 'Unauthorised — bearer token missing or wrong' });
+    }
+
+    // Parse body.
+    let body;
+    try { body = await request.json(); }
+    catch { return respondJson(400, { ok: false, error: 'Invalid JSON body' }); }
+
+    const description = String(body.description || '').trim();
+    const propertyHint = String(body.propertyHint || '').trim();
+    const assigneeFirstName = String(body.assigneeFirstName || '').trim();
+    const actorName = String(body.actorName || '').trim();
+    const actorEmail = String(body.actorEmail || '').trim();
+    const businessOverride = String(body.businessOverride || '').trim().toLowerCase();
+
+    if (!description) {
+        return respondJson(400, { ok: false, error: '`description` is required' });
+    }
+    if (!assigneeFirstName) {
+        return respondJson(400, { ok: false, error: '`assigneeFirstName` is required (Gary, Roy, or Rob)' });
+    }
+
+    // Resolve assignee.
+    const assignee = findContractorByFirstName(assigneeFirstName);
+    if (!assignee) {
+        return respondJson(404, { ok: false, error: `Couldn't recognise contractor "${assigneeFirstName}". Use Gary, Roy, or Rob.` });
+    }
+
+    // Run the same field extraction as the Slack flow so task name,
+    // priority, and propertyHint are filled from the description.
+    let extraction;
+    try {
+        extraction = await extractNewJobFields(description, env);
+    } catch (e) {
+        return respondJson(500, { ok: false, error: `Field extraction failed: ${e && e.message || e}` });
+    }
+    const effectivePropertyHint = propertyHint || extraction.propertyHint || '';
+
+    // Resolve property.
+    if (!effectivePropertyHint) {
+        return respondJson(400, { ok: false, error: 'No property mentioned in description and no propertyHint provided. Add the property name/address.' });
+    }
+    const matches = await matchProperty(effectivePropertyHint, env);
+    if (matches.length === 0) {
+        return respondJson(404, { ok: false, error: `No property matched "${effectivePropertyHint}". Try a more specific name.` });
+    }
+    if (matches.length > 1) {
+        return respondJson(400, {
+            ok: false,
+            error: `Property hint "${effectivePropertyHint}" matched ${matches.length} properties. Use a more specific propertyHint.`,
+            candidates: matches.slice(0, 5).map(p => p.name),
+        });
+    }
+    const property = matches[0];
+
+    // Business resolution.
+    let businessRes;
+    if (businessOverride === 'operations' || businessOverride === 'operations director' || businessOverride === 'ops') {
+        businessRes = { id: BUSINESS_OPS_DIRECTOR_ID, name: 'Operations Director', confident: true };
+    } else if (businessOverride === 'real_estate' || businessOverride === 'real estate' || businessOverride === 're') {
+        businessRes = { id: BUSINESS_REAL_ESTATE_ID, name: 'Real Estate', confident: true };
+    } else {
+        businessRes = resolveBusinessId(assignee, true /* property always present here */, description);
+    }
+
+    const priority = extraction.priority === 'High Priority' ? 'Urgent' : 'Not Urgent';
+
+    // Build the same field set the Slack confirm flow writes.
+    const collaboratorEmails = TEAM_COLLABORATOR_EMAILS
+        .filter(e => e.toLowerCase() !== assignee.airtableEmail.toLowerCase());
+    // If actorEmail is one of the team-collab emails (and isn't the assignee),
+    // it's already in the list above. Nothing extra needed.
+    const fields = {
+        [FIELD.taskName]:        extraction.taskName,
+        [FIELD.description]:     description,
+        [FIELD.status]:          'Upcoming',
+        [FIELD.priority]:        priority,
+        [FIELD.assignee]:        { email: assignee.airtableEmail },
+        [FIELD.properties]:      [property.id],
+        [FIELD.business]:        [businessRes.id],
+        [FIELD.maintenanceTick]: true,
+        [FIELD.collaborators]:   collaboratorEmails.map(email => ({ email })),
+    };
+    if (assignee.contractorFieldValue) {
+        fields[FIELD.contractor] = assignee.contractorFieldValue;
+    }
+
+    let created;
+    try {
+        created = await createTask(env, fields);
+    } catch (e) {
+        return respondJson(500, { ok: false, error: `Airtable createTask failed: ${e && e.message || e}` });
+    }
+    const newTaskId = created && created.records && created.records[0] && created.records[0].id;
+
+    // Notify channel + DM the contractor (mirrors Slack flow). Best-effort —
+    // a Slack failure shouldn't fail the whole API call now that the task
+    // has been written to Airtable. Errors are returned in the response so
+    // the caller can surface them.
+    const slackErrors = [];
+    const headerLine = actorName
+        ? `✅ Logged for ${assignee.firstName} (added by ${actorName.split(' ')[0]}).`
+        : `✅ Logged for ${assignee.firstName}.`;
+    const channelLines = [
+        headerLine,
+        `*${extraction.taskName}*`,
+        `📍 ${property.name}`,
+        `⚡ Priority: ${priority}`,
+        `🏢 Business: ${businessRes.name}`,
+    ];
+    try {
+        await postSlackChannelMessage(env, PROPERTY_CHANNEL_ID, channelLines.join('\n'));
+    } catch (e) {
+        slackErrors.push(`channel post: ${e && e.message || e}`);
+    }
+    try {
+        await dmUserByEmail(env, assignee.airtableEmail,
+            `*Operations Director* assigned to you:\n` +
+            `*${extraction.taskName}*\n` +
+            `📍 ${property.name}\n` +
+            `⚡ Priority: ${priority}`
+        );
+    } catch (e) {
+        slackErrors.push(`assignee DM: ${e && e.message || e}`);
+    }
+
+    return respondJson(200, {
+        ok: true,
+        taskId: newTaskId,
+        taskName: extraction.taskName,
+        propertyName: property.name,
+        businessName: businessRes.name,
+        priority,
+        assigneeName: assignee.name,
+        slackWarnings: slackErrors.length ? slackErrors : undefined,
+    });
+}
+
+// Posts a plain message to the given channel via Slack chat.postMessage.
+// Used by the internal /create-task endpoint to mirror the channel-reply
+// the Slack flow does in its confirmation path.
+async function postSlackChannelMessage(env, channel, text) {
+    if (!env.SLACK_BOT_TOKEN) throw new Error('SLACK_BOT_TOKEN not configured');
+    const resp = await fetch(SLACK_POST_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify({ channel, text }),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(`Slack post failed: ${data.error}`);
 }
 
 // ─── HANDLER 0: DM THREAD REPLY → AIRTABLE COMMENT ────────────────────
