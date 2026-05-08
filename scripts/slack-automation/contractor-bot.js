@@ -94,9 +94,11 @@ const FIELD = {
     business:        'fldLu1Y4GzyWcDoxr', // multipleRecordLinks → Businesses
     collaborators:   'fldcq3t6uAPgWSOP8', // multipleCollaborators
     attachments:     'fldEbs9cscRr8elcw', // multipleAttachments
-    // Legacy Contractor singleSelect — kept in sync because the
-    // Contractor Tasks tab still filters by this field.
-    contractor:      'fldgmzcr3jHALsdYD', // singleSelect — Gary Marsh / Rob Jackson / Roy Lavin
+    // The legacy Contractor singleSelect (fldgmzcr3jHALsdYD) is no
+    // longer written by the bot. The dashboard's Contractor Tasks tab
+    // now filters by Assignee email, so the singleSelect is redundant.
+    // Old records still carry it for backwards-compat display in the
+    // task drawer; nothing here needs to write it.
     propertyName:    'fldy2t735TV5e1DIL', // single line text (Properties table)
 };
 
@@ -135,14 +137,10 @@ const TEAM_COLLABORATOR_EMAILS = [
 // Slack user ID → contractor identity. Airtable email matches the email
 // each contractor used to accept their base collaborator invite —
 // Airtable's API resolves emails to user records on write.
-//
-// `contractorFieldValue` (optional) is written to the legacy Contractor
-// singleSelect field. Only set for the three real contractors so test
-// entries don't pollute the singleSelect's options.
 const CONTRACTORS = {
-    U0A9XD12YPN: { name: 'Gary Marsh',  firstName: 'Gary', airtableEmail: 'gkm.property.maintenance@outlook.com', contractorFieldValue: 'Gary Marsh' },
-    U0AAN4CTVQQ: { name: 'Roy Lavin',   firstName: 'Roy',  airtableEmail: 'roy.lavin1978@gmail.com',              contractorFieldValue: 'Roy Lavin' },
-    U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',  airtableEmail: 'rjm320@hotmail.com',                   contractorFieldValue: 'Rob Jackson' },
+    U0A9XD12YPN: { name: 'Gary Marsh',  firstName: 'Gary', airtableEmail: 'gkm.property.maintenance@outlook.com' },
+    U0AAN4CTVQQ: { name: 'Roy Lavin',   firstName: 'Roy',  airtableEmail: 'roy.lavin1978@gmail.com' },
+    U0A9MDFKA59: { name: 'Rob Jackson', firstName: 'Rob',  airtableEmail: 'rjm320@hotmail.com' },
 };
 
 // Slack user ID → office team identity. Team members can post in
@@ -528,9 +526,6 @@ async function handleInternalCreateTask(request, env) {
         [FIELD.maintenanceTick]: true,
         [FIELD.collaborators]:   collaboratorEmails.map(email => ({ email })),
     };
-    if (assignee.contractorFieldValue) {
-        fields[FIELD.contractor] = assignee.contractorFieldValue;
-    }
 
     let created;
     try {
@@ -964,7 +959,6 @@ async function handleNewJob(sender, text, evt, threadTs, env, override) {
             businessName: businessRes.name,
             assigneeEmail: assignee.airtableEmail,
             assigneeFirstName: assignee.firstName,
-            contractorFieldValue: assignee.contractorFieldValue || null,
             collaboratorEmails: TEAM_COLLABORATOR_EMAILS
                 .filter(e => e.toLowerCase() !== assignee.airtableEmail.toLowerCase()),
             files: evt.files || [], // re-ingested on confirmation
@@ -994,9 +988,6 @@ async function executeConfirmedCreate(env, plan, threadTs) {
         [FIELD.maintenanceTick]: true,
         [FIELD.collaborators]:   plan.collaboratorEmails.map(email => ({ email })),
     };
-    if (plan.contractorFieldValue) {
-        fields[FIELD.contractor] = plan.contractorFieldValue;
-    }
     if (attachments.length) {
         fields[FIELD.attachments] = attachments;
     }
@@ -1408,6 +1399,20 @@ async function matchStatusUpdate(text, openTasks, env) {
         `the work or a team member updating on their behalf). Match it to one of the\n` +
         `open jobs below and classify the action.\n\n` +
         `OPEN JOBS:\n${taskList}\n\n` +
+        `Action rules:\n` +
+        `  - "completed" → the work itself is finished. The sender says "done", "finished",\n` +
+        `    "all sorted", "complete". Strong signal that the task can be closed.\n` +
+        `  - "in_progress" → the contractor THEMSELVES is starting / actively doing /\n` +
+        `    en route to the work. The sender's verb is about doing the job:\n` +
+        `    "started", "on my way", "fixing it now", "I'm working on", "I've begun".\n` +
+        `  - "note" → DEFAULT for everything else: relayed information, observations,\n` +
+        `    tenant feedback, scheduling chats, access details, supplier updates,\n` +
+        `    parts ETAs, anything that should be recorded against the job but is NOT\n` +
+        `    the contractor declaring they're starting or finishing the physical work.\n\n` +
+        `Important: "tenant says/feels/is/messaged…", "FYI…", "heads up…", "update…",\n` +
+        `"keysafe code…", "they're happy to wait" → ALWAYS "note". The subject is the\n` +
+        `tenant or the situation, not the contractor's own work activity. Pick\n` +
+        `"in_progress" only when the SUBJECT of the verb is the contractor (or "I").\n\n` +
         `Respond with ONLY valid JSON (no markdown):\n` +
         `{\n` +
         `  "matchedTaskIndex": number,   // 0-based index, or -1 if no confident match\n` +

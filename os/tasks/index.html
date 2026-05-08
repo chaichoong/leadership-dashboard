@@ -7058,11 +7058,6 @@ function jobsStatusCell(taskId,current){
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
   return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:12px;${statusStyle}" onchange="updateTaskField('${taskId}','status',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
 }
-function jobsContractorCell(taskId,current){
-  const names=['Gary Marsh','Rob Jackson','Roy Lavin'];
-  const opts=['<option value="">—</option>',...names.map(n=>`<option value="${n}" ${n===current?'selected':''}>${n}</option>`)].join('');
-  return `<select class="inline-select" onchange="updateTaskField('${taskId}','contractor',this.value).then(()=>{renderTeamBar();renderKPIs();renderJobs()})" onclick="event.stopPropagation()">${opts}</select>`;
-}
 function jobsPropertyCell(taskId,currentId){
   const props=getPropertyOptions();
   const opts=['<option value="">—</option>',...props.map(p=>`<option value="${p.id}" ${p.id===currentId?'selected':''}>${escHtml(p.name)}</option>`)].join('');
@@ -7170,7 +7165,7 @@ function renderJobs(){
           <span style="font-size:11px;font-weight:600;background:rgba(255,255,255,0.22);padding:3px 10px;border-radius:12px;letter-spacing:0.3px;text-transform:uppercase">${g.length} task${g.length===1?'':'s'}</span>
         </div>
         <div style="overflow-x:auto">
-        <table class="task-table" style="width:100%;min-width:1320px;table-layout:fixed;font-size:13px">
+        <table class="task-table" style="width:100%;min-width:1180px;table-layout:fixed;font-size:13px">
           <colgroup>
             <col style="width:220px">
             <col style="width:300px">
@@ -7179,7 +7174,6 @@ function renderJobs(){
             <col style="width:120px">
             <col style="width:120px">
             <col style="width:130px">
-            <col style="width:140px">
             <col style="width:200px">
           </colgroup>
           <thead><tr>
@@ -7190,7 +7184,6 @@ function renderJobs(){
             <th>Priority</th>
             <th>Status</th>
             <th>Attachments</th>
-            <th>Assignee</th>
             <th>Property</th>
           </tr></thead>
           <tbody>`;
@@ -7204,7 +7197,6 @@ function renderJobs(){
           <td onclick="event.stopPropagation()">${jobsPriorityCell(t.id,t.priorityLevel||'')}</td>
           <td onclick="event.stopPropagation()">${jobsStatusCell(t.id,t.status||'Upcoming')}</td>
           <td>${attThumbs(t)}</td>
-          <td onclick="event.stopPropagation()">${jobsContractorCell(t.id,t.contractor||'')}</td>
           <td onclick="event.stopPropagation()">${jobsPropertyCell(t.id,currentPropId)}</td>
         </tr>`;
       });
