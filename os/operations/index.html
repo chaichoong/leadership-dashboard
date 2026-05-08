@@ -810,6 +810,8 @@ async function refreshAll(initial=false){
     populateFilters();
     renderActiveTab();
     setSync(`Synced — ${new Date().toLocaleTimeString()}`);
+    _opsDataReady = true;
+    _tryPendingCrossNav();
 
     // ── Sync Bar + Health Checks ──
     if (typeof registerSyncBar === 'function') {
@@ -1044,14 +1046,27 @@ function bindHashRouting(){
 
 // ── Deep-link from parent shell (CFV tab, etc.) ──
 // Parent sends { type:'ops:crossNav', entity, recordId } via postMessage.
-// We navigate to the entity sub-tab and scroll/flash the matching row.
+// We queue it until data is loaded, then crossNav to the row.
+let _pendingCrossNav = null;
+let _opsDataReady = false;
+
+function _tryPendingCrossNav() {
+  if (!_pendingCrossNav || !_opsDataReady) return;
+  const { entity, recordId } = _pendingCrossNav;
+  _pendingCrossNav = null;
+  crossNav(entity, recordId);
+  window.parent.postMessage({ type: 'ops:crossNavAck' }, '*');
+}
+
 window.addEventListener('message', (e) => {
   if (e.data?.type === 'ops:crossNav') {
     const { entity, recordId } = e.data;
     if (entity && recordId) {
-      crossNav(entity, recordId);
-      // Ack so parent stops polling
-      window.parent.postMessage({ type: 'ops:crossNavAck' }, '*');
+      _pendingCrossNav = { entity, recordId };
+      if (_opsDataReady) {
+        _tryPendingCrossNav();
+      }
+      // else: will fire once refreshAll completes
     }
   }
 });
