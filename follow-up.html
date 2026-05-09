@@ -2104,10 +2104,17 @@
         const now = new Date();
         const daysOld = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
 
+        // Determine reply-to: check Reply-To header first (bridge emails set this),
+        // then fall back to the From of the last non-Kevin message
         let replyTo = from;
-        for (let m of messages) {
-            const mFrom = getHeader(m, 'From');
-            if (!mFrom.toLowerCase().includes('kevin')) replyTo = mFrom;
+        const firstReplyToHeader = getHeader(firstMsg, 'Reply-To');
+        if (firstReplyToHeader) {
+            replyTo = firstReplyToHeader;
+        } else {
+            for (let m of messages) {
+                const mFrom = getHeader(m, 'From');
+                if (!mFrom.toLowerCase().includes('kevin')) replyTo = mFrom;
+            }
         }
 
         const msgIds = messages.map(m => m.id);
@@ -6541,7 +6548,8 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
 
         try {
             // SMS Bridge: for [SMS] threads, send ONLY via GHL (not email) to avoid bounce
-            const isSmsReply = subject && subject.startsWith('[SMS]') && currentDraftEmail;
+            // subject may be "Re: [SMS] ..." so use includes(), not startsWith()
+            const isSmsReply = subject && subject.includes('[SMS]') && currentDraftEmail;
             let smsConvoId = null;
             if (isSmsReply) {
                 smsConvoId = extractSmsBridgeId(currentDraftEmail);
@@ -6552,11 +6560,7 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
                 const proxyBase = GHL_PROXY_URL;
                 const smsResp = await fetch(proxyBase + '/ghl-reply', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-GHL-Key': ghlApiKey || '',
-                        'X-GHL-Location': ghlLocationId || ''
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         type: 'SMS',
                         conversationId: smsConvoId,
