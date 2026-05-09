@@ -305,7 +305,7 @@ async function forwardSmsAsEmail(env, sms) {
     subject,
     html: htmlBody,
     text: plainBody,
-    replyTo: fromEmail,
+    replyTo: env.RECIPIENT_EMAIL,
     headers: {
       'X-SMS-ConversationId': conversationId,
       'X-SMS-Phone': phone,
@@ -531,8 +531,8 @@ function buildEmailHtml({ contactName, phone, body, conversationId, timestamp, t
 
   <div style="border-top: 1px solid #DDE1D9; margin-top: 24px; padding-top: 12px; font-size: 11px; color: #8A928C;">
     ${isSms
-      ? `Reply to this email to send an SMS back to ${escapedName}.`
-      : `Call back ${escapedName}${escapedPhone ? ' on ' + escapedPhone : ''} or reply to send an SMS.`}
+      ? `Use Inbound Comms to reply as SMS to ${escapedName}.`
+      : `Call back ${escapedName}${escapedPhone ? ' on ' + escapedPhone : ''}.`}
   </div>
 
   <!-- SMS Bridge Marker -->
