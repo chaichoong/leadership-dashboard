@@ -1722,12 +1722,28 @@
             allEmails = threads.map(thread => parseThread(thread));
 
             // Suppress duplicate GHL SMS notifications (bridge emails replace these)
+            // Auto-trash them from Gmail so they don't clutter the inbox
+            const ghlDupes = [];
             allEmails = allEmails.filter(e => {
                 const subj = (e.subject || '').toLowerCase();
                 const sender = (e.from || '').toLowerCase();
-                if (subj.includes('new text message received') && sender.includes('runpreneur.org.uk')) return false;
+                if (subj.includes('new text message received') && sender.includes('runpreneur.org.uk')) {
+                    ghlDupes.push(e);
+                    return false;
+                }
                 return true;
             });
+            if (ghlDupes.length > 0) {
+                // Remove from Gmail inbox in background (trash them)
+                for (const dupe of ghlDupes) {
+                    for (const msgId of (dupe.msgIds || [])) {
+                        try {
+                            await gapi.client.gmail.users.messages.trash({ userId: 'me', id: msgId });
+                        } catch (e) { /* ignore errors */ }
+                    }
+                }
+                console.log(`Auto-trashed ${ghlDupes.length} GHL SMS notification(s)`);
+            }
 
             // Auto-remove follow-up label if someone has replied (latest message not from us)
             if (currentLabel.toLowerCase().includes('follow')) {
@@ -2006,12 +2022,27 @@
 
             allEmails = threads.map(thread => parseThread(thread));
             // Suppress duplicate GHL SMS notifications (bridge emails replace these)
+            // Auto-trash them from Gmail so they don't clutter the inbox
+            const ghlDupesInbox = [];
             allEmails = allEmails.filter(e => {
                 const subj = (e.subject || '').toLowerCase();
                 const sender = (e.from || '').toLowerCase();
-                if (subj.includes('new text message received') && sender.includes('runpreneur.org.uk')) return false;
+                if (subj.includes('new text message received') && sender.includes('runpreneur.org.uk')) {
+                    ghlDupesInbox.push(e);
+                    return false;
+                }
                 return true;
             });
+            if (ghlDupesInbox.length > 0) {
+                for (const dupe of ghlDupesInbox) {
+                    for (const msgId of (dupe.msgIds || [])) {
+                        try {
+                            await gapi.client.gmail.users.messages.trash({ userId: 'me', id: msgId });
+                        } catch (e) { /* ignore errors */ }
+                    }
+                }
+                console.log(`Auto-trashed ${ghlDupesInbox.length} GHL SMS notification(s) from inbox view`);
+            }
             allEmails.sort((a, b) => b.lastDate - a.lastDate); // newest first for inbox
             renderInboxEmails(allEmails);
             updateInboxStats(allEmails.length, 0);
