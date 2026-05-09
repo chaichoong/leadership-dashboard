@@ -6509,37 +6509,39 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
         }
 
         try {
-            const sendParams = { userId: 'me', resource: { raw: encoded } };
-            if (currentDraftEmail?.threadId) sendParams.resource.threadId = currentDraftEmail.threadId;
+            // SMS Bridge: for [SMS] threads, send ONLY via GHL (not email) to avoid bounce
+            const isSmsReply = subject && subject.startsWith('[SMS]') && currentDraftEmail;
+            let smsConvoId = null;
+            if (isSmsReply) {
+                smsConvoId = extractSmsBridgeId(currentDraftEmail);
+            }
 
-            await gapi.client.gmail.users.messages.send(sendParams);
-
-            // SMS Bridge: if replying to an SMS-origin email, also send reply as SMS via GHL
-            // Only [SMS] triggers the GHL reply. [Missed Call] and [Voicemail] are informational only.
-            if (subject && subject.startsWith('[SMS]') && currentDraftEmail) {
-                try {
-                    const smsConvoId = extractSmsBridgeId(currentDraftEmail);
-                    if (smsConvoId && ghlApiKey && ghlLocationId) {
-                        const proxyBase = GHL_PROXY_URL;
-                        await fetch(proxyBase + '/ghl-reply', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-GHL-Key': ghlApiKey,
-                                'X-GHL-Location': ghlLocationId
-                            },
-                            body: JSON.stringify({
-                                type: 'SMS',
-                                conversationId: smsConvoId,
-                                message: body
-                            })
-                        });
-                        addAuditEntry('sms_bridge_reply', `SMS reply sent via GHL for conversation ${smsConvoId}`);
-                    }
-                } catch (smsErr) {
-                    console.warn('SMS bridge reply failed (email still sent):', smsErr);
-                    showError('Email sent but SMS relay failed. The contact may not receive your reply as a text message.');
+            if (isSmsReply && smsConvoId) {
+                // Send as SMS via GHL worker endpoint (skip email send entirely)
+                const proxyBase = GHL_PROXY_URL;
+                const smsResp = await fetch(proxyBase + '/ghl-reply', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-GHL-Key': ghlApiKey || '',
+                        'X-GHL-Location': ghlLocationId || ''
+                    },
+                    body: JSON.stringify({
+                        type: 'SMS',
+                        conversationId: smsConvoId,
+                        message: body
+                    })
+                });
+                if (!smsResp.ok) {
+                    const errDetail = await smsResp.text();
+                    throw new Error('SMS send failed: ' + errDetail);
                 }
+                addAuditEntry('sms_bridge_reply', `SMS reply sent via GHL for conversation ${smsConvoId}`);
+            } else {
+                // Standard email reply
+                const sendParams = { userId: 'me', resource: { raw: encoded } };
+                if (currentDraftEmail?.threadId) sendParams.resource.threadId = currentDraftEmail.threadId;
+                await gapi.client.gmail.users.messages.send(sendParams);
             }
 
             // Log delay payment if sending from "to pay" label
