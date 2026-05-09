@@ -152,19 +152,29 @@ async function pollGhlMessages(env) {
 
         // Skip messages we've already processed
         if (msgTs <= effectiveTimestamp) continue;
-        // Only forward inbound SMS (type 2) and calls (type 1)
+        // Forward all inbound phone activity (SMS=2, Call=1, Voicemail=4/5)
+        // Skip emails (3), system activity (28, 31), and outbound messages
         if (msg.direction !== 'inbound') continue;
-        if (msg.type !== 1 && msg.type !== 2) continue;
+        if (msg.type === 3 || msg.type === 28 || msg.type === 31) continue;
 
+        const isSms = (msg.type === 2);
         const isCall = (msg.type === 1);
         const rawBody = msg.body || msg.message || '';
 
-        // SMS must have a body; calls get a generated message
-        if (!isCall && !rawBody.trim()) continue;
-
-        const body = isCall
-          ? 'Missed call received. Please call back or follow up.'
-          : rawBody;
+        // Determine the tag and message content
+        let tag, body;
+        if (isSms) {
+          if (!rawBody.trim()) continue;
+          tag = 'SMS';
+          body = rawBody;
+        } else if (isCall) {
+          tag = 'Missed Call';
+          body = rawBody.trim() || 'Missed call received. Please call back or follow up.';
+        } else {
+          // Voicemail or other phone types
+          tag = 'Voicemail';
+          body = rawBody.trim() || 'Voicemail received. Check GHL for the recording.';
+        }
 
         const contactName = conv.fullName || conv.contactName || '';
         const phone = msg.from || conv.phone || '';
@@ -178,7 +188,7 @@ async function pollGhlMessages(env) {
           conversationId,
           contactId: conv.contactId || '',
           timestamp,
-          isCall,
+          tag,
         });
 
         forwarded++;
@@ -249,8 +259,7 @@ async function forwardSmsAsEmail(env, sms) {
   const contactName = sms.contactName || sms.phone || 'Unknown';
   const phone = sms.phone || '';
   const conversationId = sms.conversationId || '';
-  const isCall = sms.isCall || false;
-  const tag = isCall ? 'Missed Call' : 'SMS';
+  const tag = sms.tag || 'SMS';
   const messagePreview = sms.body.length > 60
     ? sms.body.substring(0, 57) + '...'
     : sms.body;
@@ -265,7 +274,7 @@ async function forwardSmsAsEmail(env, sms) {
     body: sms.body,
     conversationId,
     timestamp: sms.timestamp || new Date().toISOString(),
-    isCall,
+    tag,
   });
 
   const plainBody = [
@@ -458,7 +467,7 @@ async function lookupContactName(contactId, env) {
 /*  Email HTML builder                                                 */
 /* ------------------------------------------------------------------ */
 
-function buildEmailHtml({ contactName, phone, body, conversationId, timestamp, isCall }) {
+function buildEmailHtml({ contactName, phone, body, conversationId, timestamp, tag }) {
   const escapedBody = escapeHtml(body).replace(/\n/g, '<br>');
   const escapedName = escapeHtml(contactName);
   const escapedPhone = escapeHtml(phone);
@@ -466,9 +475,9 @@ function buildEmailHtml({ contactName, phone, body, conversationId, timestamp, i
     day: 'numeric', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
-  const tag = isCall ? 'Missed Call' : 'SMS';
-  const borderColour = isCall ? '#C6A15B' : '#2C6E49';
-  const bgColour = isCall ? '#fefce8' : '#f0fdf4';
+  const isSms = (tag === 'SMS');
+  const borderColour = isSms ? '#2C6E49' : '#C6A15B';
+  const bgColour = isSms ? '#f0fdf4' : '#fefce8';
 
   return `<!DOCTYPE html>
 <html>
@@ -488,9 +497,9 @@ function buildEmailHtml({ contactName, phone, body, conversationId, timestamp, i
   </div>
 
   <div style="border-top: 1px solid #DDE1D9; margin-top: 24px; padding-top: 12px; font-size: 11px; color: #8A928C;">
-    ${isCall
-      ? `Call back ${escapedName}${escapedPhone ? ' on ' + escapedPhone : ''} or reply to send an SMS.`
-      : `Reply to this email to send an SMS back to ${escapedName}.`}
+    ${isSms
+      ? `Reply to this email to send an SMS back to ${escapedName}.`
+      : `Call back ${escapedName}${escapedPhone ? ' on ' + escapedPhone : ''} or reply to send an SMS.`}
   </div>
 
   <!-- SMS Bridge Marker -->
