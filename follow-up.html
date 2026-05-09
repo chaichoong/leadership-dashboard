@@ -6120,8 +6120,18 @@ Sign off as ${senderName}.`;
         ).join('\n---\n');
 
         const senderName = localStorage.getItem('sender_name') || 'Kevin';
-        const recipientName = cleanFrom(email.replyTo);
-        const recipientEmail = extractEmail(email.replyTo);
+        // SMS Bridge: for SMS threads, don't use the bridge address as recipient
+        const isSmsThread = email.smsConversationId || (email.subject && email.subject.includes('[SMS]'));
+        let recipientName, recipientEmail;
+        if (isSmsThread) {
+            // Extract contact name from the bridge email subject: "[SMS] ContactName: message"
+            const smsMatch = email.subject.match(/\[(?:SMS|Missed Call|Voicemail)\]\s*([^:]+)/);
+            recipientName = smsMatch ? smsMatch[1].trim() : 'SMS Contact';
+            recipientEmail = 'sms-reply@ghl'; // Placeholder; sendDraft routes via GHL, not email
+        } else {
+            recipientName = cleanFrom(email.replyTo);
+            recipientEmail = extractEmail(email.replyTo);
+        }
 
         // Include past response amendments for self-learning
         const pastAmendments = JSON.parse(localStorage.getItem('response_amendments') || '[]');
@@ -6206,6 +6216,7 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
             document.getElementById('draftOriginal').textContent = originalText;
 
             document.getElementById('draftTo').value = recipientEmail;
+            document.getElementById('draftTo').readOnly = !!isSmsThread;
             document.getElementById('draftSubject').value = (email.subject.startsWith('Re:') ? '' : 'Re: ') + email.subject;
             document.getElementById('draftBody').value = draftText;
             document.getElementById('draftingStatus').style.display = 'none';
@@ -6232,6 +6243,7 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
         document.getElementById('attachmentInput').value = '';
         // Re-enable fields that SMS draft disables
         document.getElementById('draftTo').disabled = false;
+        document.getElementById('draftTo').readOnly = false;
         document.getElementById('draftSubject').disabled = false;
         document.getElementById('draftFrom').disabled = false;
         // Reset send button text and style
@@ -6555,8 +6567,11 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
                 smsConvoId = extractSmsBridgeId(currentDraftEmail);
             }
 
-            if (isSmsReply && smsConvoId) {
-                // Send as SMS via GHL worker endpoint (skip email send entirely)
+            if (isSmsReply) {
+                // SMS thread: MUST go through GHL, never email
+                if (!smsConvoId) {
+                    throw new Error('Cannot reply to this SMS thread: conversation ID not found. Try refreshing the page and replying again.');
+                }
                 const proxyBase = GHL_PROXY_URL;
                 const smsResp = await fetch(proxyBase + '/ghl-reply', {
                     method: 'POST',
