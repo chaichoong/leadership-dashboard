@@ -1,0 +1,22 @@
+# SMS-to-Email Bridge Worker
+# Polls GHL for inbound SMS and forwards them as emails via Resend.
+
+name = "sms-email-bridge"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Poll GHL every minute for new inbound SMS
+[triggers]
+crons = ["* * * * *"]
+
+# KV namespace for tracking last-processed message
+[[kv_namespaces]]
+binding = "SMS_STATE"
+id = "a5dcc305bef5492b9db73017fee6ff22"
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   RESEND_API_KEY     - Resend API key for sending email
+#   RECIPIENT_EMAIL    - Gmail address to receive SMS-as-email (kevinbrittain@gmail.com)
+#   GHL_API_KEY        - GoHighLevel Private Integration Token
+#   GHL_LOCATION_ID    - GoHighLevel location ID (dgsHwbYbp6xrhRGZr9ik)
+#   FROM_EMAIL         - Sending address (sms@operationsdirector.co.uk)
