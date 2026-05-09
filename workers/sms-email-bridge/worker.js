@@ -342,6 +342,28 @@ async function handleSmsReply(request, env) {
   }
 
   try {
+    // GHL requires contactId to send messages. Look it up from the conversation.
+    let contactId = payload.contactId;
+    if (!contactId) {
+      const convResp = await fetch(
+        `https://services.leadconnectorhq.com/conversations/${conversationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${providedKey}`,
+            Version: '2021-07-28',
+          },
+        }
+      );
+      if (convResp.ok) {
+        const convData = await convResp.json();
+        contactId = (convData.conversation || convData).contactId;
+      }
+    }
+
+    if (!contactId) {
+      return json({ error: 'Could not resolve contactId for this conversation' }, 400);
+    }
+
     const resp = await fetch(
       `https://services.leadconnectorhq.com/conversations/messages`,
       {
@@ -353,7 +375,7 @@ async function handleSmsReply(request, env) {
         },
         body: JSON.stringify({
           type: 'SMS',
-          contactId: payload.contactId || undefined,
+          contactId,
           conversationId,
           message,
         }),
