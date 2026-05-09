@@ -1721,6 +1721,14 @@
 
             allEmails = threads.map(thread => parseThread(thread));
 
+            // Suppress duplicate GHL SMS notifications (bridge emails replace these)
+            allEmails = allEmails.filter(e => {
+                const subj = (e.subject || '').toLowerCase();
+                const sender = (e.from || '').toLowerCase();
+                if (subj.includes('new text message received') && sender.includes('runpreneur.org.uk')) return false;
+                return true;
+            });
+
             // Auto-remove follow-up label if someone has replied (latest message not from us)
             if (currentLabel.toLowerCase().includes('follow')) {
                 const myEmails = sendAsAliases.map(a => a.sendAsEmail.toLowerCase());
@@ -1997,6 +2005,13 @@
             }
 
             allEmails = threads.map(thread => parseThread(thread));
+            // Suppress duplicate GHL SMS notifications (bridge emails replace these)
+            allEmails = allEmails.filter(e => {
+                const subj = (e.subject || '').toLowerCase();
+                const sender = (e.from || '').toLowerCase();
+                if (subj.includes('new text message received') && sender.includes('runpreneur.org.uk')) return false;
+                return true;
+            });
             allEmails.sort((a, b) => b.lastDate - a.lastDate); // newest first for inbox
             renderInboxEmails(allEmails);
             updateInboxStats(allEmails.length, 0);
