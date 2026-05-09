@@ -152,14 +152,20 @@ async function pollGhlMessages(env) {
 
         // Skip messages we've already processed
         if (msgTs <= effectiveTimestamp) continue;
-        // Only forward inbound SMS (type 1 or 2 are SMS in GHL)
+        // Only forward inbound SMS (type 2) and calls (type 1)
         if (msg.direction !== 'inbound') continue;
-        if (msg.type !== 1 && msg.type !== 2 && msg.type !== 4) continue;
+        if (msg.type !== 1 && msg.type !== 2) continue;
 
-        const body = msg.body || msg.message || '';
-        if (!body.trim()) continue;
+        const isCall = (msg.type === 1);
+        const rawBody = msg.body || msg.message || '';
 
-        // Forward this SMS as an email
+        // SMS must have a body; calls get a generated message
+        if (!isCall && !rawBody.trim()) continue;
+
+        const body = isCall
+          ? 'Missed call received. Please call back or follow up.'
+          : rawBody;
+
         const contactName = conv.fullName || conv.contactName || '';
         const phone = msg.from || conv.phone || '';
         const conversationId = conv.id;
@@ -172,6 +178,7 @@ async function pollGhlMessages(env) {
           conversationId,
           contactId: conv.contactId || '',
           timestamp,
+          isCall,
         });
 
         forwarded++;
@@ -242,13 +249,15 @@ async function forwardSmsAsEmail(env, sms) {
   const contactName = sms.contactName || sms.phone || 'Unknown';
   const phone = sms.phone || '';
   const conversationId = sms.conversationId || '';
+  const isCall = sms.isCall || false;
+  const tag = isCall ? 'Missed Call' : 'SMS';
   const messagePreview = sms.body.length > 60
     ? sms.body.substring(0, 57) + '...'
     : sms.body;
 
-  const subject = `[SMS] ${contactName}: ${messagePreview}`;
+  const subject = `[${tag}] ${contactName}: ${messagePreview}`;
   const fromEmail = env.FROM_EMAIL || 'sms@operationsdirector.co.uk';
-  const fromName = `SMS from ${contactName}`;
+  const fromName = `${tag} from ${contactName}`;
 
   const htmlBody = buildEmailHtml({
     contactName,
@@ -256,10 +265,11 @@ async function forwardSmsAsEmail(env, sms) {
     body: sms.body,
     conversationId,
     timestamp: sms.timestamp || new Date().toISOString(),
+    isCall,
   });
 
   const plainBody = [
-    `SMS from ${contactName}`,
+    `${tag} from ${contactName}`,
     phone ? `Phone: ${phone}` : '',
     `Received: ${sms.timestamp || new Date().toISOString()}`,
     '',
@@ -448,7 +458,7 @@ async function lookupContactName(contactId, env) {
 /*  Email HTML builder                                                 */
 /* ------------------------------------------------------------------ */
 
-function buildEmailHtml({ contactName, phone, body, conversationId, timestamp }) {
+function buildEmailHtml({ contactName, phone, body, conversationId, timestamp, isCall }) {
   const escapedBody = escapeHtml(body).replace(/\n/g, '<br>');
   const escapedName = escapeHtml(contactName);
   const escapedPhone = escapeHtml(phone);
@@ -456,14 +466,17 @@ function buildEmailHtml({ contactName, phone, body, conversationId, timestamp })
     day: 'numeric', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+  const tag = isCall ? 'Missed Call' : 'SMS';
+  const borderColour = isCall ? '#C6A15B' : '#2C6E49';
+  const bgColour = isCall ? '#fefce8' : '#f0fdf4';
 
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: #f0fdf4; border-left: 4px solid #2C6E49; padding: 16px; border-radius: 4px; margin-bottom: 16px;">
+  <div style="background: ${bgColour}; border-left: 4px solid ${borderColour}; padding: 16px; border-radius: 4px; margin-bottom: 16px;">
     <div style="font-weight: 600; color: #1C2422; font-size: 16px;">
-      SMS from ${escapedName}
+      ${tag} from ${escapedName}
     </div>
     <div style="color: #5A6660; font-size: 13px; margin-top: 4px;">
       ${escapedPhone ? escapedPhone + ' &middot; ' : ''}${formattedTime}
@@ -475,7 +488,9 @@ function buildEmailHtml({ contactName, phone, body, conversationId, timestamp })
   </div>
 
   <div style="border-top: 1px solid #DDE1D9; margin-top: 24px; padding-top: 12px; font-size: 11px; color: #8A928C;">
-    Reply to this email to send an SMS back to ${escapedName}.
+    ${isCall
+      ? `Call back ${escapedName}${escapedPhone ? ' on ' + escapedPhone : ''} or reply to send an SMS.`
+      : `Reply to this email to send an SMS back to ${escapedName}.`}
   </div>
 
   <!-- SMS Bridge Marker -->
