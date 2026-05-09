@@ -814,6 +814,13 @@
                 <p class="settings-info" id="airtableStatus" style="margin-top:4px;"></p>
             </div>
             <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
+                <label>SMS (GoHighLevel)</label>
+                <input type="password" id="ghlApiKey" placeholder="GHL API Key (pit-xxxxxxxx-...)" style="font-family:monospace; font-size:12px;" />
+                <input type="text" id="ghlLocationId" placeholder="GHL Location ID" style="font-family:monospace; font-size:12px; margin-top:8px;" />
+                <p class="settings-info">Connect GoHighLevel to receive and reply to SMS messages in Inbound Comms. Keys are stored locally only.</p>
+                <p class="settings-info" id="ghlStatus" style="margin-top:4px;"></p>
+            </div>
+            <div class="modal-field" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-default);">
                 <label>Knowledge Base</label>
                 <p class="kb-status" id="kbStatus">Not yet built</p>
                 <button class="kb-btn" id="kbBuildBtn" onclick="buildKnowledgeBase()">Build KB</button>
@@ -917,6 +924,7 @@
     const DEFAULT_LABEL = '__INBOX__';
     const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
     const INBOX_VALUE = '__INBOX__';
+    const GHL_PROXY_URL = 'https://sms-email-bridge.kevinbrittain.workers.dev'; // SMS bridge: polls inbound SMS, routes replies
     // Apps Script that pulls Gmail "3: to pay" → Airtable Invoice Records.
     // Triggered ad-hoc when the team applies label 3 so Invoices reflects
     // new invoices within seconds rather than waiting for the 15-min cron.
@@ -949,6 +957,10 @@
     let isInboxView = true;
     let inboxSuggestions = {};  // index -> { label, confidence, reason }
     let appliedTodayCount = 0;
+
+    // GHL state (retained for SMS bridge reply routing in sendDraft)
+    let ghlApiKey = '';
+    let ghlLocationId = '';
 
     // Pagination state
     let currentPage = 1;
@@ -1096,10 +1108,12 @@
     function showApp() {
         document.getElementById('authScreen').style.display = 'none';
         document.getElementById('mainApp').style.display = 'block';
+        // Load GHL credentials before fetchLabels so SMS option appears in dropdown
+        ghlApiKey = localStorage.getItem('ghl_api_key') || '';
+        ghlLocationId = localStorage.getItem('ghl_location_id') || '';
         fetchLabels();
         fetchSendAsAliases();
         updateKbStatusDisplay();
-        // Load applied today count from localStorage
         const todayKey = 'applied_today_' + new Date().toISOString().slice(0, 10);
         appliedTodayCount = parseInt(localStorage.getItem(todayKey) || '0');
         startAutoRefresh();
@@ -1200,6 +1214,11 @@
             select.innerHTML = inboxOption + labelOptions;
         } catch (err) {
             console.error('Failed to fetch labels:', err);
+            const select = document.getElementById('labelSelect');
+            if (select && select.options.length <= 1) {
+                const inboxOption = `<option value="${INBOX_VALUE}">Inbox (Unlabelled)</option>`;
+                select.innerHTML = inboxOption;
+            }
         }
     }
 
@@ -1312,10 +1331,22 @@
         document.getElementById('airtableBaseId').value = localStorage.getItem('airtable_base_id') || '';
         document.getElementById('airtableTableId').value = localStorage.getItem('airtable_table_id') || '';
         document.getElementById('airtableAssignee').value = localStorage.getItem('airtable_assignee') || '';
+        document.getElementById('ghlApiKey').value = localStorage.getItem('ghl_api_key') || '';
+        document.getElementById('ghlLocationId').value = localStorage.getItem('ghl_location_id') || '';
         updateAirtableStatus();
+        updateGhlStatus();
         updateKbStatusDisplay();
         renderAuditLog();
         document.getElementById('settingsModal').classList.add('active');
+    }
+
+    function updateGhlStatus() {
+        const el = document.getElementById('ghlStatus');
+        if (ghlApiKey && ghlLocationId) {
+            el.innerHTML = '<span style="color:var(--success);">Connected</span>. SMS replies will route through GoHighLevel.';
+        } else {
+            el.innerHTML = '<span style="color:var(--text-muted);">Not configured</span>. Add GHL credentials to enable SMS reply routing.';
+        }
     }
 
     function closeSettings() { document.getElementById('settingsModal').classList.remove('active'); }
@@ -1327,7 +1358,8 @@
         'label_knowledge_base', 'kb_last_built', 'ai_corrections', 'ai_accuracy_log',
         'delay_payment_log', 'read_newsletters', 'unsubscribe_log',
         'sender_name', 'applied_today_count', 'applied_today_date',
-        'response_amendments'
+        'response_amendments',
+        'ghl_api_key', 'ghl_location_id'
     ];
 
     function exportBackup() {
@@ -1406,6 +1438,14 @@
         const assignee = document.getElementById('airtableAssignee').value.trim();
         if (assignee) localStorage.setItem('airtable_assignee', assignee);
         else localStorage.removeItem('airtable_assignee');
+
+        const ghlKey = document.getElementById('ghlApiKey').value.trim();
+        if (ghlKey) { localStorage.setItem('ghl_api_key', ghlKey); ghlApiKey = ghlKey; }
+        else { localStorage.removeItem('ghl_api_key'); ghlApiKey = ''; }
+
+        const ghlLoc = document.getElementById('ghlLocationId').value.trim();
+        if (ghlLoc) { localStorage.setItem('ghl_location_id', ghlLoc); ghlLocationId = ghlLoc; }
+        else { localStorage.removeItem('ghl_location_id'); ghlLocationId = ''; }
 
         closeSettings();
     }
@@ -1552,7 +1592,7 @@
 
         // Show search bar after loading
         document.getElementById('searchBar').style.display = 'block';
-        // Hide search scope button on inbox view (no label context)
+        // Hide search scope button on inbox view
         document.getElementById('searchScopeBtn').style.display = isInboxView ? 'none' : '';
 
         // Show/hide newsletter filter bar and reset filter
@@ -1869,6 +1909,12 @@
         }
     }
 
+    // SMS view functions removed — SMS now arrives as email via the bridge worker.
+    // GHL credentials (ghlApiKey, ghlLocationId) are retained for SMS bridge reply routing in sendDraft.
+    // fetchWithTimeout, fetchSmsConversations, renderSmsEmails, loadSmsMessages,
+    // renderSmsThread, updateSmsStats, handleSmsLabelChange, handleSmsBulkAction,
+    // draftSmsReply, sendSmsReply — all removed.
+
     async function loadInboxEmails() {
         // Switch to inbox view UI
         switchToInboxView();
@@ -2031,6 +2077,21 @@
             if (mailtoMatch) unsubscribeMailto = mailtoMatch[1];
         }
 
+        // SMS Bridge: extract GHL conversation ID from custom header or body
+        let smsConversationId = null;
+        for (const m of messages) {
+            const smsHeader = getHeader(m, 'X-SMS-ConversationId');
+            if (smsHeader) { smsConversationId = smsHeader; break; }
+        }
+        if (!smsConversationId) {
+            // Fallback: check message body for SMS_BRIDGE_ID marker
+            for (const tm of threadMessages) {
+                const bodyContent = tm.body || tm.snippet || '';
+                const bridgeMatch = bodyContent.match(/SMS_BRIDGE_ID:([a-zA-Z0-9_-]+)/);
+                if (bridgeMatch) { smsConversationId = bridgeMatch[1]; break; }
+            }
+        }
+
         return {
             threadId: thread.id,
             messageId: getHeader(lastMsg, 'Message-Id'),
@@ -2042,6 +2103,7 @@
             replyTo,
             unsubscribeUrl,
             unsubscribeMailto,
+            smsConversationId,
             lastDate,
             firstDate,
             daysOld,
@@ -5091,6 +5153,9 @@ ${emailDescriptions}`;
     }
 
     function formatDate(date) {
+        if (!date) return '';
+        if (typeof date === 'string' || typeof date === 'number') date = new Date(date);
+        if (isNaN(date.getTime())) return '';
         return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
@@ -6112,6 +6177,16 @@ Do not include a subject line - just the body text. Sign off as ${senderName}.`;
         document.getElementById('attachmentListPreview').innerHTML = '';
         document.getElementById('attachmentSizeInfo').textContent = '';
         document.getElementById('attachmentInput').value = '';
+        // Re-enable fields that SMS draft disables
+        document.getElementById('draftTo').disabled = false;
+        document.getElementById('draftSubject').disabled = false;
+        document.getElementById('draftFrom').disabled = false;
+        // Reset send button text and style
+        document.getElementById('sendStayBtn').textContent = 'Send';
+        document.getElementById('sendStayBtn').style.background = '';
+        document.getElementById('sendRespondedBtn').style.display = '';
+        document.getElementById('sendFollowUpBtn').style.display = '';
+        document.getElementById('sendUnsubBtn').style.display = '';
     }
 
     // ============================================================
@@ -6314,6 +6389,32 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
     }
 
     // ============================================================
+    // SMS BRIDGE HELPERS
+    // ============================================================
+    /**
+     * Extract GHL conversation ID from an SMS-bridge email.
+     * Looks for the SMS_BRIDGE_ID marker in the email body/snippet.
+     */
+    function extractSmsBridgeId(email) {
+        if (!email) return null;
+        // Prefer the header-extracted value (set during email parsing)
+        if (email.smsConversationId) return email.smsConversationId;
+        // Fallback: search message bodies for the marker
+        if (email.messages) {
+            for (const m of email.messages) {
+                const bodyContent = m.body || m.snippet || '';
+                const match = bodyContent.match(/SMS_BRIDGE_ID:([a-zA-Z0-9_-]+)/);
+                if (match) return match[1];
+            }
+        }
+        // Last resort: check snippet
+        const snippet = email.snippet || '';
+        const match = snippet.match(/SMS_BRIDGE_ID:([a-zA-Z0-9_-]+)/);
+        if (match) return match[1];
+        return null;
+    }
+
+    // ============================================================
     // SEND EMAIL
     // ============================================================
     async function sendDraft(destination) {
@@ -6397,6 +6498,33 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
             if (currentDraftEmail?.threadId) sendParams.resource.threadId = currentDraftEmail.threadId;
 
             await gapi.client.gmail.users.messages.send(sendParams);
+
+            // SMS Bridge: if replying to an SMS-origin email, also send via GHL
+            if (subject && subject.startsWith('[SMS]') && currentDraftEmail) {
+                try {
+                    const smsConvoId = extractSmsBridgeId(currentDraftEmail);
+                    if (smsConvoId && ghlApiKey && ghlLocationId) {
+                        const proxyBase = GHL_PROXY_URL;
+                        await fetch(proxyBase + '/ghl-reply', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-GHL-Key': ghlApiKey,
+                                'X-GHL-Location': ghlLocationId
+                            },
+                            body: JSON.stringify({
+                                type: 'SMS',
+                                conversationId: smsConvoId,
+                                message: body
+                            })
+                        });
+                        addAuditEntry('sms_bridge_reply', `SMS reply sent via GHL for conversation ${smsConvoId}`);
+                    }
+                } catch (smsErr) {
+                    console.warn('SMS bridge reply failed (email still sent):', smsErr);
+                    showError('Email sent but SMS relay failed. The contact may not receive your reply as a text message.');
+                }
+            }
 
             // Log delay payment if sending from "to pay" label
             const isToPaySend = currentLabel.toLowerCase().includes('to pay') || currentLabel.startsWith('3');
