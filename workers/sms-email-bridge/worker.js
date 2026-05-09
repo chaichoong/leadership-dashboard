@@ -53,6 +53,17 @@ export default {
       });
     }
 
+    // Reset checkpoint (for testing/debug)
+    if (url.pathname === '/reset' && request.method === 'POST') {
+      const secret = request.headers.get('x-webhook-secret');
+      if (env.WEBHOOK_SECRET && secret !== env.WEBHOOK_SECRET) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      await env.SMS_STATE.delete('lastMessageTimestamp');
+      await env.SMS_STATE.put('forwardedCount', '0');
+      return json({ status: 'reset' });
+    }
+
     // Manual trigger for testing
     if (url.pathname === '/poll' && request.method === 'POST') {
       const secret = request.headers.get('x-webhook-secret');
@@ -99,8 +110,8 @@ async function pollGhlMessages(env) {
 
   // Get the timestamp of the last message we processed (stored as epoch ms)
   const lastTimestamp = parseInt(await env.SMS_STATE.get('lastMessageTimestamp') || '0', 10);
-  // If first run, default to 5 minutes ago to avoid flooding
-  const effectiveTimestamp = lastTimestamp || (Date.now() - 5 * 60 * 1000);
+  // If first run, default to 60 minutes ago to catch recent messages
+  const effectiveTimestamp = lastTimestamp || (Date.now() - 60 * 60 * 1000);
 
   try {
     // Search for recent conversations sorted by last message date
