@@ -6499,8 +6499,8 @@ Return ONLY the polished email body text. No subject line, no commentary, no exp
 
             await gapi.client.gmail.users.messages.send(sendParams);
 
-            // SMS Bridge: if replying to an SMS-origin email, also send via GHL
-            if (subject && subject.startsWith('[SMS]') && currentDraftEmail) {
+            // SMS Bridge: if replying to an SMS/Call-origin email, also send via GHL
+            if (subject && (subject.startsWith('[SMS]') || subject.startsWith('[Missed Call]')) && currentDraftEmail) {
                 try {
                     const smsConvoId = extractSmsBridgeId(currentDraftEmail);
                     if (smsConvoId && ghlApiKey && ghlLocationId) {
