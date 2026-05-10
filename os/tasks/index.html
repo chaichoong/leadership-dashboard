@@ -2929,23 +2929,12 @@ async function doDeleteComment(taskId,commentId){
 
 // ===== PROJECT PICKER (drawer) =====
 function renderProjectPicker(t){
-  const current=t.projectNames.length?escHtml(t.projectNames.join(', ')):'<span style="color:var(--text-muted)">-</span>';
-  return `<div id="drwProjectInner" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span style="font-size:12px">${current}</span>
-    <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showProjectPickerMenu('${t.id}')">Change</button>
-  </div>`;
-}
-function showProjectPickerMenu(taskId){
-  const wrap=document.getElementById('drwProjectWrap');if(!wrap)return;
   const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
-  let html=`<select id="drwProjectSelect" style="max-width:260px"><option value="">-</option>`;
-  active.forEach(p=>{html+=`<option value="${p.id}">${escHtml(p.name)}</option>`});
-  html+=`</select> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="applyProjectPick('${taskId}')">Save</button> <button class="btn" style="padding:2px 8px;font-size:11px" onclick="cancelProjectPick('${taskId}')">Cancel</button>`;
-  wrap.innerHTML=html;
-}
-function cancelProjectPick(taskId){
-  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
-  const wrap=document.getElementById('drwProjectWrap');if(wrap)wrap.innerHTML=renderProjectPicker(task);
+  const currentId=(t.projectIds&&t.projectIds[0])||'';
+  let html=`<select id="drwProjectSelect" style="max-width:260px" onchange="applyProjectPick('${t.id}')"><option value="">-</option>`;
+  active.forEach(p=>{html+=`<option value="${p.id}" ${p.id===currentId?'selected':''}>${escHtml(p.name)}</option>`});
+  html+=`</select>`;
+  return html;
 }
 async function applyProjectPick(taskId){
   const task=allTasks.find(t=>t.id===taskId);if(!task)return;
@@ -2959,19 +2948,43 @@ async function applyProjectPick(taskId){
   const edits=[{fieldKey:'projects-link',oldRaw:{ids:oldProjectIds,names:oldProjectNames},newRaw:{projectId}}];
   let setPriorityProject=false;
   if(projectId&&task.priority!=='Project'){
-    payload[F.priority]='Project';  // singleSelect with typecast = plain string
+    payload[F.priority]='Project';
     setPriorityProject=true;
     edits.push({fieldKey:'priority',oldRaw:oldPriority,newRaw:'Project'});
+  }
+  // CASCADE: inherit Business and Collaborators from the project (same as quickRelinkProject)
+  let cascadedBusinessId='';
+  let cascadedCollaborators=null;
+  if(projectId){
+    const targetProj=allProjects.find(p=>p.id===projectId);
+    if(targetProj){
+      if(targetProj.businessId&&targetProj.businessId!==task.businessId){
+        payload[F.business]=[targetProj.businessId];
+        cascadedBusinessId=targetProj.businessId;
+        edits.push({fieldKey:'business',oldRaw:task.business,newRaw:selectName(targetProj.business)||targetProj.business});
+      }
+      const resolvedCollabs=resolveTeamMemberCollabs(targetProj.collaboratorIds);
+      if(resolvedCollabs.length){
+        payload[F.collaborators]=resolvedCollabs.map(r=>({email:r.email}));
+        cascadedCollaborators=resolvedCollabs;
+      }
+    }
   }
   try{
     const res=await patchTask(taskId,payload);
     if(!res.ok){let body='';try{body=await res.text()}catch(_){};throw new Error('HTTP '+res.status+' '+body.slice(0,200))}
-    // Optimistic local update — don't parseTask() the response (it's name-keyed,
-    // parseTask reads field IDs so it'd silently give us empty projectIds).
+    // Optimistic local update
     task.projectIds=projectId?[projectId]:[];
     const newProj=projectId?allProjects.find(p=>p.id===projectId):null;
     task.projectNames=newProj?[newProj.name]:[];
     if(setPriorityProject)task.priority='Project';
+    if(cascadedBusinessId&&newProj){
+      task.businessId=cascadedBusinessId;
+      task.business=selectName(newProj.business)||newProj.business||BUSINESS_ID_TO_NAME[cascadedBusinessId]||task.business;
+    }
+    if(cascadedCollaborators){
+      task.collaborators=cascadedCollaborators.slice();
+    }
     adjustProjectTaskCounts(oldProjectIds,task.projectIds);
     if(!_undoInProgress){
       pushUndo({type:'multi-patch',taskId,edits,label:projectId?`Linked project${setPriorityProject?' (priority -> Project)':''}`:'Unlinked project'});
