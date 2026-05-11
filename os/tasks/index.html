@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Task &amp; Project Management</title>
+<title>Tasks &amp; Projects</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <link rel="stylesheet" href="../../css/sync-bar.css?v=2">
 <link rel="stylesheet" href="../../css/quick-task.css?v=2">
@@ -429,14 +429,14 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 
 <div class="topbar">
   <div>
-    <h1>Task &amp; Project Management</h1>
+    <h1>Tasks &amp; Projects</h1>
     <div class="subtitle">Team task management &middot; synced with Airtable &middot; <span id="taskCount"></span> &middot; <span id="buildStamp" style="color:var(--text-muted);font-size:10px">build 2026-05-07-1300 self-test-comment-dm</span></div>
   </div>
   <div class="topbar-right">
     <div id="userBadge" class="user-badge" style="display:none"></div>
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
     <div id="syncPill" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--success-bg);color:var(--success);border:1px solid var(--success);cursor:pointer;user-select:none" title="Click to run a sync check">✓ Saved</div>
-    <a class="btn" href="workflow.html" target="_blank" title="Visual map of how the Task &amp; Project Management OS works" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">📖 Workflow</a>
+    <a class="btn" href="workflow.html" target="_blank" title="Visual map of how the Tasks &amp; Projects OS works" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">📖 Workflow</a>
     <button class="btn" data-refresh-btn onclick="loadAllData()" title="Reload data from Airtable">Refresh</button>
     <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4" title="Undo last action (Cmd+Z) — Nothing to undo">
       <span>Undo</span><span id="undoBtnLabel" style="display:none"></span>
@@ -4264,7 +4264,7 @@ function renderAutoScheduleModal(){
     html+=`<p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Ordered by <strong>Priority</strong> (Project &rarr; Urgent &rarr; Not Urgent). Edit any destination date below — the capacity for that day will be recalculated and subsequent tasks will reshuffle automatically.</p>
     <p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
     <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
-    <table class="task-table"><thead><tr><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th></tr></thead><tbody>
+    <table class="task-table"><thead><tr><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th><th></th></tr></thead><tbody>
     ${moves.map((m,i)=>{
       const pri=m.task.priority||'';
       const priCls={Project:'badge-project',Urgent:'badge-urgent','Not Urgent':'badge-not-urgent'}[pri]||'';
@@ -4275,6 +4275,7 @@ function renderAutoScheduleModal(){
         <td>${m.from||'-'}</td>
         <td><input type="date" value="${m.to}" onchange="updateAutoMoveDate(${i},this.value)" style="width:140px"></td>
         <td style="white-space:nowrap">${m.task.timeEst||formatMins(m.task.minutes)}</td>
+        <td>${m.to!==todayStr()?`<button class="btn btn-sm" onclick="updateAutoMoveDate(${i},todayStr())" style="font-size:10px;padding:2px 6px;white-space:nowrap">Keep Today</button>`:`<span style="font-size:10px;color:var(--text-muted)">Today</span>`}</td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
