@@ -249,6 +249,28 @@
             }
         }
 
+        // Most recent reconciled payment linked to this tenancy — gives the
+        // user a "when did we last actually see money from them?" anchor right
+        // in the CFV table without having to drill into Operations.
+        let lastPaymentDate = null;
+        let lastPaymentAmount = null;
+        for (const tx of (allTransactions || [])) {
+            if (!getField(tx, F.txReconciled)) continue;
+            const links = getField(tx, F.txTenancy);
+            if (!links) continue;
+            const arr = Array.isArray(links) ? links : [links];
+            const matches = arr.some(item => (typeof item === 'object' ? item.id : item) === tenancy.id);
+            if (!matches) continue;
+            const dStr = getField(tx, F.txDate);
+            if (!dStr) continue;
+            const d = new Date(dStr);
+            if (isNaN(d.getTime())) continue;
+            if (!lastPaymentDate || d > lastPaymentDate) {
+                lastPaymentDate = d;
+                lastPaymentAmount = Number(getField(tx, F.txReportAmount) || getField(tx, F.txAmount)) || 0;
+            }
+        }
+
         return {
             tenancyId: tenancy.id,
             surname, ref, rent, dueDay, daysOverdue,
@@ -257,6 +279,7 @@
             tenantName, tenantPhone, tenantEmail,
             tenantId: tenant ? tenant.id : null,
             chaseStage, chaseStart, cfvStartDate,
+            lastPaymentDate, lastPaymentAmount,
             autoDetected: false,
         };
     }
@@ -400,7 +423,7 @@
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
             return;
         }
 
@@ -494,6 +517,9 @@
                 <td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${fmt(entry.rent)}</td>
                 <td style="text-align:center">${entry.dueDay || '—'}</td>
                 <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? 'var(--danger)' : entry.daysOverdue > 3 ? 'var(--warning)' : 'var(--text-primary)'}">${entry.daysOverdue}</td>
+                <td style="font-size:12px;white-space:nowrap">${entry.lastPaymentDate
+                    ? `${entry.lastPaymentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}<br><span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(entry.lastPaymentAmount)}</span>`
+                    : '<span style="color:var(--text-muted);font-style:italic">never</span>'}</td>
                 <td>${statusBadge}</td>
                 <td>${contactHtml}</td>
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
