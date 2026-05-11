@@ -2931,7 +2931,7 @@ async function doDeleteComment(taskId,commentId){
 function renderProjectPicker(t){
   const active=(allProjects||[]).filter(p=>!p.completed&&selectName(p.status)!=='Completed');
   const currentId=(t.projectIds&&t.projectIds[0])||'';
-  let html=`<select id="drwProjectSelect" style="max-width:260px" onchange="applyProjectPick('${t.id}')"><option value="">-</option>`;
+  let html=`<select id="drwProjectSelect" onchange="applyProjectPick('${t.id}')"><option value="">-</option>`;
   active.forEach(p=>{html+=`<option value="${p.id}" ${p.id===currentId?'selected':''}>${escHtml(p.name)}</option>`});
   html+=`</select>`;
   return html;
