@@ -4264,18 +4264,20 @@ function renderAutoScheduleModal(){
     html+=`<p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Ordered by <strong>Priority</strong> (Project &rarr; Urgent &rarr; Not Urgent). Edit any destination date below — the capacity for that day will be recalculated and subsequent tasks will reshuffle automatically.</p>
     <p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
     <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
-    <table class="task-table"><thead><tr><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th><th></th></tr></thead><tbody>
+    <table class="task-table"><thead><tr><th style="width:28px"><input type="checkbox" onchange="toggleAllKeepToday(this.checked)" title="Select all for Keep Today"></th><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th><th></th></tr></thead><tbody>
     ${moves.map((m,i)=>{
       const pri=m.task.priority||'';
       const priCls={Project:'badge-project',Urgent:'badge-urgent','Not Urgent':'badge-not-urgent'}[pri]||'';
+      const isToday=m.to===todayStr();
       return `<tr>
+        <td><input type="checkbox" class="keep-today-cb" data-idx="${i}" ${isToday?'disabled':''} ${isToday?'title="Already today"':''}></td>
         <td style="color:var(--text-secondary);font-size:11px">${i+1}</td>
         <td>${escHtml(m.task.name)}</td>
         <td>${pri?`<span class="badge ${priCls}">${escHtml(pri)}</span>`:'-'}</td>
         <td>${m.from||'-'}</td>
         <td><input type="date" value="${m.to}" onchange="updateAutoMoveDate(${i},this.value)" style="width:140px"></td>
         <td style="white-space:nowrap">${m.task.timeEst||formatMins(m.task.minutes)}</td>
-        <td>${m.to!==todayStr()?`<button class="btn btn-sm" onclick="updateAutoMoveDate(${i},todayStr())" style="font-size:10px;padding:2px 6px;white-space:nowrap">Keep Today</button>`:`<span style="font-size:10px;color:var(--text-muted)">Today</span>`}</td>
+        <td>${!isToday?`<button class="btn btn-sm" onclick="updateAutoMoveDate(${i},todayStr())" style="font-size:10px;padding:2px 6px;white-space:nowrap">Keep Today</button>`:`<span style="font-size:10px;color:var(--text-muted)">Today</span>`}</td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
@@ -4283,7 +4285,8 @@ function renderAutoScheduleModal(){
   if(warnings.length)html+=`<div style="color:var(--danger);font-size:12px;margin-top:10px;max-height:100px;overflow-y:auto;padding:8px;background:var(--danger-bg);border-radius:6px">${warnings.map(escHtml).join('<br>')}</div>`;
   html+=`<div class="modal-actions">
     <button class="btn" onclick="document.getElementById('autoModal').remove()">Cancel</button>
-    ${moves.length?`<button class="btn btn-primary" onclick="applyAutoSchedule()">Apply ${moves.length} changes</button>`:''}
+    ${moves.length?`<button class="btn" onclick="keepSelectedToday()" style="margin-left:auto">Keep Selected Today</button>
+    <button class="btn btn-primary" onclick="applyAutoSchedule()">Apply ${moves.length} changes</button>`:''}
   </div></div>`;
   return html;
 }
@@ -4292,12 +4295,13 @@ function renderAutoScheduleModal(){
 // We reassign this task to the chosen date, then re-run the scheduler
 // with the remaining tasks to redistribute capacity intelligently.
 function updateAutoMoveDate(index,newDate){
-  if(!newDate)return;
   const moves=window._pendingMoves||[];
-  const m=moves[index];if(!m)return;
-  // Force this task to go to the chosen date
-  m.to=newDate;
-  m._locked=true;
+  if(index>=0){
+    if(!newDate)return;
+    const m=moves[index];if(!m)return;
+    m.to=newDate;
+    m._locked=true;
+  }
   // Re-run scheduler for the UNLOCKED tasks, seeding usage with locked moves
   try{
     const member=TEAM.find(x=>x.key===activeTeam)||(currentUser?TEAM.find(x=>x.key===currentUser.key):null);
@@ -4336,6 +4340,19 @@ function updateAutoMoveDate(index,newDate){
     if(ov){const sc=ov.querySelector('[style*="max-height:360px"]');const st=sc?sc.scrollTop:0;ov.innerHTML=renderAutoScheduleModal();const sc2=ov.querySelector('[style*="max-height:360px"]');if(sc2)sc2.scrollTop=st;}
   }catch(e){console.error('[updateAutoMoveDate] failed',e);toast('Could not rebalance: '+e.message,true)}
 }
+function toggleAllKeepToday(checked){
+  document.querySelectorAll('.keep-today-cb:not(:disabled)').forEach(cb=>{cb.checked=checked});
+}
+function keepSelectedToday(){
+  const cbs=[...document.querySelectorAll('.keep-today-cb:checked')];
+  if(!cbs.length){toast('Select tasks to keep today first');return}
+  const moves=window._pendingMoves||[];
+  const today=todayStr();
+  cbs.forEach(cb=>{const i=parseInt(cb.dataset.idx);const m=moves[i];if(m){m.to=today;m._locked=true}});
+  updateAutoMoveDate(-1,null);
+}
+window.toggleAllKeepToday=toggleAllKeepToday;
+window.keepSelectedToday=keepSelectedToday;
 window.updateAutoMoveDate=updateAutoMoveDate;
 window.uploadAttachments=uploadAttachments;
 window.removeAttachment=removeAttachment;
