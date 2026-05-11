@@ -71,7 +71,7 @@
     // fallback when a tab has no SOP file (os-strategy, fintable).
     const PAGE_PURPOSES = {
         'overview': 'Leadership Dashboard — financial overview, 31-day cash flow forecast, balance calculator, reconciliation accuracy, AI commentary. The single executive view of business health.',
-        'tasks': 'Task and Project Management — tasks and projects across the portfolio, with assignment, due dates, and Kanban-style flow.',
+        'tasks': 'Tasks & Projects — tasks and projects across the portfolio, with assignment, due dates, and Kanban-style flow.',
         'cfv': 'CFVs (Cash Flow Voids) — detects tenancies where rent hasn\'t landed on time, runs a 3-stage chase sequence, tracks exposure.',
         'invoices': 'Invoices — pending invoices pulled from Gmail, AI-matched to vendors/jobs, approved and marked paid.',
         'pnl': 'Profit & Loss — business-level P&L with category breakdown, period comparison, and variance.',
