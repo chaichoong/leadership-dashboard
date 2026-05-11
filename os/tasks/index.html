@@ -4331,8 +4331,9 @@ function updateAutoMoveDate(index,newDate){
       if(!placed)newWarnings.push(`Could not fit "${mv.task.name}" within 60 days after your edit`);
     });
     window._autoWarnings=newWarnings;
-    // Re-render modal
-    const ov=document.getElementById('autoModal');if(ov)ov.innerHTML=renderAutoScheduleModal();
+    // Re-render modal, preserving scroll position
+    const ov=document.getElementById('autoModal');
+    if(ov){const sc=ov.querySelector('[style*="max-height:360px"]');const st=sc?sc.scrollTop:0;ov.innerHTML=renderAutoScheduleModal();const sc2=ov.querySelector('[style*="max-height:360px"]');if(sc2)sc2.scrollTop=st;}
   }catch(e){console.error('[updateAutoMoveDate] failed',e);toast('Could not rebalance: '+e.message,true)}
 }
 window.updateAutoMoveDate=updateAutoMoveDate;
