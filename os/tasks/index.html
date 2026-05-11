@@ -4322,7 +4322,8 @@ function updateAutoMoveDate(index,newDate){
     const newWarnings=[];
     unlocked.forEach(mv=>{
       const mins=mv.task.minutes||30;
-      let day=cursor;let tries=0;let placed=false;
+      let day=mv.to||cursor;if(isWeekend(day))day=nextWorkDay(day);
+      let tries=0;let placed=false;
       while(tries<60){
         if((usage[day]||0)+mins<=dailyCapMin){mv.to=day;usage[day]=(usage[day]||0)+mins;placed=true;break}
         day=nextWorkDay(day);tries++;
