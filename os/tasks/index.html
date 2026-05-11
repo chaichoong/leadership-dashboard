@@ -4153,6 +4153,8 @@ function scheduleTasksAcrossDays(){
   usage[today]=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?en-st:0)},0);
 
   const moves=[];const warnings=[];
+  const stayingToday=[];
+  const excluded={hard:[],projectFuture:[],farFuture:[]};
   let cursorDay=today;
   function nextWorkDay(d){
     let x=addDays(d,1);
@@ -4162,51 +4164,35 @@ function scheduleTasksAcrossDays(){
     return x;
   }
   if(isWeekend(cursorDay))cursorDay=nextWorkDay(cursorDay);
-  // Horizon beyond which non-hard tasks are left alone (user intentionally
-  // pushed them out — don't pull them back in just because there's capacity).
   const PULL_IN_DAYS=Math.max(1,(config.autoSchedulePullInDays||14));
   const horizonDate=addDays(today,PULL_IN_DAYS);
-  // End-of-current-week (Sunday). Project-priority tasks scheduled beyond
-  // this point are deliberately week-aligned in the Kanban — never pull
-  // them forward into the current week. They can still move WITHIN the
-  // current week or be brought into it from overdue.
   const _todayParts=today.split('-').map(Number);
   const _todayDate=new Date(_todayParts[0],_todayParts[1]-1,_todayParts[2]);
-  const _dow=_todayDate.getDay(); // 0=Sun..6=Sat
+  const _dow=_todayDate.getDay();
   const _daysToSunday=_dow===0?0:7-_dow;
   const endOfWeek=addDays(today,_daysToSunday);
+  const calendarMinsToday=usage[today]||0;
 
   console.log('[Scheduler] Step 6: process',tasks.length,'tasks  (horizon:',PULL_IN_DAYS,'days, eow:',endOfWeek,')');
   let processed=0;
-  let skippedFarFuture=0;
-  let skippedHard=0;
-  let skippedProjectFuture=0;
   for(let i=0;i<tasks.length;i++){
     const task=tasks[i];
     const mins=task.minutes||30;
-    // HARD DEADLINE — never moved (forward or backward). Reserve its capacity
-    // on its existing due date so nothing else overloads that day.
     if(task.hardDeadline){
       if(task.dueDate){usage[task.dueDate]=(usage[task.dueDate]||0)+mins}
-      skippedHard++;
+      excluded.hard.push(task);
       processed++;
       continue;
     }
-    // PROJECT TASK pinned past this week — Kevin uses the Kanban to
-    // schedule project work into specific future weeks; the auto-
-    // scheduler must not pull those tasks back into the current week.
-    // Urgent / High / Not Urgent priorities are still movable within
-    // the pull-in horizon.
     if(task.priority==='Project'&&task.dueDate&&task.dueDate>endOfWeek){
       usage[task.dueDate]=(usage[task.dueDate]||0)+mins;
-      skippedProjectFuture++;
+      excluded.projectFuture.push(task);
       processed++;
       continue;
     }
-    // FAR-FUTURE — task due beyond the pull-in horizon. Leave it alone.
     if(task.dueDate&&task.dueDate>horizonDate){
       usage[task.dueDate]=(usage[task.dueDate]||0)+mins;
-      skippedFarFuture++;
+      excluded.farFuture.push(task);
       processed++;
       continue;
     }
@@ -4217,6 +4203,7 @@ function scheduleTasksAcrossDays(){
       const used=usage[day]||0;
       if(used+mins<=dailyCapMin){
         if(task.dueDate!==day){moves.push({task,from:task.dueDate,to:day})}
+        else if(day===today){stayingToday.push(task)}
         usage[day]=used+mins;
         placed=true;
         break;
@@ -4228,10 +4215,10 @@ function scheduleTasksAcrossDays(){
     processed++;
     if(processed%25===0)console.log('[Scheduler] processed',processed,'/',tasks.length);
   }
-  console.log('[Scheduler] skipped hard-deadline:',skippedHard,'skipped far-future:',skippedFarFuture,'skipped project beyond this week:',skippedProjectFuture);
-  console.log('[Scheduler] DONE. moves=',moves.length,'warnings=',warnings.length);
+  console.log('[Scheduler] excluded hard:',excluded.hard.length,'projectFuture:',excluded.projectFuture.length,'farFuture:',excluded.farFuture.length);
+  console.log('[Scheduler] stayingToday:',stayingToday.length,'moves:',moves.length,'warnings:',warnings.length);
 
-  return{moves,warnings};
+  return{moves,warnings,stayingToday,excluded,calendarMinsToday,dailyCapMin,todayTaskMins:usage[today]||0,totalConsidered:tasks.length};
  }catch(e){
   console.error('scheduleTasksAcrossDays crashed',e);
   return{moves:[],warnings:['Scheduler error: '+(e.message||e)]};
@@ -4243,13 +4230,16 @@ function runAutoSchedulePreview(){
   try{closeAllOverlays()}catch(e){console.warn('closeAllOverlays failed',e)}
   let result;
   try{result=scheduleTasksAcrossDays()}catch(e){console.error('[Auto-Schedule] scheduler threw',e);toast('Scheduler error — check console',true);return}
-  const {moves,warnings}=result;
-  console.log('[Auto-Schedule] Preview ready. moves=',moves.length,'warnings=',warnings);
+  const {moves,warnings,stayingToday,excluded,calendarMinsToday,dailyCapMin,todayTaskMins,totalConsidered}=result;
+  console.log('[Auto-Schedule] Preview ready. moves=',moves.length,'staying=',stayingToday.length,'excluded=',excluded.hard.length+excluded.projectFuture.length+excluded.farFuture.length);
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='autoModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   window._pendingMoves=moves;
   window._autoWarnings=warnings;
+  window._autoStaying=stayingToday;
+  window._autoExcluded=excluded;
+  window._autoCapacity={calendarMinsToday,dailyCapMin,todayTaskMins,totalConsidered};
   overlay.innerHTML=renderAutoScheduleModal();
   document.body.appendChild(overlay);
 }
@@ -4258,12 +4248,38 @@ function runAutoSchedulePreview(){
 function renderAutoScheduleModal(){
   const moves=window._pendingMoves||[];
   const warnings=window._autoWarnings||[];
-  let html=`<div class="modal" style="max-width:880px;width:95%"><h2>Auto-Schedule Preview</h2>`;
+  const staying=window._autoStaying||[];
+  const excl=window._autoExcluded||{hard:[],projectFuture:[],farFuture:[]};
+  const cap=window._autoCapacity||{calendarMinsToday:0,dailyCapMin:360,todayTaskMins:0,totalConsidered:0};
+  const exclTotal=excl.hard.length+excl.projectFuture.length+excl.farFuture.length;
+  const fmtH=(mins)=>{const h=Math.floor(mins/60);const m=mins%60;return h>0?(m>0?h+'h '+m+'m':h+'h'):(m+'m')};
+
+  let html=`<div class="modal" style="max-width:920px;width:95%"><h2>Auto-Schedule Preview</h2>`;
+
+  // Summary header
+  const todayPct=cap.dailyCapMin>0?Math.min(100,Math.round(cap.todayTaskMins/cap.dailyCapMin*100)):0;
+  const barCol=todayPct>90?'var(--danger)':todayPct>70?'var(--warning)':'var(--accent)';
+  html+=`<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">
+    <span><strong>${cap.totalConsidered}</strong> tasks considered</span>
+    <span><strong>${moves.length}</strong> to move</span>
+    <span><strong>${staying.length}</strong> staying today</span>
+    <span><strong>${exclTotal}</strong> excluded</span>
+  </div>`;
+
+  // Capacity bar for today
+  html+=`<div style="margin-bottom:14px">
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Today's capacity: <strong>${fmtH(Math.round(cap.todayTaskMins))}</strong> of <strong>${fmtH(cap.dailyCapMin)}</strong> used${cap.calendarMinsToday>0?' (incl. '+fmtH(Math.round(cap.calendarMinsToday))+' calendar)':''}</div>
+    <div style="height:8px;background:var(--bg-subtle);border-radius:4px;overflow:hidden">
+      <div style="height:100%;width:${todayPct}%;background:${barCol};border-radius:4px;transition:width .3s"></div>
+    </div>
+  </div>`;
+
+  // Moves table
   if(moves.length===0)html+=`<p>No changes needed — everything fits in its current day.</p>`;
   else{
     html+=`<p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Ordered by <strong>Priority</strong> (Project &rarr; Urgent &rarr; Not Urgent). Edit any destination date below — the capacity for that day will be recalculated and subsequent tasks will reshuffle automatically.</p>
     <p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
-    <div style="max-height:360px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
+    <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
     <table class="task-table"><thead><tr><th style="width:28px"><input type="checkbox" onchange="toggleAllKeepToday(this.checked)" title="Select all for Keep Today"></th><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th><th></th></tr></thead><tbody>
     ${moves.map((m,i)=>{
       const pri=m.task.priority||'';
@@ -4282,6 +4298,39 @@ function renderAutoScheduleModal(){
     }).join('')}
     </tbody></table></div>`;
   }
+
+  // Staying Today section
+  if(staying.length){
+    html+=`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary)">Staying today (${staying.length})</summary>
+    <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:6px;margin-top:6px">
+    <table class="task-table"><thead><tr><th>Task</th><th>Priority</th><th>Time</th></tr></thead><tbody>
+    ${staying.map(t=>{
+      const pri=t.priority||'';
+      const priCls={Project:'badge-project',Urgent:'badge-urgent','Not Urgent':'badge-not-urgent'}[pri]||'';
+      return `<tr><td>${escHtml(t.name)}</td><td>${pri?`<span class="badge ${priCls}">${escHtml(pri)}</span>`:'-'}</td><td style="white-space:nowrap">${t.timeEst||formatMins(t.minutes)}</td></tr>`;
+    }).join('')}
+    </tbody></table></div></details>`;
+  }
+
+  // Excluded section
+  if(exclTotal){
+    html+=`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary)">Excluded (${exclTotal})</summary>
+    <div style="font-size:12px;color:var(--text-secondary);margin-top:6px;max-height:180px;overflow-y:auto">`;
+    if(excl.hard.length){
+      html+=`<div style="margin-bottom:8px"><strong>Hard deadline — not moved (${excl.hard.length})</strong><ul style="margin:4px 0 0 16px;padding:0">
+      ${excl.hard.map(t=>`<li>${escHtml(t.name)} — due ${t.dueDate||'no date'}, ${t.timeEst||formatMins(t.minutes)}</li>`).join('')}</ul></div>`;
+    }
+    if(excl.projectFuture.length){
+      html+=`<div style="margin-bottom:8px"><strong>Project task beyond this week (${excl.projectFuture.length})</strong><ul style="margin:4px 0 0 16px;padding:0">
+      ${excl.projectFuture.map(t=>`<li>${escHtml(t.name)} — due ${t.dueDate||'no date'}, ${t.timeEst||formatMins(t.minutes)}</li>`).join('')}</ul></div>`;
+    }
+    if(excl.farFuture.length){
+      html+=`<div style="margin-bottom:8px"><strong>Beyond pull-in horizon (${excl.farFuture.length})</strong><ul style="margin:4px 0 0 16px;padding:0">
+      ${excl.farFuture.map(t=>`<li>${escHtml(t.name)} — due ${t.dueDate||'no date'}, ${t.timeEst||formatMins(t.minutes)}</li>`).join('')}</ul></div>`;
+    }
+    html+=`</div></details>`;
+  }
+
   if(warnings.length)html+=`<div style="color:var(--danger);font-size:12px;margin-top:10px;max-height:100px;overflow-y:auto;padding:8px;background:var(--danger-bg);border-radius:6px">${warnings.map(escHtml).join('<br>')}</div>`;
   html+=`<div class="modal-actions">
     <button class="btn" onclick="document.getElementById('autoModal').remove()">Cancel</button>
