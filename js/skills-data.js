@@ -870,6 +870,42 @@ const SKILLS_LIBRARY = [
         source: 'system',
         tags: ['init', 'CLAUDE.md', 'project', 'setup']
     },
+    {
+        id: 'update-config',
+        name: 'Update Config',
+        command: 'update-config',
+        description: 'Configure the Claude Code harness via settings.json — permissions, environment variables, hooks, and automated behaviours. Use for adding allowed commands, setting env vars, or configuring pre/post hooks.',
+        category: 'Development',
+        source: 'system',
+        tags: ['config', 'settings', 'permissions', 'hooks', 'environment']
+    },
+    {
+        id: 'keybindings-help',
+        name: 'Keybindings Help',
+        command: 'keybindings-help',
+        description: 'Customise keyboard shortcuts for Claude Code — rebind keys, add chord bindings, and modify ~/.claude/keybindings.json.',
+        category: 'Development',
+        source: 'system',
+        tags: ['keybindings', 'shortcuts', 'keyboard', 'configuration']
+    },
+    {
+        id: 'fewer-permission-prompts',
+        name: 'Fewer Permission Prompts',
+        command: 'fewer-permission-prompts',
+        description: 'Scan session transcripts for common read-only Bash and MCP tool calls, then add a prioritised allowlist to project settings to reduce permission prompts.',
+        category: 'Development',
+        source: 'system',
+        tags: ['permissions', 'allowlist', 'settings', 'productivity']
+    },
+    {
+        id: 'loop',
+        name: 'Loop',
+        command: 'loop',
+        description: 'Run a prompt or slash command on a recurring interval — useful for polling deploy status, checking build progress, or repeating any task on a schedule within a session.',
+        category: 'Development',
+        source: 'system',
+        tags: ['loop', 'recurring', 'polling', 'interval']
+    },
 ];
 
 const SKILLS_CATEGORIES = [
