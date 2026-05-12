@@ -861,7 +861,7 @@
                 </div>
                 <div style="grid-column:1/-1;overflow-x:auto">
                     <table class="tx-table">
-                        <colgroup><col style="width:30px"><col style="width:82px"><col><col style="width:110px"><col style="width:90px"><col style="width:115px"><col style="width:125px"><col style="width:135px"><col style="width:100px"><col style="width:100px"></colgroup>
+                        <colgroup><col style="width:28px"><col style="width:80px"><col><col style="width:85px"><col style="width:80px"><col style="width:100px"><col style="width:110px"><col style="width:120px"><col style="width:90px"><col style="width:90px"></colgroup>
                         <thead><tr>
                             <th>#</th><th>Date</th><th>Description</th><th>Account</th><th class="money">Amount</th><th>Category</th><th>Sub-Category</th><th>Tenancy</th><th>Unit</th><th>Property</th>
                         </tr></thead>
