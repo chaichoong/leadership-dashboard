@@ -456,7 +456,8 @@
             <td style="font-size:12px;color:var(--text-secondary)">${accountStr}</td>
             <td style="font-size:12px;color:var(--text-secondary);max-width:140px">${subCatStr}</td>
             <td style="white-space:nowrap">${endDateCell}</td>
-            <td style="width:40px;text-align:center">
+            <td style="width:80px;text-align:center;white-space:nowrap">
+                <button onclick="event.stopPropagation(); costOpenPrintStatement('${e.id}')" title="Print statement" style="background:none;border:1px solid var(--accent);border-radius:4px;cursor:pointer;padding:2px 6px;font-size:11px;color:var(--accent);margin-right:2px">🖨</button>
                 <button onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')" title="Show linked transactions" style="background:none;border:1px solid var(--border-default);border-radius:4px;cursor:pointer;padding:2px 6px;font-size:11px;color:var(--text-secondary)">▶</button>
             </td>
         </tr>
@@ -1615,3 +1616,163 @@
         _costsBackfillState.plan = null;
         renderCostsTab();
     }
+
+    // ══════════════════════════════════════════
+    // PRINT STATEMENT — per-cost payment ledger
+    // ══════════════════════════════════════════
+
+    function costOpenPrintStatement(costId) {
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+        const e = enrichCost(cost);
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center';
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);padding:24px;max-width:440px;width:90%;box-shadow:var(--shadow-lg)';
+
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth();
+        const taxYearStart = (currentMonth >= 3) ? `${currentYear}-04-06` : `${currentYear - 1}-04-06`;
+        const defaultStart = '2025-04-01';
+        const defaultEnd = today.toISOString().slice(0, 10);
+
+        panel.innerHTML = `
+            <div style="font-weight:600;font-size:15px;margin-bottom:4px">Generate Cost Statement</div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px">${escHtml(e.name)} · ${escHtml(e.frequency)} · Expected: ${fmt(e.expected)}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">Start date</label>
+                    <input id="costStmtStart" type="date" value="${defaultStart}" style="width:100%;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:13px;box-sizing:border-box">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">End date</label>
+                    <input id="costStmtEnd" type="date" value="${defaultEnd}" style="width:100%;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:13px;box-sizing:border-box">
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button id="costStmtCancel" style="padding:6px 16px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);cursor:pointer;font-size:13px">Cancel</button>
+                <button id="costStmtGenerate" style="padding:6px 16px;border:1px solid var(--accent);border-radius:var(--radius-md);background:var(--accent);color:#fff;cursor:pointer;font-size:13px;font-weight:600">Generate</button>
+            </div>
+        `;
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+        panel.querySelector('#costStmtCancel').addEventListener('click', () => overlay.remove());
+        panel.querySelector('#costStmtGenerate').addEventListener('click', () => {
+            const startDate = new Date(panel.querySelector('#costStmtStart').value);
+            const endDate = new Date(panel.querySelector('#costStmtEnd').value);
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) { alert('Select valid dates'); return; }
+            overlay.remove();
+            costGeneratePrintStatement(e, startDate, endDate);
+        });
+    }
+    window.costOpenPrintStatement = costOpenPrintStatement;
+
+    function costGeneratePrintStatement(e, startDate, endDate) {
+        const txs = (allTransactions || []).filter(tx => {
+            const linked = getField(tx, F.txCost);
+            if (!Array.isArray(linked)) return false;
+            if (!linked.some(v => (v.id || v) === e.id)) return false;
+            const dateStr = String(getField(tx, F.txDate) || '');
+            const txDate = dateStr ? new Date(dateStr) : null;
+            if (!txDate || isNaN(txDate)) return false;
+            return txDate >= startDate && txDate <= endDate;
+        });
+
+        txs.sort((a, b) => new Date(getField(a, F.txDate) || '') - new Date(getField(b, F.txDate) || ''));
+
+        let runningTotal = 0;
+        const ledgerRows = txs.map(tx => {
+            const amount = Math.abs(Number(getField(tx, F.txReportAmount)) || 0);
+            runningTotal += amount;
+            const date = String(getField(tx, F.txDate) || '').slice(0, 10);
+            const desc = txLabel(tx);
+            const account = String(getField(tx, F.txAccountAlias) || '');
+            const reconciled = getField(tx, F.txReconciled);
+            return { date, desc, account, amount, runningTotal, reconciled };
+        });
+
+        const totalPaid = runningTotal;
+        const paymentCount = txs.length;
+
+        const monthsBetween = ((endDate.getFullYear() - startDate.getFullYear()) * 12) + (endDate.getMonth() - startDate.getMonth()) + 1;
+        let totalExpected = 0;
+        const freq = (e.frequency || '').toLowerCase();
+        if (freq === 'monthly') totalExpected = e.expected * monthsBetween;
+        else if (freq === 'quarterly') totalExpected = e.expected * Math.ceil(monthsBetween / 3);
+        else if (freq === 'annually' || freq === 'annual') totalExpected = e.expected * Math.ceil(monthsBetween / 12);
+        else if (freq === 'weekly') totalExpected = e.expected * Math.round(monthsBetween * 4.33);
+        else if (freq === 'fortnightly') totalExpected = e.expected * Math.round(monthsBetween * 2.17);
+        else if (freq === '4-weekly') totalExpected = e.expected * Math.round(monthsBetween * (13 / 12));
+        else totalExpected = e.expected * monthsBetween;
+
+        const variance = totalPaid - totalExpected;
+
+        const fmtDateStr = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+        const statusLabel = e.status || 'Unknown';
+        const dueDayLabel = e.dueDay ? `Day ${e.dueDay} of each ${freq === 'monthly' ? 'month' : 'period'}` : 'Not set';
+
+        const printWin = window.open('', '_blank', 'width=800,height=900');
+        printWin.document.write(`<!DOCTYPE html><html><head><title>Cost Statement — ${escHtml(e.name)}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family:'Inter',sans-serif; color:#1C2422; padding:40px; font-size:12px; line-height:1.5; }
+            h1 { font-size:20px; margin-bottom:4px; }
+            .meta { color:#5A6660; font-size:12px; margin-bottom:24px; }
+            .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
+            .summary-box { border:1px solid #DDE1D9; border-radius:8px; padding:12px; }
+            .summary-box .label { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#5A6660; font-weight:600; }
+            .summary-box .value { font-size:16px; font-weight:700; margin-top:4px; }
+            table { width:100%; border-collapse:collapse; margin-bottom:24px; }
+            th { text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#5A6660; font-weight:600; border-bottom:2px solid #DDE1D9; }
+            td { padding:6px 8px; border-bottom:1px solid #E5E8E1; font-size:11px; }
+            .text-right { text-align:right; }
+            .text-danger { color:#C53030; }
+            .text-success { color:#2C6E49; }
+            .footer { margin-top:32px; font-size:10px; color:#8A928C; border-top:1px solid #E5E8E1; padding-top:12px; }
+            @media print { body { padding:20px; } .no-print { display:none; } }
+        </style></head><body>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px">
+            <div>
+                <h1>Cost Statement</h1>
+                <div class="meta">${fmtDateStr(startDate)} to ${fmtDateStr(endDate)}</div>
+            </div>
+            <button class="no-print" onclick="window.print()" style="padding:8px 20px;border:1px solid #2C6E49;border-radius:6px;background:#2C6E49;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Print</button>
+        </div>
+        <div class="summary-grid">
+            <div class="summary-box"><div class="label">Cost Name</div><div class="value">${escHtml(e.name)}</div></div>
+            <div class="summary-box"><div class="label">Status</div><div class="value">${escHtml(statusLabel)}</div></div>
+            <div class="summary-box"><div class="label">Expected per payment</div><div class="value">${fmt(e.expected)}</div></div>
+            <div class="summary-box"><div class="label">Frequency</div><div class="value">${escHtml(e.frequency || 'Unknown')}</div></div>
+            <div class="summary-box"><div class="label">Due Day</div><div class="value">${escHtml(dueDayLabel)}</div></div>
+            <div class="summary-box"><div class="label">Payments in period</div><div class="value">${paymentCount}</div></div>
+            <div class="summary-box"><div class="label">Total expected</div><div class="value">${fmt(totalExpected)}</div></div>
+            <div class="summary-box"><div class="label">Total paid</div><div class="value">${fmt(totalPaid)}</div></div>
+        </div>
+        ${totalExpected > 0 ? `<div style="margin-bottom:24px;padding:12px;border:1px solid ${Math.abs(variance) < 0.01 ? '#DDE1D9' : (variance > 0 ? '#C53030' : '#2C6E49')};border-radius:8px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:12px;font-weight:600">Variance</span>
+            <span style="font-size:16px;font-weight:700;color:${Math.abs(variance) < 0.01 ? '#1C2422' : (variance > 0 ? '#C53030' : '#2C6E49')}">${variance > 0 ? '+' : variance < 0 ? '-' : ''}${fmt(Math.abs(variance))}</span>
+        </div>` : ''}
+        <table>
+            <thead><tr><th>Date</th><th>Description</th><th>Account</th><th class="text-right">Amount</th><th class="text-right">Running Total</th></tr></thead>
+            <tbody>${ledgerRows.length > 0 ? ledgerRows.map(r => `<tr>
+                <td>${escHtml(r.date)}</td>
+                <td>${escHtml(r.desc)}</td>
+                <td style="color:#5A6660">${escHtml(r.account)}</td>
+                <td class="text-right" style="font-weight:500">${fmt(r.amount)}</td>
+                <td class="text-right" style="font-weight:600">${fmt(r.runningTotal)}</td>
+            </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:#8A928C;padding:24px">No payments found in this date range</td></tr>'}</tbody>
+        </table>
+        <div class="footer">
+            Generated ${new Date().toLocaleDateString('en-GB', { day:'numeric',month:'long',year:'numeric' })} at ${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}.
+            ${escHtml(e.name)}: ${escHtml(e.frequency || '')} cost, expected ${fmt(e.expected)} per payment.
+            ${paymentCount} payment${paymentCount !== 1 ? 's' : ''} totalling ${fmt(totalPaid)} in this period.
+        </div>
+        </body></html>`);
+        printWin.document.close();
+    }
+    window.costGeneratePrintStatement = costGeneratePrintStatement;
