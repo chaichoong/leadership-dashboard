@@ -741,22 +741,25 @@
         input.select();
 
         let done = false;
+        const renderAndRestore = () => {
+            const expanded = getExpandedCostIds();
+            renderCostsTab();
+            restoreExpandedCostRows(expanded);
+        };
         const finish = async (commit) => {
             if (done) return; done = true;
-            if (!commit) { renderCostsTab(); return; }
+            if (!commit) { renderAndRestore(); return; }
             const typed = input.value.trim();
-            // Match exact name (case-insensitive). If empty, clear the link.
-            // If typed but no match, refuse to save and re-render.
             let newId = '';
             if (typed) {
                 const match = items.find(i => i.name.toLowerCase() === typed.toLowerCase());
                 if (!match) {
                     alert(`No ${linkType === 'cat' ? 'category' : 'sub-category'} matches "${typed}". Pick from the list.`);
-                    renderCostsTab(); return;
+                    renderAndRestore(); return;
                 }
                 newId = match.id;
             }
-            if (newId === currentId) { renderCostsTab(); return; }
+            if (newId === currentId) { renderAndRestore(); return; }
             const newLinks = newId ? [newId] : [];
             try {
                 const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
@@ -773,10 +776,10 @@
                     oldValue: currentLinks, newValue: newLinks,
                     label: `${linkType === 'cat' ? 'Category' : 'Sub-Category'} → ${newName}`
                 });
-                renderCostsTab();
+                renderAndRestore();
             } catch (err) {
                 alert('Save failed: ' + err.message);
-                renderCostsTab();
+                renderAndRestore();
             }
         };
 
@@ -787,6 +790,31 @@
         // Datalist suggestions fire 'change' on selection AND 'input' on typing.
         // We commit on blur to give the user time to finish typing.
         input.addEventListener('blur', () => finish(true));
+    }
+
+    function getExpandedCostIds() {
+        const ids = [];
+        document.querySelectorAll('.cost-tx-detail-row').forEach(row => {
+            if (row.style.display !== 'none') {
+                const id = row.id.replace('cost-tx-', '');
+                if (id) ids.push(id);
+            }
+        });
+        return ids;
+    }
+
+    function restoreExpandedCostRows(ids) {
+        for (const id of ids) {
+            const row = document.getElementById('cost-tx-' + id);
+            if (row) {
+                row.style.display = '';
+                const mainRow = document.querySelector(`tr[data-record-id="${id}"]`);
+                if (mainRow) {
+                    const btn = mainRow.querySelector('button[title="Show linked transactions"]');
+                    if (btn && btn.textContent === '▶') btn.textContent = '▼';
+                }
+            }
+        }
     }
 
     function toggleCostTxRow(btn, costId) {
@@ -817,7 +845,9 @@
             if (localTx) localTx.fields[F.txCost] = [];
             // Recompute the cost's "Last Reconciled *" from the remaining reconciled linked txs
             await recomputeCostFromLinkedTxs(costId);
+            const expanded = getExpandedCostIds();
             renderCostsTab();
+            restoreExpandedCostRows(expanded);
         } catch (err) {
             alert('Unlink failed: ' + err.message);
             if (btn) { btn.textContent = 'Unlink'; btn.disabled = false; }
