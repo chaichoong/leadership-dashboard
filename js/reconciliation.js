@@ -42,36 +42,37 @@
     // Uses <input list="datalist"> for type-to-search. All sorted A-Z.
     // Each returns { datalist, inputValue } — datalist is <datalist> HTML, inputValue is pre-selected display text
     let _dlCounter = 0;
-    function reconDropdown(id, items, selectedId, style) {
+    function reconDropdown(id, items, selectedId, style, cssClass) {
         // items = [{ id, name }] — sorted A-Z
         const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
         const dlId = 'dl_' + id;
         const selected = sorted.find(i => i.id === selectedId);
         const val = selected ? selected.name : '';
         const datalist = `<datalist id="${dlId}">${sorted.map(i => `<option value="${escHtml(i.name)}" data-id="${i.id}">`).join('')}</datalist>`;
-        return `${datalist}<input id="${id}" list="${dlId}" value="${escHtml(val)}" style="${style}" autocomplete="off" placeholder="Type to search...">`;
+        const cls = cssClass ? ` class="${cssClass}"` : '';
+        return `${datalist}<input id="${id}" list="${dlId}" value="${escHtml(val)}"${cls} style="${style}" autocomplete="off" placeholder="Type to search...">`;
     }
 
     function buildSubCatDropdown(id, selectedId) {
         const items = allSubCategories.map(r => ({ id: r.id, name: getField(r, 'fldO4BTJhFv5EsN6i') || '' }));
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:170px');
+        return reconDropdown(id, items, selectedId, 'width:170px', 'od-filter-select');
     }
     function buildCatDropdown(id, selectedId) {
         const items = allCategories.map(r => ({ id: r.id, name: getField(r, 'fldii4oUzSfmplihO') || '' }));
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:140px');
+        return reconDropdown(id, items, selectedId, 'width:140px', 'od-filter-select');
     }
     function buildTenantDropdown(id, selectedId) {
         const items = allTenants.filter(t => {
             const status = getField(t, F.tenantStatus);
             return status && typeof status === 'object' ? status.name === 'Active' : String(status || '').toLowerCase() === 'active';
         }).map(t => ({ id: t.id, name: getField(t, F.tenantName) || '' }));
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:110px');
+        return reconDropdown(id, items, selectedId, 'width:110px', 'od-filter-select');
     }
     function buildTenancyDropdown(id, selectedId) {
         const items = allTenancies.filter(r => isTenancyActive(getField(r, F.tenPayStatus))).map(r => ({
             id: r.id, name: getField(r, F.tenRef) || ''
         }));
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:140px');
+        return reconDropdown(id, items, selectedId, 'width:140px', 'od-filter-select');
     }
     function buildRentalUnitDropdown(id, selectedId) {
         const seen = new Set();
@@ -85,7 +86,7 @@
             seen.add(unitId);
             items.push({ id: unitId, name: unitName });
         });
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:120px');
+        return reconDropdown(id, items, selectedId, 'width:120px', 'od-filter-select');
     }
     function buildPropertyDropdown(id, selectedName) {
         const seen = new Set();
@@ -97,13 +98,13 @@
             seen.add(propName);
             items.push({ id: propName, name: propName });
         });
-        return reconDropdown(id, items, selectedName, 'font-size:10px;padding:2px 4px;width:120px');
+        return reconDropdown(id, items, selectedName, 'width:120px', 'od-filter-select');
     }
     function buildCostDropdown(id, selectedId) {
         const items = allCosts.filter(r => isCostActive(r)).map(r => ({
             id: r.id, name: getField(r, F.costName) || ''
         }));
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:130px');
+        return reconDropdown(id, items, selectedId, 'width:130px', 'od-filter-select');
     }
     function buildBusinessDropdown(id, selectedId) {
         const pickList = getActiveBusinesses();
@@ -114,7 +115,7 @@
         const items = pickList.map(r => ({
             id: r.id, name: getField(r, 'fldbbRqVxLxUdHwIR') || ''
         }));
-        return reconDropdown(id, items, selectedId, 'font-size:10px;padding:2px 4px;width:120px');
+        return reconDropdown(id, items, selectedId, 'width:120px', 'od-filter-select');
     }
 
     // Resolve a datalist input value back to its record ID
@@ -437,7 +438,6 @@
         if (existing) existing.remove();
         const matched = results.filter(r => r.status === 'suggestion').length;
         const unmatched = results.length - matched;
-        const thStyle = 'padding:6px;text-align:left;font-size:9px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;white-space:nowrap';
 
         const panel = document.createElement('div');
         panel.id = 'reconPanel';
@@ -447,32 +447,32 @@
         <div style="background:white;border-radius:12px;max-width:98vw;width:100%;max-height:95vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,0.25)">
             <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
                 <div>
-                    <h2 style="font-size:16px;font-weight:700;color:var(--text-primary);margin:0">Transaction Reconciliation</h2>
-                    <p style="font-size:11px;color:var(--text-secondary);margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
+                    <h2 class="od-section-header" style="font-size:16px;border-bottom:none;padding-bottom:0;margin:0">Transaction Reconciliation</h2>
+                    <p class="od-text-muted-sm" style="font-size:11px;color:var(--text-secondary);margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
                 </div>
                 <div style="display:flex;gap:6px">
-                    <button onclick="approveAllRecon()" style="padding:6px 14px;font-size:11px;font-weight:600;background:var(--success);color:white;border:none;border-radius:6px;cursor:pointer">Approve All Transactions</button>
-                    <button onclick="closeReconPanel()" style="padding:6px 14px;font-size:11px;font-weight:600;background:var(--bg-surface-2);color:var(--text-secondary);border:1px solid var(--border-default);border-radius:6px;cursor:pointer">Close</button>
+                    <button onclick="approveAllRecon()" class="od-btn-primary" style="background:var(--success)">Approve All Transactions</button>
+                    <button onclick="closeReconPanel()" class="od-btn-secondary">Close</button>
                 </div>
             </div>
             <div style="overflow:auto;padding:8px 12px">
-                <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:1260px">
+                <table class="od-table" style="min-width:1260px">
                     <thead>
-                        <tr style="border-bottom:2px solid #e2e8f0">
-                            <th style="${thStyle}">#</th>
-                            <th style="${thStyle}">Date</th>
-                            <th style="${thStyle}">Account</th>
-                            <th style="${thStyle}">Vendor / Description</th>
-                            <th style="${thStyle};text-align:right">Amount</th>
-                            <th style="${thStyle}">Category</th>
-                            <th style="${thStyle}">Sub-Category</th>
-                            <th style="${thStyle}">Business</th>
-                            <th style="${thStyle}">Tenant</th>
-                            <th style="${thStyle}">Tenancy</th>
-                            <th style="${thStyle}">Rental Unit</th>
-                            <th style="${thStyle}">Property</th>
-                            <th style="${thStyle}">Cost</th>
-                            <th style="${thStyle};text-align:center">Action</th>
+                        <tr>
+                            <th>#</th>
+                            <th>Date</th>
+                            <th>Account</th>
+                            <th>Vendor / Description</th>
+                            <th style="text-align:right">Amount</th>
+                            <th>Category</th>
+                            <th>Sub-Category</th>
+                            <th>Business</th>
+                            <th>Tenant</th>
+                            <th>Tenancy</th>
+                            <th>Rental Unit</th>
+                            <th>Property</th>
+                            <th>Cost</th>
+                            <th style="text-align:center">Action</th>
                         </tr>
                     </thead>
                     <tbody id="reconTableBody">
@@ -495,7 +495,7 @@
     function reconRowHtml(r, i) {
         const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
         const cell = 'padding:5px 6px;vertical-align:top;font-size:11px';
-        const dim = 'color:var(--text-muted);font-size:10px';
+        const dimClass = 'od-text-muted-sm';
         const catSelect = buildCatDropdown('recon-cat-' + i, r.categoryId);
         const subCatSelect = buildSubCatDropdown('recon-subcat-' + i, r.subCatId);
 
@@ -510,23 +510,23 @@
             return cnt > 1;
         })();
         const splitBtnHtml = isAlreadySplit
-            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled style="font-size:10px;font-weight:600;padding:3px 8px;background:var(--bg-surface);color:var(--text-muted);border:1px solid var(--border-default);border-radius:4px;cursor:not-allowed">Split</button>`
-            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" style="font-size:10px;font-weight:600;padding:3px 8px;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Split</button>`;
+            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled class="od-btn-secondary" style="font-size:10px;padding:3px 8px;color:var(--text-muted);cursor:not-allowed">Split</button>`
+            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" class="od-btn-secondary" style="font-size:10px;padding:3px 8px">Split</button>`;
         const actionHtml = r.status === 'approved'
-            ? `<span style="color:var(--success);font-weight:600;font-size:10px">Done ✓</span>`
+            ? `<span class="od-status-badge success">Done ✓</span>`
             : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
                   <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
                   ${splitBtnHtml}
               </div>`;
 
-        const matchBadge = r.matchType ? `<span style="font-size:9px;color:var(--info);font-weight:600">${escHtml(r.matchType)}</span>` : '';
+        const matchBadge = r.matchType ? `<span class="od-status-badge info">${escHtml(r.matchType)}</span>` : '';
 
         return `<tr id="recon-row-${i}" oninput="persistReconRow(${i})" style="border-bottom:1px solid var(--border-subtle);${r.status === 'approved' ? 'opacity:0.5;' : ''}">
             <td style="${cell};color:var(--text-muted);font-weight:600">${i + 1}</td>
             <td style="${cell};white-space:nowrap">${escHtml(r.txDate)}</td>
-            <td style="${cell};white-space:nowrap;font-size:10px;color:var(--text-secondary)">${escHtml(r.txAccount || '—')}</td>
-            <td style="${cell};max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span style="${dim}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
-            <td style="${cell};text-align:right;font-weight:600;font-variant-numeric:tabular-nums" class="${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
+            <td style="${cell};white-space:nowrap" class="muted-cell">${escHtml(r.txAccount || '—')}</td>
+            <td style="${cell};max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span class="${dimClass}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
+            <td style="${cell};font-weight:600" class="num-cell ${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
             <td style="${cell}">${catSelect}</td>
             <td style="${cell}">${subCatSelect}</td>
             <td style="${cell}">${buildBusinessDropdown('recon-business-' + i, r.businessId || '')}</td>
@@ -759,7 +759,7 @@
                 <div style="margin-top:8px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
                     <div style="height:100%;width:${stats.pct}%;background:${stats.colour};border-radius:3px;transition:width 0.3s"></div>
                 </div>
-                <div style="margin-top:6px;font-size:10px;color:var(--text-muted)">Target: ≥90% <span style="color:var(--success)">●</span> 75–89% <span style="color:var(--warning)">●</span> &lt;75% <span style="color:var(--danger)">●</span></div>
+                <div class="od-text-muted-sm" style="margin-top:6px">Target: ≥90% <span style="color:var(--success)">●</span> 75–89% <span style="color:var(--warning)">●</span> &lt;75% <span style="color:var(--danger)">●</span></div>
             </div>`;
     }
 
@@ -1166,7 +1166,7 @@
             <div style="background:#fff;border-radius:12px;width:100%;max-width:760px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);font-family:var(--font-family-base)">
                 <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
                     <div style="flex:1;min-width:0">
-                        <h3 style="margin:0;font-size:15px;font-weight:700;color:var(--text-primary)">Split Transaction</h3>
+                        <h3 class="od-section-header" style="font-size:15px;border-bottom:none;padding-bottom:0;margin:0">Split Transaction</h3>
                         <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
                             <strong>${escHtml(r.txDate)}</strong> &middot;
                             <strong>${escHtml(r.txVendor || '—')}</strong> &middot;
@@ -1177,13 +1177,13 @@
                     <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:var(--text-muted);cursor:pointer;padding:0 4px">&times;</button>
                 </div>
                 <div style="padding:14px 20px;border-bottom:1px solid var(--border-subtle);display:flex;gap:6px">
-                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;cursor:pointer">Equal Split</button>
-                    <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border:1px solid var(--border-default);background:#fff;color:var(--text-secondary);border-radius:6px;cursor:pointer">Custom Amounts</button>
+                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  class="od-btn-primary" style="flex:1;padding:8px 12px">Equal Split</button>
+                    <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" class="od-btn-secondary" style="flex:1;padding:8px 12px">Custom Amounts</button>
                 </div>
                 <div id="splitModalBody" style="overflow:auto;padding:16px 20px;flex:1"></div>
                 <div style="padding:12px 20px;border-top:1px solid var(--border-default);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-surface)">
-                    <button onclick="document.getElementById('reconSplitModal').remove()" style="padding:8px 16px;font-size:12px;font-weight:600;background:#fff;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:6px;cursor:pointer">Cancel</button>
-                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" style="padding:8px 16px;font-size:12px;font-weight:700;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer">Save Split</button>
+                    <button onclick="document.getElementById('reconSplitModal').remove()" class="od-btn-secondary" style="padding:8px 16px">Cancel</button>
+                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" class="od-btn-primary" style="padding:8px 16px;font-weight:700">Save Split</button>
                 </div>
             </div>`;
         document.body.appendChild(overlay);
@@ -1211,10 +1211,10 @@
         const tEq = document.getElementById('splitTabEqual');
         const tCu = document.getElementById('splitTabCustom');
         if (tEq && tCu) {
-            const active = 'border:1px solid var(--accent);background:var(--accent);color:#fff';
-            const inactive = 'border:1px solid var(--border-default);background:#fff;color:var(--text-secondary)';
-            tEq.setAttribute('style', `flex:1;padding:8px 12px;font-size:12px;font-weight:600;${mode==='equal'?active:inactive};border-radius:6px;cursor:pointer`);
-            tCu.setAttribute('style', `flex:1;padding:8px 12px;font-size:12px;font-weight:600;${mode==='custom'?active:inactive};border-radius:6px;cursor:pointer`);
+            tEq.className = mode === 'equal' ? 'od-btn-primary' : 'od-btn-secondary';
+            tCu.className = mode === 'custom' ? 'od-btn-primary' : 'od-btn-secondary';
+            tEq.style.cssText = 'flex:1;padding:8px 12px';
+            tCu.style.cssText = 'flex:1;padding:8px 12px';
         }
         renderSplitModalBody();
     }
@@ -1268,21 +1268,21 @@
                     Enter each portion's amount and pre-categorise. The original record gets the first portion's amount + categories;
                     each remaining portion becomes a new record. Sum of all portions must equal <strong>${fmt(st.totalRaw)}</strong>.
                 </p>
-                <table style="width:100%;border-collapse:collapse;font-size:11px">
+                <table class="od-table">
                     <thead>
-                        <tr style="border-bottom:1px solid var(--border-default)">
-                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">#</th>
-                            <th style="padding:5px;text-align:right;font-size:9px;color:var(--text-secondary);text-transform:uppercase;min-width:90px">Amount (£)</th>
-                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">Sub-Category</th>
-                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">Business</th>
-                            <th style="padding:5px;text-align:left;font-size:9px;color:var(--text-secondary);text-transform:uppercase">Tenancy</th>
+                        <tr>
+                            <th>#</th>
+                            <th style="text-align:right;min-width:90px">Amount (£)</th>
+                            <th>Sub-Category</th>
+                            <th>Business</th>
+                            <th>Tenancy</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>${rowsHtml}</tbody>
                 </table>
                 <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-                    <button onclick="splitAddCustomRow()" style="padding:6px 12px;font-size:11px;font-weight:600;background:#fff;color:var(--accent);border:1px solid var(--accent);border-radius:4px;cursor:pointer">+ Add Portion</button>
+                    <button onclick="splitAddCustomRow()" class="od-btn-outline">+ Add Portion</button>
                     <div style="font-size:12px">
                         <span style="color:var(--text-muted)">Total: <strong style="color:var(--text-primary)">${fmt(total)}</strong></span>
                         &nbsp;·&nbsp;
