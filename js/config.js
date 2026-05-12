@@ -46,7 +46,7 @@
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
-        arVariable:    'tblPLACEHOLDER_ARV', // Accounts Receivable Variable — update after creating table in Airtable
+        arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
@@ -109,19 +109,18 @@
         wasAccurate: 'fld9n62GxQijQWqSA',  // checkbox — AI suggestion matched final values
     };
 
-    // Accounts Receivable Variable field IDs
-    // Update these after creating the table in Airtable.
+    // Accounts Receivable Variable field IDs (Airtable table: Outbound Invoices / tblmKRKZMJvUxN4h1)
     const ARV = {
-        customer:    'fldPH_ARV_customer',    // Customer/Client Name (singleLineText)
-        invoiceNo:   'fldPH_ARV_invoiceNo',   // Invoice Number (singleLineText)
-        desc:        'fldPH_ARV_desc',         // Description (singleLineText)
-        amount:      'fldPH_ARV_amount',       // Amount (currency, GBP)
-        dateSent:    'fldPH_ARV_dateSent',     // Date Sent (date)
-        dueDate:     'fldPH_ARV_dueDate',      // Due Date (date)
-        status:      'fldPH_ARV_status',       // Status (singleSelect: Draft, Sent, Overdue, Paid, Written Off)
-        business:    'fldPH_ARV_business',     // Business (multipleRecordLinks → Businesses)
-        ref:         'fldPH_ARV_ref',          // Reference (singleLineText)
-        notes:       'fldPH_ARV_notes',        // Notes (multilineText)
+        customer:    'fldArOB78EOU7cxAH',  // Customer (singleLineText, primary)
+        invoiceNo:   'fldKoLPrzQAlF2Vw5',  // Invoice Number (singleLineText)
+        desc:        'fldl5Qsh74M5wmtmx',  // Description (singleLineText)
+        amount:      'fldDMr0VjIbWHJqi4',  // Amount (currency, GBP)
+        dateSent:    'fldFNUCMDTRtZuD12',  // Date Sent (date)
+        dueDate:     'fldKqkarwj6uOrUpe',  // Due Date (date)
+        status:      'flduMxhnM1KUTh5g1',  // Status (singleSelect: Draft, Sent, Overdue, Paid, Written Off)
+        business:    'fldRCXYBrjK7bYmEU',  // Business (multipleRecordLinks → Businesses)
+        ref:         'fldQt6uXbpl0JaQ8n',  // Reference (singleLineText)
+        notes:       'fldLqONrPmTXnFDze',  // Notes (multilineText)
     };
 
     // Dashboard Invoices field IDs (Airtable)
