@@ -301,7 +301,7 @@ flowchart LR
         <tbody>
           <tr><td>Change Status to Completed</td><td><span class="tag tag-auto">Auto</span> Stamps Completion Date. <span class="tag tag-slack">Slack</span> DM to every collaborator (except you). If recurring → roll the due date by the cadence and flip back to Upcoming.</td></tr>
           <tr><td>Change Due Date</td><td><span class="tag tag-auto">Auto</span> Status re-derives instantly (Overdue / Today / Upcoming). Patched back to Airtable.</td></tr>
-          <tr><td>Change Assignee</td><td><span class="tag tag-slack">Slack</span> DM to new assignee. <span class="tag tag-auto">Auto</span> The actor (whoever clicked) becomes a collaborator.</td></tr>
+          <tr><td>Change Assignee</td><td><span class="tag tag-slack">Slack</span> DM to new assignee. <span class="tag tag-auto">Auto</span> The actor (whoever clicked) and the previous assignee both become collaborators.</td></tr>
           <tr><td>Pick a Project</td><td><span class="tag tag-rule">Rule</span> Priority flips to "Project". Business inherits from project. Project's collaborators merged in. The drawer's Priority + Business dropdowns update in real-time.</td></tr>
           <tr><td>Any inline edit succeeds</td><td><span class="tag tag-auto">Auto</span> Team filter counts at the top + KPI tiles re-render to match</td></tr>
         </tbody>
