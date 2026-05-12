@@ -553,10 +553,8 @@
         pills.innerHTML=filters.map(f=>{
             const label=f==='all'?'All':f;
             const isActive=strategicKpiFilter===f;
-            const bg=isActive?'var(--accent)':'var(--bg-surface)';
-            const color=isActive?'var(--accent-on)':'var(--text-secondary)';
-            const border=isActive?'var(--accent)':'var(--border-default)';
-            return `<button onclick="setStrategicKpiFilter('${f.replace(/'/g,"\\'")}')" style="padding:6px 14px;border-radius:var(--radius-full);border:1px solid ${border};background:${bg};color:${color};font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer;transition:background var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)">${escHtml(label)}</button>`;
+
+            return `<button onclick="setStrategicKpiFilter('${f.replace(/'/g,"\\'")}')" class="od-filter-pill${isActive?' active':''}">${escHtml(label)}</button>`;
         }).join('');
 
         let filtered=active.slice();
@@ -625,7 +623,7 @@
                 <div style="text-align:center;padding-top:2px">${ownerChip}</div>
                 <div style="color:var(--text-secondary);line-height:1.35;word-break:break-word;padding-top:2px" title="${escHtml(p.kpiName)}">${escHtml(p.kpiName)}</div>
                 <div style="color:var(--text-primary);font-variant-numeric:tabular-nums;padding-top:2px">${unitPrefix}${p.kpiCurrent.toLocaleString('en-GB')}${unitSuffix} <span style="color:var(--text-muted)">/ ${unitPrefix}${p.kpiTarget.toLocaleString('en-GB')}${unitSuffix}</span></div>
-                <div style="height:8px;background:var(--bg-subtle);border-radius:var(--radius-sm);overflow:hidden;margin-top:6px"><div style="height:100%;width:${pct}%;background:${healthColor};border-radius:var(--radius-sm);transition:width var(--dur-slow) var(--ease)"></div></div>
+                <div class="od-progress" style="margin-top:6px"><div class="od-progress-fill" style="width:${pct}%;background:${healthColor}"></div></div>
                 <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:${healthColor};text-align:center;padding-top:2px">${escHtml(health)}</div>
                 <div style="text-align:right;padding-top:2px">${stamp}</div>
             </div>${monthsRow}${drillRow}`;
@@ -664,8 +662,8 @@
         if(displayHint0.kind==='taskCompletion'){
             const done=detail.completedTasks||[];
             const open=detail.outstandingTasks||[];
-            const row=t=>`<tr style="border-top:1px solid #f1f5f9"><td style="padding:6px 8px;color:var(--text-primary)">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-secondary)">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
-            const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
+            const row=t=>`<tr style="border-top:1px solid var(--border-subtle)"><td style="padding:6px 8px;color:var(--text-primary)">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-secondary)">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
+            const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px">
                 <div style="font-weight:600;color:${color};margin-bottom:6px">${title} · ${list.length} task${list.length===1?'':'s'}</div>
                 ${list.length?`<table class="od-table"><thead><tr><th>Task</th><th>Status</th><th>Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:12px">None</div>'}
             </div>`;
@@ -701,10 +699,10 @@
                 ? displayHint.revenueColumns
                 : ['date', kind==='revenue'?'tenancy':'cost', 'description', 'amount'];
             const headerFor={date:'Date',tenancy:'Tenancy',cost:'Cost',description:'Description',amount:'Amount'};
-            if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:#fff;border:1px solid var(--border-default);border-radius:6px;color:var(--text-muted);font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
+            if(!list||!list.length)return `<div style="margin-top:8px;padding:8px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px;color:var(--text-muted);font-style:italic">No ${title.toLowerCase()} transactions in this window</div>`;
             const rows=list.map(t=>{
                 const isReversal=kind==='revenue'?t.amount<0:t.amount>0;
-                const rowBg=isReversal?'background:#fef9c3':'';
+                const rowBg=isReversal?'background:var(--gold-100)':'';
                 const reversalTag=isReversal?'<span class="od-status-badge warning" style="margin-right:4px">REVERSAL</span>':'';
                 const cellFor=(col,isFirst)=>{
                     const tag=isFirst?reversalTag:'';
@@ -715,7 +713,7 @@
                     if(col==='amount')return `<td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-primary)">${fmtSigned(t.amount)}</td>`;
                     return '<td></td>';
                 };
-                return `<tr style="border-top:1px solid #f1f5f9;${rowBg}">${columns.map((c,i)=>cellFor(c,i===1)).join('')}</tr>`;
+                return `<tr style="border-top:1px solid var(--border-subtle);${rowBg}">${columns.map((c,i)=>cellFor(c,i===1)).join('')}</tr>`;
             }).join('');
             // Use the authoritative total from the compute (detail.costs/revenue)
             // rather than recalculating from the visible rows, which may be
@@ -724,7 +722,7 @@
             const authTotal=kind==='revenue'?(detail.revenue||0):(detail.costs||0);
             const isTruncated=totalCount>list.length;
             const truncNote=isTruncated?` <span class="od-text-muted-sm">(showing ${list.length} of ${totalCount})</span>`:'';
-            return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
+            return `<div style="margin-top:8px;padding:10px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
                     <div style="font-weight:600;color:${color}">${title} · ${totalCount} tx · Total ${fmtAmt(authTotal)}${truncNote}</div>
                 </div>
@@ -1252,7 +1250,7 @@
             const targetPos = Math.min(target / maxVal * 100, 100);
             return `<div class="progress-bar">
                 <div class="progress-bar-fill ${tl}" style="width:${w}%"></div>
-                <div style="position:absolute;left:${targetPos}%;top:0;bottom:0;width:2px;background:#1e293b;border-radius:1px" title="Budget: ${fmt(target)}"></div>
+                <div style="position:absolute;left:${targetPos}%;top:0;bottom:0;width:2px;background:var(--forest-900);border-radius:1px" title="Budget: ${fmt(target)}"></div>
             </div>`;
         }
 
@@ -1550,26 +1548,26 @@
         const wagesStatus = wagesSpend < WAGES_TARGET_GBP ? 'green' : wagesSpend <= WAGES_TARGET_GBP * 1.1 ? 'amber' : 'red';
 
         document.getElementById('aiCommentary').innerHTML = `
-            <h3 class="od-section-header" style="font-size:15px">Financial Health</h3>
+            <h3 class="od-section-header">Financial Health</h3>
             <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
 
-            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Operating Cushion Target</h3>
+            <h3 class="od-section-header" style="margin:16px 0 8px">Operating Cushion Target</h3>
             <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
 
-            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
+            <h3 class="od-section-header" style="margin:16px 0 8px">Operational Performance (31-Day)</h3>
             <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
 
-            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Occupancy &amp; Voids</h3>
+            <h3 class="od-section-header" style="margin:16px 0 8px">Occupancy &amp; Voids</h3>
             <p>Occupancy is ${occupancyRate}% with ${voidUnits.length} void${voidUnits.length !== 1 ? 's' : ''}. Each void costs roughly £${voidCostPerMonth}/month in lost income. ${voidUnits.length > 0 ? `Filling ${Math.min(3, voidUnits.length)} void${Math.min(3, voidUnits.length) !== 1 ? 's' : ''} would add ${fmt(Math.min(3, voidUnits.length) * Number(voidCostPerMonth))}/month — the highest-ROI lever available.` : 'Full occupancy — excellent.'}</p>
 
-            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">CFV Risk</h3>
+            <h3 class="od-section-header" style="margin:16px 0 8px">CFV Risk</h3>
             <p>CFV exposure is ${fmt(cfvExposure)} against a ${fmt(CFV_TARGET_GBP)} monthly allowance (${cfvExposure <= CFV_TARGET_GBP ? 'within budget' : 'over budget by ' + fmt(cfvExposure - CFV_TARGET_GBP)}). ${cfvTenancies.length > 0 ? `${cfvTenancies.length} remain unactioned (${fmt(cfvUnactioned)}) — actioning these improves income certainty.` : 'All CFVs actioned — good.'}</p>
 
-            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Quick Wins</h3>
+            <h3 class="od-section-header" style="margin:16px 0 8px">Quick Wins</h3>
             <p>${voidUnits.length > 0 ? '(1) Fill voids — biggest revenue impact per action. ' : ''}${cfvTenancies.length > 0 ? `(${voidUnits.length > 0 ? '2' : '1'}) Action ${cfvTenancies.length} unactioned CFV${cfvTenancies.length !== 1 ? 's' : ''} to secure ${fmt(cfvUnactioned)}/month. ` : ''}${maintStatus !== 'green' ? `(${(voidUnits.length > 0 ? 1 : 0) + (cfvTenancies.length > 0 ? 1 : 0) + 1}) Reduce maintenance from ${fmt(maintSpend)} to below ${fmt(MAINT_TARGET_GBP)} budget. ` : ''}Monitor cash flow pinch points around mortgage payment clusters (typically days 1-6).</p>
 
-            <hr style="border:none;border-top:1px solid #cbd5e1;margin:20px 0;">
-            <h3 class="od-section-header" style="font-size:16px;margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
+            <hr style="border:none;border-top:1px solid var(--border-default);margin:20px 0;">
+            <h3 class="od-section-header" style="margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
             <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong> across ${ccRepaymentPlan.cards.length} card${ccRepaymentPlan.cards.length !== 1 ? 's' : ''}.</p>
             <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
             <div style="margin-bottom:16px">

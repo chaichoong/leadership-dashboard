@@ -444,10 +444,10 @@
         panel.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:10px';
 
         panel.innerHTML = `
-        <div style="background:white;border-radius:12px;max-width:98vw;width:100%;max-height:95vh;display:flex;flex-direction:column;box-shadow:0 25px 50px rgba(0,0,0,0.25)">
-            <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div class="od-modal" style="max-width:98vw;width:100%">
+            <div class="od-modal-header" style="flex-wrap:wrap;gap:8px">
                 <div>
-                    <h2 class="od-section-header" style="font-size:16px;border-bottom:none;padding-bottom:0;margin:0">Transaction Reconciliation</h2>
+                    <h2 class="od-section-header" style="border-bottom:none;padding-bottom:0;margin:0">Transaction Reconciliation</h2>
                     <p class="od-text-muted-sm" style="font-size:11px;color:var(--text-secondary);margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
                 </div>
                 <div style="display:flex;gap:6px">
@@ -494,7 +494,7 @@
 
     function reconRowHtml(r, i) {
         const amtClass = r.txAmount >= 0 ? 'text-green' : 'text-red';
-        const cell = 'padding:5px 6px;vertical-align:top;font-size:11px';
+        const cc = 'od-cell'; // base cell class (padding, font-size, v-align)
         const dimClass = 'od-text-muted-sm';
         const catSelect = buildCatDropdown('recon-cat-' + i, r.categoryId);
         const subCatSelect = buildSubCatDropdown('recon-subcat-' + i, r.subCatId);
@@ -510,8 +510,8 @@
             return cnt > 1;
         })();
         const splitBtnHtml = isAlreadySplit
-            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled class="od-btn-secondary" style="font-size:10px;padding:3px 8px;color:var(--text-muted);cursor:not-allowed">Split</button>`
-            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" class="od-btn-secondary" style="font-size:10px;padding:3px 8px">Split</button>`;
+            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled class="od-btn-secondary od-btn-sm" style="color:var(--text-muted);cursor:not-allowed">Split</button>`
+            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" class="od-btn-secondary od-btn-sm">Split</button>`;
         const actionHtml = r.status === 'approved'
             ? `<span class="od-status-badge success">Done ✓</span>`
             : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
@@ -522,20 +522,20 @@
         const matchBadge = r.matchType ? `<span class="od-status-badge info">${escHtml(r.matchType)}</span>` : '';
 
         return `<tr id="recon-row-${i}" oninput="persistReconRow(${i})" style="border-bottom:1px solid var(--border-subtle);${r.status === 'approved' ? 'opacity:0.5;' : ''}">
-            <td style="${cell};color:var(--text-muted);font-weight:600">${i + 1}</td>
-            <td style="${cell};white-space:nowrap">${escHtml(r.txDate)}</td>
-            <td style="${cell};white-space:nowrap" class="muted-cell">${escHtml(r.txAccount || '—')}</td>
-            <td style="${cell};max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span class="${dimClass}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
-            <td style="${cell};font-weight:600" class="num-cell ${amtClass}">${fmt(Math.abs(r.txAmount))}</td>
-            <td style="${cell}">${catSelect}</td>
-            <td style="${cell}">${subCatSelect}</td>
-            <td style="${cell}">${buildBusinessDropdown('recon-business-' + i, r.businessId || '')}</td>
-            <td style="${cell}">${buildTenantDropdown('recon-tenant-' + i, r.tenantId || '')}</td>
-            <td style="${cell}" onchange="reconTenancyChanged(${i})">${buildTenancyDropdown('recon-tenancy-' + i, r.tenancyId || '')}</td>
-            <td style="${cell}">${buildRentalUnitDropdown('recon-unit-' + i, r.unitId || '')}</td>
-            <td style="${cell}">${buildPropertyDropdown('recon-property-' + i, r.propertyName || '')}</td>
-            <td style="${cell}">${buildCostDropdown('recon-cost-' + i, r.costId || '')}</td>
-            <td style="${cell};text-align:center;min-width:60px">${actionHtml}</td>
+            <td class="${cc}" style="color:var(--text-muted);font-weight:600">${i + 1}</td>
+            <td class="${cc}" style="white-space:nowrap">${escHtml(r.txDate)}</td>
+            <td class="${cc} muted-cell" style="white-space:nowrap">${escHtml(r.txAccount || '—')}</td>
+            <td class="${cc}" style="max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span class="${dimClass}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
+            <td class="${cc} num-cell ${amtClass}" style="font-weight:600">${fmt(Math.abs(r.txAmount))}</td>
+            <td class="${cc}">${catSelect}</td>
+            <td class="${cc}">${subCatSelect}</td>
+            <td class="${cc}">${buildBusinessDropdown('recon-business-' + i, r.businessId || '')}</td>
+            <td class="${cc}">${buildTenantDropdown('recon-tenant-' + i, r.tenantId || '')}</td>
+            <td class="${cc}" onchange="reconTenancyChanged(${i})">${buildTenancyDropdown('recon-tenancy-' + i, r.tenancyId || '')}</td>
+            <td class="${cc}">${buildRentalUnitDropdown('recon-unit-' + i, r.unitId || '')}</td>
+            <td class="${cc}">${buildPropertyDropdown('recon-property-' + i, r.propertyName || '')}</td>
+            <td class="${cc}">${buildCostDropdown('recon-cost-' + i, r.costId || '')}</td>
+            <td class="${cc}" style="text-align:center;min-width:60px">${actionHtml}</td>
         </tr>`;
     }
 
@@ -756,8 +756,8 @@
                 <div class="kpi-card-label">AI Reconciliation Accuracy</div>
                 <div class="kpi-card-value" style="color:${stats.colour}">${stats.pct}%</div>
                 <div class="kpi-card-sub">${stats.accurate}/${stats.total} correct — last 31 days</div>
-                <div style="margin-top:8px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
-                    <div style="height:100%;width:${stats.pct}%;background:${stats.colour};border-radius:3px;transition:width 0.3s"></div>
+                <div class="od-progress">
+                    <div class="od-progress-fill" style="width:${stats.pct}%;background:${stats.colour}"></div>
                 </div>
                 <div class="od-text-muted-sm" style="margin-top:6px">Target: ≥90% <span style="color:var(--success)">●</span> 75–89% <span style="color:var(--warning)">●</span> &lt;75% <span style="color:var(--danger)">●</span></div>
             </div>`;
@@ -1163,10 +1163,10 @@
         overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
 
         overlay.innerHTML = `
-            <div style="background:#fff;border-radius:12px;width:100%;max-width:760px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);font-family:var(--font-family-base)">
-                <div style="padding:16px 20px;border-bottom:1px solid var(--border-default);display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+            <div class="od-modal" style="width:100%;max-width:760px">
+                <div class="od-modal-header" style="align-items:flex-start;gap:12px">
                     <div style="flex:1;min-width:0">
-                        <h3 class="od-section-header" style="font-size:15px;border-bottom:none;padding-bottom:0;margin:0">Split Transaction</h3>
+                        <h3 class="od-section-header" style="border-bottom:none;padding-bottom:0;margin:0">Split Transaction</h3>
                         <div style="margin-top:4px;font-size:11px;color:var(--text-secondary)">
                             <strong>${escHtml(r.txDate)}</strong> &middot;
                             <strong>${escHtml(r.txVendor || '—')}</strong> &middot;
@@ -1182,8 +1182,8 @@
                 </div>
                 <div id="splitModalBody" style="overflow:auto;padding:16px 20px;flex:1"></div>
                 <div style="padding:12px 20px;border-top:1px solid var(--border-default);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-surface)">
-                    <button onclick="document.getElementById('reconSplitModal').remove()" class="od-btn-secondary" style="padding:8px 16px">Cancel</button>
-                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" class="od-btn-primary" style="padding:8px 16px;font-weight:700">Save Split</button>
+                    <button onclick="document.getElementById('reconSplitModal').remove()" class="od-btn-secondary od-btn-lg">Cancel</button>
+                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" class="od-btn-primary od-btn-lg">Save Split</button>
                 </div>
             </div>`;
         document.body.appendChild(overlay);
@@ -1251,7 +1251,7 @@
             const rowsHtml = st.customRows.map((row, i) => `
                 <tr id="splitCustomRow-${i}">
                     <td style="padding:4px 6px;font-size:11px;color:var(--text-muted);width:24px">${i + 1}</td>
-                    <td style="padding:4px 6px"><input type="number" step="0.01" value="${row.amount === '' ? '' : row.amount}" oninput="splitOnCustomAmountChange(${i}, this.value)" placeholder="0.00" style="width:100%;padding:6px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:4px;text-align:right"></td>
+                    <td style="padding:4px 6px"><input type="number" step="0.01" value="${row.amount === '' ? '' : row.amount}" oninput="splitOnCustomAmountChange(${i}, this.value)" placeholder="0.00" class="od-inline-input" style="text-align:right"></td>
                     <td style="padding:4px 6px">${buildSubCatDropdown('split-subcat-' + i, row.subCatId)}</td>
                     <td style="padding:4px 6px">${buildBusinessDropdown('split-business-' + i, row.businessId)}</td>
                     <td style="padding:4px 6px">${buildTenancyDropdown('split-tenancy-' + i, row.tenancyId)}</td>

@@ -1013,6 +1013,124 @@ body {
     background: var(--bg-surface-2);
 }
 
+/* ── Table cell utility classes ── */
+.od-cell           { padding: 6px 8px; vertical-align: top; font-size: var(--fs-sm); }
+.od-cell-tight     { padding: 4px 6px; vertical-align: top; font-size: var(--fs-xs); }
+.od-cell-center    { text-align: center; }
+.od-cell-right     { text-align: right; }
+.od-cell-nowrap    { white-space: nowrap; }
+.od-cell-bold      { font-weight: var(--fw-semibold); }
+.od-cell-muted     { color: var(--text-muted); }
+.od-cell-num       { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; text-align: right; }
+.od-cell-clamp     { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Inline input (editable table cells) ── */
+.od-inline-input {
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    padding: 4px 6px;
+    font-size: var(--fs-sm);
+    font-family: var(--font-family-base);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    width: 100%;
+    transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.od-inline-input:focus {
+    border-color: var(--border-focus);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* ── Progress bar ── */
+.od-progress {
+    height: 6px;
+    background: var(--bg-subtle);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin-top: 8px;
+}
+.od-progress-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    transition: width var(--dur-slow) var(--ease);
+}
+
+/* ── Filter pill button (dashboard business filters) ── */
+.od-filter-pill {
+    padding: 6px 14px;
+    border-radius: var(--radius-full);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+    border: 1px solid var(--border-default);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-family: var(--font-family-base);
+    transition: all var(--dur-fast) var(--ease);
+}
+.od-filter-pill:hover {
+    background: var(--bg-surface-2);
+}
+.od-filter-pill.active {
+    background: var(--accent);
+    color: var(--accent-on);
+    border-color: var(--accent);
+}
+
+/* ── Small pill badge (sidebar counts, inline tags) ── */
+.od-count-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: var(--radius-full);
+    font-size: 10px;
+    font-weight: var(--fw-bold);
+    white-space: nowrap;
+}
+
+/* ── Button size modifiers ── */
+.od-btn-sm {
+    font-size: 10px;
+    padding: 3px 8px;
+}
+.od-btn-lg {
+    padding: 8px 16px;
+    font-weight: var(--fw-bold);
+}
+
+/* ── Colour utility classes (text) ── */
+.text-green  { color: var(--success); }
+.text-amber  { color: var(--warning); }
+.text-red    { color: var(--danger); }
+.text-blue   { color: var(--info); }
+
+/* ── Modal container ── */
+.od-modal {
+    background: var(--bg-surface);
+    border-radius: var(--radius-xl);
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+.od-modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* ── Empty/loading state ── */
+.od-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: var(--fs-md);
+}
+
 .dashboard { display: none; }
 
 /* ── AI Assistant ── */

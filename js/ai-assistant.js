@@ -260,13 +260,13 @@
     // Simple markdown renderer
     function renderMarkdown(text) {
         return text
-            .replace(/```([\s\S]*?)```/g, '<pre style="background:#f1f5f9;padding:8px;border-radius:6px;font-size:11px;overflow-x:auto"><code>$1</code></pre>')
-            .replace(/`([^`]+)`/g, '<code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
+            .replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg-subtle);padding:8px;border-radius:6px;font-size:var(--fs-xs);overflow-x:auto"><code>$1</code></pre>')
+            .replace(/`([^`]+)`/g, '<code style="background:var(--bg-subtle);padding:1px 4px;border-radius:3px;font-size:var(--fs-sm)">$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.+?)\*/g, '<em>$1</em>')
-            .replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:13px;color:#1e293b">$1</h4>')
-            .replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 6px;font-size:14px;color:#1e293b">$1</h3>')
-            .replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;font-size:15px;color:#1e293b">$1</h2>')
+            .replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:var(--fs-base);color:var(--text-primary)">$1</h4>')
+            .replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 6px;font-size:var(--fs-md);color:var(--text-primary)">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;font-size:var(--fs-lg);color:var(--text-primary)">$1</h2>')
             .replace(/^- (.+)$/gm, '<div style="padding-left:12px">\u2022 $1</div>')
             .replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px">$&</div>')
             .replace(/\n/g, '<br>');
@@ -356,8 +356,8 @@
             if (reply.length > 500) {
                 const exportBtn = document.createElement('div');
                 exportBtn.style.cssText = 'margin-top:6px;display:flex;gap:6px';
-                exportBtn.innerHTML = `<button onclick="copyAIResponse(this)" style="font-size:10px;padding:3px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;color:#64748b">Copy</button>
-                    <button onclick="printAIResponse(this)" style="font-size:10px;padding:3px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;cursor:pointer;color:#64748b">Print</button>`;
+                exportBtn.innerHTML = `<button onclick="copyAIResponse(this)" style="font-size:10px;padding:3px 8px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-muted)">Copy</button>
+                    <button onclick="printAIResponse(this)" style="font-size:10px;padding:3px 8px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-muted)">Print</button>`;
                 msgEl.appendChild(exportBtn);
             }
         } catch (e) {
@@ -407,7 +407,7 @@
         const filtered = filter ? all.filter(a => a.label.toLowerCase().includes(filter.toLowerCase())) : all;
         list.innerHTML = filtered.map(a =>
             `<div class="ai-cmd-item" onclick="closeCmdPalette();sendQuickAction('${escHtml(a.label)}')">${a.label}</div>`
-        ).join('') || '<div style="padding:12px;color:#94a3b8;text-align:center">No matching commands</div>';
+        ).join('') || '<div class="od-empty-state" style="padding:12px">No matching commands</div>';
     }
     function filterCmdPalette() {
         populateCmdPalette(document.getElementById('aiCmdInput').value);
