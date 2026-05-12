@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Operations — Tenants, Tenancies, Units, Properties</title>
+<title>Operations — Tenants, Tenancies, Units, Properties, Customers</title>
 <link rel="stylesheet" href="../../css/tokens.css?v=1">
 <link rel="stylesheet" href="../../css/sync-bar.css?v=2">
 <link rel="stylesheet" href="../../css/quick-task.css?v=2">
@@ -116,6 +116,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .badge-overdue,.badge-cfv{background:var(--danger-bg);color:var(--danger)}
 .badge-warning{background:var(--warning-bg);color:var(--warning)}
 .badge-info{background:var(--info-bg);color:var(--info)}
+/* Customer stage badges — tonal palette */
+.badge-lead{background:var(--info-bg);color:var(--tone-blue)}
+.badge-onboarding{background:var(--warning-bg);color:var(--tone-gold)}
+.badge-churned{background:var(--bg-subtle);color:var(--text-secondary)}
+
+/* Customer demo banner */
+.demo-banner{background:var(--warning-bg);color:var(--warning);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:500;margin-bottom:16px;display:flex;align-items:center;gap:8px}
 
 /* Drawer */
 .drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
@@ -244,7 +251,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <div class="topbar" id="topbar" style="display:none">
   <div>
     <h1>🏢 Operations</h1>
-    <div class="subtitle">Tenants · Tenancies · Rental Units · Properties — synced live with Airtable</div>
+    <div class="subtitle">Tenants · Tenancies · Rental Units · Properties · Customers — synced live with Airtable</div>
   </div>
   <div class="topbar-right">
     <span id="syncStatus" style="font-size:11px;color:var(--text-muted)"></span>
@@ -259,6 +266,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
   <button class="view-tab" data-tab="tenancies" onclick="switchSubTab('tenancies')">📄 Tenancies <span class="count" id="cntTenancies">·</span></button>
   <button class="view-tab" data-tab="units" onclick="switchSubTab('units')">🚪 Rental Units <span class="count" id="cntUnits">·</span></button>
   <button class="view-tab" data-tab="properties" onclick="switchSubTab('properties')">🏠 Properties <span class="count" id="cntProperties">·</span></button>
+  <button class="view-tab" data-tab="customers" onclick="switchSubTab('customers')">💼 Customers <span class="count" id="cntCustomers">0</span></button>
 </div>
 
 <!-- Main -->
@@ -323,6 +331,23 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
       <span class="meta" id="metaProperties"></span>
     </div>
     <div id="contentProperties"><div class="loading"><div class="spinner"></div><div>Loading properties...</div></div></div>
+  </div>
+
+  <!-- Customers (SaaS CRM) -->
+  <div class="tab-pane" id="pane-customers">
+    <div id="customerKpis" class="kpi-grid"></div>
+    <div class="controls">
+      <input class="search-box" id="searchCustomers" placeholder="Search customers..." oninput="renderCustomers()">
+      <select class="filter-select" id="filterCustomerStage" onchange="renderCustomers()">
+        <option value="">All stages</option>
+        <option value="Lead">Lead</option>
+        <option value="Onboarding">Onboarding</option>
+        <option value="Active">Active</option>
+        <option value="Churned">Churned</option>
+      </select>
+      <span class="meta" id="metaCustomers"></span>
+    </div>
+    <div id="contentCustomers"><div class="empty"><div class="icon">💼</div><div class="msg">No customers yet. Your first subscriber will appear here.</div></div></div>
   </div>
 
 </div>
@@ -1033,12 +1058,13 @@ function renderActiveTab(){
   if (activeTab === 'tenancies')  renderTenancies();
   if (activeTab === 'units')      renderUnits();
   if (activeTab === 'properties') renderProperties();
+  if (activeTab === 'customers')  renderCustomers();
 }
 
 function bindHashRouting(){
   const apply = () => {
     const h = window.location.hash.replace('#','').split('/')[0];
-    if (['tenants','tenancies','units','properties'].includes(h) && h !== activeTab) switchSubTab(h);
+    if (['tenants','tenancies','units','properties','customers'].includes(h) && h !== activeTab) switchSubTab(h);
   };
   window.addEventListener('hashchange', apply);
   apply();
@@ -2834,6 +2860,122 @@ function openSchemaInspector(){
 function closeSchemaInspector(){
   const host = document.getElementById('schemaModalHost');
   if (host) host.innerHTML = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Customers (SaaS CRM) — placeholder data, no Airtable integration yet
+// ═══════════════════════════════════════════════════════════════════════
+const CUSTOMER_DEMO_DATA = [
+  { id:'cust_001', company:'Greenleaf Landscaping', contact:'Sarah Mitchell', email:'sarah@greenleafscaping.co.uk', plan:'Growth', stage:'Active',     startDate:'2026-04-15', mrr:149 },
+  { id:'cust_002', company:'Bolt Electrical Ltd',   contact:'James Okafor',   email:'james@boltelectrical.co.uk',  plan:'Starter', stage:'Onboarding', startDate:'2026-05-01', mrr:79 },
+  { id:'cust_003', company:'Pureflow Plumbing',     contact:'Amir Hassan',    email:'amir@pureflow.co.uk',         plan:'Growth', stage:'Lead',        startDate:null,         mrr:0 },
+];
+
+let customerData = [...CUSTOMER_DEMO_DATA];
+let customerSortState = null;
+
+function renderCustomerKpis(){
+  const total   = customerData.length;
+  const active  = customerData.filter(c => c.stage === 'Active').length;
+  const onboard = customerData.filter(c => c.stage === 'Onboarding').length;
+  const leads   = customerData.filter(c => c.stage === 'Lead').length;
+  const totalMrr = customerData.filter(c => c.stage === 'Active' || c.stage === 'Onboarding').reduce((s,c) => s + c.mrr, 0);
+
+  document.getElementById('customerKpis').innerHTML = `
+    <div class="kpi"><div class="label">Total Customers</div><div class="value">${total}</div><div class="sub">${leads} leads in pipeline</div></div>
+    <div class="kpi"><div class="label">Active</div><div class="value" style="color:var(--success)">${active}</div><div class="sub">paying subscribers</div></div>
+    <div class="kpi"><div class="label">Onboarding</div><div class="value" style="color:var(--tone-gold)">${onboard}</div><div class="sub">setting up</div></div>
+    <div class="kpi"><div class="label">MRR</div><div class="value">&pound;${totalMrr.toLocaleString()}</div><div class="sub">monthly recurring revenue</div></div>
+  `;
+}
+
+function customerStageBadge(stage){
+  const cls = {Lead:'badge-lead', Onboarding:'badge-onboarding', Active:'badge-active', Churned:'badge-churned'};
+  return `<span class="badge ${cls[stage]||'badge-info'}">${escapeHtml(stage)}</span>`;
+}
+
+function renderCustomers(){
+  renderCustomerKpis();
+  const search = (document.getElementById('searchCustomers').value || '').toLowerCase().trim();
+  const stage  = document.getElementById('filterCustomerStage').value;
+
+  let rows = customerData.filter(c => {
+    if (search && !c.company.toLowerCase().includes(search) && !c.contact.toLowerCase().includes(search) && !(c.email||'').toLowerCase().includes(search)) return false;
+    if (stage && c.stage !== stage) return false;
+    return true;
+  });
+
+  if (customerSortState) {
+    const { key, dir } = customerSortState;
+    const d = dir === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a,b) => {
+      let av = a[key], bv = b[key];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * d;
+      return String(av).localeCompare(String(bv), undefined, { numeric:true, sensitivity:'base' }) * d;
+    });
+  }
+
+  document.getElementById('cntCustomers').textContent = customerData.length;
+  document.getElementById('metaCustomers').textContent = `${rows.length} of ${customerData.length}`;
+
+  if (!rows.length) {
+    document.getElementById('contentCustomers').innerHTML = `<div class="empty"><div class="icon">💼</div><div class="msg">No customers match the current filters.</div></div>`;
+    return;
+  }
+
+  const cols = [
+    { key:'company',   label:'Company',      width:'200px' },
+    { key:'contact',   label:'Contact',      width:'160px' },
+    { key:'email',     label:'Email',        width:'200px' },
+    { key:'plan',      label:'Plan',         width:'100px' },
+    { key:'stage',     label:'Stage',        width:'110px' },
+    { key:'startDate', label:'Start Date',   width:'110px' },
+    { key:'mrr',       label:'MRR',          width:'100px', money:true },
+  ];
+
+  const colgroup = '<colgroup>' + cols.map(c => `<col style="width:${c.width}">`).join('') + '</colgroup>';
+
+  const sortArrow = (key) => {
+    if (customerSortState && customerSortState.key === key) return customerSortState.dir === 'asc' ? '▲' : '▼';
+    return '↕';
+  };
+
+  const head = '<tr>' + cols.map(c => {
+    const sorted = customerSortState && customerSortState.key === c.key;
+    const cls = [(c.money?'money':''), (sorted?'sorted':'')].filter(Boolean).join(' ');
+    return `<th class="${cls}" onclick="toggleCustomerSort('${c.key}')"><span class="th-inner"><span class="th-label">${escapeHtml(c.label)}</span><span class="th-sort">${sortArrow(c.key)}</span></span></th>`;
+  }).join('') + '</tr>';
+
+  const body = rows.map(r => {
+    const fmtDate = r.startDate ? new Date(r.startDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '<span style="color:var(--text-muted)">—</span>';
+    const fmtMrr  = r.mrr ? `&pound;${r.mrr.toLocaleString()}` : '<span style="color:var(--text-muted)">—</span>';
+    return `<tr>
+      <td>${escapeHtml(r.company)}</td>
+      <td>${escapeHtml(r.contact)}</td>
+      <td><a href="mailto:${escapeHtml(r.email)}" style="color:var(--accent)">${escapeHtml(r.email)}</a></td>
+      <td>${escapeHtml(r.plan)}</td>
+      <td class="wrap-cell">${customerStageBadge(r.stage)}</td>
+      <td>${fmtDate}</td>
+      <td class="money">${fmtMrr}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('contentCustomers').innerHTML = `
+    <div class="demo-banner">⚠ Sample data shown below. Real customer records will replace these when the first subscriber signs up.</div>
+    <div class="table-wrap"><table class="dt">${colgroup}<thead>${head}</thead><tbody>${body}</tbody></table></div>
+  `;
+}
+
+function toggleCustomerSort(key){
+  if (customerSortState && customerSortState.key === key) {
+    customerSortState.dir = customerSortState.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    customerSortState = { key, dir:'asc' };
+  }
+  renderCustomers();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
