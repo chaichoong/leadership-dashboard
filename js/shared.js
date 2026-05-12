@@ -532,6 +532,10 @@ if (tabId === 'comms') {
             const frame = document.getElementById('complianceFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('compliance')) frame.src = frame.dataset.src;
         }
+        // Render income tab on switch
+        if (tabId === 'income') {
+            if (typeof renderIncomeTab === 'function') renderIncomeTab();
+        }
         // Render costs tab on switch
         if (tabId === 'costs') {
             if (typeof renderCostsTab === 'function') renderCostsTab();
