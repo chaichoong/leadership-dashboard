@@ -406,6 +406,7 @@ const TX = {
   unit:        'fldJGIhSbgXNIEW4a',
   property:    'fldvp44VfF8uTTthp',
 };
+const CAT_NAME = 'fldii4oUzSfmplihO';
 
 // Curated field RESOLVERS per entity. Field IDs are resolved at load time
 // via the Airtable metadata API. Each field provides MULTIPLE name candidates
@@ -3056,11 +3057,7 @@ function renderExpandContent(entityKey, recId){
     return ids.map(v => {
       const id = typeof v === 'object' ? (v.id || v) : v;
       const rec = INDEX.categories && INDEX.categories[id];
-      if (rec) {
-        const fields = rec.fields || {};
-        const name = Object.values(fields).find(v => typeof v === 'string');
-        return escapeHtml(String(name || id));
-      }
+      if (rec) return escapeHtml(String(rec.fields[CAT_NAME] || id));
       return typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v));
     }).join(', ');
   };
