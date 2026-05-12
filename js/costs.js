@@ -458,13 +458,13 @@
             <td style="white-space:nowrap">${endDateCell}</td>
             <td style="width:80px;text-align:center;white-space:nowrap">
                 <button class="od-btn od-btn-outline od-btn-sm" onclick="event.stopPropagation(); costOpenPrintStatement('${e.id}')" title="Print statement" style="margin-right:2px">🖨</button>
-                <button class="od-btn od-btn-secondary od-btn-sm" onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')" title="Show linked transactions">▶</button>
+                <span class="expand-chevron" id="cost-chev-${e.id}" onclick="event.stopPropagation(); toggleCostTxRow('${e.id}')" style="cursor:pointer;font-size:11px" title="Show linked transactions">▶</span>
             </td>
         </tr>
-        <tr class="cost-tx-detail-row" id="cost-tx-${e.id}" style="display:none">
-            <td colspan="13" style="padding:8px 16px;background:var(--bg-surface-2);border-left:3px solid var(--accent)">
+        <tr class="expand-row cost-tx-detail-row" id="cost-tx-${e.id}" style="display:none">
+            <td colspan="13"><div class="expand-content">
                 ${buildLinkedTransactionsHtml(e)}
-            </td>
+            </div></td>
         </tr>`;
     }
 
@@ -808,22 +808,19 @@
             const row = document.getElementById('cost-tx-' + id);
             if (row) {
                 row.style.display = '';
-                const mainRow = document.querySelector(`tr[data-record-id="${id}"]`);
-                if (mainRow) {
-                    const btn = mainRow.querySelector('button[title="Show linked transactions"]');
-                    if (btn && btn.textContent === '▶') btn.textContent = '▼';
-                }
+                const chevron = document.getElementById('cost-chev-' + id);
+                if (chevron) chevron.classList.add('open');
             }
         }
     }
 
-    function toggleCostTxRow(btn, costId) {
+    function toggleCostTxRow(costId) {
         const row = document.getElementById('cost-tx-' + costId);
+        const chevron = document.getElementById('cost-chev-' + costId);
         if (!row) return;
         const visible = row.style.display !== 'none';
         row.style.display = visible ? 'none' : '';
-        if (btn.textContent === '▶') btn.textContent = '▼';
-        else if (btn.textContent === '▼') btn.textContent = '▶';
+        if (chevron) chevron.classList.toggle('open', !visible);
     }
 
     // Unlink a transaction from a cost — used when a reconciliation was wrong.
