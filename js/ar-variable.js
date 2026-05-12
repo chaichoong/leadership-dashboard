@@ -286,8 +286,7 @@
                 <div style="font-size:32px;margin-bottom:12px" aria-hidden="true">&#x1F4E4;</div>
                 <div style="font-size:15px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">No outbound invoices yet</div>
                 <div style="font-size:13px;max-width:420px;margin:0 auto;line-height:1.5">
-                    Invoices you send to customers will appear here once the Airtable table is connected.<br>
-                    The table needs to be created in Airtable and the table/field IDs updated in <code style="font-size:12px;background:var(--bg-subtle);padding:1px 4px;border-radius:3px">js/config.js</code>.
+                    Invoices you send to customers will appear here. Add records to the Outbound Invoices table in Airtable to get started.
                 </div>
             `;
             emptyEl.style.display = '';
