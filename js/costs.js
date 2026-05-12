@@ -641,7 +641,7 @@
         });
 
         if (txs.length === 0) {
-            return '<div style="font-size:12px;color:var(--text-muted);padding:4px 0">No linked transactions found</div>';
+            return '<div class="expand-empty">No linked transactions found</div>';
         }
 
         const txSorted = [...txs].sort((a, b) => {
@@ -649,7 +649,7 @@
             return db - da;
         });
 
-        const grid = '90px 1fr 85px 90px 130px 140px 90px 70px';
+        const totalLinked = txSorted.reduce((s, tx) => s + Math.abs(Number(getField(tx, F.txReportAmount)) || 0), 0);
 
         const rows = txSorted.slice(0, 20).map(tx => {
             const date = getField(tx, F.txDate) || '';
@@ -658,12 +658,10 @@
             const account = getField(tx, F.txAccountAlias) || '';
             const reconciled = getField(tx, F.txReconciled);
 
-            // Category cell — click to edit (dropdown)
             const catLinks = (getField(tx, F.txCategory) || []).map(v => v.id || v).filter(Boolean);
             const catName = catLinks.length > 0 ? getCatNameById(catLinks[0]) : '';
             const catCell = `<span class="tx-cat-editable" data-tx-id="${tx.id}" data-link-type="cat" onclick="event.stopPropagation(); editTxLinkField(this)" title="Click to set category" style="cursor:pointer;color:${catName ? 'var(--text-primary)' : 'var(--text-muted)'}">${catName ? escHtml(catName) : '— set —'}</span>`;
 
-            // Sub-Category cell
             const scLinks = (getField(tx, F.txSubCategory) || []).map(v => v.id || v).filter(Boolean);
             const scName = scLinks.length > 0 ? getSubCatNameById(scLinks[0]) : '';
             const scCell = `<span class="tx-cat-editable" data-tx-id="${tx.id}" data-link-type="subcat" onclick="event.stopPropagation(); editTxLinkField(this)" title="Click to set sub-category" style="cursor:pointer;color:${scName ? 'var(--text-primary)' : 'var(--text-muted)'}">${scName ? escHtml(scName) : '— set —'}</span>`;
@@ -674,26 +672,27 @@
             const unlinkBtn = reconciled
                 ? `<button class="od-btn od-btn-outline od-btn-sm" onclick="event.stopPropagation(); unlinkTxFromCost('${tx.id}', '${e.id}', this)" title="Unlink — wrong reconciliation" style="color:var(--danger);border-color:var(--danger)">Unlink</button>`
                 : '';
-            return `<div style="display:grid;grid-template-columns:${grid};gap:8px;padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;align-items:center">
-                <span style="color:var(--text-secondary)">${escHtml(formatCostDate(date))}</span>
-                <span style="color:var(--text-primary);font-weight:500">${escHtml(label)}</span>
-                <span style="text-align:right;font-weight:600;color:${amount < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt(Math.abs(amount))}</span>
-                <span style="color:var(--text-muted);font-size:11px">${escHtml(account)}</span>
-                <span style="font-size:11px">${catCell}</span>
-                <span style="font-size:11px">${scCell}</span>
-                <span>${reconBadge}</span>
-                <span style="text-align:right">${unlinkBtn}</span>
-            </div>`;
+            return `<tr>
+                <td style="color:var(--text-secondary)">${escHtml(formatCostDate(date))}</td>
+                <td class="truncate" style="font-weight:500">${escHtml(label)}</td>
+                <td class="money" style="font-weight:600;color:${amount < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt(Math.abs(amount))}</td>
+                <td style="color:var(--text-muted)">${escHtml(account)}</td>
+                <td>${catCell}</td>
+                <td>${scCell}</td>
+                <td>${reconBadge}</td>
+                <td style="text-align:right">${unlinkBtn}</td>
+            </tr>`;
         }).join('');
 
-        const totalLinked = txSorted.reduce((s, tx) => s + Math.abs(Number(getField(tx, F.txReportAmount)) || 0), 0);
-
-        return `<div style="margin-bottom:4px;font-size:11px;font-weight:600;color:var(--text-secondary)">${txSorted.length} linked transaction${txSorted.length !== 1 ? 's' : ''} · Total: ${fmt(totalLinked)}</div>
-            <div style="display:grid;grid-template-columns:${grid};gap:8px;padding:4px 0;font-size:10px;text-transform:uppercase;color:var(--text-muted);font-weight:600">
-                <span>Date</span><span>Description</span><span style="text-align:right">Amount</span><span>Account</span><span>Category</span><span>Sub-Category</span><span>Status</span><span></span>
-            </div>
-            ${rows}
-            ${txSorted.length > 20 ? `<div style="font-size:11px;color:var(--text-muted);padding:4px 0">Showing 20 of ${txSorted.length} — use Transactions tab for full list</div>` : ''}`;
+        return `<div class="expand-summary"><span>${txSorted.length} linked transaction${txSorted.length !== 1 ? 's' : ''} · Total: <strong>${fmt(totalLinked)}</strong></span></div>
+            <table class="tx-table">
+            <colgroup><col style="width:90px"><col><col style="width:95px"><col style="width:100px"><col style="width:140px"><col style="width:150px"><col style="width:95px"><col style="width:75px"></colgroup>
+            <thead><tr>
+                <th>Date</th><th>Description</th><th class="money">Amount</th><th>Account</th><th>Category</th><th>Sub-Category</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+            </table>
+            ${txSorted.length > 20 ? '<div style="font-size:var(--fs-xs);color:var(--text-muted);padding:6px 0">Showing 20 of ' + txSorted.length + '</div>' : ''}`;
     }
 
     function getCatNameById(id) {

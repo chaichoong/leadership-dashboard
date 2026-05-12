@@ -1155,6 +1155,31 @@ tr.expand-row:hover td {
     font-size: var(--fs-sm);
 }
 
+/* ── Shared tx-table (detail tables inside expanded rows) ── */
+.tx-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); table-layout: fixed; }
+.tx-table th {
+    text-align: left; padding: 6px 10px; background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border-default); font-size: 10px;
+    text-transform: uppercase; color: var(--text-secondary);
+    font-weight: var(--fw-bold); letter-spacing: .4px;
+}
+.tx-table th.money { text-align: right; }
+.tx-table td { padding: 6px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.tx-table td.money {
+    text-align: right; white-space: nowrap;
+    font-variant-numeric: tabular-nums; padding-right: 14px;
+}
+.tx-table td.truncate {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0;
+}
+.tx-table .badge { padding: 2px 7px; font-size: 10px; border-radius: 8px; }
+.tx-table tbody tr:nth-child(even) td { background: var(--bg-surface); }
+.tx-show-all {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    font-size: var(--fs-sm); font-weight: var(--fw-semibold); padding: 6px 0; margin-top: 4px;
+}
+.tx-show-all:hover { text-decoration: underline; }
+
 /* ── Row highlight backgrounds ── */
 .od-row-danger  { background: var(--danger-bg); }
 .od-row-warning { background: var(--warning-bg); }
