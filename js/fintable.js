@@ -164,25 +164,25 @@
 
         const summaryEl = document.getElementById('fintableSummary');
         summaryEl.innerHTML = `
-            <div style="background:var(--success-bg);border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:center">
+            <div style="background:var(--success-bg);border:1px solid var(--success-border);border-radius:10px;padding:16px;text-align:center">
                 <div class="od-metric-value" style="font-size:28px;color:var(--success)">${ok}</div>
-                <div class="od-metric-label" style="font-size:12px;color:var(--success)">Healthy</div>
+                <div class="od-metric-label" style="color:var(--success)">Healthy</div>
             </div>
-            <div style="background:#fefce8;border:1px solid #fef08a;border-radius:10px;padding:16px;text-align:center">
-                <div class="od-metric-value" style="font-size:28px;color:#ca8a04">${warning}</div>
-                <div class="od-metric-label" style="font-size:12px;color:#a16207">1–3 Days</div>
+            <div style="background:var(--gold-100);border:1px solid var(--gold-200);border-radius:10px;padding:16px;text-align:center">
+                <div class="od-metric-value" style="font-size:28px;color:var(--gold-700)">${warning}</div>
+                <div class="od-metric-label" style="color:var(--gold-700)">1–3 Days</div>
             </div>
-            <div style="background:var(--warning-bg);border:1px solid #fed7aa;border-radius:10px;padding:16px;text-align:center">
-                <div class="od-metric-value" style="font-size:28px;color:#ea580c">${alert}</div>
-                <div class="od-metric-label" style="font-size:12px;color:#c2410c">3–7 Days</div>
+            <div style="background:var(--warning-bg);border:1px solid var(--warning-border);border-radius:10px;padding:16px;text-align:center">
+                <div class="od-metric-value" style="font-size:28px;color:var(--warning)">${alert}</div>
+                <div class="od-metric-label" style="color:var(--warning)">3–7 Days</div>
             </div>
-            <div style="background:var(--danger-bg);border:1px solid #fecaca;border-radius:10px;padding:16px;text-align:center">
+            <div style="background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:10px;padding:16px;text-align:center">
                 <div class="od-metric-value" style="font-size:28px;color:var(--danger)">${critical}</div>
-                <div class="od-metric-label" style="font-size:12px;color:var(--danger)">Needs Reconnect</div>
+                <div class="od-metric-label" style="color:var(--danger)">Needs Reconnect</div>
             </div>
             <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;text-align:center">
                 <div class="od-metric-value" style="font-size:28px;color:var(--text-primary)">${total}</div>
-                <div class="od-metric-label" style="font-size:12px;color:var(--text-secondary)">Total Active</div>
+                <div class="od-metric-label" style="color:var(--text-secondary)">Total Active</div>
             </div>
         `;
 

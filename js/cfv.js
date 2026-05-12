@@ -423,7 +423,7 @@
         if (!tbody) return;
 
         if (filteredList.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);font-size:14px">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="od-empty-state">No cash flow voids detected. All tenancies are in payment.</td></tr>`;
             return;
         }
 
@@ -510,15 +510,15 @@
             // Payment detected banner removed — auto-return handles this now
 
             return `<tr>
-                <td style="font-weight:600">${entry.tenantId
+                <td class="od-cell-bold">${entry.tenantId
                     ? `<a href="#" onclick="event.preventDefault();event.stopPropagation();cfvNavToTenant('${entry.tenantId}')" style="color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent)" title="View in Operations">${escHtml(entry.surname)}</a>`
                     : escHtml(entry.surname)}<br><span class="od-text-muted-sm">${escHtml(entry.ref)}</span></td>
-                <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span class="od-text-muted-sm">${escHtml(entry.unitName)}</span></td>
-                <td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${fmt(entry.rent)}</td>
-                <td style="text-align:center">${entry.dueDay || '—'}</td>
-                <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? 'var(--danger)' : entry.daysOverdue > 3 ? 'var(--warning)' : 'var(--text-primary)'}">${entry.daysOverdue}</td>
-                <td style="font-size:12px;white-space:nowrap">${entry.lastPaymentDate
-                    ? `${entry.lastPaymentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}<br><span style="font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums">${fmt(entry.lastPaymentAmount)}</span>`
+                <td>${escHtml(entry.propertyName)}<br><span class="od-text-muted-sm">${escHtml(entry.unitName)}</span></td>
+                <td class="od-cell-num od-cell-bold">${fmt(entry.rent)}</td>
+                <td class="od-cell-center">${entry.dueDay || '—'}</td>
+                <td class="od-cell-center" style="font-weight:700;color:${entry.daysOverdue > 7 ? 'var(--danger)' : entry.daysOverdue > 3 ? 'var(--warning)' : 'var(--text-primary)'}">${entry.daysOverdue}</td>
+                <td class="od-cell-nowrap">${entry.lastPaymentDate
+                    ? `${entry.lastPaymentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}<br><span class="od-text-muted-sm od-cell-num">${fmt(entry.lastPaymentAmount)}</span>`
                     : '<span style="color:var(--text-muted);font-style:italic">never</span>'}</td>
                 <td>${statusBadge}</td>
                 <td>${contactHtml}</td>
@@ -856,7 +856,7 @@
     }
 
     function formatCommentsList(comments, emptyMsg) {
-        if (comments.length === 0) return `<div style="color:var(--text-muted);font-size:12px;padding:8px 0">${emptyMsg}</div>`;
+        if (comments.length === 0) return `<div class="od-text-muted-sm" style="padding:8px 0">${emptyMsg}</div>`;
         return comments.map(c => {
             const d = new Date(c.createdTime);
             const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -869,7 +869,7 @@
         const section = document.getElementById('cfvCommentsSection');
         const container = document.getElementById('cfvCommentsContainer');
         section.style.display = 'block';
-        container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Loading full comment history...</div>';
+        container.innerHTML = '<div class="od-empty-state">Loading full comment history...</div>';
 
         // Fetch all comments from the tenancy record
         const tenancyComments = await fetchAllComments(TABLES.tenancies, tenancyId);
@@ -878,7 +878,7 @@
         if (tenancyComments.length > 0) {
             commentsHtml = formatCommentsList(tenancyComments, '');
         } else {
-            commentsHtml = '<div style="color:var(--text-muted);font-size:12px;padding:12px 0">No comments yet. Your Airtable PAT may need the <strong>data.recordComments:read</strong> scope — update at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>.</div>';
+            commentsHtml = '<div class="od-text-muted-sm" style="padding:12px 0">No comments yet. Your Airtable PAT may need the <strong>data.recordComments:read</strong> scope — update at <a href="https://airtable.com/create/tokens" target="_blank">airtable.com/create/tokens</a>.</div>';
         }
 
         container.innerHTML = `

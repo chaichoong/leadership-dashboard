@@ -756,7 +756,7 @@
     function renderCalcList(checkedSet) {
         const list = document.getElementById('calcTxList');
         if (!calcItems.length) {
-            list.innerHTML = '<div class="od-text-muted-sm" style="padding:20px;text-align:center">No forecast items found</div>';
+            list.innerHTML = '<div class="od-empty-state">No forecast items found</div>';
             return;
         }
         list.innerHTML = calcItems.map((item, i) => {

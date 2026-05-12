@@ -29,7 +29,7 @@
         if (!badge) {
             badge = document.createElement('span');
             badge.className = 'sidebar-invoice-badge';
-            badge.style.cssText = 'margin-left:6px;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;';
+            badge.className = 'sidebar-invoice-badge od-count-badge';
             label.appendChild(badge);
         }
         if (newCount > 0) {
@@ -207,7 +207,7 @@
             const statusLabel = airtableInvoices.length > 0
                 ? '<span style="color:var(--success);font-weight:600">Airtable</span>'
                 : '<span style="color:var(--warning);font-weight:600">Loading…</span>';
-            refreshSpan.innerHTML = `Source: <strong style="color:var(--text-secondary)">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:var(--info);font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceReconcile(); this.textContent='Reconciling…'; setTimeout(()=>this.textContent='Reconcile with Gmail',4000)" style="color:#7c3aed;font-size:11px;text-decoration:underline" title="Realign dashboard against Gmail '3: to pay' label">Reconcile with Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
+            refreshSpan.innerHTML = `Source: <strong style="color:var(--text-secondary)">Airtable → Gmail</strong> &nbsp;·&nbsp; ${statusLabel} &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">${refreshTime}</strong> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceSync(); this.textContent='Syncing…'; setTimeout(()=>this.textContent='Refresh from Gmail',4000)" style="color:var(--info);font-size:11px;text-decoration:underline">Refresh from Gmail</a> &nbsp;·&nbsp; <a href="#" onclick="event.preventDefault(); triggerGmailInvoiceReconcile(); this.textContent='Reconciling…'; setTimeout(()=>this.textContent='Reconcile with Gmail',4000)" style="color:var(--tone-plum);font-size:11px;text-decoration:underline" title="Realign dashboard against Gmail '3: to pay' label">Reconcile with Gmail</a> &nbsp;·&nbsp; <span id="invSyncHealth" style="font-size:11px"></span>`;
         }
         updateSyncHealthIndicator();
 
@@ -294,7 +294,7 @@
             }
             const isNew = inv.createdTime && new Date(inv.createdTime) > lastSeenBeforeRender;
             if (isNew) {
-                badge += ' <span class="inv-badge" style="background:var(--success-bg);color:var(--success);border:1px solid #16a34a">NEW</span>';
+                badge += ' <span class="inv-badge" style="background:var(--success-bg);color:var(--success);border:1px solid var(--success)">NEW</span>';
             }
 
             const displayAmt = inv.amount;
@@ -305,14 +305,13 @@
             // Always-visible spreadsheet-style cell inputs. Each input has data-record + data-field
             // attributes so the delegated handlers (handleCellInputChange, handleCellInputBlur,
             // handleCellInputKey) know what to PATCH. See saveCellInput() for the save flow.
-            const inputBase = 'border:1px solid var(--border-default);border-radius:4px;padding:4px 6px;font-size:12px;font-family:inherit;background:var(--bg-surface);color:var(--text-primary);width:100%;transition:border-color 0.15s,box-shadow 0.15s';
             // Amount is type="text" (not number) so trailing zeros are preserved — e.g. £40.00 not £40.
             // inputmode="decimal" still gives mobile users a numeric keyboard. Validation happens on save.
             const amountVal = displayAmt !== null ? Number(displayAmt).toFixed(2) : '';
-            const amountHtml = `<input type="text" inputmode="decimal" class="inv-cell-input inv-cell-amount" data-record="${inv.recordId}" data-field="${INV.amount}" data-type="number" value="${amountVal}" placeholder="0.00" style="${inputBase};text-align:right;font-weight:600">`;
-            const payeeHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.payee}" data-type="text" value="${escHtml(displayPayee)}" placeholder="Payee…" style="${inputBase};font-weight:600">`;
-            const descHtml = `<input type="text" class="inv-cell-input" data-record="${inv.recordId}" data-field="${INV.desc}" data-type="text" value="${escHtml(displayDesc)}" placeholder="Description…" style="${inputBase}">`;
-            const refHtml = `<input type="text" class="inv-cell-input inv-cell-ref" data-record="${inv.recordId}" data-field="${INV.ref}" data-type="text" value="${escHtml(displayRef)}" placeholder="Ref…" style="${inputBase};font-family:monospace;font-size:11px">`;
+            const amountHtml = `<input type="text" inputmode="decimal" class="inv-cell-input inv-cell-amount od-inline-input" data-record="${inv.recordId}" data-field="${INV.amount}" data-type="number" value="${amountVal}" placeholder="0.00" style="text-align:right;font-weight:600">`;
+            const payeeHtml = `<input type="text" class="inv-cell-input od-inline-input" data-record="${inv.recordId}" data-field="${INV.payee}" data-type="text" value="${escHtml(displayPayee)}" placeholder="Payee…" style="font-weight:600">`;
+            const descHtml = `<input type="text" class="inv-cell-input od-inline-input" data-record="${inv.recordId}" data-field="${INV.desc}" data-type="text" value="${escHtml(displayDesc)}" placeholder="Description…">`;
+            const refHtml = `<input type="text" class="inv-cell-input inv-cell-ref od-inline-input" data-record="${inv.recordId}" data-field="${INV.ref}" data-type="text" value="${escHtml(displayRef)}" placeholder="Ref…" style="font-family:monospace;font-size:11px">`;
 
             // Business cell — always-visible <select> populated with active businesses only.
             // If the invoice already points at an inactive business we still show that option
@@ -330,7 +329,7 @@
                     return `<option value="${b.id}"${b.id === currentBizId ? ' selected' : ''}>${escHtml(label)}</option>`;
                 })
             ).join('');
-            const businessHtml = `<select class="inv-cell-input inv-cell-business" data-record="${inv.recordId}" data-field="${INV.business}" data-type="link" style="${inputBase};cursor:pointer">${bizOptions}</select>`;
+            const businessHtml = `<select class="inv-cell-input inv-cell-business od-inline-input" data-record="${inv.recordId}" data-field="${INV.business}" data-type="link" style="cursor:pointer">${bizOptions}</select>`;
 
             const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
             const threadId = inv.threadId || inv.id;
@@ -756,7 +755,8 @@
             }
         }
         const w = inputType === 'number' ? '90px' : (fieldId === INV.ref ? '110px' : '170px');
-        input.style.cssText = `width:${w};padding:3px 6px;font-size:12px;border:1px solid var(--info);border-radius:4px;${inputType === 'number' ? 'text-align:right;' : ''}`;
+        input.className = 'od-inline-input';
+        input.style.cssText = `width:${w};border-color:var(--info);${inputType === 'number' ? 'text-align:right;' : ''}`;
 
         async function save() {
             const val = input.value.trim();
@@ -823,7 +823,8 @@
         const inv = airtableInvoices.find(i => i.recordId === recordId);
         const currentBizId = (inv && inv.businessIds && inv.businessIds[0]) || '';
         const select = document.createElement('select');
-        select.style.cssText = 'padding:3px 6px;font-size:12px;border:1px solid var(--info);border-radius:4px;background:#fff;color:var(--text-primary);cursor:pointer';
+        select.className = 'od-inline-input';
+        select.style.cssText = 'border-color:var(--info);cursor:pointer';
         // Empty option for "no business assigned"
         const blank = document.createElement('option');
         blank.value = ''; blank.textContent = '— None —';
