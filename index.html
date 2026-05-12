@@ -104,13 +104,14 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="finance" data-tabs="costs,invoices,pnl,transactions,fintable">
+            <div class="sidebar-section" data-section="finance" data-tabs="income,costs,invoices,pnl,transactions,fintable">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('finance')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('finance')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Finance</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
                 </div>
                 <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('income')}"><span class="sidebar-icon">&#x1F4B7;</span><span class="sidebar-label">Accounts Receivable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="income" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('costs')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('costs')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Accounts Payable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="costs" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('invoices')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('invoices')}"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Accounts Payable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('pnl')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('pnl')}"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
@@ -325,6 +326,79 @@
             <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
+
+        <!-- Tab: Accounts Receivable Fixed (Income) -->
+        <div class="tab-panel" id="tab-income">
+            <div data-sync-bar="income"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Receivable Fixed</h2>
+                </div>
+                <div class="cards-grid" id="incomeSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Sort:
+                        <select id="incomeSortBy" onchange="renderIncomeTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="due-day">Due Day</option>
+                            <option value="rent-desc">Rent (high to low)</option>
+                            <option value="rent-asc">Rent (low to high)</option>
+                            <option value="tenant">Tenant (A to Z)</option>
+                            <option value="status">Payment Status</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Status:
+                        <select id="incomeStatusFilter" onchange="renderIncomeTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="in-payment">In Payment</option>
+                            <option value="cfv">CFV / Not In Payment</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Business:
+                        <select id="incomeBusinessFilter" onchange="renderIncomeTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
+                        Search:
+                        <input id="incomeFilterText" type="text" placeholder="Search tenant, property, amount, status..." oninput="renderIncomeTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <div class="invoice-table-wrapper">
+                    <table class="invoice-table" id="incomeTable" style="display:none">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;text-align:center">#</th>
+                                <th>Tenant</th>
+                                <th>Property</th>
+                                <th>Unit</th>
+                                <th style="text-align:right">Rent</th>
+                                <th>Due Day</th>
+                                <th>Status</th>
+                                <th>Payment Type</th>
+                                <th>Frequency</th>
+                                <th style="width:40px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="incomeTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="section">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                    <h3 class="section-title" style="font-size:14px;margin-bottom:0">Income Breakdown</h3>
+                    <div id="incomeBreakdownToggles" style="display:flex;gap:4px"></div>
+                </div>
+                <div id="incomeBreakdown"></div>
+            </div>
+            <div class="section">
+                <h3 class="section-title" style="font-size:14px">AI Analysis</h3>
+                <div id="incomeAIAnalysis"></div>
+            </div>
+        </div>
 
         <!-- Tab: Accounts Payable Fixed (Costs) -->
         <div class="tab-panel" id="tab-costs">
@@ -657,6 +731,7 @@
     <script defer src="js/dashboard.js?v=19"></script>
     <script defer src="js/cashflow.js?v=14"></script>
     <script defer src="js/sitemap.js?v=25"></script>
+    <script defer src="js/income.js?v=1"></script>
     <script defer src="js/costs.js?v=13"></script>
     <script defer src="js/invoices.js?v=12"></script>
     <script defer src="js/pnl.js?v=21"></script>
