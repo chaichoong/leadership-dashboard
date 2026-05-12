@@ -278,7 +278,7 @@
                 <input list="${datalistId}" value="${escHtml(currentName)}"
                     onchange="pnlEditTxByName(${jsAttr(txId)}, ${jsAttr(kind)}, this.value, this)"
                     placeholder="Type to search…"
-                    style="font-size:11px;padding:3px 6px;border:1px solid var(--border-default);border-radius:4px;background:#fff;width:150px">
+                    style="font-size:11px;padding:3px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);width:150px">
                 <span class="pnl-edit-status" style="font-size:11px;min-width:12px"></span>
             </div>`;
         }
@@ -663,7 +663,7 @@ RULES:
         function rowsFor(section, indent = 14) {
             return section.rows.map(r => {
                 const cells = keys.map(k => cellTd(section.name, r.subCat, k, r.monthly[k] || 0)).join('');
-                return `<tr><td class="pnl-first" style="padding-left:${indent}px;color:var(--text-secondary);background:#fff">${escHtml(r.subCat)}</td>${cells}${subTotalTd(section.name, r.subCat, r.total)}</tr>`;
+                return `<tr><td class="pnl-first" style="padding-left:${indent}px;color:var(--text-secondary);background:var(--bg-surface)">${escHtml(r.subCat)}</td>${cells}${subTotalTd(section.name, r.subCat, r.total)}</tr>`;
             }).join('');
         }
         function sectionTotalRow(label, sectionName, perMonth, grand, { bg = 'var(--border-default)', color = 'var(--text-primary)' } = {}) {
@@ -679,7 +679,7 @@ RULES:
             return `<tr style="font-style:italic;color:var(--text-secondary)"><td class="pnl-first" style="padding:6px 10px;background:var(--bg-surface)">${escHtml(label)}</td>${cells}<td style="text-align:right;background:var(--bg-surface)">${pnlPct(grand)}</td></tr>`;
         }
         function sectionHeader(name) {
-            return `<tr style="color:#fff"><td class="pnl-first" style="padding:8px 10px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:1px;background:#0f172a">${escHtml(name)}</td><td colspan="${keys.length + 1}" style="background:#0f172a"></td></tr>`;
+            return `<tr style="color:#fff"><td class="pnl-first" style="padding:8px 10px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:1px;background:var(--bg-sidebar)">${escHtml(name)}</td><td colspan="${keys.length + 1}" style="background:var(--bg-sidebar)"></td></tr>`;
         }
 
         const bizOptions = businessNames.map(n => `<option value="${escHtml(n)}" ${n === pnlBusinessName ? 'selected' : ''}>${escHtml(n)}</option>`).join('');
@@ -693,22 +693,22 @@ RULES:
                         <h2 class="section-title" style="margin-bottom:4px">Profit &amp; Loss</h2>
                         <span style="font-size:12px;color:var(--text-muted)">Live from reconciled transactions · ${pnlBusinessName}</span>
                     </div>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                        <label style="font-size:12px;color:var(--text-secondary)">Business:
-                            <select id="pnlBizSelect" onchange="pnlBusinessName=this.value;renderPnL()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border-default);border-radius:4px;background:#fff;margin-left:4px">${bizOptions}</select>
+                    <div class="od-filter-row">
+                        <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">Business:
+                            <select id="pnlBizSelect" onchange="pnlBusinessName=this.value;renderPnL()" class="od-filter-select">${bizOptions}</select>
                         </label>
-                        <label style="font-size:12px;color:var(--text-secondary)">Period:
-                            <select id="pnlMonthsSelect" onchange="pnlMonths=Number(this.value);renderPnL()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border-default);border-radius:4px;background:#fff;margin-left:4px">${monthOptions}</select>
+                        <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">Period:
+                            <select id="pnlMonthsSelect" onchange="pnlMonths=Number(this.value);renderPnL()" class="od-filter-select">${monthOptions}</select>
                         </label>
                     </div>
                 </div>
 
                 <!-- AI Analysis -->
-                <div style="background:linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%);border:1px solid var(--border-default);border-radius:10px;padding:16px 20px;margin-bottom:16px">
+                <div style="background:linear-gradient(135deg,var(--bg-surface) 0%,var(--accent-soft) 100%);border:1px solid var(--border-default);border-radius:10px;padding:16px 20px;margin-bottom:16px">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:16px">🤖</span>
                         <span style="font-size:13px;font-weight:700;color:var(--text-primary)">AI Financial Analysis</span>
-                        <button onclick="pnlRunAIAnalysis()" class="od-btn-primary od-btn-sm" style="margin-left:auto">Generate Analysis</button>
+                        <button onclick="pnlRunAIAnalysis()" class="od-btn od-btn-primary od-btn-sm" style="margin-left:auto">Generate Analysis</button>
                     </div>
                     <div id="pnlAiPanel" style="color:var(--text-secondary);font-size:12px">Click <strong>Generate Analysis</strong> to get AI-powered insights into your P&amp;L trends, cost drivers, and path to ${PNL_NET_MARGIN_TARGET}% net margin.</div>
                 </div>
@@ -736,16 +736,16 @@ RULES:
 
                 <!-- Charts — 2 per row, taller for clarity -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
+                    <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartRevExp"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
+                    <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartProfit"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
+                    <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;height:380px">
                         <canvas id="pnlChartMargin"></canvas>
                     </div>
-                    <div style="background:#fff;border:1px solid var(--border-default);border-radius:10px;padding:16px;height:420px">
+                    <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;height:420px">
                         <canvas id="pnlChartBreakdown"></canvas>
                     </div>
                 </div>
@@ -757,8 +757,8 @@ RULES:
                     .pnl-grid thead th { position:sticky; top:0; z-index:2; }
                     .pnl-grid tbody td.pnl-first, .pnl-grid thead th.pnl-first { position:sticky; left:0; z-index:1; }
                     .pnl-grid thead th.pnl-first { z-index:3; }
-                    .pnl-grid thead th { box-shadow: inset 0 -1px 0 #e2e8f0; }
-                    .pnl-grid tbody td.pnl-first { box-shadow: inset -1px 0 0 #e2e8f0; }
+                    .pnl-grid thead th { box-shadow: inset 0 -1px 0 var(--border-default); }
+                    .pnl-grid tbody td.pnl-first { box-shadow: inset -1px 0 0 var(--border-default); }
                 </style>
                 <div class="pnl-grid-wrap">
                     <table class="invoice-table pnl-grid" style="min-width:${160 + keys.length * 100}px;font-size:12px">
@@ -777,14 +777,14 @@ RULES:
                             ${rowsFor(pnl.cogs)}
                             ${sectionTotalRow('Total COGS', 'Cost of Goods Sold', pnl.cogs.totals, pnl.grand.cogs, { bg: 'var(--danger-bg)', color: 'var(--danger)' })}
 
-                            ${totalRow('Gross Profit', pnl.grossProfit, pnl.grand.grossProfit, { bg: '#e0f2fe', color: '#075985' })}
+                            ${totalRow('Gross Profit', pnl.grossProfit, pnl.grand.grossProfit, { bg: 'var(--info-bg)', color: 'var(--info)' })}
                             ${marginRow('Gross Profit Margin', pnl.grossMargin, pnl.grand.grossMargin)}
 
                             ${sectionHeader('Operating Expenses')}
                             ${rowsFor(pnl.opex)}
                             ${sectionTotalRow('Total Operating Expenses', 'Operating Expenses', pnl.opex.totals, pnl.grand.opex, { bg: 'var(--danger-bg)', color: 'var(--danger)' })}
 
-                            ${totalRow('Net Profit', pnl.netProfit, pnl.grand.netProfit, { bg: '#d1fae5', color: 'var(--success)' })}
+                            ${totalRow('Net Profit', pnl.netProfit, pnl.grand.netProfit, { bg: 'var(--success-bg)', color: 'var(--success)' })}
                             ${marginRow('Net Profit Margin', pnl.netMargin, pnl.grand.netMargin)}
                         </tbody>
                     </table>

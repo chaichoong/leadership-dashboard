@@ -915,7 +915,7 @@
 
             return `<tr style="border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="toggleRentBreakdown('${breakdownId}', this)">
                 <td style="padding:10px 12px">
-                    <span style="display:inline-block;width:14px;color:var(--text-muted);font-size:10px" data-chevron>&#x25B8;</span>
+                    <span class="od-expand-chevron" data-chevron>&#x25B8;</span>
                     <span style="font-weight:600">${escHtml(entry.tenantName)}</span>
                     ${entry.unit ? `<div style="font-size:11px;color:var(--text-muted);margin-left:14px">${escHtml(entry.unit)}</div>` : ''}
                 </td>

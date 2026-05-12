@@ -1109,6 +1109,14 @@ body {
     vertical-align: middle;
 }
 
+/* ── Expand chevron (small inline toggle indicator) ── */
+.od-expand-chevron {
+    display: inline-block;
+    width: 14px;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
 /* ── Row highlight backgrounds ── */
 .od-row-danger  { background: var(--danger-bg); }
 .od-row-warning { background: var(--warning-bg); }

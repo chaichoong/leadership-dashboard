@@ -454,7 +454,7 @@
             <td style="white-space:nowrap">${statusBadge}</td>
             <td style="font-size:12px;color:var(--text-secondary)">${escHtml(e.frequency)}</td>
             <td style="font-size:12px;color:var(--text-secondary)">${accountStr}</td>
-            <td style="font-size:12px;color:var(--text-secondary);max-width:140px">${subCatStr}</td>
+            <td style="font-size:12px;color:var(--text-secondary);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${subCatStr}</td>
             <td style="white-space:nowrap">${endDateCell}</td>
             <td style="width:80px;text-align:center;white-space:nowrap">
                 <button class="od-btn od-btn-outline od-btn-sm" onclick="event.stopPropagation(); costOpenPrintStatement('${e.id}')" title="Print statement" style="margin-right:2px">🖨</button>

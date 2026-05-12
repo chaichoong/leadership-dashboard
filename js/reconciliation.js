@@ -525,7 +525,7 @@
             <td class="${cc}" style="color:var(--text-muted);font-weight:600">${i + 1}</td>
             <td class="${cc}" style="white-space:nowrap">${escHtml(r.txDate)}</td>
             <td class="${cc} muted-cell" style="white-space:nowrap">${escHtml(r.txAccount || '—')}</td>
-            <td class="${cc}" style="max-width:180px"><strong>${escHtml(r.txVendor)}</strong><br><span class="${dimClass}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
+            <td class="${cc}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><strong>${escHtml(r.txVendor)}</strong><br><span class="${dimClass}">${escHtml(r.txDesc).substring(0, 60)}</span><br>${matchBadge}</td>
             <td class="${cc} num-cell ${amtClass}" style="font-weight:600">${fmt(Math.abs(r.txAmount))}</td>
             <td class="${cc}">${catSelect}</td>
             <td class="${cc}">${subCatSelect}</td>
