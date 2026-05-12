@@ -817,9 +817,9 @@
                 return `<tr>
                     <td style="color:var(--text-muted)">${i + 1}</td>
                     <td style="color:var(--text-secondary)">${p.dateStr.split('-').reverse().join('/')}</td>
-                    <td class="truncate" title="${escHtml(p.description)}">${escHtml(p.description)}</td>
-                    <td style="color:var(--text-secondary)">${escHtml(accountName)}</td>
-                    <td class="money">${fmtMoney(p.amount)}</td>
+                    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.description)}">${escHtml(p.description)}</td>
+                    <td style="color:var(--text-secondary);white-space:nowrap">${escHtml(accountName)}</td>
+                    <td class="money" style="white-space:nowrap">${fmtMoney(p.amount)}</td>
                     <td style="position:relative">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px', saveFn(F.txCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
                     <td style="position:relative">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px', saveFn(F.txSubCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
                     <td style="position:relative">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px', saveFn(F.txTenancy))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
@@ -860,10 +860,9 @@
                     <button onclick="event.stopPropagation();rsOpenPrintStatement('${entry.tenancyId}')" style="font-size:11px;padding:4px 12px;border:1px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);color:var(--accent);cursor:pointer;font-weight:600">Print Statement</button>
                 </div>
                 <div style="grid-column:1/-1;overflow-x:auto">
-                    <table class="tx-table">
-                        <colgroup><col style="width:28px"><col style="width:80px"><col><col style="width:85px"><col style="width:70px"><col style="width:100px"><col style="width:110px"><col style="width:105px"><col style="width:90px"><col style="width:90px"></colgroup>
+                    <table class="tx-table" style="table-layout:auto">
                         <thead><tr>
-                            <th>#</th><th>Date</th><th>Description</th><th>Account</th><th class="money">Amount</th><th>Category</th><th>Sub-Category</th><th>Tenancy</th><th>Unit</th><th>Property</th>
+                            <th style="width:24px">#</th><th style="white-space:nowrap">Date</th><th>Description</th><th style="white-space:nowrap">Account</th><th class="money" style="white-space:nowrap">Amount</th><th style="white-space:nowrap">Category</th><th style="white-space:nowrap">Sub-Category</th><th style="white-space:nowrap">Tenancy</th><th style="white-space:nowrap">Unit</th><th style="white-space:nowrap">Property</th>
                         </tr></thead>
                         <tbody>${paymentRows}</tbody>
                     </table>
