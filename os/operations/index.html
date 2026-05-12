@@ -266,10 +266,10 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 
 <!-- Auth bar (only if no PAT yet) -->
 <div class="auth-bar" id="authBar" style="display:none">
-  <span style="font-size:13px;color:var(--text-secondary)">Airtable PAT:</span>
+  <span style="font-size:var(--fs-base);color:var(--text-secondary)">Airtable PAT:</span>
   <input id="patInput" type="password" placeholder="pat_xxxxxxxxxx..." autocomplete="off">
   <button onclick="saveAuth()">Connect</button>
-  <span id="authError" style="font-size:12px;color:var(--danger);display:none">Invalid token — please check and try again.</span>
+  <span id="authError" style="font-size:var(--fs-sm);color:var(--danger);display:none">Invalid token — please check and try again.</span>
 </div>
 
 <!-- Topbar -->
@@ -1889,7 +1889,7 @@ function renderTenancyDocLinks(rec){
     const dateCell  = date ? `<td style="color:var(--text-secondary);white-space:nowrap;font-size:11px;width:90px">${escapeHtml(date)}</td>` : `<td style="width:90px"></td>`;
     const labelCell = `<td style="word-break:break-word">${escapeHtml(label || '(no label)')}</td>`;
     const linkCell  = url
-      ? `<td style="text-align:right;width:120px"><a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:12px;font-weight:500;">Open in Gmail ↗</a></td>`
+      ? `<td style="text-align:right;width:120px"><a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:var(--fs-sm);font-weight:500;">Open in Gmail ↗</a></td>`
       : `<td style="text-align:right;width:120px;color:var(--text-muted);font-size:11px">no link</td>`;
     return `<tr>${dateCell}${labelCell}${linkCell}</tr>`;
   }).join('');
@@ -1897,7 +1897,7 @@ function renderTenancyDocLinks(rec){
   return `<div class="drawer-section">
     <h3>Document Links (${lines.length})</h3>
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Auto-populated by Inbound Comms when emails are filed under "11: tenancy docs". Append-only — older entries are preserved.</div>
-    <table class="breakdown-table" style="font-size:13px">
+    <table class="breakdown-table" style="font-size:var(--fs-base)">
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -1913,7 +1913,7 @@ function renderPropertyMortgageBreakdown(rec){
   if (!Array.isArray(linked) || !linked.length) {
     return `<div class="drawer-section">
       <h3>Fixed Cost Breakdown</h3>
-      <div style="font-size:12px;color:var(--text-muted)">No costs are linked to this property in Airtable. Fixed Costs / mo therefore shows blank. Link the relevant Cost records (mortgage, council tax, insurance, etc.) on the Properties table to fix.</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted)">No costs are linked to this property in Airtable. Fixed Costs / mo therefore shows blank. Link the relevant Cost records (mortgage, council tax, insurance, etc.) on the Properties table to fix.</div>
     </div>`;
   }
   const expFid      = fid('costs','expected');
@@ -2059,7 +2059,7 @@ function renderPropertyValuationHistory(propRec){
 
   // Pending review banner
   const pendingHtml = pending.length ? `
-    <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--warning)">
+    <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:var(--fs-sm);color:var(--warning)">
       <strong>${pending.length} valuation${pending.length>1?'s':''} pending review</strong>
       — open the most recent below to approve or reject.
     </div>` : '';
@@ -2191,7 +2191,7 @@ async function ensureAnthropicKey(){
   return new Promise((resolve) => {
     showAIModal(`
       <div class="ai-key-prompt">
-        <p style="font-size:13px;color:var(--text-secondary);line-height:1.5">Connect your Anthropic API key so the page can run web-search-backed property valuations. The key is stored in this browser's localStorage only — same place as your Airtable PAT.</p>
+        <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5">Connect your Anthropic API key so the page can run web-search-backed property valuations. The key is stored in this browser's localStorage only — same place as your Airtable PAT.</p>
         <input id="aiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off">
         <div style="display:flex;gap:8px;margin-top:6px">
           <button class="btn-ai" onclick="(()=>{const v=document.getElementById('aiKeyInput').value.trim();if(!v)return;setAnthropicKey(v);window.__aiKeyResolve(v);closeAIModal();})()">Save & Continue</button>
@@ -2454,7 +2454,7 @@ function showValuationReviewModal(property, result){
   // Render a single section table for one comp type.
   const renderCompSection = (rows, opts) => {
     if (!rows.length) {
-      return `<div style="padding:14px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;color:var(--text-muted);font-size:12px;text-align:center;margin-bottom:14px">No ${opts.label.toLowerCase()} returned. Use <em>Refine with feedback</em> to ask Claude to find some.</div>`;
+      return `<div style="padding:14px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;color:var(--text-muted);font-size:var(--fs-sm);text-align:center;margin-bottom:14px">No ${opts.label.toLowerCase()} returned. Use <em>Refine with feedback</em> to ask Claude to find some.</div>`;
     }
     const trs = rows.map(c => {
       // Beds tag — green-ish (default) if it matches the subject; amber if not
@@ -2485,7 +2485,7 @@ function showValuationReviewModal(property, result){
       ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:6px">median ${fmtMoneyShort(opts.median)}</span>`
       : '';
     return `
-      <h3 style="font-size:12px;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">
+      <h3 style="font-size:var(--fs-sm);text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">
         ${opts.icon} ${opts.label} (${rows.length})${medianBlurb}
       </h3>
       <table class="breakdown-table" style="margin-bottom:14px">
@@ -2520,15 +2520,15 @@ function showValuationReviewModal(property, result){
   // Two completed + two listed is enough triangulation; below that we flag.
   let warningBanner = '';
   if (completedSales.length === 0) {
-    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5"><strong>No completed sales found</strong> — estimate is anchored on current asking prices only, which usually run higher than actuals. Click <em>Refine with feedback</em> and ask for Land Registry / Rightmove Sold Prices data.</div>`;
+    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:var(--fs-sm);line-height:1.5"><strong>No completed sales found</strong> — estimate is anchored on current asking prices only, which usually run higher than actuals. Click <em>Refine with feedback</em> and ask for Land Registry / Rightmove Sold Prices data.</div>`;
   } else if (currentListings.length === 0) {
-    warningBanner = `<div style="background:var(--info-bg);color:var(--info);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5"><strong>No current listings found</strong> — estimate is anchored on completed sales only. Useful but lacks a forward-looking signal of where the market is heading.</div>`;
+    warningBanner = `<div style="background:var(--info-bg);color:var(--info);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:var(--fs-sm);line-height:1.5"><strong>No current listings found</strong> — estimate is anchored on completed sales only. Useful but lacks a forward-looking signal of where the market is heading.</div>`;
   } else if (completedSales.length < 2 || currentListings.length < 2) {
-    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.5"><strong>Thin data</strong> — only ${completedSales.length} completed sale${completedSales.length===1?'':'s'} and ${currentListings.length} current listing${currentListings.length===1?'':'s'} returned. Click <em>Refine with feedback</em> to push for more.</div>`;
+    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:var(--fs-sm);line-height:1.5"><strong>Thin data</strong> — only ${completedSales.length} completed sale${completedSales.length===1?'':'s'} and ${currentListings.length} current listing${currentListings.length===1?'':'s'} returned. Click <em>Refine with feedback</em> to push for more.</div>`;
   }
 
   const html = `
-    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:14px">${escapeHtml(displayName(property,'properties'))}</div>
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:14px">${escapeHtml(displayName(property,'properties'))}</div>
     ${warningBanner}
     <div class="ai-headline">
       <div class="val-tile"><div class="lbl">Current</div><div class="val">${fmtMoneyShort(currentValue)}</div></div>
@@ -2551,7 +2551,7 @@ function showValuationReviewModal(property, result){
     ${deltaTile}
     <div style="margin-top:14px">
       <label style="font-size:11px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px;display:block;margin-bottom:4px">Methodology / Notes <span style="font-size:9px;font-weight:400">(editable)</span></label>
-      <textarea id="aiMethodology" rows="3" style="width:100%;font-family:inherit;font-size:12px;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5">${escapeHtml(result.methodology||'')}</textarea>
+      <textarea id="aiMethodology" rows="3" style="width:100%;font-family:inherit;font-size:var(--fs-sm);padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5">${escapeHtml(result.methodology||'')}</textarea>
     </div>
     <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
@@ -2586,16 +2586,16 @@ function showFeedbackModal(propertyId){
   // Capture any edited estimate / methodology so we can warn the user
   // they're about to discard them.
   const html = `
-    <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;margin-bottom:10px">
+    <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5;margin-bottom:10px">
       Tell Claude what to do differently. Examples:
     </p>
-    <ul style="font-size:12px;color:var(--text-secondary);margin-left:18px;line-height:1.6;margin-bottom:12px">
+    <ul style="font-size:var(--fs-sm);color:var(--text-secondary);margin-left:18px;line-height:1.6;margin-bottom:12px">
       <li>"Use only Land Registry sold prices — no Rightmove listings."</li>
       <li>"Comparables on Withersfield Road and Camps Road aren't relevant — different neighbourhood."</li>
       <li>"Filter to last 6 months and at least 3 of the comps must be in postcode CB9 0."</li>
       <li>"Subject has been fully refurbished — adjust upward."</li>
     </ul>
-    <textarea id="aiFeedback" rows="5" placeholder="What should the AI do differently?" style="width:100%;font-family:inherit;font-size:13px;padding:10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5"></textarea>
+    <textarea id="aiFeedback" rows="5" placeholder="What should the AI do differently?" style="width:100%;font-family:inherit;font-size:var(--fs-base);padding:10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5"></textarea>
     <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
       <button class="btn-ai" onclick="(()=>{const f=document.getElementById('aiFeedback').value.trim();if(!f){toast('Add some feedback first','error');return;}closeAIModal();runAIValuation('${propertyId}',{feedback:f})})()">Re-run with feedback</button>
@@ -2681,7 +2681,7 @@ function showProxySetupModal(propertyId){
   const current = localStorage.getItem('_anthropic_proxy_url') || '';
   showAIModal(`
     <div class="ai-key-prompt">
-      <p style="font-size:13px;color:var(--text-secondary);line-height:1.5">
+      <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5">
         Once you've deployed the Worker (file: <code>cloudflare-worker/anthropic-proxy.js</code>),
         paste its URL here. It looks like <code>https://anthropic-proxy.&lt;your-account&gt;.workers.dev</code>.
         Leave blank to clear and call api.anthropic.com directly again.
@@ -2735,7 +2735,7 @@ async function testAnthropicKey(propertyId){
       <div style="background:var(--success-bg);color:var(--success);padding:14px;border-radius:8px;margin-bottom:14px">
         <strong>API key works.</strong> Anthropic responded: <code>${escapeHtml(text || '(empty)')}</code>
       </div>
-      <p style="font-size:13px;color:var(--text-secondary);line-height:1.5;margin-bottom:14px">If the full valuation still fails, the issue is specific to the <code>web_search</code> tool. Web search may need to be enabled on your account, or your key may not have access to that beta. Check <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> → Settings → Web Search.</p>
+      <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5;margin-bottom:14px">If the full valuation still fails, the issue is specific to the <code>web_search</code> tool. Web search may need to be enabled on your account, or your key may not have access to that beta. Check <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> → Settings → Web Search.</p>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn-secondary" onclick="closeAIModal()">Close</button>
         ${propertyId ? `<button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')">Run full valuation</button>` : ''}
@@ -2890,7 +2890,7 @@ function openSchemaInspector(){
     `;
     const unusedTable = unusedFields.length ? `
       <details style="margin-bottom:24px">
-        <summary style="cursor:pointer;font-size:12px;color:var(--text-secondary);margin-bottom:8px">▸ ${unusedFields.length} other fields on this table (not currently shown)</summary>
+        <summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:8px">▸ ${unusedFields.length} other fields on this table (not currently shown)</summary>
         <table class="schema-table">
           <thead><tr><th>Airtable field</th><th>Type</th></tr></thead>
           <tbody>
