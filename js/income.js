@@ -288,7 +288,7 @@
         const tableBodyEl = document.getElementById('incomeTableBody');
         if (tableBodyEl) {
             if (sorted.length === 0) {
-                tableBodyEl.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:32px">No income sources match your filters.</td></tr>`;
+                tableBodyEl.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:32px">No income sources match your filters.</td></tr>`;
             } else {
                 tableBodyEl.innerHTML = sorted.map((e, idx) => renderIncomeRow(e, idx)).join('');
             }
@@ -380,7 +380,6 @@
             <td>${statusBadge}${cfvLink}</td>
             <td>${payTypeBadge}</td>
             <td style="font-size:12px;color:var(--text-secondary)">${escHtml(e.frequency)}</td>
-            <td></td>
         </tr>`;
     }
 
@@ -443,7 +442,7 @@
                 : '';
             return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-subtle)">
                 <span style="flex:1;font-size:13px;font-weight:500;color:var(--text-primary)">${escHtml(key)}</span>
-                <span style="font-size:12px;color:var(--text-muted)">${data.count} sources${cfvNote}</span>
+                <span style="font-size:12px;color:var(--text-muted)">${data.count} ${data.count === 1 ? 'source' : 'sources'}${cfvNote}</span>
                 <span style="font-size:13px;font-weight:600;color:var(--text-primary);min-width:80px;text-align:right">${fmt(data.total)}</span>
                 <span style="font-size:11px;color:var(--text-muted);min-width:40px;text-align:right">${pctNum}%</span>
                 <div style="width:80px;height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden">
