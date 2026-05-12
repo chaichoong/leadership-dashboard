@@ -3044,6 +3044,8 @@ function renderExpandContent(entityKey, recId){
   const visible = showAll ? txs : txs.slice(0, MAX_SHOW);
 
   const reconBadge = (val) => {
+    if (val === true)  return '<span class="badge badge-active">Reconciled</span>';
+    if (val === false) return '<span class="badge badge-warning">Unreconciled</span>';
     if (!val) return '<span class="badge badge-info">—</span>';
     const v = Array.isArray(val) ? (val[0]?.name || val[0]) : (typeof val === 'object' ? val?.name : val);
     const s = String(v || '').toLowerCase();
