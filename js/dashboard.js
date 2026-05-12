@@ -581,7 +581,7 @@
             })();
             // Business pill — sits under the project name, same spirit as category chips elsewhere.
             const businessPill=p.business
-                ? `<span style="display:inline-block;font-size:var(--fs-xs);font-weight:var(--fw-medium);color:var(--text-secondary);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full);letter-spacing:0.01em">${escHtml(p.business)}</span>`
+                ? `<span class="od-status-badge neutral" style="letter-spacing:0.01em">${escHtml(p.business)}</span>`
                 : `<span style="display:inline-block;font-size:var(--fs-xs);color:var(--text-muted);font-style:italic">No business</span>`;
             // Staleness / auto indicator — now uses success/danger/text tokens.
             let stamp='';
@@ -667,11 +667,11 @@
             const row=t=>`<tr style="border-top:1px solid #f1f5f9"><td style="padding:6px 8px;color:var(--text-primary)">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-secondary)">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
             const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
                 <div style="font-weight:600;color:${color};margin-bottom:6px">${title} · ${list.length} task${list.length===1?'':'s'}</div>
-                ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:12px">None</div>'}
+                ${list.length?`<table class="od-table"><thead><tr><th>Task</th><th>Status</th><th>Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:12px">None</div>'}
             </div>`;
             el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <div><strong>${escHtml(label)}</strong> · ${escHtml(detail.label||'')}</div>
-                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid var(--border-default);padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" class="od-btn-outline">Close ▴</button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
                 <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--accent-hover);font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:var(--accent-hover)">${detail.completedCount||0}</div></div>
@@ -705,7 +705,7 @@
             const rows=list.map(t=>{
                 const isReversal=kind==='revenue'?t.amount<0:t.amount>0;
                 const rowBg=isReversal?'background:#fef9c3':'';
-                const reversalTag=isReversal?'<span style="font-size:10px;color:#a16207;background:#fde68a;padding:1px 5px;border-radius:3px;margin-right:4px">REVERSAL</span>':'';
+                const reversalTag=isReversal?'<span class="od-status-badge warning" style="margin-right:4px">REVERSAL</span>':'';
                 const cellFor=(col,isFirst)=>{
                     const tag=isFirst?reversalTag:'';
                     if(col==='date')return `<td style="padding:6px 8px;white-space:nowrap;color:var(--text-secondary);font-family:ui-monospace,Menlo,monospace;font-size:11px">${escHtml(t.date||'')}</td>`;
@@ -723,14 +723,14 @@
             const totalCount=kind==='revenue'?(detail.revCount||list.length):(detail.costCount||list.length);
             const authTotal=kind==='revenue'?(detail.revenue||0):(detail.costs||0);
             const isTruncated=totalCount>list.length;
-            const truncNote=isTruncated?` <span style="font-size:10px;color:var(--text-muted)">(showing ${list.length} of ${totalCount})</span>`:'';
+            const truncNote=isTruncated?` <span class="od-text-muted-sm">(showing ${list.length} of ${totalCount})</span>`:'';
             return `<div style="margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border-default);border-radius:6px">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
                     <div style="font-weight:600;color:${color}">${title} · ${totalCount} tx · Total ${fmtAmt(authTotal)}${truncNote}</div>
                 </div>
-                <table style="width:100%;border-collapse:collapse;font-size:12px">
-                    <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">
-                        ${columns.map(c=>`<th style="padding:4px 8px;text-align:${c==='amount'?'right':'left'}">${headerFor[c]||c}</th>`).join('')}
+                <table class="od-table">
+                    <thead><tr>
+                        ${columns.map(c=>`<th style="${c==='amount'?'text-align:right':''}">${headerFor[c]||c}</th>`).join('')}
                     </tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
@@ -738,7 +738,7 @@
         };
         el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <div><strong>${escHtml(label)}</strong> · Window: ${escHtml(detail.windowStart||'-')} → ${escHtml(detail.windowEnd||'-')}</div>
-                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" style="background:none;border:1px solid var(--border-default);padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">Close ▴</button>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" class="od-btn-outline">Close ▴</button>
             </div>
             <div style="display:grid;grid-template-columns:${displayHint.hideCosts?'1fr':'1fr 1fr 1fr'};gap:10px;margin-bottom:10px">
                 <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--accent-hover);font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:var(--accent-hover)">${fmtAmt(detail.revenue)}</div></div>
@@ -1297,13 +1297,13 @@
                     <div class="progress-bar-fill ${ocOnTrack ? 'green' : 'amber'}" style="width:${Math.min(Number(ocProgressPct), 100)}%"></div>
                 </div>
                 <div class="kpi-card-detail">
-                    <div style="font-size:12px;color:var(--text-secondary)">
-                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Maintenance budget</span><span>${fmt(MAINT_TARGET_GBP)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Wages budget</span><span>${fmt(WAGES_TARGET_GBP)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>CFV allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
-                        <div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px;font-weight:600;color:var(--text-primary)"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
+                    <div>
+                        <div class="od-breakdown-row"><span>Maintenance budget</span><span>${fmt(MAINT_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row"><span>Wages budget</span><span>${fmt(WAGES_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row"><span>CFV allowance</span><span>${fmt(CFV_TARGET_GBP)}</span></div>
+                        <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px"><span>Variable cost reserve</span><span style="font-weight:600">${fmt(variableCostReserve)}</span></div>
+                        <div class="od-breakdown-row"><span>Clear profit target</span><span style="font-weight:600">${fmt(CLEAR_PROFIT_TARGET)}</span></div>
+                        <div class="od-breakdown-row" style="border-top:1px solid var(--border-default);margin-top:4px;padding-top:4px;font-weight:600;color:var(--text-primary)"><span>Required operating cushion</span><span>${fmt(requiredOperatingCushion)}</span></div>
                     </div>
                 </div>
             </div>
@@ -1510,10 +1510,10 @@
 
             const paymentLines = p.payments.map(pay => {
                 const dueBadge = pay.dueDate
-                    ? `<span style="background:var(--danger-bg);color:var(--danger);font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">due ${pay.dueDate.toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span>`
+                    ? `<span class="od-status-badge danger" style="margin-left:6px">due ${pay.dueDate.toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span>`
                     : '';
                 const minBadge = pay.isMinimum
-                    ? `<span style="background:var(--warning-bg);color:var(--warning);font-size:10px;padding:1px 6px;border-radius:3px;margin-left:6px">min. payment</span>`
+                    ? `<span class="od-status-badge warning" style="margin-left:6px">min. payment</span>`
                     : '';
                 return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;color:var(--text-secondary);">
                     <span>${escHtml(pay.name)}${dueBadge}${minBadge}</span>
@@ -1550,26 +1550,26 @@
         const wagesStatus = wagesSpend < WAGES_TARGET_GBP ? 'green' : wagesSpend <= WAGES_TARGET_GBP * 1.1 ? 'amber' : 'red';
 
         document.getElementById('aiCommentary').innerHTML = `
-            <h3 style="color:var(--text-primary);font-size:15px;margin:0 0 8px">Financial Health</h3>
+            <h3 class="od-section-header" style="font-size:15px">Financial Health</h3>
             <p>The portfolio generates ${fmt(inPaymentIncome)} confirmed monthly income (In Payment) with a further ${fmt(cfvActionedIncome)} from ${cfvActionedCount} CFV Actioned tenancies, giving a best-case total of ${fmt(monthlyIncome)}. Against ${fmt(monthlyCosts)} in fixed costs, the operating cushion margin ranges from ${operatingCushionMarginLow}% to ${operatingCushionMarginHigh}%. ${Number(operatingCushionMarginHigh) >= 40 ? 'The upper range is healthy.' : 'Margins are tight — cost reduction or occupancy gains are needed.'}</p>
 
-            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Operating Cushion Target</h3>
+            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Operating Cushion Target</h3>
             <p>Target operating cushion: ${fmt(requiredOperatingCushion)}/month (${fmt(CLEAR_PROFIT_TARGET)} clear profit + ${fmt(variableCostReserve)} variable costs: ${fmt(MAINT_TARGET_GBP)} maintenance, ${fmt(WAGES_TARGET_GBP)} wages, ${fmt(CFV_TARGET_GBP)} CFV allowance). Current best-case operating cushion is ${fmt(operatingCushionHigh)} — ${ocOnTrack ? `a surplus of ${fmt(operatingCushionHigh - requiredOperatingCushion)} above target. You are on track.` : `a shortfall of ${fmt(requiredOperatingCushion - operatingCushionHigh)} (${ocProgressPct}% of target). Focus on filling voids and converting CFVs to close the gap.`}</p>
 
-            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
+            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Operational Performance (31-Day)</h3>
             <p>Actual rental income over 31 days: ${fmt(rentalInc30)}. Maintenance spend of ${fmt(maintSpend)} is ${maintStatus === 'green' ? 'under' : maintStatus === 'amber' ? 'on' : 'over'} the ${fmt(MAINT_TARGET_GBP)} budget${maintStatus === 'red' ? ' — investigate whether reactive costs can shift to planned maintenance' : ''}. Wages at ${fmt(wagesSpend)} are ${wagesStatus === 'green' ? 'under' : wagesStatus === 'amber' ? 'on' : 'over'} the ${fmt(WAGES_TARGET_GBP)} budget.</p>
 
-            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Occupancy &amp; Voids</h3>
+            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Occupancy &amp; Voids</h3>
             <p>Occupancy is ${occupancyRate}% with ${voidUnits.length} void${voidUnits.length !== 1 ? 's' : ''}. Each void costs roughly £${voidCostPerMonth}/month in lost income. ${voidUnits.length > 0 ? `Filling ${Math.min(3, voidUnits.length)} void${Math.min(3, voidUnits.length) !== 1 ? 's' : ''} would add ${fmt(Math.min(3, voidUnits.length) * Number(voidCostPerMonth))}/month — the highest-ROI lever available.` : 'Full occupancy — excellent.'}</p>
 
-            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">CFV Risk</h3>
+            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">CFV Risk</h3>
             <p>CFV exposure is ${fmt(cfvExposure)} against a ${fmt(CFV_TARGET_GBP)} monthly allowance (${cfvExposure <= CFV_TARGET_GBP ? 'within budget' : 'over budget by ' + fmt(cfvExposure - CFV_TARGET_GBP)}). ${cfvTenancies.length > 0 ? `${cfvTenancies.length} remain unactioned (${fmt(cfvUnactioned)}) — actioning these improves income certainty.` : 'All CFVs actioned — good.'}</p>
 
-            <h3 style="color:var(--text-primary);font-size:15px;margin:16px 0 8px">Quick Wins</h3>
+            <h3 class="od-section-header" style="font-size:15px;margin:16px 0 8px">Quick Wins</h3>
             <p>${voidUnits.length > 0 ? '(1) Fill voids — biggest revenue impact per action. ' : ''}${cfvTenancies.length > 0 ? `(${voidUnits.length > 0 ? '2' : '1'}) Action ${cfvTenancies.length} unactioned CFV${cfvTenancies.length !== 1 ? 's' : ''} to secure ${fmt(cfvUnactioned)}/month. ` : ''}${maintStatus !== 'green' ? `(${(voidUnits.length > 0 ? 1 : 0) + (cfvTenancies.length > 0 ? 1 : 0) + 1}) Reduce maintenance from ${fmt(maintSpend)} to below ${fmt(MAINT_TARGET_GBP)} budget. ` : ''}Monitor cash flow pinch points around mortgage payment clusters (typically days 1-6).</p>
 
             <hr style="border:none;border-top:1px solid #cbd5e1;margin:20px 0;">
-            <h3 style="color:var(--text-primary);font-size:16px;margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
+            <h3 class="od-section-header" style="font-size:16px;margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
             <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong> across ${ccRepaymentPlan.cards.length} card${ccRepaymentPlan.cards.length !== 1 ? 's' : ''}.</p>
             <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
             <div style="margin-bottom:16px">

@@ -403,7 +403,7 @@
 
             let gitCell;
             if (!gs) {
-                gitCell = '<span style="color:var(--text-muted);font-size:11px">Not checked</span>';
+                gitCell = '<span class="od-text-muted-sm">Not checked</span>';
             } else {
                 const pageStr = gs.pageDate ? fmtRelative(gs.pageDate) : (gs.state === 'no-source' ? 'no source tracked' : '—');
                 const sopStr = gs.sopDate ? fmtRelative(gs.sopDate) : (gs.state === 'no-sop' ? 'no SOP' : '—');
@@ -442,19 +442,19 @@
                 let lines = headline;
                 // Sub-line: declared tag (if we have git data) + date + drift.
                 if (gs && typeof gs.pageCount === 'number') {
-                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">tag ${escHtml(p.pageVer)}</div>`;
+                    lines += `<div class="od-text-muted-sm" style="margin-top:1px">tag ${escHtml(p.pageVer)}</div>`;
                 }
                 if (gs && gs.pageDate) {
                     const col = gs.state === 'stale' ? 'var(--danger)' : 'var(--text-muted)';
-                    lines += `<div style="font-size:10px;color:${col};margin-top:1px">${fmtRelative(gs.pageDate)}</div>`;
+                    lines += `<div class="od-text-muted-sm" style="color:${col};margin-top:1px">${fmtRelative(gs.pageDate)}</div>`;
                 }
                 if (gs && gs.state === 'stale' && typeof gs.driftCount === 'number' && gs.driftCount > 0) {
-                    lines += `<div style="font-size:10px;color:var(--danger);font-weight:600;margin-top:1px" title="page-source commits since SOP was last written">⚠ ${gs.driftCount} improvement${gs.driftCount === 1 ? '' : 's'} behind</div>`;
+                    lines += `<div class="od-text-muted-sm" style="color:var(--danger);font-weight:600;margin-top:1px" title="page-source commits since SOP was last written">⚠ ${gs.driftCount} improvement${gs.driftCount === 1 ? '' : 's'} behind</div>`;
                 }
                 if (gs && gs.state === 'no-source') {
-                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">no tracked src</div>`;
+                    lines += `<div class="od-text-muted-sm" style="margin-top:1px">no tracked src</div>`;
                 } else if (gs && gs.errors.length && !gs.pageDate) {
-                    lines += `<div style="font-size:10px;color:var(--warning);margin-top:1px">? unknown</div>`;
+                    lines += `<div class="od-text-muted-sm" style="color:var(--warning);margin-top:1px">? unknown</div>`;
                 }
                 return lines;
             })();
@@ -467,14 +467,14 @@
                 }
                 let lines = headline;
                 if (gs && typeof gs.sopCount === 'number') {
-                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">tag ${escHtml(p.sopVer)}</div>`;
+                    lines += `<div class="od-text-muted-sm" style="margin-top:1px">tag ${escHtml(p.sopVer)}</div>`;
                 }
                 if (gs && gs.sopDate) {
-                    lines += `<div style="font-size:10px;color:var(--text-muted);margin-top:1px">${fmtRelative(gs.sopDate)}</div>`;
+                    lines += `<div class="od-text-muted-sm" style="margin-top:1px">${fmtRelative(gs.sopDate)}</div>`;
                 } else if (gs && !p.sopFile) {
-                    lines += `<div style="font-size:10px;color:var(--danger);font-weight:600;margin-top:1px">needs SOP</div>`;
+                    lines += `<div class="od-text-muted-sm" style="color:var(--danger);font-weight:600;margin-top:1px">needs SOP</div>`;
                 } else if (gs && gs.errors.length && !gs.sopDate) {
-                    lines += `<div style="font-size:10px;color:var(--warning);margin-top:1px">? unknown</div>`;
+                    lines += `<div class="od-text-muted-sm" style="color:var(--warning);margin-top:1px">? unknown</div>`;
                 }
                 return lines;
             })();
@@ -485,7 +485,7 @@
                 <td style="text-align:center">${pageVerCell}</td>
                 <td><a href="#${escHtml(p.id)}" onclick="switchTab('${escJs(p.id)}')" style="font-size:12px">Open</a></td>
                 <td style="font-size:11px"><a href="${escHtml(p.standalone)}" target="_blank">${escHtml(p.standalone)}</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.standalone)}')">Copy</button></td>
-                <td>${p.sopFile ? `<a href="${escHtml(p.sopFile)}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.sopFile)}')">Copy</button>` : '<span style="color:var(--text-muted);font-size:11px">no SOP</span>'}</td>
+                <td>${p.sopFile ? `<a href="${escHtml(p.sopFile)}" target="_blank" style="font-size:12px">Open SOP</a> <button class="sitemap-copy" onclick="event.stopPropagation();copyLink('${escJs(p.sopFile)}')">Copy</button>` : '<span class="od-text-muted-sm">no SOP</span>'}</td>
                 <td style="text-align:center">${sopVerCell}</td>
                 <td style="text-align:center">${statusHtml}</td>
                 <td>${gitCell}</td>
@@ -529,8 +529,8 @@
             if (!gitSyncData) {
                 gitCard = `<div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                     <div class="kpi-card-label">Git Sync (real)</div>
-                    <div style="font-size:20px;font-weight:700;color:var(--text-muted)">—</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">Not checked yet</div>
+                    <div class="od-metric-value" style="color:var(--text-muted)">—</div>
+                    <div class="od-metric-label" style="margin-top:2px">Not checked yet</div>
                 </div>`;
                 gitBtn = `<button class="cfv-action-btn primary" onclick="runGitSyncCheck(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Check Git Sync</button>`;
             } else {
@@ -553,8 +553,8 @@
                 const authSuffix = gitHubAuthed ? ' · 🔑 auth' : '';
                 gitCard = `<div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                     <div class="kpi-card-label">Git Sync (real)</div>
-                    <div style="font-size:20px;font-weight:700;color:${colour}">${bigNum}</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${subline} · checked ${fetchedRel}${gitSyncData.rateLimited ? ' · <strong style="color:var(--warning)">rate-limited</strong>' : ''}${authSuffix}</div>
+                    <div class="od-metric-value" style="color:${colour}">${bigNum}</div>
+                    <div class="od-metric-label" style="margin-top:2px">${subline} · checked ${fetchedRel}${gitSyncData.rateLimited ? ' · <strong style="color:var(--warning)">rate-limited</strong>' : ''}${authSuffix}</div>
                 </div>`;
                 gitBtn = `<button class="cfv-action-btn" onclick="clearGitSyncCache();runGitSyncCheck(this)" style="font-size:11px;padding:8px 16px;margin-top:8px">Re-check Git Sync</button>`;
             }
@@ -563,15 +563,15 @@
                 <div style="display:flex;gap:16px;align-items:stretch;flex-wrap:wrap">
                     <div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                         <div class="kpi-card-label">Pages</div>
-                        <div style="font-size:20px;font-weight:700">${total}</div>
+                        <div class="od-metric-value">${total}</div>
                     </div>
                     <div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                         <div class="kpi-card-label">SOPs</div>
-                        <div style="font-size:20px;font-weight:700">${total}</div>
+                        <div class="od-metric-value">${total}</div>
                     </div>
                     <div class="kpi-card" style="flex:1;min-width:160px;padding:12px 16px">
                         <div class="kpi-card-label">Version Sync (declared)</div>
-                        <div style="font-size:20px;font-weight:700;color:${allGood ? 'var(--success)' : 'var(--warning)'}">${matched}/${total} ${allGood ? '✓' : '⚠'}</div>
+                        <div class="od-metric-value" style="color:${allGood ? 'var(--success)' : 'var(--warning)'}">${matched}/${total} ${allGood ? '✓' : '⚠'}</div>
                     </div>
                     ${gitCard}
                 </div>

@@ -512,8 +512,8 @@
             return `<tr>
                 <td style="font-weight:600">${entry.tenantId
                     ? `<a href="#" onclick="event.preventDefault();event.stopPropagation();cfvNavToTenant('${entry.tenantId}')" style="color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent)" title="View in Operations">${escHtml(entry.surname)}</a>`
-                    : escHtml(entry.surname)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.ref)}</span></td>
-                <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span style="font-size:10px;color:var(--text-muted)">${escHtml(entry.unitName)}</span></td>
+                    : escHtml(entry.surname)}<br><span class="od-text-muted-sm">${escHtml(entry.ref)}</span></td>
+                <td style="font-size:12px">${escHtml(entry.propertyName)}<br><span class="od-text-muted-sm">${escHtml(entry.unitName)}</span></td>
                 <td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${fmt(entry.rent)}</td>
                 <td style="text-align:center">${entry.dueDay || '—'}</td>
                 <td style="text-align:center;font-weight:700;color:${entry.daysOverdue > 7 ? 'var(--danger)' : entry.daysOverdue > 3 ? 'var(--warning)' : 'var(--text-primary)'}">${entry.daysOverdue}</td>

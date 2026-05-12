@@ -395,7 +395,7 @@
 
             // Account tag helper
             const acctTag = (acct) => acct
-                ? `<span style="font-size:10px;background:var(--bg-subtle);color:var(--text-secondary);padding:1px 6px;border-radius:3px;margin-left:6px;white-space:nowrap">${escHtml(acct)}</span>`
+                ? `<span class="od-text-muted-sm" style="background:var(--bg-subtle);padding:1px 6px;border-radius:3px;margin-left:6px;white-space:nowrap;color:var(--text-secondary)">${escHtml(acct)}</span>`
                 : '';
 
             const inflowsHtml = r.inflows.length > 0
@@ -429,7 +429,7 @@
                     <td class="text-red">-${fmt(r.dayOut)}</td>
                     <td class="${r.net >= 0 ? 'text-green' : 'text-red'}">${r.net >= 0 ? '+' : '-'}${fmt(r.net)}</td>
                     <td class="${closingClass}"><strong>${fmtAccounting(r.closing)}</strong></td>
-                    <td style="font-size:11px;color:var(--text-secondary);white-space:nowrap">${acctSummary}</td>
+                    <td class="od-text-muted-sm" style="white-space:nowrap">${acctSummary}</td>
                 </tr>
                 <tr class="cashflow-table-row-detail" id="cfrow-${i}">
                     <td colspan="7"><div class="cashflow-detail-list">
@@ -525,7 +525,7 @@
                         display: true,
                         labels: {
                             color: textPrimary,
-                            font: { size: 12, family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+                            font: { size: 12, family: cv('--font-family-base', 'Inter, sans-serif') },
                             padding: 15,
                         }
                     },
@@ -756,7 +756,7 @@
     function renderCalcList(checkedSet) {
         const list = document.getElementById('calcTxList');
         if (!calcItems.length) {
-            list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:20px;text-align:center">No forecast items found</div>';
+            list.innerHTML = '<div class="od-text-muted-sm" style="padding:20px;text-align:center">No forecast items found</div>';
             return;
         }
         list.innerHTML = calcItems.map((item, i) => {
@@ -764,8 +764,8 @@
             const prefix = item.isInflow ? '+' : '-';
             const isChecked = checkedSet && checkedSet.has(i) ? ' checked' : '';
             const typeTag = item.isInflow
-                ? '<span style="font-size:10px;background:var(--success-bg);color:var(--success);padding:1px 5px;border-radius:3px;margin-left:6px">Inflow</span>'
-                : '<span style="font-size:10px;background:var(--danger-bg);color:var(--danger);padding:1px 5px;border-radius:3px;margin-left:6px">Outflow</span>';
+                ? '<span class="od-status-badge success" style="margin-left:6px">Inflow</span>'
+                : '<span class="od-status-badge danger" style="margin-left:6px">Outflow</span>';
             return `<div class="calc-tx-item">
                 <input type="checkbox" class="calc-tx-cb" id="calc-cb-${i}" data-idx="${i}"${isChecked} onchange="updateCalcTotals()">
                 <span class="calc-tx-date">${escHtml(item.dateStr)}</span>
