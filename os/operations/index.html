@@ -875,7 +875,7 @@ async function refreshAll(initial=false){
     setSync(`Synced — ${new Date().toLocaleTimeString()}`);
     _opsDataReady = true;
     _tryPendingCrossNav();
-    loadTransactionsBackground();
+    loadTransactionsBackground(!initial);
 
     // ── Sync Bar + Health Checks ──
     if (typeof registerSyncBar === 'function') {
@@ -2923,6 +2923,46 @@ function closeSchemaInspector(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// IndexedDB cache for transactions (reuses dashboard's DB, separate key)
+// ═══════════════════════════════════════════════════════════════════════
+const OPS_IDB_NAME  = '_dlr_cache';
+const OPS_IDB_STORE = 'kv';
+const OPS_TX_CACHE_KEY = 'ops_transactions';
+const OPS_TX_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+
+let _opsIdbPromise = null;
+function _opsOpenIDB(){
+  if (_opsIdbPromise) return _opsIdbPromise;
+  _opsIdbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('IDB unsupported')); return; }
+    const req = indexedDB.open(OPS_IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(OPS_IDB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IDB open blocked'));
+  });
+  return _opsIdbPromise;
+}
+function _opsIdbGet(key){
+  return _opsOpenIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(OPS_IDB_STORE, 'readonly');
+    const req = tx.objectStore(OPS_IDB_STORE).get(key);
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  }));
+}
+function _opsIdbSet(key, value){
+  return _opsOpenIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(OPS_IDB_STORE, 'readwrite');
+    tx.objectStore(OPS_IDB_STORE).put(value, key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  }));
+}
+
+// Only fetch the 8 fields we actually use
+const TX_FIELDS = [TX.date, TX.amount, TX.description, TX.category, TX.reconciled, TX.tenancy, TX.unit, TX.property];
+
 // Transaction lookups — pre-index by tenancy, unit, property for fast expand
 // ═══════════════════════════════════════════════════════════════════════
 const TX_BY_TENANCY  = {};
@@ -2966,15 +3006,11 @@ function getLinkedTransactions(entityKey, recId){
   return [];
 }
 
-async function loadTransactionsBackground(){
-  if (_txLoaded) return;
-  _txLoadPromise = fetchAllRecords(TABLE.transactions);
-  const tx = await _txLoadPromise;
+function _applyTransactions(tx){
   DATA.transactions = tx;
   INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
   buildTxLookups();
   _txLoaded = true;
-  // Re-render any currently expanded row
   for (const [ek, rid] of Object.entries(_expandedRow)) {
     if (!rid) continue;
     const expTr = document.getElementById('exp-' + rid);
@@ -2983,6 +3019,34 @@ async function loadTransactionsBackground(){
       td.innerHTML = `<div class="expand-content">${renderExpandContent(ek, rid)}</div>`;
     }
   }
+}
+
+async function loadTransactionsBackground(forceRefresh = false){
+  if (_txLoaded && !forceRefresh) return;
+
+  // 1. Try IndexedDB cache first (instant)
+  if (!forceRefresh) {
+    try {
+      const cached = await _opsIdbGet(OPS_TX_CACHE_KEY);
+      if (cached && cached.savedAt && cached.data) {
+        const age = Date.now() - cached.savedAt;
+        if (age < OPS_TX_CACHE_TTL) {
+          _applyTransactions(cached.data);
+          return;
+        }
+      }
+    } catch(e) { /* cache miss, proceed to fetch */ }
+  }
+
+  // 2. Fetch from Airtable with only the fields we need
+  const fieldParams = {};
+  TX_FIELDS.forEach((fid, i) => { fieldParams[`fields[${i}]`] = fid; });
+  _txLoadPromise = fetchAllRecords(TABLE.transactions, { params: fieldParams });
+  const tx = await _txLoadPromise;
+  _applyTransactions(tx);
+
+  // 3. Save to IndexedDB for next load
+  try { await _opsIdbSet(OPS_TX_CACHE_KEY, { savedAt: Date.now(), data: tx }); } catch(e) { /* non-critical */ }
 }
 
 function sortTransactionsByDate(txs){
