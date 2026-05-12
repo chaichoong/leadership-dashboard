@@ -476,7 +476,7 @@ const SCHEMA = {
   properties: {
     label: 'Properties', singular: 'Property',
     fields: [
-      { key:'name',         label:'Property',     exact:['Property Name','Name','Property Address','Address','Full Address','Property'],                                                             type:'text',    edit:true,  width:'170px' },
+      { key:'name',         label:'Property',     primary:true, fixedId:'fldy2t735TV5e1DIL',                                                                                                        type:'text',    edit:true,  width:'170px' },
       { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true,  width:'85px' },
       { key:'beds',         label:'Beds',         exact:['No. of Bedrooms','Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds','# of Beds'], keywords:['beds','bedrooms'],          type:'number',  edit:true,  width:'42px' },
       { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units', width:'120px' },
@@ -724,6 +724,9 @@ async function fetchAllRecords(tableId, opts={}){
 // fields only — otherwise a money column literally named "Monthly Mortgage
 // Payment" can outrank the actual link field that points at the cost record.
 function resolveField(def, allFields, primaryFieldId){
+  if (def.fixedId) {
+    return allFields.find(f => f.id === def.fixedId) || null;
+  }
   if (def.primary && !def.exact && !def.keywords) {
     return allFields.find(f => f.id === primaryFieldId) || null;
   }
@@ -743,7 +746,6 @@ function resolveField(def, allFields, primaryFieldId){
     });
     if (f) return f;
   }
-  if (def.primary) return allFields.find(f => f.id === primaryFieldId) || null;
   return null;
 }
 
@@ -862,6 +864,7 @@ async function refreshAll(initial=false){
     DATA.tenancies    = tc;
     DATA.units        = un;
     DATA.properties   = pr;
+    if (pr.length) { const _r = pr[0]; console.log('[OPS] Property sample:', _r.id, 'fields:', Object.keys(_r.fields).length, 'name(fldy2t735TV5e1DIL):', _r.fields['fldy2t735TV5e1DIL']); }
     DATA.costs        = cs;
     DATA.valuations   = vl;
     DATA.categories   = cat;
