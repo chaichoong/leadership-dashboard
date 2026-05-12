@@ -104,7 +104,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="finance" data-tabs="income,costs,invoices,pnl,transactions,fintable">
+            <div class="sidebar-section" data-section="finance" data-tabs="income,ar-variable,costs,invoices,pnl,transactions,fintable">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('finance')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('finance')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Finance</span>
@@ -112,6 +112,7 @@
                 </div>
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('income')}"><span class="sidebar-icon">&#x1F4B7;</span><span class="sidebar-label">Accounts Receivable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="income" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ar-variable')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ar-variable')}"><span class="sidebar-icon">&#x1F4E4;</span><span class="sidebar-label">Accounts Receivable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="ar-variable" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('costs')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('costs')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Accounts Payable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="costs" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('invoices')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('invoices')}"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Accounts Payable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('pnl')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('pnl')}"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
@@ -396,6 +397,78 @@
             <div class="section">
                 <h3 class="section-title" style="font-size:14px">AI Analysis</h3>
                 <div id="incomeAIAnalysis"></div>
+            </div>
+        </div>
+
+        <!-- Tab: Accounts Receivable Variable -->
+        <div class="tab-panel" id="tab-ar-variable">
+            <div data-sync-bar="ar-variable"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Receivable Variable</h2>
+                    <span id="arvRefreshedAt" style="font-size:12px;color:var(--text-muted)"></span>
+                </div>
+                <div class="cards-grid" id="arvSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Sort:
+                        <select id="arvSortBy" onchange="renderARVariableTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="due-date">Due Date (soonest first)</option>
+                            <option value="due-date-desc">Due Date (latest first)</option>
+                            <option value="amount-desc">Amount (high to low)</option>
+                            <option value="amount-asc">Amount (low to high)</option>
+                            <option value="customer">Customer (A to Z)</option>
+                            <option value="status">Status</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Status:
+                        <select id="arvStatusFilter" onchange="renderARVariableTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="unpaid">Unpaid (Sent + Overdue)</option>
+                            <option value="sent">Sent</option>
+                            <option value="overdue">Overdue</option>
+                            <option value="paid">Paid</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px">
+                        Business:
+                        <select id="arvBusinessFilter" onchange="renderARVariableTab()" style="font-size:12px;padding:2px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)">
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
+                        Search:
+                        <input id="arvFilterText" type="text" placeholder="Search customer, invoice, amount, ref..." oninput="renderARVariableTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <div class="invoice-table-wrapper">
+                    <div id="arvLoadingSpinner" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:12px">
+                        <div style="width:36px;height:36px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:arv-spin 0.8s linear infinite"></div>
+                        <span id="arvLoadingMessage" style="font-size:13px;color:var(--text-muted);font-weight:500">Loading outbound invoices...</span>
+                        <button id="arvLoadingRetryBtn" onclick="forceARVRefresh()" style="margin-top:8px;padding:8px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:6px;cursor:pointer;display:none">Force Refresh from Airtable</button>
+                        <style>@keyframes arv-spin { to { transform: rotate(360deg); } }</style>
+                    </div>
+                    <table class="invoice-table" id="arvTable" style="display:none">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;text-align:center">#</th>
+                                <th>Customer</th>
+                                <th>Invoice No.</th>
+                                <th>Description</th>
+                                <th style="text-align:right">Amount</th>
+                                <th>Date Sent</th>
+                                <th>Due Date</th>
+                                <th>Status</th>
+                                <th>Business</th>
+                                <th>Days Overdue</th>
+                            </tr>
+                        </thead>
+                        <tbody id="arvTableBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -732,6 +805,7 @@
     <script defer src="js/sitemap.js?v=25"></script>
     <script defer src="js/income.js?v=1"></script>
     <script defer src="js/costs.js?v=13"></script>
+    <script defer src="js/ar-variable.js?v=1"></script>
     <script defer src="js/invoices.js?v=12"></script>
     <script defer src="js/pnl.js?v=21"></script>
     <script defer src="js/transactions.js?v=6"></script>

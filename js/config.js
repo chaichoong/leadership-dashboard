@@ -12,6 +12,7 @@
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.76', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.19', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
+        { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.15', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.18', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
@@ -45,6 +46,7 @@
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
+        arVariable:    'tblPLACEHOLDER_ARV', // Accounts Receivable Variable — update after creating table in Airtable
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
         projects:      'tblHrpTMd5LNYn8v1', // Projects (quarterly projects from Strategy push here)
@@ -105,6 +107,21 @@
         txId:        'fld1n4hxZ0XD5FaR9',  // singleLineText — Airtable record ID of reconciled tx
         date:        'fldJC9UcHCaXAaxKV',  // date (ISO) — when logged
         wasAccurate: 'fld9n62GxQijQWqSA',  // checkbox — AI suggestion matched final values
+    };
+
+    // Accounts Receivable Variable field IDs
+    // Update these after creating the table in Airtable.
+    const ARV = {
+        customer:    'fldPH_ARV_customer',    // Customer/Client Name (singleLineText)
+        invoiceNo:   'fldPH_ARV_invoiceNo',   // Invoice Number (singleLineText)
+        desc:        'fldPH_ARV_desc',         // Description (singleLineText)
+        amount:      'fldPH_ARV_amount',       // Amount (currency, GBP)
+        dateSent:    'fldPH_ARV_dateSent',     // Date Sent (date)
+        dueDate:     'fldPH_ARV_dueDate',      // Due Date (date)
+        status:      'fldPH_ARV_status',       // Status (singleSelect: Draft, Sent, Overdue, Paid, Written Off)
+        business:    'fldPH_ARV_business',     // Business (multipleRecordLinks → Businesses)
+        ref:         'fldPH_ARV_ref',          // Reference (singleLineText)
+        notes:       'fldPH_ARV_notes',        // Notes (multilineText)
     };
 
     // Dashboard Invoices field IDs (Airtable)

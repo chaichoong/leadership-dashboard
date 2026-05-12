@@ -536,6 +536,10 @@ if (tabId === 'comms') {
         if (tabId === 'income') {
             if (typeof renderIncomeTab === 'function') renderIncomeTab();
         }
+        // Render AR Variable tab on switch
+        if (tabId === 'ar-variable') {
+            if (typeof renderARVariableTab === 'function') renderARVariableTab();
+        }
         // Render costs tab on switch
         if (tabId === 'costs') {
             if (typeof renderCostsTab === 'function') renderCostsTab();
