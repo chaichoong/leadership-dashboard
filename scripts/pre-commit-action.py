@@ -20,6 +20,7 @@ import sys
 FILE_TO_PAGE = {
     'js/dashboard.js':      'overview',
     'js/cfv.js':            'cfv',
+    'js/income.js':         'income',
     'js/costs.js':          'costs',
     'js/invoices.js':       'invoices',
     'js/pnl.js':            'pnl',

@@ -11,6 +11,7 @@
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.12', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.76', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.19', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
+        { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
         { id: 'invoices',   name: 'Accounts Payable Variable',     icon: '🧾', pageVer: '2.15', sopFile: 'sop-invoices.html',           sopVer: '2.2', standalone: 'index.html#invoices' },
         { id: 'pnl',        name: 'Profit & Loss',                 icon: '💰', pageVer: '2.18', sopFile: 'sop-pnl.html',               sopVer: '2.12', standalone: 'index.html#pnl' },
