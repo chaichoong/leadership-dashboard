@@ -840,6 +840,7 @@ async function start(){
 
 async function refreshAll(initial=false){
   setSync('Refreshing...');
+  _txLoaded = false;
   try {
     const [tn, tc, un, pr, cs, vl, cat] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
@@ -873,6 +874,7 @@ async function refreshAll(initial=false){
     setSync(`Synced — ${new Date().toLocaleTimeString()}`);
     _opsDataReady = true;
     _tryPendingCrossNav();
+    loadTransactionsBackground();
 
     // ── Sync Bar + Health Checks ──
     if (typeof registerSyncBar === 'function') {
@@ -915,9 +917,10 @@ async function refreshAll(initial=false){
             }
           },
           {
-            name: 'Transactions lazy-load ready', kind: 'sync', run: () => {
-              if (!TABLE.transactions) return { status: 'fail', detail: 'Transactions table ID not configured' };
-              return { status: 'pass', detail: 'Transactions fetched on-demand when rows are expanded' };
+            name: 'Transactions loaded (background)', kind: 'sync', run: () => {
+              if (!_txLoaded) return { status: 'warn', detail: 'Transactions still loading in background' };
+              const n = (DATA.transactions||[]).length;
+              return { status: 'pass', detail: `${n} transaction records loaded` };
             }
           },
           {
@@ -2921,21 +2924,32 @@ function closeSchemaInspector(){
 // ═══════════════════════════════════════════════════════════════════════
 // Transaction lookups — pre-index by tenancy, unit, property for fast expand
 // ═══════════════════════════════════════════════════════════════════════
-// Lazy-fetch transactions for a specific entity when expanding a row
-const _txCache = {};
+const TX_BY_TENANCY  = {};
+const TX_BY_UNIT     = {};
+const TX_BY_PROPERTY = {};
+let _txLoaded = false;
+let _txLoadPromise = null;
 
-async function fetchTransactionsForEntity(entityKey, recId){
-  const cacheKey = `${entityKey}:${recId}`;
-  if (_txCache[cacheKey]) return _txCache[cacheKey];
+function buildTxLookups(){
+  for (const k in TX_BY_TENANCY)  delete TX_BY_TENANCY[k];
+  for (const k in TX_BY_UNIT)     delete TX_BY_UNIT[k];
+  for (const k in TX_BY_PROPERTY) delete TX_BY_PROPERTY[k];
+  for (const tx of (DATA.transactions || [])) {
+    const f = tx.fields;
+    const tenancyIds = Array.isArray(f[TX.tenancy]) ? f[TX.tenancy] : [];
+    const unitIds    = Array.isArray(f[TX.unit])    ? f[TX.unit]    : [];
+    const propIds    = Array.isArray(f[TX.property]) ? f[TX.property] : [];
+    for (const id of tenancyIds) { (TX_BY_TENANCY[id]  || (TX_BY_TENANCY[id]  = [])).push(tx); }
+    for (const id of unitIds)    { (TX_BY_UNIT[id]     || (TX_BY_UNIT[id]     = [])).push(tx); }
+    for (const id of propIds)    { (TX_BY_PROPERTY[id] || (TX_BY_PROPERTY[id] = [])).push(tx); }
+  }
+}
 
-  let filterFormula = '';
-  if (entityKey === 'tenancies') {
-    filterFormula = `FIND("${recId}",ARRAYJOIN({${TX.tenancy}}))`;
-  } else if (entityKey === 'units') {
-    filterFormula = `FIND("${recId}",ARRAYJOIN({${TX.unit}}))`;
-  } else if (entityKey === 'properties') {
-    filterFormula = `FIND("${recId}",ARRAYJOIN({${TX.property}}))`;
-  } else if (entityKey === 'tenants') {
+function getLinkedTransactions(entityKey, recId){
+  if (entityKey === 'tenancies') return TX_BY_TENANCY[recId] || [];
+  if (entityKey === 'units')     return TX_BY_UNIT[recId]    || [];
+  if (entityKey === 'properties') return TX_BY_PROPERTY[recId] || [];
+  if (entityKey === 'tenants') {
     const tenSch = SCHEMA_RESOLVED?.tenancies;
     if (!tenSch) return [];
     const tenancyIds = (DATA.tenancies || [])
@@ -2944,15 +2958,30 @@ async function fetchTransactionsForEntity(entityKey, recId){
         return Array.isArray(link) && link.includes(recId);
       })
       .map(tc => tc.id);
-    if (!tenancyIds.length) { _txCache[cacheKey] = []; return []; }
-    const parts = tenancyIds.map(id => `FIND("${id}",ARRAYJOIN({${TX.tenancy}}))`);
-    filterFormula = parts.length === 1 ? parts[0] : `OR(${parts.join(',')})`;
+    const txs = [];
+    for (const tid of tenancyIds) txs.push(...(TX_BY_TENANCY[tid] || []));
+    return txs;
   }
+  return [];
+}
 
-  if (!filterFormula) return [];
-  const txs = await fetchAllRecords(TABLE.transactions, { params: { filterByFormula: filterFormula } });
-  _txCache[cacheKey] = txs;
-  return txs;
+async function loadTransactionsBackground(){
+  if (_txLoaded) return;
+  _txLoadPromise = fetchAllRecords(TABLE.transactions);
+  const tx = await _txLoadPromise;
+  DATA.transactions = tx;
+  INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
+  buildTxLookups();
+  _txLoaded = true;
+  // Re-render any currently expanded row
+  for (const [ek, rid] of Object.entries(_expandedRow)) {
+    if (!rid) continue;
+    const expTr = document.getElementById('exp-' + rid);
+    if (expTr && expTr.style.display !== 'none') {
+      const td = expTr.querySelector('td');
+      td.innerHTML = `<div class="expand-content">${renderExpandContent(ek, rid)}</div>`;
+    }
+  }
 }
 
 function sortTransactionsByDate(txs){
@@ -2965,7 +2994,7 @@ function sortTransactionsByDate(txs){
 
 let _expandedRow = {};
 
-async function toggleExpandRow(entityKey, recId, rowEl){
+function toggleExpandRow(entityKey, recId, rowEl){
   const expTr = document.getElementById('exp-' + recId);
   const chevron = document.getElementById('chev-' + recId);
   if (!expTr) return;
@@ -2985,23 +3014,23 @@ async function toggleExpandRow(entityKey, recId, rowEl){
     _expandedRow[entityKey] = null;
   } else {
     const td = expTr.querySelector('td');
-    td.innerHTML = '<div class="expand-content" style="padding:16px;color:var(--text-muted)">Loading transactions...</div>';
+    if (_txLoaded) {
+      td.innerHTML = `<div class="expand-content">${renderExpandContent(entityKey, recId)}</div>`;
+    } else {
+      td.innerHTML = '<div class="expand-content" style="padding:16px;color:var(--text-muted)">Loading transactions...</div>';
+    }
     expTr.style.display = '';
     if (chevron) chevron.classList.add('open');
     _expandedRow[entityKey] = recId;
-    const txs = await fetchTransactionsForEntity(entityKey, recId);
-    if (_expandedRow[entityKey] === recId) {
-      td.innerHTML = `<div class="expand-content">${renderExpandContent(entityKey, recId, txs)}</div>`;
-    }
   }
 }
 
-function renderExpandContent(entityKey, recId, rawTxs){
+function renderExpandContent(entityKey, recId){
   if (entityKey === 'customers') {
     return '<div class="expand-empty">No transaction data yet. This will populate when Operations Director connects to your accounting system.</div>';
   }
 
-  const txs = sortTransactionsByDate(rawTxs || []);
+  const txs = sortTransactionsByDate(getLinkedTransactions(entityKey, recId));
   if (!txs.length) {
     return '<div class="expand-empty">No transactions linked to this record.</div>';
   }
