@@ -124,6 +124,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Customer demo banner */
 .demo-banner{background:var(--warning-bg);color:var(--warning);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:500;margin-bottom:16px;display:flex;align-items:center;gap:8px}
 
+/* Expandable row */
+.dt tbody tr.expandable{cursor:pointer}
+.dt tbody tr.expandable:hover td:first-child::before{color:var(--accent)}
+.expand-chevron{display:inline-block;font-size:9px;color:var(--text-muted);margin-right:6px;transition:transform .15s ease;width:10px;text-align:center}
+.expand-chevron.open{transform:rotate(90deg);color:var(--accent)}
+tr.expand-row td{padding:0!important;border-top:none!important;background:var(--bg-surface-2)!important}
+tr.expand-row:hover td{background:var(--bg-surface-2)!important}
+.expand-content{padding:12px 16px 16px;border-top:1px dashed var(--border-default)}
+.expand-summary{display:flex;gap:16px;margin-bottom:10px;font-size:12px;color:var(--text-secondary)}
+.expand-summary strong{color:var(--text-primary)}
+.tx-table{width:100%;border-collapse:collapse;font-size:12px}
+.tx-table th{text-align:left;padding:5px 8px;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.4px}
+.tx-table th.money{text-align:right}
+.tx-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle)}
+.tx-table td.money{text-align:right;font-variant-numeric:tabular-nums}
+.tx-table tbody tr:nth-child(even) td{background:var(--bg-surface)}
+.tx-show-all{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;padding:6px 0;margin-top:4px}
+.tx-show-all:hover{text-decoration:underline}
+.expand-empty{padding:16px;text-align:center;color:var(--text-muted);font-size:12px}
+
 /* Drawer */
 .drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
 .drawer{background:var(--bg-surface);width:640px;max-width:95vw;height:100vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
@@ -366,12 +386,24 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 // ═══════════════════════════════════════════════════════════════════════
 const BASE_ID = 'appnqjDpqDniH3IRl';
 const TABLE = {
-  tenants:     'tblX4elTuu01gwBYh',
-  tenancies:   'tblN51a88qTDB6iMH',
-  rentalUnits: 'tblM3mZCR5kiEdWMj',
-  properties:  'tbl6f0OkAmTC2jbuG',
-  costs:       'tblx5kvhzNEI5TFlS',
-  valuations:  'tblZYsa0u1M17N7ZE',  // Property Valuations — historical AI/manual estimates
+  tenants:      'tblX4elTuu01gwBYh',
+  tenancies:    'tblN51a88qTDB6iMH',
+  rentalUnits:  'tblM3mZCR5kiEdWMj',
+  properties:   'tbl6f0OkAmTC2jbuG',
+  costs:        'tblx5kvhzNEI5TFlS',
+  valuations:   'tblZYsa0u1M17N7ZE',
+  transactions: 'tbln0gzhCAorFc3zB',
+};
+
+const TX = {
+  date:        'fldoyQ6Rr9cHp3bgQ',
+  amount:      'fldN01r1hp7UQjgtm',
+  description: 'fldsbuAJCTsXHug4C',
+  category:    'fldFPmNixqHPQy4D6',
+  reconciled:  'fldxKX1IbIFcAOnn5',
+  tenancy:     'fldPmAMmxwqs4SdPa',
+  unit:        'fldJGIhSbgXNIEW4a',
+  property:    'fldvp44VfF8uTTthp',
 };
 
 // Curated field RESOLVERS per entity. Field IDs are resolved at load time
@@ -808,26 +840,30 @@ async function start(){
 async function refreshAll(initial=false){
   setSync('Refreshing...');
   try {
-    const [tn, tc, un, pr, cs, vl] = await Promise.all([
+    const [tn, tc, un, pr, cs, vl, tx] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
       fetchAllRecords(TABLE.tenancies),
       fetchAllRecords(TABLE.rentalUnits),
       fetchAllRecords(TABLE.properties),
       fetchAllRecords(TABLE.costs),
       fetchAllRecords(TABLE.valuations),
+      fetchAllRecords(TABLE.transactions),
     ]);
-    DATA.tenants    = tn;
-    DATA.tenancies  = tc;
-    DATA.units      = un;
-    DATA.properties = pr;
-    DATA.costs      = cs;
-    DATA.valuations = vl;
-    INDEX.tenants    = Object.fromEntries(tn.map(r=>[r.id,r]));
-    INDEX.tenancies  = Object.fromEntries(tc.map(r=>[r.id,r]));
-    INDEX.units      = Object.fromEntries(un.map(r=>[r.id,r]));
-    INDEX.properties = Object.fromEntries(pr.map(r=>[r.id,r]));
-    INDEX.costs      = Object.fromEntries(cs.map(r=>[r.id,r]));
-    INDEX.valuations = Object.fromEntries(vl.map(r=>[r.id,r]));
+    DATA.tenants      = tn;
+    DATA.tenancies    = tc;
+    DATA.units        = un;
+    DATA.properties   = pr;
+    DATA.costs        = cs;
+    DATA.valuations   = vl;
+    DATA.transactions = tx;
+    INDEX.tenants      = Object.fromEntries(tn.map(r=>[r.id,r]));
+    INDEX.tenancies    = Object.fromEntries(tc.map(r=>[r.id,r]));
+    INDEX.units        = Object.fromEntries(un.map(r=>[r.id,r]));
+    INDEX.properties   = Object.fromEntries(pr.map(r=>[r.id,r]));
+    INDEX.costs        = Object.fromEntries(cs.map(r=>[r.id,r]));
+    INDEX.valuations   = Object.fromEntries(vl.map(r=>[r.id,r]));
+    INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
+    buildTxLookups();
     document.getElementById('cntTenants').textContent    = tn.length;
     document.getElementById('cntTenancies').textContent  = tc.length;
     document.getElementById('cntUnits').textContent      = un.length;
@@ -879,11 +915,18 @@ async function refreshAll(initial=false){
             }
           },
           {
+            name: 'Transactions table fetched (expand rows)', kind: 'sync', run: () => {
+              const n = (DATA.transactions||[]).length;
+              if (n === 0) return { status: 'warn', detail: 'No transactions loaded — expand rows will be empty' };
+              return { status: 'pass', detail: `${n} transaction records loaded` };
+            }
+          },
+          {
             name: 'Indexes built for fast linked-record lookup', kind: 'automation', run: () => {
-              const expected = ['tenants','tenancies','units','properties','costs'];
+              const expected = ['tenants','tenancies','units','properties','costs','transactions'];
               const missing = expected.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
               if (missing.length) return { status: 'fail', detail: `Missing indexes: ${missing.join(', ')}` };
-              return { status: 'pass', detail: 'All five tables indexed by record ID' };
+              return { status: 'pass', detail: 'All six tables indexed by record ID' };
             }
           },
           {
@@ -1476,9 +1519,18 @@ function renderTable(entityKey, sch, rows){
     return `<th class="${cls}" data-col="${c.key}" onclick="toggleSort('${entityKey}','${c.key}')"><span class="th-inner"><span class="th-label">${escapeHtml(c.label)}</span><span class="th-sort">${arrow}</span></span></th>`;
   }).join('') + '<th></th></tr>';
 
+  const hasDrawer = entityKey === 'properties';
   const body = rows.map(r => {
-    const tds = cols.map(c => `<td class="${colCls(c)}">${renderCell(r, c, entityKey)}</td>`).join('');
-    return `<tr data-rec="${r.id}" data-entity="${entityKey}">${tds}<td><button class="row-open" onclick="event.stopPropagation();openDrawer('${entityKey}','${r.id}')" title="Open detail">↗</button></td></tr>`;
+    const chevron = `<span class="expand-chevron" id="chev-${r.id}">▶</span>`;
+    const firstCol = cols[0];
+    const firstTd = `<td class="${colCls(firstCol)}">${chevron}${renderCell(r, firstCol, entityKey)}</td>`;
+    const restTds = cols.slice(1).map(c => `<td class="${colCls(c)}">${renderCell(r, c, entityKey)}</td>`).join('');
+    const actionTd = hasDrawer
+      ? `<td><button class="row-open" onclick="event.stopPropagation();openDrawer('${entityKey}','${r.id}')" title="Open detail">↗</button></td>`
+      : '<td></td>';
+    const dataRow = `<tr class="expandable" data-rec="${r.id}" data-entity="${entityKey}" onclick="toggleExpandRow('${entityKey}','${r.id}',this)">${firstTd}${restTds}${actionTd}</tr>`;
+    const expandRow = `<tr class="expand-row" id="exp-${r.id}" style="display:none"><td colspan="${cols.length+1}"></td></tr>`;
+    return dataRow + expandRow;
   }).join('');
 
   return `<div class="table-wrap"><table class="dt">${colgroup}<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
@@ -2863,6 +2915,157 @@ function closeSchemaInspector(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Transaction lookups — pre-index by tenancy, unit, property for fast expand
+// ═══════════════════════════════════════════════════════════════════════
+const TX_BY_TENANCY  = {};
+const TX_BY_UNIT     = {};
+const TX_BY_PROPERTY = {};
+
+function buildTxLookups(){
+  for (const k in TX_BY_TENANCY)  delete TX_BY_TENANCY[k];
+  for (const k in TX_BY_UNIT)     delete TX_BY_UNIT[k];
+  for (const k in TX_BY_PROPERTY) delete TX_BY_PROPERTY[k];
+
+  for (const tx of (DATA.transactions || [])) {
+    const f = tx.fields;
+    const tenancyIds = Array.isArray(f[TX.tenancy]) ? f[TX.tenancy] : [];
+    const unitIds    = Array.isArray(f[TX.unit])    ? f[TX.unit]    : [];
+    const propIds    = Array.isArray(f[TX.property]) ? f[TX.property] : [];
+    for (const id of tenancyIds) { (TX_BY_TENANCY[id]  || (TX_BY_TENANCY[id]  = [])).push(tx); }
+    for (const id of unitIds)    { (TX_BY_UNIT[id]     || (TX_BY_UNIT[id]     = [])).push(tx); }
+    for (const id of propIds)    { (TX_BY_PROPERTY[id] || (TX_BY_PROPERTY[id] = [])).push(tx); }
+  }
+}
+
+function getLinkedTransactions(entityKey, recId){
+  if (entityKey === 'tenancies') return TX_BY_TENANCY[recId] || [];
+  if (entityKey === 'units')     return TX_BY_UNIT[recId]    || [];
+  if (entityKey === 'properties') return TX_BY_PROPERTY[recId] || [];
+  if (entityKey === 'tenants') {
+    const tenSch = SCHEMA_RESOLVED?.tenancies;
+    if (!tenSch) return [];
+    const tenancyIds = (DATA.tenancies || [])
+      .filter(tc => {
+        const link = tc.fields[tenSch.byKey?.tenant?.id];
+        return Array.isArray(link) && link.includes(recId);
+      })
+      .map(tc => tc.id);
+    const txs = [];
+    for (const tid of tenancyIds) txs.push(...(TX_BY_TENANCY[tid] || []));
+    return txs;
+  }
+  return [];
+}
+
+function sortTransactionsByDate(txs){
+  return [...txs].sort((a,b) => {
+    const da = a.fields[TX.date] || '';
+    const db = b.fields[TX.date] || '';
+    return db.localeCompare(da);
+  });
+}
+
+let _expandedRow = {};
+
+function toggleExpandRow(entityKey, recId, rowEl){
+  const expTr = document.getElementById('exp-' + recId);
+  const chevron = document.getElementById('chev-' + recId);
+  if (!expTr) return;
+
+  const wasOpen = expTr.style.display !== 'none';
+
+  if (_expandedRow[entityKey] && _expandedRow[entityKey] !== recId) {
+    const prev = document.getElementById('exp-' + _expandedRow[entityKey]);
+    const prevChev = document.getElementById('chev-' + _expandedRow[entityKey]);
+    if (prev) prev.style.display = 'none';
+    if (prevChev) prevChev.classList.remove('open');
+  }
+
+  if (wasOpen) {
+    expTr.style.display = 'none';
+    if (chevron) chevron.classList.remove('open');
+    _expandedRow[entityKey] = null;
+  } else {
+    const td = expTr.querySelector('td');
+    td.innerHTML = `<div class="expand-content">${renderExpandContent(entityKey, recId)}</div>`;
+    expTr.style.display = '';
+    if (chevron) chevron.classList.add('open');
+    _expandedRow[entityKey] = recId;
+  }
+}
+
+function renderExpandContent(entityKey, recId){
+  if (entityKey === 'customers') {
+    return '<div class="expand-empty">No transaction data yet. This will populate when Operations Director connects to your accounting system.</div>';
+  }
+
+  const txs = sortTransactionsByDate(getLinkedTransactions(entityKey, recId));
+  if (!txs.length) {
+    return '<div class="expand-empty">No transactions linked to this record.</div>';
+  }
+
+  const total = txs.reduce((s, t) => s + (parseFloat(t.fields[TX.amount]) || 0), 0);
+  const summary = `<div class="expand-summary"><span><strong>${txs.length}</strong> transaction${txs.length===1?'':'s'}</span><span>Net: <strong style="color:${total>=0?'var(--success)':'var(--danger)'}">£${Math.abs(total).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}${total<0?' DR':''}</strong></span></div>`;
+
+  const MAX_SHOW = 20;
+  const showAll = txs.length <= MAX_SHOW;
+  const visible = showAll ? txs : txs.slice(0, MAX_SHOW);
+
+  const reconBadge = (val) => {
+    if (!val) return '<span class="badge badge-info">—</span>';
+    const v = Array.isArray(val) ? (val[0]?.name || val[0]) : (typeof val === 'object' ? val?.name : val);
+    const s = String(v || '').toLowerCase();
+    const cls = s.includes('reconcil') || s.includes('match') ? 'badge-active' : s.includes('unreconcil') || s.includes('unmatch') ? 'badge-warning' : 'badge-info';
+    return `<span class="badge ${cls}">${escapeHtml(String(v || '—'))}</span>`;
+  };
+
+  const catDisplay = (val) => {
+    if (!val) return '—';
+    if (Array.isArray(val)) return val.map(v => typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v))).join(', ');
+    return typeof val === 'object' ? escapeHtml(val.name || val.id || '—') : escapeHtml(String(val));
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+  };
+
+  const rows = visible.map(t => {
+    const f = t.fields;
+    const amt = parseFloat(f[TX.amount]) || 0;
+    return `<tr>
+      <td>${fmtDate(f[TX.date])}</td>
+      <td>${escapeHtml(String(f[TX.description] || '—'))}</td>
+      <td class="money">£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}${amt<0?' DR':''}</td>
+      <td>${catDisplay(f[TX.category])}</td>
+      <td class="wrap-cell">${reconBadge(f[TX.reconciled])}</td>
+    </tr>`;
+  }).join('');
+
+  const showMoreBtn = showAll ? '' : `<button class="tx-show-all" onclick="event.stopPropagation();this.closest('.expand-content').querySelector('.tx-hidden').style.display='';this.remove()">Show all ${txs.length} transactions</button>`;
+  const hiddenRows = showAll ? '' : `<tbody class="tx-hidden" style="display:none">${txs.slice(MAX_SHOW).map(t => {
+    const f = t.fields;
+    const amt = parseFloat(f[TX.amount]) || 0;
+    return `<tr>
+      <td>${fmtDate(f[TX.date])}</td>
+      <td>${escapeHtml(String(f[TX.description] || '—'))}</td>
+      <td class="money">£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}${amt<0?' DR':''}</td>
+      <td>${catDisplay(f[TX.category])}</td>
+      <td class="wrap-cell">${reconBadge(f[TX.reconciled])}</td>
+    </tr>`;
+  }).join('')}</tbody>`;
+
+  return `${summary}
+    <table class="tx-table">
+      <thead><tr><th style="width:100px">Date</th><th>Description</th><th class="money" style="width:100px">Amount</th><th style="width:130px">Category</th><th style="width:120px">Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+      ${hiddenRows}
+    </table>
+    ${showMoreBtn}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Customers (SaaS CRM) — placeholder data, no Airtable integration yet
 // ═══════════════════════════════════════════════════════════════════════
 const CUSTOMER_DEMO_DATA = [
@@ -2952,15 +3155,18 @@ function renderCustomers(){
   const body = rows.map(r => {
     const fmtDate = r.startDate ? new Date(r.startDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '<span style="color:var(--text-muted)">—</span>';
     const fmtMrr  = r.mrr ? `&pound;${r.mrr.toLocaleString()}` : '<span style="color:var(--text-muted)">—</span>';
-    return `<tr>
-      <td>${escapeHtml(r.company)}</td>
+    const chevron = `<span class="expand-chevron" id="chev-${r.id}">▶</span>`;
+    const dataRow = `<tr class="expandable" onclick="toggleExpandRow('customers','${r.id}',this)">
+      <td>${chevron}${escapeHtml(r.company)}</td>
       <td>${escapeHtml(r.contact)}</td>
-      <td><a href="mailto:${escapeHtml(r.email)}" style="color:var(--accent)">${escapeHtml(r.email)}</a></td>
+      <td><a href="mailto:${escapeHtml(r.email)}" onclick="event.stopPropagation()" style="color:var(--accent)">${escapeHtml(r.email)}</a></td>
       <td>${escapeHtml(r.plan)}</td>
       <td class="wrap-cell">${customerStageBadge(r.stage)}</td>
       <td>${fmtDate}</td>
       <td class="money">${fmtMrr}</td>
     </tr>`;
+    const expandRow = `<tr class="expand-row" id="exp-${r.id}" style="display:none"><td colspan="7"></td></tr>`;
+    return dataRow + expandRow;
   }).join('');
 
   document.getElementById('contentCustomers').innerHTML = `
