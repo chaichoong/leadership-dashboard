@@ -3041,7 +3041,7 @@ function renderExpandContent(entityKey, recId){
       const rec = INDEX.categories && INDEX.categories[id];
       if (rec) {
         const fields = rec.fields || {};
-        const name = Object.values(fields)[0];
+        const name = Object.values(fields).find(v => typeof v === 'string');
         return escapeHtml(String(name || id));
       }
       return typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v));
