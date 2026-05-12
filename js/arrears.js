@@ -797,7 +797,12 @@
 
     function renderBreakdownDetail(entry) {
         const s = entry.stmt;
-        const fmtDate = d => d instanceof Date ? d.toISOString().slice(0, 10) : '';
+        const fmtDate = d => {
+            if (!(d instanceof Date)) return '';
+            const dd = String(d.getDate()).padStart(2, '0');
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            return dd + '/' + mm + '/' + d.getFullYear();
+        };
         const cellStyle = 'padding:4px 4px;vertical-align:middle;position:relative';
         const indicatorHtml = '<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span>';
 
@@ -807,24 +812,22 @@
         const paymentRows = s.payments.length
             ? s.payments.map((p, i) => {
                 const prefix = `rstx_${p.txId}_`;
-                const bg = i % 2 ? 'background:var(--bg-surface-2)' : '';
-                const roStyle = 'font-size:10px;color:var(--text-secondary)';
                 const accountName = accountLookup[p.accountLinkId] || p.accountAlias || '';
                 const saveFn = (field) => `rsSaveTxField('${p.txId}','${field}','${prefix}${field === F.txCategory ? 'cat' : field === F.txSubCategory ? 'subcat' : field === F.txTenancy ? 'tenancy' : field === F.txUnit ? 'unit' : 'property'}',true)`;
-                return `<tr style="${bg}">
-                    <td style="${cellStyle};color:var(--text-muted);font-size:11px;width:24px">${i + 1}</td>
-                    <td style="${cellStyle};width:80px;${roStyle}">${escHtml(p.dateStr)}</td>
-                    <td style="${cellStyle};width:160px;${roStyle};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px" title="${escHtml(p.description)}">${escHtml(p.description)}</td>
-                    <td style="${cellStyle};width:90px;${roStyle}">${escHtml(accountName)}</td>
-                    <td style="${cellStyle};text-align:right;width:70px;font-variant-numeric:tabular-nums;${roStyle}">${fmtMoney(p.amount)}</td>
-                    <td style="${cellStyle};width:110px">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px', saveFn(F.txCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:120px">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px', saveFn(F.txSubCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:140px">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px', saveFn(F.txTenancy))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'unit', rsUnitItems(), p.unitId, '90px', saveFn(F.txUnit))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
-                    <td style="${cellStyle};width:100px">${rsDropdown(prefix + 'property', rsPropertyItems(), p.propertyId, '90px', saveFn(F.txProperty))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                return `<tr>
+                    <td style="color:var(--text-muted)">${i + 1}</td>
+                    <td style="color:var(--text-secondary)">${p.dateStr.split('-').reverse().join('/')}</td>
+                    <td class="truncate" title="${escHtml(p.description)}">${escHtml(p.description)}</td>
+                    <td style="color:var(--text-secondary)">${escHtml(accountName)}</td>
+                    <td class="money">${fmtMoney(p.amount)}</td>
+                    <td style="position:relative">${rsDropdown(prefix + 'cat', rsCatItems(), p.categoryId, '100px', saveFn(F.txCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="position:relative">${rsDropdown(prefix + 'subcat', rsSubCatItems(), p.subCatId, '110px', saveFn(F.txSubCategory))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="position:relative">${rsDropdown(prefix + 'tenancy', rsTenancyItems(), entry.tenancyId, '130px', saveFn(F.txTenancy))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="position:relative">${rsDropdown(prefix + 'unit', rsUnitItems(), p.unitId, '90px', saveFn(F.txUnit))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
+                    <td style="position:relative">${rsDropdown(prefix + 'property', rsPropertyItems(), p.propertyId, '90px', saveFn(F.txProperty))}<span class="rs-save-indicator" style="font-size:9px;position:absolute;top:1px;right:2px"></span></td>
                 </tr>`;
             }).join('')
-            : '<tr><td colspan="10" style="padding:8px;color:var(--text-muted);font-style:italic">No reconciled payments</td></tr>';
+            : '<tr><td colspan="10" class="expand-empty">No reconciled payments</td></tr>';
 
         const balanceColour = s.balance > 0 ? 'var(--danger)' : 'var(--success)';
         const balanceLabel = s.balance > 0 ? 'Tenant owes' : 'Tenant in credit';
@@ -857,18 +860,10 @@
                     <button onclick="event.stopPropagation();rsOpenPrintStatement('${entry.tenancyId}')" style="font-size:11px;padding:4px 12px;border:1px solid var(--accent);border-radius:var(--radius-md);background:var(--accent-soft);color:var(--accent);cursor:pointer;font-weight:600">Print Statement</button>
                 </div>
                 <div style="grid-column:1/-1;overflow-x:auto">
-                    <table style="width:100%;border-collapse:collapse;font-size:11px">
-                        <thead><tr style="text-align:left;background:var(--bg-surface)">
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">#</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Date</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Description</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Account</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px;text-align:right">Amount</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Category</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Sub-Category</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Tenancy</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Unit</th>
-                            <th style="padding:4px 4px;font-weight:600;color:var(--text-secondary);font-size:10px">Property</th>
+                    <table class="tx-table">
+                        <colgroup><col style="width:30px"><col style="width:82px"><col><col style="width:110px"><col style="width:90px"><col style="width:115px"><col style="width:125px"><col style="width:135px"><col style="width:100px"><col style="width:100px"></colgroup>
+                        <thead><tr>
+                            <th>#</th><th>Date</th><th>Description</th><th>Account</th><th class="money">Amount</th><th>Category</th><th>Sub-Category</th><th>Tenancy</th><th>Unit</th><th>Property</th>
                         </tr></thead>
                         <tbody>${paymentRows}</tbody>
                     </table>
