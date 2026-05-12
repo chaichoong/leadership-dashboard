@@ -841,13 +841,17 @@ async function start(){
 async function refreshAll(initial=false){
   setSync('Refreshing...');
   try {
-    const [tn, tc, un, pr, cs, vl, tx, cat] = await Promise.all([
+    // Batch 1: core entity tables (6 parallel requests)
+    const [tn, tc, un, pr, cs, vl] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
       fetchAllRecords(TABLE.tenancies),
       fetchAllRecords(TABLE.rentalUnits),
       fetchAllRecords(TABLE.properties),
       fetchAllRecords(TABLE.costs),
       fetchAllRecords(TABLE.valuations),
+    ]);
+    // Batch 2: transaction + category tables (avoids Airtable 5-req/s rate limit)
+    const [tx, cat] = await Promise.all([
       fetchAllRecords(TABLE.transactions),
       fetchAllRecords(TABLE.categories),
     ]);
