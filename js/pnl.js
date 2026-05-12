@@ -328,18 +328,18 @@
                     <button onclick="pnlCloseDrill()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-secondary);padding:0 8px">&times;</button>
                 </div>
                 <div style="overflow:auto;flex:1">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px">
-                        <thead style="background:var(--bg-surface);position:sticky;top:0">
-                            <tr style="border-bottom:1px solid var(--border-default)">
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Date</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Transaction Detail</th>
-                                <th style="padding:8px 10px;text-align:right;font-weight:600;color:var(--text-secondary)">Report Amount</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Category</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Sub-Category</th>
-                                <th style="padding:8px 10px;text-align:left;font-weight:600;color:var(--text-secondary)">Business</th>
+                    <table class="invoice-table">
+                        <thead style="position:sticky;top:0">
+                            <tr>
+                                <th>Date</th>
+                                <th>Transaction Detail</th>
+                                <th style="text-align:right">Report Amount</th>
+                                <th>Category</th>
+                                <th>Sub-Category</th>
+                                <th>Business</th>
                             </tr>
                         </thead>
-                        <tbody>${rowsHtml || '<tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted)">No transactions for this slice.</td></tr>'}</tbody>
+                        <tbody>${rowsHtml || '<tr><td colspan="6" class="od-empty-state">No transactions for this slice.</td></tr>'}</tbody>
                     </table>
                 </div>
             </div>`;
