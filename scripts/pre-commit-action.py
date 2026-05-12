@@ -22,6 +22,7 @@ FILE_TO_PAGE = {
     'js/cfv.js':            'cfv',
     'js/income.js':         'income',
     'js/costs.js':          'costs',
+    'js/ar-variable.js':    'ar-variable',
     'js/invoices.js':       'invoices',
     'js/pnl.js':            'pnl',
     'js/fintable.js':       'fintable',
