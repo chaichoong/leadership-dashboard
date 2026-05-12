@@ -62,7 +62,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Data table */
 .table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
-.dt{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.dt{min-width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
 /* Headers — flex layout pins the sort arrow at the right edge no matter how
    the label wraps. word-break:normal + overflow-wrap:normal stop mid-word
    breaks; per-column widths give every label enough room for two lines. */
@@ -138,7 +138,8 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 .tx-table th{text-align:left;padding:5px 8px;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.4px}
 .tx-table th.money{text-align:right}
 .tx-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle)}
-.tx-table td.money{text-align:right;font-variant-numeric:tabular-nums}
+.tx-table td.money{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tx-table .badge{padding:2px 7px;font-size:10px;border-radius:8px}
 .tx-table tbody tr:nth-child(even) td{background:var(--bg-surface)}
 .tx-show-all{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;padding:6px 0;margin-top:4px}
 .tx-show-all:hover{text-decoration:underline}
@@ -3171,7 +3172,7 @@ function renderExpandContent(entityKey, recId){
 
   return `${summary}
     <table class="tx-table">
-      <thead><tr><th style="width:100px">Date</th><th>Description</th><th class="money" style="width:100px">Amount</th><th style="width:130px">Category</th><th style="width:120px">Status</th></tr></thead>
+      <thead><tr><th style="width:100px">Date</th><th>Description</th><th class="money" style="width:120px">Amount</th><th style="width:160px">Category</th><th style="width:100px">Status</th></tr></thead>
       <tbody>${rows}</tbody>
       ${hiddenRows}
     </table>
