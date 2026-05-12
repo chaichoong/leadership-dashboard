@@ -91,6 +91,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Editable cells */
 .editable{cursor:text;padding:3px 6px;border-radius:4px;display:inline-block;min-width:60px;min-height:20px}
+.dt td .editable{max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.dt td .expand-chevron{vertical-align:middle}
 .editable:hover{background:var(--bg-surface);outline:1px solid var(--border-default)}
 .editable[contenteditable=true]:focus{background:var(--bg-surface);outline:2px solid var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .inline-input,.inline-select{background:var(--bg-surface);border:1px solid var(--accent);color:var(--text-primary);padding:3px 6px;border-radius:4px;font-size:13px;font-family:inherit}
@@ -864,7 +866,6 @@ async function refreshAll(initial=false){
     DATA.tenancies    = tc;
     DATA.units        = un;
     DATA.properties   = pr;
-    if (pr.length) { const _r = pr[0]; console.log('[OPS] Property sample:', _r.id, 'fields:', Object.keys(_r.fields).length, 'name(fldy2t735TV5e1DIL):', _r.fields['fldy2t735TV5e1DIL']); }
     DATA.costs        = cs;
     DATA.valuations   = vl;
     DATA.categories   = cat;
