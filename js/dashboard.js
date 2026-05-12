@@ -609,7 +609,7 @@
                     const hitColor=hit?'var(--success)':'var(--text-secondary)';
                     return `<span ${onclick} style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${hitBg};color:${hitColor};border-radius:var(--radius-full);font-size:var(--fs-xs);font-variant-numeric:tabular-nums;${cursor}" title="${clickable?'Click to see the transactions':''}"><b>${label}</b> ${unitPrefix}${(v||0).toLocaleString('en-GB')}${unitSuffix}</span>`;
                 }).join(' ');
-                const totalClick=hasDetail?`<button onclick="toggleStratKpiDrill('${p.id}','rolling');event.stopPropagation();event.preventDefault();return false" style="background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-secondary);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--fs-xs);cursor:pointer;margin-left:6px">Rolling 31d ▾</button>`:'';
+                const totalClick=hasDetail?`<button onclick="toggleStratKpiDrill('${p.id}','rolling');event.stopPropagation();event.preventDefault();return false" class="od-btn od-btn-secondary od-btn-sm" style="margin-left:6px">Rolling 31d ▾</button>`:'';
                 monthsRow=`<div style="grid-column:1/-1;padding:0 14px 10px 14px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-top:none;border-bottom:none;font-size:var(--fs-xs);color:var(--text-secondary)"><span style="margin-right:6px;color:var(--text-muted)">Per month:</span>${cells}${totalClick}</div>`;
             }
             // Drilldown container (hidden until toggled)
@@ -669,7 +669,7 @@
             </div>`;
             el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <div><strong>${escHtml(label)}</strong> · ${escHtml(detail.label||'')}</div>
-                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" class="od-btn-outline">Close ▴</button>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" class="od-btn od-btn-outline">Close ▴</button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
                 <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--accent-hover);font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:var(--accent-hover)">${detail.completedCount||0}</div></div>
@@ -736,7 +736,7 @@
         };
         el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <div><strong>${escHtml(label)}</strong> · Window: ${escHtml(detail.windowStart||'-')} → ${escHtml(detail.windowEnd||'-')}</div>
-                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" class="od-btn-outline">Close ▴</button>
+                <button onclick="toggleStratKpiDrill('${pid}','${bucket}')" class="od-btn od-btn-outline">Close ▴</button>
             </div>
             <div style="display:grid;grid-template-columns:${displayHint.hideCosts?'1fr':'1fr 1fr 1fr'};gap:10px;margin-bottom:10px">
                 <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--accent-hover);font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:var(--accent-hover)">${fmtAmt(detail.revenue)}</div></div>
@@ -973,7 +973,7 @@
                     ? '<div class="detail-item"><span><em>No unreconciled transactions</em></span></div>'
                     : unreconciledTx.map(r => `<div class="detail-item"><span class="detail-item-name">${escHtml(getField(r, F.txDate) || '')} — ${escHtml(txLabel(r))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.txReportAmount)) || 0)}</span></div>`).join(''))
                 + `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    <button onclick="event.stopPropagation(); triggerReconciliation(this)" style="padding:8px 16px;font-size:12px;font-weight:600;background:var(--info);color:white;border:none;border-radius:6px;cursor:pointer">Run Reconciliation</button>
+                    <button onclick="event.stopPropagation(); triggerReconciliation(this)" class="od-btn od-btn-primary" style="background:var(--info)">Run Reconciliation</button>
                     <span style="font-size:11px;color:var(--text-muted)" id="reconStatus"></span>
                 </div>`
             )}

@@ -1099,6 +1099,20 @@ body {
     font-weight: var(--fw-bold);
 }
 
+/* ── Status dot (coloured circle indicator) ── */
+.od-status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+/* ── Row highlight backgrounds ── */
+.od-row-danger  { background: var(--danger-bg); }
+.od-row-warning { background: var(--warning-bg); }
+
 /* ── Colour utility classes (text) ── */
 .text-green  { color: var(--success); }
 .text-amber  { color: var(--warning); }

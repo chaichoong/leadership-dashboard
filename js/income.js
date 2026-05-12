@@ -19,7 +19,7 @@
                 <div style="width:40px;height:40px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:income-spin 0.8s linear infinite"></div>
                 <div style="font-size:14px;font-weight:500">Loading Accounts Receivable Fixed…</div>
                 <div id="incomeLoadingMessage" style="font-size:12px;color:var(--text-muted);text-align:center;max-width:480px">Fetching tenancy data from Airtable. This usually takes a few seconds.</div>
-                <button id="incomeLoadingRetryBtn" onclick="forceIncomeRefresh()" style="margin-top:8px;padding:8px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:6px;cursor:pointer;display:none">Force Refresh from Airtable</button>
+                <button id="incomeLoadingRetryBtn" class="od-btn od-btn-primary" onclick="forceIncomeRefresh()" style="margin-top:8px;display:none">Force Refresh from Airtable</button>
                 <style>@keyframes income-spin { to { transform: rotate(360deg); } }</style>
             `;
             panel.appendChild(overlay);
@@ -413,7 +413,7 @@
         }
 
         togglesEl.innerHTML = views.map(v =>
-            `<button onclick="_incomeBreakdownView='${v.key}'; renderIncomeBreakdown(window._lastIncomeEnriched, window._lastIncomeTotalIncome)" style="font-size:11px;padding:3px 10px;border:1px solid ${_incomeBreakdownView === v.key ? 'var(--accent)' : 'var(--border-default)'};border-radius:4px;background:${_incomeBreakdownView === v.key ? 'var(--accent-soft)' : 'var(--bg-surface)'};color:${_incomeBreakdownView === v.key ? 'var(--accent)' : 'var(--text-secondary)'};cursor:pointer;font-weight:${_incomeBreakdownView === v.key ? '600' : '400'}">${v.label}</button>`
+            `<button class="od-btn ${_incomeBreakdownView === v.key ? 'od-btn-outline' : 'od-btn-secondary'} od-btn-sm" onclick="_incomeBreakdownView='${v.key}'; renderIncomeBreakdown(window._lastIncomeEnriched, window._lastIncomeTotalIncome)">${v.label}</button>`
         ).join('');
 
         // Cache for re-render from toggle clicks

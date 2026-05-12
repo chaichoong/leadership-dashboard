@@ -20,7 +20,7 @@
                 <div style="width:40px;height:40px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:cost-spin 0.8s linear infinite"></div>
                 <div style="font-size:14px;font-weight:500">Loading Accounts Payable Fixed…</div>
                 <div id="costsLoadingMessage" style="font-size:12px;color:var(--text-muted);text-align:center;max-width:480px">Fetching costs from Airtable. This usually takes a few seconds.</div>
-                <button id="costsLoadingRetryBtn" onclick="forceCostsRefresh()" style="margin-top:8px;padding:8px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:6px;cursor:pointer;display:none">Force Refresh from Airtable</button>
+                <button id="costsLoadingRetryBtn" class="od-btn od-btn-primary" onclick="forceCostsRefresh()" style="margin-top:8px;display:none">Force Refresh from Airtable</button>
                 <style>@keyframes cost-spin { to { transform: rotate(360deg); } }</style>
             `;
             panel.appendChild(overlay);
@@ -457,8 +457,8 @@
             <td style="font-size:12px;color:var(--text-secondary);max-width:140px">${subCatStr}</td>
             <td style="white-space:nowrap">${endDateCell}</td>
             <td style="width:80px;text-align:center;white-space:nowrap">
-                <button onclick="event.stopPropagation(); costOpenPrintStatement('${e.id}')" title="Print statement" style="background:none;border:1px solid var(--accent);border-radius:4px;cursor:pointer;padding:2px 6px;font-size:11px;color:var(--accent);margin-right:2px">🖨</button>
-                <button onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')" title="Show linked transactions" style="background:none;border:1px solid var(--border-default);border-radius:4px;cursor:pointer;padding:2px 6px;font-size:11px;color:var(--text-secondary)">▶</button>
+                <button class="od-btn od-btn-outline od-btn-sm" onclick="event.stopPropagation(); costOpenPrintStatement('${e.id}')" title="Print statement" style="margin-right:2px">🖨</button>
+                <button class="od-btn od-btn-secondary od-btn-sm" onclick="event.stopPropagation(); toggleCostTxRow(this, '${e.id}')" title="Show linked transactions">▶</button>
             </td>
         </tr>
         <tr class="cost-tx-detail-row" id="cost-tx-${e.id}" style="display:none">
@@ -672,7 +672,7 @@
                 ? '<span style="color:var(--success);font-size:10px;font-weight:600">✓ Reconciled</span>'
                 : '<span style="color:var(--text-muted);font-size:10px">Unreconciled</span>';
             const unlinkBtn = reconciled
-                ? `<button onclick="event.stopPropagation(); unlinkTxFromCost('${tx.id}', '${e.id}', this)" title="Unlink — wrong reconciliation" style="background:none;border:1px solid var(--border-default);border-radius:3px;cursor:pointer;padding:1px 6px;font-size:10px;color:var(--danger)">Unlink</button>`
+                ? `<button class="od-btn od-btn-outline od-btn-sm" onclick="event.stopPropagation(); unlinkTxFromCost('${tx.id}', '${e.id}', this)" title="Unlink — wrong reconciliation" style="color:var(--danger);border-color:var(--danger)">Unlink</button>`
                 : '';
             return `<div style="display:grid;grid-template-columns:${grid};gap:8px;padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;align-items:center">
                 <span style="color:var(--text-secondary)">${escHtml(formatCostDate(date))}</span>
@@ -1275,9 +1275,9 @@
         ];
         const buttons = opts.map(o => {
             const tick = o.name === current ? '✓ ' : '&nbsp;&nbsp;';
-            return `<button onclick="setCostStatus('${costId}', '${o.name}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px;color:${o.color};font-weight:600">${tick}${o.name}</button>`;
+            return `<button class="od-btn" onclick="setCostStatus('${costId}', '${o.name}')" style="display:block;width:100%;text-align:left;padding:8px;background:none;color:${o.color};font-weight:600">${tick}${o.name}</button>`;
         }).join('');
-        const unlockBtn = `<button onclick="unlockCostStatus('${costId}')" style="display:block;width:100%;text-align:left;padding:6px 8px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-secondary);font-size:11px;border-top:1px solid var(--border-subtle);margin-top:4px">↶ Clear manual override (let auto-flip resume)</button>`;
+        const unlockBtn = `<button class="od-btn od-btn-sm" onclick="unlockCostStatus('${costId}')" style="display:block;width:100%;text-align:left;padding:6px 8px;background:none;color:var(--text-secondary);border-top:1px solid var(--border-subtle);margin-top:4px">↶ Clear manual override (let auto-flip resume)</button>`;
         menu.innerHTML = `<div style="padding:6px 8px;font-size:11px;color:var(--text-muted);border-bottom:1px solid var(--border-subtle);margin-bottom:4px">Override status for <strong>${escHtml(getField(cost, F.costName) || '')}</strong></div>${buttons}${unlockBtn}`;
         menu.querySelectorAll('button').forEach(b => {
             b.addEventListener('mouseenter', () => b.style.background = 'var(--bg-surface-2)');
@@ -1346,8 +1346,8 @@
                 <strong>${escHtml(getField(cost, F.costName) || '')}</strong><br>
                 Recorded Due Day: ${currentDueDay || '—'} · Actual day paid: ${actualDay}
             </div>
-            <button class="drift-menu-btn" onclick="amendDueDayFromLastPaid('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px">📅 Amend Due Day to ${actualDay} <span style="color:var(--text-muted);font-size:10px">— payments actually land on the ${actualDay}${ordinal(actualDay)}</span></button>
-            <button class="drift-menu-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-secondary)">Cancel</button>
+            <button class="drift-menu-btn od-btn" onclick="amendDueDayFromLastPaid('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;background:none">📅 Amend Due Day to ${actualDay} <span style="color:var(--text-muted);font-size:10px">— payments actually land on the ${actualDay}${ordinal(actualDay)}</span></button>
+            <button class="drift-menu-btn od-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;background:none;color:var(--text-secondary)">Cancel</button>
         `;
         menu.querySelectorAll('.drift-menu-btn').forEach(b => {
             b.addEventListener('mouseenter', () => b.style.background = 'var(--bg-surface-2)');
@@ -1433,9 +1433,9 @@
                 <strong>${escHtml(e.name)}</strong><br>
                 Expected ${fmt(e.expected)} · Last paid ${fmt(e.lastReconAmount)} · Diff ${e.varianceAmount >= 0 ? '+' : '−'}${fmt(Math.abs(e.varianceAmount))} (${(e.variancePct*100).toFixed(1)}%)
             </div>
-            <button class="var-menu-btn" onclick="amendExpectedCost('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px">📝 Amend Expected to ${fmt(e.lastReconAmount)} <span style="color:var(--text-muted);font-size:10px">— rate has actually changed</span></button>
-            <button class="var-menu-btn" onclick="dismissCostVariance('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px">🚫 Dismiss this variance <span style="color:var(--text-muted);font-size:10px">— bulk payment / one-off explained</span></button>
-            <button class="var-menu-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-secondary)">Cancel</button>
+            <button class="var-menu-btn od-btn" onclick="amendExpectedCost('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;background:none">📝 Amend Expected to ${fmt(e.lastReconAmount)} <span style="color:var(--text-muted);font-size:10px">— rate has actually changed</span></button>
+            <button class="var-menu-btn od-btn" onclick="dismissCostVariance('${costId}')" style="display:block;width:100%;text-align:left;padding:8px;background:none">🚫 Dismiss this variance <span style="color:var(--text-muted);font-size:10px">— bulk payment / one-off explained</span></button>
+            <button class="var-menu-btn od-btn" onclick="this.parentElement.remove()" style="display:block;width:100%;text-align:left;padding:8px;background:none;color:var(--text-secondary)">Cancel</button>
         `;
         // Hover effect via inline JS (cleaner than adding CSS class)
         menu.querySelectorAll('.var-menu-btn').forEach(b => {
@@ -1530,7 +1530,7 @@
         toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-sidebar);color:var(--text-inverse);padding:10px 14px;border-radius:8px;box-shadow:var(--shadow-lg);font-size:13px;z-index:2000;display:flex;align-items:center;gap:12px;max-width:400px';
         toast.innerHTML = `
             <span>${escHtml(action.label)}</span>
-            <button onclick="performUndo()" style="background:var(--accent-gold);color:var(--bg-sidebar);border:none;padding:4px 10px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px">Undo</button>
+            <button class="od-btn od-btn-sm" onclick="performUndo()" style="background:var(--accent-gold);color:var(--bg-sidebar);font-weight:600">Undo</button>
         `;
         document.body.appendChild(toast);
         window._lastCostUndo = action;
@@ -1682,8 +1682,8 @@
                 </div>
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end">
-                <button id="costStmtCancel" style="padding:6px 16px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);cursor:pointer;font-size:13px">Cancel</button>
-                <button id="costStmtGenerate" style="padding:6px 16px;border:1px solid var(--accent);border-radius:var(--radius-md);background:var(--accent);color:#fff;cursor:pointer;font-size:13px;font-weight:600">Generate</button>
+                <button id="costStmtCancel" class="od-btn od-btn-secondary">Cancel</button>
+                <button id="costStmtGenerate" class="od-btn od-btn-primary">Generate</button>
             </div>
         `;
         overlay.appendChild(panel);
@@ -1771,7 +1771,7 @@
                 <h1>Cost Statement</h1>
                 <div class="meta">${fmtDateStr(startDate)} to ${fmtDateStr(endDate)}</div>
             </div>
-            <button class="no-print" onclick="window.print()" style="padding:8px 20px;border:1px solid #2C6E49;border-radius:6px;background:#2C6E49;color:#fff;cursor:pointer;font-size:13px;font-weight:600">Print</button>
+            <button class="no-print od-btn od-btn-primary od-btn-lg" onclick="window.print()">Print</button>
         </div>
         <div class="summary-grid">
             <div class="summary-box"><div class="label">Cost Name</div><div class="value">${escHtml(e.name)}</div></div>

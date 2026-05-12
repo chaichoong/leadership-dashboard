@@ -451,8 +451,8 @@
                     <p class="od-text-muted-sm" style="font-size:11px;color:var(--text-secondary);margin:3px 0 0">${results.length} unreconciled · ${matched} suggestions · ${unmatched} unmatched</p>
                 </div>
                 <div style="display:flex;gap:6px">
-                    <button onclick="approveAllRecon()" class="od-btn-primary" style="background:var(--success)">Approve All Transactions</button>
-                    <button onclick="closeReconPanel()" class="od-btn-secondary">Close</button>
+                    <button onclick="approveAllRecon()" class="od-btn od-btn-primary" style="background:var(--success)">Approve All Transactions</button>
+                    <button onclick="closeReconPanel()" class="od-btn od-btn-secondary">Close</button>
                 </div>
             </div>
             <div style="overflow:auto;padding:8px 12px">
@@ -510,8 +510,8 @@
             return cnt > 1;
         })();
         const splitBtnHtml = isAlreadySplit
-            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled class="od-btn-secondary od-btn-sm" style="color:var(--text-muted);cursor:not-allowed">Split</button>`
-            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" class="od-btn-secondary od-btn-sm">Split</button>`;
+            ? `<button title="This transaction is already split (Split Count > 1). To re-split, first reset Split Count to 1 in Airtable and remove any existing child records." disabled class="od-btn od-btn-secondary od-btn-sm" style="color:var(--text-muted);cursor:not-allowed">Split</button>`
+            : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" class="od-btn od-btn-secondary od-btn-sm">Split</button>`;
         const actionHtml = r.status === 'approved'
             ? `<span class="od-status-badge success">Done ✓</span>`
             : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
@@ -1177,13 +1177,13 @@
                     <button onclick="document.getElementById('reconSplitModal').remove()" style="background:none;border:none;font-size:22px;line-height:1;color:var(--text-muted);cursor:pointer;padding:0 4px">&times;</button>
                 </div>
                 <div style="padding:14px 20px;border-bottom:1px solid var(--border-subtle);display:flex;gap:6px">
-                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  class="od-btn-primary" style="flex:1;padding:8px 12px">Equal Split</button>
-                    <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" class="od-btn-secondary" style="flex:1;padding:8px 12px">Custom Amounts</button>
+                    <button id="splitTabEqual"  data-mode="equal"  onclick="setSplitMode('equal')"  class="od-btn od-btn-primary" style="flex:1">Equal Split</button>
+                    <button id="splitTabCustom" data-mode="custom" onclick="setSplitMode('custom')" class="od-btn od-btn-secondary" style="flex:1">Custom Amounts</button>
                 </div>
                 <div id="splitModalBody" style="overflow:auto;padding:16px 20px;flex:1"></div>
                 <div style="padding:12px 20px;border-top:1px solid var(--border-default);display:flex;justify-content:flex-end;gap:8px;background:var(--bg-surface)">
-                    <button onclick="document.getElementById('reconSplitModal').remove()" class="od-btn-secondary od-btn-lg">Cancel</button>
-                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" class="od-btn-primary od-btn-lg">Save Split</button>
+                    <button onclick="document.getElementById('reconSplitModal').remove()" class="od-btn od-btn-secondary od-btn-lg">Cancel</button>
+                    <button id="splitSaveBtn" onclick="performReconSplit(${idx})" class="od-btn od-btn-primary od-btn-lg">Save Split</button>
                 </div>
             </div>`;
         document.body.appendChild(overlay);
@@ -1211,10 +1211,10 @@
         const tEq = document.getElementById('splitTabEqual');
         const tCu = document.getElementById('splitTabCustom');
         if (tEq && tCu) {
-            tEq.className = mode === 'equal' ? 'od-btn-primary' : 'od-btn-secondary';
-            tCu.className = mode === 'custom' ? 'od-btn-primary' : 'od-btn-secondary';
-            tEq.style.cssText = 'flex:1;padding:8px 12px';
-            tCu.style.cssText = 'flex:1;padding:8px 12px';
+            tEq.className = mode === 'equal' ? 'od-btn od-btn-primary' : 'od-btn od-btn-secondary';
+            tCu.className = mode === 'custom' ? 'od-btn od-btn-primary' : 'od-btn od-btn-secondary';
+            tEq.style.cssText = 'flex:1';
+            tCu.style.cssText = 'flex:1';
         }
         renderSplitModalBody();
     }
@@ -1282,7 +1282,7 @@
                     <tbody>${rowsHtml}</tbody>
                 </table>
                 <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-                    <button onclick="splitAddCustomRow()" class="od-btn-outline">+ Add Portion</button>
+                    <button onclick="splitAddCustomRow()" class="od-btn od-btn-outline">+ Add Portion</button>
                     <div style="font-size:12px">
                         <span style="color:var(--text-muted)">Total: <strong style="color:var(--text-primary)">${fmt(total)}</strong></span>
                         &nbsp;·&nbsp;
