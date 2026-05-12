@@ -1814,18 +1814,25 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       const member=TEAM.find(m=>m.key===rawValue);
       if(member){
         payload[fid]={email:member.email};task.assignee=member.name;task.assigneeEmail=member.email;
-        // Add the actor (whoever clicked Reassign) as a collaborator so
-        // they get the completion DM. Skipped when actor IS the new
-        // assignee, OR is already on the collaborator list, OR has no
-        // known email. Reassigning to yourself doesn't trigger this.
+        // Auto-add collaborators on reassignment:
+        // 1. The actor (whoever clicked Reassign) stays in the loop
+        // 2. The previous assignee stays in the loop
+        const collabs=Array.isArray(task.collaborators)?task.collaborators.slice():[];
+        let collabsChanged=false;
         const actorEmail=(currentUser&&currentUser.email)||'';
-        if(actorEmail&&actorEmail!==member.email){
-          const collabs=Array.isArray(task.collaborators)?task.collaborators.slice():[];
-          if(!collabs.some(c=>c&&c.email===actorEmail)){
-            collabs.push({email:actorEmail,name:(currentUser&&currentUser.name)||actorEmail});
-            payload[F.collaborators]=collabs.map(c=>({email:c.email}));
-            task.collaborators=collabs;
-          }
+        if(actorEmail&&actorEmail!==member.email&&!collabs.some(c=>c&&(c.email||'').toLowerCase()===actorEmail.toLowerCase())){
+          collabs.push({email:actorEmail,name:(currentUser&&currentUser.name)||actorEmail});
+          collabsChanged=true;
+        }
+        const prevEmail=prev.assigneeEmail||'';
+        if(prevEmail&&prevEmail.toLowerCase()!==member.email.toLowerCase()&&!collabs.some(c=>c&&(c.email||'').toLowerCase()===prevEmail.toLowerCase())){
+          const prevMember=TEAM.find(m=>m.email.toLowerCase()===prevEmail.toLowerCase());
+          collabs.push({email:prevEmail,name:prevMember?prevMember.name:prevEmail});
+          collabsChanged=true;
+        }
+        if(collabsChanged){
+          payload[F.collaborators]=collabs.map(c=>({email:c.email}));
+          task.collaborators=collabs;
         }
       }
     } else {
@@ -1860,7 +1867,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         // to id / name / string.
         const norm=v=>{
           if(v==null||v==='')return '';
-          if(Array.isArray(v))return v.map(x=>x&&x.id?x.id:x).sort().join(',');
+          if(Array.isArray(v))return v.map(x=>x&&typeof x==='object'?(x.email||x.id||JSON.stringify(x)):x).sort().join(',');
           if(typeof v==='object'){
             if(v.email)return v.email;
             if(v.id)return v.id;
@@ -2683,6 +2690,19 @@ async function patchCollaborators(taskId,newList,label){
   try{
     const res=await patchTask(taskId,payload);
     if(!res.ok){let errBody='';try{errBody=await res.text()}catch(_){};throw new Error('HTTP '+res.status+' '+errBody.slice(0,200));}
+    // Verify the collaborator list actually persisted (Airtable can silently drop)
+    try{
+      const body=await res.clone().json();
+      const got=(body&&body.fields&&body.fields[F.collaborators])||[];
+      const sentEmails=newList.map(c=>(c.email||'').toLowerCase()).sort().join(',');
+      const gotEmails=(Array.isArray(got)?got:[]).map(c=>(c.email||'').toLowerCase()).sort().join(',');
+      if(sentEmails&&sentEmails!==gotEmails){
+        console.warn('[patchCollaborators] verify drift — sent',sentEmails,'got',gotEmails);
+        throw new Error('Collaborator update was accepted but Airtable did not persist all entries. Check that all team emails are valid base collaborators.');
+      }
+    }catch(verifyErr){
+      if(verifyErr&&verifyErr.message&&verifyErr.message.indexOf('Collaborator update')===0)throw verifyErr;
+    }
     // Rebuild collaborators locally from what the user picked (response uses field names; avoid round-tripping).
     task.collaborators=newList.map(c=>{
       const member=TEAM.find(m=>m.email.toLowerCase()===((c.email||'').toLowerCase()));
@@ -2697,7 +2717,7 @@ async function patchCollaborators(taskId,newList,label){
     toast('Saved');
   }catch(e){
     console.warn('collab patch failed',e);
-    toast('Failed to update collaborators',true);
+    toast('Failed to update collaborators: '+(e.message||'unknown'),true);
   }
 }
 async function addCollaborator(taskId,email,ev){
