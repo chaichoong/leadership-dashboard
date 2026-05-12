@@ -325,7 +325,7 @@
                         <div style="font-size:16px;font-weight:700;color:var(--text-primary)">${escHtml(title)}</div>
                         <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${txs.length} transaction${txs.length === 1 ? '' : 's'} · Sum: <strong>${sumFmt}</strong> · <span style="color:var(--text-muted)">Changes save instantly; report refreshes on close.</span></div>
                     </div>
-                    <button onclick="pnlCloseDrill()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--text-secondary);padding:0 8px">&times;</button>
+                    <button onclick="pnlCloseDrill()" class="od-btn od-btn-secondary" style="font-size:24px;padding:0 8px">&times;</button>
                 </div>
                 <div style="overflow:auto;flex:1">
                     <table class="invoice-table">
@@ -572,11 +572,11 @@ RULES:
             const text = data.content?.[0]?.text || 'No analysis available.';
             panel.innerHTML = `<div style="font-size:13px;line-height:1.7;color:var(--text-primary)">${typeof renderMarkdown === 'function' ? renderMarkdown(text) : text.replace(/\n/g, '<br>')}</div>
                 <div style="margin-top:8px;display:flex;gap:6px">
-                    <button onclick="pnlRunAIAnalysis()" style="font-size:10px;padding:3px 10px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:4px;cursor:pointer;color:var(--text-secondary)">↻ Refresh Analysis</button>
+                    <button onclick="pnlRunAIAnalysis()" class="od-btn-secondary od-btn-sm">↻ Refresh Analysis</button>
                 </div>`;
         } catch (e) {
             console.error('P&L AI analysis failed:', e);
-            panel.innerHTML = `<div style="color:var(--danger);font-size:12px;padding:12px">Analysis unavailable: ${escHtml(e.message)}. <button onclick="pnlRunAIAnalysis()" style="font-size:11px;padding:2px 8px;background:var(--danger-bg);border:1px solid #fca5a5;border-radius:4px;cursor:pointer;color:var(--danger);margin-left:6px">Retry</button></div>`;
+            panel.innerHTML = `<div style="color:var(--danger);font-size:12px;padding:12px">Analysis unavailable: ${escHtml(e.message)}. <button onclick="pnlRunAIAnalysis()" class="od-btn-outline od-btn-sm" style="margin-left:6px">Retry</button></div>`;
         } finally {
             _pnlAiLoading = false;
         }
@@ -708,7 +708,7 @@ RULES:
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:16px">🤖</span>
                         <span style="font-size:13px;font-weight:700;color:var(--text-primary)">AI Financial Analysis</span>
-                        <button onclick="pnlRunAIAnalysis()" style="margin-left:auto;font-size:11px;padding:4px 12px;background:#fff;border:1px solid var(--border-default);border-radius:6px;cursor:pointer;color:var(--text-secondary);font-weight:500">Generate Analysis</button>
+                        <button onclick="pnlRunAIAnalysis()" class="od-btn-primary od-btn-sm" style="margin-left:auto">Generate Analysis</button>
                     </div>
                     <div id="pnlAiPanel" style="color:var(--text-secondary);font-size:12px">Click <strong>Generate Analysis</strong> to get AI-powered insights into your P&amp;L trends, cost drivers, and path to ${PNL_NET_MARGIN_TARGET}% net margin.</div>
                 </div>
