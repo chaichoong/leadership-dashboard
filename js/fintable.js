@@ -197,13 +197,13 @@
             const balStr = a.balance != null ? '£' + a.balance.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
             const rowBg = a.status === 'critical' ? 'rgba(239,68,68,0.06)' : a.status === 'alert' ? 'rgba(249,115,22,0.06)' : '';
 
-            return `<tr style="border-bottom:1px solid var(--border-subtle);${rowBg ? 'background:' + rowBg : ''}">
-                <td style="padding:10px 12px"><span role="img" aria-label="${a.statusLabel}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
-                <td style="padding:10px 12px;font-weight:500">${escHtml(a.alias)}</td>
-                <td style="padding:10px 12px;color:var(--text-secondary)">${escHtml(a.institution)}</td>
-                <td style="padding:10px 12px">${syncStr}</td>
-                <td style="padding:10px 12px;font-weight:500;color:${a.statusColor}">${agoStr}</td>
-                <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${balStr}</td>
+            return `<tr style="${rowBg ? 'background:' + rowBg : ''}">
+                <td><span role="img" aria-label="${a.statusLabel}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.statusColor};margin-right:6px"></span>${a.statusLabel}</td>
+                <td style="font-weight:var(--fw-medium)">${escHtml(a.alias)}</td>
+                <td style="color:var(--text-secondary)">${escHtml(a.institution)}</td>
+                <td>${syncStr}</td>
+                <td style="font-weight:var(--fw-medium);color:${a.statusColor}">${agoStr}</td>
+                <td class="inv-amount">${balStr}</td>
             </tr>`;
         }).join('');
 
