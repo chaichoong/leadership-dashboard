@@ -664,11 +664,14 @@ if (tabId === 'comms') {
         }
     });
 
-    function toggleCashflowRow(rowId) {
+    function toggleCashflowRow(rowId, parentRow) {
         const row = document.getElementById(rowId);
-        if (row) {
-            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-        }
+        if (!row) return;
+        const wasHidden = row.style.display === 'none';
+        row.style.display = wasHidden ? 'table-row' : 'none';
+        const idx = rowId.replace('cfrow-', '');
+        const chevron = document.getElementById('cf-chev-' + idx);
+        if (chevron) chevron.classList.toggle('open', wasHidden);
     }
 
     function escHtml(str) {

@@ -422,8 +422,8 @@
                 : '';
 
             return `
-                <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}')">
-                    <td><strong>${dayName(r.date)}</strong></td>
+                <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}', this)">
+                    <td><span class="expand-chevron" id="cf-chev-${i}">▶</span><strong>${dayName(r.date)}</strong></td>
                     <td>${fmtAccounting(r.opening)}</td>
                     <td class="text-green">+${fmt(r.dayIn)}</td>
                     <td class="text-red">-${fmt(r.dayOut)}</td>
@@ -432,12 +432,12 @@
                     <td class="od-text-muted-sm" style="white-space:nowrap">${acctSummary}</td>
                 </tr>
                 <tr class="cashflow-table-row-detail" id="cfrow-${i}">
-                    <td colspan="7"><div class="cashflow-detail-list">
+                    <td colspan="7"><div class="expand-content"><div class="cashflow-detail-list">
                         <div style="margin-bottom:8px;"><strong>Inflows:</strong></div>
                         ${inflowsHtml}
                         <div style="margin-top:8px;margin-bottom:8px;"><strong>Outflows:</strong></div>
                         ${outflowsHtml}
-                    </div></td>
+                    </div></div></td>
                 </tr>
             `;
         }).join('');

@@ -509,7 +509,7 @@
         const isHidden = row.style.display === 'none';
         row.style.display = isHidden ? 'table-row' : 'none';
         const chevron = parentRow.querySelector('[data-chevron]');
-        if (chevron) chevron.innerHTML = isHidden ? '&#x25BE;' : '&#x25B8;';
+        if (chevron) chevron.classList.toggle('open', isHidden);
     }
     window.toggleRentBreakdown = toggleRentBreakdown;
 
@@ -915,7 +915,7 @@
 
             return `<tr style="border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="toggleRentBreakdown('${breakdownId}', this)">
                 <td style="padding:10px 12px">
-                    <span class="od-expand-chevron" data-chevron>&#x25B8;</span>
+                    <span class="expand-chevron" data-chevron>▶</span>
                     <span style="font-weight:600">${escHtml(entry.tenantName)}</span>
                     ${entry.unit ? `<div style="font-size:11px;color:var(--text-muted);margin-left:14px">${escHtml(entry.unit)}</div>` : ''}
                 </td>
@@ -925,8 +925,8 @@
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:${daysWeight};color:${daysColour}">${s.daysInArrears}</td>
                 <td style="padding:10px 12px;text-align:center">${s.s8Ready ? s8Badge : ''}</td>
             </tr>
-            <tr id="${breakdownId}" style="display:none;background:var(--bg-surface-2)">
-                <td colspan="6" style="padding:16px 24px">${renderBreakdownDetail(entry)}</td>
+            <tr class="expand-row" id="${breakdownId}" style="display:none">
+                <td colspan="6"><div class="expand-content">${renderBreakdownDetail(entry)}</div></td>
             </tr>`;
         }).join('');
 
