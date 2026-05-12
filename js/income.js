@@ -19,6 +19,7 @@
                 <div style="width:40px;height:40px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:income-spin 0.8s linear infinite"></div>
                 <div style="font-size:14px;font-weight:500">Loading Accounts Receivable Fixed…</div>
                 <div id="incomeLoadingMessage" style="font-size:12px;color:var(--text-muted);text-align:center;max-width:480px">Fetching tenancy data from Airtable. This usually takes a few seconds.</div>
+                <button id="incomeLoadingRetryBtn" onclick="forceIncomeRefresh()" style="margin-top:8px;padding:8px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:6px;cursor:pointer;display:none">Force Refresh from Airtable</button>
                 <style>@keyframes income-spin { to { transform: rotate(360deg); } }</style>
             `;
             panel.appendChild(overlay);
@@ -28,9 +29,36 @@
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
         });
+
+        if (window._incomeLoadingTimer) clearTimeout(window._incomeLoadingTimer);
+        window._incomeLoadingTimer = setTimeout(() => {
+            const msg = document.getElementById('incomeLoadingMessage');
+            const btn = document.getElementById('incomeLoadingRetryBtn');
+            if (msg) msg.innerHTML = 'Still loading after 8 seconds. Click below to force a fresh fetch from Airtable. If that doesn\'t work, log out and back in.';
+            if (btn) btn.style.display = 'inline-block';
+        }, 8000);
+    }
+
+    async function forceIncomeRefresh() {
+        const btn = document.getElementById('incomeLoadingRetryBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+        try {
+            if (typeof clearDashCache === 'function') {
+                try { await clearDashCache(); } catch (_) {}
+            }
+            if (typeof loadDashboard === 'function') {
+                await loadDashboard();
+            }
+            renderIncomeTab();
+        } catch (err) {
+            if (typeof showToast === 'function') showToast('Refresh failed: ' + err.message, { type: 'error' });
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Force Refresh from Airtable'; }
+        }
     }
 
     function hideIncomeLoadingState() {
+        if (window._incomeLoadingTimer) { clearTimeout(window._incomeLoadingTimer); window._incomeLoadingTimer = null; }
         const overlay = document.getElementById('incomeLoadingOverlay');
         if (overlay) overlay.style.display = 'none';
         ['incomeSummaryCards', 'incomeBreakdown', 'incomeAIAnalysis'].forEach(id => {
@@ -148,8 +176,18 @@
 
         if (tenancies.length === 0) {
             showIncomeLoadingState();
+            if (!window._incomeDataPoll) {
+                window._incomeDataPoll = setInterval(() => {
+                    if ((allTenancies || []).length > 0) {
+                        clearInterval(window._incomeDataPoll);
+                        window._incomeDataPoll = null;
+                        renderIncomeTab();
+                    }
+                }, 500);
+            }
             return;
         } else {
+            if (window._incomeDataPoll) { clearInterval(window._incomeDataPoll); window._incomeDataPoll = null; }
             hideIncomeLoadingState();
         }
 
