@@ -46,22 +46,35 @@
     };
 
     // ── Build name lookups from globally-loaded data ──
+    // Field IDs verified against the same ones used in reconciliation.js / pnl.js /
+    // arrears.js. We hardcode here (matching those files' pattern) rather than
+    // adding new F.* constants, per the cross-file edit rules.
+    //   Sub-Category name: fldO4BTJhFv5EsN6i  (Chart of Accounts – Sub Categories table)
+    //   Category name:     fldii4oUzSfmplihO  (Chart of Accounts – Categories table)
+    //   Business name:     fldbbRqVxLxUdHwIR  (Businesses table — also exposed as BIZ_NAME_FIELD in config.js)
+    const _TX_FIELD_SUBCAT_NAME = 'fldO4BTJhFv5EsN6i';
+    const _TX_FIELD_CAT_NAME    = 'fldii4oUzSfmplihO';
+    const _TX_FIELD_BIZ_NAME    = (typeof BIZ_NAME_FIELD !== 'undefined') ? BIZ_NAME_FIELD : 'fldbbRqVxLxUdHwIR';
+
     function _txBuildLookups() {
         const s = _txState;
+        const toName = v => {
+            if (v == null) return '';
+            if (typeof v === 'string') return v;
+            if (Array.isArray(v) && v.length) return typeof v[0] === 'string' ? v[0] : (v[0]?.name || '');
+            return v?.name || '';
+        };
         s.subCatById = {};
         (allSubCategories || []).forEach(r => {
-            const n = getField(r, 'fldYDOOrhEUAQAaNb') || r.fields?.Name || Object.values(r.fields || {})[0];
-            s.subCatById[r.id] = typeof n === 'string' ? n : (n?.name || '');
+            s.subCatById[r.id] = toName(getField(r, _TX_FIELD_SUBCAT_NAME));
         });
         s.catById = {};
         (allCategories || []).forEach(r => {
-            const n = r.fields?.Name || Object.values(r.fields || {})[0];
-            s.catById[r.id] = typeof n === 'string' ? n : (n?.name || '');
+            s.catById[r.id] = toName(getField(r, _TX_FIELD_CAT_NAME));
         });
         s.bizById = {};
         (allBusinesses || []).forEach(r => {
-            const n = r.fields?.Name || Object.values(r.fields || {})[0];
-            s.bizById[r.id] = typeof n === 'string' ? n : (n?.name || '');
+            s.bizById[r.id] = toName(getField(r, _TX_FIELD_BIZ_NAME));
         });
         s.costById = {};
         (allCosts || []).forEach(r => {
