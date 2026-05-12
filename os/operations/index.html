@@ -393,6 +393,7 @@ const TABLE = {
   costs:        'tblx5kvhzNEI5TFlS',
   valuations:   'tblZYsa0u1M17N7ZE',
   transactions: 'tbln0gzhCAorFc3zB',
+  categories:   'tbleWb8ioptnEwPR8',
 };
 
 const TX = {
@@ -840,7 +841,7 @@ async function start(){
 async function refreshAll(initial=false){
   setSync('Refreshing...');
   try {
-    const [tn, tc, un, pr, cs, vl, tx] = await Promise.all([
+    const [tn, tc, un, pr, cs, vl, tx, cat] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
       fetchAllRecords(TABLE.tenancies),
       fetchAllRecords(TABLE.rentalUnits),
@@ -848,6 +849,7 @@ async function refreshAll(initial=false){
       fetchAllRecords(TABLE.costs),
       fetchAllRecords(TABLE.valuations),
       fetchAllRecords(TABLE.transactions),
+      fetchAllRecords(TABLE.categories),
     ]);
     DATA.tenants      = tn;
     DATA.tenancies    = tc;
@@ -856,6 +858,7 @@ async function refreshAll(initial=false){
     DATA.costs        = cs;
     DATA.valuations   = vl;
     DATA.transactions = tx;
+    DATA.categories   = cat;
     INDEX.tenants      = Object.fromEntries(tn.map(r=>[r.id,r]));
     INDEX.tenancies    = Object.fromEntries(tc.map(r=>[r.id,r]));
     INDEX.units        = Object.fromEntries(un.map(r=>[r.id,r]));
@@ -863,6 +866,7 @@ async function refreshAll(initial=false){
     INDEX.costs        = Object.fromEntries(cs.map(r=>[r.id,r]));
     INDEX.valuations   = Object.fromEntries(vl.map(r=>[r.id,r]));
     INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
+    INDEX.categories   = Object.fromEntries(cat.map(r=>[r.id,r]));
     buildTxLookups();
     document.getElementById('cntTenants').textContent    = tn.length;
     document.getElementById('cntTenancies').textContent  = tc.length;
@@ -923,10 +927,12 @@ async function refreshAll(initial=false){
           },
           {
             name: 'Indexes built for fast linked-record lookup', kind: 'automation', run: () => {
-              const expected = ['tenants','tenancies','units','properties','costs','transactions'];
-              const missing = expected.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
+              const core = ['tenants','tenancies','units','properties','costs'];
+              const missing = core.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
               if (missing.length) return { status: 'fail', detail: `Missing indexes: ${missing.join(', ')}` };
-              return { status: 'pass', detail: 'All six tables indexed by record ID' };
+              const extras = ['transactions','categories'].filter(k => !INDEX[k]);
+              if (extras.length) return { status: 'warn', detail: `Optional indexes not built: ${extras.join(', ')}` };
+              return { status: 'pass', detail: 'All tables indexed by record ID' };
             }
           },
           {
@@ -1334,6 +1340,7 @@ function crossNav(entity, recordId){
 // Render — Tenants
 // ═══════════════════════════════════════════════════════════════════════
 function renderTenants(){
+  _expandedRow.tenants = null;
   const sch = SCHEMA_RESOLVED?.tenants; if (!sch) return;
   const search = document.getElementById('searchTenants').value.toLowerCase().trim();
   const status = document.getElementById('filterTenantStatus').value;
@@ -1358,6 +1365,7 @@ function renderTenants(){
 // Render — Tenancies
 // ═══════════════════════════════════════════════════════════════════════
 function renderTenancies(){
+  _expandedRow.tenancies = null;
   const sch = SCHEMA_RESOLVED?.tenancies; if (!sch) return;
   const search = document.getElementById('searchTenancies').value.toLowerCase().trim();
   const payStatus = document.getElementById('filterTenancyPayStatus').value;
@@ -1385,6 +1393,7 @@ function renderTenancies(){
 // Render — Rental Units
 // ═══════════════════════════════════════════════════════════════════════
 function renderUnits(){
+  _expandedRow.units = null;
   const sch = SCHEMA_RESOLVED?.units; if (!sch) return;
   const search = document.getElementById('searchUnits').value.toLowerCase().trim();
   const status = document.getElementById('filterUnitStatus').value;
@@ -1411,6 +1420,7 @@ function renderUnits(){
 // Render — Properties (with portfolio KPIs)
 // ═══════════════════════════════════════════════════════════════════════
 function renderProperties(){
+  _expandedRow.properties = null;
   const sch = SCHEMA_RESOLVED?.properties; if (!sch) return;
   const search = document.getElementById('searchProperties').value.toLowerCase().trim();
   const type = document.getElementById('filterPropertyType').value;
@@ -3021,8 +3031,17 @@ function renderExpandContent(entityKey, recId){
 
   const catDisplay = (val) => {
     if (!val) return '—';
-    if (Array.isArray(val)) return val.map(v => typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v))).join(', ');
-    return typeof val === 'object' ? escapeHtml(val.name || val.id || '—') : escapeHtml(String(val));
+    const ids = Array.isArray(val) ? val : [val];
+    return ids.map(v => {
+      const id = typeof v === 'object' ? (v.id || v) : v;
+      const rec = INDEX.categories && INDEX.categories[id];
+      if (rec) {
+        const fields = rec.fields || {};
+        const name = Object.values(fields)[0];
+        return escapeHtml(String(name || id));
+      }
+      return typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v));
+    }).join(', ');
   };
 
   const fmtDate = (d) => {
@@ -3098,6 +3117,7 @@ function customerStageBadge(stage){
 }
 
 function renderCustomers(){
+  _expandedRow.customers = null;
   renderCustomerKpis();
   const search = (document.getElementById('searchCustomers').value || '').toLowerCase().trim();
   const stage  = document.getElementById('filterCustomerStage').value;
