@@ -19,7 +19,7 @@
         { id: 'transactions', name: 'Transactions',                icon: '🔍', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#transactions' },
         { id: 'comms',      name: 'Inbound Comms',                 icon: '📨', pageVer: '2.44', sopFile: 'inbound-comms-sop.html',      sopVer: '2.4', standalone: 'follow-up.html' },
         { id: 'compliance', name: 'Property Compliance',            icon: '✅', pageVer: '1.10', sopFile: 'sop-compliance.html',         sopVer: '1.1', standalone: 'compliance.html' },
-        { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.27', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
+        { id: 'operations',  name: 'Operations',                    icon: '🏢', pageVer: '1.28', sopFile: '',                            sopVer: '1.0', standalone: 'os/operations/index.html' },
         // Plan Builder lives under the Leadership section in the sidebar.
         // (Operating Systems Hub + Launch Plan removed during sidebar restructure.)
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.10', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
