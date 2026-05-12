@@ -1718,8 +1718,8 @@ async function saveField(entityKey, recId, fieldId, value, el){
   const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
   el.classList.add('cell-saving');
   try {
-    const body = { fields: { [fieldId]: value }, returnFieldsByFieldId: true };
-    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify(body) });
+    const body = { fields: { [fieldId]: value }, typecast: true };
+    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`, { method:'PATCH', body: JSON.stringify(body) });
     // Update local record
     const rec = INDEX[entityKey][recId];
     if (rec && res.fields) {
@@ -1745,7 +1745,7 @@ async function saveCheckbox(input, recId, fieldId, entityKey){
   const v = input.checked;
   const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
   try {
-    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify({ fields: { [fieldId]: v }, returnFieldsByFieldId:true }) });
+    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`, { method:'PATCH', body: JSON.stringify({ fields: { [fieldId]: v }, typecast: true }) });
     const rec = INDEX[entityKey][recId];
     if (rec && res.fields) rec.fields = { ...rec.fields, ...res.fields };
     toast('Saved', 'success');
@@ -2653,15 +2653,15 @@ async function approveValuation(payload){
       [valSch.byKey.previousValue.id]:Math.round(currentValue),
       [valSch.byKey.approvedOn.id]:   today,
     };
-    await airtableFetch(`${BASE_ID}/${TABLE.valuations}`, {
+    await airtableFetch(`${BASE_ID}/${TABLE.valuations}?returnFieldsByFieldId=true`, {
       method: 'POST',
-      body: JSON.stringify({ fields: valFields, returnFieldsByFieldId: true }),
+      body: JSON.stringify({ fields: valFields, typecast: true }),
     });
     // 2. Update the property's Market Value
     const marketValueFid = sch.byKey.marketValue.id;
-    await airtableFetch(`${BASE_ID}/${TABLE.properties}/${propertyId}`, {
+    await airtableFetch(`${BASE_ID}/${TABLE.properties}/${propertyId}?returnFieldsByFieldId=true`, {
       method: 'PATCH',
-      body: JSON.stringify({ fields: { [marketValueFid]: Math.round(result.estimated_value) }, returnFieldsByFieldId: true }),
+      body: JSON.stringify({ fields: { [marketValueFid]: Math.round(result.estimated_value) }, typecast: true }),
     });
     // 3. Refresh local data + UI
     await refreshAll();
