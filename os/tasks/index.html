@@ -414,7 +414,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <body>
 
 <div class="auth-bar" id="authBar" style="display:none">
-  <span style="font-size:13px;color:var(--text-secondary)">Airtable PAT:</span>
+  <span style="font-size:var(--fs-base);color:var(--text-secondary)">Airtable PAT:</span>
   <input type="password" id="patInput" placeholder="pat_xxxxxxxxxxxx...">
   <button onclick="doAuth()">Connect</button>
 </div>
@@ -578,7 +578,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <tbody id="taskBody"></tbody>
       </table>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;color:var(--text-secondary)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:var(--fs-sm);color:var(--text-secondary)">
       <span id="showingCount"></span>
       <div style="display:flex;gap:6px">
         <button id="prevPage" onclick="changePage(-1)" class="btn btn-sm">&laquo; Prev</button>
@@ -593,7 +593,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
   <div id="view-capacity" style="display:none"><div class="capacity-grid" id="capacityGrid"></div></div>
   <div id="view-recurring" style="display:none">
     <div style="margin-bottom:16px">
-      <p style="font-size:13px;color:var(--text-secondary)">Recurring tasks grouped by person and frequency. Click any task to edit.</p>
+      <p style="font-size:var(--fs-base);color:var(--text-secondary)">Recurring tasks grouped by person and frequency. Click any task to edit.</p>
     </div>
     <div id="recurringContent"></div>
   </div>
@@ -603,7 +603,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
 <div class="toast" id="toast"></div>
 <!-- Sync popover (positioned relative to pill in topbar-right via JS on open) -->
-<div id="syncPopover" style="display:none;position:fixed;top:60px;right:24px;z-index:9997;width:360px;max-height:60vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px;font-size:12px;box-shadow:var(--shadow-lg)"></div>
+<div id="syncPopover" style="display:none;position:fixed;top:60px;right:24px;z-index:9997;width:360px;max-height:60vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px;font-size:var(--fs-sm);box-shadow:var(--shadow-lg)"></div>
 
 <!-- KPI Source Registry: template library for project KPIs (loaded before the main inline script so window.KPI_SOURCES is ready) -->
 <script src="../../js/kpi-sources.js?v=1"></script>
@@ -971,7 +971,7 @@ async function testAllSlackRecipients(){
   const okCount=results.filter(r=>r.status==='ok').length;
   const nfCount=results.filter(r=>r.status==='not-found').length;
   const errCount=results.filter(r=>r.status==='error').length;
-  const head=`<div style="font-weight:600;font-size:12px;margin-bottom:6px">${okCount} resolved · ${nfCount} not found · ${errCount} error</div>`;
+  const head=`<div style="font-weight:600;font-size:var(--fs-sm);margin-bottom:6px">${okCount} resolved · ${nfCount} not found · ${errCount} error</div>`;
   const rows=results.map(r=>{
     const icon=r.status==='ok'?'<span style="color:var(--success);font-weight:700">✓</span>':r.status==='not-found'?'<span style="color:var(--danger);font-weight:700">✗</span>':'<span style="color:var(--warning);font-weight:700">!</span>';
     const colour=r.status==='ok'?'var(--success)':r.status==='not-found'?'var(--danger)':'var(--warning)';
@@ -1081,7 +1081,7 @@ function syncPillClick(){
   // Slack diagnostic — list every active TEAM member as a target so Kevin
   // can fire a known-good payload at any of them and watch the result.
   const slackTargets=TEAM.map(m=>`<option value="${escHtml(m.email)}">${escHtml(m.name)} (${escHtml(m.email)})</option>`).join('');
-  pop.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:700;font-size:13px">Save state</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="runSyncCheck()" style="padding:3px 10px;font-size:11px">Check sync</button><button class="btn btn-sm" onclick="document.getElementById('syncPopover').style.display='none'" style="padding:3px 10px;font-size:11px">Close</button></div></div>
+  pop.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div style="font-weight:700;font-size:var(--fs-base)">Save state</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="runSyncCheck()" style="padding:3px 10px;font-size:11px">Check sync</button><button class="btn btn-sm" onclick="document.getElementById('syncPopover').style.display='none'" style="padding:3px 10px;font-size:11px">Close</button></div></div>
     <div style="display:flex;gap:12px;font-size:11px;color:var(--text-secondary);margin-bottom:10px">
       <span>Pending: <b style="color:var(--warning)">${_saveState.pending}</b></span>
       <span>OK: <b style="color:var(--success)">${_saveState.ok}</b></span>
@@ -1091,7 +1091,7 @@ function syncPillClick(){
     <details style="border:1px solid var(--border-subtle);border-radius:6px;padding:6px 10px;margin-bottom:10px;background:var(--bg-surface-2)">
       <summary style="cursor:pointer;font-weight:600;font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px">Slack notifications · diagnostic</summary>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
-        <select id="slackTestTarget" style="font-size:12px;padding:4px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface)">${slackTargets}</select>
+        <select id="slackTestTarget" style="font-size:var(--fs-sm);padding:4px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface)">${slackTargets}</select>
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm" onclick="testSlackNotification()" style="font-size:11px;flex:1">Send test DM</button>
           <button class="btn btn-sm" onclick="testAllSlackRecipients()" style="font-size:11px;flex:1" title="Run a Slack lookup for every team member, no DMs sent">Check all recipients</button>
@@ -1310,7 +1310,7 @@ function renderSaveFailureBanner(){
   if(!_saveFailures.length){if(el)el.remove();return}
   if(!el){
     el=document.createElement('div');el.id='saveFailBanner';
-    el.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--danger-bg);border:2px solid var(--danger);color:var(--danger);padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:var(--shadow-lg);z-index:10000;max-width:640px;display:flex;align-items:flex-start;gap:12px';
+    el.style.cssText='position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--danger-bg);border:2px solid var(--danger);color:var(--danger);padding:10px 16px;border-radius:8px;font-size:var(--fs-base);font-weight:600;box-shadow:var(--shadow-lg);z-index:10000;max-width:640px;display:flex;align-items:flex-start;gap:12px';
     document.body.appendChild(el);
   }
   const n=_saveFailures.length;
@@ -2235,7 +2235,7 @@ function renderDedlineSideCard(t){
     data-task-id="${t.id}">
     <div class="sc-row1">
       ${avatarSmall(t)}
-      <h4 style="flex:1;margin:0;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}${hardFlag(t)}</h4>
+      <h4 style="flex:1;margin:0;font-size:var(--fs-sm);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}${hardFlag(t)}</h4>
       ${rowActionsHtml(t.id)}
     </div>
     <div class="sc-row2">
@@ -2274,7 +2274,7 @@ function renderDrillDownList(){
     body+=`<div class="empty-state" style="padding:30px">Nothing to show.</div>`;
   }
   inner.innerHTML=`<h2>${escHtml(title)}</h2>
-    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${tasks?tasks.length+' item'+(tasks.length===1?'':'s'):''}</div>
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px">${tasks?tasks.length+' item'+(tasks.length===1?'':'s'):''}</div>
     ${body}
     <div class="modal-actions"><button class="btn" onclick="document.getElementById('drillModal').remove()">Close</button></div>`;
 }
@@ -2289,7 +2289,7 @@ function openDrillDownTaskDetail(taskId){
   drawerTaskId=taskId; // so drwSaveText/field updates work
   const drawerInnerHtml=`
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-      <button class="btn" style="padding:4px 10px;font-size:12px" onclick="renderDrillDownList()">&larr; Back</button>
+      <button class="btn" style="padding:4px 10px;font-size:var(--fs-sm)" onclick="renderDrillDownList()">&larr; Back</button>
       <div style="font-size:10px;color:var(--text-secondary);font-weight:600;letter-spacing:1px;text-transform:uppercase">Task</div>
     </div>
     <h2 contenteditable="true" id="drwName" onblur="drwSaveText('${t.id}','name',this.innerText,true)" style="margin-top:0">${escHtml(t.name)}</h2>
@@ -2306,7 +2306,7 @@ function openDrillDownTaskDetail(taskId){
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
-    <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">Add &amp; view comments</button></div></div>
+    <div class="field-row"><label>Comments</label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:var(--fs-sm)">Add &amp; view comments</button></div></div>
     <div class="modal-actions" style="margin-top:12px;justify-content:flex-start;gap:8px">
       <button class="btn btn-success" onclick="completeTaskFromDrillModal('${t.id}')">Complete</button>
       <button class="btn btn-danger" onclick="deleteTaskFromDrillModal('${t.id}')">Delete</button>
@@ -2383,11 +2383,11 @@ function openTaskDrawer(taskId){
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
       <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
-      ${t.createdByEmail?`<div class="field-row"><label>Created by</label><div class="field-val" style="font-size:12px;color:var(--text-secondary)"><span title="Set automatically when the task was created via the web app">${escHtml((TEAM.find(m=>m.email===t.createdByEmail)||{}).name||t.createdByEmail)}</span>${t.created?` <span style="color:var(--text-muted);margin-left:6px">on ${new Date(t.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}</div></div>`:''}
+      ${t.createdByEmail?`<div class="field-row"><label>Created by</label><div class="field-val" style="font-size:var(--fs-sm);color:var(--text-secondary)"><span title="Set automatically when the task was created via the web app">${escHtml((TEAM.find(m=>m.email===t.createdByEmail)||{}).name||t.createdByEmail)}</span>${t.created?` <span style="color:var(--text-muted);margin-left:6px">on ${new Date(t.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}</div></div>`:''}
       ${(t.maintenance||t.contractor)
-        ? `<div class="field-row"><label>Created</label><div class="field-val" style="font-size:13px;color:var(--text-secondary)">${t.createdDate?new Date(t.createdDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'—'}<span style="color:var(--text-muted);font-size:11px;margin-left:8px">(contractor tasks have no due date)</span></div></div>`
+        ? `<div class="field-row"><label>Created</label><div class="field-val" style="font-size:var(--fs-base);color:var(--text-secondary)">${t.createdDate?new Date(t.createdDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}):'—'}<span style="color:var(--text-muted);font-size:11px;margin-left:8px">(contractor tasks have no due date)</span></div></div>`
         : `<div class="field-row"><label>Due Date</label><div class="field-val"><input type="date" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value);renderAll()"></div></div>
-      <div class="field-row"><label>Hard Deadline</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--danger);font-weight:600;cursor:pointer"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked);renderAll()" style="width:16px;height:16px;accent-color:var(--danger)">Flag as immovable (never auto-rescheduled)</label></div></div>
+      <div class="field-row"><label>Hard Deadline</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--danger);font-weight:600;cursor:pointer"><input type="checkbox" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked);renderAll()" style="width:16px;height:16px;accent-color:var(--danger)">Flag as immovable (never auto-rescheduled)</label></div></div>
       <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>`
       }
       <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
@@ -2398,7 +2398,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
-      <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:12px">Add &amp; view comments</button></div></div>
+      <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:var(--fs-sm)">Add &amp; view comments</button></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn" onclick="cancelDrawerEdit('${t.id}')" title="${(typeof window!=='undefined'&&window._draftTaskId===t.id)?'Discard this draft task and close the drawer':'Close the drawer without making changes'}">Cancel</button>
@@ -2654,19 +2654,19 @@ function renderCollaboratorsDrawer(t){
     return `<span class="collab-chip" title="Click x to remove" style="display:inline-flex;align-items:center;gap:4px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:12px;padding:2px 4px 2px 2px;font-size:11px;margin:0 4px 4px 0">
       <span class="avatar avatar-${k}" style="width:18px;height:18px;font-size:9px">${escHtml(init)}</span>
       ${escHtml(first)}
-      <button type="button" onclick="removeCollaborator('${taskId}','${safeEmail}',event)" title="Remove ${escHtml(nm)}" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:16px;line-height:1;padding:2px 7px;border-radius:50%;transition:all .15s;font-weight:700" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button>
+      <button type="button" onclick="removeCollaborator('${taskId}','${safeEmail}',event)" title="Remove ${escHtml(nm)}" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-lg);line-height:1;padding:2px 7px;border-radius:50%;transition:all .15s;font-weight:700" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button>
     </span>`;
   }).join('');
   let addBtn='';
   if(available.length){
     addBtn=`<span style="position:relative;display:inline-block">
-      <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="toggleCollabMenu(event)">+ Add Collaborator</button>
+      <button class="btn btn-primary" style="padding:4px 12px;font-size:var(--fs-sm)" onclick="toggleCollabMenu(event)">+ Add Collaborator</button>
       <div id="collabAddMenu" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:10;min-width:200px">
-        ${available.map(m=>`<div onclick="addCollaborator('${taskId}','${m.email}',event)" style="padding:8px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:20px;height:20px;font-size:10px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
+        ${available.map(m=>`<div onclick="addCollaborator('${taskId}','${m.email}',event)" style="padding:8px 12px;font-size:var(--fs-sm);cursor:pointer;display:flex;align-items:center;gap:8px" onmouseover="this.style.background='var(--bg-surface-2)'" onmouseout="this.style.background='transparent'"><span class="avatar avatar-${m.key}" style="width:20px;height:20px;font-size:10px">${m.name[0]}</span>${escHtml(m.name)}</div>`).join('')}
       </div>
     </span>`;
   } else {
-    addBtn=`<button class="btn" style="padding:4px 12px;font-size:12px;opacity:0.6;cursor:not-allowed" disabled>All added</button>`;
+    addBtn=`<button class="btn" style="padding:4px 12px;font-size:var(--fs-sm);opacity:0.6;cursor:not-allowed" disabled>All added</button>`;
   }
   return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">${chips}${addBtn}</div>`;
 }
@@ -2754,9 +2754,9 @@ function renderAttachmentsMarkup(t){
     ? list.map(a=>{
         const sizeKb=a.size?` <span style="color:var(--text-muted)">(${Math.round(a.size/1024)} KB)</span>`:'';
         const safeId=escHtml(a.id||'');
-        return `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:6px;padding:4px 8px;margin:0 4px 4px 0;font-size:11px"><a href="${escHtml(a.url)}" target="_blank" style="text-decoration:none;color:var(--accent)">${escHtml(a.filename||'file')}</a>${sizeKb}<button onclick="removeAttachment('${taskId}','${safeId}')" title="Remove attachment" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:14px;line-height:1;padding:1px 5px;border-radius:50%;transition:all .15s" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button></div>`;
+        return `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:6px;padding:4px 8px;margin:0 4px 4px 0;font-size:11px"><a href="${escHtml(a.url)}" target="_blank" style="text-decoration:none;color:var(--accent)">${escHtml(a.filename||'file')}</a>${sizeKb}<button onclick="removeAttachment('${taskId}','${safeId}')" title="Remove attachment" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-md);line-height:1;padding:1px 5px;border-radius:50%;transition:all .15s" onmouseover="this.style.background='var(--danger)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='var(--text-secondary)'">&times;</button></div>`;
       }).join('')
-    : '<div style="color:var(--text-secondary);font-size:12px">No attachments yet</div>';
+    : '<div style="color:var(--text-secondary);font-size:var(--fs-sm)">No attachments yet</div>';
   // Wrap in a drop zone — drag any file(s) anywhere into the dashed box
   // and they upload. Multi-file works either via the picker (input has
   // multiple) or by dropping several files at once.
@@ -2769,7 +2769,7 @@ function renderAttachmentsMarkup(t){
       <div id="drwAttachList" style="display:flex;flex-wrap:wrap;align-items:center;margin-bottom:8px">${listHtml}</div>
       <input type="file" id="drwAttachInput" multiple style="display:none" onchange="uploadAttachments('${taskId}', this.files); this.value=''">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('drwAttachInput').click()">+ Add Attachment${list.length?'s':''}</button>
+        <button class="btn btn-primary" style="padding:4px 12px;font-size:var(--fs-sm)" onclick="document.getElementById('drwAttachInput').click()">+ Add Attachment${list.length?'s':''}</button>
         <span style="font-size:11px;color:var(--text-muted)">or drag &amp; drop one or more files into this box</span>
         <span id="drwAttachStatus" style="margin-left:auto;font-size:11px;color:var(--text-secondary)"></span>
       </div>
@@ -2890,13 +2890,13 @@ async function loadCommentsIntoDrawer(taskId){
   }catch(e){
     console.warn('load comments failed',e);
     const w=document.getElementById('drwCommentsWrap');
-    if(w&&drawerTaskId===taskId)w.innerHTML='<div style="color:var(--danger);font-size:12px">Failed to load comments</div>'+commentComposerHtml(taskId);
+    if(w&&drawerTaskId===taskId)w.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm)">Failed to load comments</div>'+commentComposerHtml(taskId);
   }
 }
 function commentComposerHtml(taskId){
   return `<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
     <textarea id="drwCommentInput" placeholder="Add a comment..." style="min-height:60px"></textarea>
-    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitDrawerComment('${taskId}')" style="padding:4px 12px;font-size:12px">Post</button></div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitDrawerComment('${taskId}')" style="padding:4px 12px;font-size:var(--fs-sm)">Post</button></div>
   </div>`;
 }
 function renderCommentsInDrawer(taskId){
@@ -2912,11 +2912,11 @@ function renderCommentsInDrawer(taskId){
     return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
       <span class="avatar avatar-${k}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteComment('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;padding:0">&times;</button>`:''}</div>
-        <div style="font-size:13px;color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
+        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteComment('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);padding:0">&times;</button>`:''}</div>
+        <div style="font-size:var(--fs-base);color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
       </div>
     </div>`;
-  }).join('')||'<div style="color:var(--text-secondary);font-size:12px;padding:8px 0">No comments yet.</div>';
+  }).join('')||'<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No comments yet.</div>';
   w.innerHTML=`<div style="max-height:280px;overflow-y:auto">${items}</div>${commentComposerHtml(taskId)}`;
 }
 async function submitDrawerComment(taskId){
@@ -3060,7 +3060,7 @@ function openCommentsModal(taskId){
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   overlay.innerHTML=`<div class="modal" style="max-width:600px">
     <h2 style="margin-top:0">${escHtml(task?task.name:'Task')} &mdash; Comments</h2>
-    <div id="commentsModalBody" style="max-height:60vh;overflow-y:auto"><div style="color:var(--text-secondary);font-size:12px;padding:12px 0">Loading comments&hellip;</div></div>
+    <div id="commentsModalBody" style="max-height:60vh;overflow-y:auto"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:12px 0">Loading comments&hellip;</div></div>
     <div class="modal-actions"><button class="btn" onclick="document.getElementById('commentsModal').remove()">Close</button></div>
   </div>`;
   document.body.appendChild(overlay);
@@ -3082,7 +3082,7 @@ async function loadCommentsIntoModal(taskId){
       else if(status===404)hint='Task record not found — it may have been deleted.';
       else if(status>=500)hint='Airtable is having trouble — try again in a moment.';
       else hint='Check the console for details.';
-      body.innerHTML=`<div style="color:var(--danger);font-size:13px;padding:12px 0">Failed to load comments &mdash; HTTP ${escHtml(String(status))}. ${hint} <button class="btn" onclick="loadCommentsIntoModal('${taskId}')" style="padding:2px 8px;font-size:11px;margin-left:8px">Retry</button></div>`;
+      body.innerHTML=`<div style="color:var(--danger);font-size:var(--fs-base);padding:12px 0">Failed to load comments &mdash; HTTP ${escHtml(String(status))}. ${hint} <button class="btn" onclick="loadCommentsIntoModal('${taskId}')" style="padding:2px 8px;font-size:11px;margin-left:8px">Retry</button></div>`;
     }
   }
 }
@@ -3092,7 +3092,7 @@ function renderCommentsInModal(taskId){
   const meEmail=currentUser?currentUser.email:'';
   const composer=`<div style="margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
     <textarea id="cmtModalInput" placeholder="Add a comment..." style="min-height:60px"></textarea>
-    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitModalComment('${taskId}')" style="padding:4px 12px;font-size:12px">Post</button></div>
+    <div style="display:flex;justify-content:flex-end"><button class="btn btn-accent" onclick="submitModalComment('${taskId}')" style="padding:4px 12px;font-size:var(--fs-sm)">Post</button></div>
   </div>`;
   const items=list.map(c=>{
     const email=(c.author&&c.author.email)||'';
@@ -3103,11 +3103,11 @@ function renderCommentsInModal(taskId){
     return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
       <span class="avatar avatar-${k}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteCommentModal('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;padding:0">&times;</button>`:''}</div>
-        <div style="font-size:13px;color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
+        <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteCommentModal('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);padding:0">&times;</button>`:''}</div>
+        <div style="font-size:var(--fs-base);color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
       </div>
     </div>`;
-  }).join('')||'<div style="color:var(--text-secondary);font-size:12px;padding:8px 0">No comments yet.</div>';
+  }).join('')||'<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No comments yet.</div>';
   body.innerHTML=composer+items;
 }
 async function submitModalComment(taskId){
@@ -3174,8 +3174,8 @@ function openDeleteConfirm(task){
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   overlay.innerHTML=`<div class="modal" style="max-width:460px">
     <h2 style="margin-top:0">Delete task?</h2>
-    <p style="font-size:14px;color:var(--text-primary);margin:8px 0 6px 0"><strong>${escHtml(task.name)}</strong></p>
-    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 16px 0">This permanently deletes the record from Airtable. This cannot be undone from Airtable itself &mdash; but you can undo within this session.</p>
+    <p style="font-size:var(--fs-md);color:var(--text-primary);margin:8px 0 6px 0"><strong>${escHtml(task.name)}</strong></p>
+    <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0 0 16px 0">This permanently deletes the record from Airtable. This cannot be undone from Airtable itself &mdash; but you can undo within this session.</p>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('deleteConfirmModal').remove()">Cancel</button>
       <button class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
@@ -3522,16 +3522,16 @@ function renderMyDay(){
   const availableHrs=Math.max(0,workHrs-routineHrs-meetingHrs);
 
   html+=`<div class="myday-kpi-row">
-    <div class="kpi clickable ${todayTasks.length>0?'amber':'green'}" onclick="drillTasksToday()"><div class="value" style="font-size:22px">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
-    <div class="kpi clickable purple" onclick="drillTotalHours()"><div class="value" style="font-size:22px">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
-    <div class="kpi clickable ${overdueTasks.length>0?'red':'green'}" onclick="drillOverdue()"><div class="value" style="font-size:22px">${overdueTasks.length}</div><div class="label">Overdue</div></div>
-    <div class="kpi clickable cyan" onclick="drillCalEvents()"><div class="value" style="font-size:22px">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
-    <div class="kpi clickable accent" onclick="drillAvailable()"><div class="value" style="font-size:22px">${availableHrs.toFixed(1)}</div><div class="label">Available</div></div>
-    <div class="kpi clickable ${capPct>100?'red':'green'}" onclick="drillDeferred()"><div class="value" style="font-size:22px">${plan.deferred.length}</div><div class="label">Deferred</div></div>
+    <div class="kpi clickable ${todayTasks.length>0?'amber':'green'}" onclick="drillTasksToday()"><div class="value" style="font-size:var(--fs-2xl)">${todayTasks.length}</div><div class="label">Tasks Today</div></div>
+    <div class="kpi clickable purple" onclick="drillTotalHours()"><div class="value" style="font-size:var(--fs-2xl)">${totalHrs.toFixed(1)}</div><div class="label">Total Hours</div></div>
+    <div class="kpi clickable ${overdueTasks.length>0?'red':'green'}" onclick="drillOverdue()"><div class="value" style="font-size:var(--fs-2xl)">${overdueTasks.length}</div><div class="label">Overdue</div></div>
+    <div class="kpi clickable cyan" onclick="drillCalEvents()"><div class="value" style="font-size:var(--fs-2xl)">${calendarEvents.length}</div><div class="label">Cal Events</div></div>
+    <div class="kpi clickable accent" onclick="drillAvailable()"><div class="value" style="font-size:var(--fs-2xl)">${availableHrs.toFixed(1)}</div><div class="label">Available</div></div>
+    <div class="kpi clickable ${capPct>100?'red':'green'}" onclick="drillDeferred()"><div class="value" style="font-size:var(--fs-2xl)">${plan.deferred.length}</div><div class="label">Deferred</div></div>
   </div>`;
 
   html+=`<div class="myday-capacity">
-    <h3>Task Load Today <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px" title="Your configured task budget (Configure Routine > Max hrs). Routine (${routineHrsCfg.toFixed(1)}h) and meetings (${meetingHrsCfg.toFixed(1)}h) are shown on the timeline but are separate from this budget.">${totalHrs.toFixed(1)}h of ${availHrs}h task budget</span></h3>
+    <h3>Task Load Today <span style="font-size:var(--fs-sm);font-weight:400;color:var(--text-secondary);margin-left:8px" title="Your configured task budget (Configure Routine > Max hrs). Routine (${routineHrsCfg.toFixed(1)}h) and meetings (${meetingHrsCfg.toFixed(1)}h) are shown on the timeline but are separate from this budget.">${totalHrs.toFixed(1)}h of ${availHrs}h task budget</span></h3>
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${todayHrs.toFixed(1)}h on today${overdueHrs>0?` &middot; ${overdueHrs.toFixed(1)}h overdue`:''} &middot; Budget: ${availHrs}h for tasks &middot; Routine ${routineHrsCfg.toFixed(1)}h &middot; Meetings ${meetingHrsCfg.toFixed(1)}h &middot; Working day ${workHrsCfg}h</div>
     <div class="cap-bar-outer"><div class="cap-bar-inner" style="width:${Math.min(100,capPct)}%;background:${capColor}"></div></div>
   </div>`;
@@ -3754,7 +3754,7 @@ function tlDoubleClickAddTask(e){
   wrap.style.cssText=`top:${top}px;height:${height}px;background:var(--bg-surface);border:1.5px dashed var(--accent);display:flex;flex-direction:column;justify-content:center;padding:4px 8px;z-index:5`;
   wrap.innerHTML=`
     <div style="font-size:10px;color:var(--text-secondary);margin-bottom:2px">+ Add at ${timeLabel}</div>
-    <input id="tlInlineInput" type="text" placeholder="Task name (Enter to save · Esc to cancel)" style="width:100%;border:none;outline:none;background:transparent;font-size:13px;font-weight:600;color:var(--text-primary);padding:0" />`;
+    <input id="tlInlineInput" type="text" placeholder="Task name (Enter to save · Esc to cancel)" style="width:100%;border:none;outline:none;background:transparent;font-size:var(--fs-base);font-weight:600;color:var(--text-primary);padding:0" />`;
   canvas.appendChild(wrap);
   const input=document.getElementById('tlInlineInput');
   input.focus();
@@ -4064,7 +4064,7 @@ function drillTotalHours(){
   const{todayTasks,overdueTasks}=getMyDayTasks();
   const all=[...todayTasks,...overdueTasks];
   const totalMins=all.reduce((s,t)=>s+(t.minutes||0),0);
-  const extra=`<div style="background:var(--bg-surface-2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:13px">Total: <strong>${(totalMins/60).toFixed(1)}h</strong> across ${all.length} tasks</div>`;
+  const extra=`<div style="background:var(--bg-surface-2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:var(--fs-base)">Total: <strong>${(totalMins/60).toFixed(1)}h</strong> across ${all.length} tasks</div>`;
   openDrillDown('Total Hours Breakdown',all,extra);
 }
 function drillCalEvents(){
@@ -4081,11 +4081,11 @@ function drillAvailable(){
   const routineHrs=getRoutineBlocks().reduce((s,b)=>s+b.duration,0)/60;
   const meetingHrs=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?(en-st)/60:0)},0);
   const avail=Math.max(0,workHrs-routineHrs-meetingHrs);
-  const breakdown=`<div style="font-size:13px;line-height:1.8">
+  const breakdown=`<div style="font-size:var(--fs-base);line-height:1.8">
     <div>Work day (${config.startHour}:00–${config.endHour}:00): <strong>${workHrs.toFixed(1)}h</strong></div>
     <div>− Routine (Get Ready, Lunch, Run): <strong>${routineHrs.toFixed(1)}h</strong></div>
     <div>− Calendar meetings: <strong>${meetingHrs.toFixed(1)}h</strong></div>
-    <div style="border-top:1px solid var(--border-default);margin-top:6px;padding-top:6px">= Available for tasks: <strong style="color:var(--accent);font-size:16px">${avail.toFixed(1)}h</strong></div>
+    <div style="border-top:1px solid var(--border-default);margin-top:6px;padding-top:6px">= Available for tasks: <strong style="color:var(--accent);font-size:var(--fs-lg)">${avail.toFixed(1)}h</strong></div>
   </div>`;
   openDrillDown('Available Time Breakdown',null,breakdown);
 }
@@ -4099,14 +4099,14 @@ function drillDeferred(){
 // ======================================================
 function renderRoutineConfigPanel(routineBlocks,config){
   let html=`<div class="routine-config"><h3>Routine Configuration <button class="btn btn-sm" onclick="toggleRoutineConfig()" style="float:right">Close</button></h3>
-    <div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;margin-bottom:6px">Working Hours</div>
-      <div style="display:flex;gap:10px;align-items:center;font-size:13px">
+    <div style="margin-bottom:12px"><div style="font-size:var(--fs-sm);font-weight:600;margin-bottom:6px">Working Hours</div>
+      <div style="display:flex;gap:10px;align-items:center;font-size:var(--fs-base)">
         <label>Start: <input type="number" id="cfgStartHour" value="${config.startHour}" min="5" max="12" style="width:50px"></label>
         <label>End: <input type="number" id="cfgEndHour" value="${config.endHour}" min="14" max="22" style="width:50px"></label>
         <label>Max hrs: <input type="number" id="cfgMaxHrs" value="${config.maxTaskHours}" min="2" max="12" style="width:50px"></label>
         <label title="Auto-schedule ignores tasks due more than this many days away — stops them being pulled back into today.">Pull-in horizon: <input type="number" id="cfgPullIn" value="${config.autoSchedulePullInDays||14}" min="1" max="180" style="width:60px"> days</label>
       </div></div>
-    <div style="font-size:12px;font-weight:600;margin-bottom:6px">Routine Blocks</div>
+    <div style="font-size:var(--fs-sm);font-weight:600;margin-bottom:6px">Routine Blocks</div>
     <div id="routineBlockRows">`;
   routineBlocks.forEach((b,i)=>{
     html+=`<div class="routine-row" data-idx="${i}">
@@ -4294,7 +4294,7 @@ function renderAutoScheduleModal(){
   // Summary header
   const todayPct=cap.dailyCapMin>0?Math.min(100,Math.round(cap.todayTaskMins/cap.dailyCapMin*100)):0;
   const barCol=todayPct>90?'var(--danger)':todayPct>70?'var(--warning)':'var(--accent)';
-  html+=`<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">
+  html+=`<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:var(--fs-sm);color:var(--text-secondary)">
     <span><strong>${cap.totalConsidered}</strong> tasks considered</span>
     <span><strong>${moves.length}</strong> to move</span>
     <span><strong>${staying.length}</strong> staying today</span>
@@ -4312,7 +4312,7 @@ function renderAutoScheduleModal(){
   // Moves table
   if(moves.length===0)html+=`<p>No changes needed — everything fits in its current day.</p>`;
   else{
-    html+=`<p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Ordered by <strong>Priority</strong> (Project &rarr; Urgent &rarr; Not Urgent). Edit any destination date below — the capacity for that day will be recalculated and subsequent tasks will reshuffle automatically.</p>
+    html+=`<p style="font-size:var(--fs-base);color:var(--text-secondary);margin-bottom:10px">Ordered by <strong>Priority</strong> (Project &rarr; Urgent &rarr; Not Urgent). Edit any destination date below — the capacity for that day will be recalculated and subsequent tasks will reshuffle automatically.</p>
     <p>Will move <strong>${moves.length}</strong> task${moves.length===1?'':'s'}:</p>
     <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border-default);border-radius:6px">
     <table class="task-table"><thead><tr><th style="width:28px"><input type="checkbox" onchange="toggleAllKeepToday(this.checked)" title="Select all for Keep Today"></th><th style="width:32px">#</th><th>Task</th><th>Priority</th><th>From</th><th>To (editable)</th><th>Time</th><th></th></tr></thead><tbody>
@@ -4336,7 +4336,7 @@ function renderAutoScheduleModal(){
 
   // Staying Today section
   if(staying.length){
-    html+=`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary)">Staying today (${staying.length})</summary>
+    html+=`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:var(--fs-base);font-weight:600;color:var(--text-primary)">Staying today (${staying.length})</summary>
     <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:6px;margin-top:6px">
     <table class="task-table"><thead><tr><th>Task</th><th>Priority</th><th>Time</th></tr></thead><tbody>
     ${staying.map(t=>{
@@ -4349,8 +4349,8 @@ function renderAutoScheduleModal(){
 
   // Excluded section
   if(exclTotal){
-    html+=`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary)">Excluded (${exclTotal})</summary>
-    <div style="font-size:12px;color:var(--text-secondary);margin-top:6px;max-height:180px;overflow-y:auto">`;
+    html+=`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:var(--fs-base);font-weight:600;color:var(--text-primary)">Excluded (${exclTotal})</summary>
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:6px;max-height:180px;overflow-y:auto">`;
     if(excl.hard.length){
       html+=`<div style="margin-bottom:8px"><strong>Hard deadline — not moved (${excl.hard.length})</strong><ul style="margin:4px 0 0 16px;padding:0">
       ${excl.hard.map(t=>`<li>${escHtml(t.name)} — due ${t.dueDate||'no date'}, ${t.timeEst||formatMins(t.minutes)}</li>`).join('')}</ul></div>`;
@@ -4366,7 +4366,7 @@ function renderAutoScheduleModal(){
     html+=`</div></details>`;
   }
 
-  if(warnings.length)html+=`<div style="color:var(--danger);font-size:12px;margin-top:10px;max-height:100px;overflow-y:auto;padding:8px;background:var(--danger-bg);border-radius:6px">${warnings.map(escHtml).join('<br>')}</div>`;
+  if(warnings.length)html+=`<div style="color:var(--danger);font-size:var(--fs-sm);margin-top:10px;max-height:100px;overflow-y:auto;padding:8px;background:var(--danger-bg);border-radius:6px">${warnings.map(escHtml).join('<br>')}</div>`;
   html+=`<div class="modal-actions">
     <button class="btn" onclick="document.getElementById('autoModal').remove()">Cancel</button>
     ${moves.length?`<button class="btn" onclick="keepSelectedToday()" style="margin-left:auto">Keep Selected Today</button>
@@ -4729,7 +4729,7 @@ function bulkDelete(){
   overlay.className='modal-overlay';overlay.id='bulkDeleteConfirm';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   overlay.innerHTML=`<div class="modal"><h2>Delete ${count} task${count!==1?'s':''}?</h2>
-    <p style="font-size:13px;color:var(--text-primary);margin:8px 0 6px 0">This permanently deletes <strong>${count}</strong> record${count!==1?'s':''} from Airtable. Cannot be undone from Airtable itself — but you can undo within this session.</p>
+    <p style="font-size:var(--fs-base);color:var(--text-primary);margin:8px 0 6px 0">This permanently deletes <strong>${count}</strong> record${count!==1?'s':''} from Airtable. Cannot be undone from Airtable itself — but you can undo within this session.</p>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('bulkDeleteConfirm').remove()">Cancel</button>
       <button class="btn btn-danger" onclick="document.getElementById('bulkDeleteConfirm').remove();performBulkDelete()">Delete ${count}</button>
@@ -4897,7 +4897,7 @@ function renderKanban(){
       <option value="">All Projects</option>
       ${projOpts.map(p=>`<option value="${escHtml(p)}" ${kanbanProjectFilter===p?'selected':''}>${escHtml(p)}</option>`).join('')}
     </select>
-    <span style="font-size:12px;color:var(--text-secondary)">${tasks.length} tasks</span>
+    <span style="font-size:var(--fs-sm);color:var(--text-secondary)">${tasks.length} tasks</span>
   </div>`;
   if(kanbanViewMode==='months')html+=renderKanbanMonths(tasks);
   else if(kanbanViewMode==='weeks12')html+=renderKanbanRollingWeeks(tasks,12);
@@ -5087,7 +5087,7 @@ function renderProjects(){
     <button class="btn ${projectFilter==='completed'?'btn-primary':''}" onclick="projectFilter='completed';renderProjects()">Completed</button>
     <button class="btn ${projectFilter==='all'?'btn-primary':''}" onclick="projectFilter='all';renderProjects()">All</button>
     <button class="btn btn-primary" style="margin-left:auto" onclick="openCreateProjectModal()">+ Create Project</button>
-    <span style="font-size:12px;color:var(--text-secondary)">${projects.length} projects</span>
+    <span style="font-size:var(--fs-sm);color:var(--text-secondary)">${projects.length} projects</span>
   </div>`;
   if(!projects.length){html+=`<div class="empty-state"><p>No projects.</p></div>`;container.innerHTML=html;return}
 
@@ -5137,9 +5137,9 @@ function renderProjects(){
     if(p.owner&&p.owner.email){
       const ok=p.ownerKey||teamKey(p.owner.email);
       const initials=(p.owner.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2);
-      ownerHeader=`<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);margin-top:2px"><span class="avatar avatar-${ok}" style="width:20px;height:20px;font-size:10px">${escHtml(initials)}</span>${escHtml((p.owner.name||'').split(' ')[0]||p.owner.email)}</div>`;
+      ownerHeader=`<div style="display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px"><span class="avatar avatar-${ok}" style="width:20px;height:20px;font-size:10px">${escHtml(initials)}</span>${escHtml((p.owner.name||'').split(' ')[0]||p.owner.email)}</div>`;
     }else{
-      ownerHeader=`<div style="font-size:12px;color:var(--text-muted);margin-top:2px">No owner</div>`;
+      ownerHeader=`<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:2px">No owner</div>`;
     }
     html+=`<div class="project-card" onclick="toggleProject('${p.id}')">
       <div class="project-head" style="align-items:flex-start"><div style="flex:1;min-width:0"><h3 style="word-break:break-word;overflow-wrap:anywhere;white-space:normal">${escHtml(p.name)}</h3>${ownerHeader}</div><span class="project-status ${statusCls}" style="flex-shrink:0">${escHtml(displayHealth)}</span><span title="${statusTip}" style="cursor:help;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-subtle);color:var(--text-secondary);font-size:10px;font-weight:600;margin-left:2px;flex-shrink:0">?</span></div>
@@ -5163,7 +5163,7 @@ function renderProjects(){
       </div>`;
     if(isExp){
       const PROJ_STATUS_OPTIONS=['Not Started','Off-Track','On-Track','On-Target','Completed'];
-      const taStyle='width:100%;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px;border-radius:4px;font-size:12px;min-height:60px;font-family:inherit';
+      const taStyle='width:100%;background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px;border-radius:4px;font-size:var(--fs-sm);min-height:60px;font-family:inherit';
       html+=`<div class="project-expanded" onclick="event.stopPropagation()">`;
       // Details section
       const curOwner=p.ownerKey||'';
@@ -5253,7 +5253,7 @@ function renderProjects(){
       const pCollabIds=new Set(p.collaboratorIds||[]);
       const collabChips=allTeamMembers.map(m=>{
         const on=pCollabIds.has(m.id);
-        return `<label style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:14px;border:1px solid ${on?'var(--accent)':'var(--border-default)'};background:${on?'var(--accent-soft)':'var(--bg-surface)'};cursor:pointer;font-size:12px;user-select:none">
+        return `<label style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:14px;border:1px solid ${on?'var(--accent)':'var(--border-default)'};background:${on?'var(--accent-soft)':'var(--bg-surface)'};cursor:pointer;font-size:var(--fs-sm);user-select:none">
           <input type="checkbox" ${on?'checked':''} onchange="toggleProjectCollaborator('${p.id}','${m.id}',this.checked)" style="margin:0">
           ${escHtml(m.name)}
         </label>`;
@@ -5263,7 +5263,7 @@ function renderProjects(){
         : '';
       html+=`<h4 style="margin-top:12px">Project Collaborators</h4>
         <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">Team members involved on this project. New tasks linked here inherit these collaborators automatically.</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${collabChips || '<span style="font-size:12px;color:var(--text-muted);font-style:italic">No team members loaded.</span>'}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${collabChips || '<span style="font-size:var(--fs-sm);color:var(--text-muted);font-style:italic">No team members loaded.</span>'}</div>
         ${syncBtn}`;
       // Linked tasks — include inline project picker so you can move a task to a different project without opening the drawer
       html+=`<h4 style="margin-top:12px">Linked Tasks (${linked.length})</h4>`;
@@ -5525,16 +5525,16 @@ function renderProjKpiDrill(pid,bucket){
     const row=t=>`<tr style="border-top:1px solid var(--border-subtle)"><td style="padding:6px 8px;color:var(--text-primary)">${escHtml(t.name||'(Untitled)')}</td><td style="padding:6px 8px;font-size:11px;color:var(--text-secondary)">${escHtml(t.status||'')}</td><td style="padding:6px 8px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-secondary)">${escHtml((t.dueDate||t.completion||'').slice(0,10))}</td></tr>`;
     const table=(title,list,color)=>`<div style="margin-top:8px;padding:10px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:6px">
         <div style="font-weight:600;color:${color};margin-bottom:6px">${title} · ${list.length} task${list.length===1?'':'s'}</div>
-        ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:12px">None</div>'}
+        ${list.length?`<table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)"><thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="padding:4px 8px;text-align:left">Task</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Date</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table>`:'<div style="color:var(--text-muted);font-style:italic;font-size:var(--fs-sm)">None</div>'}
       </div>`;
     el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div><strong>${escHtml(label)}</strong> · ${escHtml(detail.label||'')}</div>
         <button onclick="toggleProjKpiDrill('${pid}','${bucket}')" class="btn btn-sm">Close ▴</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
-        <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:16px;font-weight:700;color:var(--success)">${detail.completedCount||0}</div></div>
-        <div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Outstanding</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${detail.outstandingCount||0}</div></div>
-        <div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Total</div><div style="font-size:16px;font-weight:700;color:var(--info)">${detail.total||0}</div></div>
+        <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">Completed</div><div style="font-size:var(--fs-lg);font-weight:700;color:var(--success)">${detail.completedCount||0}</div></div>
+        <div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Outstanding</div><div style="font-size:var(--fs-lg);font-weight:700;color:var(--danger)">${detail.outstandingCount||0}</div></div>
+        <div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Total</div><div style="font-size:var(--fs-lg);font-weight:700;color:var(--info)">${detail.total||0}</div></div>
       </div>
       ${table('Completed',done,'var(--success)')}
       ${table('Outstanding',open,'var(--danger)')}`;
@@ -5575,7 +5575,7 @@ function renderProjKpiDrill(pid,bucket){
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
         <div style="font-weight:600;color:${color}">${title} · ${totalCount} tx · Total ${fmtAmt(authTotal)}${truncNote}</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
         <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.5px">
           ${columns.map(c=>`<th style="padding:4px 8px;text-align:${c==='amount'?'right':'left'}">${headerFor[c]||c}</th>`).join('')}
         </tr></thead><tbody>${rows}</tbody>
@@ -5586,9 +5586,9 @@ function renderProjKpiDrill(pid,bucket){
       <button onclick="toggleProjKpiDrill('${pid}','${bucket}')" class="btn btn-sm">Close ▴</button>
     </div>
     <div style="display:grid;grid-template-columns:${displayHint.hideCosts?'1fr':'1fr 1fr 1fr'};gap:10px;margin-bottom:10px">
-      <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:16px;font-weight:700;color:var(--success)">${fmtAmt(detail.revenue)}</div></div>
-      ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${fmtAmt(detail.costs)}</div></div>`}
-      ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:16px;font-weight:700;color:${detail.net>=0?'var(--success)':'var(--danger)'}">${fmtAmt(detail.net)}</div></div>`}
+      <div style="padding:10px;background:var(--success-bg);border-radius:6px"><div style="font-size:10px;color:var(--success);font-weight:600;text-transform:uppercase">${escHtml(displayHint.revenueLabel||'Revenue')}</div><div style="font-size:var(--fs-lg);font-weight:700;color:var(--success)">${fmtAmt(detail.revenue)}</div></div>
+      ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--danger-bg);border-radius:6px"><div style="font-size:10px;color:var(--danger);font-weight:600;text-transform:uppercase">Fixed Costs</div><div style="font-size:var(--fs-lg);font-weight:700;color:var(--danger)">${fmtAmt(detail.costs)}</div></div>`}
+      ${displayHint.hideCosts?'':`<div style="padding:10px;background:var(--info-bg);border-radius:6px"><div style="font-size:10px;color:var(--info);font-weight:600;text-transform:uppercase">Cushion</div><div style="font-size:var(--fs-lg);font-weight:700;color:${detail.net>=0?'var(--success)':'var(--danger)'}">${fmtAmt(detail.net)}</div></div>`}
     </div>
     ${txTable(displayHint.revenueLabel||'Revenue',detail.revTxs,'var(--success)','revenue')}
     ${displayHint.hideCosts?'':txTable('Fixed Costs',detail.costTxs,'var(--danger)','costs')}`;
@@ -5616,19 +5616,19 @@ function openKpiWizard(pid){
   overlay.onclick=(e)=>{if(e.target===overlay)closeKpiWizard()};
   overlay.innerHTML=`<div class="modal" style="max-width:720px;max-height:90vh;display:flex;flex-direction:column">
     <h2 style="margin-top:0">🪄 KPI Wizard — ${escHtml(p.name||'Untitled Project')}</h2>
-    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:10px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
       <div><b>KPI:</b> ${escHtml(p.kpiName||'(not named)')} &middot; <b>Target:</b> ${p.kpiTarget||0} ${escHtml(p.kpiUnit||'')}</div>
       <div style="margin-top:4px"><b>Period:</b> ${escHtml(p.start||'—')} → ${escHtml(p.end||'—')}</div>
       ${p.kpiTracking?`<div style="margin-top:4px"><b>Tracking notes:</b> ${escHtml(p.kpiTracking)}</div>`:''}
     </div>
-    <div id="kpiWizChat" style="flex:1;min-height:200px;max-height:45vh;overflow-y:auto;border:1px solid var(--border-default);border-radius:8px;padding:12px;background:var(--bg-surface);font-size:13px;line-height:1.5"></div>
+    <div id="kpiWizChat" style="flex:1;min-height:200px;max-height:45vh;overflow-y:auto;border:1px solid var(--border-default);border-radius:8px;padding:12px;background:var(--bg-surface);font-size:var(--fs-base);line-height:1.5"></div>
     <div id="kpiWizPreview" style="display:none;margin-top:10px;padding:10px;background:var(--success-bg);border:1px solid var(--success);border-radius:8px">
       <div style="font-size:11px;color:var(--success);font-weight:600;margin-bottom:4px">PREVIEW</div>
       <div id="kpiWizPreviewVal" style="font-size:20px;font-weight:700;color:var(--text-primary)"></div>
       <div id="kpiWizPreviewMeta" style="font-size:11px;color:var(--text-secondary);margin-top:4px"></div>
     </div>
     <div id="kpiWizInputRow" style="display:flex;gap:8px;margin-top:10px">
-      <input type="text" id="kpiWizInput" placeholder="Type your reply or a refinement…" style="flex:1;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:13px" autofocus>
+      <input type="text" id="kpiWizInput" placeholder="Type your reply or a refinement…" style="flex:1;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base)" autofocus>
       <button class="btn btn-primary" id="kpiWizSend" onclick="kpiWizardSend()">Send</button>
     </div>
     <div class="modal-actions" style="margin-top:12px">
@@ -5950,7 +5950,7 @@ function openKpiRequestModal(pid){
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   wrap.innerHTML=`<div style="background:var(--bg-surface);border-radius:12px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:var(--shadow-lg)">
     <h3 style="margin-top:0">Request a custom automated KPI source</h3>
-    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">This creates a support task so we can build the automation for you.</div>
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px">This creates a support task so we can build the automation for you.</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><label style="font-size:11px;color:var(--text-secondary);display:block">Source name</label><input id="kpiReq_name" class="inline-input" style="width:100%" placeholder="e.g. Weekly signups"></div>
       <div><label style="font-size:11px;color:var(--text-secondary);display:block">Unit</label><select id="kpiReq_unit" class="inline-select" style="width:100%">${['£','%','count','days','items','hours'].map(u=>`<option value="${u}">${u}</option>`).join('')}</select></div>
@@ -6391,8 +6391,8 @@ function openDeleteProjectConfirm(pid){
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
   overlay.innerHTML=`<div class="modal" style="max-width:460px">
     <h2 style="margin-top:0">Delete project?</h2>
-    <p style="font-size:14px;color:var(--text-primary);margin:8px 0 6px 0"><strong>${escHtml(p.name)}</strong></p>
-    <p style="font-size:12px;color:var(--text-secondary);margin:0 0 16px 0">This permanently deletes the project record from Airtable. Linked tasks will NOT be deleted &mdash; their project link will simply be removed.</p>
+    <p style="font-size:var(--fs-md);color:var(--text-primary);margin:8px 0 6px 0"><strong>${escHtml(p.name)}</strong></p>
+    <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0 0 16px 0">This permanently deletes the project record from Airtable. Linked tasks will NOT be deleted &mdash; their project link will simply be removed.</p>
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('deleteProjectModal').remove()">Cancel</button>
       <button class="btn btn-danger" id="confirmDeleteProjBtn">Delete</button>
@@ -6651,7 +6651,7 @@ function kanbanInlineAdd(colBody,dueDate,dateLabel){
   wrap.innerHTML=`
     <div id="kqaHint" style="font-size:9px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.04em">+ Add for ${escHtml(dateLabel)}</div>
     <input id="kqaInput" type="text" placeholder="Task name (Enter to save · Esc to cancel)"
-           style="width:100%;border:none;outline:none;background:transparent;font-size:12px;font-weight:600;color:var(--text-primary);padding:0;font-family:inherit" />
+           style="width:100%;border:none;outline:none;background:transparent;font-size:var(--fs-sm);font-weight:600;color:var(--text-primary);padding:0;font-family:inherit" />
   `;
   colBody.insertBefore(wrap,colBody.firstChild);
   const input=document.getElementById('kqaInput');
@@ -7016,10 +7016,10 @@ function renderCapacity(){
     html+=`<div class="capacity-card" style="grid-column:1/-1;border-color:var(--accent)">
       <h3>Team Overview</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-bottom:12px">
-        <div class="kpi green" style="padding:12px"><div class="value" style="font-size:22px">${allActive.length}</div><div class="label">Active Tasks</div></div>
-        <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${totalTeamHrs.toFixed(1)}</div><div class="label">Hours Allocated</div></div>
-        <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${teamCap}</div><div class="label">Team Capacity (hrs)</div></div>
-        <div class="kpi ${teamPct>90?'red':teamPct>70?'amber':'green'}" style="padding:12px"><div class="value" style="font-size:22px">${teamPct.toFixed(0)}%</div><div class="label">Utilisation</div></div>
+        <div class="kpi green" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${allActive.length}</div><div class="label">Active Tasks</div></div>
+        <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${totalTeamHrs.toFixed(1)}</div><div class="label">Hours Allocated</div></div>
+        <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${teamCap}</div><div class="label">Team Capacity (hrs)</div></div>
+        <div class="kpi ${teamPct>90?'red':teamPct>70?'amber':'green'}" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${teamPct.toFixed(0)}%</div><div class="label">Utilisation</div></div>
       </div>
       <div class="cap-bar-wrap" style="height:12px"><div class="cap-bar" style="width:${teamPct}%;background:${teamPct>90?'var(--danger)':teamPct>70?'var(--warning)':'var(--success)'}"></div></div>
     </div>`;
@@ -7042,7 +7042,7 @@ function renderCapacity(){
       <h3><span class="avatar avatar-${member.key}">${member.name[0]}</span> ${member.name}</h3>
       <div class="cap-stat"><span>${totalHrs.toFixed(1)}h allocated</span><span>${cap}h capacity</span></div>
       <div class="cap-bar-wrap"><div class="cap-bar" style="width:${pct}%;background:${color}"></div></div>
-      <div style="font-size:12px;color:${pct>90?'var(--danger)':'var(--text-secondary)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} tasks</div>
+      <div style="font-size:var(--fs-sm);color:${pct>90?'var(--danger)':'var(--text-secondary)'};margin-bottom:10px">${pct.toFixed(0)}% utilised &middot; ${tasks.length} tasks</div>
       <h5 style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase">Priority</h5>
       <div class="stacked-bar">${Object.entries(priBreak).map(([k,v])=>`<span style="width:${totalMin?v/totalMin*100:0}%;background:${priColors[k]||'#888'}" title="${k}: ${(v/60).toFixed(1)}h"></span>`).join('')}</div>
       <div class="stacked-legend">${Object.entries(priBreak).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<span><i style="background:${priColors[k]||'#888'}"></i>${k} ${(v/60).toFixed(1)}h</span>`).join('')}</div>
@@ -7078,14 +7078,14 @@ function renderRecurring(){
   const active=recurring.filter(t=>t.status!=='Completed');
   const totalMins=active.reduce((s,t)=>s+t.minutes,0);
 
-  let html=`<div style="background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px">
+  let html=`<div style="background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:var(--fs-base)">
     <strong>How recurring tasks work:</strong> When you mark a task with a recurring cadence as Completed, this app automatically spawns the next occurrence with the due date moved forward by the cadence. A catch-up sweep on page load also fills in any missed cycles (last 90 days, current user only). This list shows which tasks have a cadence set.
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
-    <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:22px">${recurring.length}</div><div class="label">Total Recurring</div></div>
-    <div class="kpi accent" style="padding:12px"><div class="value" style="font-size:22px">${(totalMins/60).toFixed(1)}</div><div class="label">Hours / Cycle</div></div>
-    <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t=>t.status==='Completed').length}</div><div class="label">Completed</div></div>
-    <div class="kpi amber" style="padding:12px"><div class="value" style="font-size:22px">${recurring.filter(t=>isOverdue(t)).length}</div><div class="label">Overdue</div></div>
+    <div class="kpi purple" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${recurring.length}</div><div class="label">Total Recurring</div></div>
+    <div class="kpi accent" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${(totalMins/60).toFixed(1)}</div><div class="label">Hours / Cycle</div></div>
+    <div class="kpi cyan" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${recurring.filter(t=>t.status==='Completed').length}</div><div class="label">Completed</div></div>
+    <div class="kpi amber" style="padding:12px"><div class="value" style="font-size:var(--fs-2xl)">${recurring.filter(t=>isOverdue(t)).length}</div><div class="label">Overdue</div></div>
   </div>`;
 
   const freqOrder=['Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually','Flagged'];
@@ -7095,7 +7095,7 @@ function renderRecurring(){
     const mTasks=recurring.filter(t=>t.assigneeEmail===member.email);
     if(!mTasks.length)return;
     const mHrs=mTasks.reduce((s,t)=>s+t.minutes,0)/60;
-    html+=`<div class="person-section"><h3><span class="avatar avatar-${member.key}">${member.name[0]}</span>${escHtml(member.name)} <span style="font-size:12px;color:var(--text-secondary);font-weight:400">&middot; ${mTasks.length} tasks &middot; ${mHrs.toFixed(1)}h/cycle</span></h3>`;
+    html+=`<div class="person-section"><h3><span class="avatar avatar-${member.key}">${member.name[0]}</span>${escHtml(member.name)} <span style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:400">&middot; ${mTasks.length} tasks &middot; ${mHrs.toFixed(1)}h/cycle</span></h3>`;
     const groups={};
     mTasks.forEach(t=>{const f=t.recurring||'Flagged';(groups[f]=groups[f]||[]).push(t)});
     freqOrder.forEach(f=>{
@@ -7160,7 +7160,7 @@ function jobsPriorityCell(taskId,current){
                   :current==='Low Priority'?'background:var(--success-bg);color:var(--success);font-weight:600'
                   :'background:var(--bg-subtle);color:var(--text-secondary)';
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${o==='High Priority'?'🔴 High':o==='Low Priority'?'🟢 Low':escHtml(o||'-')}</option>`).join('');
-  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:12px;${pillStyle}" onchange="updateTaskField('${taskId}','priorityLevel',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
+  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:var(--fs-sm);${pillStyle}" onchange="updateTaskField('${taskId}','priorityLevel',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
 }
 function jobsStatusCell(taskId,current){
   const options=STATUS_OPTIONS;
@@ -7173,7 +7173,7 @@ function jobsStatusCell(taskId,current){
     'Overdue':  'background:var(--danger-bg);color:var(--danger);font-weight:600',
   }[current]||'background:var(--bg-subtle);color:var(--text-secondary)';
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
-  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:12px;${statusStyle}" onchange="updateTaskField('${taskId}','status',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
+  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:var(--fs-sm);${statusStyle}" onchange="updateTaskField('${taskId}','status',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
 }
 function jobsPropertyCell(taskId,currentId){
   const props=getPropertyOptions();
@@ -7276,13 +7276,13 @@ function renderJobs(){
       const g=groups[prop];
       body+=`<div class="person-section" style="margin-bottom:28px;border:1px solid var(--border-default);border-radius:10px;overflow:hidden;box-shadow:var(--shadow-sm)">
         <div style="background:linear-gradient(90deg,var(--accent) 0%,var(--accent-hover) 100%);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-          <div style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;letter-spacing:0.2px">
+          <div style="display:flex;align-items:center;gap:10px;font-size:var(--fs-md);font-weight:600;letter-spacing:0.2px">
             <span style="font-size:18px">🏠</span>${escHtml(prop)}
           </div>
           <span style="font-size:11px;font-weight:600;background:rgba(255,255,255,0.22);padding:3px 10px;border-radius:12px;letter-spacing:0.3px;text-transform:uppercase">${g.length} task${g.length===1?'':'s'}</span>
         </div>
         <div style="overflow-x:auto">
-        <table class="task-table" style="width:100%;min-width:1180px;table-layout:fixed;font-size:13px">
+        <table class="task-table" style="width:100%;min-width:1180px;table-layout:fixed;font-size:var(--fs-base)">
           <colgroup>
             <col style="width:220px">
             <col style="width:300px">
@@ -7321,7 +7321,7 @@ function renderJobs(){
     });
   }
   container.innerHTML=`
-    <div style="margin-bottom:12px;padding:12px 14px;background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;font-size:13px">
+    <div style="margin-bottom:12px;padding:12px 14px;background:var(--info-bg);border:1px solid var(--info);color:var(--info);border-radius:8px;font-size:var(--fs-base)">
       <strong>Contractor Tasks.</strong> Open tasks grouped by property, sorted High priority first then oldest first. Status defaults to Upcoming (contractor tasks don't carry due dates). Click a row to open the task drawer.
     </div>
     <div class="view-tabs" style="margin-bottom:16px;position:static">${tabs}</div>
