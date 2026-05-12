@@ -812,6 +812,12 @@ async function fetchSchema(){
     }
     console.groupEnd();
   } catch(e){}
+  // Resolve transaction date field name for filterByFormula
+  const txMeta = data.tables.find(t => t.id === TABLE.transactions);
+  if (txMeta) {
+    const dateFld = txMeta.fields.find(f => f.id === TX.date);
+    if (dateFld) _txDateFieldName = dateFld.name;
+  }
   return result;
 }
 
@@ -2962,6 +2968,7 @@ function _opsIdbSet(key, value){
 
 // Only fetch the 8 fields we actually use
 const TX_FIELDS = [TX.date, TX.amount, TX.description, TX.category, TX.reconciled, TX.tenancy, TX.unit, TX.property];
+let _txDateFieldName = 'Date'; // resolved from schema metadata at load time
 
 // Transaction lookups — pre-index by tenancy, unit, property for fast expand
 // ═══════════════════════════════════════════════════════════════════════
@@ -3038,8 +3045,11 @@ async function loadTransactionsBackground(forceRefresh = false){
     } catch(e) { /* cache miss, proceed to fetch */ }
   }
 
-  // 2. Fetch from Airtable with only the fields we need
-  const fieldParams = {};
+  // 2. Fetch from Airtable — only fields we need, last 24 months only
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 24);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const fieldParams = { filterByFormula: `IS_AFTER({${_txDateFieldName}}, '${cutoffStr}')` };
   TX_FIELDS.forEach((fid, i) => { fieldParams[`fields[${i}]`] = fid; });
   _txLoadPromise = fetchAllRecords(TABLE.transactions, { params: fieldParams });
   const tx = await _txLoadPromise;
