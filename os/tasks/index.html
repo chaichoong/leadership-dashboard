@@ -59,6 +59,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .ded-row .ded-title{font-weight:var(--fw-semibold);flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)}
 .ded-row .ded-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-secondary)}
 .ded-row .ded-end{font-size:var(--fs-xs);color:var(--text-secondary);width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;margin-top:2px}
+.comment-count-badge{display:inline-flex;align-items:center;gap:2px;font-size:10px;padding:1px 6px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-semibold);white-space:nowrap;font-variant-numeric:tabular-nums}
 .ded-row:hover{background:var(--bg-surface-2)}
 .side-card.ded-side{padding:8px 10px;min-height:auto}
 .side-card.ded-side .sc-row1{display:flex;align-items:center;gap:6px;margin-bottom:4px}
@@ -2100,6 +2101,7 @@ function renderDedlineRow(t,opts){
       ${recurPill(t)}
       ${statusBadge(t.status)}
       ${businessPill(t)}
+      ${commentBadgeHtml(t.id)}
       ${projPicker}
       ${rowActionsHtml(t.id)}
     </div>
@@ -2127,7 +2129,7 @@ function renderLinkedTaskRow(t){
     <div class="gc-pri">${priorityBadge(t.priority)}</div>
     <div class="gc-status">${statusBadge(t.status)}</div>
     <div class="gc-proj">${projPicker}</div>
-    <div class="gc-act">${rowActionsHtml(t.id)}</div>
+    <div class="gc-act">${rowActionsHtml(t.id)} ${commentBadgeHtml(t.id)}</div>
     ${desc}
   </div>`;
 }
@@ -2321,7 +2323,8 @@ async function completeTaskFromDrillModal(taskId){
 }
 function deleteTaskFromDrillModal(taskId){
   const task=allTasks.find(t=>t.id===taskId);if(!task)return;
-  openDeleteConfirm(task);
+  const drillModal=document.getElementById('drillModal');if(drillModal)drillModal.remove();
+  performDeleteTask(taskId);
 }
 
 // ===== TEAM BAR =====
@@ -2845,6 +2848,45 @@ async function removeAttachment(taskId,attachmentId){
 // COMMENTS (Airtable native)
 // ======================================================
 const _drawerComments={}; // taskId -> array
+const _commentCounts={}; // taskId -> number (cached counts for row badges)
+let _commentCountsLoaded=false;
+async function loadAllCommentCounts(){
+  if(!allTasks.length)return;
+  const active=allTasks.filter(t=>t.status!=='Completed');
+  const CONCURRENCY=5;
+  let i=0;
+  async function next(){
+    while(i<active.length){
+      const t=active[i++];
+      if(_commentCounts[t.id]!==undefined)continue;
+      try{
+        const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${t.id}/comments?pageSize=100`,{headers:{Authorization:`Bearer ${PAT}`}});
+        if(r.ok){const d=await r.json();_commentCounts[t.id]=(d.comments||[]).length;}
+        else _commentCounts[t.id]=0;
+      }catch(e){_commentCounts[t.id]=0;}
+    }
+  }
+  await Promise.all(Array.from({length:CONCURRENCY},()=>next()));
+  _commentCountsLoaded=true;
+  updateAllCommentBadges();
+}
+function commentBadgeHtml(taskId){
+  const n=_commentCounts[taskId];
+  if(!n)return '';
+  return `<span class="comment-count-badge" data-comment-badge="${taskId}" title="${n} comment${n!==1?'s':''}">💬 ${n}</span>`;
+}
+function updateAllCommentBadges(){
+  document.querySelectorAll('[data-comment-badge]').forEach(el=>{
+    const id=el.getAttribute('data-comment-badge');
+    const n=_commentCounts[id]||0;
+    if(n>0){el.textContent='💬 '+n;el.title=n+' comment'+(n!==1?'s':'');el.style.display='';}
+    else{el.style.display='none';}
+  });
+}
+function updateCommentCount(taskId,delta){
+  _commentCounts[taskId]=Math.max(0,(_commentCounts[taskId]||0)+delta);
+  updateAllCommentBadges();
+}
 async function fetchComments(taskId){
   const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments?pageSize=100`,{headers:{Authorization:`Bearer ${PAT}`}});
   if(!r.ok){
@@ -3120,6 +3162,7 @@ async function submitModalComment(taskId){
     pushUndo({type:'comment-add',taskId,commentId:c.id,label:'Posted comment'});
     renderCommentsInModal(taskId);
     loadCommentCountForDrawer(taskId);
+    updateCommentCount(taskId,1);
     // Fan-out Slack DM (modal path uses the same task store as the drawer).
     const task=allTasks.find(x=>x.id===taskId);
     if(task)notifyCollabsOnComment(task,text);
@@ -3140,6 +3183,7 @@ function confirmDeleteCommentModal(taskId,commentId){
       pushUndo({type:'comment-delete',taskId,text,label:'Deleted comment'});
       renderCommentsInModal(taskId);
       loadCommentCountForDrawer(taskId);
+      updateCommentCount(taskId,-1);
       toast('Comment deleted');
     }catch(e){console.error(e);toast('Failed to delete',true)}
   })();
@@ -3161,9 +3205,9 @@ function deleteTask(taskId,ev){
   if(ev){ev.stopPropagation();ev.preventDefault()}
   const task=allTasks.find(t=>t.id===taskId);
   if(!task)return;
-  // Close existing confirm modal only (keep drawer open — user may want to cancel)
+  if(drawerTaskId===taskId)closeDrawer();
   const existing=document.getElementById('deleteConfirmModal');if(existing)existing.remove();
-  openDeleteConfirm(task);
+  performDeleteTask(taskId);
 }
 
 function openDeleteConfirm(task){
@@ -3184,11 +3228,6 @@ function openDeleteConfirm(task){
   document.body.appendChild(overlay);
   document.getElementById('confirmDeleteBtn').onclick=()=>{
     overlay.remove();
-    // Close the drawer immediately so the user sees an instant response
-    // — without this, the drawer hangs around for the duration of the
-    // DELETE round-trip (100–500ms), which feels broken. performDelete
-    // also calls closeDrawer on success but that's redundant once we've
-    // already closed; the second call is a no-op.
     if(drawerTaskId===task.id)closeDrawer();
     performDeleteTask(task.id);
   };
@@ -3213,7 +3252,7 @@ async function performDeleteTask(taskId){
     allTasks=allTasks.filter(t=>t.id!==taskId);
     if(drawerTaskId===taskId)closeDrawer();
     pushUndo({type:'delete',snapshot,label:`Deleted "${task.name}"`});
-    toast('Task deleted');
+    showDeleteUndoToast(task.name);
     renderAll();
     if(document.getElementById('drillModal')&&drillDownState)renderDrillDownList();
     _saveState.ok++;entry.status='ok';
@@ -3225,6 +3264,23 @@ async function performDeleteTask(taskId){
   }finally{
     _saveState.pending=Math.max(0,_saveState.pending-1);renderSyncPill();
   }
+}
+
+let _undoToastTimer=null;
+function showDeleteUndoToast(taskName){
+  const el=document.getElementById('toast');if(!el)return;
+  clearTimeout(el._t);clearTimeout(_undoToastTimer);
+  const short=taskName.length>40?taskName.slice(0,40)+'…':taskName;
+  el.innerHTML=`<span style="flex:1">Task deleted: ${escHtml(short)}</span> <button onclick="doUndo();hideDeleteUndoToast()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer;margin-left:12px;white-space:nowrap">Undo</button>`;
+  el.className='toast show';
+  el.style.display='flex';el.style.alignItems='center';
+  _undoToastTimer=setTimeout(()=>hideDeleteUndoToast(),5500);
+}
+function hideDeleteUndoToast(){
+  const el=document.getElementById('toast');if(!el)return;
+  clearTimeout(_undoToastTimer);
+  el.classList.remove('show');
+  setTimeout(()=>{el.style.display='';el.innerHTML='';},250);
 }
 
 // Build an Airtable fields payload from an in-memory task (for undo re-create)
@@ -4987,6 +5043,7 @@ function renderKanbanCardHtml(t){
       ${statusBadge(t.status)}
       ${recurPill(t)}
       ${t.business?`<span class="badge badge-business" style="font-size:9px">${escHtml(t.business)}</span>`:''}
+      ${commentBadgeHtml(t.id)}
     </div>
     ${pn?`<span class="card-project" style="background:${pbg};color:${pcol}">${escHtml(pn)}</span>`:''}
   </div>`;
@@ -7437,6 +7494,7 @@ async function loadAllData(){
     const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
     if(loader)loader.style.display='none';
     renderAll();
+    loadAllCommentCounts().catch(e=>console.warn('Comment count fetch failed',e));
 
     // ── Sync Bar + Health Checks ──
     if(typeof registerSyncBar==='function'){
