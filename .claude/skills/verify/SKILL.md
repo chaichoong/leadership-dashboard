@@ -107,16 +107,30 @@ If the page loaded without errors before the change and has errors now, that is 
 
 ## Step 4: Screenshot evidence
 
-Every fix must include at least one saved screenshot as proof. Kevin should be able to see the change without opening the browser himself.
+Every fix must include at least one saved screenshot as proof. Kevin must be able to see the change without opening the browser himself.
+
+### CRITICAL: Screenshot visibility rules
+
+Screenshots taken via Chrome MCP (`mcp__Claude_in_Chrome__computer screenshot`) and preview tools (`preview_screenshot`) appear in tool results but are **NOT visible to the user in the chat UI**. Only `mcp__computer-use__screenshot` with `save_to_disk: true` produces images that Kevin can actually see.
+
+**Mandatory process for user-visible screenshots:**
+
+1. Commit and push the changes to GitHub Pages first.
+2. Wait for the deploy to complete (use the deploy monitor or poll GitHub Actions).
+3. Use computer-use MCP (`mcp__computer-use__screenshot` with `save_to_disk: true`) to capture the **live deployed site** in Chrome. This is the only method that attaches images visibly in the chat.
+4. Before capturing, ensure the correct page/tab is visible in Chrome: use `request_access` for Chrome, `switch_display` if Chrome is on a secondary monitor, and visually confirm via a non-saved screenshot that the right content is on screen.
+
+**Do NOT rely on Chrome MCP or preview tool screenshots for the verify report.** Those are useful for Claude's own verification during Steps 2-3 but they are invisible to Kevin. The final report screenshots must come from computer-use.
 
 ### 4a. Capture the fix
 
 For each fix verified in Step 3, take a screenshot showing the result:
 
-1. Navigate to the area where the fix is visible
-2. If the fix is small (a badge, a label, a button), use `zoom` on the relevant region first to get a clear close-up
-3. Take a screenshot with `save_to_disk: true` so it is saved and attached to the conversation
-4. If the fix spans multiple views (e.g. a badge that appears on Kanban, Task List, and drill-downs), capture one screenshot per view where the change is visible
+1. Ensure the deployed version is live and matches the changes (check pageVer or visual confirmation)
+2. Navigate Chrome to the affected tab or page on the live site
+3. If the fix is small (a badge, a label, a button), use `zoom` on the relevant region first to get a clear close-up
+4. Take a screenshot with `mcp__computer-use__screenshot` and `save_to_disk: true`
+5. If the fix spans multiple views (e.g. a badge that appears on Kanban, Task List, and drill-downs), capture one screenshot per view where the change is visible
 
 ### 4b. What to capture
 
@@ -162,7 +176,7 @@ Output the report in this exact format:
 Rules for the report:
 - Every PASS or FAIL must have evidence (a specific value seen, a screenshot, a console output, or a DOM element reference)
 - "It looks correct" is not evidence. "Badge shows 3, matching 3 unresolved records in the table below" is evidence.
-- Every visual fix must have at least one saved screenshot attached. If the fix spans multiple views, include one screenshot per view.
+- Every visual fix must have at least one saved screenshot attached via `mcp__computer-use__screenshot` (the only method visible to Kevin). If the fix spans multiple views, include one screenshot per view.
 - If a fix cannot be shown live due to data conditions, state why and confirm the code is deployed.
 - If FAIL, state exactly what is wrong and which file/function to investigate. Do not attempt to fix it.
 - Keep the report short. No scoring, no readiness percentages, no recommendations beyond the failure description.
