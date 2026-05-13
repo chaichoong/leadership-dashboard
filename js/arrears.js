@@ -302,8 +302,24 @@
         ].filter(Boolean).join('\n');
     }
 
+    let _ucSyncRunning = false;
+    const UC_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
+    let _ucSyncLastRun = 0;
+
     async function syncUCRecurringTasks() {
         if (!PAT || !allTenancies?.length || !allTenants?.length) return;
+        if (_ucSyncRunning) return;
+        if (Date.now() - _ucSyncLastRun < UC_SYNC_COOLDOWN_MS) return;
+        _ucSyncRunning = true;
+        try {
+            await _syncUCRecurringTasksInner();
+        } finally {
+            _ucSyncRunning = false;
+            _ucSyncLastRun = Date.now();
+        }
+    }
+
+    async function _syncUCRecurringTasksInner() {
 
         const tenantLookup = buildTenantLookup();
         const today = new Date();
@@ -371,14 +387,10 @@
 
         let created = 0;
         for (const c of candidates) {
-            const candidateTaskDueKey = ucTaskDateKey(c.taskDue);
+            const candidateName = ucTaskNameForTenancy(c.tenantName, c.rent, c.nextDue);
             const already = existingTasks.some(t => {
-                const linked = t.fields?.['fldmne4RYJU22ICub'];
-                if (!linked) return false;
-                const ids = Array.isArray(linked) ? linked.map(x => x?.id || x) : [];
-                if (!ids.includes(c.tenancyId)) return false;
-                const tDue = t.fields?.['fld7XP8w8kbxfETV4'] || '';
-                return tDue === candidateTaskDueKey;
+                const name = t.fields?.['fldgFjGBw6bTKJFCD'] || '';
+                return name === candidateName;
             });
 
             if (already) continue;
@@ -428,27 +440,9 @@
 
         const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`;
 
-        const createResp = await fetch(url, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                fields: {
-                    'fldgFjGBw6bTKJFCD': taskName,
-                    'fldELMncVJYPDRJNc': { email: UC_TASK.assigneeEmail },
-                },
-                typecast: true,
-            }),
-        });
-
-        if (!createResp.ok) {
-            const err = await createResp.json();
-            throw new Error(err.error?.message || createResp.statusText);
-        }
-
-        const created = await createResp.json();
-        const recordId = created.id;
-
-        const patchFields = {
+        const fields = {
+            'fldgFjGBw6bTKJFCD': taskName,
+            'fldELMncVJYPDRJNc': { email: UC_TASK.assigneeEmail },
             'fldRGhBQViKZKtkQ6': description,
             'fld10VzzbiNNgRmIi': UC_TASK.timeEstimate,
             'fld7XP8w8kbxfETV4': dueDateStr,
@@ -457,32 +451,34 @@
             'fldZKzIxgyrQ8CG8a': UC_TASK.hardDeadline,
             'fldcq3t6uAPgWSOP8': UC_TASK.collaborators,
             'fldmne4RYJU22ICub': [c.tenancyId],
-            'fldLu1Y4GzyWcDoxr': ['recoGcXRXCniyJsTz'],  // Business → Real Estate
+            'fldLu1Y4GzyWcDoxr': ['recoGcXRXCniyJsTz'],
         };
 
-        if (c.tenantId) patchFields['fld6ZcfEogJmeQj2c'] = [c.tenantId];
-        if (c.unitId) patchFields['fldEW648YtTZ6j01n'] = [c.unitId];
+        if (c.tenantId) fields['fld6ZcfEogJmeQj2c'] = [c.tenantId];
+        if (c.unitId) fields['fldEW648YtTZ6j01n'] = [c.unitId];
 
         if (c.unitId && allRentalUnits?.length) {
             const unitRec = allRentalUnits.find(u => u.id === c.unitId);
             if (unitRec) {
                 const propLinked = unitRec.fields?.['fldUJNRGgzgyAwwjt'] || unitRec.fields?.[F.unitProperty];
                 const propId = Array.isArray(propLinked) ? (propLinked[0]?.id || propLinked[0]) : propLinked;
-                if (propId) patchFields['fldZKFvEpJ6NZeFKz'] = [propId];
+                if (propId) fields['fldZKFvEpJ6NZeFKz'] = [propId];
             }
         }
 
-        const patchResp = await fetch(`${url}/${recordId}`, {
-            method: 'PATCH',
+        const createResp = await fetch(url, {
+            method: 'POST',
             headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields: patchFields, typecast: true }),
+            body: JSON.stringify({ fields, typecast: true }),
         });
 
-        if (!patchResp.ok) {
-            console.warn('UC task patch failed for', c.tenantName);
+        if (!createResp.ok) {
+            const err = await createResp.json();
+            throw new Error(err.error?.message || createResp.statusText);
         }
 
-        return recordId;
+        const created = await createResp.json();
+        return created.id;
     }
 
     async function runArrearsEngine() {
