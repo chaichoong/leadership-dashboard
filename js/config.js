@@ -9,7 +9,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.29', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.13', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.83', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.84', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.21', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
