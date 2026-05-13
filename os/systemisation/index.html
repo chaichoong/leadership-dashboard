@@ -203,7 +203,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <select id="bizFilter" class="filter-select" onchange="applyBizFilter()">
             <option value="">All Businesses</option>
         </select>
-        <button class="btn btn-primary" onclick="openAddWorkflow()">+ Add Workflow</button>
     </div>
 </div>
 
@@ -211,12 +210,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <button class="view-tab active" data-tab="fulfill" onclick="switchView('fulfill')">Customer Journey <span class="count" id="fulfillCount">0</span></button>
     <button class="view-tab" data-tab="method" onclick="switchView('method')">Main Method <span class="count" id="methodCount">0</span></button>
     <button class="view-tab" data-tab="dept" onclick="switchView('dept')">Departmental <span class="count" id="deptCount">0</span></button>
+    <button class="view-tab" data-tab="all" onclick="switchView('all')">All Workflows <span class="count" id="allCount">0</span></button>
 </div>
 
 <div id="main" class="main" style="display:none">
     <div class="tab-pane active" id="pane-fulfill"></div>
     <div class="tab-pane" id="pane-method"></div>
     <div class="tab-pane" id="pane-dept"></div>
+    <div class="tab-pane" id="pane-all"></div>
 </div>
 
 <div class="loading" id="loader">Loading...</div>
@@ -483,6 +484,7 @@ function render(){
     if(currentView==='fulfill') renderFulfill();
     else if(currentView==='method') renderMethod();
     else if(currentView==='dept') renderDept();
+    else if(currentView==='all') renderAll();
     if(_drawerKey && _drawerView) openDrawer(_drawerKey, _drawerView);
 }
 
@@ -497,6 +499,7 @@ function updateCounts(){
     document.getElementById('fulfillCount').textContent=fc;
     document.getElementById('methodCount').textContent=mc;
     document.getElementById('deptCount').textContent=dc;
+    document.getElementById('allCount').textContent=wfs.length;
 }
 
 // ── Customer Journey (FULFILL) ──
@@ -662,6 +665,149 @@ function renderDept(){
     pane.innerHTML = html;
 }
 
+// ── All Workflows ──
+function renderAll(){
+    const pane = document.getElementById('pane-all');
+    const wfs = filteredWorkflows().slice().sort((a,b)=>{
+        const na = (gf(a,WF.name)||'').toLowerCase();
+        const nb = (gf(b,WF.name)||'').toLowerCase();
+        return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+
+    if(!wfs.length && !allWorkflows.length){
+        pane.innerHTML = '<div class="empty-state"><p>No workflows yet.</p><p>Click a stage card on the other tabs to add workflows, or add one here.</p></div>';
+        return;
+    }
+
+    const paneEl = document.createElement('div');
+
+    const hint = document.createElement('p');
+    hint.style.cssText = 'font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px';
+    hint.textContent = 'All workflows in one place. Edit inline or use the other tabs to organise by stage.';
+    paneEl.appendChild(hint);
+
+    const table = document.createElement('table');
+    table.className = 'wf-grid';
+    table.innerHTML = `<thead><tr>
+        <th style="width:20%">Name</th>
+        <th style="width:22%">Description</th>
+        <th style="width:14%">Department</th>
+        <th style="width:16%">FULFILL Stage</th>
+        <th style="width:14%">Main Method</th>
+        <th style="width:80px">Status</th>
+        <th style="width:80px">Actions</th>
+    </tr></thead>`;
+    const tbody = document.createElement('tbody');
+    tbody.id = 'allGridBody';
+
+    wfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
+    tbody.appendChild(buildAllNewRow());
+
+    table.appendChild(tbody);
+    paneEl.appendChild(table);
+    pane.innerHTML = '';
+    pane.appendChild(paneEl);
+}
+
+function buildAllGridRow(w){
+    const tr = document.createElement('tr');
+    tr.dataset.id = w.id;
+    const name = gf(w,WF.name)||'';
+    const desc = gf(w,WF.description)||'';
+    const status = selName(gf(w,WF.status))||'Not Started';
+    const dept = selName(gf(w,WF.department))||'';
+    const fulfill = selName(gf(w,WF.fulfillStage))||'';
+    const methodIds = linkIds(gf(w,WF.mainMethodStage));
+    const steps = stepsForWorkflow(w.id);
+
+    const deptOpts = DEPARTMENTS.map(d=>`<option value="${esc(d)}"${dept===d?' selected':''}>${esc(d)}</option>`).join('');
+    const fulfillOpts = FULFILL_STAGES.map(s=>`<option value="${esc(s.key)}"${fulfill===s.key?' selected':''}>${esc(s.label)}</option>`).join('');
+    const methodOpts = allMethods.map(m=>{
+        const sel = methodIds.includes(m.id) ? ' selected' : '';
+        return `<option value="${m.id}"${sel}>${esc(gf(m,MM.name)||'Unnamed')}</option>`;
+    }).join('');
+
+    tr.innerHTML = `
+        <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
+        <td><div style="display:flex;gap:4px;align-items:start">
+            <textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc">${esc(desc)}</textarea>
+            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:4px" title="AI generate description" onclick="aiDescRow(this)">AI</button>
+        </div></td>
+        <td><select class="wf-grid-status" data-field="department" style="width:100%"><option value="">None</option>${deptOpts}</select></td>
+        <td><select class="wf-grid-status" data-field="fulfill" style="width:100%"><option value="">None</option>${fulfillOpts}</select></td>
+        <td><select class="wf-grid-status" data-field="method" style="width:100%"><option value="">None</option>${methodOpts}</select></td>
+        <td><select class="wf-grid-status" data-field="status">
+            <option${status==='Not Started'?' selected':''}>Not Started</option>
+            <option${status==='In Progress'?' selected':''}>In Progress</option>
+            <option${status==='Complete'?' selected':''}>Complete</option>
+        </select></td>
+        <td><div class="wf-grid-actions">
+            <button class="wf-grid-expand" title="${steps.length} step${steps.length!==1?'s':''}" onclick="toggleWf('${w.id}')">&#x25B6; ${steps.length}</button>
+            <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
+        </div></td>`;
+
+    const nameInput = tr.querySelector('[data-field="name"]');
+    const descInput = tr.querySelector('[data-field="desc"]');
+    const statusSel = tr.querySelector('[data-field="status"]');
+    const deptSel = tr.querySelector('[data-field="department"]');
+    const fulfillSel = tr.querySelector('[data-field="fulfill"]');
+    const methodSel = tr.querySelector('[data-field="method"]');
+
+    nameInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.name]: nameInput.value.trim()}, tr));
+    descInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.description]: descInput.value.trim()}, tr));
+    statusSel.addEventListener('change', ()=> gridSave(w.id, {[WF.status]: statusSel.value}, tr));
+    deptSel.addEventListener('change', ()=> gridSave(w.id, {[WF.department]: deptSel.value||null}, tr));
+    fulfillSel.addEventListener('change', ()=> gridSave(w.id, {[WF.fulfillStage]: fulfillSel.value||null}, tr));
+    methodSel.addEventListener('change', ()=> gridSave(w.id, {[WF.mainMethodStage]: methodSel.value ? [methodSel.value] : []}, tr));
+
+    autoGrowTextarea(descInput);
+    return tr;
+}
+
+function buildAllNewRow(){
+    const tr = document.createElement('tr');
+    tr.className = 'wf-grid-new';
+    tr.innerHTML = `
+        <td><input class="wf-grid-input" placeholder="Type name and press Enter" data-field="name"></td>
+        <td><textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc"></textarea></td>
+        <td></td><td></td><td></td><td></td><td></td>`;
+
+    const nameInput = tr.querySelector('[data-field="name"]');
+    const descInput = tr.querySelector('[data-field="desc"]');
+
+    nameInput.addEventListener('keydown', async(e)=>{
+        if(e.key==='Enter'){
+            e.preventDefault();
+            const name = nameInput.value.trim();
+            if(!name) return;
+            nameInput.disabled = true;
+            const fields = { [WF.name]: name, [WF.status]: 'Not Started' };
+            const desc = descInput.value.trim();
+            if(desc) fields[WF.description] = desc;
+            if(bizFilterId) fields[WF.business] = [bizFilterId];
+            try {
+                const rec = await atCreate(TBL.workflows, fields);
+                allWorkflows.push(rec);
+                const tbody = tr.parentElement;
+                const newDataRow = buildAllGridRow(rec);
+                tbody.insertBefore(newDataRow, tr);
+                nameInput.value = ''; descInput.value = '';
+                nameInput.disabled = false;
+                nameInput.focus();
+                updateTabCounts();
+                toast('Workflow added');
+            } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
+        }
+    });
+
+    descInput.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter'){ e.preventDefault(); nameInput.focus(); nameInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'})); }
+    });
+
+    autoGrowTextarea(descInput);
+    return tr;
+}
+
 // ── Drawer ──
 function drillInto(view, key){
     drillStage = key;
@@ -722,8 +868,6 @@ function openDrawer(key, view){
 
     table.appendChild(tbody);
     body.appendChild(table);
-
-    body.appendChild(buildUnassignedPanel(wfs, stageWfs, key, view));
 
     document.getElementById('drawerOverlay').classList.add('open');
     document.getElementById('drawer').classList.add('open');
@@ -858,7 +1002,8 @@ function buildNewRow(stageKey, view){
             const desc = descInput.value.trim();
             if(desc) fields[WF.description] = desc;
             if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
-            else fields[WF.mainMethodStage] = [stageKey];
+            else if(view==='method') fields[WF.mainMethodStage] = [stageKey];
+            else if(view==='dept') fields[WF.department] = stageKey;
             if(bizFilterId) fields[WF.business] = [bizFilterId];
             try {
                 const rec = await atCreate(TBL.workflows, fields);
