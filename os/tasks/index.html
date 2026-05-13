@@ -2247,6 +2247,7 @@ function renderDedlineSideCard(t){
       ${recurPill(t)}
       ${statusBadge(t.status)}
       ${businessPill(t)}
+      ${commentBadgeHtml(t.id)}
     </div>
   </div>`;
 }
@@ -4652,7 +4653,7 @@ function renderTasks(){
     html+=`<tr${rowStyle} onclick="openTaskDrawer('${t.id}')" style="cursor:pointer" title="Click to open task details">
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
-      <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Enter to save · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="taskNameKeydown(event,'${t.id}')" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:'<div class="task-open-link" style="font-size:10px;color:var(--text-muted);margin-top:2px">Click row to open details ›</div>'}</td>
+      <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Enter to save · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="taskNameKeydown(event,'${t.id}')" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${commentBadgeHtml(t.id)}${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:'<div class="task-open-link" style="font-size:10px;color:var(--text-muted);margin-top:2px">Click row to open details ›</div>'}</td>
       <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value).then(()=>{renderTeamBar();renderKPIs();renderTasks()})">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
       <td class="${dueCls}" onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px;background:transparent;border-color:transparent;color:inherit;font-weight:inherit" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
       <td class="hard-cell" onclick="event.stopPropagation()"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
