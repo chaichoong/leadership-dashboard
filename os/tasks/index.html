@@ -822,26 +822,21 @@ function slackEmailFor(airtableEmail){
   const m=TEAM.find(x=>x.email===airtableEmail);
   return (m&&m.slackEmail)||airtableEmail;
 }
-function notifyAssigneeSlack({recipientEmail,taskName,taskId,action}){
+function notifyAssigneeSlack({recipientEmail,taskName,taskId,action,skipSelfCheck,actorNameOverride}){
   if(!recipientEmail||!taskName)return;
-  // Drop the placeholder so it never ships to Slack — better to skip the
-  // ping entirely than DM "(Untitled)" to the assignee.
   const tn=String(taskName||'').trim();
   if(!tn||tn==='(Untitled)')return;
-  // Don't ping the actor when they assign a task to themselves.
-  const actorEmail=(currentUser&&currentUser.email)||'';
-  if(recipientEmail===actorEmail)return;
-  const actorName=(currentUser&&currentUser.name)||'';
-  // Translate Airtable collaborator email → Slack-registered email
-  // (e.g. Gary's Airtable account uses one email, Slack uses another).
+  if(!skipSelfCheck){
+    const actorEmail=(currentUser&&currentUser.email)||'';
+    if(recipientEmail===actorEmail)return;
+  }
+  const actorName=actorNameOverride||(currentUser&&currentUser.name)||'';
   const slackTarget=slackEmailFor(recipientEmail);
   try{
     fetch(SLACK_NOTIFY_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({recipientEmail:slackTarget,taskName:tn,taskId,actorName,action:action||'assigned'}),
-      // Keep this independent of any document-leaving event so a tab close
-      // mid-fire doesn't leave a half-sent payload.
       keepalive:true,
     }).catch(e=>console.warn('[notify slack] failed (non-blocking)',e));
   }catch(e){console.warn('[notify slack] threw (non-blocking)',e)}
@@ -881,6 +876,44 @@ function notifyCollabsOnComment(task,commentText){
   });
 }
 window.notifyCollabsOnComment=notifyCollabsOnComment;
+// Catch-up: on page load, detect tasks assigned to the current user that
+// were created externally (no createdByEmail, or created by someone else)
+// within the last 48 hours and fire the Slack DM that the external
+// creation path couldn't send. Tracked in localStorage to avoid duplicates.
+function runNotificationCatchup(){
+  if(!allTasks||!allTasks.length)return;
+  const myEmail=(currentUser&&currentUser.email)||'';
+  if(!myEmail)return;
+  const LS_KEY='_slack_notified_tasks';
+  let notified;
+  try{notified=new Set(JSON.parse(localStorage.getItem(LS_KEY)||'[]'))}catch(e){notified=new Set()}
+  const now=Date.now();
+  const CUTOFF=48*60*60*1000;
+  let sent=0;
+  allTasks.forEach(t=>{
+    if(notified.has(t.id))return;
+    if(t.assigneeEmail!==myEmail){notified.add(t.id);return}
+    if(t.created){
+      const age=now-new Date(t.created).getTime();
+      if(age>CUTOFF){notified.add(t.id);return}
+    }
+    if(t.createdByEmail&&t.createdByEmail===myEmail){notified.add(t.id);return}
+    notifyAssigneeSlack({
+      recipientEmail:myEmail,
+      taskName:t.name,
+      taskId:t.id,
+      action:'assigned',
+      skipSelfCheck:true,
+      actorNameOverride:t.createdByEmail?'':(t.business||'System'),
+    });
+    notified.add(t.id);
+    sent++;
+    console.log('[notification catchup] sent assignment DM for',t.name);
+  });
+  const arr=[...notified].slice(-500);
+  localStorage.setItem(LS_KEY,JSON.stringify(arr));
+  if(sent)console.log(`[notification catchup] ${sent} catch-up DM(s) dispatched`);
+}
 // Send a known-good Slack DM and surface the worker's HTTP response so
 // the user can see exactly why the pipeline did or didn't deliver.
 // Bypasses the in-flight value cleaning (we want to test the worker
@@ -7494,6 +7527,7 @@ async function loadAllData(){
     const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
     if(loader)loader.style.display='none';
     renderAll();
+    try{runNotificationCatchup()}catch(e){console.warn('[notification catchup] error',e)}
     loadAllCommentCounts().catch(e=>console.warn('Comment count fetch failed',e));
 
     // ── Sync Bar + Health Checks ──
@@ -7571,6 +7605,13 @@ async function loadAllData(){
           {
             name:'PATCH verification active', kind:'automation', run:()=>{
               return {status:'pass',detail:'Every save verifies the field round-tripped — silent-drop bugs surface immediately'};
+            }
+          },
+          {
+            name:'Slack notification catch-up ran', kind:'automation', run:()=>{
+              const lsRaw=localStorage.getItem('_slack_notified_tasks');
+              if(!lsRaw) return {status:'warn',detail:'No catch-up tracking found — first load?'};
+              try{const ids=JSON.parse(lsRaw);return {status:'pass',detail:`${ids.length} task(s) tracked · catch-up fires on each load for unnotified assignments`}}catch(e){return {status:'warn',detail:'Tracking data corrupted'}}
             }
           },
         ],
