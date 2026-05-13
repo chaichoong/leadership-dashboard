@@ -96,6 +96,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .sop-draft{background:var(--warning-bg);color:var(--warning)}
 .sop-complete{background:var(--success-bg);color:var(--success)}
 .step-actions{display:flex;gap:4px}
+.pipeline-badge{font-size:var(--fs-xs);padding:1px 6px;border-radius:8px;font-weight:var(--fw-semibold);white-space:nowrap}
+.pipeline-none{background:var(--bg-subtle);color:var(--text-muted)}
+.pipeline-sop{background:var(--warning-bg);color:var(--warning)}
+.pipeline-skill{background:var(--info-bg);color:var(--info)}
+.pipeline-task{background:var(--accent-soft);color:var(--accent)}
+.stage-hint{text-align:center;padding:8px 20px;color:var(--text-muted);font-size:var(--fs-sm)}
+.demo-banner{background:var(--info-bg);border:1px solid var(--info);border-radius:var(--radius-md);padding:10px 16px;margin-bottom:16px;font-size:var(--fs-sm);color:var(--info);display:flex;align-items:center;gap:8px}
+.demo-banner strong{font-weight:var(--fw-bold)}
 
 .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200}
 .modal{background:var(--bg-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:90%;max-width:560px;max-height:90vh;overflow-y:auto;padding:24px}
@@ -300,6 +308,53 @@ let drillStage = null;
 let _drawerKey = null;
 let _drawerView = null;
 let bizFilterId = '';
+let _usingDemo = false;
+
+const DEMO_WORKFLOWS = [
+    {id:'demo-w1', fields:{[WF.name]:'Lead Capture & Qualification',[WF.description]:'Attract, capture and qualify inbound leads before passing to sales.',[WF.fulfillStage]:{name:'F - Find & Grab Attention'},[WF.department]:{name:'Marketing'},[WF.status]:{name:'In Progress'},[WF.sortOrder]:1}},
+    {id:'demo-w2', fields:{[WF.name]:'Client Onboarding',[WF.description]:'Welcome new clients, set expectations and complete setup tasks.',[WF.fulfillStage]:{name:'I - Initiate Onboarding'},[WF.department]:{name:'Operations'},[WF.status]:{name:'Complete'},[WF.sortOrder]:1}},
+    {id:'demo-w3', fields:{[WF.name]:'Monthly Invoicing',[WF.description]:'Generate, review and send monthly invoices to all active clients.',[WF.department]:{name:'Finance'},[WF.status]:{name:'Not Started'},[WF.sortOrder]:1}},
+];
+const DEMO_STEPS = [
+    {id:'demo-s1', fields:{[ST.name]:'Monitor social media enquiries',[ST.description]:'Scan all social channels for new enquiries and DMs.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Open social media dashboard\n2. Review all new messages and comments\n3. Flag any that contain a buying signal or enquiry\n4. Log each enquiry in the CRM with source channel\n5. Send acknowledgement reply within 1 hour',[ST.sortOrder]:1}},
+    {id:'demo-s2', fields:{[ST.name]:'Qualify lead against criteria',[ST.description]:'Check lead meets minimum qualification criteria before passing to sales.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'Both'},[ST.sopStatus]:{name:'Draft'},[ST.sortOrder]:2}},
+    {id:'demo-s3', fields:{[ST.name]:'Send follow-up email',[ST.description]:'Send personalised follow-up email to qualified leads.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Pull lead details from CRM\n2. Select appropriate email template based on lead source\n3. Personalise subject line and opening paragraph\n4. Include relevant case study or testimonial\n5. Set follow-up reminder for 48 hours',[ST.sortOrder]:3}},
+    {id:'demo-s4', fields:{[ST.name]:'Book discovery call',[ST.description]:'Schedule a discovery call with the qualified lead.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Check calendar availability for next 5 business days\n2. Send calendar invite with Zoom link\n3. Include pre-call questionnaire\n4. Add to CRM pipeline as "Discovery Booked"\n5. Set reminder 1 hour before call',[ST.sortOrder]:4}},
+    {id:'demo-s5', fields:{[ST.name]:'Send welcome pack',[ST.description]:'Email the welcome pack with onboarding materials.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Generate welcome pack from template\n2. Personalise with client name and service details\n3. Attach terms of service and contact sheet\n4. Send via email with read receipt\n5. Log in CRM as "Welcome Pack Sent"',[ST.sortOrder]:1}},
+    {id:'demo-s6', fields:{[ST.name]:'Set up client folder',[ST.description]:'Create the client folder structure in Google Drive.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Navigate to Clients folder in Google Drive\n2. Copy the Client Template folder\n3. Rename with client name and start date\n4. Share with relevant team members\n5. Add folder link to CRM record',[ST.sortOrder]:2}},
+    {id:'demo-s7', fields:{[ST.name]:'Schedule kickoff meeting',[ST.description]:'Book the kickoff meeting with all stakeholders.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Draft'},[ST.sortOrder]:3}},
+    {id:'demo-s8', fields:{[ST.name]:'Complete compliance checks',[ST.description]:'Run all required compliance and due diligence checks.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:4}},
+    {id:'demo-s9', fields:{[ST.name]:'Pull transaction data',[ST.description]:'Extract all billable transactions for the month.',[ST.workflow]:['demo-w3'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:1}},
+    {id:'demo-s10', fields:{[ST.name]:'Generate invoices',[ST.description]:'Create invoice documents from transaction data.',[ST.workflow]:['demo-w3'],[ST.stepType]:{name:'Both'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:2}},
+    {id:'demo-s11', fields:{[ST.name]:'Review and approve',[ST.description]:'Manual review of all invoices before sending.',[ST.workflow]:['demo-w3'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:3}},
+];
+
+const DEMO_SKILL_MAP = {'demo-s1':true, 'demo-s5':true};
+const DEMO_TASK_MAP = {'demo-s4':true};
+
+function isSkillCreated(stepId){ return DEMO_SKILL_MAP[stepId] || localStorage.getItem('sys_skill_'+stepId)==='1'; }
+function isTaskCreated(stepId){ return DEMO_TASK_MAP[stepId] || localStorage.getItem('sys_task_'+stepId)==='1'; }
+
+function pipelineStatus(step){
+    const sopSt = selName(gf(step,ST.sopStatus))||'Not Created';
+    const stepType = selName(gf(step,ST.stepType))||'Staff Task';
+    if(sopSt==='Not Created') return {label:'No SOP',cls:'pipeline-none'};
+    if(isSkillCreated(step.id)) return {label:'Skill',cls:'pipeline-skill'};
+    if(isTaskCreated(step.id)) return {label:'Task',cls:'pipeline-task'};
+    if(sopSt==='Complete') return {label:'SOP Ready',cls:'pipeline-sop'};
+    return {label:'SOP '+sopSt,cls:'pipeline-sop'};
+}
+
+function loadDemoData(){
+    allWorkflows = DEMO_WORKFLOWS.slice();
+    allSteps = DEMO_STEPS.slice();
+    allMethods = [{id:'demo-m1', fields:{[MM.name]:'Discovery',[MM.description]:'Initial discovery and research process'}}];
+    allBusinesses = [{id:'demo-b1', fields:{[BIZ_NAME]:'Demo Business',[BIZ_ACTIVE]:true}}];
+    allObjStrat = [];
+    methodBizMap = {};
+    bizMethodOrder = {};
+    _usingDemo = true;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Helpers
@@ -531,6 +586,9 @@ function renderFulfill(){
         </div>`;
     });
     html += '</div>';
+    const totalAssigned = wfs.filter(w=>gf(w,WF.fulfillStage)).length;
+    if(!totalAssigned) html += '<div class="stage-hint">Click a card above to view and add workflows for that stage.</div>';
+    if(_usingDemo) html = '<div class="demo-banner"><strong>Demo data.</strong> This sample data shows how the pipeline works. It will be replaced when you add real workflows.</div>' + html;
     pane.innerHTML = html;
 }
 
@@ -624,7 +682,11 @@ function renderMethod(){
         }
         if(!hasAny){
             html = '<div class="empty-state"><p>No Main Method stages found.</p><p>Add Main Method stages in Objective &amp; Strategy first.</p></div>';
+        } else {
+            const totalMethod = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).length).length;
+            if(!totalMethod) html += '<div class="stage-hint">Click a stage card to view and add workflows for that method.</div>';
         }
+        if(_usingDemo) html = '<div class="demo-banner"><strong>Demo data.</strong> This sample data shows how the pipeline works. It will be replaced when you add real workflows.</div>' + html;
         pane.innerHTML = html;
     }
 }
@@ -662,6 +724,9 @@ function renderDept(){
         </div>`;
     });
     html += '</div>';
+    const totalDept = wfs.filter(w=>gf(w,WF.department)).length;
+    if(!totalDept) html += '<div class="stage-hint">Click a department card to view and add workflows.</div>';
+    if(_usingDemo) html = '<div class="demo-banner"><strong>Demo data.</strong> This sample data shows how the pipeline works. It will be replaced when you add real workflows.</div>' + html;
     pane.innerHTML = html;
 }
 
@@ -1103,34 +1168,7 @@ function renderWorkflowCard(w){
     const steps = stepsForWorkflow(w.id);
     const sopDone = steps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
 
-    let stepsHtml = '';
-    if(steps.length){
-        stepsHtml = `<table class="step-table">
-            <thead><tr><th class="step-num">#</th><th>Step</th><th>Type</th><th>SOP</th><th style="width:140px">Actions</th></tr></thead>
-            <tbody>` + steps.map((s,i)=>{
-                const sName = gf(s,ST.name)||'Untitled';
-                const sDesc = gf(s,ST.description)||'';
-                const sType = selName(gf(s,ST.stepType))||'Staff Task';
-                const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
-                const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
-                const sopClass = sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created';
-                const hasSop = gf(s,ST.sopContent);
-                return `<tr>
-                    <td class="step-num">${i+1}</td>
-                    <td><div class="step-name">${esc(sName)}</div>${sDesc?`<div class="step-desc">${esc(sDesc)}</div>`:''}</td>
-                    <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
-                    <td><span class="sop-badge ${sopClass}">${esc(sopSt)}</span></td>
-                    <td class="step-actions">
-                        ${hasSop?`<button class="btn btn-sm" onclick="event.stopPropagation();viewSOP('${s.id}')">View SOP</button>`:''}
-                        <button class="btn btn-sm btn-ai" onclick="event.stopPropagation();generateSOP('${s.id}')">AI SOP</button>
-                        <button class="btn btn-sm" onclick="event.stopPropagation();editStep('${s.id}')">Edit</button>
-                        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteStep('${s.id}')">Del</button>
-                    </td>
-                </tr>`;
-            }).join('') + '</tbody></table>';
-    } else {
-        stepsHtml = '<div class="empty-state" style="padding:16px"><p>No steps yet. Add steps to define this workflow.</p></div>';
-    }
+    const stepsHtml = buildStepTableHtml(steps);
 
     return `<div class="wf-card" id="wf-${w.id}">
         <div class="wf-card-header" onclick="toggleWf('${w.id}')" role="button" tabindex="0" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWf('${w.id}')}">
@@ -1155,6 +1193,41 @@ function renderWorkflowCard(w){
     </div>`;
 }
 
+function buildStepRow(s, i){
+    const sName = gf(s,ST.name)||'Untitled';
+    const sDesc = gf(s,ST.description)||'';
+    const sType = selName(gf(s,ST.stepType))||'Staff Task';
+    const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
+    const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
+    const sopClass = sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created';
+    const hasSop = gf(s,ST.sopContent);
+    const ps = pipelineStatus(s);
+    const canConvertSkill = sopSt==='Complete' && (sType==='AI Skill'||sType==='Both') && !isSkillCreated(s.id);
+    const canConvertTask = sopSt==='Complete' && (sType==='Staff Task'||sType==='Both') && !isTaskCreated(s.id);
+    return `<tr>
+        <td class="step-num">${i+1}</td>
+        <td><div class="step-name">${esc(sName)}</div>${sDesc?`<div class="step-desc">${esc(sDesc)}</div>`:''}</td>
+        <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
+        <td><span class="sop-badge ${sopClass}">${esc(sopSt)}</span></td>
+        <td><span class="pipeline-badge ${ps.cls}">${esc(ps.label)}</span></td>
+        <td class="step-actions">
+            ${hasSop?`<button class="btn btn-sm" onclick="event.stopPropagation();viewSOP('${s.id}')">View SOP</button>`:''}
+            <button class="btn btn-sm btn-ai" onclick="event.stopPropagation();generateSOP('${s.id}')">AI SOP</button>
+            ${canConvertSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="event.stopPropagation();convertToSkill('${s.id}')">To Skill</button>`:''}
+            ${canConvertTask?`<button class="btn btn-sm" style="border-color:var(--accent);color:var(--accent)" onclick="event.stopPropagation();convertToTask('${s.id}')">To Task</button>`:''}
+            <button class="btn btn-sm" onclick="event.stopPropagation();editStep('${s.id}')">Edit</button>
+            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteStep('${s.id}')">Del</button>
+        </td>
+    </tr>`;
+}
+
+function buildStepTableHtml(steps){
+    if(!steps.length) return '<div style="color:var(--text-muted);font-size:var(--fs-sm);padding:8px 0">No steps yet. Add steps to define this workflow.</div>';
+    return `<table class="step-table"><thead><tr><th class="step-num">#</th><th>Step</th><th>Type</th><th>SOP</th><th>Pipeline</th><th style="width:180px">Actions</th></tr></thead><tbody>`
+        + steps.map((s,i)=>buildStepRow(s,i)).join('')
+        + '</tbody></table>';
+}
+
 function toggleWf(id){
     const existing = document.getElementById('wf-detail-'+id);
     if(existing){ existing.remove(); return; }
@@ -1164,44 +1237,18 @@ function toggleWf(id){
     detailRow.id = 'wf-detail-'+id;
     detailRow.className = 'wf-grid-detail';
     const td = document.createElement('td');
-    td.colSpan = 4;
+    const colCount = dataRow.querySelectorAll('td').length;
+    td.colSpan = colCount;
     td.style.padding = '12px 16px';
     td.style.background = 'var(--bg-surface-2)';
 
-    const w = allWorkflows.find(w=>w.id===id);
     const steps = stepsForWorkflow(id);
     let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <button class="btn btn-sm btn-primary" onclick="openAddStep('${id}')">+ Add Step</button>
         <button class="btn btn-sm btn-ai" onclick="suggestSteps('${id}')">Suggest Steps (AI)</button>
         <button class="btn btn-sm" onclick="editWorkflow('${id}')">Edit Details</button>
     </div>`;
-    if(!steps.length){
-        html += '<div style="color:var(--text-muted);font-size:var(--fs-sm);padding:8px 0">No steps yet. Add steps to define this workflow.</div>';
-    } else {
-        html += `<table class="step-table"><thead><tr><th class="step-num">#</th><th>Step</th><th>Type</th><th>SOP</th><th style="width:140px">Actions</th></tr></thead><tbody>`;
-        steps.forEach((s,i)=>{
-            const sName = gf(s,ST.name)||'Untitled';
-            const sDesc = gf(s,ST.description)||'';
-            const sType = selName(gf(s,ST.stepType))||'Staff Task';
-            const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
-            const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
-            const sopClass = sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created';
-            const hasSop = gf(s,ST.sopContent);
-            html += `<tr>
-                <td class="step-num">${i+1}</td>
-                <td><div class="step-name">${esc(sName)}</div>${sDesc?`<div class="step-desc">${esc(sDesc)}</div>`:''}</td>
-                <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
-                <td><span class="sop-badge ${sopClass}">${esc(sopSt)}</span></td>
-                <td class="step-actions">
-                    ${hasSop?`<button class="btn btn-sm" onclick="event.stopPropagation();viewSOP('${s.id}')">View SOP</button>`:''}
-                    <button class="btn btn-sm btn-ai" onclick="event.stopPropagation();generateSOP('${s.id}')">AI SOP</button>
-                    <button class="btn btn-sm" onclick="event.stopPropagation();editStep('${s.id}')">Edit</button>
-                    <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteStep('${s.id}')">Del</button>
-                </td>
-            </tr>`;
-        });
-        html += '</tbody></table>';
-    }
+    html += buildStepTableHtml(steps);
     html += `<div id="sop-viewer-${id}" style="display:none"></div>`;
     td.innerHTML = html;
     detailRow.appendChild(td);
@@ -1684,6 +1731,32 @@ async function addSuggestedSteps(suggestions, wfId){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Pipeline Conversion
+// ═══════════════════════════════════════════════════════════════════════
+async function convertToSkill(stepId){
+    const s = allSteps.find(s=>s.id===stepId);
+    if(!s) return;
+    const name = gf(s,ST.name)||'Untitled';
+    if(!confirm(`Convert "${name}" SOP to an AI Skill? This will mark the step as an automated skill.`)) return;
+    localStorage.setItem('sys_skill_'+stepId, '1');
+    if(!_usingDemo){
+        try { await atUpdate(TBL.steps, stepId, {[ST.skillId]: 'skill_'+stepId}); } catch(e){ toast('Save error: '+e.message); }
+    }
+    toast(`"${name}" converted to Skill`);
+    render();
+}
+
+async function convertToTask(stepId){
+    const s = allSteps.find(s=>s.id===stepId);
+    if(!s) return;
+    const name = gf(s,ST.name)||'Untitled';
+    if(!confirm(`Create a recurring task for "${name}"? This will link to Tasks & Projects.`)) return;
+    localStorage.setItem('sys_task_'+stepId, '1');
+    toast(`"${name}" linked to Tasks & Projects as a recurring task`);
+    render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Boot
 // ═══════════════════════════════════════════════════════════════════════
 async function start(){
@@ -1691,10 +1764,12 @@ async function start(){
     document.getElementById('authBar').style.display='none';
     try {
         await loadData();
+        if(!allWorkflows.length) loadDemoData();
         document.getElementById('topbar').style.display='flex';
         document.getElementById('viewTabs').style.display='flex';
         document.getElementById('main').style.display='block';
         document.getElementById('loader').style.display='none';
+        populateBizFilter();
         render();
     } catch(e){
         if(e.message==='auth') return;
@@ -1704,8 +1779,14 @@ async function start(){
 
 if(bootAuth()) start();
 else {
-    document.getElementById('authBar').style.display='flex';
+    loadDemoData();
+    document.getElementById('authBar').style.display='none';
+    document.getElementById('topbar').style.display='flex';
+    document.getElementById('viewTabs').style.display='flex';
+    document.getElementById('main').style.display='block';
     document.getElementById('loader').style.display='none';
+    populateBizFilter();
+    render();
 }
 </script>
 </body>
