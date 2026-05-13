@@ -107,9 +107,27 @@ If the page loaded without errors before the change and has errors now, that is 
 
 ## Step 4: Screenshot evidence
 
-If the fix is visual (UI change, layout fix, badge count, styling), take a `preview_screenshot` showing the result. This is the proof.
+Every fix must include at least one saved screenshot as proof. Kevin should be able to see the change without opening the browser himself.
 
-If the fix is non-visual (logic change, data fix, API call), the snapshot/console/network evidence from Step 3 is sufficient.
+### 4a. Capture the fix
+
+For each fix verified in Step 3, take a screenshot showing the result:
+
+1. Navigate to the area where the fix is visible
+2. If the fix is small (a badge, a label, a button), use `zoom` on the relevant region first to get a clear close-up
+3. Take a screenshot with `save_to_disk: true` so it is saved and attached to the conversation
+4. If the fix spans multiple views (e.g. a badge that appears on Kanban, Task List, and drill-downs), capture one screenshot per view where the change is visible
+
+### 4b. What to capture
+
+- **Visual fixes** (UI change, layout fix, badge count, styling): Screenshot showing the element in its new state. Zoom in if the change is small.
+- **Interaction fixes** (button behaviour, drawer open/close, toast messages): Screenshot showing the result after the interaction (e.g. the toast visible, the drawer closed, the modal gone).
+- **Data fixes** (counts, filters, calculations): Screenshot showing the correct value with enough context to confirm it is right (e.g. badge shows 3, and the table below has 3 rows).
+- **Non-visual fixes** (logic change, API call): If there is genuinely nothing to see in the UI, the snapshot/console/network evidence from Step 3 is sufficient. But if the fix affects what the user sees in any way, a screenshot is required.
+
+### 4c. When a fix cannot be shown live
+
+If the fix cannot be demonstrated because the data conditions are not present (e.g. 0 unreconciled transactions, no error state to trigger), state this explicitly in the report. Confirm the code change is deployed via curl or source inspection, and explain what the user will see when the conditions next occur.
 
 ---
 
@@ -125,6 +143,7 @@ Output the report in this exact format:
 
 ### Fix verification
 - [PASS/FAIL] [what was tested] — [evidence]
+  [saved screenshot attached if visual]
 
 ### Regression check
 - [PASS/FAIL] [related feature checked] — [evidence]
@@ -133,6 +152,9 @@ Output the report in this exact format:
 ### Console
 - [CLEAN / list of errors found]
 
+### Screenshots
+[Attach all saved screenshots here. For each one, add a one-line caption describing what it shows.]
+
 ### Result: PASS / FAIL
 [If FAIL: what is still broken and where to look]
 ```
@@ -140,6 +162,8 @@ Output the report in this exact format:
 Rules for the report:
 - Every PASS or FAIL must have evidence (a specific value seen, a screenshot, a console output, or a DOM element reference)
 - "It looks correct" is not evidence. "Badge shows 3, matching 3 unresolved records in the table below" is evidence.
+- Every visual fix must have at least one saved screenshot attached. If the fix spans multiple views, include one screenshot per view.
+- If a fix cannot be shown live due to data conditions, state why and confirm the code is deployed.
 - If FAIL, state exactly what is wrong and which file/function to investigate. Do not attempt to fix it.
 - Keep the report short. No scoring, no readiness percentages, no recommendations beyond the failure description.
 
