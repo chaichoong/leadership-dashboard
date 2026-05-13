@@ -627,28 +627,38 @@ function renderMethod(){
 }
 
 // ── Departmental ──
+const DEPT_COLOURS = {
+    'Marketing': 'var(--tone-blue)',
+    'Sales': 'var(--tone-olive)',
+    'Operations': 'var(--tone-sage)',
+    'Finance': 'var(--tone-gold)',
+    'Admin / HR': 'var(--tone-plum)',
+};
+
 function renderDept(){
     const pane = document.getElementById('pane-dept');
     const wfs = filteredWorkflows();
-    let html = '';
+    let html = '<div class="stage-grid">';
     DEPARTMENTS.forEach(dept=>{
         const deptWfs = wfs.filter(w=>selName(gf(w,WF.department))===dept);
-        html += `<div class="dept-group">
-            <div class="dept-group-header">${esc(dept)} <span class="dept-group-count">(${deptWfs.length})</span>
-                <button class="btn btn-sm" style="margin-left:auto" onclick="openAddWorkflow('${esc(dept)}')">+ Add</button>
-            </div>`;
-        if(deptWfs.length){
-            html += '<div class="wf-list">' + deptWfs.map(w=>renderWorkflowCard(w)).join('') + '</div>';
-        } else {
-            html += '<div class="empty-state"><p>No workflows yet.</p></div>';
-        }
-        html += '</div>';
+        const total = deptWfs.length;
+        const complete = deptWfs.filter(w=>selName(gf(w,WF.status))==='Complete').length;
+        const pct = total ? Math.round(complete/total*100) : 0;
+        const colour = DEPT_COLOURS[dept] || 'var(--accent)';
+        const initial = dept.charAt(0);
+        html += `<div class="stage-card" onclick="drillInto('dept','${esc(dept)}')">
+            <div class="stage-card-header">
+                <span class="stage-card-letter" style="background:${colour}">${initial}</span>
+                <span class="stage-card-title">${esc(dept)}</span>
+                <span class="stage-card-count">${total} workflow${total!==1?'s':''}</span>
+            </div>
+            <div class="stage-card-progress">
+                <div class="progress-bar"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+                <span class="stage-card-progress-label">${pct}%</span>
+            </div>
+        </div>`;
     });
-    const ungrouped = wfs.filter(w=>!gf(w,WF.department) && !gf(w,WF.fulfillStage) && !linkIds(gf(w,WF.mainMethodStage)).length);
-    if(ungrouped.length){
-        html += `<div class="dept-group"><div class="dept-group-header">Uncategorised <span class="dept-group-count">(${ungrouped.length})</span></div>
-            <div class="wf-list">${ungrouped.map(w=>renderWorkflowCard(w)).join('')}</div></div>`;
-    }
+    html += '</div>';
     pane.innerHTML = html;
 }
 
@@ -677,10 +687,13 @@ function openDrawer(key, view){
         const s = FULFILL_STAGES.find(s=>s.key===key);
         stageLabel = s ? s.label : key;
         stageWfs = wfs.filter(w=>selName(gf(w,WF.fulfillStage))===key);
-    } else {
+    } else if(view==='method'){
         const m = allMethods.find(m=>m.id===key);
         stageLabel = m ? (gf(m,MM.name)||'Unnamed') : key;
         stageWfs = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).includes(key));
+    } else {
+        stageLabel = key;
+        stageWfs = wfs.filter(w=>selName(gf(w,WF.department))===key);
     }
     stageWfs.sort((a,b)=>(gf(a,WF.sortOrder)||0)-(gf(b,WF.sortOrder)||0));
 
@@ -723,9 +736,12 @@ function buildUnassignedPanel(allWfs, stageWfs, key, view){
     if(view==='fulfill'){
         currentLabel = 'this FULFILL stage';
         unassigned = allWfs.filter(w => !stageIds.has(w.id) && selName(gf(w,WF.fulfillStage))!==key);
-    } else {
+    } else if(view==='method'){
         currentLabel = 'this Main Method stage';
         unassigned = allWfs.filter(w => !stageIds.has(w.id) && !linkIds(gf(w,WF.mainMethodStage)).includes(key));
+    } else {
+        currentLabel = 'this department';
+        unassigned = allWfs.filter(w => !stageIds.has(w.id) && selName(gf(w,WF.department))!==key);
     }
 
     const panel = document.createElement('div');
@@ -768,7 +784,8 @@ function buildUnassignedPanel(allWfs, stageWfs, key, view){
             try {
                 const fields = {};
                 if(view==='fulfill') fields[WF.fulfillStage] = key;
-                else fields[WF.mainMethodStage] = [key];
+                else if(view==='method') fields[WF.mainMethodStage] = [key];
+                else fields[WF.department] = key;
                 const updated = await atUpdate(TBL.workflows, w.id, fields);
                 const idx = allWorkflows.findIndex(x=>x.id===w.id);
                 if(idx>=0) allWorkflows[idx] = updated;
