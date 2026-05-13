@@ -2871,9 +2871,8 @@ async function loadAllCommentCounts(){
   updateAllCommentBadges();
 }
 function commentBadgeHtml(taskId){
-  const n=_commentCounts[taskId];
-  if(!n)return '';
-  return `<span class="comment-count-badge" data-comment-badge="${taskId}" title="${n} comment${n!==1?'s':''}">💬 ${n}</span>`;
+  const n=_commentCounts[taskId]||0;
+  return `<span class="comment-count-badge" data-comment-badge="${taskId}" title="${n?n+' comment'+(n!==1?'s':''):''}" style="${n?'':'display:none'}">${n?'💬 '+n:''}</span>`;
 }
 function updateAllCommentBadges(){
   document.querySelectorAll('[data-comment-badge]').forEach(el=>{
