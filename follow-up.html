@@ -2748,7 +2748,34 @@ Respond with ONLY the JSON object, no markdown.`;
                 throw new Error(errData.error?.message || 'HTTP ' + resp.status);
             }
 
+            const created = await resp.json().catch(() => ({}));
+            const taskId = created.records?.[0]?.id || '';
             addAuditEntry('airtable_create', `Created Airtable task: "${content.title}" for "${truncate(email.subject, 40)}"`);
+            // Slack DM the assignee so they know a new inbound task landed.
+            const ASSIGNEE_EMAIL_MAP = {
+                [AIRTABLE_ASSIGNEE_DEFAULT]: 'micaa.work@gmail.com',
+                [AIRTABLE_ASSIGNEE_KEVIN]: 'kevin@runpreneur.org.uk',
+                'usrKkopUJSGsBhWMD': 'kevin@runpreneur.org.uk',
+                'usrP7K5pmPSdVVgTN': 'micaa.work@gmail.com',
+            };
+            const assigneeId = opts.assigneeId || getAirtableAssignee();
+            const assigneeEmail = ASSIGNEE_EMAIL_MAP[assigneeId] || '';
+            if (assigneeEmail && content.title) {
+                try {
+                    fetch('https://slack-notify.kevinbrittain.workers.dev/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            recipientEmail: assigneeEmail,
+                            taskName: content.title,
+                            taskId,
+                            actorName: 'Inbound Comms',
+                            action: 'assigned',
+                        }),
+                        keepalive: true,
+                    }).catch(e => console.warn('[inbound notify] failed (non-blocking)', e));
+                } catch (e) { console.warn('[inbound notify] threw', e); }
+            }
             return true;
         } catch (err) {
             console.error('Airtable task creation failed:', err);
@@ -3001,11 +3028,24 @@ Body: ${bodyText}`;
                     [AIRTABLE_FIELDS.dueDate]: today
                 }
             };
-            await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
+            const fbResp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ records: [record] })
             });
+            const fbData = await fbResp.json().catch(() => ({}));
+            const fbTaskId = fbData.records?.[0]?.id || '';
+            // Slack DM the assignee
+            const fbAssigneeId = getAirtableAssignee();
+            const fbEmail = fbAssigneeId === AIRTABLE_ASSIGNEE_KEVIN ? 'kevin@runpreneur.org.uk' : 'micaa.work@gmail.com';
+            try {
+                fetch('https://slack-notify.kevinbrittain.workers.dev/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ recipientEmail: fbEmail, taskName: record.fields[AIRTABLE_FIELDS.taskName], taskId: fbTaskId, actorName: 'Inbound Comms', action: 'assigned' }),
+                    keepalive: true,
+                }).catch(e => console.warn('[inbound notify] failed', e));
+            } catch (e) {}
             // Star the Gmail thread so the sweep treats it as "already
             // processed" and never re-creates this task.
             await starGmailMessages(email);
