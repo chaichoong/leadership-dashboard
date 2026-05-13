@@ -2892,12 +2892,11 @@ async function loadAllCommentCounts(){
   async function next(){
     while(i<active.length){
       const t=active[i++];
-      if(_commentCounts[t.id]!==undefined)continue;
       try{
         const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${t.id}/comments?pageSize=100`,{headers:{Authorization:`Bearer ${PAT}`}});
-        if(r.ok){const d=await r.json();_commentCounts[t.id]=(d.comments||[]).length;}
-        else _commentCounts[t.id]=0;
-      }catch(e){_commentCounts[t.id]=0;}
+        if(r.ok){const d=await r.json();const n=(d.comments||[]).length;if(_commentCounts[t.id]!==n){_commentCounts[t.id]=n;updateAllCommentBadges();}}
+        else if(_commentCounts[t.id]===undefined)_commentCounts[t.id]=0;
+      }catch(e){if(_commentCounts[t.id]===undefined)_commentCounts[t.id]=0;}
     }
   }
   await Promise.all(Array.from({length:CONCURRENCY},()=>next()));
