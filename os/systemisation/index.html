@@ -152,6 +152,22 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .wf-grid-detail td{background:var(--bg-surface-2);border-bottom:2px solid var(--border-default)}
 .wf-grid-detail:hover{background:var(--bg-surface-2)}
 
+.unassigned-panel{border-top:2px solid var(--border-default);margin-top:8px;padding-top:0}
+.unassigned-toggle{display:flex;align-items:center;gap:8px;padding:12px 0;cursor:pointer;color:var(--text-secondary);font-size:var(--fs-sm);font-weight:var(--fw-semibold);user-select:none}
+.unassigned-toggle:hover{color:var(--text-primary)}
+.unassigned-chevron{font-size:10px;transition:transform .15s}
+.unassigned-panel.open .unassigned-chevron{transform:rotate(90deg)}
+.unassigned-count{background:var(--bg-subtle);color:var(--text-muted);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
+.unassigned-list{display:none;margin-bottom:8px}
+.unassigned-panel.open .unassigned-list{display:block}
+.unassigned-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)}
+.unassigned-item:hover{background:var(--bg-surface-2)}
+.unassigned-item-name{flex:1;font-weight:var(--fw-semibold);color:var(--text-primary)}
+.unassigned-item-meta{font-size:var(--fs-xs);color:var(--text-muted)}
+.unassigned-add{background:var(--accent);color:#fff;border:none;width:24px;height:24px;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.unassigned-add:hover{background:var(--accent-hover)}
+.unassigned-add:disabled{opacity:.4;cursor:not-allowed}
+
 .biz-group{margin-bottom:28px}
 .biz-group-header{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
 .biz-group-name{font-size:var(--fs-base);font-weight:var(--fw-bold);color:var(--text-primary)}
@@ -694,8 +710,77 @@ function openDrawer(key, view){
     table.appendChild(tbody);
     body.appendChild(table);
 
+    body.appendChild(buildUnassignedPanel(wfs, stageWfs, key, view));
+
     document.getElementById('drawerOverlay').classList.add('open');
     document.getElementById('drawer').classList.add('open');
+}
+
+function buildUnassignedPanel(allWfs, stageWfs, key, view){
+    const stageIds = new Set(stageWfs.map(w=>w.id));
+    let unassigned;
+    let currentLabel;
+    if(view==='fulfill'){
+        currentLabel = 'this FULFILL stage';
+        unassigned = allWfs.filter(w => !stageIds.has(w.id) && selName(gf(w,WF.fulfillStage))!==key);
+    } else {
+        currentLabel = 'this Main Method stage';
+        unassigned = allWfs.filter(w => !stageIds.has(w.id) && !linkIds(gf(w,WF.mainMethodStage)).includes(key));
+    }
+
+    const panel = document.createElement('div');
+    panel.className = 'unassigned-panel';
+    if(!unassigned.length){
+        panel.innerHTML = `<div class="unassigned-toggle" style="cursor:default;opacity:.5">
+            <span class="unassigned-chevron">&#x25B6;</span>
+            Available workflows <span class="unassigned-count">0</span>
+        </div>`;
+        return panel;
+    }
+
+    const toggle = document.createElement('div');
+    toggle.className = 'unassigned-toggle';
+    toggle.innerHTML = `<span class="unassigned-chevron">&#x25B6;</span> Available workflows <span class="unassigned-count">${unassigned.length}</span>`;
+    toggle.onclick = ()=> panel.classList.toggle('open');
+    panel.appendChild(toggle);
+
+    const list = document.createElement('div');
+    list.className = 'unassigned-list';
+    unassigned.forEach(w=>{
+        const name = gf(w,WF.name)||'Untitled';
+        const dept = selName(gf(w,WF.department))||'';
+        const fulfill = selName(gf(w,WF.fulfillStage))||'';
+        const methodIds = linkIds(gf(w,WF.mainMethodStage));
+        const methodName = methodIds.length ? (gf(allMethods.find(m=>m.id===methodIds[0]),MM.name)||'') : '';
+        let meta = [];
+        if(dept) meta.push(dept);
+        if(view==='fulfill' && fulfill) meta.push(fulfill);
+        if(view==='method' && methodName) meta.push(methodName);
+
+        const item = document.createElement('div');
+        item.className = 'unassigned-item';
+        item.innerHTML = `
+            <span class="unassigned-item-name">${esc(name)}</span>
+            ${meta.length ? `<span class="unassigned-item-meta">${esc(meta.join(' · '))}</span>` : ''}
+            <button class="unassigned-add" title="Add to ${esc(currentLabel)}">+</button>`;
+        item.querySelector('.unassigned-add').onclick = async function(){
+            this.disabled = true; this.textContent = '...';
+            try {
+                const fields = {};
+                if(view==='fulfill') fields[WF.fulfillStage] = key;
+                else fields[WF.mainMethodStage] = [key];
+                const updated = await atUpdate(TBL.workflows, w.id, fields);
+                const idx = allWorkflows.findIndex(x=>x.id===w.id);
+                if(idx>=0) allWorkflows[idx] = updated;
+                openDrawer(key, view);
+                updateTabCounts();
+                toast(`"${name}" added`);
+            } catch(e){ toast('Error: '+e.message); this.disabled=false; this.textContent='+'; }
+        };
+        list.appendChild(item);
+    });
+    panel.appendChild(list);
+    return panel;
 }
 
 function buildGridRow(w, stageKey, view){
