@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Systemisation — Business Process Framework</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+.auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:14px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:var(--fs-base);width:340px}
+.auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold)}
+.auth-bar button:hover{background:var(--accent-hover)}
+
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
+.topbar h1{font-size:20px;font-weight:var(--fw-bold);display:flex;align-items:center;gap:8px}
+.topbar .subtitle{font-size:var(--fs-sm);color:var(--text-secondary)}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover);color:#fff}
+.btn-sm{padding:4px 10px;font-size:var(--fs-xs)}
+.btn-danger{border-color:var(--danger);color:var(--danger)}
+.btn-danger:hover{background:var(--danger);color:#fff}
+.btn-ai{border-color:var(--info);color:var(--info);background:var(--info-bg)}
+.btn-ai:hover{background:var(--info);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
+
+.view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-default);overflow-x:auto;background:var(--bg-app);padding:8px 24px 0}
+.view-tab{padding:10px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.view-tab:hover{color:var(--text-primary)}
+.view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.view-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
+.view-tab.active .count{background:var(--accent-soft);color:var(--accent)}
+
+.main{padding:20px 24px;max-width:1400px;margin:0 auto}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 10px;border-radius:6px;font-size:var(--fs-base);cursor:pointer}
+
+.progress-bar{height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden;flex:1;min-width:80px}
+.progress-bar-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+
+.stage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-bottom:24px}
+.stage-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:20px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.stage-card:hover{border-color:var(--accent);box-shadow:var(--shadow-sm)}
+.stage-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.stage-card-letter{width:36px;height:36px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-weight:var(--fw-bold);font-size:var(--fs-lg);color:#fff}
+.stage-card-title{font-weight:var(--fw-semibold);font-size:var(--fs-base);flex:1;margin-left:12px}
+.stage-card-count{font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap}
+.stage-card-progress{margin-top:12px;display:flex;align-items:center;gap:8px}
+.stage-card-progress-label{font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap}
+
+.breadcrumb{display:flex;align-items:center;gap:6px;margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)}
+.breadcrumb a{color:var(--accent);cursor:pointer}
+.breadcrumb span{color:var(--text-muted)}
+
+.wf-list{display:flex;flex-direction:column;gap:12px}
+.wf-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);overflow:hidden}
+.wf-card-header{padding:14px 16px;display:flex;align-items:center;gap:12px;cursor:pointer}
+.wf-card-header:hover{background:var(--bg-surface-2)}
+.wf-chevron{font-size:10px;color:var(--text-muted);transition:transform .15s;flex-shrink:0}
+.wf-card.expanded .wf-chevron{transform:rotate(90deg)}
+.wf-card-title{font-weight:var(--fw-semibold);flex:1}
+.wf-card-meta{display:flex;gap:8px;align-items:center}
+.wf-status{font-size:var(--fs-xs);padding:2px 8px;border-radius:10px;font-weight:var(--fw-semibold)}
+.wf-status-not-started{background:var(--bg-subtle);color:var(--text-muted)}
+.wf-status-in-progress{background:var(--warning-bg);color:var(--warning)}
+.wf-status-complete{background:var(--success-bg);color:var(--success)}
+.wf-step-count{font-size:var(--fs-xs);color:var(--text-muted)}
+.wf-card-body{display:none;border-top:1px solid var(--border-subtle);padding:16px}
+.wf-card.expanded .wf-card-body{display:block}
+.wf-desc{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px}
+.wf-actions{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+
+.step-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.step-table th{text-align:left;padding:8px 10px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-weight:var(--fw-bold)}
+.step-table td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.step-table tr:hover{background:var(--bg-surface-2)}
+.step-table .step-num{width:36px;text-align:center;color:var(--text-muted);font-weight:var(--fw-bold)}
+.step-table .step-name{font-weight:var(--fw-semibold)}
+.step-table .step-desc{color:var(--text-secondary);font-size:var(--fs-xs);margin-top:2px}
+.step-type-badge{font-size:var(--fs-xs);padding:1px 6px;border-radius:8px;font-weight:var(--fw-semibold)}
+.step-type-ai{background:var(--info-bg);color:var(--info)}
+.step-type-staff{background:var(--success-bg);color:var(--success)}
+.step-type-both{background:var(--info-bg);color:var(--info)}
+.sop-badge{font-size:var(--fs-xs);padding:1px 6px;border-radius:8px;font-weight:var(--fw-semibold)}
+.sop-not-created{background:var(--bg-subtle);color:var(--text-muted)}
+.sop-draft{background:var(--warning-bg);color:var(--warning)}
+.sop-complete{background:var(--success-bg);color:var(--success)}
+.step-actions{display:flex;gap:4px}
+
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200}
+.modal{background:var(--bg-surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:90%;max-width:560px;max-height:90vh;overflow-y:auto;padding:24px}
+.modal-title{font-size:var(--fs-lg);font-weight:var(--fw-bold);margin-bottom:16px}
+.field-row{display:flex;flex-direction:column;gap:4px;margin-bottom:14px}
+.field-row label{font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary)}
+.field-row input,.field-row select,.field-row textarea{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:8px 12px;border-radius:6px;font-size:var(--fs-base);font-family:inherit}
+.field-row textarea{min-height:80px;resize:vertical}
+.field-row input:focus,.field-row select:focus,.field-row textarea:focus{outline:none;border-color:var(--accent)}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+
+.sop-viewer{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:16px;margin-top:12px;font-size:var(--fs-sm);line-height:1.7;white-space:pre-wrap;max-height:400px;overflow-y:auto}
+
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
+.empty-state p{margin-bottom:12px}
+
+.loading{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:var(--fs-sm)}
+
+.dept-group{margin-bottom:24px}
+.dept-group-header{font-size:var(--fs-base);font-weight:var(--fw-bold);color:var(--text-primary);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border-default);display:flex;align-items:center;gap:8px}
+.dept-group-count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold)}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-sidebar);color:#fff;padding:10px 20px;border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-semibold);z-index:300;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+
+@media print{
+.auth-bar,.topbar-right,.view-tabs,.wf-actions,.step-actions,.btn-ai,.btn-danger,.controls,.toast,.modal-overlay{display:none!important}
+.topbar{position:static;box-shadow:none}
+.wf-card-body{display:block!important}
+.main{padding:10px}
+}
+</style>
+</head>
+<body>
+
+<div id="authBar" class="auth-bar" style="display:none">
+    <span>Airtable API Key:</span>
+    <input type="password" id="patInput" placeholder="pat..." onkeydown="if(event.key==='Enter')saveAuth()">
+    <button onclick="saveAuth()">Connect</button>
+    <span id="authError" style="display:none;color:var(--danger);font-size:var(--fs-sm)">Invalid key</span>
+</div>
+
+<div id="topbar" class="topbar" style="display:none">
+    <div>
+        <h1>Systemisation</h1>
+        <div class="subtitle">Map, document and automate every business process</div>
+    </div>
+    <div class="topbar-right">
+        <select id="bizFilter" class="filter-select" onchange="applyBizFilter()">
+            <option value="">All Businesses</option>
+        </select>
+        <button class="btn btn-primary" onclick="openAddWorkflow()">+ Add Workflow</button>
+    </div>
+</div>
+
+<div id="viewTabs" class="view-tabs" style="display:none">
+    <button class="view-tab active" data-tab="fulfill" onclick="switchView('fulfill')">FULFILL Journey <span class="count" id="fulfillCount">0</span></button>
+    <button class="view-tab" data-tab="method" onclick="switchView('method')">Main Method <span class="count" id="methodCount">0</span></button>
+    <button class="view-tab" data-tab="dept" onclick="switchView('dept')">Departmental <span class="count" id="deptCount">0</span></button>
+</div>
+
+<div id="main" class="main" style="display:none">
+    <div class="tab-pane active" id="pane-fulfill"></div>
+    <div class="tab-pane" id="pane-method"></div>
+    <div class="tab-pane" id="pane-dept"></div>
+</div>
+
+<div class="loading" id="loader">Loading...</div>
+<div class="toast" id="toast"></div>
+
+<script src="../../js/prompts/boardroom-mentor.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════════════
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const TBL = {
+    workflows:    'tblLPoRHFBl0vqR24',
+    steps:        'tblTadoyWXFHbmYxm',
+    mainMethods:  'tbl065D58MBEJhjlp',
+    businesses:   'tblpqkvWJJo8Uu25q',
+};
+const WF = {
+    name:            'fldsaS0jeoSRuJN28',
+    description:     'fld1cGXzKp8ab5nBr',
+    fulfillStage:    'fldoN7pdUv4CIcKf2',
+    department:      'fldTYbvsvqD1CQmxd',
+    status:          'fldBHe23lba7DkLci',
+    sortOrder:       'fldOAAESotc8rNKyu',
+    mainMethodStage: 'fldQZEvjCRYUaQdME',
+    business:        'fldQcQSnlSipSBhb4',
+    steps:           'fldjmfqk77Wr1aOs5',
+};
+const ST = {
+    name:        'fldqKG4mVY16PTNmO',
+    description: 'fldlSSG0bV9VyhKEN',
+    workflow:    'fldmGLPupz0fZFfch',
+    stepType:    'fldPHutLN9Q2c2SzU',
+    sopContent:  'fldyNojZsSjfF6lLI',
+    sopStatus:   'fldZo6pPcn1lNvOay',
+    sortOrder:   'fldOWS3MfMSVJyo0b',
+    skillId:     'fldOisvuXul0r1XUD',
+};
+const MM = { name: 'fldRphzaAUzBqconG', description: 'fldWDxL9EyS1iaGlf' };
+const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
+const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
+
+const FULFILL_STAGES = [
+    { key: 'F - Find & Grab Attention',    letter: 'F', label: 'Find & Grab Attention',    colour: 'var(--tone-blue)' },
+    { key: 'U - Understand & Enquire',     letter: 'U', label: 'Understand & Enquire',     colour: 'var(--tone-sage)' },
+    { key: 'L - Lead to Sales Process',    letter: 'L', label: 'Lead to Sales Process',    colour: 'var(--tone-olive)' },
+    { key: 'F - Finance Received',         letter: 'F', label: 'Finance Received',         colour: 'var(--tone-gold)' },
+    { key: 'I - Initiate Onboarding',      letter: 'I', label: 'Initiate Onboarding',      colour: 'var(--tone-plum)' },
+    { key: 'L - Launch Delivery',          letter: 'L', label: 'Launch Delivery',          colour: 'var(--tone-blue)' },
+    { key: 'L - Loyalty Programme',        letter: 'L', label: 'Loyalty Programme',        colour: 'var(--tone-sage)' },
+];
+
+const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
+
+let PAT = '';
+let allWorkflows = [];
+let allSteps = [];
+let allMethods = [];
+let allBusinesses = [];
+let currentView = 'fulfill';
+let drillStage = null;
+let bizFilterId = '';
+
+// ═══════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════
+function esc(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function gf(rec,fid){ return rec?.fields?.[fid] ?? null; }
+function selName(v){ return typeof v === 'object' && v !== null ? (v.name || '') : String(v||''); }
+function linkIds(v){ if(!v) return []; return (Array.isArray(v)?v:[v]).map(x=> typeof x==='string'?x:(x?.id||'')).filter(Boolean); }
+function toast(msg,ms=2500){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),ms); }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Auth
+// ═══════════════════════════════════════════════════════════════════════
+function bootAuth(){
+    try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){}
+    const stored=localStorage.getItem('_dlr_pat');
+    if(stored){ PAT=stored; return true; }
+    return false;
+}
+function saveAuth(){
+    const v=document.getElementById('patInput').value.trim();
+    if(!v) return;
+    PAT=v;
+    localStorage.setItem('_dlr_pat',v);
+    document.getElementById('authError').style.display='none';
+    start();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Airtable API
+// ═══════════════════════════════════════════════════════════════════════
+async function atFetch(tableId, fields){
+    let all=[], offset='';
+    const params = new URLSearchParams({ returnFieldsByFieldId:'true', pageSize:'100' });
+    if(fields) fields.forEach(f=>params.append('fields[]',f));
+    do {
+        if(offset) params.set('offset',offset);
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}?${params}`,{
+            headers:{'Authorization':`Bearer ${PAT}`}
+        });
+        if(res.status===401||res.status===403){ showAuthBar(); throw new Error('auth'); }
+        if(res.status===429){ await new Promise(r=>setTimeout(r,1100)); continue; }
+        const data = await res.json();
+        all = all.concat(data.records||[]);
+        offset = data.offset||'';
+    } while(offset);
+    return all;
+}
+
+async function atCreate(tableId, fields){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`,{
+        method:'POST',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body: JSON.stringify({ records:[{fields}], typecast:true, returnFieldsByFieldId:true })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    return data.records[0];
+}
+
+async function atUpdate(tableId, recId, fields){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}`,{
+        method:'PATCH',
+        headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+        body: JSON.stringify({ fields, typecast:true, returnFieldsByFieldId:true })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    return (await res.json());
+}
+
+async function atDelete(tableId, recId){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${recId}`,{
+        method:'DELETE',
+        headers:{'Authorization':`Bearer ${PAT}`}
+    });
+    if(!res.ok) throw new Error(await res.text());
+}
+
+function showAuthBar(){
+    PAT=''; localStorage.removeItem('_dlr_pat');
+    document.getElementById('authBar').style.display='flex';
+    document.getElementById('topbar').style.display='none';
+    document.getElementById('viewTabs').style.display='none';
+    document.getElementById('main').style.display='none';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Data Loading
+// ═══════════════════════════════════════════════════════════════════════
+async function loadData(){
+    const [wf, st, mm, bz] = await Promise.all([
+        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business]),
+        atFetch(TBL.steps, [ST.name,ST.description,ST.workflow,ST.stepType,ST.sopContent,ST.sopStatus,ST.sortOrder,ST.skillId]),
+        atFetch(TBL.mainMethods, [MM.name,MM.description]),
+        atFetch(TBL.businesses, [BIZ_NAME,BIZ_ACTIVE]),
+    ]);
+    allWorkflows = wf;
+    allSteps = st;
+    allMethods = mm;
+    allBusinesses = bz.filter(b=>{ const a=gf(b,BIZ_ACTIVE); return a===true||a===1; });
+    populateBizFilter();
+}
+
+function populateBizFilter(){
+    const sel = document.getElementById('bizFilter');
+    sel.innerHTML = '<option value="">All Businesses</option>';
+    allBusinesses.forEach(b=>{
+        const n = gf(b,BIZ_NAME)||'Unnamed';
+        sel.innerHTML += `<option value="${b.id}">${esc(n)}</option>`;
+    });
+}
+
+function applyBizFilter(){
+    bizFilterId = document.getElementById('bizFilter').value;
+    render();
+}
+
+function filteredWorkflows(){
+    if(!bizFilterId) return allWorkflows;
+    return allWorkflows.filter(w=>{
+        const links = linkIds(gf(w,WF.business));
+        return links.length===0 || links.includes(bizFilterId);
+    });
+}
+
+function stepsForWorkflow(wfId){
+    return allSteps
+        .filter(s=> linkIds(gf(s,ST.workflow)).includes(wfId))
+        .sort((a,b)=>(gf(a,ST.sortOrder)||0)-(gf(b,ST.sortOrder)||0));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// View Switching
+// ═══════════════════════════════════════════════════════════════════════
+function switchView(view){
+    currentView = view;
+    drillStage = null;
+    document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===view));
+    document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+view));
+    render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Rendering
+// ═══════════════════════════════════════════════════════════════════════
+function render(){
+    updateCounts();
+    if(currentView==='fulfill') renderFulfill();
+    else if(currentView==='method') renderMethod();
+    else if(currentView==='dept') renderDept();
+}
+
+function updateCounts(){
+    const wfs = filteredWorkflows();
+    let fc=0,mc=0,dc=0;
+    wfs.forEach(w=>{
+        if(gf(w,WF.fulfillStage)) fc++;
+        if(linkIds(gf(w,WF.mainMethodStage)).length) mc++;
+        if(gf(w,WF.department)) dc++;
+    });
+    document.getElementById('fulfillCount').textContent=fc;
+    document.getElementById('methodCount').textContent=mc;
+    document.getElementById('deptCount').textContent=dc;
+}
+
+// ── FULFILL ──
+function renderFulfill(){
+    const pane = document.getElementById('pane-fulfill');
+    if(drillStage){
+        renderStageDrill(pane, drillStage, 'fulfill');
+        return;
+    }
+    const wfs = filteredWorkflows();
+    let html = '<div class="stage-grid">';
+    FULFILL_STAGES.forEach(s=>{
+        const stageWfs = wfs.filter(w=>selName(gf(w,WF.fulfillStage))===s.key);
+        const complete = stageWfs.filter(w=>selName(gf(w,WF.status))==='Complete').length;
+        const pct = stageWfs.length ? Math.round(complete/stageWfs.length*100) : 0;
+        html += `<div class="stage-card" onclick="drillInto('fulfill','${esc(s.key)}')">
+            <div class="stage-card-header">
+                <div class="stage-card-letter" style="background:${s.colour}">${s.letter}</div>
+                <div class="stage-card-title">${esc(s.label)}</div>
+                <div class="stage-card-count">${stageWfs.length} workflow${stageWfs.length!==1?'s':''}</div>
+            </div>
+            <div class="stage-card-progress">
+                <div class="progress-bar"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+                <div class="stage-card-progress-label">${pct}%</div>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+    pane.innerHTML = html;
+}
+
+// ── Main Method ──
+function renderMethod(){
+    const pane = document.getElementById('pane-method');
+    if(drillStage){
+        renderStageDrill(pane, drillStage, 'method');
+        return;
+    }
+    const wfs = filteredWorkflows();
+    if(!allMethods.length){
+        pane.innerHTML = '<div class="empty-state"><p>No Main Method stages found.</p><p>Add Main Method stages in Objective &amp; Strategy first.</p></div>';
+        return;
+    }
+    let html = '<div class="stage-grid">';
+    allMethods.forEach((m,i)=>{
+        const methodWfs = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).includes(m.id));
+        const complete = methodWfs.filter(w=>selName(gf(w,WF.status))==='Complete').length;
+        const pct = methodWfs.length ? Math.round(complete/methodWfs.length*100) : 0;
+        const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+        html += `<div class="stage-card" onclick="drillInto('method','${m.id}')">
+            <div class="stage-card-header">
+                <div class="stage-card-letter" style="background:${colours[i%5]}">${String(i+1).padStart(2,'0')}</div>
+                <div class="stage-card-title">${esc(gf(m,MM.name)||'Unnamed')}</div>
+                <div class="stage-card-count">${methodWfs.length} workflow${methodWfs.length!==1?'s':''}</div>
+            </div>
+            <div class="stage-card-progress">
+                <div class="progress-bar"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+                <div class="stage-card-progress-label">${pct}%</div>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+    pane.innerHTML = html;
+}
+
+// ── Departmental ──
+function renderDept(){
+    const pane = document.getElementById('pane-dept');
+    const wfs = filteredWorkflows();
+    let html = '';
+    DEPARTMENTS.forEach(dept=>{
+        const deptWfs = wfs.filter(w=>selName(gf(w,WF.department))===dept);
+        html += `<div class="dept-group">
+            <div class="dept-group-header">${esc(dept)} <span class="dept-group-count">(${deptWfs.length})</span>
+                <button class="btn btn-sm" style="margin-left:auto" onclick="openAddWorkflow('${esc(dept)}')">+ Add</button>
+            </div>`;
+        if(deptWfs.length){
+            html += '<div class="wf-list">' + deptWfs.map(w=>renderWorkflowCard(w)).join('') + '</div>';
+        } else {
+            html += '<div class="empty-state"><p>No workflows yet.</p></div>';
+        }
+        html += '</div>';
+    });
+    const ungrouped = wfs.filter(w=>!gf(w,WF.department) && !gf(w,WF.fulfillStage) && !linkIds(gf(w,WF.mainMethodStage)).length);
+    if(ungrouped.length){
+        html += `<div class="dept-group"><div class="dept-group-header">Uncategorised <span class="dept-group-count">(${ungrouped.length})</span></div>
+            <div class="wf-list">${ungrouped.map(w=>renderWorkflowCard(w)).join('')}</div></div>`;
+    }
+    pane.innerHTML = html;
+}
+
+// ── Drill into a stage ──
+function drillInto(view, key){
+    drillStage = key;
+    render();
+}
+
+function renderStageDrill(pane, key, view){
+    const wfs = filteredWorkflows();
+    let stageWfs, stageLabel, breadcrumbRoot;
+    if(view==='fulfill'){
+        const s = FULFILL_STAGES.find(s=>s.key===key);
+        stageLabel = s ? s.label : key;
+        breadcrumbRoot = 'FULFILL Journey';
+        stageWfs = wfs.filter(w=>selName(gf(w,WF.fulfillStage))===key);
+    } else {
+        const m = allMethods.find(m=>m.id===key);
+        stageLabel = m ? (gf(m,MM.name)||'Unnamed') : key;
+        breadcrumbRoot = 'Main Method';
+        stageWfs = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).includes(key));
+    }
+    stageWfs.sort((a,b)=>(gf(a,WF.sortOrder)||0)-(gf(b,WF.sortOrder)||0));
+
+    let html = `<div class="breadcrumb">
+        <a onclick="drillStage=null;render()">${esc(breadcrumbRoot)}</a>
+        <span>&#x25B8;</span>
+        <strong>${esc(stageLabel)}</strong>
+    </div>
+    <div class="controls">
+        <button class="btn btn-primary btn-sm" onclick="openAddWorkflow(null,'${esc(key)}','${view}')">+ Add Workflow</button>
+        <button class="btn btn-ai btn-sm" onclick="suggestWorkflows('${esc(key)}','${view}')">Suggest Workflows (AI)</button>
+    </div>`;
+
+    if(!stageWfs.length){
+        html += '<div class="empty-state"><p>No workflows in this stage yet.</p><p>Add one manually or use AI to suggest workflows.</p></div>';
+    } else {
+        html += '<div class="wf-list">' + stageWfs.map(w=>renderWorkflowCard(w)).join('') + '</div>';
+    }
+    pane.innerHTML = html;
+}
+
+// ── Single workflow card ──
+function renderWorkflowCard(w){
+    const name = gf(w,WF.name)||'Untitled';
+    const desc = gf(w,WF.description)||'';
+    const status = selName(gf(w,WF.status))||'Not Started';
+    const statusClass = status==='Complete'?'wf-status-complete':status==='In Progress'?'wf-status-in-progress':'wf-status-not-started';
+    const steps = stepsForWorkflow(w.id);
+    const sopDone = steps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
+
+    let stepsHtml = '';
+    if(steps.length){
+        stepsHtml = `<table class="step-table">
+            <thead><tr><th class="step-num">#</th><th>Step</th><th>Type</th><th>SOP</th><th style="width:140px">Actions</th></tr></thead>
+            <tbody>` + steps.map((s,i)=>{
+                const sName = gf(s,ST.name)||'Untitled';
+                const sDesc = gf(s,ST.description)||'';
+                const sType = selName(gf(s,ST.stepType))||'Staff Task';
+                const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
+                const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
+                const sopClass = sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created';
+                const hasSop = gf(s,ST.sopContent);
+                return `<tr>
+                    <td class="step-num">${i+1}</td>
+                    <td><div class="step-name">${esc(sName)}</div>${sDesc?`<div class="step-desc">${esc(sDesc)}</div>`:''}</td>
+                    <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
+                    <td><span class="sop-badge ${sopClass}">${esc(sopSt)}</span></td>
+                    <td class="step-actions">
+                        ${hasSop?`<button class="btn btn-sm" onclick="event.stopPropagation();viewSOP('${s.id}')">View SOP</button>`:''}
+                        <button class="btn btn-sm btn-ai" onclick="event.stopPropagation();generateSOP('${s.id}')">AI SOP</button>
+                        <button class="btn btn-sm" onclick="event.stopPropagation();editStep('${s.id}')">Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteStep('${s.id}')">Del</button>
+                    </td>
+                </tr>`;
+            }).join('') + '</tbody></table>';
+    } else {
+        stepsHtml = '<div class="empty-state" style="padding:16px"><p>No steps yet. Add steps to define this workflow.</p></div>';
+    }
+
+    return `<div class="wf-card" id="wf-${w.id}">
+        <div class="wf-card-header" onclick="toggleWf('${w.id}')" role="button" tabindex="0" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleWf('${w.id}')}">
+            <span class="wf-chevron">&#x25B6;</span>
+            <div class="wf-card-title">${esc(name)}</div>
+            <div class="wf-card-meta">
+                <span class="wf-step-count">${steps.length} step${steps.length!==1?'s':''} (${sopDone} SOPs)</span>
+                <span class="wf-status ${statusClass}">${esc(status)}</span>
+            </div>
+        </div>
+        <div class="wf-card-body">
+            ${desc?`<div class="wf-desc">${esc(desc)}</div>`:''}
+            <div class="wf-actions">
+                <button class="btn btn-sm btn-primary" onclick="openAddStep('${w.id}')">+ Add Step</button>
+                <button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>
+                <button class="btn btn-sm" onclick="editWorkflow('${w.id}')">Edit Workflow</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteWorkflow('${w.id}')">Delete</button>
+            </div>
+            <div id="sop-viewer-${w.id}" style="display:none"></div>
+            ${stepsHtml}
+        </div>
+    </div>`;
+}
+
+function toggleWf(id){
+    const el = document.getElementById('wf-'+id);
+    if(!el) return;
+    el.classList.toggle('expanded');
+    const header = el.querySelector('.wf-card-header');
+    if(header) header.setAttribute('aria-expanded', el.classList.contains('expanded'));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Modals
+// ═══════════════════════════════════════════════════════════════════════
+function closeModal(){ const m=document.getElementById('modalOverlay'); if(m) m.remove(); }
+
+function showModal(title, body, footer){
+    closeModal();
+    const div = document.createElement('div');
+    div.id = 'modalOverlay';
+    div.className = 'modal-overlay';
+    div.onclick = e=>{ if(e.target===div) closeModal(); };
+    div.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-title">${title}</div>${body}<div class="modal-footer">${footer}</div></div>`;
+    document.body.appendChild(div);
+    const firstInput = div.querySelector('input,select,textarea');
+    if(firstInput) firstInput.focus();
+}
+
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+// ── Add/Edit Workflow ──
+function openAddWorkflow(dept, stageKey, view){
+    const fulfillOpts = FULFILL_STAGES.map(s=>`<option value="${esc(s.key)}"${stageKey&&view==='fulfill'&&stageKey===s.key?' selected':''}>${esc(s.key)}</option>`).join('');
+    const methodOpts = allMethods.map(m=>`<option value="${m.id}"${stageKey&&view==='method'&&stageKey===m.id?' selected':''}>${esc(gf(m,MM.name)||'Unnamed')}</option>`).join('');
+    const deptOpts = DEPARTMENTS.map(d=>`<option value="${d}"${dept===d?' selected':''}>${d}</option>`).join('');
+    const bizOpts = allBusinesses.map(b=>`<option value="${b.id}">${esc(gf(b,BIZ_NAME)||'Unnamed')}</option>`).join('');
+
+    const body = `
+        <div class="field-row"><label>Workflow Name</label><input id="mWfName" placeholder="e.g. Lead Qualification Process"></div>
+        <div class="field-row"><label>Description</label><textarea id="mWfDesc" placeholder="What does this workflow achieve?"></textarea></div>
+        <div class="field-row"><label>FULFILL Stage</label><select id="mWfFulfill"><option value="">None</option>${fulfillOpts}</select></div>
+        <div class="field-row"><label>Main Method Stage</label><select id="mWfMethod"><option value="">None</option>${methodOpts}</select></div>
+        <div class="field-row"><label>Department</label><select id="mWfDept"><option value="">None</option>${deptOpts}</select></div>
+        <div class="field-row"><label>Business (leave empty for all)</label><select id="mWfBiz"><option value="">All Businesses</option>${bizOpts}</select></div>
+        <div class="field-row"><label>Status</label><select id="mWfStatus"><option>Not Started</option><option>In Progress</option><option>Complete</option></select></div>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveNewWorkflow()">Save</button>`;
+    showModal('Add Workflow', body, footer);
+}
+
+async function saveNewWorkflow(){
+    const name = document.getElementById('mWfName').value.trim();
+    if(!name){ toast('Name is required'); return; }
+    const saveBtn = document.querySelector('#modalOverlay .btn-primary');
+    if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving...'; }
+    const fields = { [WF.name]: name };
+    const desc = document.getElementById('mWfDesc').value.trim();
+    if(desc) fields[WF.description] = desc;
+    const fulfill = document.getElementById('mWfFulfill').value;
+    if(fulfill) fields[WF.fulfillStage] = fulfill;
+    const method = document.getElementById('mWfMethod').value;
+    if(method) fields[WF.mainMethodStage] = [method];
+    const dept = document.getElementById('mWfDept').value;
+    if(dept) fields[WF.department] = dept;
+    const biz = document.getElementById('mWfBiz').value;
+    if(biz) fields[WF.business] = [biz];
+    fields[WF.status] = document.getElementById('mWfStatus').value;
+
+    try {
+        const rec = await atCreate(TBL.workflows, fields);
+        allWorkflows.push(rec);
+        closeModal();
+        render();
+        toast('Workflow created');
+    } catch(e){ toast('Error: '+e.message); if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; } }
+}
+
+function editWorkflow(id){
+    const w = allWorkflows.find(w=>w.id===id);
+    if(!w) return;
+    const fulfillOpts = FULFILL_STAGES.map(s=>`<option value="${esc(s.key)}"${selName(gf(w,WF.fulfillStage))===s.key?' selected':''}>${esc(s.key)}</option>`).join('');
+    const methodLinks = linkIds(gf(w,WF.mainMethodStage));
+    const methodOpts = allMethods.map(m=>`<option value="${m.id}"${methodLinks.includes(m.id)?' selected':''}>${esc(gf(m,MM.name)||'Unnamed')}</option>`).join('');
+    const curDept = selName(gf(w,WF.department));
+    const deptOpts = DEPARTMENTS.map(d=>`<option value="${d}"${curDept===d?' selected':''}>${d}</option>`).join('');
+    const bizLinks = linkIds(gf(w,WF.business));
+    const bizOpts = allBusinesses.map(b=>`<option value="${b.id}"${bizLinks.includes(b.id)?' selected':''}>${esc(gf(b,BIZ_NAME)||'Unnamed')}</option>`).join('');
+    const curStatus = selName(gf(w,WF.status))||'Not Started';
+
+    const body = `
+        <div class="field-row"><label>Workflow Name</label><input id="mWfName" value="${esc(gf(w,WF.name)||'')}"></div>
+        <div class="field-row"><label>Description</label><textarea id="mWfDesc">${esc(gf(w,WF.description)||'')}</textarea></div>
+        <div class="field-row"><label>FULFILL Stage</label><select id="mWfFulfill"><option value="">None</option>${fulfillOpts}</select></div>
+        <div class="field-row"><label>Main Method Stage</label><select id="mWfMethod"><option value="">None</option>${methodOpts}</select></div>
+        <div class="field-row"><label>Department</label><select id="mWfDept"><option value="">None</option>${deptOpts}</select></div>
+        <div class="field-row"><label>Business</label><select id="mWfBiz"><option value="">All Businesses</option>${bizOpts}</select></div>
+        <div class="field-row"><label>Status</label><select id="mWfStatus"><option${curStatus==='Not Started'?' selected':''}>Not Started</option><option${curStatus==='In Progress'?' selected':''}>In Progress</option><option${curStatus==='Complete'?' selected':''}>Complete</option></select></div>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveEditWorkflow('${id}')">Save</button>`;
+    showModal('Edit Workflow', body, footer);
+}
+
+async function saveEditWorkflow(id){
+    const name = document.getElementById('mWfName').value.trim();
+    if(!name){ toast('Name is required'); return; }
+    const saveBtn = document.querySelector('#modalOverlay .btn-primary');
+    if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving...'; }
+    const fields = { [WF.name]: name };
+    fields[WF.description] = document.getElementById('mWfDesc').value.trim();
+    const fulfill = document.getElementById('mWfFulfill').value;
+    fields[WF.fulfillStage] = fulfill||null;
+    const method = document.getElementById('mWfMethod').value;
+    fields[WF.mainMethodStage] = method ? [method] : [];
+    const dept = document.getElementById('mWfDept').value;
+    fields[WF.department] = dept||null;
+    const biz = document.getElementById('mWfBiz').value;
+    fields[WF.business] = biz ? [biz] : [];
+    fields[WF.status] = document.getElementById('mWfStatus').value;
+
+    try {
+        const updated = await atUpdate(TBL.workflows, id, fields);
+        const idx = allWorkflows.findIndex(w=>w.id===id);
+        if(idx>=0) allWorkflows[idx] = updated;
+        closeModal();
+        render();
+        toast('Workflow updated');
+    } catch(e){ toast('Error: '+e.message); }
+}
+
+async function deleteWorkflow(id){
+    if(!confirm('Delete this workflow and all its steps?')) return;
+    try {
+        const steps = stepsForWorkflow(id);
+        for(const s of steps) await atDelete(TBL.steps, s.id);
+        await atDelete(TBL.workflows, id);
+        allWorkflows = allWorkflows.filter(w=>w.id!==id);
+        allSteps = allSteps.filter(s=>!linkIds(gf(s,ST.workflow)).includes(id));
+        render();
+        toast('Workflow deleted');
+    } catch(e){ toast('Error: '+e.message); if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; } }
+}
+
+// ── Add/Edit Step ──
+function openAddStep(wfId){
+    const body = `
+        <div class="field-row"><label>Step Name</label><input id="mStName" placeholder="e.g. Send welcome email"></div>
+        <div class="field-row"><label>Description</label><textarea id="mStDesc" placeholder="What does this step involve?"></textarea></div>
+        <div class="field-row"><label>Step Type</label><select id="mStType"><option>Staff Task</option><option>AI Skill</option><option>Both</option></select></div>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveNewStep('${wfId}')">Save</button>`;
+    showModal('Add Workflow Step', body, footer);
+}
+
+async function saveNewStep(wfId){
+    const name = document.getElementById('mStName').value.trim();
+    if(!name){ toast('Name is required'); return; }
+    const saveBtn = document.querySelector('#modalOverlay .btn-primary');
+    if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving...'; }
+    const existing = stepsForWorkflow(wfId);
+    const fields = {
+        [ST.name]: name,
+        [ST.description]: document.getElementById('mStDesc').value.trim(),
+        [ST.workflow]: [wfId],
+        [ST.stepType]: document.getElementById('mStType').value,
+        [ST.sopStatus]: 'Not Created',
+        [ST.sortOrder]: existing.length + 1,
+    };
+    try {
+        const rec = await atCreate(TBL.steps, fields);
+        allSteps.push(rec);
+        closeModal();
+        render();
+        toast('Step added');
+    } catch(e){ toast('Error: '+e.message); if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; } }
+}
+
+function editStep(id){
+    const s = allSteps.find(s=>s.id===id);
+    if(!s) return;
+    const curType = selName(gf(s,ST.stepType))||'Staff Task';
+    const curSopSt = selName(gf(s,ST.sopStatus))||'Not Created';
+    const body = `
+        <div class="field-row"><label>Step Name</label><input id="mStName" value="${esc(gf(s,ST.name)||'')}"></div>
+        <div class="field-row"><label>Description</label><textarea id="mStDesc">${esc(gf(s,ST.description)||'')}</textarea></div>
+        <div class="field-row"><label>Step Type</label><select id="mStType">
+            <option${curType==='Staff Task'?' selected':''}>Staff Task</option>
+            <option${curType==='AI Skill'?' selected':''}>AI Skill</option>
+            <option${curType==='Both'?' selected':''}>Both</option>
+        </select></div>
+        <div class="field-row"><label>SOP Status</label><select id="mStSopSt">
+            <option${curSopSt==='Not Created'?' selected':''}>Not Created</option>
+            <option${curSopSt==='Draft'?' selected':''}>Draft</option>
+            <option${curSopSt==='Complete'?' selected':''}>Complete</option>
+        </select></div>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveEditStep('${id}')">Save</button>`;
+    showModal('Edit Step', body, footer);
+}
+
+async function saveEditStep(id){
+    const name = document.getElementById('mStName').value.trim();
+    if(!name){ toast('Name is required'); return; }
+    const saveBtn = document.querySelector('#modalOverlay .btn-primary');
+    if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving...'; }
+    const fields = {
+        [ST.name]: name,
+        [ST.description]: document.getElementById('mStDesc').value.trim(),
+        [ST.stepType]: document.getElementById('mStType').value,
+        [ST.sopStatus]: document.getElementById('mStSopSt').value,
+    };
+    try {
+        const updated = await atUpdate(TBL.steps, id, fields);
+        const idx = allSteps.findIndex(s=>s.id===id);
+        if(idx>=0) allSteps[idx] = updated;
+        closeModal();
+        render();
+        toast('Step updated');
+    } catch(e){ toast('Error: '+e.message); if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save'; } }
+}
+
+async function deleteStep(id){
+    if(!confirm('Delete this step?')) return;
+    try {
+        await atDelete(TBL.steps, id);
+        allSteps = allSteps.filter(s=>s.id!==id);
+        render();
+        toast('Step deleted');
+    } catch(e){ toast('Error: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SOP Viewer
+// ═══════════════════════════════════════════════════════════════════════
+function viewSOP(stepId){
+    const s = allSteps.find(s=>s.id===stepId);
+    if(!s) return;
+    const content = gf(s,ST.sopContent)||'No SOP content yet.';
+    const wfId = linkIds(gf(s,ST.workflow))[0];
+    const viewer = document.getElementById('sop-viewer-'+wfId);
+    if(!viewer) return;
+    if(viewer.style.display==='block' && viewer.dataset.stepId===stepId){
+        viewer.style.display='none';
+        return;
+    }
+    viewer.dataset.stepId = stepId;
+    viewer.style.display = 'block';
+    viewer.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>SOP: ${esc(gf(s,ST.name)||'')}</strong>
+        <button class="btn btn-sm" onclick="this.parentElement.parentElement.style.display='none'">Close</button>
+    </div><div class="sop-viewer">${esc(content)}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI — SOP Generation
+// ═══════════════════════════════════════════════════════════════════════
+async function generateSOP(stepId){
+    const s = allSteps.find(s=>s.id===stepId);
+    if(!s) return;
+    const wfId = linkIds(gf(s,ST.workflow))[0];
+    const w = allWorkflows.find(w=>w.id===wfId);
+    const stepName = gf(s,ST.name)||'';
+    const stepDesc = gf(s,ST.description)||'';
+    const wfName = w ? (gf(w,WF.name)||'') : '';
+    const wfDesc = w ? (gf(w,WF.description)||'') : '';
+    const stageName = w ? (selName(gf(w,WF.fulfillStage))||selName(gf(w,WF.department))||'') : '';
+
+    if(!confirm(`Generate an SOP for "${stepName}"? This will overwrite any existing SOP content.`)) return;
+
+    const viewer = document.getElementById('sop-viewer-'+wfId);
+    if(viewer){
+        viewer.style.display='block';
+        viewer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Generating SOP... This may take a moment.</div>';
+    }
+
+    const taskPrompt = `Write a Standard Operating Procedure (SOP) for the following workflow step.
+
+Workflow: ${wfName}
+Workflow description: ${wfDesc}
+Stage: ${stageName}
+Step name: ${stepName}
+Step description: ${stepDesc}
+
+The SOP must be:
+- Written in plain English, suitable for a team member with no prior knowledge of this process
+- Structured with numbered steps
+- Each step should be a single clear action
+- Include any important notes, warnings, or quality checks
+- Include expected outcomes and how to verify the step was completed correctly
+- Keep it concise but thorough
+
+Output the SOP text only, no additional commentary.`;
+
+    try {
+        const systemPrompt = typeof buildCachedWizardSystem === 'function'
+            ? buildCachedWizardSystem('Systemisation Module', taskPrompt)
+            : [{type:'text', text: taskPrompt}];
+
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 2000,
+                system: systemPrompt,
+                messages: [{ role:'user', content: taskPrompt }],
+            })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const sopText = data.content?.[0]?.text || 'Failed to generate SOP.';
+
+        await atUpdate(TBL.steps, stepId, {
+            [ST.sopContent]: sopText,
+            [ST.sopStatus]: 'Draft',
+        });
+        const idx = allSteps.findIndex(st=>st.id===stepId);
+        if(idx>=0){
+            allSteps[idx].fields[ST.sopContent] = sopText;
+            allSteps[idx].fields[ST.sopStatus] = {name:'Draft'};
+        }
+        render();
+        if(viewer){
+            viewer.style.display='block';
+            viewer.dataset.stepId = stepId;
+            viewer.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <strong>SOP: ${esc(stepName)} (Draft)</strong>
+                <button class="btn btn-sm" onclick="this.parentElement.parentElement.style.display='none'">Close</button>
+            </div><div class="sop-viewer">${esc(sopText)}</div>`;
+        }
+        toast('SOP generated (saved as Draft)');
+    } catch(e){
+        toast('AI error: '+e.message);
+        if(viewer) viewer.innerHTML = `<div style="padding:20px;color:var(--danger)">Error generating SOP: ${esc(e.message)}</div>`;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI — Suggest Workflows
+// ═══════════════════════════════════════════════════════════════════════
+async function suggestWorkflows(stageKey, view){
+    let stageName = stageKey;
+    if(view==='fulfill'){
+        const s = FULFILL_STAGES.find(s=>s.key===stageKey);
+        if(s) stageName = s.label;
+    } else {
+        const m = allMethods.find(m=>m.id===stageKey);
+        if(m) stageName = gf(m,MM.name)||stageKey;
+    }
+
+    const existing = filteredWorkflows().filter(w=>{
+        if(view==='fulfill') return selName(gf(w,WF.fulfillStage))===stageKey;
+        return linkIds(gf(w,WF.mainMethodStage)).includes(stageKey);
+    }).map(w=>gf(w,WF.name)).filter(Boolean);
+
+    const bizName = bizFilterId ? (gf(allBusinesses.find(b=>b.id===bizFilterId),BIZ_NAME)||'') : 'a general business';
+
+    const prompt = `Suggest 5-8 workflow names for the "${stageName}" stage of ${view==='fulfill'?'the FULFILL customer journey':'the Main Method business process'} for ${bizName}.
+${existing.length ? `These workflows already exist, do not duplicate them: ${existing.join(', ')}` : ''}
+Return ONLY a JSON array of objects with "name" and "description" keys. No other text.`;
+
+    toast('AI is thinking...');
+    try {
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model:'claude-sonnet-4-20250514',
+                max_tokens:1500,
+                messages:[{role:'user',content:prompt}],
+            })
+        });
+        if(!res.ok) throw new Error('AI request failed');
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'[]';
+        const match = text.match(/\[[\s\S]*\]/);
+        if(!match) throw new Error('Invalid AI response');
+        const suggestions = JSON.parse(match[0]);
+        showSuggestionPicker(suggestions, stageKey, view);
+    } catch(e){ toast('AI error: '+e.message); }
+}
+
+function showSuggestionPicker(suggestions, stageKey, view){
+    let body = '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px">Tick the workflows you want to add:</p>';
+    suggestions.forEach((s,i)=>{
+        body += `<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
+            <input type="checkbox" id="sug${i}" checked style="margin-top:3px">
+            <div><strong>${esc(s.name)}</strong><div style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(s.description||'')}</div></div>
+        </div>`;
+    });
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="addSuggestedWorkflows(${JSON.stringify(suggestions).replace(/"/g,'&quot;')},'${esc(stageKey)}','${view}')">Add Selected</button>`;
+    showModal('AI Suggested Workflows', body, footer);
+}
+
+async function addSuggestedWorkflows(suggestions, stageKey, view){
+    const selected = suggestions.filter((_,i)=>document.getElementById('sug'+i)?.checked);
+    if(!selected.length){ closeModal(); return; }
+    closeModal();
+    toast(`Adding ${selected.length} workflows...`);
+
+    for(const s of selected){
+        const fields = { [WF.name]: s.name, [WF.description]: s.description||'', [WF.status]: 'Not Started' };
+        if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
+        else fields[WF.mainMethodStage] = [stageKey];
+        if(bizFilterId) fields[WF.business] = [bizFilterId];
+        try {
+            const rec = await atCreate(TBL.workflows, fields);
+            allWorkflows.push(rec);
+        } catch(e){ console.error(e); }
+    }
+    render();
+    toast(`${selected.length} workflows added`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI — Suggest Steps
+// ═══════════════════════════════════════════════════════════════════════
+async function suggestSteps(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wfName = gf(w,WF.name)||'';
+    const wfDesc = gf(w,WF.description)||'';
+    const existing = stepsForWorkflow(wfId).map(s=>gf(s,ST.name)).filter(Boolean);
+
+    const prompt = `Suggest 5-8 workflow steps for a workflow called "${wfName}".
+${wfDesc ? `Workflow description: ${wfDesc}` : ''}
+${existing.length ? `These steps already exist, do not duplicate them: ${existing.join(', ')}` : ''}
+Each step should be a concrete, actionable task that a team member or AI agent would perform.
+Return ONLY a JSON array of objects with "name", "description", and "type" keys. Type must be one of: "Staff Task", "AI Skill", or "Both". No other text.`;
+
+    toast('AI is thinking...');
+    try {
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model:'claude-sonnet-4-20250514',
+                max_tokens:1500,
+                messages:[{role:'user',content:prompt}],
+            })
+        });
+        if(!res.ok) throw new Error('AI request failed');
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'[]';
+        const match = text.match(/\[[\s\S]*\]/);
+        if(!match) throw new Error('Invalid AI response');
+        const suggestions = JSON.parse(match[0]);
+        showStepSuggestionPicker(suggestions, wfId);
+    } catch(e){ toast('AI error: '+e.message); }
+}
+
+function showStepSuggestionPicker(suggestions, wfId){
+    let body = '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px">Tick the steps you want to add:</p>';
+    suggestions.forEach((s,i)=>{
+        const typeLabel = s.type||'Staff Task';
+        body += `<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
+            <input type="checkbox" id="ssug${i}" checked style="margin-top:3px">
+            <div><strong>${esc(s.name)}</strong> <span class="step-type-badge ${typeLabel==='AI Skill'?'step-type-ai':typeLabel==='Both'?'step-type-both':'step-type-staff'}">${esc(typeLabel)}</span>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(s.description||'')}</div></div>
+        </div>`;
+    });
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="addSuggestedSteps(${JSON.stringify(suggestions).replace(/"/g,'&quot;')},'${wfId}')">Add Selected</button>`;
+    showModal('AI Suggested Steps', body, footer);
+}
+
+async function addSuggestedSteps(suggestions, wfId){
+    const selected = suggestions.filter((_,i)=>document.getElementById('ssug'+i)?.checked);
+    if(!selected.length){ closeModal(); return; }
+    closeModal();
+    toast(`Adding ${selected.length} steps...`);
+    const existingCount = stepsForWorkflow(wfId).length;
+
+    for(let i=0; i<selected.length; i++){
+        const s = selected[i];
+        const fields = {
+            [ST.name]: s.name,
+            [ST.description]: s.description||'',
+            [ST.workflow]: [wfId],
+            [ST.stepType]: s.type||'Staff Task',
+            [ST.sopStatus]: 'Not Created',
+            [ST.sortOrder]: existingCount + i + 1,
+        };
+        try {
+            const rec = await atCreate(TBL.steps, fields);
+            allSteps.push(rec);
+        } catch(e){ console.error(e); }
+    }
+    render();
+    toast(`${selected.length} steps added`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════
+async function start(){
+    document.getElementById('loader').style.display='block';
+    document.getElementById('authBar').style.display='none';
+    try {
+        await loadData();
+        document.getElementById('topbar').style.display='flex';
+        document.getElementById('viewTabs').style.display='flex';
+        document.getElementById('main').style.display='block';
+        document.getElementById('loader').style.display='none';
+        render();
+    } catch(e){
+        if(e.message==='auth') return;
+        document.getElementById('loader').textContent='Error loading data: '+e.message;
+    }
+}
+
+if(bootAuth()) start();
+else {
+    document.getElementById('authBar').style.display='flex';
+    document.getElementById('loader').style.display='none';
+}
+</script>
+</body>
+</html>

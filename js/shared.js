@@ -582,6 +582,13 @@ if (tabId === 'comms') {
             }
         }
         // (Launch Plan tab removed — content was duplicating Strategy OS.)
+        // Systemisation OS lazy-load (cache-busted so Pages deploys are picked up)
+        if (tabId === 'systemisation') {
+            const frame = document.getElementById('systemisationFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('systemisation')) {
+                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+            }
+        }
         // Operations OS lazy-load (cache-busted so Pages deploys are picked up)
         if (tabId === 'operations') {
             const frame = document.getElementById('operationsFrame');

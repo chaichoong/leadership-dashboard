@@ -290,6 +290,21 @@ Start the preview server and test the golden path:
 - Check it at 1024px width (tablet)
 - Verify colours match the design system (no rogue greys or blues)
 
+### 6d. Screenshot walkthrough evidence (MANDATORY)
+
+Before declaring the feature done, produce screenshot evidence of a full walkthrough. This proves the feature works and gives Kevin a visual record of what was built. Use the preview tools to capture each screenshot.
+
+**Required screenshots (minimum):**
+
+1. **Initial load state** — the feature as it appears when first opened (or empty state if no data)
+2. **Data populated** — the feature with real or representative data loaded
+3. **Primary interaction** — the main action being performed (e.g. opening a modal, expanding a card, clicking a button)
+4. **Action result** — the outcome of the primary action (e.g. record created, status changed, form submitted)
+5. **Secondary views** — if the feature has tabs, filters, or alternative views, screenshot at least one
+6. **Tablet width** — the feature at 1024px width to verify responsive behaviour
+
+Present all screenshots to Kevin with a brief caption for each. This is not optional. The feature is not done until the walkthrough is shared.
+
 ---
 
 ## Phase 7: AUDIT (invoke the audit skill)

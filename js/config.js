@@ -24,6 +24,7 @@
         // (Operating Systems Hub + Launch Plan removed during sidebar restructure.)
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.11', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
+        { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.16', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.2', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
     ];
@@ -53,6 +54,8 @@
         reconAudit:    'tblbfuxYxu4uMMWwT', // AI Recon Audit — accuracy log (auto-pruned to last 35 days)
         arrears:       'tblzG0B9oRRpszcgC', // Arrears Records — 7-stage credit control pipeline
         arrearsLog:    'tblik5VI5Jy6tO2yc', // Arrears Contact Log — audit trail per contact event
+        sysWorkflows:  'tblLPoRHFBl0vqR24', // Systemisation Workflows
+        workflowSteps: 'tblTadoyWXFHbmYxm', // Workflow Steps (within Systemisation Workflows)
     };
 
     // ── Arrears Records field IDs (Airtable table: Arrears Records / tblzG0B9oRRpszcgC) ──
@@ -345,6 +348,32 @@
         name:         'fldRphzaAUzBqconG',  // Main Method (primary)
         description:  'fldWDxL9EyS1iaGlf',  // multilineText
         business1:    'fldi4uVOf2NgxiSKy',  // inverse link back to Objective & Strategy
+    };
+
+    // Systemisation Workflows table
+    const SYS_WF = {
+        name:            'fldsaS0jeoSRuJN28',
+        description:     'fld1cGXzKp8ab5nBr',
+        fulfillStage:    'fldoN7pdUv4CIcKf2',
+        department:      'fldTYbvsvqD1CQmxd',
+        status:          'fldBHe23lba7DkLci',
+        sortOrder:       'fldOAAESotc8rNKyu',
+        mainMethodStage: 'fldQZEvjCRYUaQdME',
+        business:        'fldQcQSnlSipSBhb4',
+        steps:           'fldjmfqk77Wr1aOs5',  // inverse link from Workflow Steps
+    };
+
+    // Workflow Steps table
+    const WF_STEP = {
+        name:        'fldqKG4mVY16PTNmO',
+        description: 'fldlSSG0bV9VyhKEN',
+        workflow:    'fldmGLPupz0fZFfch',
+        stepType:    'fldPHutLN9Q2c2SzU',
+        sopContent:  'fldyNojZsSjfF6lLI',
+        sopStatus:   'fldZo6pPcn1lNvOay',
+        sortOrder:   'fldOWS3MfMSVJyo0b',
+        skillId:     'fldOisvuXul0r1XUD',
+        tasks:       'fldzxG4dMwZiL9ZzK',  // inverse link from Tasks table
     };
 
     // Key record IDs
