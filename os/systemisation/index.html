@@ -123,7 +123,17 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .acronym-letter{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-weight:var(--fw-bold);font-size:var(--fs-base);color:#fff}
 .acronym-dot{width:4px;height:4px;border-radius:50%;background:var(--border-default)}
 
-.stage-card-desc{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.stage-card-desc{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px;line-height:1.4}
+
+.drawer-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.35);z-index:150;opacity:0;transition:opacity .2s;pointer-events:none}
+.drawer-overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;width:min(560px,90vw);height:100vh;background:var(--bg-surface);box-shadow:var(--shadow-lg);z-index:160;transform:translateX(100%);transition:transform .25s ease;overflow-y:auto;display:flex;flex-direction:column}
+.drawer.open{transform:translateX(0)}
+.drawer-header{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border-default);position:sticky;top:0;background:var(--bg-surface);z-index:1}
+.drawer-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted);padding:4px 8px;border-radius:var(--radius-sm)}
+.drawer-close:hover{background:var(--bg-surface-2);color:var(--text-primary)}
+.drawer-title{font-size:var(--fs-lg);font-weight:var(--fw-bold);flex:1}
+.drawer-body{padding:20px;flex:1}
 
 .biz-group{margin-bottom:28px}
 .biz-group-header{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
@@ -178,6 +188,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 <div class="loading" id="loader">Loading...</div>
 <div class="toast" id="toast"></div>
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Stage details">
+    <div class="drawer-header">
+        <button class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+        <div class="drawer-title" id="drawerTitle"></div>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+</div>
 
 <script src="../../js/prompts/boardroom-mentor.js"></script>
 <script>
@@ -217,6 +235,11 @@ const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
 const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
 const OBJSTRAT_TBL = 'tblEBvFw8DonwxzGh';
 const OBJSTRAT_BIZ = 'fldLt6uDJ2xKCMlj2';
+const OBJSTRAT_METHOD_LINKS = [
+    'fldqQIH0bU4hDSiL5','fldd6IJwHKPIb0CIl','fldAUbgvtC5lNXTdS','fldgYPzIjyt37wo6k',
+    'fldfw9UiUpzz4ndge','fldT6Lo73MJJ3xEPa','fld9bViCHPvZviENY','fld0TDbOBZ4JZVG2i',
+    'fldcUeyPErJIU8rvH','fldiWxDwMGyVuWMCr',
+];
 
 const FULFILL_STAGES = [
     { key: 'F - Find & Grab Attention',    letter: 'F', label: 'Find & Grab Attention',    colour: 'var(--tone-blue)',  desc: 'Attract potential customers through marketing, advertising and brand awareness. Make your business visible to the right audience.' },
@@ -237,6 +260,7 @@ let allMethods = [];
 let allBusinesses = [];
 let allObjStrat = [];
 let methodBizMap = {};
+let bizMethodOrder = {};
 let currentView = 'fulfill';
 let drillStage = null;
 let bizFilterId = '';
@@ -335,7 +359,7 @@ async function loadData(){
         atFetch(TBL.steps, [ST.name,ST.description,ST.workflow,ST.stepType,ST.sopContent,ST.sopStatus,ST.sortOrder,ST.skillId]),
         atFetch(TBL.mainMethods, [MM.name,MM.description,MM.business]),
         atFetch(TBL.businesses, [BIZ_NAME,BIZ_ACTIVE]),
-        atFetch(OBJSTRAT_TBL, [OBJSTRAT_BIZ]),
+        atFetch(OBJSTRAT_TBL, [OBJSTRAT_BIZ, ...OBJSTRAT_METHOD_LINKS]),
     ]);
     allWorkflows = wf;
     allSteps = st;
@@ -347,17 +371,24 @@ async function loadData(){
 }
 
 function buildMethodBizMap(){
-    const osBizMap = {};
+    methodBizMap = {};
+    bizMethodOrder = {};
     allObjStrat.forEach(o=>{
         const bizIds = linkIds(gf(o,OBJSTRAT_BIZ));
-        if(bizIds.length) osBizMap[o.id] = bizIds[0];
-    });
-    methodBizMap = {};
-    allMethods.forEach(m=>{
-        const osLinks = linkIds(gf(m,MM.business));
-        for(const osId of osLinks){
-            if(osBizMap[osId]){ methodBizMap[m.id] = osBizMap[osId]; break; }
-        }
+        if(!bizIds.length) return;
+        const bizId = bizIds[0];
+        const orderedIds = [];
+        OBJSTRAT_METHOD_LINKS.forEach(fid=>{
+            const ids = linkIds(gf(o,fid));
+            ids.forEach(mid=>{
+                if(!orderedIds.includes(mid)) orderedIds.push(mid);
+            });
+        });
+        orderedIds.forEach(mid=>{ methodBizMap[mid] = bizId; });
+        if(!bizMethodOrder[bizId]) bizMethodOrder[bizId] = [];
+        orderedIds.forEach(mid=>{
+            if(!bizMethodOrder[bizId].includes(mid)) bizMethodOrder[bizId].push(mid);
+        });
     });
 }
 
@@ -385,7 +416,10 @@ function filteredWorkflows(){
 
 function filteredMethods(){
     if(!bizFilterId) return allMethods;
-    return allMethods.filter(m=> methodBizMap[m.id] === bizFilterId);
+    const ordered = bizMethodOrder[bizFilterId] || [];
+    const result = ordered.map(mid=>allMethods.find(m=>m.id===mid)).filter(Boolean);
+    const remaining = allMethods.filter(m=>methodBizMap[m.id]===bizFilterId && !ordered.includes(m.id));
+    return result.concat(remaining);
 }
 
 function stepsForWorkflow(wfId){
@@ -400,6 +434,7 @@ function stepsForWorkflow(wfId){
 function switchView(view){
     currentView = view;
     drillStage = null;
+    closeDrawer();
     document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===view));
     document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+view));
     render();
@@ -431,10 +466,6 @@ function updateCounts(){
 // ── Customer Journey (FULFILL) ──
 function renderFulfill(){
     const pane = document.getElementById('pane-fulfill');
-    if(drillStage){
-        renderStageDrill(pane, drillStage, 'fulfill');
-        return;
-    }
     const wfs = filteredWorkflows();
     let html = '<div class="acronym-strip"><span class="acronym-strip-label">FULFILL</span>';
     FULFILL_STAGES.forEach((s,i)=>{
@@ -491,68 +522,72 @@ function renderMethodCards(methods, wfs){
     return html;
 }
 
+function orderedMethodsForBiz(bizId){
+    const ordered = (bizMethodOrder[bizId] || []).map(mid=>allMethods.find(m=>m.id===mid)).filter(Boolean);
+    const extras = allMethods.filter(m=>methodBizMap[m.id]===bizId && !(bizMethodOrder[bizId]||[]).includes(m.id));
+    return ordered.concat(extras);
+}
+
+function buildAcronymStrip(methods, label){
+    const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+    const acronym = methods.map(m=>(gf(m,MM.name)||'?').charAt(0).toUpperCase()).join('');
+    let html = `<div class="acronym-strip"><span class="acronym-strip-label">${esc(label)}</span>`;
+    methods.forEach((m,i)=>{
+        if(i>0) html += '<span class="acronym-dot"></span>';
+        html += `<span class="acronym-letter" style="background:${colours[i%colours.length]}" title="${esc(gf(m,MM.name)||'')}">${esc((gf(m,MM.name)||'?').charAt(0).toUpperCase())}</span>`;
+    });
+    if(acronym) html += `<span style="margin-left:8px;font-weight:var(--fw-bold);font-size:var(--fs-sm);color:var(--text-secondary)">${esc(acronym)}</span>`;
+    html += '</div>';
+    return html;
+}
+
 function renderMethod(){
     const pane = document.getElementById('pane-method');
-    if(drillStage){
-        renderStageDrill(pane, drillStage, 'method');
-        return;
-    }
-    const methods = filteredMethods();
     const wfs = filteredWorkflows();
-    if(!methods.length){
-        pane.innerHTML = '<div class="empty-state"><p>No Main Method stages found.</p><p>Add Main Method stages in Objective &amp; Strategy first.</p></div>';
-        return;
-    }
 
-    let html = '';
     if(bizFilterId){
+        const methods = orderedMethodsForBiz(bizFilterId);
+        if(!methods.length){
+            pane.innerHTML = '<div class="empty-state"><p>No Main Method stages found for this business.</p><p>Link Main Method stages in Objective &amp; Strategy.</p></div>';
+            return;
+        }
         const biz = allBusinesses.find(b=>b.id===bizFilterId);
         const bizName = biz ? (gf(biz,BIZ_NAME)||'Unnamed') : 'Selected Business';
-        const acronym = methods.map(m=>(gf(m,MM.name)||'?').charAt(0).toUpperCase()).join('');
-        html += `<div class="acronym-strip"><span class="acronym-strip-label">${esc(bizName)}</span>`;
-        methods.forEach((m,i)=>{
-            const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
-            if(i>0) html += '<span class="acronym-dot"></span>';
-            html += `<span class="acronym-letter" style="background:${colours[i%5]}" title="${esc(gf(m,MM.name)||'')}">${esc((gf(m,MM.name)||'?').charAt(0).toUpperCase())}</span>`;
-        });
-        if(acronym) html += `<span style="margin-left:8px;font-weight:var(--fw-bold);font-size:var(--fs-sm);color:var(--text-secondary)">${esc(acronym)}</span>`;
-        html += '</div>';
+        let html = buildAcronymStrip(methods, bizName);
         html += '<div class="stage-grid">' + renderMethodCards(methods, wfs) + '</div>';
+        pane.innerHTML = html;
     } else {
-        const bizGroups = {};
-        const unassigned = [];
-        methods.forEach(m=>{
-            const bizId = methodBizMap[m.id];
-            if(bizId){
-                if(!bizGroups[bizId]) bizGroups[bizId] = [];
-                bizGroups[bizId].push(m);
-            } else {
-                unassigned.push(m);
-            }
-        });
+        let html = '';
+        let hasAny = false;
         allBusinesses.forEach(b=>{
-            const group = bizGroups[b.id];
-            if(!group || !group.length) return;
+            const group = orderedMethodsForBiz(b.id);
+            if(!group.length) return;
+            hasAny = true;
             const bizName = gf(b,BIZ_NAME)||'Unnamed';
-            const acronym = group.map(m=>(gf(m,MM.name)||'?').charAt(0).toUpperCase()).join('');
             html += '<div class="biz-group">';
             html += `<div class="biz-group-header"><span class="biz-group-name">${esc(bizName)}</span>`;
-            html += '<span class="biz-acronym">';
             const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+            const acronym = group.map(m=>(gf(m,MM.name)||'?').charAt(0).toUpperCase()).join('');
+            html += '<span class="biz-acronym">';
             group.forEach((m,i)=>{
-                html += `<span class="biz-acronym-letter" style="background:${colours[i%5]}">${esc((gf(m,MM.name)||'?').charAt(0).toUpperCase())}</span>`;
+                html += `<span class="biz-acronym-letter" style="background:${colours[i%colours.length]}">${esc((gf(m,MM.name)||'?').charAt(0).toUpperCase())}</span>`;
             });
             html += `<span style="margin-left:4px;font-weight:var(--fw-bold);font-size:var(--fs-sm);color:var(--text-secondary)">${esc(acronym)}</span>`;
             html += '</span></div>';
             html += '<div class="stage-grid">' + renderMethodCards(group, wfs) + '</div>';
             html += '</div>';
         });
+        const unassigned = allMethods.filter(m=>!methodBizMap[m.id]);
         if(unassigned.length){
+            hasAny = true;
             html += '<div class="biz-group"><div class="biz-group-header"><span class="biz-group-name">Unassigned</span></div>';
             html += '<div class="stage-grid">' + renderMethodCards(unassigned, wfs) + '</div></div>';
         }
+        if(!hasAny){
+            html = '<div class="empty-state"><p>No Main Method stages found.</p><p>Add Main Method stages in Objective &amp; Strategy first.</p></div>';
+        }
+        pane.innerHTML = html;
     }
-    pane.innerHTML = html;
 }
 
 // ── Departmental ──
@@ -581,44 +616,45 @@ function renderDept(){
     pane.innerHTML = html;
 }
 
-// ── Drill into a stage ──
+// ── Drawer ──
 function drillInto(view, key){
     drillStage = key;
-    render();
+    openDrawer(key, view);
 }
 
-function renderStageDrill(pane, key, view){
+function closeDrawer(){
+    document.getElementById('drawerOverlay').classList.remove('open');
+    document.getElementById('drawer').classList.remove('open');
+    drillStage = null;
+}
+
+function openDrawer(key, view){
     const wfs = filteredWorkflows();
-    let stageWfs, stageLabel, breadcrumbRoot;
+    let stageWfs, stageLabel;
     if(view==='fulfill'){
         const s = FULFILL_STAGES.find(s=>s.key===key);
         stageLabel = s ? s.label : key;
-        breadcrumbRoot = 'Customer Journey';
         stageWfs = wfs.filter(w=>selName(gf(w,WF.fulfillStage))===key);
     } else {
         const m = allMethods.find(m=>m.id===key);
         stageLabel = m ? (gf(m,MM.name)||'Unnamed') : key;
-        breadcrumbRoot = 'Main Method';
         stageWfs = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).includes(key));
     }
     stageWfs.sort((a,b)=>(gf(a,WF.sortOrder)||0)-(gf(b,WF.sortOrder)||0));
 
-    let html = `<div class="breadcrumb">
-        <a onclick="drillStage=null;render()">${esc(breadcrumbRoot)}</a>
-        <span>&#x25B8;</span>
-        <strong>${esc(stageLabel)}</strong>
-    </div>
-    <div class="controls">
+    document.getElementById('drawerTitle').textContent = stageLabel;
+    let html = `<div class="controls">
         <button class="btn btn-primary btn-sm" onclick="openAddWorkflow(null,'${esc(key)}','${view}')">+ Add Workflow</button>
         <button class="btn btn-ai btn-sm" onclick="suggestWorkflows('${esc(key)}','${view}')">Suggest Workflows (AI)</button>
     </div>`;
-
     if(!stageWfs.length){
         html += '<div class="empty-state"><p>No workflows in this stage yet.</p><p>Add one manually or use AI to suggest workflows.</p></div>';
     } else {
         html += '<div class="wf-list">' + stageWfs.map(w=>renderWorkflowCard(w)).join('') + '</div>';
     }
-    pane.innerHTML = html;
+    document.getElementById('drawerBody').innerHTML = html;
+    document.getElementById('drawerOverlay').classList.add('open');
+    document.getElementById('drawer').classList.add('open');
 }
 
 // ── Single workflow card ──
@@ -707,7 +743,7 @@ function showModal(title, body, footer){
     if(firstInput) firstInput.focus();
 }
 
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeModal(); closeDrawer(); } });
 
 // ── Add/Edit Workflow ──
 function openAddWorkflow(dept, stageKey, view){
