@@ -2929,11 +2929,21 @@ async function fetchComments(taskId){
   }
   return (await r.json()).comments||[];
 }
+function _embedAuthor(text){
+  if(!currentUser)return text;
+  return `[author:${currentUser.name}|${currentUser.email}]\n${text}`;
+}
+function _parseAuthor(c){
+  const raw=c.text||'';
+  const m=raw.match(/^\[author:([^|]+)\|([^\]]+)\]\n([\s\S]*)$/);
+  if(m)return{name:m[1],email:m[2],text:m[3]};
+  return{name:(c.author&&c.author.name)||'Unknown',email:(c.author&&c.author.email)||'',text:raw};
+}
 async function postComment(taskId,text){
   const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${taskId}/comments`,{
     method:'POST',
     headers:{Authorization:`Bearer ${PAT}`,'Content-Type':'application/json'},
-    body:JSON.stringify({text})
+    body:JSON.stringify({text:_embedAuthor(text)})
   });
   if(!r.ok)throw new Error('Comment post failed');
   return await r.json();
@@ -2978,8 +2988,9 @@ function renderCommentsInDrawer(taskId){
   const list=(_drawerComments[taskId]||[]).slice().sort((a,b)=>new Date(b.createdTime)-new Date(a.createdTime));
   const meEmail=currentUser?currentUser.email:'';
   const items=list.map(c=>{
-    const email=(c.author&&c.author.email)||'';
-    const name=(c.author&&c.author.name)||email||'Unknown';
+    const parsed=_parseAuthor(c);
+    const email=parsed.email;
+    const name=parsed.name;
     const k=collabKeyForEmail(email);
     const init=name.split(' ').map(w=>w[0]).join('').slice(0,2);
     const mine=email&&meEmail&&email.toLowerCase()===meEmail.toLowerCase();
@@ -2987,7 +2998,7 @@ function renderCommentsInDrawer(taskId){
       <span class="avatar avatar-${k}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:11px;color:var(--text-secondary);display:flex;justify-content:space-between;gap:6px"><span><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(c.createdTime))}</span>${mine?`<button onclick="confirmDeleteComment('${taskId}','${c.id}')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);padding:0">&times;</button>`:''}</div>
-        <div style="font-size:var(--fs-base);color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(c.text||'')}</div>
+        <div style="font-size:var(--fs-base);color:var(--text-primary);white-space:pre-wrap;word-wrap:break-word">${escHtml(parsed.text)}</div>
       </div>
     </div>`;
   }).join('')||'<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No comments yet.</div>';
