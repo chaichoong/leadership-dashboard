@@ -118,6 +118,19 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .dept-group-header{font-size:var(--fs-base);font-weight:var(--fw-bold);color:var(--text-primary);margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border-default);display:flex;align-items:center;gap:8px}
 .dept-group-count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:var(--fw-semibold)}
 
+.acronym-strip{display:flex;align-items:center;gap:6px;margin-bottom:16px;padding:10px 16px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md)}
+.acronym-strip-label{font-size:var(--fs-xs);font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-right:8px}
+.acronym-letter{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-weight:var(--fw-bold);font-size:var(--fs-base);color:#fff}
+.acronym-dot{width:4px;height:4px;border-radius:50%;background:var(--border-default)}
+
+.stage-card-desc{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+.biz-group{margin-bottom:28px}
+.biz-group-header{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
+.biz-group-name{font-size:var(--fs-base);font-weight:var(--fw-bold);color:var(--text-primary)}
+.biz-acronym{display:flex;gap:3px;align-items:center}
+.biz-acronym-letter{width:24px;height:24px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-weight:var(--fw-bold);font-size:var(--fs-xs);color:#fff;background:var(--accent)}
+
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-sidebar);color:#fff;padding:10px 20px;border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-semibold);z-index:300;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
 
@@ -152,7 +165,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <div id="viewTabs" class="view-tabs" style="display:none">
-    <button class="view-tab active" data-tab="fulfill" onclick="switchView('fulfill')">FULFILL Journey <span class="count" id="fulfillCount">0</span></button>
+    <button class="view-tab active" data-tab="fulfill" onclick="switchView('fulfill')">Customer Journey <span class="count" id="fulfillCount">0</span></button>
     <button class="view-tab" data-tab="method" onclick="switchView('method')">Main Method <span class="count" id="methodCount">0</span></button>
     <button class="view-tab" data-tab="dept" onclick="switchView('dept')">Departmental <span class="count" id="deptCount">0</span></button>
 </div>
@@ -199,18 +212,20 @@ const ST = {
     sortOrder:   'fldOWS3MfMSVJyo0b',
     skillId:     'fldOisvuXul0r1XUD',
 };
-const MM = { name: 'fldRphzaAUzBqconG', description: 'fldWDxL9EyS1iaGlf' };
+const MM = { name: 'fldRphzaAUzBqconG', description: 'fldWDxL9EyS1iaGlf', business: 'fldi4uVOf2NgxiSKy' };
 const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
 const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
+const OBJSTRAT_TBL = 'tblEBvFw8DonwxzGh';
+const OBJSTRAT_BIZ = 'fldLt6uDJ2xKCMlj2';
 
 const FULFILL_STAGES = [
-    { key: 'F - Find & Grab Attention',    letter: 'F', label: 'Find & Grab Attention',    colour: 'var(--tone-blue)' },
-    { key: 'U - Understand & Enquire',     letter: 'U', label: 'Understand & Enquire',     colour: 'var(--tone-sage)' },
-    { key: 'L - Lead to Sales Process',    letter: 'L', label: 'Lead to Sales Process',    colour: 'var(--tone-olive)' },
-    { key: 'F - Finance Received',         letter: 'F', label: 'Finance Received',         colour: 'var(--tone-gold)' },
-    { key: 'I - Initiate Onboarding',      letter: 'I', label: 'Initiate Onboarding',      colour: 'var(--tone-plum)' },
-    { key: 'L - Launch Delivery',          letter: 'L', label: 'Launch Delivery',          colour: 'var(--tone-blue)' },
-    { key: 'L - Loyalty Programme',        letter: 'L', label: 'Loyalty Programme',        colour: 'var(--tone-sage)' },
+    { key: 'F - Find & Grab Attention',    letter: 'F', label: 'Find & Grab Attention',    colour: 'var(--tone-blue)',  desc: 'Attract potential customers through marketing, advertising and brand awareness. Make your business visible to the right audience.' },
+    { key: 'U - Understand & Enquire',     letter: 'U', label: 'Understand & Enquire',     colour: 'var(--tone-sage)',  desc: 'Qualify leads by understanding their needs. Handle enquiries and assess whether the customer is the right fit.' },
+    { key: 'L - Lead to Sales Process',    letter: 'L', label: 'Lead to Sales Process',    colour: 'var(--tone-olive)', desc: 'Guide qualified prospects through your sales process. Present solutions, handle objections and close the deal.' },
+    { key: 'F - Finance Received',         letter: 'F', label: 'Finance Received',         colour: 'var(--tone-gold)',  desc: 'Collect payment and confirm financial commitment. Process deposits, contracts and initial invoicing.' },
+    { key: 'I - Initiate Onboarding',      letter: 'I', label: 'Initiate Onboarding',      colour: 'var(--tone-plum)',  desc: 'Welcome new customers and set expectations. Complete setup tasks, handovers and kickoff activities.' },
+    { key: 'L - Launch Delivery',          letter: 'L', label: 'Launch Delivery',          colour: 'var(--tone-blue)',  desc: 'Deliver the core product or service. Execute the main value proposition the customer is paying for.' },
+    { key: 'L - Loyalty Programme',        letter: 'L', label: 'Loyalty Programme',        colour: 'var(--tone-sage)',  desc: 'Retain customers and generate repeat business. Gather feedback, upsell and build long-term relationships.' },
 ];
 
 const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
@@ -220,6 +235,8 @@ let allWorkflows = [];
 let allSteps = [];
 let allMethods = [];
 let allBusinesses = [];
+let allObjStrat = [];
+let methodBizMap = {};
 let currentView = 'fulfill';
 let drillStage = null;
 let bizFilterId = '';
@@ -313,17 +330,35 @@ function showAuthBar(){
 // Data Loading
 // ═══════════════════════════════════════════════════════════════════════
 async function loadData(){
-    const [wf, st, mm, bz] = await Promise.all([
+    const [wf, st, mm, bz, os] = await Promise.all([
         atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business]),
         atFetch(TBL.steps, [ST.name,ST.description,ST.workflow,ST.stepType,ST.sopContent,ST.sopStatus,ST.sortOrder,ST.skillId]),
-        atFetch(TBL.mainMethods, [MM.name,MM.description]),
+        atFetch(TBL.mainMethods, [MM.name,MM.description,MM.business]),
         atFetch(TBL.businesses, [BIZ_NAME,BIZ_ACTIVE]),
+        atFetch(OBJSTRAT_TBL, [OBJSTRAT_BIZ]),
     ]);
     allWorkflows = wf;
     allSteps = st;
     allMethods = mm;
     allBusinesses = bz.filter(b=>{ const a=gf(b,BIZ_ACTIVE); return a===true||a===1; });
+    allObjStrat = os;
+    buildMethodBizMap();
     populateBizFilter();
+}
+
+function buildMethodBizMap(){
+    const osBizMap = {};
+    allObjStrat.forEach(o=>{
+        const bizIds = linkIds(gf(o,OBJSTRAT_BIZ));
+        if(bizIds.length) osBizMap[o.id] = bizIds[0];
+    });
+    methodBizMap = {};
+    allMethods.forEach(m=>{
+        const osLinks = linkIds(gf(m,MM.business));
+        for(const osId of osLinks){
+            if(osBizMap[osId]){ methodBizMap[m.id] = osBizMap[osId]; break; }
+        }
+    });
 }
 
 function populateBizFilter(){
@@ -346,6 +381,11 @@ function filteredWorkflows(){
         const links = linkIds(gf(w,WF.business));
         return links.length===0 || links.includes(bizFilterId);
     });
+}
+
+function filteredMethods(){
+    if(!bizFilterId) return allMethods;
+    return allMethods.filter(m=> methodBizMap[m.id] === bizFilterId);
 }
 
 function stepsForWorkflow(wfId){
@@ -388,7 +428,7 @@ function updateCounts(){
     document.getElementById('deptCount').textContent=dc;
 }
 
-// ── FULFILL ──
+// ── Customer Journey (FULFILL) ──
 function renderFulfill(){
     const pane = document.getElementById('pane-fulfill');
     if(drillStage){
@@ -396,7 +436,13 @@ function renderFulfill(){
         return;
     }
     const wfs = filteredWorkflows();
-    let html = '<div class="stage-grid">';
+    let html = '<div class="acronym-strip"><span class="acronym-strip-label">FULFILL</span>';
+    FULFILL_STAGES.forEach((s,i)=>{
+        if(i>0) html += '<span class="acronym-dot"></span>';
+        html += `<span class="acronym-letter" style="background:${s.colour}" title="${esc(s.label)}">${s.letter}</span>`;
+    });
+    html += '</div>';
+    html += '<div class="stage-grid">';
     FULFILL_STAGES.forEach(s=>{
         const stageWfs = wfs.filter(w=>selName(gf(w,WF.fulfillStage))===s.key);
         const complete = stageWfs.filter(w=>selName(gf(w,WF.status))==='Complete').length;
@@ -407,6 +453,7 @@ function renderFulfill(){
                 <div class="stage-card-title">${esc(s.label)}</div>
                 <div class="stage-card-count">${stageWfs.length} workflow${stageWfs.length!==1?'s':''}</div>
             </div>
+            <div class="stage-card-desc">${esc(s.desc)}</div>
             <div class="stage-card-progress">
                 <div class="progress-bar"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
                 <div class="stage-card-progress-label">${pct}%</div>
@@ -418,36 +465,93 @@ function renderFulfill(){
 }
 
 // ── Main Method ──
-function renderMethod(){
-    const pane = document.getElementById('pane-method');
-    if(drillStage){
-        renderStageDrill(pane, drillStage, 'method');
-        return;
-    }
-    const wfs = filteredWorkflows();
-    if(!allMethods.length){
-        pane.innerHTML = '<div class="empty-state"><p>No Main Method stages found.</p><p>Add Main Method stages in Objective &amp; Strategy first.</p></div>';
-        return;
-    }
-    let html = '<div class="stage-grid">';
-    allMethods.forEach((m,i)=>{
+function renderMethodCards(methods, wfs){
+    const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+    let html = '';
+    methods.forEach((m,i)=>{
         const methodWfs = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).includes(m.id));
         const complete = methodWfs.filter(w=>selName(gf(w,WF.status))==='Complete').length;
         const pct = methodWfs.length ? Math.round(complete/methodWfs.length*100) : 0;
-        const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+        const mName = gf(m,MM.name)||'Unnamed';
+        const initial = mName.charAt(0).toUpperCase();
+        const desc = gf(m,MM.description)||'';
         html += `<div class="stage-card" onclick="drillInto('method','${m.id}')">
             <div class="stage-card-header">
-                <div class="stage-card-letter" style="background:${colours[i%5]}">${String(i+1).padStart(2,'0')}</div>
-                <div class="stage-card-title">${esc(gf(m,MM.name)||'Unnamed')}</div>
+                <div class="stage-card-letter" style="background:${colours[i%5]}">${esc(initial)}</div>
+                <div class="stage-card-title">${esc(mName)}</div>
                 <div class="stage-card-count">${methodWfs.length} workflow${methodWfs.length!==1?'s':''}</div>
             </div>
+            ${desc ? `<div class="stage-card-desc">${esc(desc)}</div>` : ''}
             <div class="stage-card-progress">
                 <div class="progress-bar"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
                 <div class="stage-card-progress-label">${pct}%</div>
             </div>
         </div>`;
     });
-    html += '</div>';
+    return html;
+}
+
+function renderMethod(){
+    const pane = document.getElementById('pane-method');
+    if(drillStage){
+        renderStageDrill(pane, drillStage, 'method');
+        return;
+    }
+    const methods = filteredMethods();
+    const wfs = filteredWorkflows();
+    if(!methods.length){
+        pane.innerHTML = '<div class="empty-state"><p>No Main Method stages found.</p><p>Add Main Method stages in Objective &amp; Strategy first.</p></div>';
+        return;
+    }
+
+    let html = '';
+    if(bizFilterId){
+        const biz = allBusinesses.find(b=>b.id===bizFilterId);
+        const bizName = biz ? (gf(biz,BIZ_NAME)||'Unnamed') : 'Selected Business';
+        const acronym = methods.map(m=>(gf(m,MM.name)||'?').charAt(0).toUpperCase()).join('');
+        html += `<div class="acronym-strip"><span class="acronym-strip-label">${esc(bizName)}</span>`;
+        methods.forEach((m,i)=>{
+            const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+            if(i>0) html += '<span class="acronym-dot"></span>';
+            html += `<span class="acronym-letter" style="background:${colours[i%5]}" title="${esc(gf(m,MM.name)||'')}">${esc((gf(m,MM.name)||'?').charAt(0).toUpperCase())}</span>`;
+        });
+        if(acronym) html += `<span style="margin-left:8px;font-weight:var(--fw-bold);font-size:var(--fs-sm);color:var(--text-secondary)">${esc(acronym)}</span>`;
+        html += '</div>';
+        html += '<div class="stage-grid">' + renderMethodCards(methods, wfs) + '</div>';
+    } else {
+        const bizGroups = {};
+        const unassigned = [];
+        methods.forEach(m=>{
+            const bizId = methodBizMap[m.id];
+            if(bizId){
+                if(!bizGroups[bizId]) bizGroups[bizId] = [];
+                bizGroups[bizId].push(m);
+            } else {
+                unassigned.push(m);
+            }
+        });
+        allBusinesses.forEach(b=>{
+            const group = bizGroups[b.id];
+            if(!group || !group.length) return;
+            const bizName = gf(b,BIZ_NAME)||'Unnamed';
+            const acronym = group.map(m=>(gf(m,MM.name)||'?').charAt(0).toUpperCase()).join('');
+            html += '<div class="biz-group">';
+            html += `<div class="biz-group-header"><span class="biz-group-name">${esc(bizName)}</span>`;
+            html += '<span class="biz-acronym">';
+            const colours = ['var(--tone-sage)','var(--tone-olive)','var(--tone-gold)','var(--tone-blue)','var(--tone-plum)'];
+            group.forEach((m,i)=>{
+                html += `<span class="biz-acronym-letter" style="background:${colours[i%5]}">${esc((gf(m,MM.name)||'?').charAt(0).toUpperCase())}</span>`;
+            });
+            html += `<span style="margin-left:4px;font-weight:var(--fw-bold);font-size:var(--fs-sm);color:var(--text-secondary)">${esc(acronym)}</span>`;
+            html += '</span></div>';
+            html += '<div class="stage-grid">' + renderMethodCards(group, wfs) + '</div>';
+            html += '</div>';
+        });
+        if(unassigned.length){
+            html += '<div class="biz-group"><div class="biz-group-header"><span class="biz-group-name">Unassigned</span></div>';
+            html += '<div class="stage-grid">' + renderMethodCards(unassigned, wfs) + '</div></div>';
+        }
+    }
     pane.innerHTML = html;
 }
 
@@ -489,7 +593,7 @@ function renderStageDrill(pane, key, view){
     if(view==='fulfill'){
         const s = FULFILL_STAGES.find(s=>s.key===key);
         stageLabel = s ? s.label : key;
-        breadcrumbRoot = 'FULFILL Journey';
+        breadcrumbRoot = 'Customer Journey';
         stageWfs = wfs.filter(w=>selName(gf(w,WF.fulfillStage))===key);
     } else {
         const m = allMethods.find(m=>m.id===key);
