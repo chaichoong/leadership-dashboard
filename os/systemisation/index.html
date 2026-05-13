@@ -135,6 +135,23 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .drawer-title{font-size:var(--fs-lg);font-weight:var(--fw-bold);flex:1}
 .drawer-body{padding:20px;flex:1}
 
+.wf-grid{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-bottom:16px}
+.wf-grid th{text-align:left;padding:8px 10px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary);background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-weight:var(--fw-bold)}
+.wf-grid td{padding:4px 6px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.wf-grid tr:hover{background:var(--bg-surface-2)}
+.wf-grid tr.wf-grid-new td{border-bottom:none}
+.wf-grid-input{width:100%;border:1px solid transparent;background:transparent;padding:6px 8px;border-radius:4px;font-size:var(--fs-sm);font-family:inherit;color:var(--text-primary);resize:none;overflow:hidden}
+.wf-grid-input:focus{outline:none;border-color:var(--accent);background:var(--bg-surface)}
+.wf-grid-input:hover:not(:focus){border-color:var(--border-default)}
+.wf-grid-input::placeholder{color:var(--text-muted)}
+.wf-grid-actions{display:flex;gap:4px;align-items:center;white-space:nowrap}
+.wf-grid-status{font-size:var(--fs-xs);padding:2px 8px;border-radius:10px;font-weight:var(--fw-semibold);border:none;cursor:pointer;background:var(--bg-subtle);color:var(--text-muted)}
+.wf-grid-expand{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:12px;padding:4px;border-radius:4px}
+.wf-grid-expand:hover{background:var(--bg-surface-2);color:var(--text-primary)}
+.wf-grid-saving{opacity:.5;pointer-events:none}
+.wf-grid-detail td{background:var(--bg-surface-2);border-bottom:2px solid var(--border-default)}
+.wf-grid-detail:hover{background:var(--bg-surface-2)}
+
 .biz-group{margin-bottom:28px}
 .biz-group-header{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid var(--border-default)}
 .biz-group-name{font-size:var(--fs-base);font-weight:var(--fw-bold);color:var(--text-primary)}
@@ -263,6 +280,8 @@ let methodBizMap = {};
 let bizMethodOrder = {};
 let currentView = 'fulfill';
 let drillStage = null;
+let _drawerKey = null;
+let _drawerView = null;
 let bizFilterId = '';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -448,6 +467,7 @@ function render(){
     if(currentView==='fulfill') renderFulfill();
     else if(currentView==='method') renderMethod();
     else if(currentView==='dept') renderDept();
+    if(_drawerKey && _drawerView) openDrawer(_drawerKey, _drawerView);
 }
 
 function updateCounts(){
@@ -619,6 +639,8 @@ function renderDept(){
 // ── Drawer ──
 function drillInto(view, key){
     drillStage = key;
+    _drawerKey = key;
+    _drawerView = view;
     openDrawer(key, view);
 }
 
@@ -626,7 +648,11 @@ function closeDrawer(){
     document.getElementById('drawerOverlay').classList.remove('open');
     document.getElementById('drawer').classList.remove('open');
     drillStage = null;
+    _drawerKey = null;
+    _drawerView = null;
 }
+
+let _gridSaveTimers = {};
 
 function openDrawer(key, view){
     const wfs = filteredWorkflows();
@@ -643,19 +669,183 @@ function openDrawer(key, view){
     stageWfs.sort((a,b)=>(gf(a,WF.sortOrder)||0)-(gf(b,WF.sortOrder)||0));
 
     document.getElementById('drawerTitle').textContent = stageLabel;
-    let html = `<div class="controls">
-        <button class="btn btn-primary btn-sm" onclick="openAddWorkflow(null,'${esc(key)}','${view}')">+ Add Workflow</button>
-        <button class="btn btn-ai btn-sm" onclick="suggestWorkflows('${esc(key)}','${view}')">Suggest Workflows (AI)</button>
-    </div>`;
-    if(!stageWfs.length){
-        html += '<div class="empty-state"><p>No workflows in this stage yet.</p><p>Add one manually or use AI to suggest workflows.</p></div>';
-    } else {
-        html += '<div class="wf-list">' + stageWfs.map(w=>renderWorkflowCard(w)).join('') + '</div>';
-    }
-    document.getElementById('drawerBody').innerHTML = html;
+    const body = document.getElementById('drawerBody');
+    body.innerHTML = '';
+
+    const controls = document.createElement('div');
+    controls.className = 'controls';
+    controls.innerHTML = `<button class="btn btn-ai btn-sm" onclick="suggestWorkflows('${esc(key)}','${view}')">Suggest Workflows (AI)</button>`;
+    body.appendChild(controls);
+
+    const table = document.createElement('table');
+    table.className = 'wf-grid';
+    table.innerHTML = `<thead><tr>
+        <th style="width:30%">Name</th>
+        <th style="width:40%">Description</th>
+        <th style="width:90px">Status</th>
+        <th style="width:100px">Actions</th>
+    </tr></thead>`;
+    const tbody = document.createElement('tbody');
+    tbody.id = 'gridBody';
+
+    stageWfs.forEach(w => tbody.appendChild(buildGridRow(w, key, view)));
+    tbody.appendChild(buildNewRow(key, view));
+
+    table.appendChild(tbody);
+    body.appendChild(table);
+
     document.getElementById('drawerOverlay').classList.add('open');
     document.getElementById('drawer').classList.add('open');
 }
+
+function buildGridRow(w, stageKey, view){
+    const tr = document.createElement('tr');
+    tr.dataset.id = w.id;
+    const name = gf(w,WF.name)||'';
+    const desc = gf(w,WF.description)||'';
+    const status = selName(gf(w,WF.status))||'Not Started';
+    const steps = stepsForWorkflow(w.id);
+
+    tr.innerHTML = `
+        <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
+        <td><div style="display:flex;gap:4px;align-items:start">
+            <textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc">${esc(desc)}</textarea>
+            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:4px" title="AI generate description" onclick="aiDescRow(this)">AI</button>
+        </div></td>
+        <td><select class="wf-grid-status" data-field="status">
+            <option${status==='Not Started'?' selected':''}>Not Started</option>
+            <option${status==='In Progress'?' selected':''}>In Progress</option>
+            <option${status==='Complete'?' selected':''}>Complete</option>
+        </select></td>
+        <td><div class="wf-grid-actions">
+            <button class="wf-grid-expand" title="${steps.length} step${steps.length!==1?'s':''}" onclick="toggleWf('${w.id}')">&#x25B6; ${steps.length}</button>
+            <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
+        </div></td>`;
+
+    const nameInput = tr.querySelector('[data-field="name"]');
+    const descInput = tr.querySelector('[data-field="desc"]');
+    const statusSel = tr.querySelector('[data-field="status"]');
+
+    nameInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.name]: nameInput.value.trim()}, tr));
+    descInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.description]: descInput.value.trim()}, tr));
+    statusSel.addEventListener('change', ()=> gridSave(w.id, {[WF.status]: statusSel.value}, tr));
+
+    autoGrowTextarea(descInput);
+
+    return tr;
+}
+
+function buildNewRow(stageKey, view){
+    const tr = document.createElement('tr');
+    tr.className = 'wf-grid-new';
+    tr.innerHTML = `
+        <td><input class="wf-grid-input" placeholder="Type workflow name and press Enter" data-field="name"></td>
+        <td><textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc"></textarea></td>
+        <td></td><td></td>`;
+
+    const nameInput = tr.querySelector('[data-field="name"]');
+    const descInput = tr.querySelector('[data-field="desc"]');
+
+    nameInput.addEventListener('keydown', async(e)=>{
+        if(e.key==='Enter'){
+            e.preventDefault();
+            const name = nameInput.value.trim();
+            if(!name) return;
+            nameInput.disabled = true;
+            const fields = { [WF.name]: name, [WF.status]: 'Not Started' };
+            const desc = descInput.value.trim();
+            if(desc) fields[WF.description] = desc;
+            if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
+            else fields[WF.mainMethodStage] = [stageKey];
+            if(bizFilterId) fields[WF.business] = [bizFilterId];
+            try {
+                const rec = await atCreate(TBL.workflows, fields);
+                allWorkflows.push(rec);
+                const tbody = tr.parentElement;
+                const newDataRow = buildGridRow(rec, stageKey, view);
+                tbody.insertBefore(newDataRow, tr);
+                nameInput.value = ''; descInput.value = '';
+                nameInput.disabled = false;
+                nameInput.focus();
+                updateTabCounts();
+                toast('Workflow added');
+            } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
+        }
+    });
+
+    descInput.addEventListener('keydown', (e)=>{
+        if(e.key==='Enter'){ e.preventDefault(); nameInput.focus(); nameInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'})); }
+    });
+
+    autoGrowTextarea(descInput);
+
+    return tr;
+}
+
+function autoGrowTextarea(el){
+    const grow = ()=>{ el.style.height='auto'; el.style.height=el.scrollHeight+'px'; };
+    el.addEventListener('input', grow);
+    requestAnimationFrame(grow);
+}
+
+async function gridSave(recId, fields, tr){
+    clearTimeout(_gridSaveTimers[recId]);
+    _gridSaveTimers[recId] = setTimeout(async()=>{
+        tr.classList.add('wf-grid-saving');
+        try {
+            const updated = await atUpdate(TBL.workflows, recId, fields);
+            const idx = allWorkflows.findIndex(w=>w.id===recId);
+            if(idx>=0) allWorkflows[idx] = updated;
+            updateTabCounts();
+        } catch(e){ toast('Save error: '+e.message); }
+        tr.classList.remove('wf-grid-saving');
+    }, 300);
+}
+
+async function deleteWorkflowRow(btn, id){
+    if(!confirm('Delete this workflow and all its steps?')) return;
+    const tr = btn.closest('tr');
+    tr.classList.add('wf-grid-saving');
+    try {
+        const steps = stepsForWorkflow(id);
+        for(const s of steps) await atDelete(TBL.steps, s.id);
+        await atDelete(TBL.workflows, id);
+        allWorkflows = allWorkflows.filter(w=>w.id!==id);
+        allSteps = allSteps.filter(s=>!linkIds(gf(s,ST.workflow)).includes(id));
+        tr.remove();
+        updateTabCounts();
+        toast('Workflow deleted');
+    } catch(e){ toast('Error: '+e.message); tr.classList.remove('wf-grid-saving'); }
+}
+
+async function aiDescRow(btn){
+    const tr = btn.closest('tr');
+    const nameInput = tr.querySelector('[data-field="name"]');
+    const descInput = tr.querySelector('[data-field="desc"]');
+    const name = nameInput.value.trim();
+    if(!name){ toast('Enter a workflow name first'); return; }
+
+    btn.disabled = true; btn.textContent = '...';
+    const prompt = `Write a concise 1-2 sentence description for a business workflow called "${name}". The description should explain what this workflow achieves and its purpose. Return ONLY the description text, nothing else.`;
+    try {
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:200, messages:[{role:'user',content:prompt}] })
+        });
+        if(!res.ok) throw new Error('AI request failed');
+        const data = await res.json();
+        const text = (data.content?.[0]?.text||'').trim();
+        descInput.value = text;
+        descInput.style.height='auto'; descInput.style.height=descInput.scrollHeight+'px';
+        const recId = tr.dataset.id;
+        if(recId) gridSave(recId, {[WF.description]: text}, tr);
+        toast('Description generated');
+    } catch(e){ toast('AI error: '+e.message); }
+    btn.disabled = false; btn.textContent = 'AI';
+}
+
+function updateTabCounts(){ updateCounts(); }
 
 // ── Single workflow card ──
 function renderWorkflowCard(w){
@@ -719,11 +909,56 @@ function renderWorkflowCard(w){
 }
 
 function toggleWf(id){
-    const el = document.getElementById('wf-'+id);
-    if(!el) return;
-    el.classList.toggle('expanded');
-    const header = el.querySelector('.wf-card-header');
-    if(header) header.setAttribute('aria-expanded', el.classList.contains('expanded'));
+    const existing = document.getElementById('wf-detail-'+id);
+    if(existing){ existing.remove(); return; }
+    const dataRow = document.querySelector(`tr[data-id="${id}"]`);
+    if(!dataRow) return;
+    const detailRow = document.createElement('tr');
+    detailRow.id = 'wf-detail-'+id;
+    detailRow.className = 'wf-grid-detail';
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.style.padding = '12px 16px';
+    td.style.background = 'var(--bg-surface-2)';
+
+    const w = allWorkflows.find(w=>w.id===id);
+    const steps = stepsForWorkflow(id);
+    let html = `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" onclick="openAddStep('${id}')">+ Add Step</button>
+        <button class="btn btn-sm btn-ai" onclick="suggestSteps('${id}')">Suggest Steps (AI)</button>
+        <button class="btn btn-sm" onclick="editWorkflow('${id}')">Edit Details</button>
+    </div>`;
+    if(!steps.length){
+        html += '<div style="color:var(--text-muted);font-size:var(--fs-sm);padding:8px 0">No steps yet. Add steps to define this workflow.</div>';
+    } else {
+        html += `<table class="step-table"><thead><tr><th class="step-num">#</th><th>Step</th><th>Type</th><th>SOP</th><th style="width:140px">Actions</th></tr></thead><tbody>`;
+        steps.forEach((s,i)=>{
+            const sName = gf(s,ST.name)||'Untitled';
+            const sDesc = gf(s,ST.description)||'';
+            const sType = selName(gf(s,ST.stepType))||'Staff Task';
+            const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
+            const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
+            const sopClass = sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created';
+            const hasSop = gf(s,ST.sopContent);
+            html += `<tr>
+                <td class="step-num">${i+1}</td>
+                <td><div class="step-name">${esc(sName)}</div>${sDesc?`<div class="step-desc">${esc(sDesc)}</div>`:''}</td>
+                <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
+                <td><span class="sop-badge ${sopClass}">${esc(sopSt)}</span></td>
+                <td class="step-actions">
+                    ${hasSop?`<button class="btn btn-sm" onclick="event.stopPropagation();viewSOP('${s.id}')">View SOP</button>`:''}
+                    <button class="btn btn-sm btn-ai" onclick="event.stopPropagation();generateSOP('${s.id}')">AI SOP</button>
+                    <button class="btn btn-sm" onclick="event.stopPropagation();editStep('${s.id}')">Edit</button>
+                    <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteStep('${s.id}')">Del</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    }
+    html += `<div id="sop-viewer-${id}" style="display:none"></div>`;
+    td.innerHTML = html;
+    detailRow.appendChild(td);
+    dataRow.after(detailRow);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
