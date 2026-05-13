@@ -89,7 +89,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="operations" data-tabs="tasks,cfv,comms,operations,compliance">
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,cfv,comms,operations,compliance,systemisation">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
@@ -101,6 +101,7 @@
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('operations')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('operations')}"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('compliance')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('compliance')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span><span class="sidebar-health-dot unknown" data-sidebar-health="compliance" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
                 </div>
             </div>
 
@@ -689,6 +690,11 @@
         <!-- Tab: Operations (Tenants, Tenancies, Rental Units, Properties) -->
         <div class="tab-panel" id="tab-operations">
             <iframe class="tab-panel-iframe" id="operationsFrame" src="" data-src="os/operations/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Tab: Systemisation -->
+        <div class="tab-panel" id="tab-systemisation">
+            <iframe class="tab-panel-iframe" id="systemisationFrame" src="" data-src="os/systemisation/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
         <!-- Plan Builder + Strategy iframe panels (Operating Systems Hub removed in Phase 3 sidebar restructure) -->

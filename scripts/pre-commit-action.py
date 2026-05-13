@@ -37,6 +37,7 @@ FILE_TO_PAGE = {
     'os/operations/index.html': 'operations',
     'js/skills.js':             'skills',
     'js/skills-data.js':        'skills',
+    'os/systemisation/index.html': 'systemisation',
 }
 
 CONFIG_FILE = 'js/config.js'
