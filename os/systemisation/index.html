@@ -174,6 +174,20 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .wf-grid-expand{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:12px;padding:4px;border-radius:4px}
 .wf-grid-expand:hover{background:var(--bg-surface-2);color:var(--text-primary)}
 .wf-grid-saving{opacity:.5;pointer-events:none}
+
+.move-menu{position:absolute;right:0;top:100%;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:200;min-width:200px;max-height:260px;overflow-y:auto;padding:4px 0}
+.move-menu-item{display:block;width:100%;text-align:left;padding:8px 14px;font-size:var(--fs-sm);border:none;background:none;cursor:pointer;color:var(--text-primary);font-family:inherit}
+.move-menu-item:hover{background:var(--bg-surface-2)}
+.move-menu-item.current{color:var(--text-muted);font-style:italic;cursor:default;pointer-events:none}
+
+.searchable-select{position:relative;width:100%}
+.searchable-select input{width:100%;font-size:var(--fs-xs);padding:2px 8px;border-radius:10px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);font-family:inherit;cursor:text}
+.searchable-select input:focus{outline:none;border-color:var(--accent)}
+.searchable-select-list{position:absolute;left:0;right:0;top:100%;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);z-index:200;max-height:200px;overflow-y:auto;padding:4px 0;display:none}
+.searchable-select.open .searchable-select-list{display:block}
+.searchable-select-opt{display:block;width:100%;text-align:left;padding:6px 10px;font-size:var(--fs-xs);border:none;background:none;cursor:pointer;color:var(--text-primary);font-family:inherit}
+.searchable-select-opt:hover,.searchable-select-opt.highlighted{background:var(--bg-surface-2)}
+.searchable-select-opt.selected{font-weight:var(--fw-bold);color:var(--accent)}
 .wf-grid-detail td{background:var(--bg-surface-2);border-bottom:2px solid var(--border-default)}
 .wf-grid-detail:hover{background:var(--bg-surface-2)}
 
@@ -774,15 +788,9 @@ function buildAllGridRow(w){
     const methodIds = linkIds(gf(w,WF.mainMethodStage));
     const steps = stepsForWorkflow(w.id);
 
-    const deptOpts = DEPARTMENTS.map(d=>`<option value="${esc(d)}"${dept===d?' selected':''}>${esc(d)}</option>`).join('');
-    const fulfillOpts = FULFILL_STAGES.map(s=>`<option value="${esc(s.key)}"${fulfill===s.key?' selected':''}>${esc(s.label)}</option>`).join('');
     const orderedMethods = [];
     allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); }); });
     allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
-    const methodOpts = orderedMethods.map(m=>{
-        const sel = methodIds.includes(m.id) ? ' selected' : '';
-        return `<option value="${m.id}"${sel}>${esc(gf(m,MM.name)||'Unnamed')}</option>`;
-    }).join('');
 
     tr.innerHTML = `
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
@@ -790,9 +798,9 @@ function buildAllGridRow(w){
             <textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc">${esc(desc)}</textarea>
             <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:2px;font-size:11px;padding:2px 8px" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
         </div></td>
-        <td><select class="wf-grid-status" data-field="department" style="width:100%"><option value="">None</option>${deptOpts}</select></td>
-        <td><select class="wf-grid-status" data-field="fulfill" style="width:100%"><option value="">None</option>${fulfillOpts}</select></td>
-        <td><select class="wf-grid-status" data-field="method" style="width:100%"><option value="">None</option>${methodOpts}</select></td>
+        <td class="ss-dept"></td>
+        <td class="ss-fulfill"></td>
+        <td class="ss-method"></td>
         <td><select class="wf-grid-status" data-field="status">
             <option${status==='Not Started'?' selected':''}>Not Started</option>
             <option${status==='In Progress'?' selected':''}>In Progress</option>
@@ -802,19 +810,23 @@ function buildAllGridRow(w){
             <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
         </div></td>`;
 
+    const deptOpts = DEPARTMENTS.map(d=>({value:d, label:d}));
+    tr.querySelector('.ss-dept').appendChild(createSearchableSelect(deptOpts, dept, (v)=> gridSave(w.id, {[WF.department]: v||null}, tr)));
+
+    const fulfillOpts = FULFILL_STAGES.map(s=>({value:s.key, label:s.label}));
+    tr.querySelector('.ss-fulfill').appendChild(createSearchableSelect(fulfillOpts, fulfill, (v)=> gridSave(w.id, {[WF.fulfillStage]: v||null}, tr)));
+
+    const methodOpts = orderedMethods.map(m=>({value:m.id, label:gf(m,MM.name)||'Unnamed'}));
+    const currentMethodId = methodIds.length ? methodIds[0] : '';
+    tr.querySelector('.ss-method').appendChild(createSearchableSelect(methodOpts, currentMethodId, (v)=> gridSave(w.id, {[WF.mainMethodStage]: v ? [v] : []}, tr)));
+
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
     const statusSel = tr.querySelector('[data-field="status"]');
-    const deptSel = tr.querySelector('[data-field="department"]');
-    const fulfillSel = tr.querySelector('[data-field="fulfill"]');
-    const methodSel = tr.querySelector('[data-field="method"]');
 
     nameInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.name]: nameInput.value.trim()}, tr));
     descInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.description]: descInput.value.trim()}, tr));
     statusSel.addEventListener('change', ()=> gridSave(w.id, {[WF.status]: statusSel.value}, tr));
-    deptSel.addEventListener('change', ()=> gridSave(w.id, {[WF.department]: deptSel.value||null}, tr));
-    fulfillSel.addEventListener('change', ()=> gridSave(w.id, {[WF.fulfillStage]: fulfillSel.value||null}, tr));
-    methodSel.addEventListener('change', ()=> gridSave(w.id, {[WF.mainMethodStage]: methodSel.value ? [methodSel.value] : []}, tr));
 
     autoGrowTextarea(descInput);
     return tr;
@@ -940,7 +952,10 @@ function buildGridRow(w, stageKey, view){
             <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
             <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:2px;font-size:11px;padding:2px 8px" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
         </div></td>
-        <td><button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button></td>`;
+        <td style="white-space:nowrap"><div style="display:flex;gap:2px;align-items:center;position:relative">
+            <button class="btn btn-sm" style="padding:2px 6px;font-size:11px;background:none;border:1px solid var(--border-default);cursor:pointer;color:var(--text-secondary)" title="Move to another stage" onclick="showMoveMenu(this,'${w.id}','${esc(stageKey)}','${view}')">&#x21C4;</button>
+            <button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
+        </div></td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
@@ -1041,6 +1056,114 @@ async function deleteWorkflowRow(btn, id){
         else if(currentView==='dept') renderDept();
         toast('Workflow deleted');
     } catch(e){ toast('Error: '+e.message); tr.classList.remove('wf-grid-saving'); }
+}
+
+function createSearchableSelect(options, currentValue, onChange){
+    const wrapper = document.createElement('div');
+    wrapper.className = 'searchable-select';
+    const currentLabel = (options.find(o=>o.value===currentValue)||{}).label || 'None';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentLabel;
+    input.placeholder = 'Search...';
+    wrapper.appendChild(input);
+
+    const list = document.createElement('div');
+    list.className = 'searchable-select-list';
+    wrapper.appendChild(list);
+
+    function renderOptions(filter){
+        list.innerHTML = '';
+        const term = (filter||'').toLowerCase();
+        const allOpts = [{value:'', label:'None'}, ...options];
+        const filtered = term ? allOpts.filter(o=>o.label.toLowerCase().includes(term)) : allOpts;
+        filtered.forEach(opt=>{
+            const btn = document.createElement('button');
+            btn.className = 'searchable-select-opt' + (opt.value===currentValue?' selected':'');
+            btn.textContent = opt.label;
+            btn.addEventListener('mousedown', (e)=>{
+                e.preventDefault();
+                currentValue = opt.value;
+                input.value = opt.label;
+                wrapper.classList.remove('open');
+                onChange(opt.value);
+            });
+            list.appendChild(btn);
+        });
+    }
+
+    input.addEventListener('focus', ()=>{ input.select(); renderOptions(''); wrapper.classList.add('open'); });
+    input.addEventListener('input', ()=>{ renderOptions(input.value); wrapper.classList.add('open'); });
+    input.addEventListener('blur', ()=>{
+        setTimeout(()=>{
+            wrapper.classList.remove('open');
+            const cur = options.find(o=>o.value===currentValue);
+            input.value = cur ? cur.label : 'None';
+        }, 150);
+    });
+    input.addEventListener('keydown', (e)=>{
+        if(e.key==='Escape'){ input.blur(); }
+        if(e.key==='Enter'){
+            const first = list.querySelector('.searchable-select-opt');
+            if(first) first.dispatchEvent(new MouseEvent('mousedown'));
+        }
+    });
+
+    return wrapper;
+}
+
+function showMoveMenu(btn, wfId, currentKey, view){
+    document.querySelectorAll('.move-menu').forEach(m=>m.remove());
+    const container = btn.parentElement;
+    const menu = document.createElement('div');
+    menu.className = 'move-menu';
+
+    let options = [];
+    if(view==='fulfill'){
+        options = FULFILL_STAGES.map(s=>({key:s.key, label:s.label}));
+    } else if(view==='method'){
+        const ordered = [];
+        allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!ordered.includes(m)) ordered.push(m); }); });
+        allMethods.forEach(m=>{ if(!ordered.includes(m)) ordered.push(m); });
+        options = ordered.map(m=>({key:m.id, label:gf(m,MM.name)||'Unnamed'}));
+    } else {
+        options = DEPARTMENTS.map(d=>({key:d, label:d}));
+    }
+
+    options.forEach(opt=>{
+        const item = document.createElement('button');
+        item.className = 'move-menu-item' + (opt.key===currentKey?' current':'');
+        item.textContent = opt.key===currentKey ? opt.label + ' (current)' : opt.label;
+        if(opt.key!==currentKey){
+            item.addEventListener('click', ()=>{ menu.remove(); moveWorkflow(wfId, opt.key, view); });
+        }
+        menu.appendChild(item);
+    });
+
+    container.appendChild(menu);
+    const closeMenu = (e)=>{ if(!menu.contains(e.target) && e.target!==btn){ menu.remove(); document.removeEventListener('click', closeMenu); } };
+    setTimeout(()=> document.addEventListener('click', closeMenu), 0);
+}
+
+async function moveWorkflow(wfId, newKey, view){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const fields = {};
+    if(view==='fulfill') fields[WF.fulfillStage] = newKey;
+    else if(view==='method') fields[WF.mainMethodStage] = [newKey];
+    else fields[WF.department] = newKey;
+
+    try {
+        const updated = await atUpdate(TBL.workflows, wfId, fields);
+        const idx = allWorkflows.findIndex(w=>w.id===wfId);
+        if(idx>=0) allWorkflows[idx] = updated;
+        updateTabCounts();
+        if(view==='fulfill') renderFulfill();
+        else if(view==='method') renderMethod();
+        else if(view==='dept') renderDept();
+        openDrawer(_drawerKey, _drawerView);
+        toast('Workflow moved');
+    } catch(e){ toast('Error: '+e.message); }
 }
 
 async function aiDescRow(btn){
