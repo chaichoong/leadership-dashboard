@@ -277,6 +277,37 @@ body {
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
+/* Accounts sub-tab bar (finance mega-tab) */
+.accounts-subtab-bar {
+    display: flex;
+    gap: 4px;
+    padding: 12px 0 16px;
+    flex-wrap: wrap;
+}
+.accounts-subtab {
+    padding: 7px 16px;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: var(--font-family-base);
+}
+.accounts-subtab:hover {
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+.accounts-subtab.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-weight: var(--fw-semibold);
+}
+
 /* Invoices Tab */
 .invoice-table-wrapper { overflow-x: auto; }
 .invoice-table { width: 100%; border-collapse: collapse; font-size: var(--fs-base); }

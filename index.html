@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/tokens.css?v=1">
     <link rel="stylesheet" href="css/sync-bar.css?v=2">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
-    <link rel="stylesheet" href="css/styles.css?v=18">
+    <link rel="stylesheet" href="css/styles.css?v=19">
 </head>
 <body>
     <!-- Auth Screen -->
@@ -67,29 +67,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section coming-soon" data-section="marketing" data-tabs="">
-                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('marketing')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('marketing')">
-                    <span class="sidebar-section-chevron">&#x25B8;</span>
-                    <span class="sidebar-section-name">Marketing</span>
-                    <span class="sidebar-section-coming">Coming</span>
-                </div>
-                <div class="sidebar-section-body">
-                    <div class="sidebar-item disabled" title="No Marketing module yet — coming"><span class="sidebar-icon">&#x1F4E3;</span><span class="sidebar-label">Marketing</span></div>
-                </div>
-            </div>
-
-            <div class="sidebar-section coming-soon" data-section="sales" data-tabs="">
-                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('sales')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('sales')">
-                    <span class="sidebar-section-chevron">&#x25B8;</span>
-                    <span class="sidebar-section-name">Sales</span>
-                    <span class="sidebar-section-coming">Coming</span>
-                </div>
-                <div class="sidebar-section-body">
-                    <div class="sidebar-item disabled" title="No Sales module yet — coming"><span class="sidebar-icon">&#x1F91D;</span><span class="sidebar-label">Sales / Pipeline</span></div>
-                </div>
-            </div>
-
-            <div class="sidebar-section" data-section="operations" data-tabs="tasks,cfv,comms,operations,compliance,systemisation">
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,comms,operations,compliance,systemisation">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
@@ -97,35 +75,30 @@
                 </div>
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('tasks')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('cfv')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('cfv')}"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids</span><span class="sidebar-health-dot unknown" data-sidebar-health="cfv" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('operations')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('operations')}"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('compliance')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('compliance')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Property Compliance</span><span class="sidebar-health-dot unknown" data-sidebar-health="compliance" title="No checks run yet"></span></div>
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="finance" data-tabs="income,ar-variable,costs,invoices,pnl,transactions,fintable">
+            <div class="sidebar-section" data-section="finance" data-tabs="income,ar-variable,costs,invoices,pnl,transactions,fintable,cfv">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('finance')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('finance')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Finance</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('income')}"><span class="sidebar-icon">&#x1F4B7;</span><span class="sidebar-label">Accounts Receivable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="income" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ar-variable')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ar-variable')}"><span class="sidebar-icon">&#x1F4E4;</span><span class="sidebar-label">Accounts Receivable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="ar-variable" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('costs')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('costs')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Accounts Payable Fixed</span><span class="sidebar-health-dot unknown" data-sidebar-health="costs" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('invoices')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('invoices')}"><span class="sidebar-icon">&#x1F9FE;</span><span class="sidebar-label">Accounts Payable Variable</span><span class="sidebar-health-dot unknown" data-sidebar-health="invoices" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" data-tab-group="accounts" onclick="switchTab('income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('income')}"><span class="sidebar-icon">&#x1F4B7;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="accounts" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('pnl')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('pnl')}"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('transactions')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('transactions')}"><span class="sidebar-icon">&#x1F50D;</span><span class="sidebar-label">Transactions</span><span class="sidebar-health-dot unknown" data-sidebar-health="transactions" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('fintable')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('fintable')}"><span class="sidebar-icon">&#x1F3E6;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="fintable" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('cfv')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('cfv')}"><span class="sidebar-icon">&#x1F6A8;</span><span class="sidebar-label">Cash Flow Voids</span><span class="sidebar-health-dot unknown" data-sidebar-health="cfv" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
                 </div>
             </div>
 
             <div class="sidebar-section" data-section="team" data-tabs="os-team">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('team')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('team')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
-                    <span class="sidebar-section-name">Team / HR</span>
+                    <span class="sidebar-section-name">HR / Admin</span>
                     <span class="sidebar-section-dot unknown" data-section-dot="team"></span>
                 </div>
                 <div class="sidebar-section-body">
@@ -328,6 +301,16 @@
             <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
+
+        <!-- Accounts sub-tab bar (shown when any finance sub-tab is active) -->
+        <div class="accounts-subtab-bar" id="accountsSubtabBar" style="display:none">
+            <button class="accounts-subtab active" data-tab="income" onclick="switchTab('income')">AR Fixed</button>
+            <button class="accounts-subtab" data-tab="ar-variable" onclick="switchTab('ar-variable')">AR Variable</button>
+            <button class="accounts-subtab" data-tab="costs" onclick="switchTab('costs')">AP Fixed</button>
+            <button class="accounts-subtab" data-tab="invoices" onclick="switchTab('invoices')">AP Variable</button>
+            <button class="accounts-subtab" data-tab="transactions" onclick="switchTab('transactions')">Transactions</button>
+            <button class="accounts-subtab" data-tab="fintable" onclick="switchTab('fintable')">Bank Accounts</button>
+        </div>
 
         <!-- Tab: Accounts Receivable Fixed (Income) -->
         <div class="tab-panel" id="tab-income">
@@ -716,6 +699,7 @@
             <div class="section">
                 <h2 class="section-title">Site Map & Guides</h2>
                 <div id="sitemapIntegrity" style="margin-bottom:16px"></div>
+                <div style="margin-bottom:16px"><a href="architecture.html" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--accent);text-decoration:none;transition:all .15s ease" onmouseover="this.style.background='var(--accent-soft)';this.style.borderColor='var(--accent)'" onmouseout="this.style.background='var(--bg-surface)';this.style.borderColor='var(--border-default)'">🗺️ Platform Architecture Map</a></div>
                 <div style="overflow-x:auto">
                     <table class="invoice-table" style="min-width:900px">
                         <thead>
@@ -809,7 +793,7 @@
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
     <script defer src="js/config.js?v=22"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
-    <script defer src="js/shared.js?v=21"></script>
+    <script defer src="js/shared.js?v=22"></script>
     <script defer src="js/sync-bar.js?v=4"></script>
     <script defer src="js/dashboard.js?v=19"></script>
     <script defer src="js/cashflow.js?v=14"></script>
