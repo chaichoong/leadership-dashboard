@@ -46,6 +46,20 @@
     function hasLinkedPaymentThisMonth(tenancyId, today) {
         const tenancy = allTenancies.find(t => t.id === tenancyId);
         if (!tenancy) return true; // unknown — don't flag
+
+        // Guard: if no reconciled transaction is linked to this tenancy at all,
+        // there is no payment evidence. The arrears engine returns "not in arrears"
+        // for tenancies with no start date or no history, producing a false positive
+        // "payment detected" that would auto-return new CFVs to In Payment.
+        const hasAnyLinkedTx = allTransactions.some(tx => {
+            if (!getField(tx, F.txReconciled)) return false;
+            const links = getField(tx, F.txTenancy);
+            if (!links) return false;
+            const arr = Array.isArray(links) ? links : [links];
+            return arr.some(item => (typeof item === 'object' ? item.id : item) === tenancyId);
+        });
+        if (!hasAnyLinkedTx) return false;
+
         const tenantLookup = buildTenantLookup();
         const tenantType = (typeof getTenantTypeForTenancy === 'function')
             ? getTenantTypeForTenancy(tenancy, tenantLookup)
@@ -86,9 +100,9 @@
                 if (localStorage.getItem('cfv_' + tenancy.id + '_returned')) return;
 
                 // Skip if the tenancy has ended — tenant status will be "Former" after
-                // the tenancy-ender skill runs. This keeps the CFV tab in sync with the
-                // Leadership Dashboard, which filters voids by active tenant status.
-                if (!isTenantStatusActive(tenancy)) return;
+                // the tenancy-ender skill runs. Only exclude when the status is explicitly
+                // "Former"; new tenancies may have an empty/null rollup and must still show.
+                if (isTenantStatusFormer(tenancy)) return;
 
                 const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today);
 
