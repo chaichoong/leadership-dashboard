@@ -597,16 +597,20 @@ function openDrawer(recId) {
 
     if (Array.isArray(achievements) && achievements.length) {
         html += `<div class="drawer-section"><h3>Achievements (${achievements.length})</h3>`;
-        achievements.forEach(a => {
-            html += `<div style="padding:4px 0;font-size:var(--fs-sm);color:var(--text-secondary)">&#x1F3C6; ${escHtml(a.name || 'Achievement')}</div>`;
+        achievements.forEach(aId => {
+            const rec = allAchievements.find(r => r.id === aId);
+            const title = rec ? (gf(rec, ACHIEVE.title) || 'Achievement') : 'Achievement';
+            html += `<div style="padding:4px 0;font-size:var(--fs-sm);color:var(--text-secondary)">&#x1F3C6; ${escHtml(title)}</div>`;
         });
         html += `</div>`;
     }
 
     if (Array.isArray(sops) && sops.length) {
         html += `<div class="drawer-section"><h3>SOPs Assigned (${sops.length})</h3>`;
-        sops.forEach(s => {
-            html += `<div style="padding:4px 0;font-size:var(--fs-sm);color:var(--text-secondary)">&#x1F4CB; ${escHtml(s.name || 'SOP')}</div>`;
+        sops.forEach(sId => {
+            const rec = allSOPs.find(r => r.id === sId);
+            const title = rec ? (gf(rec, SOP.title) || 'SOP') : 'SOP';
+            html += `<div style="padding:4px 0;font-size:var(--fs-sm);color:var(--text-secondary)">&#x1F4CB; ${escHtml(title)}</div>`;
         });
         html += `</div>`;
     }
