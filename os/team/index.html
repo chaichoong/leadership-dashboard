@@ -248,23 +248,27 @@ function authenticate() {
     const v = document.getElementById('patInput').value.trim();
     if (!v) return;
     PAT = v;
-    try { sessionStorage.setItem('airtable_pat', v); } catch(e) {}
+    try { localStorage.setItem('_dlr_pat', v); } catch(e) {}
     document.getElementById('authBar').style.display = 'none';
     document.getElementById('appShell').style.display = '';
     loadAll();
 }
 
+function showApp() {
+    document.getElementById('authBar').style.display = 'none';
+    document.getElementById('appShell').style.display = '';
+}
+
 (function autoAuth() {
+    try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; showApp(); loadAll(); return; } } catch(e) {}
     let stored = '';
-    try { stored = sessionStorage.getItem('airtable_pat') || ''; } catch(e) {}
-    if (stored) { PAT = stored; document.getElementById('authBar').style.display = 'none'; document.getElementById('appShell').style.display = ''; loadAll(); }
+    try { stored = localStorage.getItem('_dlr_pat') || ''; } catch(e) {}
+    if (stored) { PAT = stored; showApp(); loadAll(); return; }
     window.addEventListener('message', e => {
         if (e.data?.type === 'pat-broadcast' && e.data.pat) {
             PAT = e.data.pat;
-            try { sessionStorage.setItem('airtable_pat', PAT); } catch(ex) {}
-            document.getElementById('authBar').style.display = 'none';
-            document.getElementById('appShell').style.display = '';
-            loadAll();
+            try { localStorage.setItem('_dlr_pat', PAT); } catch(ex) {}
+            showApp(); loadAll();
         }
     });
 })();
