@@ -267,6 +267,18 @@
         return false;
     }
 
+    // Positive check for "Former" — returns false when the field is empty/null,
+    // so new tenancies with an unpopulated rollup are NOT treated as former.
+    function isTenantStatusFormer(rec) {
+        const status = getField(rec, F.tenStatus);
+        if (!status) return false;
+        if (Array.isArray(status)) {
+            return status.some(s => typeof s === 'string' && s.trim().toLowerCase() === 'former');
+        }
+        if (typeof status === 'string') return status.trim().toLowerCase() === 'former';
+        return false;
+    }
+
     function isCostActive(rec) {
         // Single rule, used everywhere (Leadership Dashboard monthly costs,
         // AP Fixed table, reconciliation dropdowns, transactions dropdowns).
