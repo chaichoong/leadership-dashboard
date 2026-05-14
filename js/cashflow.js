@@ -442,6 +442,20 @@
             `;
         }).join('');
 
+        // Totals row at the bottom of the daily table
+        const totalNet = totalIn - totalOut;
+        tbody.insertAdjacentHTML('beforeend', `
+            <tr style="background:var(--bg-subtle);font-weight:var(--fw-semibold);border-top:2px solid var(--border-default)">
+                <td>Totals</td>
+                <td></td>
+                <td class="text-green">+${fmt(totalIn)}</td>
+                <td class="text-red">-${fmt(totalOut)}</td>
+                <td class="${totalNet >= 0 ? 'text-green' : 'text-red'}">${totalNet >= 0 ? '+' : '-'}${fmt(totalNet)}</td>
+                <td></td>
+                <td></td>
+            </tr>
+        `);
+
         // Build what-if data: recalculate closing balances excluding unchecked items
         window._cfRows = rows;
         window._cfOpeningBalance = openingBalance;
@@ -627,32 +641,30 @@
             }
         } else {
             // Monthly (default)
-            // Always include this month's due date (even if past, for reconciliation window)
-            // Plus next month if within the 31-day forecast window
+            // Include this month's due date if today or future, plus next month
+            // if within the 31-day window. Reconciliation handles already-paid items.
             const thisMonthLast = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
             const nextMonthLast = new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate();
 
-            // This month: if due day exceeds days in month, roll to 1st of next month
             let dThis;
             if (dueDay > thisMonthLast) {
-                // e.g. due day 31 in April (30 days) → rolls to May 1st
                 dThis = new Date(today.getFullYear(), today.getMonth() + 1, 1);
             } else {
                 dThis = new Date(today.getFullYear(), today.getMonth(), dueDay);
             }
-            const daysAgo = Math.floor((today - dThis) / 86400000);
-            if (dThis <= windowEnd && daysAgo <= 5) {
+            // Normalise to midnight for clean comparison
+            const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            if (dThis >= todayMidnight && dThis <= windowEnd) {
                 dates.push(dateKey(dThis));
             }
 
-            // Next month: same rollover logic
             let dNext;
             if (dueDay > nextMonthLast) {
                 dNext = new Date(today.getFullYear(), today.getMonth() + 2, 1);
             } else {
                 dNext = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
             }
-            if (dNext >= today && dNext <= windowEnd) {
+            if (dNext >= todayMidnight && dNext <= windowEnd) {
                 dates.push(dateKey(dNext));
             }
         }
