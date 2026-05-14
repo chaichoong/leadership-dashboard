@@ -25,6 +25,7 @@
         { id: 'os-bplan',  name: 'Business Launch Plan Builder',   icon: '📋', pageVer: '1.11', sopFile: 'os/business-plan-builder/sop.html', sopVer: '1.3', standalone: 'os/business-plan-builder/index.html' },
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
+        { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.16', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.2', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
     ];
@@ -374,6 +375,88 @@
         sortOrder:   'fldOWS3MfMSVJyo0b',
         skillId:     'fldOisvuXul0r1XUD',
         tasks:       'fldzxG4dMwZiL9ZzK',  // inverse link from Tasks table
+    };
+
+    // Team Members table
+    const TEAM_TABLE = 'tblco0p2OnlLQVAX7';
+    const TEAM = {
+        name:              'flds7xoRFQhcRTnbB',  // formula (display name)
+        preferredName:     'fldFyTZu3vu1a7X3a',
+        fullLegalName:     'fld1DYEbtyVsO2GVP',
+        member:            'fldh16yvEgBy8uLKQ',  // singleCollaborator
+        role:              'fld6O2PpClGpTZd8N',  // link → Roles
+        department:        'fldi8KmXyedB1ixrr',  // link → Department
+        manager:           'fld2Wt9bHuIT9iia4',  // link → Team Members (self-ref, org chart)
+        workEmail:         'fldraub938ex3BqMU',
+        whatsApp:          'fldTZ0ReLsqpAHxE8',
+        profilePhoto:      'fldekq1yBG4ZC2jKU',  // attachment
+        jobTitle:          'fldWQldpgSxZRqUu5',
+        status:            'fldTOGTPw20khbtec',   // singleSelect: Onboarding/Active/Offboarding/Offboarded
+        startDate:         'fld9uw166E6TkGusD',
+        active:            'fld2YLfcPqSe6b60u',  // checkbox
+        contractDocs:      'fldqqOLK8d934TLdL',  // attachment
+        achievements:      'fldxGZDWnoAYp21Ey',  // link → Achievements
+        sops:              'fldVjCuHUCgzD5bqP',  // link → SOPs
+        sopsTask:          'fld4dpctNy2v57aL8',  // link → SOPs
+        trainingStatus:    'fldc2RdaXuuYPqymA',  // lookup from SOPs
+        performanceReviews:'fldmnlTfShMkPj88u',  // link → Performance Reviews
+        emergencyName:     'fldcDbWN6n7ja31RM',
+        emergencyPhone:    'fldzlBLXXCL1u55HH',
+        country:           'fld819Jpc8zHEUyVh',
+        workingDays:       'fld2XkmSBs70NvXKn',  // multipleSelects
+        weeklyCapacity:    'fldIwCBuf1B8KMbIp',  // number (hours)
+        utilisation:       'fldnt6iHzSrJkkEHJ',  // formula %
+        business:          'fldbvMos3oFMrb4W9',  // link → Business
+        slackHandle:       'fld3OV2XCYDAWwwbX',
+        managerEmail:      'fldw28xtoxwSJgH2Z',
+        constraints:       'fldvjbOZ7ejbFOQK9',  // multilineText
+        handbookLink:      'fldEIwDJhvGJ8FTgH',
+        dob:               'fldXOpDiYpVnxyDyL',
+        contractHR:        'fldxq9tYZVYrZFGdH',  // link → Contract HR OS
+    };
+
+    // Achievements table
+    const ACHIEVE_TABLE = 'tblHtx8o3zt1Rd8fF';
+    const ACHIEVE = {
+        title:       'fld371pHn1EQYRDq0',  // formula (display)
+        teamMember:  'fldntslZwKqS7jnkv',  // link → Team Members
+        titleAI:     'fldvux4XWfVhVZ87B',  // aiText
+        description: 'fldUxbt7ZOB5Ig1yD',
+        date:        'fld0dfmYoaMQEbXrU',
+        type:        'fldUh6dqEh9PNc8gr',  // singleSelect
+        source:      'fldlKhLHUYg1fPf7X',  // singleSelect
+        status:      'fldPO8gtvCy9qUN4D',  // singleSelect
+        approval:    'fldaNdproX7gYya93',  // checkbox
+    };
+
+    // Department table
+    const DEPT_TABLE = 'tbloIBoYzlF3URiYK';
+    const DEPT = {
+        name:       'fldDGaNynfawVs36F',
+        members:    'fldzNy5Pq2d51BQ5q',  // link → Team Members
+        head:       'fldaXgNKrRhwoQ3t1',  // link → Team Members
+        roles:      'fldg8PhceRBD86XcW',   // link → Roles
+    };
+
+    // Roles table
+    const ROLES_TABLE = 'tblHiFrzekohQk2lt';
+    const ROLES = {
+        role:       'fldR7jqnTLqFNdJ4Y',
+        members:    'fldXqrYpqdJEMyCpu',  // link → Team Members
+        department: 'fld45Tf2vWbbKVSEw',  // link → Department
+    };
+
+    // SOPs table (for training records)
+    const SOP_TABLE = 'tblF3tSfEajPQJHoI';
+    const SOP = {
+        title:          'fldKuv5brBlD02B63',
+        sopStatus:      'fld6qkVkFgzN2XGbQ',  // singleSelect
+        department:     'fldiLbmDHr6ghPRNr',   // link → Department
+        business:       'fldxbWsXSSnWj6qBA',   // link → Business
+        teamMember:     'fldm7Uew4thUsRwUe',   // link → Team Members
+        trainingStatus: 'fldJms3VbxHmkaHol',   // formula
+        sopVideo:       'fldileM23VJc0b8Kd',   // url
+        sopType:        'fldzhsJD96JFDRho6',   // singleSelect
     };
 
     // Key record IDs

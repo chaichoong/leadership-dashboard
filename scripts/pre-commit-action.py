@@ -38,6 +38,7 @@ FILE_TO_PAGE = {
     'js/skills.js':             'skills',
     'js/skills-data.js':        'skills',
     'os/systemisation/index.html': 'systemisation',
+    'os/team/index.html':          'os-team',
 }
 
 CONFIG_FILE = 'js/config.js'
