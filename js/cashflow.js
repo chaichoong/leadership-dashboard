@@ -271,9 +271,9 @@
 
             projectDates(today, dueDay, freq, getField(r, F.tenDueDay), null).forEach(dk => {
                 if (dayMap[dk]) {
-                    if (isInReconWindow(dk) && isInflowAlreadyCleared(rent, label, r.id)) return;
+                    const cleared = isInReconWindow(dk) && isInflowAlreadyCleared(rent, label, r.id);
                     const isUC = tenancyIsUC[r.id] || false;
-                    dayMap[dk].inflows.push({ name: label, amount: rent, isUC, tenancyId: r.id, tenantId, unitId, dueDate: dk, account: tenancyLastAccount[r.id] || '' });
+                    dayMap[dk].inflows.push({ name: label, amount: rent, isUC, tenancyId: r.id, tenantId, unitId, dueDate: dk, account: tenancyLastAccount[r.id] || '', cleared });
                 }
             });
         });
@@ -296,9 +296,8 @@
 
             projectDates(today, dueDay, freq, null, dueDateNext).forEach(dk => {
                 if (dayMap[dk]) {
-                    // Check today..today+3: keyword + amount + sub-category match against reconciled outflows
-                    if (isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds)) return;
-                    dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '' });
+                    const cleared = isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds);
+                    dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '', cleared });
                 }
             });
         });
@@ -308,7 +307,7 @@
         const chartLabels = [];
         const chartData = [];
         const chartDataWorstCase = [];
-        let totalIn = 0, totalOut = 0;
+        let totalIn = 0, totalOut = 0, clearedIn = 0, clearedOut = 0, clearedInCount = 0, clearedOutCount = 0;
         let lowestBal = openingBalance;
         let lowestDay = '';
         const rows = [];
@@ -318,14 +317,16 @@
 
         days.forEach((key, idx) => {
             const day = dayMap[key];
-            const dayIn = day.inflows.reduce((s, i) => s + i.amount, 0);
-            const dayOut = day.outflows.reduce((s, i) => s + i.amount, 0);
+            const dayIn = day.inflows.reduce((s, i) => s + (i.cleared ? 0 : i.amount), 0);
+            const dayOut = day.outflows.reduce((s, i) => s + (i.cleared ? 0 : i.amount), 0);
             const net = dayIn - dayOut;
             const opening = balance;
             const closing = balance + net;
             balance = closing;
             totalIn += dayIn;
             totalOut += dayOut;
+            day.inflows.forEach(f => { if (f.cleared) { clearedIn += f.amount; clearedInCount++; } });
+            day.outflows.forEach(f => { if (f.cleared) { clearedOut += f.amount; clearedOutCount++; } });
 
             if (closing < lowestBal) {
                 lowestBal = closing;
@@ -398,8 +399,12 @@
                 ? `<span class="od-text-muted-sm" style="background:var(--bg-subtle);padding:1px 6px;border-radius:3px;margin-left:6px;white-space:nowrap;color:var(--text-secondary)">${escHtml(acct)}</span>`
                 : '';
 
+            const reconBadge = '<span style="background:var(--bg-subtle);color:var(--text-muted);padding:1px 6px;border-radius:3px;margin-left:6px;font-size:0.75rem">Reconciled</span>';
             const inflowsHtml = r.inflows.length > 0
                 ? r.inflows.map((f, fi) => {
+                    if (f.cleared) {
+                        return `<div class="cashflow-detail-item in" style="opacity:0.5"><span class="cashflow-detail-item-name" style="flex:1;color:var(--text-muted)">${escHtml(f.name)}${reconBadge}${acctTag(f.account)}</span><span class="cashflow-detail-item-value" style="text-decoration:line-through;color:var(--text-muted)">+${fmt(f.amount)}</span></div>`;
+                    }
                     const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
                     return `<div class="cashflow-detail-item in"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="in" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value">+${fmt(f.amount)}</span></div>`;
@@ -407,6 +412,9 @@
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
             const outflowsHtml = r.outflows.length > 0
                 ? r.outflows.map((f, fi) => {
+                    if (f.cleared) {
+                        return `<div class="cashflow-detail-item out" style="opacity:0.5"><span class="cashflow-detail-item-name" style="flex:1;color:var(--text-muted)">${escHtml(f.name)}${reconBadge}${acctTag(f.account)}</span><span class="cashflow-detail-item-value" style="text-decoration:line-through;color:var(--text-muted)">-${fmt(f.amount)}</span></div>`;
+                    }
                     const cbId = cfStableKey(r.key, 'out', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
                     return `<div class="cashflow-detail-item out"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`;
@@ -442,8 +450,19 @@
             `;
         }).join('');
 
-        // Totals row at the bottom of the daily table
+        // Totals row + cross-check diagnostic
         const totalNet = totalIn - totalOut;
+        const monthlyCostsCalc = activeCostsList.reduce((s, r) => s + (Number(getField(r, F.costExpected)) || 0), 0);
+        const fullOutflows = totalOut + clearedOut;
+        const fullInflows = totalIn + clearedIn;
+        const outDiff = Math.abs(fullOutflows - monthlyCostsCalc);
+        const inDiff = Math.abs(fullInflows - monthlyIncome);
+        const outMatch = outDiff < monthlyCostsCalc * 0.05;
+        const inMatch = inDiff < monthlyIncome * 0.05;
+        const clearedNote = (clearedInCount + clearedOutCount) > 0
+            ? `${clearedInCount + clearedOutCount} reconciled (${fmt(clearedIn)} in, ${fmt(clearedOut)} out)`
+            : '';
+
         tbody.insertAdjacentHTML('beforeend', `
             <tr style="background:var(--bg-subtle);font-weight:var(--fw-semibold);border-top:2px solid var(--border-default)">
                 <td>Totals</td>
@@ -453,6 +472,19 @@
                 <td class="${totalNet >= 0 ? 'text-green' : 'text-red'}">${totalNet >= 0 ? '+' : '-'}${fmt(totalNet)}</td>
                 <td></td>
                 <td></td>
+            </tr>
+            <tr style="background:var(--bg-surface-2);font-size:0.8rem;color:var(--text-secondary)">
+                <td colspan="7" style="padding:8px 12px;line-height:1.6">
+                    <strong>Cross-check vs Dashboard metrics:</strong><br>
+                    Inflows: ${fmt(fullInflows)} forecast (incl. reconciled) vs ${fmt(monthlyIncome)} monthly income
+                    <span style="color:${inMatch ? 'var(--success)' : 'var(--warning)'}">${inMatch ? '✓ Match' : '△ Differs'}</span>
+                    ${!inMatch ? `<span style="color:var(--text-muted)"> (${fmt(inDiff)} gap — partial month or frequency differences)</span>` : ''}
+                    <br>
+                    Outflows: ${fmt(fullOutflows)} forecast (incl. reconciled) vs ${fmt(monthlyCostsCalc)} monthly costs
+                    <span style="color:${outMatch ? 'var(--success)' : 'var(--warning)'}">${outMatch ? '✓ Match' : '△ Differs'}</span>
+                    ${!outMatch ? `<span style="color:var(--text-muted)"> (${fmt(outDiff)} gap — quarterly/annual costs or partial month)</span>` : ''}
+                    ${clearedNote ? `<br><span style="color:var(--text-muted)">🔄 ${clearedNote}</span>` : ''}
+                </td>
             </tr>
         `);
 
@@ -893,10 +925,12 @@
         return rows.map((r, i) => {
             let dayIn = 0, dayOut = 0;
             r.inflows.forEach((f, fi) => {
+                if (f.cleared) return;
                 const key = cfStableKey(r.key, 'in', f.name, f.amount);
                 if (!excl[key]) dayIn += f.amount;
             });
             r.outflows.forEach((f, fi) => {
+                if (f.cleared) return;
                 const key = cfStableKey(r.key, 'out', f.name, f.amount);
                 if (!excl[key]) dayOut += f.amount;
             });
