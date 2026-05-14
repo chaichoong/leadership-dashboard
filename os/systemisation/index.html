@@ -188,6 +188,18 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .searchable-select-opt{display:block;width:100%;text-align:left;padding:6px 10px;font-size:var(--fs-xs);border:none;background:none;cursor:pointer;color:var(--text-primary);font-family:inherit}
 .searchable-select-opt:hover,.searchable-select-opt.highlighted{background:var(--bg-surface-2)}
 .searchable-select-opt.selected{font-weight:var(--fw-bold);color:var(--accent)}
+
+.bulk-toolbar{display:none;align-items:center;gap:12px;padding:10px 16px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:8px;position:sticky;top:0;z-index:10}
+.bulk-toolbar.visible{display:flex}
+.bulk-toolbar-count{font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--accent-hover);white-space:nowrap}
+.bulk-toolbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1}
+.bulk-toolbar .searchable-select{width:160px}
+.bulk-toolbar .searchable-select input{font-size:var(--fs-sm);padding:4px 10px;border-radius:var(--radius-sm)}
+.bulk-toolbar-label{font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)}
+.bulk-toolbar .btn-danger{font-size:var(--fs-sm);padding:4px 12px}
+.bulk-toolbar-clear{background:none;border:none;font-size:var(--fs-xs);color:var(--text-secondary);cursor:pointer;text-decoration:underline;margin-left:auto}
+.bulk-toolbar-clear:hover{color:var(--text-primary)}
+.wf-grid .bulk-check{width:18px;height:18px;cursor:pointer;accent-color:var(--accent)}
 .wf-grid-detail td{background:var(--bg-surface-2);border-bottom:2px solid var(--border-default)}
 .wf-grid-detail:hover{background:var(--bg-surface-2)}
 
@@ -754,14 +766,39 @@ function renderAll(){
     hint.textContent = 'All workflows in one place. Edit inline or use the other tabs to organise by stage.';
     paneEl.appendChild(hint);
 
+    const toolbar = document.createElement('div');
+    toolbar.className = 'bulk-toolbar';
+    toolbar.id = 'bulkToolbar';
+    toolbar.innerHTML = `<span class="bulk-toolbar-count" id="bulkCount">0 selected</span>
+        <div class="bulk-toolbar-actions">
+            <span class="bulk-toolbar-label">Assign:</span>
+            <div id="bulkDept"></div>
+            <div id="bulkFulfill"></div>
+            <div id="bulkMethod"></div>
+            <button class="btn btn-sm btn-danger" onclick="bulkDelete()">Delete selected</button>
+        </div>
+        <button class="bulk-toolbar-clear" onclick="bulkClearAll()">Clear selection</button>`;
+    paneEl.appendChild(toolbar);
+
+    const deptOpts = DEPARTMENTS.map(d=>({value:d, label:d}));
+    toolbar.querySelector('#bulkDept').appendChild(createSearchableSelect(deptOpts, '', (v)=> bulkAssign('department', v)));
+    const fulfillOpts = FULFILL_STAGES.map(s=>({value:s.key, label:s.label}));
+    toolbar.querySelector('#bulkFulfill').appendChild(createSearchableSelect(fulfillOpts, '', (v)=> bulkAssign('fulfill', v)));
+    const orderedMethods = [];
+    allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); }); });
+    allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
+    const methodOpts = orderedMethods.map(m=>({value:m.id, label:gf(m,MM.name)||'Unnamed'}));
+    toolbar.querySelector('#bulkMethod').appendChild(createSearchableSelect(methodOpts, '', (v)=> bulkAssign('method', v)));
+
     const table = document.createElement('table');
     table.className = 'wf-grid';
     table.innerHTML = `<thead><tr>
-        <th style="width:20%">Name</th>
-        <th style="width:22%">Description</th>
-        <th style="width:14%">Department</th>
-        <th style="width:16%">Customer Journey Stage</th>
-        <th style="width:14%">Main Method Stage</th>
+        <th style="width:36px"><input type="checkbox" class="bulk-check" id="bulkSelectAll" onchange="bulkToggleAll(this.checked)"></th>
+        <th style="width:18%">Name</th>
+        <th style="width:20%">Description</th>
+        <th style="width:13%">Department</th>
+        <th style="width:15%">Customer Journey Stage</th>
+        <th style="width:13%">Main Method Stage</th>
         <th style="width:80px">Status</th>
         <th style="width:60px">Actions</th>
     </tr></thead>`;
@@ -793,6 +830,7 @@ function buildAllGridRow(w){
     allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
 
     tr.innerHTML = `
+        <td><input type="checkbox" class="bulk-check" data-wf-id="${w.id}" onchange="bulkUpdateCount()"></td>
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
         <td><div style="display:flex;gap:4px;align-items:start">
             <textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc">${esc(desc)}</textarea>
@@ -836,6 +874,7 @@ function buildAllNewRow(){
     const tr = document.createElement('tr');
     tr.className = 'wf-grid-new';
     tr.innerHTML = `
+        <td></td>
         <td><input class="wf-grid-input" placeholder="Type name and press Enter" data-field="name"></td>
         <td><textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc"></textarea></td>
         <td></td><td></td><td></td><td></td><td></td>`;
@@ -1164,6 +1203,98 @@ async function moveWorkflow(wfId, newKey, view){
         openDrawer(_drawerKey, _drawerView);
         toast('Workflow moved');
     } catch(e){ toast('Error: '+e.message); }
+}
+
+function getSelectedWfIds(){
+    return Array.from(document.querySelectorAll('.bulk-check[data-wf-id]:checked')).map(cb=>cb.dataset.wfId);
+}
+
+function bulkUpdateCount(){
+    const ids = getSelectedWfIds();
+    const toolbar = document.getElementById('bulkToolbar');
+    const counter = document.getElementById('bulkCount');
+    if(ids.length){
+        toolbar.classList.add('visible');
+        counter.textContent = ids.length + ' selected';
+    } else {
+        toolbar.classList.remove('visible');
+    }
+    const allCbs = document.querySelectorAll('.bulk-check[data-wf-id]');
+    const selectAll = document.getElementById('bulkSelectAll');
+    if(selectAll) selectAll.checked = allCbs.length > 0 && ids.length === allCbs.length;
+}
+
+function bulkToggleAll(checked){
+    document.querySelectorAll('.bulk-check[data-wf-id]').forEach(cb=>{ cb.checked = checked; });
+    bulkUpdateCount();
+}
+
+function bulkClearAll(){
+    document.querySelectorAll('.bulk-check[data-wf-id]').forEach(cb=>{ cb.checked = false; });
+    const selectAll = document.getElementById('bulkSelectAll');
+    if(selectAll) selectAll.checked = false;
+    bulkUpdateCount();
+}
+
+async function bulkAssign(fieldType, value){
+    const ids = getSelectedWfIds();
+    if(!ids.length){ toast('No workflows selected'); return; }
+    if(!value){ return; }
+    const fields = {};
+    if(fieldType==='department') fields[WF.department] = value;
+    else if(fieldType==='fulfill') fields[WF.fulfillStage] = value;
+    else if(fieldType==='method') fields[WF.mainMethodStage] = [value];
+
+    const toolbar = document.getElementById('bulkToolbar');
+    toolbar.style.opacity = '0.5';
+    toolbar.style.pointerEvents = 'none';
+    let done = 0;
+    try {
+        for(const id of ids){
+            const updated = await atUpdate(TBL.workflows, id, fields);
+            const idx = allWorkflows.findIndex(w=>w.id===id);
+            if(idx>=0) allWorkflows[idx] = updated;
+            done++;
+            if(done < ids.length) await new Promise(r=>setTimeout(r, 500));
+        }
+        updateTabCounts();
+        renderAll();
+        toast(done + ' workflow' + (done!==1?'s':'') + ' updated');
+    } catch(e){
+        toast('Error after ' + done + ' updates: ' + e.message);
+        renderAll();
+    }
+}
+
+async function bulkDelete(){
+    const ids = getSelectedWfIds();
+    if(!ids.length){ toast('No workflows selected'); return; }
+    if(!confirm('Delete ' + ids.length + ' workflow' + (ids.length!==1?'s':'') + ' and all their steps? This cannot be undone.')) return;
+
+    const toolbar = document.getElementById('bulkToolbar');
+    toolbar.style.opacity = '0.5';
+    toolbar.style.pointerEvents = 'none';
+    let done = 0;
+    try {
+        for(const id of ids){
+            const steps = stepsForWorkflow(id);
+            for(const s of steps) await atDelete(TBL.steps, s.id);
+            await atDelete(TBL.workflows, id);
+            allWorkflows = allWorkflows.filter(w=>w.id!==id);
+            allSteps = allSteps.filter(s=>!linkIds(gf(s,ST.workflow)).includes(id));
+            done++;
+            if(done < ids.length) await new Promise(r=>setTimeout(r, 500));
+        }
+        updateTabCounts();
+        renderAll();
+        renderFulfill();
+        renderMethod();
+        renderDept();
+        toast(done + ' workflow' + (done!==1?'s':'') + ' deleted');
+    } catch(e){
+        toast('Error after ' + done + ' deletions: ' + e.message);
+        renderAll();
+    }
 }
 
 async function aiDescRow(btn){
