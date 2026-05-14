@@ -106,10 +106,13 @@
             } else if (!isExcludedOutflow) {
                 // Only include in outflow pool if NOT a Transfer or other excluded category
                 const amt = reportAmt > 0 ? reportAmt : rawAmt;
-                // Store sub-category IDs for cross-referencing against projected costs
                 const txSubCatIds = getField(r, F.txSubCategory);
                 const subCatSet = new Set(Array.isArray(txSubCatIds) ? txSubCatIds : []);
-                reconciledOutflows.push({ amount: amt, searchText, subCats: subCatSet, used: false });
+                const linkedCost = getField(r, F.txCost);
+                const costIds = Array.isArray(linkedCost)
+                    ? linkedCost.map(x => (x && typeof x === 'object') ? x.id : x).filter(Boolean)
+                    : (linkedCost ? [(typeof linkedCost === 'object') ? linkedCost.id : linkedCost] : []);
+                reconciledOutflows.push({ amount: amt, searchText, subCats: subCatSet, costIds, used: false });
             }
             // Excluded outflows (Transfers etc.) are silently dropped — they're internal movements
         });
@@ -179,7 +182,19 @@
         // Three checks must align: (1) keyword match, (2) amount proximity, (3) sub-category match.
         // If both the cost and transaction have sub-category data, they MUST overlap.
         // This prevents false matches (e.g. Tesla software subscription ≠ Tesla vehicle charge).
-        function isOutflowAlreadyCleared(amount, label, costSubCatIds) {
+        function isOutflowAlreadyCleared(amount, label, costSubCatIds, forecastCostId) {
+            // Priority 1: explicit cost link on the transaction
+            if (forecastCostId) {
+                for (let i = 0; i < reconciledOutflows.length; i++) {
+                    if (reconciledOutflows[i].used) continue;
+                    if ((reconciledOutflows[i].costIds || []).includes(forecastCostId)) {
+                        reconciledOutflows[i].used = true;
+                        return true;
+                    }
+                }
+            }
+
+            // Priority 2: keyword + amount + sub-category heuristic (only for txs without a cost link)
             const keywords = extractKeywords(label);
             const costSubCats = new Set(Array.isArray(costSubCatIds) ? costSubCatIds : []);
             let bestIdx = -1;
@@ -187,18 +202,17 @@
             for (let i = 0; i < reconciledOutflows.length; i++) {
                 if (reconciledOutflows[i].used) continue;
                 const tx = reconciledOutflows[i];
+                // Skip txs that are explicitly linked to a different cost
+                if ((tx.costIds || []).length > 0 && forecastCostId && !tx.costIds.includes(forecastCostId)) continue;
                 const kwCount = keywordMatchCount(tx.searchText, keywords);
-                // Tolerance: within 33% OR £1, whichever is greater
                 const tolerance = Math.max(amount * 0.33, 1.00);
                 const amtClose = Math.abs(tx.amount - amount) <= tolerance;
 
-                // Sub-category check: if BOTH have sub-cats, they must overlap
                 let subCatOk = true;
                 if (costSubCats.size > 0 && tx.subCats.size > 0) {
                     subCatOk = [...costSubCats].some(id => tx.subCats.has(id));
                 }
 
-                // Must have: keyword match + amount close + sub-category compatible
                 if (kwCount >= 1 && amtClose && subCatOk) {
                     bestIdx = i;
                     break;
@@ -296,7 +310,7 @@
 
             projectDates(today, dueDay, freq, null, dueDateNext).forEach(dk => {
                 if (dayMap[dk]) {
-                    const cleared = isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds);
+                    const cleared = isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds, r.id);
                     dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '', cleared });
                 }
             });
