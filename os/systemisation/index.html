@@ -776,7 +776,10 @@ function buildAllGridRow(w){
 
     const deptOpts = DEPARTMENTS.map(d=>`<option value="${esc(d)}"${dept===d?' selected':''}>${esc(d)}</option>`).join('');
     const fulfillOpts = FULFILL_STAGES.map(s=>`<option value="${esc(s.key)}"${fulfill===s.key?' selected':''}>${esc(s.label)}</option>`).join('');
-    const methodOpts = allMethods.map(m=>{
+    const orderedMethods = [];
+    allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); }); });
+    allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
+    const methodOpts = orderedMethods.map(m=>{
         const sel = methodIds.includes(m.id) ? ' selected' : '';
         return `<option value="${m.id}"${sel}>${esc(gf(m,MM.name)||'Unnamed')}</option>`;
     }).join('');
@@ -785,7 +788,7 @@ function buildAllGridRow(w){
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
         <td><div style="display:flex;gap:4px;align-items:start">
             <textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc">${esc(desc)}</textarea>
-            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:4px" title="AI generate description" onclick="aiDescRow(this)">AI</button>
+            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:2px;font-size:11px;padding:2px 8px" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
         </div></td>
         <td><select class="wf-grid-status" data-field="department" style="width:100%"><option value="">None</option>${deptOpts}</select></td>
         <td><select class="wf-grid-status" data-field="fulfill" style="width:100%"><option value="">None</option>${fulfillOpts}</select></td>
@@ -908,10 +911,9 @@ function openDrawer(key, view){
     const table = document.createElement('table');
     table.className = 'wf-grid';
     table.innerHTML = `<thead><tr>
-        <th style="width:30%">Name</th>
-        <th style="width:40%">Description</th>
-        <th style="width:90px">Status</th>
-        <th style="width:100px">Actions</th>
+        <th style="width:35%">Name</th>
+        <th>Description</th>
+        <th style="width:40px"></th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
     tbody.id = 'gridBody';
@@ -931,32 +933,20 @@ function buildGridRow(w, stageKey, view){
     tr.dataset.id = w.id;
     const name = gf(w,WF.name)||'';
     const desc = gf(w,WF.description)||'';
-    const status = selName(gf(w,WF.status))||'Not Started';
-    const steps = stepsForWorkflow(w.id);
 
     tr.innerHTML = `
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
         <td><div style="display:flex;gap:4px;align-items:start">
-            <textarea class="wf-grid-input" rows="1" placeholder="Description" data-field="desc">${esc(desc)}</textarea>
-            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:4px" title="AI generate description" onclick="aiDescRow(this)">AI</button>
+            <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
+            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:2px;font-size:11px;padding:2px 8px" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
         </div></td>
-        <td><select class="wf-grid-status" data-field="status">
-            <option${status==='Not Started'?' selected':''}>Not Started</option>
-            <option${status==='In Progress'?' selected':''}>In Progress</option>
-            <option${status==='Complete'?' selected':''}>Complete</option>
-        </select></td>
-        <td><div class="wf-grid-actions">
-            <button class="wf-grid-expand" title="${steps.length} step${steps.length!==1?'s':''}" onclick="toggleWf('${w.id}')">&#x25B6; ${steps.length}</button>
-            <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
-        </div></td>`;
+        <td><button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button></td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
-    const statusSel = tr.querySelector('[data-field="status"]');
 
     nameInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.name]: nameInput.value.trim()}, tr));
     descInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.description]: descInput.value.trim()}, tr));
-    statusSel.addEventListener('change', ()=> gridSave(w.id, {[WF.status]: statusSel.value}, tr));
 
     autoGrowTextarea(descInput);
 
@@ -969,7 +959,7 @@ function buildNewRow(stageKey, view){
     tr.innerHTML = `
         <td><input class="wf-grid-input" placeholder="Type workflow name and press Enter" data-field="name"></td>
         <td><textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc"></textarea></td>
-        <td></td><td></td>`;
+        <td></td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
@@ -997,6 +987,9 @@ function buildNewRow(stageKey, view){
                 nameInput.disabled = false;
                 nameInput.focus();
                 updateTabCounts();
+                if(currentView==='fulfill') renderFulfill();
+                else if(currentView==='method') renderMethod();
+                else if(currentView==='dept') renderDept();
                 toast('Workflow added');
             } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
         }
@@ -1043,6 +1036,9 @@ async function deleteWorkflowRow(btn, id){
         allSteps = allSteps.filter(s=>!linkIds(gf(s,ST.workflow)).includes(id));
         tr.remove();
         updateTabCounts();
+        if(currentView==='fulfill') renderFulfill();
+        else if(currentView==='method') renderMethod();
+        else if(currentView==='dept') renderDept();
         toast('Workflow deleted');
     } catch(e){ toast('Error: '+e.message); tr.classList.remove('wf-grid-saving'); }
 }
@@ -1691,42 +1687,27 @@ function renderSteps(){
 
             html += '<table class="wf-grid"><thead><tr>';
             html += '<th style="width:40px">#</th>';
-            html += '<th style="width:25%">Step Name</th>';
-            html += '<th style="width:30%">Description</th>';
-            html += '<th style="width:100px">Type</th>';
-            html += '<th style="width:90px">SOP Status</th>';
-            html += '<th style="width:80px">Actions</th>';
+            html += '<th style="width:35%">Step Name</th>';
+            html += '<th>Description</th>';
+            html += '<th style="width:40px"></th>';
             html += '</tr></thead><tbody id="stepsGridBody">';
 
             steps.forEach((s,i)=>{
                 const sName = gf(s,ST.name)||'';
                 const sDesc = gf(s,ST.description)||'';
-                const sType = selName(gf(s,ST.stepType))||'Staff Task';
-                const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
                 html += `<tr data-step-id="${s.id}">
                     <td class="step-num">${i+1}</td>
                     <td><input class="wf-grid-input" value="${esc(sName)}" data-field="name" onblur="stepGridSave('${s.id}','${ST.name}',this.value)"></td>
                     <td><textarea class="wf-grid-input" rows="1" data-field="desc" onblur="stepGridSave('${s.id}','${ST.description}',this.value)">${esc(sDesc)}</textarea></td>
-                    <td><select class="wf-grid-status" onchange="stepGridSave('${s.id}','${ST.stepType}',this.value)">
-                        <option${sType==='Staff Task'?' selected':''}>Staff Task</option>
-                        <option${sType==='AI Skill'?' selected':''}>AI Skill</option>
-                        <option${sType==='Both'?' selected':''}>Both</option>
-                    </select></td>
-                    <td><span class="sop-badge ${sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created'}">${esc(sopSt)}</span></td>
-                    <td><div class="wf-grid-actions">
-                        <button class="btn btn-sm btn-ai" title="Generate SOP" onclick="generateSOP('${s.id}')">SOP</button>
-                        <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteStepInline('${s.id}')">&#x2715;</button>
-                    </div></td>
+                    <td><button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteStepInline('${s.id}')">&#x2715;</button></td>
                 </tr>`;
             });
 
             html += `<tr class="wf-grid-new">
                 <td class="step-num">${steps.length+1}</td>
                 <td><input class="wf-grid-input" placeholder="New step name" id="newStepName" onkeydown="if(event.key==='Enter'){event.preventDefault();addStepInline('${w.id}')}"></td>
-                <td><textarea class="wf-grid-input" rows="1" placeholder="Description" id="newStepDesc"></textarea></td>
-                <td><select class="wf-grid-status" id="newStepType"><option>Staff Task</option><option>AI Skill</option><option>Both</option></select></td>
+                <td><textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" id="newStepDesc"></textarea></td>
                 <td></td>
-                <td><button class="btn btn-sm btn-primary" onclick="addStepInline('${w.id}')">Add</button></td>
             </tr>`;
 
             html += '</tbody></table>';
@@ -1758,7 +1739,6 @@ function stepGridSave(stepId, field, value){
 async function addStepInline(wfId){
     const nameEl = document.getElementById('newStepName');
     const descEl = document.getElementById('newStepDesc');
-    const typeEl = document.getElementById('newStepType');
     const name = nameEl.value.trim();
     if(!name){ toast('Step name required'); return; }
     nameEl.disabled = true;
@@ -1767,7 +1747,7 @@ async function addStepInline(wfId){
         [ST.name]: name,
         [ST.description]: descEl.value.trim(),
         [ST.workflow]: [wfId],
-        [ST.stepType]: typeEl.value,
+        [ST.stepType]: 'Staff Task',
         [ST.sopStatus]: 'Not Created',
         [ST.sortOrder]: existing.length + 1,
     };
