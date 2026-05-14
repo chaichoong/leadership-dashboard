@@ -232,12 +232,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <script src="../../js/config.js?v=23"></script>
 <script>
 const BASE = BASE_ID;
-let PAT = '';
-let allMembers = [];
-let allDepts = [];
-let allRoles = [];
-let allAchievements = [];
-let allSOPs = [];
+if (typeof PAT === 'undefined') var PAT = '';
+var allMembers = [];
+var allDepts = [];
+var allRoles = [];
+var allAchievements = [];
+var allSOPs = [];
 
 function escHtml(s) {
     if (s == null) return '';
