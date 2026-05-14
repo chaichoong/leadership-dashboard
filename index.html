@@ -122,14 +122,14 @@
                 </div>
             </div>
 
-            <div class="sidebar-section coming-soon" data-section="team" data-tabs="">
+            <div class="sidebar-section" data-section="team" data-tabs="os-team">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('team')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('team')">
-                    <span class="sidebar-section-chevron">&#x25B8;</span>
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Team / HR</span>
-                    <span class="sidebar-section-coming">Coming</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="team"></span>
                 </div>
                 <div class="sidebar-section-body">
-                    <div class="sidebar-item disabled" title="No Team / HR module yet — coming"><span class="sidebar-icon">&#x1F465;</span><span class="sidebar-label">HR Suite</span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-team')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-team')}"><span class="sidebar-icon">&#x1F465;</span><span class="sidebar-label">Team Members</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-team" title="No checks run yet"></span></div>
                 </div>
             </div>
 
@@ -695,6 +695,11 @@
         <!-- Tab: Systemisation -->
         <div class="tab-panel" id="tab-systemisation">
             <iframe class="tab-panel-iframe" id="systemisationFrame" src="" data-src="os/systemisation/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Tab: Team Members -->
+        <div class="tab-panel" id="tab-os-team">
+            <iframe class="tab-panel-iframe" id="osTeamFrame" src="" data-src="os/team/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
         <!-- Plan Builder + Strategy iframe panels (Operating Systems Hub removed in Phase 3 sidebar restructure) -->

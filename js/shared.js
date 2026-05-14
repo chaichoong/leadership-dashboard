@@ -605,9 +605,13 @@ if (tabId === 'comms') {
         if (tabId === 'os-strategy') {
             const frame = document.getElementById('osStrategyFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('strategy')) {
-                // Bust the iframe cache so Pages deploys of os/strategy/index.html
-                // are picked up without the user having to clear their browser cache.
                 frame.src = frame.dataset.src + '?cb=' + Date.now();
+            }
+        }
+        if (tabId === 'os-team') {
+            const frame = document.getElementById('osTeamFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('team')) {
+                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
             }
         }
 
