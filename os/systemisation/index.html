@@ -31,12 +31,29 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .btn-ai:hover{background:var(--info);color:#fff}
 .btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 
-.view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-default);overflow-x:auto;background:var(--bg-app);padding:8px 24px 0}
-.view-tab{padding:10px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
-.view-tab:hover{color:var(--text-primary)}
-.view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.view-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
-.view-tab.active .count{background:var(--accent-soft);color:var(--accent)}
+.pipeline-tabs{display:flex;gap:0;overflow-x:auto;background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:0 24px}
+.pipeline-tab{position:relative;padding:12px 20px 12px 32px;border:none;background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);white-space:nowrap;display:flex;align-items:center;gap:6px;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%,14px 50%)}
+.pipeline-tab:first-child{padding-left:20px;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%)}
+.pipeline-tab:hover{background:var(--bg-surface-2)}
+.pipeline-tab.active{background:var(--accent);color:#fff}
+.pipeline-tab .step-num-badge{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:var(--fw-bold);background:var(--bg-subtle);color:var(--text-secondary);flex-shrink:0}
+.pipeline-tab.active .step-num-badge{background:rgba(255,255,255,.25);color:#fff}
+.pipeline-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
+.pipeline-tab.active .count{background:rgba(255,255,255,.25);color:#fff}
+
+.steps-layout{display:flex;gap:0;min-height:500px;border:1px solid var(--border-default);border-radius:var(--radius-md);overflow:hidden}
+.steps-sidebar{width:260px;flex-shrink:0;background:var(--bg-surface);border-right:1px solid var(--border-default);overflow-y:auto}
+.steps-sidebar-title{padding:12px 16px;font-size:var(--fs-sm);font-weight:var(--fw-bold);color:var(--text-secondary);border-bottom:1px solid var(--border-subtle);text-transform:uppercase;letter-spacing:.5px}
+.steps-wf-item{padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border-subtle);transition:background .15s}
+.steps-wf-item:hover{background:var(--bg-surface-2)}
+.steps-wf-item.active{background:var(--accent-soft);border-left:3px solid var(--accent)}
+.steps-wf-name{font-size:var(--fs-sm);color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.steps-wf-count{font-size:var(--fs-xs);color:var(--text-muted);background:var(--bg-subtle);padding:1px 7px;border-radius:10px;flex-shrink:0}
+.steps-main{flex:1;padding:20px;overflow-y:auto}
+.steps-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px}
+
+.auto-wf-group{margin-bottom:24px}
+.auto-wf-header{font-size:var(--fs-base);font-weight:var(--fw-semibold);padding:8px 0;margin-bottom:8px;border-bottom:1px solid var(--border-subtle)}
 
 .main{padding:20px 24px;max-width:1400px;margin:0 auto}
 .tab-pane{display:none}
@@ -186,7 +203,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .toast.show{opacity:1}
 
 @media print{
-.auth-bar,.topbar-right,.view-tabs,.wf-actions,.step-actions,.btn-ai,.btn-danger,.controls,.toast,.modal-overlay{display:none!important}
+.auth-bar,.topbar-right,.pipeline-tabs,.wf-actions,.step-actions,.btn-ai,.btn-danger,.controls,.toast,.modal-overlay{display:none!important}
 .topbar{position:static;box-shadow:none}
 .wf-card-body{display:block!important}
 .main{padding:10px}
@@ -214,11 +231,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     </div>
 </div>
 
-<div id="viewTabs" class="view-tabs" style="display:none">
-    <button class="view-tab active" data-tab="fulfill" onclick="switchView('fulfill')">Customer Journey <span class="count" id="fulfillCount">0</span></button>
-    <button class="view-tab" data-tab="method" onclick="switchView('method')">Main Method <span class="count" id="methodCount">0</span></button>
-    <button class="view-tab" data-tab="dept" onclick="switchView('dept')">Departmental <span class="count" id="deptCount">0</span></button>
-    <button class="view-tab" data-tab="all" onclick="switchView('all')">All Workflows <span class="count" id="allCount">0</span></button>
+<div id="viewTabs" class="pipeline-tabs" style="display:none">
+    <button class="pipeline-tab active" data-tab="fulfill" onclick="switchView('fulfill')"><span class="step-num-badge">1</span> Customer Journey <span class="count" id="fulfillCount">0</span></button>
+    <button class="pipeline-tab" data-tab="method" onclick="switchView('method')"><span class="step-num-badge">2</span> Main Method <span class="count" id="methodCount">0</span></button>
+    <button class="pipeline-tab" data-tab="dept" onclick="switchView('dept')"><span class="step-num-badge">3</span> Departmental <span class="count" id="deptCount">0</span></button>
+    <button class="pipeline-tab" data-tab="all" onclick="switchView('all')"><span class="step-num-badge">4</span> All Workflows <span class="count" id="allCount">0</span></button>
+    <button class="pipeline-tab" data-tab="steps" onclick="switchView('steps')"><span class="step-num-badge">5</span> Workflow Steps <span class="count" id="stepsCount">0</span></button>
+    <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')"><span class="step-num-badge">6</span> Automation <span class="count" id="autoCount">0</span></button>
 </div>
 
 <div id="main" class="main" style="display:none">
@@ -226,6 +245,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <div class="tab-pane" id="pane-method"></div>
     <div class="tab-pane" id="pane-dept"></div>
     <div class="tab-pane" id="pane-all"></div>
+    <div class="tab-pane" id="pane-steps"></div>
+    <div class="tab-pane" id="pane-automation"></div>
 </div>
 
 <div class="loading" id="loader">Loading...</div>
@@ -308,52 +329,18 @@ let drillStage = null;
 let _drawerKey = null;
 let _drawerView = null;
 let bizFilterId = '';
-let _usingDemo = false;
+let selectedStepsWf = null;
 
-const DEMO_WORKFLOWS = [
-    {id:'demo-w1', fields:{[WF.name]:'Lead Capture & Qualification',[WF.description]:'Attract, capture and qualify inbound leads before passing to sales.',[WF.fulfillStage]:{name:'F - Find & Grab Attention'},[WF.department]:{name:'Marketing'},[WF.status]:{name:'In Progress'},[WF.sortOrder]:1}},
-    {id:'demo-w2', fields:{[WF.name]:'Client Onboarding',[WF.description]:'Welcome new clients, set expectations and complete setup tasks.',[WF.fulfillStage]:{name:'I - Initiate Onboarding'},[WF.department]:{name:'Operations'},[WF.status]:{name:'Complete'},[WF.sortOrder]:1}},
-    {id:'demo-w3', fields:{[WF.name]:'Monthly Invoicing',[WF.description]:'Generate, review and send monthly invoices to all active clients.',[WF.department]:{name:'Finance'},[WF.status]:{name:'Not Started'},[WF.sortOrder]:1}},
-];
-const DEMO_STEPS = [
-    {id:'demo-s1', fields:{[ST.name]:'Monitor social media enquiries',[ST.description]:'Scan all social channels for new enquiries and DMs.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Open social media dashboard\n2. Review all new messages and comments\n3. Flag any that contain a buying signal or enquiry\n4. Log each enquiry in the CRM with source channel\n5. Send acknowledgement reply within 1 hour',[ST.sortOrder]:1}},
-    {id:'demo-s2', fields:{[ST.name]:'Qualify lead against criteria',[ST.description]:'Check lead meets minimum qualification criteria before passing to sales.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'Both'},[ST.sopStatus]:{name:'Draft'},[ST.sortOrder]:2}},
-    {id:'demo-s3', fields:{[ST.name]:'Send follow-up email',[ST.description]:'Send personalised follow-up email to qualified leads.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Pull lead details from CRM\n2. Select appropriate email template based on lead source\n3. Personalise subject line and opening paragraph\n4. Include relevant case study or testimonial\n5. Set follow-up reminder for 48 hours',[ST.sortOrder]:3}},
-    {id:'demo-s4', fields:{[ST.name]:'Book discovery call',[ST.description]:'Schedule a discovery call with the qualified lead.',[ST.workflow]:['demo-w1'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Check calendar availability for next 5 business days\n2. Send calendar invite with Zoom link\n3. Include pre-call questionnaire\n4. Add to CRM pipeline as "Discovery Booked"\n5. Set reminder 1 hour before call',[ST.sortOrder]:4}},
-    {id:'demo-s5', fields:{[ST.name]:'Send welcome pack',[ST.description]:'Email the welcome pack with onboarding materials.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Generate welcome pack from template\n2. Personalise with client name and service details\n3. Attach terms of service and contact sheet\n4. Send via email with read receipt\n5. Log in CRM as "Welcome Pack Sent"',[ST.sortOrder]:1}},
-    {id:'demo-s6', fields:{[ST.name]:'Set up client folder',[ST.description]:'Create the client folder structure in Google Drive.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Complete'},[ST.sopContent]:'1. Navigate to Clients folder in Google Drive\n2. Copy the Client Template folder\n3. Rename with client name and start date\n4. Share with relevant team members\n5. Add folder link to CRM record',[ST.sortOrder]:2}},
-    {id:'demo-s7', fields:{[ST.name]:'Schedule kickoff meeting',[ST.description]:'Book the kickoff meeting with all stakeholders.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Draft'},[ST.sortOrder]:3}},
-    {id:'demo-s8', fields:{[ST.name]:'Complete compliance checks',[ST.description]:'Run all required compliance and due diligence checks.',[ST.workflow]:['demo-w2'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:4}},
-    {id:'demo-s9', fields:{[ST.name]:'Pull transaction data',[ST.description]:'Extract all billable transactions for the month.',[ST.workflow]:['demo-w3'],[ST.stepType]:{name:'AI Skill'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:1}},
-    {id:'demo-s10', fields:{[ST.name]:'Generate invoices',[ST.description]:'Create invoice documents from transaction data.',[ST.workflow]:['demo-w3'],[ST.stepType]:{name:'Both'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:2}},
-    {id:'demo-s11', fields:{[ST.name]:'Review and approve',[ST.description]:'Manual review of all invoices before sending.',[ST.workflow]:['demo-w3'],[ST.stepType]:{name:'Staff Task'},[ST.sopStatus]:{name:'Not Created'},[ST.sortOrder]:3}},
-];
-
-const DEMO_SKILL_MAP = {'demo-s1':true, 'demo-s5':true};
-const DEMO_TASK_MAP = {'demo-s4':true};
-
-function isSkillCreated(stepId){ return DEMO_SKILL_MAP[stepId] || localStorage.getItem('sys_skill_'+stepId)==='1'; }
-function isTaskCreated(stepId){ return DEMO_TASK_MAP[stepId] || localStorage.getItem('sys_task_'+stepId)==='1'; }
+function isSkillCreated(stepId){ return localStorage.getItem('sys_skill_'+stepId)==='1'; }
+function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)==='1'; }
 
 function pipelineStatus(step){
     const sopSt = selName(gf(step,ST.sopStatus))||'Not Created';
-    const stepType = selName(gf(step,ST.stepType))||'Staff Task';
     if(sopSt==='Not Created') return {label:'No SOP',cls:'pipeline-none'};
     if(isSkillCreated(step.id)) return {label:'Skill',cls:'pipeline-skill'};
     if(isTaskCreated(step.id)) return {label:'Task',cls:'pipeline-task'};
     if(sopSt==='Complete') return {label:'SOP Ready',cls:'pipeline-sop'};
     return {label:'SOP '+sopSt,cls:'pipeline-sop'};
-}
-
-function loadDemoData(){
-    allWorkflows = DEMO_WORKFLOWS.slice();
-    allSteps = DEMO_STEPS.slice();
-    allMethods = [{id:'demo-m1', fields:{[MM.name]:'Discovery',[MM.description]:'Initial discovery and research process'}}];
-    allBusinesses = [{id:'demo-b1', fields:{[BIZ_NAME]:'Demo Business',[BIZ_ACTIVE]:true}}];
-    allObjStrat = [];
-    methodBizMap = {};
-    bizMethodOrder = {};
-    _usingDemo = true;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -526,7 +513,7 @@ function switchView(view){
     currentView = view;
     drillStage = null;
     closeDrawer();
-    document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===view));
+    document.querySelectorAll('.pipeline-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===view));
     document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+view));
     render();
 }
@@ -540,6 +527,8 @@ function render(){
     else if(currentView==='method') renderMethod();
     else if(currentView==='dept') renderDept();
     else if(currentView==='all') renderAll();
+    else if(currentView==='steps') renderSteps();
+    else if(currentView==='automation') renderAutomation();
     if(_drawerKey && _drawerView) openDrawer(_drawerKey, _drawerView);
 }
 
@@ -555,6 +544,9 @@ function updateCounts(){
     document.getElementById('methodCount').textContent=mc;
     document.getElementById('deptCount').textContent=dc;
     document.getElementById('allCount').textContent=wfs.length;
+    document.getElementById('stepsCount').textContent=allSteps.length;
+    const autoReady = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
+    document.getElementById('autoCount').textContent=autoReady;
 }
 
 // ── Customer Journey (FULFILL) ──
@@ -588,7 +580,6 @@ function renderFulfill(){
     html += '</div>';
     const totalAssigned = wfs.filter(w=>gf(w,WF.fulfillStage)).length;
     if(!totalAssigned) html += '<div class="stage-hint">Click a card above to view and add workflows for that stage.</div>';
-    if(_usingDemo) html = '<div class="demo-banner"><strong>Demo data.</strong> This sample data shows how the pipeline works. It will be replaced when you add real workflows.</div>' + html;
     pane.innerHTML = html;
 }
 
@@ -686,7 +677,6 @@ function renderMethod(){
             const totalMethod = wfs.filter(w=>linkIds(gf(w,WF.mainMethodStage)).length).length;
             if(!totalMethod) html += '<div class="stage-hint">Click a stage card to view and add workflows for that method.</div>';
         }
-        if(_usingDemo) html = '<div class="demo-banner"><strong>Demo data.</strong> This sample data shows how the pipeline works. It will be replaced when you add real workflows.</div>' + html;
         pane.innerHTML = html;
     }
 }
@@ -726,7 +716,6 @@ function renderDept(){
     html += '</div>';
     const totalDept = wfs.filter(w=>gf(w,WF.department)).length;
     if(!totalDept) html += '<div class="stage-hint">Click a department card to view and add workflows.</div>';
-    if(_usingDemo) html = '<div class="demo-banner"><strong>Demo data.</strong> This sample data shows how the pipeline works. It will be replaced when you add real workflows.</div>' + html;
     pane.innerHTML = html;
 }
 
@@ -757,10 +746,10 @@ function renderAll(){
         <th style="width:20%">Name</th>
         <th style="width:22%">Description</th>
         <th style="width:14%">Department</th>
-        <th style="width:16%">FULFILL Stage</th>
-        <th style="width:14%">Main Method</th>
+        <th style="width:16%">Customer Journey Stage</th>
+        <th style="width:14%">Main Method Stage</th>
         <th style="width:80px">Status</th>
-        <th style="width:80px">Actions</th>
+        <th style="width:60px">Actions</th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
     tbody.id = 'allGridBody';
@@ -807,7 +796,6 @@ function buildAllGridRow(w){
             <option${status==='Complete'?' selected':''}>Complete</option>
         </select></td>
         <td><div class="wf-grid-actions">
-            <button class="wf-grid-expand" title="${steps.length} step${steps.length!==1?'s':''}" onclick="toggleWf('${w.id}')">&#x25B6; ${steps.length}</button>
             <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
         </div></td>`;
 
@@ -936,77 +924,6 @@ function openDrawer(key, view){
 
     document.getElementById('drawerOverlay').classList.add('open');
     document.getElementById('drawer').classList.add('open');
-}
-
-function buildUnassignedPanel(allWfs, stageWfs, key, view){
-    const stageIds = new Set(stageWfs.map(w=>w.id));
-    let unassigned;
-    let currentLabel;
-    if(view==='fulfill'){
-        currentLabel = 'this FULFILL stage';
-        unassigned = allWfs.filter(w => !stageIds.has(w.id) && selName(gf(w,WF.fulfillStage))!==key);
-    } else if(view==='method'){
-        currentLabel = 'this Main Method stage';
-        unassigned = allWfs.filter(w => !stageIds.has(w.id) && !linkIds(gf(w,WF.mainMethodStage)).includes(key));
-    } else {
-        currentLabel = 'this department';
-        unassigned = allWfs.filter(w => !stageIds.has(w.id) && selName(gf(w,WF.department))!==key);
-    }
-
-    const panel = document.createElement('div');
-    panel.className = 'unassigned-panel';
-    if(!unassigned.length){
-        panel.innerHTML = `<div class="unassigned-toggle" style="cursor:default;opacity:.5">
-            <span class="unassigned-chevron">&#x25B6;</span>
-            Available workflows <span class="unassigned-count">0</span>
-        </div>`;
-        return panel;
-    }
-
-    const toggle = document.createElement('div');
-    toggle.className = 'unassigned-toggle';
-    toggle.innerHTML = `<span class="unassigned-chevron">&#x25B6;</span> Available workflows <span class="unassigned-count">${unassigned.length}</span>`;
-    toggle.onclick = ()=> panel.classList.toggle('open');
-    panel.appendChild(toggle);
-
-    const list = document.createElement('div');
-    list.className = 'unassigned-list';
-    unassigned.forEach(w=>{
-        const name = gf(w,WF.name)||'Untitled';
-        const dept = selName(gf(w,WF.department))||'';
-        const fulfill = selName(gf(w,WF.fulfillStage))||'';
-        const methodIds = linkIds(gf(w,WF.mainMethodStage));
-        const methodName = methodIds.length ? (gf(allMethods.find(m=>m.id===methodIds[0]),MM.name)||'') : '';
-        let meta = [];
-        if(dept) meta.push(dept);
-        if(view==='fulfill' && fulfill) meta.push(fulfill);
-        if(view==='method' && methodName) meta.push(methodName);
-
-        const item = document.createElement('div');
-        item.className = 'unassigned-item';
-        item.innerHTML = `
-            <span class="unassigned-item-name">${esc(name)}</span>
-            ${meta.length ? `<span class="unassigned-item-meta">${esc(meta.join(' · '))}</span>` : ''}
-            <button class="unassigned-add" title="Add to ${esc(currentLabel)}">+</button>`;
-        item.querySelector('.unassigned-add').onclick = async function(){
-            this.disabled = true; this.textContent = '...';
-            try {
-                const fields = {};
-                if(view==='fulfill') fields[WF.fulfillStage] = key;
-                else if(view==='method') fields[WF.mainMethodStage] = [key];
-                else fields[WF.department] = key;
-                const updated = await atUpdate(TBL.workflows, w.id, fields);
-                const idx = allWorkflows.findIndex(x=>x.id===w.id);
-                if(idx>=0) allWorkflows[idx] = updated;
-                openDrawer(key, view);
-                updateTabCounts();
-                toast(`"${name}" added`);
-            } catch(e){ toast('Error: '+e.message); this.disabled=false; this.textContent='+'; }
-        };
-        list.appendChild(item);
-    });
-    panel.appendChild(list);
-    return panel;
 }
 
 function buildGridRow(w, stageKey, view){
@@ -1284,7 +1201,7 @@ function openAddWorkflow(dept, stageKey, view){
     const body = `
         <div class="field-row"><label>Workflow Name</label><input id="mWfName" placeholder="e.g. Lead Qualification Process"></div>
         <div class="field-row"><label>Description</label><textarea id="mWfDesc" placeholder="What does this workflow achieve?"></textarea></div>
-        <div class="field-row"><label>FULFILL Stage</label><select id="mWfFulfill"><option value="">None</option>${fulfillOpts}</select></div>
+        <div class="field-row"><label>Customer Journey Stage</label><select id="mWfFulfill"><option value="">None</option>${fulfillOpts}</select></div>
         <div class="field-row"><label>Main Method Stage</label><select id="mWfMethod"><option value="">None</option>${methodOpts}</select></div>
         <div class="field-row"><label>Department</label><select id="mWfDept"><option value="">None</option>${deptOpts}</select></div>
         <div class="field-row"><label>Business (leave empty for all)</label><select id="mWfBiz"><option value="">All Businesses</option>${bizOpts}</select></div>
@@ -1335,7 +1252,7 @@ function editWorkflow(id){
     const body = `
         <div class="field-row"><label>Workflow Name</label><input id="mWfName" value="${esc(gf(w,WF.name)||'')}"></div>
         <div class="field-row"><label>Description</label><textarea id="mWfDesc">${esc(gf(w,WF.description)||'')}</textarea></div>
-        <div class="field-row"><label>FULFILL Stage</label><select id="mWfFulfill"><option value="">None</option>${fulfillOpts}</select></div>
+        <div class="field-row"><label>Customer Journey Stage</label><select id="mWfFulfill"><option value="">None</option>${fulfillOpts}</select></div>
         <div class="field-row"><label>Main Method Stage</label><select id="mWfMethod"><option value="">None</option>${methodOpts}</select></div>
         <div class="field-row"><label>Department</label><select id="mWfDept"><option value="">None</option>${deptOpts}</select></div>
         <div class="field-row"><label>Business</label><select id="mWfBiz"><option value="">All Businesses</option>${bizOpts}</select></div>
@@ -1731,6 +1648,209 @@ async function addSuggestedSteps(suggestions, wfId){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Workflow Steps (Tab 5)
+// ═══════════════════════════════════════════════════════════════════════
+function renderSteps(){
+    const pane = document.getElementById('pane-steps');
+    if(!allWorkflows.length){
+        pane.innerHTML = '<div class="empty-state"><p>No workflows yet.</p><p>Add workflows in the earlier tabs first.</p></div>';
+        return;
+    }
+
+    let html = '<div class="steps-layout">';
+    html += '<div class="steps-sidebar">';
+    html += '<div class="steps-sidebar-title">Workflows</div>';
+    const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
+    wfs.forEach(w=>{
+        const name = gf(w,WF.name)||'Untitled';
+        const stepCount = stepsForWorkflow(w.id).length;
+        const active = selectedStepsWf===w.id ? ' active' : '';
+        html += `<div class="steps-wf-item${active}" onclick="selectStepsWf('${w.id}')" title="${esc(name)}">
+            <span class="steps-wf-name">${esc(name)}</span>
+            <span class="steps-wf-count">${stepCount}</span>
+        </div>`;
+    });
+    html += '</div>';
+
+    html += '<div class="steps-main">';
+    if(!selectedStepsWf){
+        html += '<div class="empty-state"><p>Select a workflow from the list to view and manage its steps.</p></div>';
+    } else {
+        const w = allWorkflows.find(w=>w.id===selectedStepsWf);
+        if(!w){
+            html += '<div class="empty-state"><p>Workflow not found. Select another.</p></div>';
+        } else {
+            const wName = gf(w,WF.name)||'Untitled';
+            const steps = stepsForWorkflow(w.id);
+            html += `<div class="steps-header">
+                <h3 style="margin:0;font-size:var(--fs-lg)">${esc(wName)}</h3>
+                <div style="display:flex;gap:8px">
+                    <button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>
+                </div>
+            </div>`;
+
+            html += '<table class="wf-grid"><thead><tr>';
+            html += '<th style="width:40px">#</th>';
+            html += '<th style="width:25%">Step Name</th>';
+            html += '<th style="width:30%">Description</th>';
+            html += '<th style="width:100px">Type</th>';
+            html += '<th style="width:90px">SOP Status</th>';
+            html += '<th style="width:80px">Actions</th>';
+            html += '</tr></thead><tbody id="stepsGridBody">';
+
+            steps.forEach((s,i)=>{
+                const sName = gf(s,ST.name)||'';
+                const sDesc = gf(s,ST.description)||'';
+                const sType = selName(gf(s,ST.stepType))||'Staff Task';
+                const sopSt = selName(gf(s,ST.sopStatus))||'Not Created';
+                html += `<tr data-step-id="${s.id}">
+                    <td class="step-num">${i+1}</td>
+                    <td><input class="wf-grid-input" value="${esc(sName)}" data-field="name" onblur="stepGridSave('${s.id}','${ST.name}',this.value)"></td>
+                    <td><textarea class="wf-grid-input" rows="1" data-field="desc" onblur="stepGridSave('${s.id}','${ST.description}',this.value)">${esc(sDesc)}</textarea></td>
+                    <td><select class="wf-grid-status" onchange="stepGridSave('${s.id}','${ST.stepType}',this.value)">
+                        <option${sType==='Staff Task'?' selected':''}>Staff Task</option>
+                        <option${sType==='AI Skill'?' selected':''}>AI Skill</option>
+                        <option${sType==='Both'?' selected':''}>Both</option>
+                    </select></td>
+                    <td><span class="sop-badge ${sopSt==='Complete'?'sop-complete':sopSt==='Draft'?'sop-draft':'sop-not-created'}">${esc(sopSt)}</span></td>
+                    <td><div class="wf-grid-actions">
+                        <button class="btn btn-sm btn-ai" title="Generate SOP" onclick="generateSOP('${s.id}')">SOP</button>
+                        <button class="btn btn-sm btn-danger" title="Delete" onclick="deleteStepInline('${s.id}')">&#x2715;</button>
+                    </div></td>
+                </tr>`;
+            });
+
+            html += `<tr class="wf-grid-new">
+                <td class="step-num">${steps.length+1}</td>
+                <td><input class="wf-grid-input" placeholder="New step name" id="newStepName" onkeydown="if(event.key==='Enter'){event.preventDefault();addStepInline('${w.id}')}"></td>
+                <td><textarea class="wf-grid-input" rows="1" placeholder="Description" id="newStepDesc"></textarea></td>
+                <td><select class="wf-grid-status" id="newStepType"><option>Staff Task</option><option>AI Skill</option><option>Both</option></select></td>
+                <td></td>
+                <td><button class="btn btn-sm btn-primary" onclick="addStepInline('${w.id}')">Add</button></td>
+            </tr>`;
+
+            html += '</tbody></table>';
+        }
+    }
+    html += '</div></div>';
+    pane.innerHTML = html;
+}
+
+function selectStepsWf(id){
+    selectedStepsWf = id;
+    renderSteps();
+}
+
+let _stepSaveTimers = {};
+function stepGridSave(stepId, field, value){
+    clearTimeout(_stepSaveTimers[stepId+field]);
+    _stepSaveTimers[stepId+field] = setTimeout(async()=>{
+        try {
+            const fields = { [field]: value.trim() };
+            const updated = await atUpdate(TBL.steps, stepId, fields);
+            const idx = allSteps.findIndex(s=>s.id===stepId);
+            if(idx>=0) allSteps[idx] = updated;
+            updateCounts();
+        } catch(e){ toast('Save error: '+e.message); }
+    }, 300);
+}
+
+async function addStepInline(wfId){
+    const nameEl = document.getElementById('newStepName');
+    const descEl = document.getElementById('newStepDesc');
+    const typeEl = document.getElementById('newStepType');
+    const name = nameEl.value.trim();
+    if(!name){ toast('Step name required'); return; }
+    nameEl.disabled = true;
+    const existing = stepsForWorkflow(wfId);
+    const fields = {
+        [ST.name]: name,
+        [ST.description]: descEl.value.trim(),
+        [ST.workflow]: [wfId],
+        [ST.stepType]: typeEl.value,
+        [ST.sopStatus]: 'Not Created',
+        [ST.sortOrder]: existing.length + 1,
+    };
+    try {
+        const rec = await atCreate(TBL.steps, fields);
+        allSteps.push(rec);
+        nameEl.disabled = false;
+        renderSteps();
+        updateCounts();
+        toast('Step added');
+    } catch(e){ toast('Error: '+e.message); nameEl.disabled = false; }
+}
+
+async function deleteStepInline(stepId){
+    if(!confirm('Delete this step?')) return;
+    try {
+        await atDelete(TBL.steps, stepId);
+        allSteps = allSteps.filter(s=>s.id!==stepId);
+        renderSteps();
+        updateCounts();
+        toast('Step deleted');
+    } catch(e){ toast('Error: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Automation (Tab 6)
+// ═══════════════════════════════════════════════════════════════════════
+function renderAutomation(){
+    const pane = document.getElementById('pane-automation');
+    const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
+    const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
+
+    if(!stepsWithSop.length){
+        pane.innerHTML = '<div class="empty-state"><p>No steps with completed SOPs yet.</p><p>Complete SOPs in the Workflow Steps tab first, then return here to convert them to Skills or Tasks.</p></div>';
+        return;
+    }
+
+    let html = '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:16px">Steps with completed SOPs, ready for automation. Convert to an AI Skill (automated) or a recurring Task (manual).</p>';
+
+    wfs.forEach(w=>{
+        const steps = stepsForWorkflow(w.id).filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
+        if(!steps.length) return;
+        const wName = gf(w,WF.name)||'Untitled';
+
+        html += `<div class="auto-wf-group">
+            <div class="auto-wf-header">${esc(wName)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${steps.length} ready)</span></div>
+            <table class="wf-grid"><thead><tr>
+                <th style="width:25%">Step</th>
+                <th style="width:30%">Description</th>
+                <th style="width:90px">Type</th>
+                <th style="width:100px">Pipeline</th>
+                <th style="width:120px">Actions</th>
+            </tr></thead><tbody>`;
+
+        steps.forEach(s=>{
+            const sName = gf(s,ST.name)||'Untitled';
+            const sDesc = gf(s,ST.description)||'';
+            const sType = selName(gf(s,ST.stepType))||'Staff Task';
+            const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
+            const ps = pipelineStatus(s);
+            const canSkill = (sType==='AI Skill'||sType==='Both') && !isSkillCreated(s.id);
+            const canTask = (sType==='Staff Task'||sType==='Both') && !isTaskCreated(s.id);
+
+            html += `<tr>
+                <td>${esc(sName)}</td>
+                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sDesc)}</td>
+                <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
+                <td><span class="pipeline-badge ${ps.cls}">${esc(ps.label)}</span></td>
+                <td style="display:flex;gap:4px;flex-wrap:wrap">
+                    ${canSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertToSkill('${s.id}')">To Skill</button>`:''}
+                    ${canTask?`<button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="convertToTask('${s.id}')">To Task</button>`:''}
+                    ${!canSkill&&!canTask?'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Converted</span>':''}
+                </td>
+            </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+    });
+
+    pane.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Pipeline Conversion
 // ═══════════════════════════════════════════════════════════════════════
 async function convertToSkill(stepId){
@@ -1739,9 +1859,7 @@ async function convertToSkill(stepId){
     const name = gf(s,ST.name)||'Untitled';
     if(!confirm(`Convert "${name}" SOP to an AI Skill? This will mark the step as an automated skill.`)) return;
     localStorage.setItem('sys_skill_'+stepId, '1');
-    if(!_usingDemo){
-        try { await atUpdate(TBL.steps, stepId, {[ST.skillId]: 'skill_'+stepId}); } catch(e){ toast('Save error: '+e.message); }
-    }
+    try { await atUpdate(TBL.steps, stepId, {[ST.skillId]: 'skill_'+stepId}); } catch(e){ toast('Save error: '+e.message); }
     toast(`"${name}" converted to Skill`);
     render();
 }
@@ -1764,7 +1882,6 @@ async function start(){
     document.getElementById('authBar').style.display='none';
     try {
         await loadData();
-        if(!allWorkflows.length) loadDemoData();
         document.getElementById('topbar').style.display='flex';
         document.getElementById('viewTabs').style.display='flex';
         document.getElementById('main').style.display='block';
@@ -1779,14 +1896,8 @@ async function start(){
 
 if(bootAuth()) start();
 else {
-    loadDemoData();
-    document.getElementById('authBar').style.display='none';
-    document.getElementById('topbar').style.display='flex';
-    document.getElementById('viewTabs').style.display='flex';
-    document.getElementById('main').style.display='block';
+    document.getElementById('authBar').style.display='flex';
     document.getElementById('loader').style.display='none';
-    populateBizFilter();
-    render();
 }
 </script>
 </body>
