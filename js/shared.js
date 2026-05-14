@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'compliance', 'operations'];
+        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'compliance', 'operations', 'systemisation', 'os-team'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -511,19 +511,36 @@
         restoreSidebarSectionState();
     }
 
+    const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable'];
+
     async function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
         document.getElementById('tab-' + tabId).classList.add('active');
         // Update URL hash for deep-linking
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
-        // Highlight the sidebar item by mapping tabId → onclick attribute. Cleaner
-        // than the old text-includes approach which broke when labels were
-        // shortened in the Phase 3 restructure.
+        // Highlight the sidebar item by mapping tabId → onclick attribute.
         document.querySelectorAll('.sidebar-item').forEach(b => {
             const onclickAttr = b.getAttribute('onclick') || '';
             if (onclickAttr.includes(`switchTab('${tabId}')`)) b.classList.add('active');
         });
+        // Accounts mega-tab: highlight the "Accounts" sidebar item for any sub-tab
+        if (ACCOUNTS_GROUP.includes(tabId)) {
+            const accountsItem = document.querySelector('[data-tab-group="accounts"]');
+            if (accountsItem) accountsItem.classList.add('active');
+        }
+        // Show/hide accounts sub-tab bar and update active button
+        const subtabBar = document.getElementById('accountsSubtabBar');
+        if (subtabBar) {
+            if (ACCOUNTS_GROUP.includes(tabId)) {
+                subtabBar.style.display = '';
+                subtabBar.querySelectorAll('.accounts-subtab').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.tab === tabId);
+                });
+            } else {
+                subtabBar.style.display = 'none';
+            }
+        }
         // Auto-expand the section that contains the now-active tab so it's
         // always visible after deep-linking.
         expandSidebarSectionForTab(tabId);

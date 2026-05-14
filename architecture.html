@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture Map — Operations Director</title>
+    <link rel="stylesheet" href="css/tokens.css?v=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-family-base); background: var(--bg-app); color: var(--text-primary); }
+
+        .arch-header {
+            background: var(--bg-sidebar);
+            color: #fff;
+            padding: 20px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .arch-header h1 { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+        .arch-header p { font-size: var(--fs-sm); opacity: 0.7; }
+        .arch-back {
+            font-size: var(--fs-sm);
+            color: var(--accent-gold);
+            text-decoration: none;
+            padding: 6px 12px;
+            border: 1px solid rgba(198,161,91,0.4);
+            border-radius: var(--radius-md);
+        }
+        .arch-back:hover { background: rgba(198,161,91,0.15); }
+
+        .arch-legend {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding: 16px 32px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-default);
+            font-size: var(--fs-xs);
+            color: var(--text-secondary);
+        }
+        .arch-legend-item { display: flex; align-items: center; gap: 6px; }
+        .arch-legend-swatch {
+            width: 14px; height: 14px; border-radius: 3px;
+        }
+
+        .arch-container {
+            padding: 32px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .arch-section {
+            margin-bottom: 40px;
+        }
+        .arch-section-title {
+            font-size: var(--fs-lg);
+            font-weight: var(--fw-semibold);
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--accent);
+        }
+
+        .arch-grid {
+            display: grid;
+            gap: 12px;
+        }
+        .arch-grid.pages { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+        .arch-grid.integrations { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+        .arch-grid.workers { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+
+        .arch-node {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-lg);
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+        }
+        .arch-node:hover {
+            border-color: var(--accent);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+        .arch-node.expanded {
+            border-color: var(--accent);
+            box-shadow: var(--shadow-md);
+        }
+        .arch-node-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .arch-node-icon { font-size: 18px; }
+        .arch-node-name {
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-semibold);
+            flex: 1;
+        }
+        .arch-node-type {
+            font-size: 10px;
+            font-weight: var(--fw-semibold);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .arch-node-type.inline { background: var(--accent-soft); color: var(--accent); }
+        .arch-node-type.iframe { background: var(--info-bg); color: var(--info); }
+        .arch-node-type.worker { background: #FFF3E0; color: #E65100; }
+        .arch-node-type.external { background: var(--warning-bg); color: #8B6914; }
+        .arch-node-type.storage { background: #E8EAF6; color: #283593; }
+
+        .arch-node-detail {
+            display: none;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border-subtle);
+            font-size: var(--fs-xs);
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .arch-node.expanded .arch-node-detail { display: block; }
+
+        .arch-detail-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .arch-detail-label {
+            font-weight: var(--fw-semibold);
+            color: var(--text-primary);
+            min-width: 70px;
+            flex-shrink: 0;
+        }
+        .arch-detail-value { color: var(--text-secondary); }
+
+        .arch-subtabs {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .arch-subtab-chip {
+            font-size: 10px;
+            padding: 2px 8px;
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+        }
+
+        .arch-tables-list {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+        .arch-table-chip {
+            font-size: 10px;
+            padding: 2px 8px;
+            background: var(--accent-soft);
+            border-radius: var(--radius-sm);
+            color: var(--accent);
+            font-weight: var(--fw-medium);
+        }
+
+        .arch-flow-section { margin-bottom: 40px; }
+
+        .arch-flow-diagram {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            overflow-x: auto;
+        }
+
+        .arch-flow-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .arch-flow-row:last-child { margin-bottom: 0; }
+
+        .arch-flow-box {
+            padding: 10px 16px;
+            border-radius: var(--radius-md);
+            font-size: var(--fs-xs);
+            font-weight: var(--fw-semibold);
+            white-space: nowrap;
+            border: 1px solid;
+            min-width: 120px;
+            text-align: center;
+        }
+        .arch-flow-box.source { background: #E8F5E9; border-color: #4CAF50; color: #2E7D32; }
+        .arch-flow-box.worker { background: #FFF3E0; border-color: #FF9800; color: #E65100; }
+        .arch-flow-box.store { background: #E8EAF6; border-color: #5C6BC0; color: #283593; }
+        .arch-flow-box.output { background: #E3F2FD; border-color: #42A5F5; color: #1565C0; }
+        .arch-flow-box.app { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+
+        .arch-flow-arrow {
+            color: var(--text-muted);
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .arch-flow-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: -10px;
+            margin-bottom: 8px;
+        }
+
+        .arch-data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .arch-data-item {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            padding: 10px 12px;
+            font-size: var(--fs-xs);
+        }
+        .arch-data-item-name {
+            font-weight: var(--fw-semibold);
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        .arch-data-item-id {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-family: monospace;
+        }
+        .arch-data-item-used {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .expand-all-btn {
+            font-size: var(--fs-xs);
+            padding: 4px 12px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: var(--font-family-base);
+        }
+        .expand-all-btn:hover { background: var(--bg-surface-2); color: var(--text-primary); }
+
+        @media (max-width: 768px) {
+            .arch-container { padding: 16px; }
+            .arch-header { padding: 16px; }
+            .arch-legend { padding: 12px 16px; }
+            .arch-grid.pages, .arch-grid.integrations, .arch-grid.workers {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="arch-header">
+        <div>
+            <h1>Platform Architecture Map</h1>
+            <p>Operations Director infrastructure overview. Click any node for details. Prepared for Supabase migration.</p>
+        </div>
+        <a class="arch-back" href="index.html#sitemap">Back to Platform</a>
+    </div>
+
+    <div class="arch-legend">
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--accent-soft);border:1px solid var(--accent)"></div> Inline tab (JS renders in main shell)</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--info-bg);border:1px solid var(--info)"></div> Iframe page (standalone HTML)</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:#FFF3E0;border:1px solid #FF9800"></div> Cloudflare Worker</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--warning-bg);border:1px solid #C6A15B"></div> External service</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:#E8EAF6;border:1px solid #5C6BC0"></div> Data store</div>
+    </div>
+
+    <div class="arch-container">
+
+        <!-- ═══════════ PAGES & TABS ═══════════ -->
+        <div class="arch-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                <h2 class="arch-section-title" style="margin-bottom:0;border-bottom:none">Pages and Tabs</h2>
+                <button class="expand-all-btn" onclick="toggleAllNodes(this)">Expand All</button>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Leadership</h3>
+            <div class="arch-grid pages" style="margin-bottom:20px">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📊</span>
+                        <span class="arch-node-name">Leadership Dashboard</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/dashboard.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenancies, Transactions, Costs, Tenants, Properties, Rental Units, Businesses, Categories, Sub-Categories, Accounts</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Financial KPIs, portfolio overview, tenancy metrics, 31-day cash flow forecast, AI analysis, balance calculator, strategic KPIs</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Depends on</span><span class="arch-detail-value">cashflow.js, reconciliation.js, arrears.js, sync-bar.js, ai-assistant.js, quick-task.js</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🎯</span>
+                        <span class="arch-node-name">Objective & Strategy</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">os/strategy/index.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Objective & Strategy, Main Methods, Projects, Businesses</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Objective & Strategy, Main Methods, Projects</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Quarterly OKR wizard, strategy push to projects, AI boardroom mentor</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📋</span>
+                        <span class="arch-node-name">Plan Builder</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">os/business-plan-builder/index.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Businesses</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Business launch plans with products, pricing, cost modelling per business</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Operations</h3>
+            <div class="arch-grid pages" style="margin-bottom:20px">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">✅</span>
+                        <span class="arch-node-name">Tasks & Projects</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">os/tasks/index.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tasks, Projects, Businesses, Team Members</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Tasks (create, update, complete, comment)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Integrations</span><span class="arch-detail-value">Slack notify worker (DMs on assign/complete)</span></div>
+                        <div style="margin-top:6px;font-weight:var(--fw-semibold);color:var(--text-primary)">Internal views:</div>
+                        <div class="arch-subtabs">
+                            <span class="arch-subtab-chip">My Day</span>
+                            <span class="arch-subtab-chip">Task List</span>
+                            <span class="arch-subtab-chip">Kanban</span>
+                            <span class="arch-subtab-chip">Projects</span>
+                            <span class="arch-subtab-chip">Capacity</span>
+                            <span class="arch-subtab-chip">Recurring</span>
+                            <span class="arch-subtab-chip">Contractor Tasks</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🏢</span>
+                        <span class="arch-node-name">Operations</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">os/operations/index.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenants, Tenancies, Rental Units, Properties, Businesses</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Tenants, Tenancies, Rental Units, Properties</span></div>
+                        <div style="margin-top:6px;font-weight:var(--fw-semibold);color:var(--text-primary)">Sub-tabs:</div>
+                        <div class="arch-subtabs">
+                            <span class="arch-subtab-chip">Tenants</span>
+                            <span class="arch-subtab-chip">Tenancies</span>
+                            <span class="arch-subtab-chip">Rental Units</span>
+                            <span class="arch-subtab-chip">Properties</span>
+                            <span class="arch-subtab-chip">Customers</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📨</span>
+                        <span class="arch-node-name">Inbound Comms</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">follow-up.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Email follow-up tracking, response management</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">⚙️</span>
+                        <span class="arch-node-name">Systemisation</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">os/systemisation/index.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Systemisation Workflows, Workflow Steps</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Systemisation Workflows, Workflow Steps</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">✅</span>
+                        <span class="arch-node-name">Property Compliance</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">compliance.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Properties, Rental Units</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Gas, electrical, EPC, fire safety checks and expiry tracking</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Finance (Accounts mega-tab)</h3>
+            <div class="arch-grid pages" style="margin-bottom:20px">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">💷</span>
+                        <span class="arch-node-name">AR Fixed (Income)</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/income.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenancies, Tenants, Properties, Rental Units, Businesses</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Rent roll, payment status, income breakdown by business</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📤</span>
+                        <span class="arch-node-name">AR Variable (Outbound Invoices)</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/ar-variable.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Outbound Invoices (arVariable), Businesses</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Outbound invoice tracking, overdue monitoring, customer management</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📋</span>
+                        <span class="arch-node-name">AP Fixed (Costs)</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/costs.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Costs, Transactions, Categories, Sub-Categories, Accounts</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Costs (status backfill, reconciliation fields)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Fixed cost tracking, reconciliation status, spending breakdown</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🧾</span>
+                        <span class="arch-node-name">AP Variable (Invoices)</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/invoices.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Invoices (Gmail label "3. to pay"), Businesses</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Invoices (approve, mark paid, assign business)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Integration</span><span class="arch-detail-value">Gmail Apps Script for invoice extraction</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">💰</span>
+                        <span class="arch-node-name">Profit & Loss</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/pnl.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Transactions, Costs, Tenancies, Businesses, Categories, Sub-Categories</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Monthly P&L, business breakdown, category drill-down, trend analysis</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🔍</span>
+                        <span class="arch-node-name">Transactions</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/transactions.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Transactions, Accounts, Categories, Sub-Categories</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Transactions (split, categorise, reconcile)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Transaction search, AI reconciliation, split management</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🏦</span>
+                        <span class="arch-node-name">Bank Accounts</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/fintable.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Accounts (bank account sync data via FinTable)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Bank sync health monitoring, balance tracking, reconnection alerts</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🚨</span>
+                        <span class="arch-node-name">Cash Flow Voids</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/cfv.js + js/arrears.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenancies, Tenants, Transactions, Arrears Records, Arrears Contact Log</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Arrears Records, Arrears Contact Log</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Void detection, 7-stage credit control pipeline, rent statements, contact logging</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">HR / Admin</h3>
+            <div class="arch-grid pages" style="margin-bottom:20px">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">👥</span>
+                        <span class="arch-node-name">Team Members</span>
+                        <span class="arch-node-type iframe">Iframe</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">os/team/index.html</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Team Members, Businesses</span></div>
+                        <div style="margin-top:6px;font-weight:var(--fw-semibold);color:var(--text-primary)">Internal tabs:</div>
+                        <div class="arch-subtabs">
+                            <span class="arch-subtab-chip">Directory</span>
+                            <span class="arch-subtab-chip">Org Chart</span>
+                            <span class="arch-subtab-chip">Training</span>
+                            <span class="arch-subtab-chip">Achievements</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">System</h3>
+            <div class="arch-grid pages">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🔗</span>
+                        <span class="arch-node-name">Site Map & Guides</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/sitemap.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Page registry, SOP version tracking, git sync status, integrity checks</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🧠</span>
+                        <span class="arch-node-name">Skills Library</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/skills.js + js/skills-data.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Claude Code and Cowork skill catalogue, search, category filtering</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">⭐</span>
+                        <span class="arch-node-name">AI Assistant</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/ai-assistant.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Integration</span><span class="arch-detail-value">Anthropic API (via anthropic-proxy worker)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Context-aware AI chat, tab-specific prompts, SOP awareness, streaming responses</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════ AUTOMATION FLOWS ═══════════ -->
+        <div class="arch-section">
+            <h2 class="arch-section-title">Automation Flows</h2>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.05em">Contractor Task Flow (Slack to Airtable)</h3>
+            <div class="arch-flow-diagram">
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box source">Slack #property-management</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box worker">contractor-bot Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box store">Airtable Tasks</div>
+                </div>
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box worker">contractor-bot Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box output">Slack DM to Contractor</div>
+                </div>
+                <div class="arch-flow-label">Intent classification (Claude Sonnet) → property matching → task creation → Slack confirmation + contractor DM</div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.05em">Task Notification Flow (Dashboard to Slack)</h3>
+            <div class="arch-flow-diagram">
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box app">Dashboard (Tasks OS)</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box worker">slack-notify Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box output">Slack DM</div>
+                </div>
+                <div class="arch-flow-label">Assign / reassign / complete / comment → lookup Slack user by email → post DM card</div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.05em">Apple Shortcuts (Voice Tasks / Forwarding)</h3>
+            <div class="arch-flow-diagram">
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box source">Apple Watch / iPhone</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box worker">apple-inbound Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box store">Airtable Tasks</div>
+                </div>
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box worker">apple-inbound Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box store">R2 (audio files)</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box output">Gmail (via Resend)</div>
+                </div>
+                <div class="arch-flow-label">Voice task → Airtable | Text/voice forward → R2 storage + email via Resend</div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.05em">SMS Bridge (GoHighLevel to Gmail)</h3>
+            <div class="arch-flow-diagram">
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box source">GoHighLevel (SMS)</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box worker">sms-email-bridge Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box output">Gmail (via Resend)</div>
+                </div>
+                <div class="arch-flow-label">Polls GHL every 60 seconds → deduplicates via KV state → forwards new SMS to Gmail</div>
+            </div>
+
+            <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.05em">AI Assistant</h3>
+            <div class="arch-flow-diagram">
+                <div class="arch-flow-row">
+                    <div class="arch-flow-box app">Dashboard AI Panel</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box worker">anthropic-proxy Worker</div>
+                    <span class="arch-flow-arrow">→</span>
+                    <div class="arch-flow-box source">Anthropic API</div>
+                </div>
+                <div class="arch-flow-label">Gathers tab context + data → CORS proxy → Claude streaming response</div>
+            </div>
+        </div>
+
+        <!-- ═══════════ CLOUDFLARE WORKERS ═══════════ -->
+        <div class="arch-section">
+            <h2 class="arch-section-title">Cloudflare Workers</h2>
+            <div class="arch-grid workers">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🤖</span>
+                        <span class="arch-node-name">contractor-bot</span>
+                        <span class="arch-node-type worker">Worker</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">URL</span><span class="arch-detail-value">contractor-bot.kevinbrittain.workers.dev</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">Slack Event Subscriptions (messages)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">KV</span><span class="arch-detail-value">STATE (10-min session expiry)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">R2</span><span class="arch-detail-value">contractor-bot-attachments</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">APIs</span><span class="arch-detail-value">Airtable, Slack, Anthropic (Sonnet)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Actions</span><span class="arch-detail-value">new_job, status_update, list_request, attach_photo</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🔔</span>
+                        <span class="arch-node-name">slack-notify</span>
+                        <span class="arch-node-type worker">Worker</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">URL</span><span class="arch-detail-value">slack-notify.kevinbrittain.workers.dev</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">HTTP POST from dashboard</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">CORS</span><span class="arch-detail-value">chaichoong.github.io only</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Actions</span><span class="arch-detail-value">assigned, reassigned, completed, comment</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📱</span>
+                        <span class="arch-node-name">apple-inbound</span>
+                        <span class="arch-node-type worker">Worker</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">URL</span><span class="arch-detail-value">apple-inbound.kevinbrittain.workers.dev</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">Apple Shortcuts (HTTP POST)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">R2</span><span class="arch-detail-value">apple-inbound-attachments</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Endpoints</span><span class="arch-detail-value">/voice-task, /text-forward, /voice-forward, /files/{key}</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">💬</span>
+                        <span class="arch-node-name">sms-email-bridge</span>
+                        <span class="arch-node-type worker">Worker</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">URL</span><span class="arch-detail-value">sms-email-bridge.kevinbrittain.workers.dev</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">Cron (every 60 seconds)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">KV</span><span class="arch-detail-value">SMS_STATE (persistent)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">APIs</span><span class="arch-detail-value">GoHighLevel (poll), Resend (send)</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🔄</span>
+                        <span class="arch-node-name">anthropic-proxy</span>
+                        <span class="arch-node-type worker">Worker</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">CORS relay for Anthropic API calls from the dashboard</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Trigger</span><span class="arch-detail-value">HTTP POST from AI Assistant panel</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════ EXTERNAL SERVICES ═══════════ -->
+        <div class="arch-section">
+            <h2 class="arch-section-title">External Services</h2>
+            <div class="arch-grid integrations">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📊</span>
+                        <span class="arch-node-name">Airtable</span>
+                        <span class="arch-node-type external">Core Data</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Base</span><span class="arch-detail-value">appnqjDpqDniH3IRl</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Auth</span><span class="arch-detail-value">Personal Access Token (PAT)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Tables</span><span class="arch-detail-value">20 tables (see Data Model section)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Rate limit</span><span class="arch-detail-value">5 req/sec, with 4-attempt exponential backoff</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Migration</span><span class="arch-detail-value">Moving to Supabase (planned)</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">💬</span>
+                        <span class="arch-node-name">Slack</span>
+                        <span class="arch-node-type external">Messaging</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Bot scopes</span><span class="arch-detail-value">chat:write, users:read, users:read:email, im:history, im:read, channels:history, files:read, im:write</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Channels</span><span class="arch-detail-value">#property-management (contractor tasks)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">DMs</span><span class="arch-detail-value">Task notifications to team members and contractors</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🏦</span>
+                        <span class="arch-node-name">FinTable</span>
+                        <span class="arch-node-type external">Banking</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Bank account sync to Airtable (transactions + balances)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Flow</span><span class="arch-detail-value">FinTable → Airtable Accounts table → Dashboard reads</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📧</span>
+                        <span class="arch-node-name">Gmail / Google Apps Script</span>
+                        <span class="arch-node-type external">Email</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Invoice extraction from Gmail label "3. to pay"</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Script</span><span class="arch-detail-value">Google Apps Script web app (GMAIL_SCRIPT_URL in config.js)</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📱</span>
+                        <span class="arch-node-name">GoHighLevel</span>
+                        <span class="arch-node-type external">CRM / SMS</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">SMS inbox (inbound messages from tenants/prospects)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Location</span><span class="arch-detail-value">dgsHwbYbp6xrhRGZr9ik</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Integration</span><span class="arch-detail-value">Polled every 60s by sms-email-bridge worker</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">✉️</span>
+                        <span class="arch-node-name">Resend</span>
+                        <span class="arch-node-type external">Email API</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Transactional email dispatch (from workers)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">From</span><span class="arch-detail-value">sms@operationsdirector.co.uk</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Used by</span><span class="arch-detail-value">apple-inbound, sms-email-bridge</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🤖</span>
+                        <span class="arch-node-name">Anthropic API</span>
+                        <span class="arch-node-type external">AI</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">AI Assistant, AI commentary, intent classification</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Models</span><span class="arch-detail-value">Claude Sonnet (contractor-bot), Claude (AI assistant)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Access</span><span class="arch-detail-value">Via anthropic-proxy worker (CORS)</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🚀</span>
+                        <span class="arch-node-name">GitHub Pages</span>
+                        <span class="arch-node-type external">Hosting</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">URL</span><span class="arch-detail-value">chaichoong.github.io/leadership-dashboard/</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Deploy</span><span class="arch-detail-value">Push to main → auto-deploy (2-3 min)</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">CI</span><span class="arch-detail-value">auto-bump-pagever.yml (bumps PAGE_REGISTRY versions)</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════ DATA MODEL ═══════════ -->
+        <div class="arch-section">
+            <h2 class="arch-section-title">Airtable Data Model (20 Tables)</h2>
+            <div class="arch-data-grid">
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Transactions</div>
+                    <div class="arch-data-item-id">tbln0gzhCAorFc3zB</div>
+                    <div class="arch-data-item-used">Used by: Dashboard, P&L, Costs, CFV, Reconciliation</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Tenancies</div>
+                    <div class="arch-data-item-id">tblN51a88qTDB6iMH</div>
+                    <div class="arch-data-item-used">Used by: Dashboard, Income, CFV, Operations</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Tenants</div>
+                    <div class="arch-data-item-id">tblX4elTuu01gwBYh</div>
+                    <div class="arch-data-item-used">Used by: Dashboard, Income, CFV, Operations</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Costs</div>
+                    <div class="arch-data-item-id">tblx5kvhzNEI5TFlS</div>
+                    <div class="arch-data-item-used">Used by: Dashboard, AP Fixed, P&L, Reconciliation</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Properties</div>
+                    <div class="arch-data-item-id">tbl6f0OkAmTC2jbuG</div>
+                    <div class="arch-data-item-used">Used by: Dashboard, Operations, Compliance</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Rental Units</div>
+                    <div class="arch-data-item-id">tblM3mZCR5kiEdWMj</div>
+                    <div class="arch-data-item-used">Used by: Dashboard, Operations, Income</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Tasks</div>
+                    <div class="arch-data-item-id">tblqB8b22hKBL4PF1</div>
+                    <div class="arch-data-item-used">Used by: Tasks OS, contractor-bot, apple-inbound</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Businesses</div>
+                    <div class="arch-data-item-id">tblpqkvWJJo8Uu25q</div>
+                    <div class="arch-data-item-used">Used by: Most pages (filter dropdowns)</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Categories</div>
+                    <div class="arch-data-item-id">tbleWb8ioptnEwPR8</div>
+                    <div class="arch-data-item-used">Used by: P&L, Costs, Transactions</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Sub-Categories</div>
+                    <div class="arch-data-item-id">tblOTdRcPf8AgRz25</div>
+                    <div class="arch-data-item-used">Used by: P&L, Costs, Transactions</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Accounts</div>
+                    <div class="arch-data-item-id">tbl1nr0EcX2T62KME</div>
+                    <div class="arch-data-item-used">Used by: Bank Accounts, Dashboard</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Invoices</div>
+                    <div class="arch-data-item-id">tblkOTKIG2Tyiy9aM</div>
+                    <div class="arch-data-item-used">Used by: AP Variable</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Outbound Invoices</div>
+                    <div class="arch-data-item-id">tblmKRKZMJvUxN4h1</div>
+                    <div class="arch-data-item-used">Used by: AR Variable</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Objective & Strategy</div>
+                    <div class="arch-data-item-id">tblEBvFw8DonwxzGh</div>
+                    <div class="arch-data-item-used">Used by: Strategy OS</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Main Methods</div>
+                    <div class="arch-data-item-id">tbl065D58MBEJhjlp</div>
+                    <div class="arch-data-item-used">Used by: Strategy OS</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Projects</div>
+                    <div class="arch-data-item-id">tblHrpTMd5LNYn8v1</div>
+                    <div class="arch-data-item-used">Used by: Tasks OS, Strategy OS, Dashboard KPIs</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Recon Audit</div>
+                    <div class="arch-data-item-id">tblbfuxYxu4uMMWwT</div>
+                    <div class="arch-data-item-used">Used by: Reconciliation engine</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Arrears Records</div>
+                    <div class="arch-data-item-id">tblzG0B9oRRpszcgC</div>
+                    <div class="arch-data-item-used">Used by: CFV (credit control pipeline)</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Arrears Contact Log</div>
+                    <div class="arch-data-item-id">tblik5VI5Jy6tO2yc</div>
+                    <div class="arch-data-item-used">Used by: CFV (audit trail)</div>
+                </div>
+                <div class="arch-data-item">
+                    <div class="arch-data-item-name">Systemisation Workflows</div>
+                    <div class="arch-data-item-id">tblLPoRHFBl0vqR24</div>
+                    <div class="arch-data-item-used">Used by: Systemisation OS</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════ STORAGE ═══════════ -->
+        <div class="arch-section">
+            <h2 class="arch-section-title">Storage</h2>
+            <div class="arch-grid integrations">
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📦</span>
+                        <span class="arch-node-name">Cloudflare KV: STATE</span>
+                        <span class="arch-node-type storage">KV</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Used by</span><span class="arch-detail-value">contractor-bot</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Multi-turn conversation state (10-min TTL per session)</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">📦</span>
+                        <span class="arch-node-name">Cloudflare KV: SMS_STATE</span>
+                        <span class="arch-node-type storage">KV</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Used by</span><span class="arch-detail-value">sms-email-bridge</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Last poll timestamp and forwarded count (persistent)</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🗄️</span>
+                        <span class="arch-node-name">R2: contractor-bot-attachments</span>
+                        <span class="arch-node-type storage">R2</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Used by</span><span class="arch-detail-value">contractor-bot</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Photo attachments from Slack contractor messages</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🗄️</span>
+                        <span class="arch-node-name">R2: apple-inbound-attachments</span>
+                        <span class="arch-node-type storage">R2</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Used by</span><span class="arch-detail-value">apple-inbound</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Purpose</span><span class="arch-detail-value">Audio files from Apple Watch voice messages</span></div>
+                    </div>
+                </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">💾</span>
+                        <span class="arch-node-name">Browser localStorage</span>
+                        <span class="arch-node-type storage">Local</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">Keys</span><span class="arch-detail-value">_dlr_pat (auth token), sidebar section state, dashboard cache</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Migration note</span><span class="arch-detail-value">PAT auth will be replaced by Supabase session tokens</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function toggleNode(el) {
+            el.classList.toggle('expanded');
+        }
+        function toggleAllNodes(btn) {
+            const nodes = document.querySelectorAll('.arch-node');
+            const anyCollapsed = Array.from(nodes).some(n => !n.classList.contains('expanded'));
+            nodes.forEach(n => n.classList.toggle('expanded', anyCollapsed));
+            btn.textContent = anyCollapsed ? 'Collapse All' : 'Expand All';
+        }
+    </script>
+</body>
+</html>
