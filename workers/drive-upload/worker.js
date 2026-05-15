@@ -1,6 +1,8 @@
 // Google Drive SOP Upload Worker
 // POST /upload  { workflowName, htmlContent, fileName }
 // Returns { folderId, folderUrl, fileId, fileUrl }
+// GET /auth/start — redirects to Google OAuth consent screen
+// GET /auth/callback — exchanges code for refresh token, displays it
 
 const CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
@@ -10,6 +12,40 @@ const CORS_HEADERS = {
 
 export default {
     async fetch(request, env) {
+        const url = new URL(request.url);
+
+        if (url.pathname === '/auth/start') {
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&response_type=code&scope=${encodeURIComponent('https://www.googleapis.com/auth/drive')}&access_type=offline&prompt=consent`;
+            return Response.redirect(authUrl, 302);
+        }
+
+        if (url.pathname === '/auth/callback') {
+            const code = url.searchParams.get('code');
+            if (!code) return new Response('No code provided', { status: 400 });
+
+            const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `code=${code}&client_id=${env.GOOGLE_CLIENT_ID}&client_secret=${env.GOOGLE_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(url.origin + '/auth/callback')}&grant_type=authorization_code`,
+            });
+            const tokenData = await tokenRes.json();
+
+            if (tokenData.refresh_token) {
+                return new Response(
+                    `<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px">
+                    <h2>Success</h2>
+                    <p>Copy this refresh token and save it as a Cloudflare Worker secret:</p>
+                    <pre style="background:#f0f0f0;padding:12px;border-radius:4px;word-break:break-all">${tokenData.refresh_token}</pre>
+                    <p>Run this in your terminal:</p>
+                    <code style="background:#f0f0f0;padding:8px;border-radius:4px;display:block">echo "${tokenData.refresh_token}" | npx wrangler secret put GOOGLE_REFRESH_TOKEN</code>
+                    <p style="color:#666;margin-top:20px">You can close this tab after saving the token.</p>
+                    </body></html>`,
+                    { status: 200, headers: { 'Content-Type': 'text/html' } }
+                );
+            }
+            return new Response('Error: ' + JSON.stringify(tokenData), { status: 400 });
+        }
+
         if (request.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: CORS_HEADERS });
         }
@@ -24,7 +60,7 @@ export default {
                 return jsonResponse({ error: 'workflowName and htmlContent are required' }, 400);
             }
 
-            const accessToken = await getAccessToken(env.GOOGLE_SERVICE_ACCOUNT_JSON);
+            const accessToken = await getAccessToken(env);
             const parentFolderId = env.DRIVE_PARENT_FOLDER_ID;
 
             const folder = await createFolder(accessToken, workflowName, parentFolderId);
@@ -53,58 +89,16 @@ function jsonResponse(data, status = 200) {
     });
 }
 
-// Google OAuth2 JWT flow for service accounts
-async function getAccessToken(serviceAccountJson) {
-    const sa = JSON.parse(serviceAccountJson);
-    const now = Math.floor(Date.now() / 1000);
-
-    const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-    const claim = base64url(JSON.stringify({
-        iss: sa.client_email,
-        scope: 'https://www.googleapis.com/auth/drive',
-        aud: 'https://oauth2.googleapis.com/token',
-        iat: now,
-        exp: now + 3600,
-    }));
-
-    const signingInput = `${header}.${claim}`;
-    const signature = await signRS256(signingInput, sa.private_key);
-    const jwt = `${signingInput}.${signature}`;
-
+async function getAccessToken(env) {
     const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+        body: `client_id=${env.GOOGLE_CLIENT_ID}&client_secret=${env.GOOGLE_CLIENT_SECRET}&refresh_token=${env.GOOGLE_REFRESH_TOKEN}&grant_type=refresh_token`,
     });
 
     if (!res.ok) throw new Error('Google auth failed: ' + await res.text());
     const data = await res.json();
     return data.access_token;
-}
-
-async function signRS256(input, privateKeyPem) {
-    const pemBody = privateKeyPem
-        .replace(/-----BEGIN PRIVATE KEY-----/, '')
-        .replace(/-----END PRIVATE KEY-----/, '')
-        .replace(/\s/g, '');
-    const keyData = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
-
-    const key = await crypto.subtle.importKey(
-        'pkcs8', keyData, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']
-    );
-
-    const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(input));
-    return base64url(new Uint8Array(sig));
-}
-
-function base64url(data) {
-    let b64;
-    if (typeof data === 'string') {
-        b64 = btoa(data);
-    } else {
-        b64 = btoa(String.fromCharCode(...data));
-    }
-    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 async function createFolder(token, name, parentId) {
