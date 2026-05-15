@@ -199,9 +199,45 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .bulk-toolbar .btn-danger{font-size:var(--fs-sm);padding:4px 12px}
 .bulk-toolbar-clear{background:none;border:none;font-size:var(--fs-xs);color:var(--text-secondary);cursor:pointer;text-decoration:underline;margin-left:auto}
 .bulk-toolbar-clear:hover{color:var(--text-primary)}
+.bulk-toolbar-field{display:flex;align-items:center;gap:4px}
+.bulk-toolbar-field-label{font-size:var(--fs-xs);color:var(--accent-hover);font-weight:var(--fw-semibold);white-space:nowrap}
+.bulk-toolbar .btn-apply{background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:var(--radius-sm);font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer}
+.bulk-toolbar .btn-apply:hover{background:var(--accent-hover)}
+.bulk-toolbar .btn-apply:disabled{opacity:.5;cursor:not-allowed}
 .wf-grid .bulk-check{width:18px;height:18px;cursor:pointer;accent-color:var(--accent)}
 .wf-grid-detail td{background:var(--bg-surface-2);border-bottom:2px solid var(--border-default)}
 .wf-grid-detail:hover{background:var(--bg-surface-2)}
+
+.resources-panel{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:var(--radius-md);margin-bottom:16px;overflow:hidden}
+.resources-header{display:flex;align-items:center;gap:8px;padding:12px 16px;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);user-select:none}
+.resources-header:hover{background:var(--bg-surface)}
+.resources-chevron{font-size:10px;color:var(--text-muted);transition:transform .15s}
+.resources-panel.open .resources-chevron{transform:rotate(90deg)}
+.resources-body{display:none;padding:16px;border-top:1px solid var(--border-subtle)}
+.resources-panel.open .resources-body{display:block}
+.resources-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.resources-item{display:flex;flex-direction:column;gap:4px}
+.resources-item label{font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary)}
+.resources-item input{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 10px;border-radius:var(--radius-sm);font-size:var(--fs-sm);font-family:inherit}
+.resources-item input:focus{outline:none;border-color:var(--accent)}
+.resources-item a{font-size:var(--fs-sm);color:var(--accent);word-break:break-all}
+.loom-embed-container{grid-column:1/-1;margin-top:4px}
+.loom-embed-container iframe{width:100%;height:280px;border:none;border-radius:var(--radius-md)}
+
+.loom-import-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 14px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:var(--radius-md)}
+.loom-import-bar input{flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface);color:var(--text-primary);font-family:inherit}
+.loom-import-bar input:focus{outline:none;border-color:var(--accent)}
+.loom-import-bar .btn{flex-shrink:0}
+
+.settings-icon{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);padding:4px}
+.settings-icon:hover{color:var(--text-primary)}
+.settings-panel{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:16px;margin-bottom:16px}
+.settings-panel .field-row{margin-bottom:12px}
+
+.task-assign-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 14px;background:var(--info-bg);border:1px solid var(--info);border-radius:var(--radius-md)}
+.task-status-badge{font-size:var(--fs-xs);padding:2px 8px;border-radius:10px;font-weight:var(--fw-semibold)}
+.task-pending{background:var(--warning-bg);color:var(--warning)}
+.task-complete{background:var(--success-bg);color:var(--success)}
 
 .unassigned-panel{border-top:2px solid var(--border-default);margin-top:8px;padding-top:0}
 .unassigned-toggle{display:flex;align-items:center;gap:8px;padding:12px 0;cursor:pointer;color:var(--text-secondary);font-size:var(--fs-sm);font-weight:var(--fw-semibold);user-select:none}
@@ -254,6 +290,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <select id="bizFilter" class="filter-select" onchange="applyBizFilter()">
             <option value="">All Businesses</option>
         </select>
+        <button class="settings-icon" onclick="toggleSettings()" title="Settings">&#x2699;</button>
     </div>
 </div>
 
@@ -342,12 +379,26 @@ const FULFILL_STAGES = [
 
 const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
 
+const TASKS_TBL = 'tblqB8b22hKBL4PF1';
+const TF = {
+    name:        'fldgFjGBw6bTKJFCD',
+    status:      'fldx4qCw17UfrKpaN',
+    assignee:    'fldELMncVJYPDRJNc',
+    description: 'fldRGhBQViKZKtkQ6',
+    category:    'fldVDvfhfOUBNvAxe',
+    notes:       'fldR7apBzSp3oxFxz',
+    dueDate:     'fld7XP8w8kbxfETV4',
+    priority:    'fldS21RwmwOqt71LI',
+    attachments: 'fldEbs9cscRr8elcw',
+};
+
 let PAT = '';
 let allWorkflows = [];
 let allSteps = [];
 let allMethods = [];
 let allBusinesses = [];
 let allObjStrat = [];
+let allVideoTasks = [];
 let methodBizMap = {};
 let bizMethodOrder = {};
 let currentView = 'fulfill';
@@ -356,9 +407,20 @@ let _drawerKey = null;
 let _drawerView = null;
 let bizFilterId = '';
 let selectedStepsWf = null;
+let _bulkPendingAssigns = {};
 
 function isSkillCreated(stepId){ return localStorage.getItem('sys_skill_'+stepId)==='1'; }
 function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)==='1'; }
+
+function getWfLoomUrl(wfId){ return localStorage.getItem('sys_loom_'+wfId)||''; }
+function setWfLoomUrl(wfId, url){ if(url) localStorage.setItem('sys_loom_'+wfId, url); else localStorage.removeItem('sys_loom_'+wfId); }
+function getWfDriveUrl(wfId){ return localStorage.getItem('sys_drive_'+wfId)||''; }
+function setWfDriveUrl(wfId, url){ if(url) localStorage.setItem('sys_drive_'+wfId, url); else localStorage.removeItem('sys_drive_'+wfId); }
+function getWfVideoTaskId(wfId){ return localStorage.getItem('sys_vtask_'+wfId)||''; }
+function setWfVideoTaskId(wfId, taskId){ if(taskId) localStorage.setItem('sys_vtask_'+wfId, taskId); else localStorage.removeItem('sys_vtask_'+wfId); }
+function getWfVideoTaskStatus(wfId){ return localStorage.getItem('sys_vtask_status_'+wfId)||''; }
+function setWfVideoTaskStatus(wfId, status){ if(status) localStorage.setItem('sys_vtask_status_'+wfId, status); else localStorage.removeItem('sys_vtask_status_'+wfId); }
+function getLoomApiKey(){ return localStorage.getItem('sys_loom_api_key')||''; }
 
 function pipelineStatus(step){
     const sopSt = selName(gf(step,ST.sopStatus))||'Not Created';
@@ -472,6 +534,45 @@ async function loadData(){
     allObjStrat = os;
     buildMethodBizMap();
     populateBizFilter();
+    await checkVideoTasks();
+}
+
+async function checkVideoTasks(){
+    const wfIds = allWorkflows.map(w=>w.id);
+    const pendingIds = wfIds.filter(id=>getWfVideoTaskId(id) && getWfVideoTaskStatus(id)==='pending');
+    if(!pendingIds.length) return;
+    try {
+        const taskIds = pendingIds.map(id=>getWfVideoTaskId(id)).filter(Boolean);
+        const formula = taskIds.length===1
+            ? `RECORD_ID()='${taskIds[0]}'`
+            : `OR(${taskIds.map(id=>`RECORD_ID()='${id}'`).join(',')})`;
+        const params = new URLSearchParams({
+            returnFieldsByFieldId:'true', pageSize:'100',
+            filterByFormula: formula
+        });
+        [TF.status,TF.notes].forEach(f=>params.append('fields[]',f));
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TBL}?${params}`,{
+            headers:{'Authorization':`Bearer ${PAT}`}
+        });
+        if(!res.ok) return;
+        const data = await res.json();
+        allVideoTasks = data.records||[];
+        for(const wfId of pendingIds){
+            const taskId = getWfVideoTaskId(wfId);
+            const task = allVideoTasks.find(t=>t.id===taskId);
+            if(!task) continue;
+            const status = selName(gf(task,TF.status))||'';
+            if(status==='Complete'||status==='Done'){
+                setWfVideoTaskStatus(wfId, 'complete');
+                const notes = gf(task,TF.notes)||'';
+                const loomMatch = notes.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
+                if(loomMatch && !getWfLoomUrl(wfId)){
+                    setWfLoomUrl(wfId, loomMatch[0]);
+                    toast('Loom URL auto-imported for '+((allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow'));
+                }
+            }
+        }
+    } catch(e){ console.error('Video task check failed:', e); }
 }
 
 function buildMethodBizMap(){
@@ -572,7 +673,8 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     document.getElementById('stepsCount').textContent=allSteps.length;
     const autoReady = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
-    document.getElementById('autoCount').textContent=autoReady;
+    const pendingVideoTasks = allWorkflows.filter(w=>getWfVideoTaskId(w.id)&&getWfVideoTaskStatus(w.id)==='pending').length;
+    document.getElementById('autoCount').textContent=autoReady+pendingVideoTasks;
 }
 
 // ── Customer Journey (FULFILL) ──
@@ -771,24 +873,25 @@ function renderAll(){
     toolbar.id = 'bulkToolbar';
     toolbar.innerHTML = `<span class="bulk-toolbar-count" id="bulkCount">0 selected</span>
         <div class="bulk-toolbar-actions">
-            <span class="bulk-toolbar-label">Assign:</span>
-            <div id="bulkDept"></div>
-            <div id="bulkFulfill"></div>
-            <div id="bulkMethod"></div>
+            <div class="bulk-toolbar-field"><span class="bulk-toolbar-field-label">Department:</span><div id="bulkDept"></div></div>
+            <div class="bulk-toolbar-field"><span class="bulk-toolbar-field-label">Customer Journey:</span><div id="bulkFulfill"></div></div>
+            <div class="bulk-toolbar-field"><span class="bulk-toolbar-field-label">Main Method:</span><div id="bulkMethod"></div></div>
+            <button class="btn-apply" id="bulkApplyBtn" onclick="bulkApplyAll()" disabled>Apply to selected</button>
             <button class="btn btn-sm btn-danger" onclick="bulkDelete()">Delete selected</button>
         </div>
         <button class="bulk-toolbar-clear" onclick="bulkClearAll()">Clear selection</button>`;
     paneEl.appendChild(toolbar);
 
+    _bulkPendingAssigns = {};
     const deptOpts = DEPARTMENTS.map(d=>({value:d, label:d}));
-    toolbar.querySelector('#bulkDept').appendChild(createSearchableSelect(deptOpts, '', (v)=> bulkAssign('department', v)));
+    toolbar.querySelector('#bulkDept').appendChild(createSearchableSelect(deptOpts, '', (v)=> { _bulkPendingAssigns.department=v; updateBulkApplyBtn(); }));
     const fulfillOpts = FULFILL_STAGES.map(s=>({value:s.key, label:s.label}));
-    toolbar.querySelector('#bulkFulfill').appendChild(createSearchableSelect(fulfillOpts, '', (v)=> bulkAssign('fulfill', v)));
+    toolbar.querySelector('#bulkFulfill').appendChild(createSearchableSelect(fulfillOpts, '', (v)=> { _bulkPendingAssigns.fulfill=v; updateBulkApplyBtn(); }));
     const orderedMethods = [];
     allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); }); });
     allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
     const methodOpts = orderedMethods.map(m=>({value:m.id, label:gf(m,MM.name)||'Unnamed'}));
-    toolbar.querySelector('#bulkMethod').appendChild(createSearchableSelect(methodOpts, '', (v)=> bulkAssign('method', v)));
+    toolbar.querySelector('#bulkMethod').appendChild(createSearchableSelect(methodOpts, '', (v)=> { _bulkPendingAssigns.method=v; updateBulkApplyBtn(); }));
 
     const table = document.createElement('table');
     table.className = 'wf-grid';
@@ -1236,14 +1339,23 @@ function bulkClearAll(){
     bulkUpdateCount();
 }
 
-async function bulkAssign(fieldType, value){
+function updateBulkApplyBtn(){
+    const btn = document.getElementById('bulkApplyBtn');
+    if(!btn) return;
+    const hasAny = _bulkPendingAssigns.department || _bulkPendingAssigns.fulfill || _bulkPendingAssigns.method;
+    btn.disabled = !hasAny;
+}
+
+async function bulkApplyAll(){
     const ids = getSelectedWfIds();
     if(!ids.length){ toast('No workflows selected'); return; }
-    if(!value){ return; }
+    const hasAny = _bulkPendingAssigns.department || _bulkPendingAssigns.fulfill || _bulkPendingAssigns.method;
+    if(!hasAny){ toast('Select at least one field to assign'); return; }
+
     const fields = {};
-    if(fieldType==='department') fields[WF.department] = value;
-    else if(fieldType==='fulfill') fields[WF.fulfillStage] = value;
-    else if(fieldType==='method') fields[WF.mainMethodStage] = [value];
+    if(_bulkPendingAssigns.department) fields[WF.department] = _bulkPendingAssigns.department;
+    if(_bulkPendingAssigns.fulfill) fields[WF.fulfillStage] = _bulkPendingAssigns.fulfill;
+    if(_bulkPendingAssigns.method) fields[WF.mainMethodStage] = [_bulkPendingAssigns.method];
 
     const toolbar = document.getElementById('bulkToolbar');
     toolbar.style.opacity = '0.5';
@@ -1257,6 +1369,7 @@ async function bulkAssign(fieldType, value){
             done++;
             if(done < ids.length) await new Promise(r=>setTimeout(r, 500));
         }
+        _bulkPendingAssigns = {};
         updateTabCounts();
         renderAll();
         toast(done + ' workflow' + (done!==1?'s':'') + ' updated');
@@ -1932,11 +2045,63 @@ function renderSteps(){
         } else {
             const wName = gf(w,WF.name)||'Untitled';
             const steps = stepsForWorkflow(w.id);
+            const loomUrl = getWfLoomUrl(w.id);
+            const driveUrl = getWfDriveUrl(w.id);
+            const vtaskId = getWfVideoTaskId(w.id);
+            const vtaskStatus = getWfVideoTaskStatus(w.id);
+
             html += `<div class="steps-header">
                 <h3 style="margin:0;font-size:var(--fs-lg)">${esc(wName)}</h3>
                 <div style="display:flex;gap:8px">
                     <button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>
+                    ${!vtaskId?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="assignVideoTask('${w.id}')">Assign Video Task</button>`:''}
                 </div>
+            </div>`;
+
+            if(vtaskId){
+                const statusCls = vtaskStatus==='complete'?'task-complete':'task-pending';
+                const statusLabel = vtaskStatus==='complete'?'Complete':'Pending';
+                html += `<div class="task-assign-bar">
+                    <span style="font-size:var(--fs-sm);font-weight:var(--fw-semibold)">Video Task:</span>
+                    <span class="task-status-badge ${statusCls}">${statusLabel}</span>
+                    ${vtaskStatus==='complete'&&!loomUrl?'<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Task complete. Paste the Loom URL below to import steps.</span>':''}
+                    ${vtaskStatus!=='complete'?'<span style="font-size:var(--fs-xs);color:var(--text-secondary)">Waiting for team member to record and complete the task.</span>':''}
+                </div>`;
+            }
+
+            html += `<div class="resources-panel${loomUrl||driveUrl?' open':''}" id="resources-${w.id}">
+                <div class="resources-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="resources-chevron">&#x25B6;</span>
+                    Resources
+                </div>
+                <div class="resources-body">
+                    <div class="resources-grid">
+                        <div class="resources-item">
+                            <label>Loom Video URL</label>
+                            <input type="url" placeholder="https://www.loom.com/share/..." value="${esc(loomUrl)}" onblur="setWfLoomUrl('${w.id}',this.value);renderStepsResourceEmbed('${w.id}')">
+                        </div>
+                        <div class="resources-item">
+                            <label>Google Drive Folder</label>
+                            <input type="url" placeholder="https://drive.google.com/..." value="${esc(driveUrl)}" onblur="setWfDriveUrl('${w.id}',this.value)">
+                        </div>
+                        ${loomUrl?`<div class="resources-item">
+                            <label>Loom SOP</label>
+                            <a href="${esc(loomUrl)}" target="_blank" rel="noopener">Open in Loom (use Generate SOP feature)</a>
+                        </div>`:''}
+                        ${driveUrl?`<div class="resources-item">
+                            <label>Drive Folder</label>
+                            <a href="${esc(driveUrl)}" target="_blank" rel="noopener">Open folder</a>
+                        </div>`:''}
+                        <div class="loom-embed-container" id="loomEmbed-${w.id}">
+                            ${loomUrl?renderLoomEmbed(loomUrl):''}
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+            html += `<div class="loom-import-bar">
+                <input type="url" placeholder="Paste Loom URL to import steps from transcript..." id="loomImportUrl-${w.id}" value="${esc(loomUrl)}">
+                <button class="btn btn-sm btn-ai" onclick="importFromLoom('${w.id}')">Import from Loom</button>
             </div>`;
 
             html += '<table class="wf-grid"><thead><tr>';
@@ -2034,54 +2199,101 @@ function renderAutomation(){
     const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
     const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
 
-    if(!stepsWithSop.length){
-        pane.innerHTML = '<div class="empty-state"><p>No steps with completed SOPs yet.</p><p>Complete SOPs in the Workflow Steps tab first, then return here to convert them to Skills or Tasks.</p></div>';
-        return;
-    }
+    let html = '';
 
-    let html = '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:16px">Steps with completed SOPs, ready for automation. Convert to an AI Skill (automated) or a recurring Task (manual).</p>';
+    const wfsWithTasks = wfs.filter(w=>getWfVideoTaskId(w.id));
+    if(wfsWithTasks.length){
+        html += '<div class="auto-wf-group">';
+        html += '<div class="auto-wf-header">Video Recording Tasks <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithTasks.length + ' assigned)</span></div>';
+        html += `<table class="wf-grid"><thead><tr>
+            <th style="width:30%">Workflow</th>
+            <th style="width:100px">Task Status</th>
+            <th style="width:100px">Loom URL</th>
+            <th style="width:100px">Steps Extracted</th>
+            <th style="width:120px">Actions</th>
+        </tr></thead><tbody>`;
 
-    wfs.forEach(w=>{
-        const steps = stepsForWorkflow(w.id).filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
-        if(!steps.length) return;
-        const wName = gf(w,WF.name)||'Untitled';
-
-        html += `<div class="auto-wf-group">
-            <div class="auto-wf-header">${esc(wName)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${steps.length} ready)</span></div>
-            <table class="wf-grid"><thead><tr>
-                <th style="width:25%">Step</th>
-                <th style="width:30%">Description</th>
-                <th style="width:90px">Type</th>
-                <th style="width:100px">Pipeline</th>
-                <th style="width:120px">Actions</th>
-            </tr></thead><tbody>`;
-
-        steps.forEach(s=>{
-            const sName = gf(s,ST.name)||'Untitled';
-            const sDesc = gf(s,ST.description)||'';
-            const sType = selName(gf(s,ST.stepType))||'Staff Task';
-            const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
-            const ps = pipelineStatus(s);
-            const canSkill = (sType==='AI Skill'||sType==='Both') && !isSkillCreated(s.id);
-            const canTask = (sType==='Staff Task'||sType==='Both') && !isTaskCreated(s.id);
+        wfsWithTasks.forEach(w=>{
+            const wName = gf(w,WF.name)||'Untitled';
+            const vtaskStatus = getWfVideoTaskStatus(w.id);
+            const loomUrl = getWfLoomUrl(w.id);
+            const steps = stepsForWorkflow(w.id);
+            const statusCls = vtaskStatus==='complete'?'task-complete':'task-pending';
+            const statusLabel = vtaskStatus==='complete'?'Complete':'Pending';
+            const hasSteps = steps.length > 0;
 
             html += `<tr>
-                <td>${esc(sName)}</td>
-                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sDesc)}</td>
-                <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
-                <td><span class="pipeline-badge ${ps.cls}">${esc(ps.label)}</span></td>
+                <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
+                <td><span class="task-status-badge ${statusCls}">${statusLabel}</span></td>
+                <td>${loomUrl?'<span style="color:var(--success);font-size:var(--fs-xs)">Linked</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">None</span>'}</td>
+                <td>${hasSteps?'<span style="color:var(--success);font-size:var(--fs-xs)">'+steps.length+' steps</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">Not yet</span>'}</td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap">
-                    ${canSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertToSkill('${s.id}')">To Skill</button>`:''}
-                    ${canTask?`<button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="convertToTask('${s.id}')">To Task</button>`:''}
-                    ${!canSkill&&!canTask?'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Converted</span>':''}
+                    ${vtaskStatus==='complete'&&loomUrl&&!hasSteps?`<button class="btn btn-sm btn-ai" onclick="selectedStepsWf='${w.id}';importFromLoom('${w.id}')">Extract Steps</button>`:''}
+                    <button class="btn btn-sm" onclick="selectedStepsWf='${w.id}';switchView('steps')">View</button>
                 </td>
             </tr>`;
         });
 
         html += '</tbody></table></div>';
-    });
+    }
+
+    if(!stepsWithSop.length && !wfsWithTasks.length){
+        pane.innerHTML = '<div class="empty-state"><p>No automation activity yet.</p><p>Assign video tasks in the Workflow Steps tab, or complete SOPs to convert them to Skills or Tasks.</p></div>';
+        return;
+    }
+
+    if(stepsWithSop.length){
+        html += '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:16px;margin-top:16px">Steps with completed SOPs, ready for automation. Convert to an AI Skill (automated) or a recurring Task (manual).</p>';
+
+        wfs.forEach(w=>{
+            const steps = stepsForWorkflow(w.id).filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
+            if(!steps.length) return;
+            const wName = gf(w,WF.name)||'Untitled';
+
+            html += `<div class="auto-wf-group">
+                <div class="auto-wf-header">${esc(wName)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${steps.length} ready)</span></div>
+                <table class="wf-grid"><thead><tr>
+                    <th style="width:25%">Step</th>
+                    <th style="width:30%">Description</th>
+                    <th style="width:90px">Type</th>
+                    <th style="width:100px">Pipeline</th>
+                    <th style="width:120px">Actions</th>
+                </tr></thead><tbody>`;
+
+            steps.forEach(s=>{
+                const sName = gf(s,ST.name)||'Untitled';
+                const sDesc = gf(s,ST.description)||'';
+                const sType = selName(gf(s,ST.stepType))||'Staff Task';
+                const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
+                const ps = pipelineStatus(s);
+                const canSkill = (sType==='AI Skill'||sType==='Both') && !isSkillCreated(s.id);
+                const canTask = (sType==='Staff Task'||sType==='Both') && !isTaskCreated(s.id);
+
+                html += `<tr>
+                    <td>${esc(sName)}</td>
+                    <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sDesc)}</td>
+                    <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
+                    <td><span class="pipeline-badge ${ps.cls}">${esc(ps.label)}</span></td>
+                    <td style="display:flex;gap:4px;flex-wrap:wrap">
+                        ${canSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertToSkill('${s.id}')">To Skill</button>`:''}
+                        ${canTask?`<button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="convertToTask('${s.id}')">To Task</button>`:''}
+                        ${!canSkill&&!canTask?'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Converted</span>':''}
+                    </td>
+                </tr>`;
+            });
+
+            html += '</tbody></table></div>';
+        });
+    }
 
     pane.innerHTML = html;
+    updateAutoCount();
+}
+
+function updateAutoCount(){
+    const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
+    const pendingTasks = allWorkflows.filter(w=>getWfVideoTaskId(w.id)&&getWfVideoTaskStatus(w.id)==='pending').length;
+    document.getElementById('autoCount').textContent = stepsWithSop + pendingTasks;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2106,6 +2318,240 @@ async function convertToTask(stepId){
     localStorage.setItem('sys_task_'+stepId, '1');
     toast(`"${name}" linked to Tasks & Projects as a recurring task`);
     render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Loom Integration
+// ═══════════════════════════════════════════════════════════════════════
+function renderLoomEmbed(url){
+    if(!url) return '';
+    const match = url.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
+    if(!match) return '';
+    return `<iframe src="https://www.loom.com/embed/${match[1]}" allowfullscreen></iframe>`;
+}
+
+function renderStepsResourceEmbed(wfId){
+    const container = document.getElementById('loomEmbed-'+wfId);
+    if(!container) return;
+    const url = getWfLoomUrl(wfId);
+    container.innerHTML = url ? renderLoomEmbed(url) : '';
+}
+
+async function importFromLoom(wfId){
+    const urlInput = document.getElementById('loomImportUrl-'+wfId);
+    let loomUrl = urlInput ? urlInput.value.trim() : getWfLoomUrl(wfId);
+    if(!loomUrl){ toast('Paste a Loom URL first'); return; }
+
+    const match = loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
+    if(!match){ toast('Invalid Loom URL. Use format: https://www.loom.com/share/...'); return; }
+
+    setWfLoomUrl(wfId, loomUrl);
+
+    const apiKey = getLoomApiKey();
+    let transcript = '';
+
+    if(apiKey){
+        toast('Fetching transcript from Loom...');
+        try {
+            const videoId = match[1];
+            const res = await fetch(`https://developer.loom.com/v1/videos/${videoId}/transcript`, {
+                headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+            });
+            if(res.ok){
+                const data = await res.json();
+                if(data.transcript) transcript = data.transcript;
+                else if(data.data) transcript = typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
+            } else {
+                toast('Loom API returned '+res.status+'. Using oEmbed fallback.');
+            }
+        } catch(e){ toast('Loom API error: '+e.message+'. Using oEmbed fallback.'); }
+    }
+
+    if(!transcript){
+        try {
+            const oembedRes = await fetch(`https://www.loom.com/v1/oembed?url=${encodeURIComponent(loomUrl)}`);
+            if(oembedRes.ok){
+                const odata = await oembedRes.json();
+                transcript = odata.title || '';
+                if(odata.description) transcript += '. ' + odata.description;
+            }
+        } catch(e){}
+    }
+
+    const w = allWorkflows.find(w=>w.id===wfId);
+    const wName = w ? (gf(w,WF.name)||'') : '';
+    const wDesc = w ? (gf(w,WF.description)||'') : '';
+    const existing = stepsForWorkflow(wfId).map(s=>gf(s,ST.name)).filter(Boolean);
+
+    const prompt = transcript
+        ? `You are extracting workflow steps from a Loom video transcript for the workflow "${wName}".
+${wDesc ? `Workflow description: ${wDesc}` : ''}
+${existing.length ? `These steps already exist, do not duplicate them: ${existing.join(', ')}` : ''}
+
+Here is the video transcript:
+${transcript}
+
+Extract discrete, actionable workflow steps from this transcript. Each step should be a specific task someone would perform.
+Return ONLY a JSON array of objects with "name" and "description" keys. No other text.`
+        : `Suggest 5-8 workflow steps for a workflow called "${wName}".
+${wDesc ? `Workflow description: ${wDesc}` : ''}
+${existing.length ? `These steps already exist, do not duplicate them: ${existing.join(', ')}` : ''}
+A Loom video exists for this workflow but the transcript could not be fetched. Suggest logical steps based on the workflow name and description.
+Return ONLY a JSON array of objects with "name" and "description" keys. No other text.`;
+
+    toast(transcript ? 'AI extracting steps from transcript...' : 'AI suggesting steps...');
+    try {
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model:'claude-sonnet-4-20250514',
+                max_tokens:2000,
+                messages:[{role:'user',content:prompt}],
+            })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'[]';
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if(!jsonMatch) throw new Error('Invalid AI response');
+        const suggestions = JSON.parse(jsonMatch[0]);
+        showLoomStepPicker(suggestions, wfId);
+    } catch(e){ toast('AI error: '+e.message); }
+}
+
+function showLoomStepPicker(suggestions, wfId){
+    let body = '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px">Steps extracted from the Loom video. Tick the ones to add:</p>';
+    suggestions.forEach((s,i)=>{
+        body += `<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;padding:8px;background:var(--bg-surface-2);border-radius:6px">
+            <input type="checkbox" id="lsug${i}" checked style="margin-top:3px">
+            <div><strong>${esc(s.name)}</strong>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(s.description||'')}</div></div>
+        </div>`;
+    });
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="addLoomSteps(${JSON.stringify(suggestions).replace(/"/g,'&quot;')},'${wfId}')">Add Selected</button>`;
+    showModal('Import Steps from Loom', body, footer);
+}
+
+async function addLoomSteps(suggestions, wfId){
+    const selected = suggestions.filter((_,i)=>document.getElementById('lsug'+i)?.checked);
+    if(!selected.length){ closeModal(); return; }
+    closeModal();
+    toast(`Adding ${selected.length} steps...`);
+    const existingCount = stepsForWorkflow(wfId).length;
+
+    for(let i=0; i<selected.length; i++){
+        const s = selected[i];
+        const fields = {
+            [ST.name]: s.name,
+            [ST.description]: s.description||'',
+            [ST.workflow]: [wfId],
+            [ST.stepType]: 'Staff Task',
+            [ST.sopStatus]: 'Not Created',
+            [ST.sortOrder]: existingCount + i + 1,
+        };
+        try {
+            const rec = await atCreate(TBL.steps, fields);
+            allSteps.push(rec);
+        } catch(e){ console.error(e); }
+        if(i < selected.length-1) await new Promise(r=>setTimeout(r, 500));
+    }
+    renderSteps();
+    updateCounts();
+    toast(`${selected.length} steps added from Loom`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Task Assignment
+// ═══════════════════════════════════════════════════════════════════════
+function assignVideoTask(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+
+    const body = `
+        <div class="field-row"><label>Task Name</label><input id="vtaskName" value="Record video: ${esc(wName)}"></div>
+        <div class="field-row"><label>Assignee</label><input id="vtaskAssignee" placeholder="Team member name or email"></div>
+        <div class="field-row"><label>Description</label><textarea id="vtaskDesc">Record a Loom video walkthrough of the "${esc(wName)}" workflow. When complete, paste the Loom share URL into the task notes field and mark the task as Done.</textarea></div>
+        <div class="field-row"><label>Due Date (optional)</label><input type="date" id="vtaskDue"></div>
+        <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px">This creates a task in Tasks &amp; Projects. When the task is marked complete and contains a Loom URL, it will automatically be pulled back here.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createVideoTask('${wfId}')">Create Task</button>`;
+    showModal('Assign Video Recording Task', body, footer);
+}
+
+async function createVideoTask(wfId){
+    const name = document.getElementById('vtaskName').value.trim();
+    const assignee = document.getElementById('vtaskAssignee').value.trim();
+    const desc = document.getElementById('vtaskDesc').value.trim();
+    const due = document.getElementById('vtaskDue').value;
+
+    if(!name){ toast('Task name is required'); return; }
+    if(!assignee){ toast('Assignee is required'); return; }
+
+    const saveBtn = document.querySelector('#modalOverlay .btn-primary');
+    if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Creating...'; }
+
+    const fields = {
+        [TF.name]: name,
+        [TF.assignee]: assignee,
+        [TF.description]: desc,
+        [TF.category]: 'Systemisation',
+        [TF.notes]: `[Systemisation] Workflow ID: ${wfId}`,
+        [TF.status]: 'Not Started',
+        [TF.priority]: 'Medium',
+    };
+    if(due) fields[TF.dueDate] = due;
+
+    try {
+        const rec = await atCreate(TASKS_TBL, fields);
+        setWfVideoTaskId(wfId, rec.id);
+        setWfVideoTaskStatus(wfId, 'pending');
+        closeModal();
+        renderSteps();
+        updateCounts();
+        toast('Video task created and assigned to '+assignee);
+    } catch(e){
+        toast('Error creating task: '+e.message);
+        if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Create Task'; }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Settings Panel
+// ═══════════════════════════════════════════════════════════════════════
+function toggleSettings(){
+    const existing = document.getElementById('settingsPanel');
+    if(existing){ existing.remove(); return; }
+
+    const panel = document.createElement('div');
+    panel.className = 'settings-panel';
+    panel.id = 'settingsPanel';
+    const currentKey = getLoomApiKey();
+    panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <strong style="font-size:var(--fs-base)">Settings</strong>
+            <button class="btn btn-sm" onclick="document.getElementById('settingsPanel').remove()">Close</button>
+        </div>
+        <div class="field-row">
+            <label>Loom Developer API Key</label>
+            <input type="password" id="settingsLoomKey" value="${esc(currentKey)}" placeholder="Enter your Loom API key...">
+            <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px">
+                Get your API key from <a href="https://www.loom.com/developer-portal" target="_blank" rel="noopener">Loom Developer Portal</a>.
+                Required for transcript fetching. Without it, Loom import will use AI to suggest steps based on the workflow name.
+            </p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveLoomApiKey()">Save</button>`;
+
+    const main = document.getElementById('main');
+    main.parentElement.insertBefore(panel, main);
+}
+
+function saveLoomApiKey(){
+    const key = document.getElementById('settingsLoomKey').value.trim();
+    if(key) localStorage.setItem('sys_loom_api_key', key);
+    else localStorage.removeItem('sys_loom_api_key');
+    toast(key ? 'Loom API key saved' : 'Loom API key removed');
+    document.getElementById('settingsPanel').remove();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
