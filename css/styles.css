@@ -1383,6 +1383,7 @@ tr.expand-row:hover td {
 .skills-source-scheduled { background: var(--warning-bg); color: var(--warning); }
 .skills-source-system    { background: var(--bg-subtle); color: var(--text-secondary); }
 .skills-source-marketplace { background: var(--success-bg); color: var(--success); }
+.skills-source-sop        { background: #E8F0E4; color: var(--tone-olive); }
 
 .skills-card-desc {
     font-size: 13px; color: var(--text-secondary); line-height: 1.5;

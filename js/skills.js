@@ -8,12 +8,49 @@
     let _skillsRendered = false;
     let _activeCategory = null;
     let _searchTerm = '';
+    let _sopSkills = [];
+    let _sopSkillsFetched = false;
+
+    async function fetchSOPSkills() {
+        if (_sopSkillsFetched || typeof PAT === 'undefined' || !PAT) return;
+        try {
+            const baseId = 'appnqjDpqDniH3IRl';
+            const tableId = 'tblLPoRHFBl0vqR24';
+            const fieldId = 'fldmRF1UDkbHtl1AG';
+            const url = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${fieldId}&filterByFormula=NOT({Skill Definition}='')`;
+            const res = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
+            if (!res.ok) return;
+            const data = await res.json();
+            const skills = [];
+            (data.records || []).forEach(r => {
+                const raw = r.fields[fieldId];
+                if (!raw) return;
+                try {
+                    const parsed = JSON.parse(raw);
+                    const arr = Array.isArray(parsed) ? parsed : [parsed];
+                    arr.forEach(sk => {
+                        if (sk && sk.id && sk.name) {
+                            sk.source = sk.source || 'sop';
+                            if (!SKILLS_LIBRARY.some(s => s.id === sk.id)) skills.push(sk);
+                        }
+                    });
+                } catch (e) {}
+            });
+            _sopSkills = skills;
+            _sopSkillsFetched = true;
+        } catch (e) {}
+    }
+
+    function allSkills() {
+        return SKILLS_LIBRARY.concat(_sopSkills);
+    }
 
     function renderSkillsLibrary() {
         const container = document.getElementById('skillsLibraryContent');
         if (!container) return;
 
-        const filtered = SKILLS_LIBRARY.filter(s => {
+        const all = allSkills();
+        const filtered = all.filter(s => {
             if (_activeCategory && s.category !== _activeCategory) return false;
             if (_searchTerm) {
                 const q = _searchTerm.toLowerCase();
@@ -34,7 +71,7 @@
         });
 
         const countEl = document.getElementById('skillsTotalCount');
-        if (countEl) countEl.textContent = filtered.length + ' of ' + SKILLS_LIBRARY.length + ' skills';
+        if (countEl) countEl.textContent = filtered.length + ' of ' + all.length + ' skills';
 
         let html = '';
         SKILLS_CATEGORIES.forEach(cat => {
@@ -141,9 +178,12 @@
 
     function renderFilterPills() {
         const bar = document.getElementById('skillsFilterBar');
-        if (!bar || bar.children.length > 0) return;
+        if (!bar) return;
+        bar.innerHTML = '';
+        const all = allSkills();
         SKILLS_CATEGORIES.forEach(cat => {
-            const count = SKILLS_LIBRARY.filter(s => s.category === cat).length;
+            const count = all.filter(s => s.category === cat).length;
+            if (count === 0) return;
             const pill = document.createElement('button');
             pill.className = 'skills-filter-pill';
             pill.dataset.category = cat;
@@ -153,7 +193,8 @@
         });
     }
 
-    window.renderSkillsTab = function () {
+    window.renderSkillsTab = async function () {
+        await fetchSOPSkills();
         renderFilterPills();
         renderSkillsLibrary();
     };

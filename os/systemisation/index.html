@@ -376,6 +376,8 @@ const WF = {
     mainMethodStage: 'fldQZEvjCRYUaQdME',
     business:        'fldQcQSnlSipSBhb4',
     steps:           'fldjmfqk77Wr1aOs5',
+    skillDefinition: 'fldmRF1UDkbHtl1AG',
+    driveUrl:        'fldNtXnxGrpUivWxU',
 };
 const ST = {
     name:        'fldqKG4mVY16PTNmO',
@@ -387,6 +389,8 @@ const ST = {
     sortOrder:   'fldOWS3MfMSVJyo0b',
     skillId:     'fldOisvuXul0r1XUD',
 };
+const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
+const DRIVE_UPLOAD_ENDPOINT = 'https://drive-upload.kevinbrittain.workers.dev/upload';
 const MM = { name: 'fldRphzaAUzBqconG', description: 'fldWDxL9EyS1iaGlf', business: 'fldi4uVOf2NgxiSKy' };
 const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
 const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
@@ -451,13 +455,25 @@ let bizFilterId = '';
 let selectedStepsWf = null;
 let _bulkPendingAssigns = {};
 
-function isSkillCreated(stepId){ return localStorage.getItem('sys_skill_'+stepId)==='1'; }
+function isSkillCreated(stepId){
+    if(localStorage.getItem('sys_skill_'+stepId)==='1') return true;
+    const s = allSteps.find(s=>s.id===stepId);
+    return s && gf(s,ST.skillId);
+}
 function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)==='1'; }
 
 function getWfLoomUrl(wfId){ return localStorage.getItem('sys_loom_'+wfId)||''; }
 function setWfLoomUrl(wfId, url){ if(url) localStorage.setItem('sys_loom_'+wfId, url); else localStorage.removeItem('sys_loom_'+wfId); }
-function getWfDriveUrl(wfId){ return localStorage.getItem('sys_drive_'+wfId)||''; }
-function setWfDriveUrl(wfId, url){ if(url) localStorage.setItem('sys_drive_'+wfId, url); else localStorage.removeItem('sys_drive_'+wfId); }
+function getWfDriveUrl(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    return (w && gf(w,WF.driveUrl)) || localStorage.getItem('sys_drive_'+wfId) || '';
+}
+async function setWfDriveUrl(wfId, url){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(w) w.fields[WF.driveUrl] = url||null;
+    if(url) localStorage.setItem('sys_drive_'+wfId, url); else localStorage.removeItem('sys_drive_'+wfId);
+    try { await atUpdate(TBL.workflows, wfId, {[WF.driveUrl]: url||null}); } catch(e){ console.error('Drive URL save error:', e); }
+}
 function getWfVideoTaskId(wfId){ return localStorage.getItem('sys_vtask_'+wfId)||''; }
 function setWfVideoTaskId(wfId, taskId){ if(taskId) localStorage.setItem('sys_vtask_'+wfId, taskId); else localStorage.removeItem('sys_vtask_'+wfId); }
 function getWfVideoTaskStatus(wfId){ return localStorage.getItem('sys_vtask_status_'+wfId)||''; }
@@ -563,7 +579,7 @@ function showAuthBar(){
 // ═══════════════════════════════════════════════════════════════════════
 async function loadData(){
     const [wf, st, mm, bz, os] = await Promise.all([
-        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business]),
+        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business,WF.skillDefinition,WF.driveUrl]),
         atFetch(TBL.steps, [ST.name,ST.description,ST.workflow,ST.stepType,ST.sopContent,ST.sopStatus,ST.sortOrder,ST.skillId]),
         atFetch(TBL.mainMethods, [MM.name,MM.description,MM.business]),
         atFetch(TBL.businesses, [BIZ_NAME,BIZ_ACTIVE]),
@@ -2102,6 +2118,7 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
         <span>Generated ${now}</span>
         <div style="display:flex;gap:8px">
             <button class="btn btn-sm btn-primary" onclick="exportSOPAsHTML('${wfId}')">Export</button>
+            <button class="btn btn-sm btn-drive-upload" style="border-color:var(--info);color:var(--info)" onclick="uploadSOPToDrive('${wfId}')">Upload to Drive</button>
             <button class="btn btn-sm btn-danger" onclick="deleteSOPDocument('${wfId}')">Delete SOP</button>
         </div>
     </div>`;
@@ -2113,10 +2130,7 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
     container._sopData = { wfId, sopTitle, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, cautions, tips, videoTitle, generatedDate: now };
 }
 
-function exportSOPAsHTML(wfId){
-    const container = document.getElementById('sopDoc-'+wfId);
-    if(!container || !container._sopData){ toast('Generate the SOP first'); return; }
-    const d = container._sopData;
+function buildSOPExportHTML(d){
     const loomVideoId = d.loomUrl ? (d.loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/)||[])[1] : '';
 
     let stepsHtml = '';
@@ -2153,7 +2167,7 @@ function exportSOPAsHTML(wfId){
         tipsHtml += '</ul></div>';
     }
 
-    const html = `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -2212,12 +2226,18 @@ ${tipsHtml}
 </div>
 </body>
 </html>`;
+}
+
+function exportSOPAsHTML(wfId){
+    const container = document.getElementById('sopDoc-'+wfId);
+    if(!container || !container._sopData){ toast('Generate the SOP first'); return; }
+    const html = buildSOPExportHTML(container._sopData);
 
     const blob = new Blob([html], {type:'text/html'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (d.sopTitle||'SOP').replace(/[^a-zA-Z0-9 _-]/g,'').replace(/\s+/g,'-') + '.html';
+    a.download = (container._sopData.sopTitle||'SOP').replace(/[^a-zA-Z0-9 _-]/g,'').replace(/\s+/g,'-') + '.html';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2225,6 +2245,39 @@ ${tipsHtml}
 
     container._exportedHTML = html;
     toast('SOP downloaded');
+}
+
+async function uploadSOPToDrive(wfId){
+    const container = document.getElementById('sopDoc-'+wfId);
+    if(!container || !container._sopData){ toast('Generate the SOP first'); return; }
+    const d = container._sopData;
+    const htmlContent = container._exportedHTML || buildSOPExportHTML(d);
+    container._exportedHTML = htmlContent;
+    const btn = container.querySelector('.btn-drive-upload');
+    if(btn){ btn.disabled = true; btn.textContent = 'Uploading...'; }
+
+    try {
+        const res = await fetch(DRIVE_UPLOAD_ENDPOINT, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                workflowName: d.wName,
+                htmlContent,
+                fileName: (d.sopTitle||d.wName||'SOP'),
+            }),
+        });
+        if(!res.ok) throw new Error('Upload failed: '+res.status);
+        const result = await res.json();
+        if(result.error) throw new Error(result.error);
+
+        await setWfDriveUrl(wfId, result.folderUrl);
+        toast('SOP uploaded to Google Drive');
+        render();
+    } catch(e){
+        toast('Drive upload error: '+e.message);
+    } finally {
+        if(btn){ btn.disabled = false; btn.textContent = 'Upload to Drive'; }
+    }
 }
 
 function deleteSOPDocument(wfId){
@@ -2679,6 +2732,37 @@ function renderAutomation(){
         });
     }
 
+    const wfsWithSkills = wfs.filter(w=>{
+        const raw = gf(w,WF.skillDefinition);
+        if(!raw) return false;
+        try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr.length > 0 : !!arr; } catch(e){ return false; }
+    });
+    if(wfsWithSkills.length){
+        html += '<div class="auto-wf-group" style="margin-top:20px">';
+        html += '<div class="auto-wf-header">Generated Skills <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithSkills.length + ' workflows)</span></div>';
+        html += `<table class="wf-grid"><thead><tr>
+            <th style="width:25%">Workflow</th>
+            <th style="width:30%">Skill Name</th>
+            <th style="width:25%">Category</th>
+            <th style="width:20%">Status</th>
+        </tr></thead><tbody>`;
+
+        wfsWithSkills.forEach(w=>{
+            const wName = gf(w,WF.name)||'Untitled';
+            let skills = [];
+            try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){}
+            skills.forEach(sk=>{
+                html += `<tr>
+                    <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
+                    <td>${esc(sk.name||'')}</td>
+                    <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sk.category||'')}</td>
+                    <td><span class="pipeline-badge pipeline-skill">In Skills Library</span></td>
+                </tr>`;
+            });
+        });
+        html += '</tbody></table></div>';
+    }
+
     pane.innerHTML = html;
     updateAutoCount();
 }
@@ -2696,19 +2780,103 @@ async function convertToSkill(stepId){
     const s = allSteps.find(s=>s.id===stepId);
     if(!s) return;
     const name = gf(s,ST.name)||'Untitled';
-    if(!confirm(`Convert "${name}" SOP to an AI Skill? This will mark the step as an automated skill.`)) return;
-    localStorage.setItem('sys_skill_'+stepId, '1');
-    try { await atUpdate(TBL.steps, stepId, {[ST.skillId]: 'skill_'+stepId}); } catch(e){ toast('Save error: '+e.message); }
-    toast(`"${name}" converted to Skill`);
-    render();
+    const wfLinks = gf(s,ST.workflow);
+    const wfId = Array.isArray(wfLinks) ? wfLinks[0] : wfLinks;
+    const w = wfId ? allWorkflows.find(w=>w.id===wfId) : null;
+    const wName = w ? (gf(w,WF.name)||'Untitled') : 'Workflow';
+
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:4px">This will use AI to generate a Claude Code skill definition from the "${esc(name)}" SOP and save it to the Skills Library.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="closeModal();doConvertToSkill('${stepId}')">Generate Skill</button>`;
+    showModal('Convert to AI Skill', body, footer);
 }
 
-async function convertToTask(stepId){
+async function doConvertToSkill(stepId){
     const s = allSteps.find(s=>s.id===stepId);
     if(!s) return;
     const name = gf(s,ST.name)||'Untitled';
-    if(!confirm(`Create a recurring task for "${name}"? This will link to Tasks & Projects.`)) return;
+    const desc = gf(s,ST.description)||'';
+    const sopContent = gf(s,ST.sopContent)||'';
+    const wfLinks = gf(s,ST.workflow);
+    const wfId = Array.isArray(wfLinks) ? wfLinks[0] : wfLinks;
+    const w = wfId ? allWorkflows.find(w=>w.id===wfId) : null;
+    const wName = w ? (gf(w,WF.name)||'Untitled') : 'Workflow';
+    const dept = w ? (selName(gf(w,WF.department))||'') : '';
+
+    toast('Generating skill definition...');
+
+    try {
+        const prompt = `You are generating a Claude Code skill definition. Given the following SOP step, create a JSON skill definition that can be used by Claude Code to automate this task.
+
+Step name: ${name}
+Step description: ${desc}
+Workflow: ${wName}
+${dept ? `Department: ${dept}` : ''}
+${sopContent ? `SOP Content:\n${sopContent}` : ''}
+
+Generate a JSON object with these exact fields:
+- "id": a kebab-case identifier derived from the step name (e.g. "process-tenant-invoice")
+- "name": a clean human-readable name for the skill
+- "command": a command string in format "anthropic-skills:<id>" using the id above
+- "description": a clear 1-2 sentence description of what this skill automates
+- "category": one of: "Property Management", "Finance", "Operations", "Legal", "Data & Analytics", "Customer Support", "Productivity", "Documents & Media", "Automation", "Development"
+- "tags": an array of 3-6 relevant lowercase keyword tags
+
+Return ONLY the JSON object, no markdown fences, no explanation.`;
+
+        const res = await fetch(CLAUDE_PROXY, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1024,
+                messages: [{role:'user', content: prompt}]
+            }),
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'{}';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if(!jsonMatch) throw new Error('Invalid AI response');
+        const skillDef = JSON.parse(jsonMatch[0]);
+
+        skillDef.source = 'sop';
+        skillDef.workflowId = wfId;
+        skillDef.stepId = stepId;
+
+        localStorage.setItem('sys_skill_'+stepId, '1');
+        await atUpdate(TBL.steps, stepId, {[ST.skillId]: skillDef.id});
+
+        if(w){
+            const existing = gf(w,WF.skillDefinition);
+            let skills = [];
+            try { skills = existing ? JSON.parse(existing) : []; } catch(e){ skills = []; }
+            if(!Array.isArray(skills)) skills = [skills];
+            skills = skills.filter(sk => sk.stepId !== stepId);
+            skills.push(skillDef);
+            const json = JSON.stringify(skills);
+            w.fields[WF.skillDefinition] = json;
+            await atUpdate(TBL.workflows, wfId, {[WF.skillDefinition]: json});
+        }
+
+        toast(`Skill "${skillDef.name}" created and saved`);
+        render();
+    } catch(e){
+        toast('Skill generation error: '+e.message);
+    }
+}
+
+function convertToTask(stepId){
+    const s = allSteps.find(s=>s.id===stepId);
+    if(!s) return;
+    const name = gf(s,ST.name)||'Untitled';
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:4px">Create a recurring task for "${esc(name)}"? This will link to Tasks & Projects.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="closeModal();doConvertToTask('${stepId}')">Create Task</button>`;
+    showModal('Create Recurring Task', body, footer);
+}
+function doConvertToTask(stepId){
     localStorage.setItem('sys_task_'+stepId, '1');
+    const s = allSteps.find(s=>s.id===stepId);
+    const name = s ? (gf(s,ST.name)||'Untitled') : 'Step';
     toast(`"${name}" linked to Tasks & Projects as a recurring task`);
     render();
 }
