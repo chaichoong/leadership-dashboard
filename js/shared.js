@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'compliance', 'operations', 'systemisation', 'os-team'];
+        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'operations', 'systemisation', 'os-team'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -511,6 +511,7 @@
         restoreSidebarSectionState();
     }
 
+    const DASHBOARD_GROUP = ['overview', 'cfv'];
     const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable'];
 
     async function switchTab(tabId) {
@@ -524,6 +525,23 @@
             const onclickAttr = b.getAttribute('onclick') || '';
             if (onclickAttr.includes(`switchTab('${tabId}')`)) b.classList.add('active');
         });
+        // Dashboard mega-tab: highlight "Leadership Dashboard" sidebar item for overview or cfv
+        if (DASHBOARD_GROUP.includes(tabId)) {
+            const dashItem = document.querySelector('[data-tab-group="dashboard"]');
+            if (dashItem) dashItem.classList.add('active');
+        }
+        // Show/hide dashboard sub-tab bar
+        const dashSubtabBar = document.getElementById('dashboardSubtabBar');
+        if (dashSubtabBar) {
+            if (DASHBOARD_GROUP.includes(tabId)) {
+                dashSubtabBar.style.display = '';
+                dashSubtabBar.querySelectorAll('.accounts-subtab').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.tab === tabId);
+                });
+            } else {
+                dashSubtabBar.style.display = 'none';
+            }
+        }
         // Accounts mega-tab: highlight the "Accounts" sidebar item for any sub-tab
         if (ACCOUNTS_GROUP.includes(tabId)) {
             const accountsItem = document.querySelector('[data-tab-group="accounts"]');
@@ -556,10 +574,6 @@
 if (tabId === 'comms') {
             const frame = document.getElementById('commsFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('follow-up')) frame.src = frame.dataset.src;
-        }
-        if (tabId === 'compliance') {
-            const frame = document.getElementById('complianceFrame');
-            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('compliance')) frame.src = frame.dataset.src;
         }
         // Render income tab on switch
         if (tabId === 'income') {

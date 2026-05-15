@@ -292,6 +292,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
   <button class="view-tab" data-tab="units" onclick="switchSubTab('units')">🚪 Rental Units <span class="count" id="cntUnits">·</span></button>
   <button class="view-tab" data-tab="properties" onclick="switchSubTab('properties')">🏠 Properties <span class="count" id="cntProperties">·</span></button>
   <button class="view-tab" data-tab="customers" onclick="switchSubTab('customers')">💼 Customers <span class="count" id="cntCustomers">0</span></button>
+  <button class="view-tab" data-tab="compliance" onclick="switchSubTab('compliance')">✅ Compliance</button>
 </div>
 
 <!-- Main -->
@@ -373,6 +374,11 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
       <span class="meta" id="metaCustomers"></span>
     </div>
     <div id="contentCustomers"><div class="empty"><div class="icon">💼</div><div class="msg">No customers yet. Your first subscriber will appear here.</div></div></div>
+  </div>
+
+  <!-- Compliance -->
+  <div class="tab-pane" id="pane-compliance">
+    <iframe src="../../compliance.html" style="width:100%;height:calc(100vh - 140px);border:none" loading="lazy" allowfullscreen></iframe>
   </div>
 
 </div>
@@ -1121,7 +1127,7 @@ function renderActiveTab(){
 function bindHashRouting(){
   const apply = () => {
     const h = window.location.hash.replace('#','').split('/')[0];
-    if (['tenants','tenancies','units','properties','customers'].includes(h) && h !== activeTab) switchSubTab(h);
+    if (['tenants','tenancies','units','properties','customers','compliance'].includes(h) && h !== activeTab) switchSubTab(h);
   };
   window.addEventListener('hashchange', apply);
   apply();
