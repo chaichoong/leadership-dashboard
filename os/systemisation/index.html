@@ -541,6 +541,7 @@ async function checkVideoTasks(){
     const wfIds = allWorkflows.map(w=>w.id);
     const pendingIds = wfIds.filter(id=>getWfVideoTaskId(id) && getWfVideoTaskStatus(id)==='pending');
     if(!pendingIds.length) return;
+    const newlyCompleted = [];
     try {
         const taskIds = pendingIds.map(id=>getWfVideoTaskId(id)).filter(Boolean);
         const formula = taskIds.length===1
@@ -568,11 +569,19 @@ async function checkVideoTasks(){
                 const loomMatch = notes.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
                 if(loomMatch && !getWfLoomUrl(wfId)){
                     setWfLoomUrl(wfId, loomMatch[0]);
-                    toast('Loom URL auto-imported for '+((allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow'));
+                    const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
+                    toast('Loom URL auto-imported for "'+wName+'"');
+                    newlyCompleted.push(wfId);
                 }
             }
         }
     } catch(e){ console.error('Video task check failed:', e); }
+    for(const wfId of newlyCompleted){
+        const hasSteps = stepsForWorkflow(wfId).length > 0;
+        if(!hasSteps){
+            try { await importFromLoom(wfId, true); } catch(e){ console.error('Auto-import failed for '+wfId, e); }
+        }
+    }
 }
 
 function buildMethodBizMap(){
@@ -850,7 +859,15 @@ function renderDept(){
 // ── All Workflows ──
 function renderAll(){
     const pane = document.getElementById('pane-all');
+    const methodOrder = [];
+    allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); }); });
+    allMethods.forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); });
     const wfs = filteredWorkflows().slice().sort((a,b)=>{
+        const aMethodIds = linkIds(gf(a,WF.mainMethodStage));
+        const bMethodIds = linkIds(gf(b,WF.mainMethodStage));
+        const aIdx = aMethodIds.length ? methodOrder.indexOf(aMethodIds[0]) : methodOrder.length;
+        const bIdx = bMethodIds.length ? methodOrder.indexOf(bMethodIds[0]) : methodOrder.length;
+        if(aIdx !== bIdx) return aIdx - bIdx;
         const na = (gf(a,WF.name)||'').toLowerCase();
         const nb = (gf(b,WF.name)||'').toLowerCase();
         return na < nb ? -1 : na > nb ? 1 : 0;
@@ -2086,15 +2103,15 @@ function renderSteps(){
                         </div>
                         ${loomUrl?`<div class="resources-item">
                             <label>Loom SOP</label>
-                            <a href="${esc(loomUrl)}" target="_blank" rel="noopener">Open in Loom (use Generate SOP feature)</a>
+                            <a href="${esc(loomUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open in Loom to generate SOP &#x2197;</a>
                         </div>`:''}
                         ${driveUrl?`<div class="resources-item">
                             <label>Drive Folder</label>
-                            <a href="${esc(driveUrl)}" target="_blank" rel="noopener">Open folder</a>
+                            <a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open folder &#x2197;</a>
                         </div>`:''}
-                        <div class="loom-embed-container" id="loomEmbed-${w.id}">
-                            ${loomUrl?renderLoomEmbed(loomUrl):''}
-                        </div>
+                    </div>
+                    <div class="loom-embed-container" id="loomEmbed-${w.id}" style="margin-top:12px">
+                        ${loomUrl?renderLoomEmbed(loomUrl):''}
                     </div>
                 </div>
             </div>`;
@@ -2337,36 +2354,24 @@ function renderStepsResourceEmbed(wfId){
     container.innerHTML = url ? renderLoomEmbed(url) : '';
 }
 
-async function importFromLoom(wfId){
-    const urlInput = document.getElementById('loomImportUrl-'+wfId);
-    let loomUrl = urlInput ? urlInput.value.trim() : getWfLoomUrl(wfId);
-    if(!loomUrl){ toast('Paste a Loom URL first'); return; }
-
+async function fetchLoomTranscript(loomUrl){
     const match = loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
-    if(!match){ toast('Invalid Loom URL. Use format: https://www.loom.com/share/...'); return; }
-
-    setWfLoomUrl(wfId, loomUrl);
-
+    if(!match) return '';
     const apiKey = getLoomApiKey();
     let transcript = '';
-
     if(apiKey){
-        toast('Fetching transcript from Loom...');
         try {
             const videoId = match[1];
-            const res = await fetch(`https://developer.loom.com/v1/videos/${videoId}/transcript`, {
+            const res = await fetch(`https://developer.loom.com/v1/videos/${videoId}/transcriptions`, {
                 headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
             });
             if(res.ok){
                 const data = await res.json();
                 if(data.transcript) transcript = data.transcript;
                 else if(data.data) transcript = typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
-            } else {
-                toast('Loom API returned '+res.status+'. Using oEmbed fallback.');
             }
-        } catch(e){ toast('Loom API error: '+e.message+'. Using oEmbed fallback.'); }
+        } catch(e){}
     }
-
     if(!transcript){
         try {
             const oembedRes = await fetch(`https://www.loom.com/v1/oembed?url=${encodeURIComponent(loomUrl)}`);
@@ -2377,7 +2382,10 @@ async function importFromLoom(wfId){
             }
         } catch(e){}
     }
+    return transcript;
+}
 
+async function aiExtractSteps(wfId, transcript){
     const w = allWorkflows.find(w=>w.id===wfId);
     const wName = w ? (gf(w,WF.name)||'') : '';
     const wDesc = w ? (gf(w,WF.description)||'') : '';
@@ -2399,24 +2407,71 @@ ${existing.length ? `These steps already exist, do not duplicate them: ${existin
 A Loom video exists for this workflow but the transcript could not be fetched. Suggest logical steps based on the workflow name and description.
 Return ONLY a JSON array of objects with "name" and "description" keys. No other text.`;
 
-    toast(transcript ? 'AI extracting steps from transcript...' : 'AI suggesting steps...');
+    const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            model:'claude-sonnet-4-20250514',
+            max_tokens:2000,
+            messages:[{role:'user',content:prompt}],
+        })
+    });
+    if(!res.ok) throw new Error('AI request failed: '+res.status);
+    const data = await res.json();
+    const text = data.content?.[0]?.text||'[]';
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if(!jsonMatch) throw new Error('Invalid AI response');
+    return JSON.parse(jsonMatch[0]);
+}
+
+async function autoAddSteps(suggestions, wfId){
+    if(!suggestions.length) return;
+    const existingCount = stepsForWorkflow(wfId).length;
+    for(let i=0; i<suggestions.length; i++){
+        const s = suggestions[i];
+        const fields = {
+            [ST.name]: s.name,
+            [ST.description]: s.description||'',
+            [ST.workflow]: [wfId],
+            [ST.stepType]: 'Staff Task',
+            [ST.sopStatus]: 'Not Created',
+            [ST.sortOrder]: existingCount + i + 1,
+        };
+        try {
+            const rec = await atCreate(TBL.steps, fields);
+            allSteps.push(rec);
+        } catch(e){ console.error(e); }
+        if(i < suggestions.length-1) await new Promise(r=>setTimeout(r, 500));
+    }
+}
+
+async function importFromLoom(wfId, auto){
+    const urlInput = document.getElementById('loomImportUrl-'+wfId);
+    let loomUrl = urlInput ? urlInput.value.trim() : getWfLoomUrl(wfId);
+    if(!loomUrl){ if(!auto) toast('Paste a Loom URL first'); return; }
+
+    const match = loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
+    if(!match){ if(!auto) toast('Invalid Loom URL. Use format: https://www.loom.com/share/...'); return; }
+
+    setWfLoomUrl(wfId, loomUrl);
+
+    if(!auto) toast('Fetching transcript from Loom...');
+    const transcript = await fetchLoomTranscript(loomUrl);
+
+    if(!auto) toast(transcript ? 'AI extracting steps from transcript...' : 'AI suggesting steps...');
+    else toast('Auto-extracting workflow steps from Loom video...');
+
     try {
-        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({
-                model:'claude-sonnet-4-20250514',
-                max_tokens:2000,
-                messages:[{role:'user',content:prompt}],
-            })
-        });
-        if(!res.ok) throw new Error('AI request failed: '+res.status);
-        const data = await res.json();
-        const text = data.content?.[0]?.text||'[]';
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if(!jsonMatch) throw new Error('Invalid AI response');
-        const suggestions = JSON.parse(jsonMatch[0]);
-        showLoomStepPicker(suggestions, wfId);
+        const suggestions = await aiExtractSteps(wfId, transcript);
+        if(auto){
+            await autoAddSteps(suggestions, wfId);
+            const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
+            toast(`${suggestions.length} steps auto-extracted for "${wName}"`);
+            renderSteps();
+            updateCounts();
+        } else {
+            showLoomStepPicker(suggestions, wfId);
+        }
     } catch(e){ toast('AI error: '+e.message); }
 }
 
@@ -2438,24 +2493,7 @@ async function addLoomSteps(suggestions, wfId){
     if(!selected.length){ closeModal(); return; }
     closeModal();
     toast(`Adding ${selected.length} steps...`);
-    const existingCount = stepsForWorkflow(wfId).length;
-
-    for(let i=0; i<selected.length; i++){
-        const s = selected[i];
-        const fields = {
-            [ST.name]: s.name,
-            [ST.description]: s.description||'',
-            [ST.workflow]: [wfId],
-            [ST.stepType]: 'Staff Task',
-            [ST.sopStatus]: 'Not Created',
-            [ST.sortOrder]: existingCount + i + 1,
-        };
-        try {
-            const rec = await atCreate(TBL.steps, fields);
-            allSteps.push(rec);
-        } catch(e){ console.error(e); }
-        if(i < selected.length-1) await new Promise(r=>setTimeout(r, 500));
-    }
+    await autoAddSteps(selected, wfId);
     renderSteps();
     updateCounts();
     toast(`${selected.length} steps added from Loom`);
@@ -2533,14 +2571,25 @@ function toggleSettings(){
             <button class="btn btn-sm" onclick="document.getElementById('settingsPanel').remove()">Close</button>
         </div>
         <div class="field-row">
-            <label>Loom Developer API Key</label>
-            <input type="password" id="settingsLoomKey" value="${esc(currentKey)}" placeholder="Enter your Loom API key...">
+            <label>Loom API Key (optional)</label>
+            <input type="password" id="settingsLoomKey" value="${esc(currentKey)}" placeholder="Enter your Loom API key if available...">
             <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px">
-                Get your API key from <a href="https://www.loom.com/developer-portal" target="_blank" rel="noopener">Loom Developer Portal</a>.
-                Required for transcript fetching. Without it, Loom import will use AI to suggest steps based on the workflow name.
+                If you have a Loom Developer API key, enter it here for direct transcript access.
+                Without it, the system uses Loom's oEmbed metadata combined with AI to extract workflow steps. Both approaches work.
             </p>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="saveLoomApiKey()">Save</button>`;
+        <button class="btn btn-primary btn-sm" onclick="saveLoomApiKey()">Save</button>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default)">
+            <strong style="font-size:var(--fs-sm)">How the pipeline works</strong>
+            <ol style="font-size:var(--fs-xs);color:var(--text-secondary);margin:8px 0 0 16px;padding:0;line-height:1.6">
+                <li>Assign a video recording task (Workflow Steps tab)</li>
+                <li>Team member records the video in Loom, pastes the share URL into the task notes, marks it Done</li>
+                <li>On next refresh, the Loom URL is auto-imported into the workflow</li>
+                <li>AI automatically extracts workflow steps from the video metadata</li>
+                <li>Use Loom's built-in "Generate SOP" to create the SOP document</li>
+                <li>Resources panel auto-populates with video link</li>
+            </ol>
+        </div>`;
 
     const main = document.getElementById('main');
     main.parentElement.insertBefore(panel, main);
