@@ -378,6 +378,7 @@ const WF = {
     steps:           'fldjmfqk77Wr1aOs5',
     skillDefinition: 'fldmRF1UDkbHtl1AG',
     driveUrl:        'fldNtXnxGrpUivWxU',
+    sopDocument:     'fldW4qoDv2mrTNvu7',
 };
 const ST = {
     name:        'fldqKG4mVY16PTNmO',
@@ -579,7 +580,7 @@ function showAuthBar(){
 // ═══════════════════════════════════════════════════════════════════════
 async function loadData(){
     const [wf, st, mm, bz, os] = await Promise.all([
-        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business,WF.skillDefinition,WF.driveUrl]),
+        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business,WF.skillDefinition,WF.driveUrl,WF.sopDocument]),
         atFetch(TBL.steps, [ST.name,ST.description,ST.workflow,ST.stepType,ST.sopContent,ST.sopStatus,ST.sortOrder,ST.skillId]),
         atFetch(TBL.mainMethods, [MM.name,MM.description,MM.business]),
         atFetch(TBL.businesses, [BIZ_NAME,BIZ_ACTIVE]),
@@ -2046,6 +2047,12 @@ No other text outside the JSON object.`;
         const tips = sopData.tips || [];
 
         renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container, sopTitle, cautions, tips, videoTitle);
+        const sopJson = JSON.stringify({ sopTitle, sopSteps, cautions, tips, videoTitle, generatedDate: new Date().toISOString() });
+        try {
+            await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: sopJson });
+            const wi = allWorkflows.findIndex(w2=>w2.id===wfId);
+            if(wi>=0) allWorkflows[wi].fields[WF.sopDocument] = sopJson;
+        } catch(e){ console.error('SOP save error:', e); }
         toast('SOP generated');
         autoUploadToDrive(wfId);
     } catch(e){
@@ -2298,7 +2305,7 @@ function deleteSOPDocument(wfId){
     const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="confirmDeleteSOP('${wfId}')">Clear SOP</button>`;
     showModal('Clear SOP', body, footer);
 }
-function confirmDeleteSOP(wfId){
+async function confirmDeleteSOP(wfId){
     closeModal();
     const container = document.getElementById('sopDoc-'+wfId);
     if(container){
@@ -2309,7 +2316,12 @@ function confirmDeleteSOP(wfId){
         container._sopData = null;
         container._exportedHTML = null;
     }
-    toast('SOP deleted');
+    try {
+        await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: null });
+        const wi = allWorkflows.findIndex(w=>w.id===wfId);
+        if(wi>=0) allWorkflows[wi].fields[WF.sopDocument] = null;
+    } catch(e){ console.error('SOP clear error:', e); }
+    toast('SOP cleared');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2593,6 +2605,26 @@ function renderSteps(){
     }
     html += '</div></div>';
     pane.innerHTML = html;
+    restoreSavedSOPs();
+}
+
+function restoreSavedSOPs(){
+    allWorkflows.forEach(w=>{
+        const raw = gf(w, WF.sopDocument);
+        if(!raw) return;
+        try {
+            const saved = JSON.parse(raw);
+            const container = document.getElementById('sopDoc-'+w.id);
+            if(!container) return;
+            const wName = gf(w,WF.name)||'Untitled';
+            const wDesc = gf(w,WF.description)||'';
+            const dept = selName(gf(w,WF.department))||'';
+            const fulfill = selName(gf(w,WF.fulfillStage))||'';
+            const loomUrl = getWfLoomUrl(w.id);
+            const steps = stepsForWorkflow(w.id);
+            renderSOPDocument(w.id, wName, wDesc, dept, fulfill, loomUrl, steps, saved.sopSteps||[], container, saved.sopTitle||wName, saved.cautions||[], saved.tips||[], saved.videoTitle||'');
+        } catch(e){ console.error('SOP restore error for '+w.id, e); }
+    });
 }
 
 function selectStepsWf(id){
