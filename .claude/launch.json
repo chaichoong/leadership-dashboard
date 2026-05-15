@@ -4,8 +4,8 @@
     {
       "name": "ops-director",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8766"],
-      "port": 8766,
+      "runtimeArgs": ["-m", "http.server", "8811"],
+      "port": 8811,
       "cwd": "."
     }
   ]
