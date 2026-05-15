@@ -327,7 +327,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <button class="pipeline-tab" data-tab="method" onclick="switchView('method')"><span class="step-num-badge">2</span> Main Method <span class="count" id="methodCount">0</span></button>
     <button class="pipeline-tab" data-tab="dept" onclick="switchView('dept')"><span class="step-num-badge">3</span> Departmental <span class="count" id="deptCount">0</span></button>
     <button class="pipeline-tab" data-tab="all" onclick="switchView('all')"><span class="step-num-badge">4</span> All Workflows <span class="count" id="allCount">0</span></button>
-    <button class="pipeline-tab" data-tab="steps" onclick="switchView('steps')"><span class="step-num-badge">5</span> Workflow Steps <span class="count" id="stepsCount">0</span></button>
+    <button class="pipeline-tab" data-tab="steps" onclick="switchView('steps')"><span class="step-num-badge">5</span> SOPs <span class="count" id="stepsCount">0</span></button>
     <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')"><span class="step-num-badge">6</span> Automation <span class="count" id="autoCount">0</span></button>
 </div>
 
@@ -953,8 +953,12 @@ function renderAll(){
     table.className = 'wf-grid';
     table.innerHTML = `<thead><tr>
         <th style="width:36px"><input type="checkbox" class="bulk-check" id="bulkSelectAll" onchange="bulkToggleAll(this.checked)"></th>
-        <th style="width:35%">Name</th>
-        <th>Description</th>
+        <th style="width:18%">Name</th>
+        <th style="width:20%">Description</th>
+        <th style="width:13%">Department</th>
+        <th style="width:15%">Customer Journey</th>
+        <th style="width:13%">Main Method</th>
+        <th style="width:80px">Status</th>
         <th style="width:40px"></th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
@@ -977,7 +981,7 @@ function renderAll(){
         headerTr.className = 'wf-grid-group-header';
         const method = key !== UNASSIGNED ? allMethods.find(m=>m.id===key) : null;
         const label = method ? (gf(method,MM.name)||'Unnamed') : 'Unassigned';
-        headerTr.innerHTML = `<td colspan="4">${esc(label)} (${groupWfs.length})</td>`;
+        headerTr.innerHTML = `<td colspan="8">${esc(label)} (${groupWfs.length})</td>`;
         tbody.appendChild(headerTr);
         groupWfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
     });
@@ -995,6 +999,14 @@ function buildAllGridRow(w){
     tr.dataset.id = w.id;
     const name = gf(w,WF.name)||'';
     const desc = gf(w,WF.description)||'';
+    const status = selName(gf(w,WF.status))||'Not Started';
+    const dept = selName(gf(w,WF.department))||'';
+    const fulfill = selName(gf(w,WF.fulfillStage))||'';
+    const methodIds = linkIds(gf(w,WF.mainMethodStage));
+
+    const orderedMethods = [];
+    allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); }); });
+    allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
 
     tr.innerHTML = `
         <td><input type="checkbox" class="bulk-check" data-wf-id="${w.id}" onchange="bulkUpdateCount()"></td>
@@ -1003,15 +1015,35 @@ function buildAllGridRow(w){
             <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
             <button class="btn btn-ai btn-sm btn-ai-inline" title="Click to auto-generate a description using AI" onclick="aiDescRow(this)">&#x1F916; Write with AI</button>
         </div></td>
+        <td class="ss-dept"></td>
+        <td class="ss-fulfill"></td>
+        <td class="ss-method"></td>
+        <td><select class="wf-grid-status" data-field="status">
+            <option${status==='Not Started'?' selected':''}>Not Started</option>
+            <option${status==='In Progress'?' selected':''}>In Progress</option>
+            <option${status==='Complete'?' selected':''}>Complete</option>
+        </select></td>
         <td style="white-space:nowrap">
             <button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
         </td>`;
 
+    const deptOpts = DEPARTMENTS.map(d=>({value:d, label:d}));
+    tr.querySelector('.ss-dept').appendChild(createSearchableSelect(deptOpts, dept, (v)=> gridSave(w.id, {[WF.department]: v||null}, tr)));
+
+    const fulfillOpts = FULFILL_STAGES.map(s=>({value:s.key, label:s.label}));
+    tr.querySelector('.ss-fulfill').appendChild(createSearchableSelect(fulfillOpts, fulfill, (v)=> gridSave(w.id, {[WF.fulfillStage]: v||null}, tr)));
+
+    const methodOpts = orderedMethods.map(m=>({value:m.id, label:gf(m,MM.name)||'Unnamed'}));
+    const currentMethodId = methodIds.length ? methodIds[0] : '';
+    tr.querySelector('.ss-method').appendChild(createSearchableSelect(methodOpts, currentMethodId, (v)=> gridSave(w.id, {[WF.mainMethodStage]: v ? [v] : []}, tr)));
+
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
+    const statusSel = tr.querySelector('[data-field="status"]');
 
     nameInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.name]: nameInput.value.trim()}, tr));
     descInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.description]: descInput.value.trim()}, tr));
+    statusSel.addEventListener('change', ()=> gridSave(w.id, {[WF.status]: statusSel.value}, tr));
 
     autoGrowTextarea(descInput);
     return tr;
@@ -2574,7 +2606,7 @@ function renderAutomation(){
     }
 
     if(!stepsWithSop.length && !wfsWithTasks.length){
-        pane.innerHTML = '<div class="empty-state"><p>No automation activity yet.</p><p>Assign video tasks in the Workflow Steps tab, or complete SOPs to convert them to Skills or Tasks.</p></div>';
+        pane.innerHTML = '<div class="empty-state"><p>No automation activity yet.</p><p>Assign video tasks in the SOPs tab, or complete SOPs to convert them to Skills or Tasks.</p></div>';
         return;
     }
 
@@ -2913,7 +2945,7 @@ function toggleSettings(){
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default)">
             <strong style="font-size:var(--fs-sm)">How the pipeline works</strong>
             <ol style="font-size:var(--fs-xs);color:var(--text-secondary);margin:8px 0 0 16px;padding:0;line-height:1.6">
-                <li>Assign a video recording task (Workflow Steps tab)</li>
+                <li>Assign a video recording task (SOPs tab)</li>
                 <li>Team member records the video in Loom, pastes the share URL into the task notes, marks it Done</li>
                 <li>On next refresh, the Loom URL is auto-imported into the workflow</li>
                 <li>AI automatically extracts workflow steps from the video metadata</li>
