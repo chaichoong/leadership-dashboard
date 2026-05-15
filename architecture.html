@@ -335,6 +335,19 @@
                         <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Business launch plans with products, pricing, cost modelling per business</span></div>
                     </div>
                 </div>
+                <div class="arch-node" onclick="toggleNode(this)">
+                    <div class="arch-node-header">
+                        <span class="arch-node-icon">🚨</span>
+                        <span class="arch-node-name">Cash Flow Voids</span>
+                        <span class="arch-node-type inline">Inline</span>
+                    </div>
+                    <div class="arch-node-detail">
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/cfv.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenancies, Tenants, Transactions</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Overdue rent detection, arrears pipeline, comments, chase actions</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Access</span><span class="arch-detail-value">Sub-tab of Leadership Dashboard (mega-tab bar)</span></div>
+                    </div>
+                </div>
             </div>
 
             <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Operations</h3>
@@ -379,6 +392,7 @@
                             <span class="arch-subtab-chip">Rental Units</span>
                             <span class="arch-subtab-chip">Properties</span>
                             <span class="arch-subtab-chip">Customers</span>
+                            <span class="arch-subtab-chip">Compliance</span>
                         </div>
                     </div>
                 </div>
@@ -407,14 +421,13 @@
                 </div>
                 <div class="arch-node" onclick="toggleNode(this)">
                     <div class="arch-node-header">
-                        <span class="arch-node-icon">✅</span>
-                        <span class="arch-node-name">Property Compliance</span>
-                        <span class="arch-node-type iframe">Iframe</span>
+                        <span class="arch-node-icon">🧠</span>
+                        <span class="arch-node-name">Skills Library</span>
+                        <span class="arch-node-type inline">Inline</span>
                     </div>
                     <div class="arch-node-detail">
-                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">compliance.html</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Properties, Rental Units</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Gas, electrical, EPC, fire safety checks and expiry tracking</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/skills.js, js/skills-data.js</span></div>
+                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Claude Code and Cowork skills catalogue, search, filter</span></div>
                     </div>
                 </div>
             </div>
@@ -508,19 +521,6 @@
                         <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Bank sync health monitoring, balance tracking, reconnection alerts</span></div>
                     </div>
                 </div>
-                <div class="arch-node" onclick="toggleNode(this)">
-                    <div class="arch-node-header">
-                        <span class="arch-node-icon">🚨</span>
-                        <span class="arch-node-name">Cash Flow Voids</span>
-                        <span class="arch-node-type inline">Inline</span>
-                    </div>
-                    <div class="arch-node-detail">
-                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/cfv.js + js/arrears.js</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Reads</span><span class="arch-detail-value">Tenancies, Tenants, Transactions, Arrears Records, Arrears Contact Log</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Writes</span><span class="arch-detail-value">Arrears Records, Arrears Contact Log</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Void detection, 7-stage credit control pipeline, rent statements, contact logging</span></div>
-                    </div>
-                </div>
             </div>
 
             <h3 style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">HR / Admin</h3>
@@ -556,17 +556,6 @@
                     <div class="arch-node-detail">
                         <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/sitemap.js</span></div>
                         <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Page registry, SOP version tracking, git sync status, integrity checks</span></div>
-                    </div>
-                </div>
-                <div class="arch-node" onclick="toggleNode(this)">
-                    <div class="arch-node-header">
-                        <span class="arch-node-icon">🧠</span>
-                        <span class="arch-node-name">Skills Library</span>
-                        <span class="arch-node-type inline">Inline</span>
-                    </div>
-                    <div class="arch-node-detail">
-                        <div class="arch-detail-row"><span class="arch-detail-label">File</span><span class="arch-detail-value">js/skills.js + js/skills-data.js</span></div>
-                        <div class="arch-detail-row"><span class="arch-detail-label">Features</span><span class="arch-detail-value">Claude Code and Cowork skill catalogue, search, category filtering</span></div>
                     </div>
                 </div>
                 <div class="arch-node" onclick="toggleNode(this)">
