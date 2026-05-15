@@ -610,7 +610,7 @@ async function checkVideoTasks(){
             returnFieldsByFieldId:'true', pageSize:'100',
             filterByFormula: formula
         });
-        [TF.status,TF.notes].forEach(f=>params.append('fields[]',f));
+        [TF.status,TF.notes,TF.description].forEach(f=>params.append('fields[]',f));
         const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TBL}?${params}`,{
             headers:{'Authorization':`Bearer ${PAT}`}
         });
@@ -625,9 +625,13 @@ async function checkVideoTasks(){
             if(status==='Complete'||status==='Done'){
                 setWfVideoTaskStatus(wfId, 'complete');
                 const notes = gf(task,TF.notes)||'';
-                const loomMatch = notes.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
-                if(loomMatch && !getWfLoomUrl(wfId)){
-                    setWfLoomUrl(wfId, loomMatch[0]);
+                const desc = gf(task,TF.description)||'';
+                const combined = notes + ' ' + desc;
+                const bracketMatch = combined.match(/\[loom:(https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+)\]/);
+                const plainMatch = combined.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
+                const loomUrl = bracketMatch ? bracketMatch[1] : (plainMatch ? plainMatch[0] : null);
+                if(loomUrl && !getWfLoomUrl(wfId)){
+                    setWfLoomUrl(wfId, loomUrl);
                     const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
                     toast('Loom URL auto-imported for "'+wName+'"');
                     newlyCompleted.push(wfId);
@@ -636,10 +640,21 @@ async function checkVideoTasks(){
         }
     } catch(e){ console.error('Video task check failed:', e); }
     for(const wfId of newlyCompleted){
-        const hasSteps = stepsForWorkflow(wfId).length > 0;
-        if(!hasSteps){
-            try { await importFromLoom(wfId, true); } catch(e){ console.error('Auto-import failed for '+wfId, e); }
-        }
+        try { await autoGenerateSOPPipeline(wfId); } catch(e){ console.error('Auto-pipeline failed for '+wfId, e); }
+    }
+}
+
+async function autoGenerateSOPPipeline(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    const hasSteps = stepsForWorkflow(wfId).length > 0;
+    if(!hasSteps){
+        try { await importFromLoom(wfId, true); } catch(e){ console.error('Step import failed for '+wfId, e); }
+    }
+    if(stepsForWorkflow(wfId).length > 0){
+        toast('Auto-generating SOP for "'+wName+'"...');
+        try { await generateWorkflowSOP(wfId); } catch(e){ console.error('SOP generation failed for '+wfId, e); }
     }
 }
 
@@ -3100,15 +3115,11 @@ function assignVideoTask(wfId){
     const body = `
         <div class="field-row"><label>Task Name</label><input id="vtaskName" value="Record video: ${esc(wName)}"></div>
         <div class="field-row"><label>Assignee</label><select id="vtaskAssignee"><option value="">Select team member...</option>${teamOptions}</select></div>
-        <div class="field-row"><label>Description</label><textarea id="vtaskDesc">Record a Loom video walkthrough of the "${esc(wName)}" workflow. When complete, paste the Loom share URL into the task notes field and mark the task as Done.</textarea></div>
-        <div style="background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:12px;margin-top:4px">
-            <label style="font-size:var(--fs-xs);color:var(--text-secondary);display:block;margin-bottom:4px">Loom URL (paste here after recording)</label>
-            <div style="color:var(--text-muted);font-size:var(--fs-xs)">This area will be used by the assignee to paste the Loom share URL once the recording is complete.</div>
-        </div>
-        <div style="margin-top:12px;padding:10px;background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-xs);color:var(--text-secondary)">
+        <div class="field-row"><label>Description</label><textarea id="vtaskDesc" rows="5">Record a Loom video walkthrough of the "${esc(wName)}" workflow.\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]</textarea></div>
+        <div style="margin-top:8px;padding:10px;background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-xs);color:var(--text-secondary)">
             <strong>Auto-set fields:</strong> Due today &middot; Not Urgent &middot; 15 min estimate &middot; Kevin as collaborator
         </div>
-        <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px">This creates a task in Tasks &amp; Projects. The Slack notification will fire automatically on assignment. When the task is marked complete and contains a Loom URL, steps will be auto-extracted.</p>`;
+        <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px">When the task is marked complete, the Loom URL is auto-imported into the SOP resources. The system then generates the SOP, uploads to Drive, and creates an AI skill automatically.</p>`;
     const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createVideoTask('${wfId}')">Create Task</button>`;
     showModal('Assign Video Recording Task', body, footer);
 }
