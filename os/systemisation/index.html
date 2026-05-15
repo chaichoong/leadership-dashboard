@@ -152,6 +152,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .sop-doc-step-name{font-weight:var(--fw-semibold);font-size:var(--fs-base);margin-bottom:4px}
 .sop-doc-step-desc{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6}
 .sop-doc-ai-detail{margin-top:8px;padding:12px;background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-sm);line-height:1.6;color:var(--text-primary);white-space:pre-wrap}
+.sop-doc-cautions{margin-top:24px;padding:16px;background:var(--warning-bg);border-radius:var(--radius-md);border-left:4px solid var(--warning)}
+.sop-doc-cautions h3{font-size:var(--fs-sm);font-weight:var(--fw-bold);margin:0 0 8px 0;color:var(--warning)}
+.sop-doc-cautions ul{margin:0;padding:0 0 0 20px;font-size:var(--fs-sm);line-height:1.8;color:var(--text-primary)}
+.sop-doc-tips{margin-top:16px;padding:16px;background:var(--info-bg);border-radius:var(--radius-md);border-left:4px solid var(--info)}
+.sop-doc-tips h3{font-size:var(--fs-sm);font-weight:var(--fw-bold);margin:0 0 8px 0;color:var(--info)}
+.sop-doc-tips ul{margin:0;padding:0 0 0 20px;font-size:var(--fs-sm);line-height:1.8;color:var(--text-primary)}
 .sop-doc-footer{padding:16px 24px;border-top:1px solid var(--border-default);font-size:var(--fs-xs);color:var(--text-muted);display:flex;justify-content:space-between}
 @media print{.sop-doc-header{-webkit-print-color-adjust:exact;print-color-adjust:exact}.sop-document{border:none;box-shadow:none}}
 
@@ -1890,14 +1896,25 @@ async function generateWorkflowSOP(wfId){
     const container = document.getElementById('sopDoc-'+wfId);
     if(!container) return;
 
-    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Generating SOP... This may take a moment.</div>';
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Generating SOP... Fetching video transcript and creating detailed instructions. This may take a few minutes.</div>';
     container.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+    let transcript = '';
+    let videoTitle = '';
+    if(loomUrl){
+        try {
+            transcript = await fetchLoomTranscript(loomUrl);
+            const oembedRes = await fetch(`https://www.loom.com/v1/oembed?url=${encodeURIComponent(loomUrl)}`);
+            if(oembedRes.ok){ const od = await oembedRes.json(); videoTitle = od.title||''; }
+        } catch(e){}
+    }
 
     const stepsText = steps.map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||'Untitled'}\nDescription: ${gf(s,ST.description)||'None'}`).join('\n\n');
 
     const prompt = `Write a comprehensive Standard Operating Procedure (SOP) for the following workflow.
 
 Workflow name: ${wName}
+${videoTitle ? `Video title: ${videoTitle}` : ''}
 ${wDesc ? `Workflow description: ${wDesc}` : ''}
 ${dept ? `Department: ${dept}` : ''}
 ${fulfill ? `Customer journey stage: ${fulfill}` : ''}
@@ -1905,43 +1922,56 @@ ${fulfill ? `Customer journey stage: ${fulfill}` : ''}
 The workflow has the following steps:
 ${stepsText}
 
-For EACH step, write:
-1. A clear, actionable instruction explaining exactly what to do
-2. Any important tips, warnings, or quality checks
-3. How to verify the step was completed correctly
+${transcript ? `IMPORTANT: Below is the transcript from the actual video walkthrough of this process. Use the specific details, system names, screen locations, and actions mentioned in the transcript to write accurate, context-specific instructions. Do NOT write generic software help. Write instructions that match exactly what happens in the video.
 
-Write for a team member with no prior knowledge of this process.
+VIDEO TRANSCRIPT:
+${transcript}` : ''}
+
+For EACH step, write instructions that:
+1. Describe exactly what to do, referencing specific screens, buttons, menus, and fields by name
+2. Include any warnings, gotchas, or quality checks mentioned in the video
+3. Explain how to verify the step was completed correctly
+
+Then add two extra sections:
+- "cautions": an array of 3-5 warning strings about things that could go wrong or important rules to follow
+- "tips": an array of 3-5 efficiency tips for completing this process faster or avoiding common mistakes
+
+Write for a team member with no prior knowledge of this process. A 13-year-old should be able to follow these instructions.
 Keep language plain and direct. Short sentences. Active voice.
 Do not use markdown formatting. Use plain text only.
-Output ONLY a JSON array where each element has:
-- "name": the step name (use the exact names provided)
-- "detail": the expanded SOP instructions for that step (2-4 paragraphs of plain text)
+Output ONLY a JSON object with:
+- "title": a descriptive SOP title based on what the process actually does (not just the workflow name)
+- "steps": an array where each element has "name" (use the exact step names provided) and "detail" (2-4 paragraphs of plain text)
+- "cautions": an array of warning strings
+- "tips": an array of efficiency tip strings
 
-No other text outside the JSON array.`;
+No other text outside the JSON object.`;
 
     try {
-        const systemPrompt = typeof buildCachedWizardSystem === 'function'
-            ? buildCachedWizardSystem('Systemisation Module', prompt)
-            : [{type:'text', text:'You are a business process documentation expert.'}];
+        const systemPrompt = [{type:'text', text:'You are a business process documentation expert. You write SOPs that are specific, actionable, and easy for anyone to follow. When a video transcript is provided, you use the exact details from the video rather than writing generic instructions.'}];
 
         const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({
                 model:'claude-sonnet-4-20250514',
-                max_tokens:4000,
+                max_tokens:6000,
                 system: systemPrompt,
                 messages:[{role:'user',content:prompt}],
             })
         });
         if(!res.ok) throw new Error('AI request failed: '+res.status);
         const data = await res.json();
-        const text = data.content?.[0]?.text||'[]';
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        const text = data.content?.[0]?.text||'{}';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
         if(!jsonMatch) throw new Error('Invalid AI response');
-        const sopSteps = JSON.parse(jsonMatch[0]);
+        const sopData = JSON.parse(jsonMatch[0]);
+        const sopSteps = sopData.steps || [];
+        const sopTitle = sopData.title || wName;
+        const cautions = sopData.cautions || [];
+        const tips = sopData.tips || [];
 
-        renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container);
+        renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container, sopTitle, cautions, tips, videoTitle);
         toast('SOP generated');
     } catch(e){
         toast('SOP generation error: '+e.message);
@@ -1949,13 +1979,16 @@ No other text outside the JSON array.`;
     }
 }
 
-function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container){
+function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container, sopTitle, cautions, tips, videoTitle){
     const loomEmbed = renderLoomEmbed(loomUrl);
     const now = new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+    sopTitle = sopTitle || wName;
+    cautions = cautions || [];
+    tips = tips || [];
 
     let html = '<div class="sop-document">';
     html += `<div class="sop-doc-header">
-        <h2>${esc(wName)}</h2>
+        <h2>${esc(sopTitle)}</h2>
         <p>Standard Operating Procedure${dept?' &middot; '+esc(dept):''}${fulfill?' &middot; '+esc(fulfill):''}</p>
     </div>`;
     html += '<div class="sop-doc-body">';
@@ -1966,7 +1999,7 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
 
     if(loomEmbed){
         html += `<div class="sop-doc-video">
-            <div style="padding:12px 16px;background:var(--bg-surface-2);font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px">Video Walkthrough</div>
+            <div style="padding:12px 16px;background:var(--bg-surface-2);font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px">Video Walkthrough${videoTitle?' &mdash; '+esc(videoTitle):''}</div>
             ${loomEmbed}
         </div>`;
     }
@@ -1989,12 +2022,25 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
             </div>
         </div>`;
     });
-    html += '</div></div>';
+    html += '</div>';
+
+    if(cautions.length){
+        html += '<div class="sop-doc-cautions"><h3>Cautionary Notes</h3><ul>';
+        cautions.forEach(c=>{ html += `<li>${esc(c)}</li>`; });
+        html += '</ul></div>';
+    }
+    if(tips.length){
+        html += '<div class="sop-doc-tips"><h3>Tips for Efficiency</h3><ul>';
+        tips.forEach(t=>{ html += `<li>${esc(t)}</li>`; });
+        html += '</ul></div>';
+    }
+
+    html += '</div>';
 
     html += `<div class="sop-doc-footer">
         <span>Generated ${now}</span>
         <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="window.print()">Print</button>
+            <button class="btn btn-sm btn-primary" onclick="exportSOPAsHTML('${wfId}')">Export</button>
             <button class="btn btn-sm" onclick="this.closest('.sop-document').remove()">Close</button>
         </div>
     </div>`;
@@ -2002,6 +2048,112 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
 
     container.innerHTML = html;
     container.scrollIntoView({behavior:'smooth',block:'start'});
+
+    container._sopData = { wfId, sopTitle, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, cautions, tips, videoTitle, generatedDate: now };
+}
+
+function exportSOPAsHTML(wfId){
+    const container = document.getElementById('sopDoc-'+wfId);
+    if(!container || !container._sopData){ toast('Generate the SOP first'); return; }
+    const d = container._sopData;
+    const loomVideoId = d.loomUrl ? (d.loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/)||[])[1] : '';
+
+    let stepsHtml = '';
+    d.steps.forEach((s,i)=>{
+        const sName = gf(s,ST.name)||'Untitled';
+        const sDesc = gf(s,ST.description)||'';
+        const sopDetail = (d.sopSteps.find(ss=>ss.name===sName)||{}).detail||'';
+        stepsHtml += `
+        <div class="step">
+            <div class="step-header">
+                <div class="step-num">${i+1}</div>
+                <div class="step-content">
+                    <h3>${esc(sName)}</h3>
+                    ${sDesc?`<p class="step-desc">${esc(sDesc)}</p>`:''}
+                    ${sopDetail?`<div class="step-detail">${esc(sopDetail)}</div>`:''}
+                </div>
+            </div>
+        </div>`;
+    });
+
+    let cautionsHtml = '';
+    if(d.cautions.length){
+        cautionsHtml = '<div class="cautions"><h3>Cautionary Notes</h3><ul>';
+        d.cautions.forEach(c=>{ cautionsHtml += `<li>${esc(c)}</li>`; });
+        cautionsHtml += '</ul></div>';
+    }
+    let tipsHtml = '';
+    if(d.tips.length){
+        tipsHtml = '<div class="tips"><h3>Tips for Efficiency</h3><ul>';
+        d.tips.forEach(t=>{ tipsHtml += `<li>${esc(t)}</li>`; });
+        tipsHtml += '</ul></div>';
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${esc(d.sopTitle)} - SOP</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;line-height:1.6;color:#1C2422;background:#fff;max-width:800px;margin:0 auto;padding:40px 24px}
+.header{background:#2C6E49;color:#fff;padding:24px 32px;border-radius:8px;margin-bottom:32px}
+.header h1{font-size:22px;font-weight:700;margin:0 0 4px 0}
+.header p{margin:0;opacity:.85;font-size:14px}
+.description{font-size:14px;color:#5A6660;line-height:1.7;margin-bottom:24px}
+.video-section{margin-bottom:32px;border:1px solid #DDE1D9;border-radius:8px;overflow:hidden}
+.video-label{padding:12px 16px;background:#F4F6F1;font-size:12px;font-weight:600;color:#5A6660;text-transform:uppercase;letter-spacing:.4px}
+.video-section iframe{width:100%;aspect-ratio:16/9;border:none;display:block}
+.video-link{padding:12px 16px;font-size:13px}
+.video-link a{color:#2C6E49;text-decoration:none}
+.video-link a:hover{text-decoration:underline}
+.step{padding:20px 0;border-bottom:1px solid #E5E8E1}
+.step:last-child{border-bottom:none}
+.step-header{display:flex;align-items:flex-start;gap:16px}
+.step-num{width:36px;height:36px;border-radius:50%;background:#2C6E49;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+.step-content{flex:1}
+.step-content h3{font-size:16px;font-weight:600;margin:0 0 4px 0}
+.step-desc{font-size:14px;color:#5A6660;margin:0 0 8px 0}
+.step-detail{margin-top:8px;padding:14px;background:#F4F6F1;border-radius:6px;font-size:14px;line-height:1.7;white-space:pre-wrap}
+.cautions{margin-top:32px;padding:20px;background:#FFF8E6;border-radius:8px;border-left:4px solid #C6A15B}
+.cautions h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#946B1F}
+.cautions ul{margin:0;padding:0 0 0 20px;font-size:14px;line-height:2}
+.tips{margin-top:16px;padding:20px;background:#E8F4FD;border-radius:8px;border-left:4px solid #5A86CF}
+.tips h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#3A6AB0}
+.tips ul{margin:0;padding:0 0 0 20px;font-size:14px;line-height:2}
+.footer{margin-top:32px;padding-top:16px;border-top:1px solid #DDE1D9;font-size:12px;color:#8A928C;display:flex;justify-content:space-between}
+@media print{body{max-width:100%;padding:20px}.header{-webkit-print-color-adjust:exact;print-color-adjust:exact}.step-num{-webkit-print-color-adjust:exact;print-color-adjust:exact}.cautions,.tips{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>${esc(d.sopTitle)}</h1>
+    <p>Standard Operating Procedure${d.dept?' &middot; '+esc(d.dept):''}${d.fulfill?' &middot; '+esc(d.fulfill):''}</p>
+</div>
+${d.wDesc?`<p class="description">${esc(d.wDesc)}</p>`:''}
+${loomVideoId?`<div class="video-section">
+    <div class="video-label">Video Walkthrough${d.videoTitle?' &mdash; '+esc(d.videoTitle):''}</div>
+    <iframe src="https://www.loom.com/embed/${loomVideoId}" allowfullscreen></iframe>
+    <div class="video-link"><a href="${esc(d.loomUrl)}" target="_blank">Open video in Loom &rarr;</a></div>
+</div>`:''}
+${stepsHtml}
+${cautionsHtml}
+${tipsHtml}
+<div class="footer">
+    <span>Generated ${d.generatedDate}</span>
+    <span>Operations Director</span>
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], {type:'text/html'});
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+
+    container._exportedHTML = html;
+    toast('SOP exported to new tab');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
