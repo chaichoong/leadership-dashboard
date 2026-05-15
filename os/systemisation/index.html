@@ -390,7 +390,18 @@ const TF = {
     dueDate:     'fld7XP8w8kbxfETV4',
     priority:    'fldS21RwmwOqt71LI',
     attachments: 'fldEbs9cscRr8elcw',
+    timeEstimate:'fld10VzzbiNNgRmIi',
+    collaborators:'fldcq3t6uAPgWSOP8',
 };
+
+const TEAM = [
+    { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
+    { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
+    { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
+    { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
+    { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
+    { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
+];
 
 let PAT = '';
 let allWorkflows = [];
@@ -1109,7 +1120,7 @@ function buildGridRow(w, stageKey, view){
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
         <td><div style="display:flex;gap:4px;align-items:start">
             <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
-            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:2px;font-size:11px;padding:2px 8px" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
+            <button class="btn btn-ai btn-sm" style="flex-shrink:0;margin-top:2px;font-size:12px;padding:4px 10px;border-radius:var(--radius-md)" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI</button>
         </div></td>
         <td style="white-space:nowrap"><div style="display:flex;gap:2px;align-items:center;position:relative">
             <button class="btn btn-sm" style="padding:2px 6px;font-size:11px;background:none;border:1px solid var(--border-default);cursor:pointer;color:var(--text-secondary)" title="Move to another stage" onclick="showMoveMenu(this,'${w.id}','${esc(stageKey)}','${view}')">&#x21C4;</button>
@@ -2507,38 +2518,50 @@ function assignVideoTask(wfId){
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
 
+    const teamOptions = TEAM.map(m=>`<option value="${m.key}">${esc(m.name)}</option>`).join('');
     const body = `
         <div class="field-row"><label>Task Name</label><input id="vtaskName" value="Record video: ${esc(wName)}"></div>
-        <div class="field-row"><label>Assignee</label><input id="vtaskAssignee" placeholder="Team member name or email"></div>
+        <div class="field-row"><label>Assignee</label><select id="vtaskAssignee"><option value="">Select team member...</option>${teamOptions}</select></div>
         <div class="field-row"><label>Description</label><textarea id="vtaskDesc">Record a Loom video walkthrough of the "${esc(wName)}" workflow. When complete, paste the Loom share URL into the task notes field and mark the task as Done.</textarea></div>
-        <div class="field-row"><label>Due Date (optional)</label><input type="date" id="vtaskDue"></div>
-        <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px">This creates a task in Tasks &amp; Projects. When the task is marked complete and contains a Loom URL, it will automatically be pulled back here.</p>`;
+        <div style="background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:12px;margin-top:4px">
+            <label style="font-size:var(--fs-xs);color:var(--text-secondary);display:block;margin-bottom:4px">Loom URL (paste here after recording)</label>
+            <div style="color:var(--text-muted);font-size:var(--fs-xs)">This area will be used by the assignee to paste the Loom share URL once the recording is complete.</div>
+        </div>
+        <div style="margin-top:12px;padding:10px;background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-xs);color:var(--text-secondary)">
+            <strong>Auto-set fields:</strong> Due today &middot; Not Urgent &middot; 15 min estimate &middot; Kevin as collaborator
+        </div>
+        <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px">This creates a task in Tasks &amp; Projects. The Slack notification will fire automatically on assignment. When the task is marked complete and contains a Loom URL, steps will be auto-extracted.</p>`;
     const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createVideoTask('${wfId}')">Create Task</button>`;
     showModal('Assign Video Recording Task', body, footer);
 }
 
 async function createVideoTask(wfId){
     const name = document.getElementById('vtaskName').value.trim();
-    const assignee = document.getElementById('vtaskAssignee').value.trim();
+    const assigneeKey = document.getElementById('vtaskAssignee').value;
     const desc = document.getElementById('vtaskDesc').value.trim();
-    const due = document.getElementById('vtaskDue').value;
 
     if(!name){ toast('Task name is required'); return; }
-    if(!assignee){ toast('Assignee is required'); return; }
+    if(!assigneeKey){ toast('Please select an assignee'); return; }
+
+    const member = TEAM.find(m=>m.key===assigneeKey);
+    if(!member){ toast('Invalid team member selected'); return; }
 
     const saveBtn = document.querySelector('#modalOverlay .btn-primary');
     if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Creating...'; }
 
+    const today = new Date().toISOString().split('T')[0];
     const fields = {
         [TF.name]: name,
-        [TF.assignee]: assignee,
+        [TF.assignee]: {email: member.email},
         [TF.description]: desc,
         [TF.category]: 'Systemisation',
         [TF.notes]: `[Systemisation] Workflow ID: ${wfId}`,
-        [TF.status]: 'Not Started',
-        [TF.priority]: 'Medium',
+        [TF.status]: 'Today',
+        [TF.priority]: 'Not Urgent',
+        [TF.dueDate]: today,
+        [TF.timeEstimate]: '15 min',
+        [TF.collaborators]: [{email: 'kevin@runpreneur.org.uk'}],
     };
-    if(due) fields[TF.dueDate] = due;
 
     try {
         const rec = await atCreate(TASKS_TBL, fields);
@@ -2547,7 +2570,7 @@ async function createVideoTask(wfId){
         closeModal();
         renderSteps();
         updateCounts();
-        toast('Video task created and assigned to '+assignee);
+        toast('Video task created and assigned to '+member.name);
     } catch(e){
         toast('Error creating task: '+e.message);
         if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Create Task'; }
