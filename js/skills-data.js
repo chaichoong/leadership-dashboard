@@ -927,4 +927,5 @@ const SKILLS_SOURCE_LABELS = {
     cowork:    'Cowork / Plugin',
     system:    'Built-in',
     marketplace: 'Marketplace',
+    sop:       'SOP Generated',
 };
