@@ -29,7 +29,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .btn-danger:hover{background:var(--danger);color:#fff}
 .btn-ai{border-color:var(--info);color:var(--info);background:var(--info-bg);font-weight:var(--fw-semibold)}
 .btn-ai:hover{background:var(--info);color:#fff}
-.btn-ai-inline{flex-shrink:0;margin-top:2px;font-size:12px;padding:4px 10px;border-radius:var(--radius-md);white-space:nowrap}
+.btn-ai-inline{flex-shrink:0;margin-top:2px;font-size:var(--fs-xs);padding:5px 12px;border-radius:var(--radius-md);white-space:nowrap;font-weight:var(--fw-bold);letter-spacing:.3px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 
 .pipeline-tabs{display:flex;gap:0;overflow-x:auto;background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:0 24px}
@@ -55,6 +55,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 .auto-wf-group{margin-bottom:24px}
 .auto-wf-header{font-size:var(--fs-base);font-weight:var(--fw-semibold);padding:8px 0;margin-bottom:8px;border-bottom:1px solid var(--border-subtle)}
+.wf-grid-group-header td{background:var(--bg-subtle);font-weight:var(--fw-bold);font-size:var(--fs-sm);color:var(--text-secondary);padding:8px 12px;letter-spacing:.3px;border-bottom:1px solid var(--border-default)}
 
 .main{padding:20px 24px;max-width:1400px;margin:0 auto}
 .tab-pane{display:none}
@@ -959,7 +960,28 @@ function renderAll(){
     const tbody = document.createElement('tbody');
     tbody.id = 'allGridBody';
 
-    wfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
+    const grouped = new Map();
+    const UNASSIGNED = '__unassigned__';
+    methodOrder.forEach(mid => grouped.set(mid, []));
+    grouped.set(UNASSIGNED, []);
+    wfs.forEach(w => {
+        const mIds = linkIds(gf(w,WF.mainMethodStage));
+        const key = mIds.length ? mIds[0] : UNASSIGNED;
+        if(!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(w);
+    });
+
+    grouped.forEach((groupWfs, key) => {
+        if(!groupWfs.length) return;
+        const headerTr = document.createElement('tr');
+        headerTr.className = 'wf-grid-group-header';
+        const method = key !== UNASSIGNED ? allMethods.find(m=>m.id===key) : null;
+        const label = method ? (gf(method,MM.name)||'Unnamed') : 'Unassigned';
+        headerTr.innerHTML = `<td colspan="4">${esc(label)} (${groupWfs.length})</td>`;
+        tbody.appendChild(headerTr);
+        groupWfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
+    });
+
     tbody.appendChild(buildAllNewRow());
 
     table.appendChild(tbody);
@@ -979,7 +1001,7 @@ function buildAllGridRow(w){
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
         <td><div style="display:flex;gap:4px;align-items:start">
             <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
-            <button class="btn btn-ai btn-sm btn-ai-inline" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
+            <button class="btn btn-ai btn-sm btn-ai-inline" title="Click to auto-generate a description using AI" onclick="aiDescRow(this)">&#x1F916; Write with AI</button>
         </div></td>
         <td style="white-space:nowrap">
             <button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
@@ -1054,6 +1076,7 @@ function closeDrawer(){
     drillStage = null;
     _drawerKey = null;
     _drawerView = null;
+    render();
 }
 
 let _gridSaveTimers = {};
@@ -1114,12 +1137,11 @@ function buildGridRow(w, stageKey, view){
         <td><input class="wf-grid-input" value="${esc(name)}" placeholder="Workflow name" data-field="name"></td>
         <td><div style="display:flex;gap:4px;align-items:start">
             <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
-            <button class="btn btn-ai btn-sm btn-ai-inline" title="Generate description with AI" onclick="aiDescRow(this)">&#x2728; AI Describe</button>
+            <button class="btn btn-ai btn-sm btn-ai-inline" title="Click to auto-generate a description using AI" onclick="aiDescRow(this)">&#x1F916; Write with AI</button>
         </div></td>
-        <td style="white-space:nowrap"><div style="display:flex;gap:2px;align-items:center;position:relative">
-            <button class="btn btn-sm" style="padding:2px 6px;font-size:11px;background:none;border:1px solid var(--border-default);cursor:pointer;color:var(--text-secondary)" title="Move to another stage" onclick="showMoveMenu(this,'${w.id}','${esc(stageKey)}','${view}')">&#x21C4;</button>
+        <td style="white-space:nowrap">
             <button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
-        </div></td>`;
+        </td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
@@ -1456,7 +1478,7 @@ async function aiDescRow(btn){
         if(recId) gridSave(recId, {[WF.description]: text}, tr);
         toast('Description generated');
     } catch(e){ toast('AI error: '+e.message); }
-    btn.disabled = false; btn.textContent = 'AI';
+    btn.disabled = false; btn.textContent = '\u{1F916} Write with AI';
 }
 
 function updateTabCounts(){ updateCounts(); }
@@ -2041,7 +2063,7 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
         <span>Generated ${now}</span>
         <div style="display:flex;gap:8px">
             <button class="btn btn-sm btn-primary" onclick="exportSOPAsHTML('${wfId}')">Export</button>
-            <button class="btn btn-sm" onclick="this.closest('.sop-document').remove()">Close</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSOPDocument('${wfId}')">Delete SOP</button>
         </div>
     </div>`;
     html += '</div>';
@@ -2154,6 +2176,17 @@ ${tipsHtml}
 
     container._exportedHTML = html;
     toast('SOP exported to new tab');
+}
+
+function deleteSOPDocument(wfId){
+    if(!confirm('Are you sure you want to delete this SOP? This cannot be undone.')) return;
+    const container = document.getElementById('sopDoc-'+wfId);
+    if(container){
+        container.innerHTML = '';
+        container._sopData = null;
+        container._exportedHTML = null;
+    }
+    toast('SOP deleted');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
