@@ -135,6 +135,26 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 .sop-viewer{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:16px;margin-top:12px;font-size:var(--fs-sm);line-height:1.7;white-space:pre-wrap;max-height:400px;overflow-y:auto}
 
+.sop-document{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);margin-top:16px;overflow:hidden}
+.sop-doc-header{background:var(--accent);color:#fff;padding:20px 24px}
+.sop-doc-header h2{margin:0 0 4px 0;font-size:var(--fs-xl);font-weight:var(--fw-bold)}
+.sop-doc-header p{margin:0;opacity:.85;font-size:var(--fs-sm)}
+.sop-doc-body{padding:24px}
+.sop-doc-video{margin-bottom:24px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border-default)}
+.sop-doc-video iframe{width:100%;aspect-ratio:16/9;border:none;display:block}
+.sop-doc-steps{counter-reset:sop-step}
+.sop-doc-step{padding:16px 0;border-bottom:1px solid var(--border-subtle)}
+.sop-doc-step:last-child{border-bottom:none}
+.sop-doc-step-header{display:flex;align-items:flex-start;gap:12px}
+.sop-doc-step-num{counter-increment:sop-step;width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:var(--fw-bold);font-size:var(--fs-sm);flex-shrink:0}
+.sop-doc-step-num::after{content:counter(sop-step)}
+.sop-doc-step-content{flex:1}
+.sop-doc-step-name{font-weight:var(--fw-semibold);font-size:var(--fs-base);margin-bottom:4px}
+.sop-doc-step-desc{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6}
+.sop-doc-ai-detail{margin-top:8px;padding:12px;background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-sm);line-height:1.6;color:var(--text-primary);white-space:pre-wrap}
+.sop-doc-footer{padding:16px 24px;border-top:1px solid var(--border-default);font-size:var(--fs-xs);color:var(--text-muted);display:flex;justify-content:space-between}
+@media print{.sop-doc-header{-webkit-print-color-adjust:exact;print-color-adjust:exact}.sop-document{border:none;box-shadow:none}}
+
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
 .empty-state p{margin-bottom:12px}
 
@@ -1853,6 +1873,138 @@ Output the SOP text only, no additional commentary.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// AI — Workflow SOP Generation (full document with embedded video)
+// ═══════════════════════════════════════════════════════════════════════
+async function generateWorkflowSOP(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    const wDesc = gf(w,WF.description)||'';
+    const steps = stepsForWorkflow(wfId);
+    const loomUrl = getWfLoomUrl(wfId);
+    const dept = selName(gf(w,WF.department))||'';
+    const fulfill = selName(gf(w,WF.fulfillStage))||'';
+
+    if(!steps.length){ toast('Add steps to this workflow first'); return; }
+
+    const container = document.getElementById('sopDoc-'+wfId);
+    if(!container) return;
+
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Generating SOP... This may take a moment.</div>';
+    container.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+    const stepsText = steps.map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||'Untitled'}\nDescription: ${gf(s,ST.description)||'None'}`).join('\n\n');
+
+    const prompt = `Write a comprehensive Standard Operating Procedure (SOP) for the following workflow.
+
+Workflow name: ${wName}
+${wDesc ? `Workflow description: ${wDesc}` : ''}
+${dept ? `Department: ${dept}` : ''}
+${fulfill ? `Customer journey stage: ${fulfill}` : ''}
+
+The workflow has the following steps:
+${stepsText}
+
+For EACH step, write:
+1. A clear, actionable instruction explaining exactly what to do
+2. Any important tips, warnings, or quality checks
+3. How to verify the step was completed correctly
+
+Write for a team member with no prior knowledge of this process.
+Keep language plain and direct. Short sentences. Active voice.
+Do not use markdown formatting. Use plain text only.
+Output ONLY a JSON array where each element has:
+- "name": the step name (use the exact names provided)
+- "detail": the expanded SOP instructions for that step (2-4 paragraphs of plain text)
+
+No other text outside the JSON array.`;
+
+    try {
+        const systemPrompt = typeof buildCachedWizardSystem === 'function'
+            ? buildCachedWizardSystem('Systemisation Module', prompt)
+            : [{type:'text', text:'You are a business process documentation expert.'}];
+
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model:'claude-sonnet-4-20250514',
+                max_tokens:4000,
+                system: systemPrompt,
+                messages:[{role:'user',content:prompt}],
+            })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'[]';
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if(!jsonMatch) throw new Error('Invalid AI response');
+        const sopSteps = JSON.parse(jsonMatch[0]);
+
+        renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container);
+        toast('SOP generated');
+    } catch(e){
+        toast('SOP generation error: '+e.message);
+        container.innerHTML = `<div style="padding:20px;color:var(--danger)">Error generating SOP: ${esc(e.message)}</div>`;
+    }
+}
+
+function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container){
+    const loomEmbed = renderLoomEmbed(loomUrl);
+    const now = new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+
+    let html = '<div class="sop-document">';
+    html += `<div class="sop-doc-header">
+        <h2>${esc(wName)}</h2>
+        <p>Standard Operating Procedure${dept?' &middot; '+esc(dept):''}${fulfill?' &middot; '+esc(fulfill):''}</p>
+    </div>`;
+    html += '<div class="sop-doc-body">';
+
+    if(wDesc){
+        html += `<p style="margin:0 0 20px 0;font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">${esc(wDesc)}</p>`;
+    }
+
+    if(loomEmbed){
+        html += `<div class="sop-doc-video">
+            <div style="padding:12px 16px;background:var(--bg-surface-2);font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px">Video Walkthrough</div>
+            ${loomEmbed}
+        </div>`;
+    }
+
+    html += '<div class="sop-doc-steps">';
+    steps.forEach((s,i)=>{
+        const sName = gf(s,ST.name)||'Untitled';
+        const sDesc = gf(s,ST.description)||'';
+        const sopDetail = sopSteps.find(ss=>ss.name===sName);
+        const detail = sopDetail ? sopDetail.detail : '';
+
+        html += `<div class="sop-doc-step">
+            <div class="sop-doc-step-header">
+                <div class="sop-doc-step-num"></div>
+                <div class="sop-doc-step-content">
+                    <div class="sop-doc-step-name">${esc(sName)}</div>
+                    ${sDesc?`<div class="sop-doc-step-desc">${esc(sDesc)}</div>`:''}
+                    ${detail?`<div class="sop-doc-ai-detail">${esc(detail)}</div>`:''}
+                </div>
+            </div>
+        </div>`;
+    });
+    html += '</div></div>';
+
+    html += `<div class="sop-doc-footer">
+        <span>Generated ${now}</span>
+        <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="window.print()">Print</button>
+            <button class="btn btn-sm" onclick="this.closest('.sop-document').remove()">Close</button>
+        </div>
+    </div>`;
+    html += '</div>';
+
+    container.innerHTML = html;
+    container.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // AI — Suggest Workflows
 // ═══════════════════════════════════════════════════════════════════════
 async function suggestWorkflows(stageKey, view){
@@ -2049,6 +2201,7 @@ function renderSteps(){
             html += `<div class="steps-header">
                 <h3 style="margin:0;font-size:var(--fs-lg)">${esc(wName)}</h3>
                 <div style="display:flex;gap:8px">
+                    ${steps.length?`<button class="btn btn-sm btn-ai" onclick="generateWorkflowSOP('${w.id}')">Generate SOP</button>`:''}
                     <button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>
                     ${!vtaskId?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="assignVideoTask('${w.id}')">Assign Video Task</button>`:''}
                 </div>
@@ -2126,6 +2279,8 @@ function renderSteps(){
             </tr>`;
 
             html += '</tbody></table>';
+
+            html += `<div id="sopDoc-${w.id}"></div>`;
         }
     }
     html += '</div></div>';
