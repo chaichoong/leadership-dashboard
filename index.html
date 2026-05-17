@@ -190,48 +190,8 @@
         <!-- Fintable Sync Alert Banner (hidden when all OK) -->
         <div id="fintableAlertBanner" style="display:none"></div>
 
-        <!-- Balance Calculator Tool -->
-        <div>
-            <button class="calc-toggle" onclick="toggleCalcPanel()">
-                <span style="font-size:16px">&#9874;</span> Balance Calculator
-            </button>
-            <div class="calc-panel" id="calcPanel">
-                <div class="calc-header">
-                    <h3>Balance Calculator</h3>
-                    <div>
-                        <label style="font-size:12px;color:var(--text-secondary);margin-right:8px">Opening Balance:</label>
-                        <input type="number" class="calc-input" id="calcOpeningBal" step="0.01" oninput="this.dataset.userEdited='1'; updateCalcTotals()">
-                    </div>
-                </div>
-                <div class="calc-summary" id="calcSummary">
-                    <div class="calc-summary-item">
-                        <div class="calc-summary-label">Selected Inflows</div>
-                        <div class="calc-summary-value text-green" id="calcTotalIn">£0.00</div>
-                    </div>
-                    <div class="calc-summary-item">
-                        <div class="calc-summary-label">Selected Outflows</div>
-                        <div class="calc-summary-value text-red" id="calcTotalOut">£0.00</div>
-                    </div>
-                    <div class="calc-summary-item">
-                        <div class="calc-summary-label">Net Impact</div>
-                        <div class="calc-summary-value" id="calcNetImpact">£0.00</div>
-                    </div>
-                    <div class="calc-summary-item">
-                        <div class="calc-summary-label">Closing Balance</div>
-                        <div class="calc-summary-value" id="calcClosingBal">£0.00</div>
-                    </div>
-                </div>
-                <div class="calc-actions" style="margin-bottom:12px">
-                    <button class="calc-btn primary" onclick="calcSelectAll()">Select All</button>
-                    <button class="calc-btn" onclick="calcDeselectAll()">Deselect All</button>
-                    <button class="calc-btn" onclick="calcSelectInflows()">Inflows Only</button>
-                    <button class="calc-btn" onclick="calcSelectOutflows()">Outflows Only</button>
-                </div>
-                <div class="calc-tx-list" id="calcTxList">
-                    <div style="color:var(--text-muted);font-size:13px;padding:20px;text-align:center">Loading transactions...</div>
-                </div>
-            </div>
-        </div>
+        <!-- Cash Flow Opening Balance Override -->
+        <div id="cfOpeningBalSection"></div>
 
         <!-- Utility Bar: Unreconciled Transactions -->
         <div id="reconBar" class="cards-grid" style="margin-bottom:16px"></div>
@@ -270,6 +230,7 @@
         <!-- Section 5: 31-Day Cash Flow Forecast -->
         <div class="section">
             <h2 class="section-title">31-Day Cash Flow Forecast</h2>
+            <div id="cfWaControls"></div>
             <div class="cards-grid" id="cashflowKPIs"></div>
             <div class="cashflow-container">
                 <div class="chart-container">
@@ -282,20 +243,15 @@
                             <th>Opening</th>
                             <th>In</th>
                             <th>Out</th>
-                            <th>Net</th>
                             <th>Closing</th>
+                            <th>Withdraw</th>
                             <th>Last Acct</th>
                         </tr>
                     </thead>
                     <tbody id="cashflowBody"></tbody>
                 </table>
             </div>
-        </div>
-
-        <!-- Section 5b: Withdrawal Advisor -->
-        <div class="section" id="withdrawalAdvisorSection">
-            <h2 class="section-title">Withdrawal Advisor</h2>
-            <div id="withdrawalAdvisorCard"></div>
+            <div id="creditCardSummary"></div>
         </div>
 
         <!-- Section 6: AI Analysis -->
