@@ -1113,16 +1113,8 @@
             });
         }
 
-        let adjustedOpening = effectiveOpening;
-        todayItems.forEach(item => {
-            if (item.cleared) {
-                if (item.dir === 'in') adjustedOpening += item.amount;
-                else adjustedOpening -= item.amount;
-            }
-        });
-
         const projectedDays = [];
-        let runningBalance = adjustedOpening;
+        let runningBalance = effectiveOpening;
 
         const allDayInflows = [];
 
@@ -1136,8 +1128,8 @@
                 const inflowKey = `risk|${r.key}|${f.name}|${f.amount}`;
                 const isRisk = savedRisk.has(inflowKey);
                 if (isToday) {
-                    const todayKey2 = `in|${f.name}|${f.amount}`;
-                    if (savedCleared.has(todayKey2)) return;
+                    const ck = `in|${f.name}|${f.amount}`;
+                    if (savedCleared.has(ck)) return;
                 }
                 dayInflowItems.push({ name: f.name, amount: f.amount, riskKey: inflowKey, excluded: isRisk });
                 if (!isRisk) dayIn += f.amount;
@@ -1145,8 +1137,8 @@
             r.outflows.forEach(f => {
                 if (f.cleared) return;
                 if (isToday) {
-                    const key = `out|${f.name}|${f.amount}`;
-                    if (savedCleared.has(key)) return;
+                    const ck = `out|${f.name}|${f.amount}`;
+                    if (savedCleared.has(ck)) return;
                 }
                 dayOut += f.amount;
             });
@@ -1156,9 +1148,8 @@
                 dayOut += WEEKLY_COMMITMENTS;
             }
 
-            if (!isToday) {
-                runningBalance += dayIn - dayOut;
-            }
+            const opening = runningBalance;
+            runningBalance += dayIn - dayOut;
 
             allDayInflows.push({ key: r.key, date: r.date, items: dayInflowItems });
 
@@ -1167,6 +1158,7 @@
                 key: r.key,
                 dayIn,
                 dayOut,
+                opening,
                 balance: runningBalance,
                 isFriday: dow === 5,
             });
@@ -1187,33 +1179,32 @@
             if (i - lastWithdrawalIdx < MIN_DAYS_BETWEEN && lastWithdrawalIdx >= 0) continue;
 
             const day = projectedDays[i];
-            const surplus = day.balance - roundedBuffer;
-            if (surplus < 50) continue;
+            const availableNow = day.opening - roundedBuffer;
+            if (availableNow < 50) continue;
 
-            let minFutureBalance = day.balance;
-            const lookAhead = Math.min(i + lagAnalysis.bufferDays + 2, projectedDays.length);
+            let minFutureOpening = availableNow;
+            const lookAhead = projectedDays.length;
             for (let j = i + 1; j < lookAhead; j++) {
-                if (projectedDays[j].balance < minFutureBalance) {
-                    minFutureBalance = projectedDays[j].balance;
-                }
+                const lowestInDay = Math.min(projectedDays[j].opening, projectedDays[j].balance);
+                const futureAvail = lowestInDay - roundedBuffer;
+                if (futureAvail < minFutureOpening) minFutureOpening = futureAvail;
             }
 
-            const safeToTake = minFutureBalance - roundedBuffer;
-            if (safeToTake < 50) continue;
-
-            const withdrawAmount = Math.floor(safeToTake / 50) * 50;
+            if (minFutureOpening < 50) continue;
+            const withdrawAmount = Math.floor(minFutureOpening / 50) * 50;
             if (withdrawAmount < 50) continue;
 
             withdrawals.push({
                 date: day.date,
                 key: day.key,
                 amount: withdrawAmount,
-                balanceBefore: day.balance,
-                balanceAfter: day.balance - withdrawAmount,
+                balanceBefore: day.opening,
+                balanceAfter: day.opening - withdrawAmount,
             });
 
             for (let j = i; j < projectedDays.length; j++) {
                 projectedDays[j].balance -= withdrawAmount;
+                if (j > i) projectedDays[j].opening -= withdrawAmount;
             }
             lastWithdrawalIdx = i;
         }
@@ -1249,7 +1240,7 @@
 
         const todayItemsHtml = todayItems.length > 0
             ? `<div style="margin:12px 0 16px">
-                <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Today's items (tick what's already cleared):</div>
+                <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Today's items (tick what's already cleared in the bank):</div>
                 ${todayItems.map(item => {
                     const checked = item.cleared ? ' checked' : '';
                     const colour = item.dir === 'in' ? 'var(--success)' : 'var(--danger)';
@@ -1260,6 +1251,7 @@
                         <span style="color:${colour};font-weight:var(--fw-medium)">${prefix}${fmt(item.amount)}</span>
                     </label>`;
                 }).join('')}
+                <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">Ticked = already in your bank balance. Unticked = still expected today and included in the forecast.</div>
             </div>`
             : '';
 
@@ -1273,47 +1265,50 @@
             }).join('')
             : `<div style="padding:12px;color:var(--text-muted)">No safe withdrawal windows in the next 31 days. All surplus is needed to cover commitments and maintain the safety buffer.</div>`;
 
-        const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const dailyBalanceRows = projectedDays.map((d, idx) => {
             const isToday2 = d.key === todayKey;
             const w = withdrawalByKey[d.key];
             const isBelowBuffer = d.balance < roundedBuffer;
             const isNearBuffer = !isBelowBuffer && d.balance < roundedBuffer * 1.2;
-            let rowBg = '';
-            if (isBelowBuffer) rowBg = 'background:var(--danger-bg);';
-            else if (isNearBuffer) rowBg = 'background:var(--warning-bg);';
-            else if (isToday2) rowBg = 'background:var(--accent-soft);';
+            const closingClass = isBelowBuffer ? 'text-red' : isNearBuffer ? 'text-amber' : 'text-green';
+            const wknd = [0, 6].includes(d.date.getDay()) ? ' weekend' : '';
 
             const dayInflows = allDayInflows[idx];
             const hasRiskItems = dayInflows && dayInflows.items.length > 0;
-            const riskCount = hasRiskItems ? dayInflows.items.filter(i => i.excluded).length : 0;
 
-            let riskToggleHtml = '';
-            if (hasRiskItems) {
-                riskToggleHtml = `<div style="padding:4px 12px 8px 36px;font-size:var(--fs-xs);border-bottom:1px solid var(--border-subtle);background:var(--bg-surface-2)">` +
-                    dayInflows.items.map(item => {
-                        const chk = item.excluded ? ' checked' : '';
-                        return `<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;color:${item.excluded ? 'var(--danger)' : 'var(--text-secondary)'}">
-                            <input type="checkbox" class="wa-risk-cb" data-wa-key="${item.riskKey.replace(/"/g, '&quot;')}"${chk} onchange="waRecalc()">
-                            <span style="${item.excluded ? 'text-decoration:line-through;' : ''}">${escHtml(item.name)}</span>
-                            <span style="margin-left:auto;font-weight:var(--fw-medium)">+${fmt(item.amount)}</span>
-                            ${item.excluded ? '<span style="color:var(--danger);font-size:var(--fs-xs)">excluded</span>' : ''}
-                        </label>`;
-                    }).join('') +
-                    `</div>`;
-            }
+            const inflowsDetail = hasRiskItems
+                ? dayInflows.items.map(item => {
+                    const chk = item.excluded ? ' checked' : '';
+                    return `<div class="cashflow-detail-item in" style="${item.excluded ? 'opacity:0.5' : ''}">
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1">
+                            <input type="checkbox" class="wa-risk-cb" data-wa-key="${item.riskKey.replace(/"/g, '&quot;')}"${chk} onchange="waRecalc()" title="Tick to flag as risk (exclude from forecast)">
+                            <span class="cashflow-detail-item-name" style="flex:1;${item.excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(item.name)}${item.excluded ? ' <span style="background:var(--danger-bg);color:var(--danger);padding:1px 6px;border-radius:3px;font-size:0.75rem">Risk</span>' : ''}</span>
+                        </label>
+                        <span class="cashflow-detail-item-value" style="${item.excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">+${fmt(item.amount)}</span>
+                    </div>`;
+                }).join('')
+                : '<div class="cashflow-detail-item"><em>None</em></div>';
 
-            const dateLabel = isToday2 ? `<strong>Today</strong>` : `${dayNames[d.date.getDay()]} ${d.date.getDate()}/${d.date.getMonth()+1}`;
-            const balColour = isBelowBuffer ? 'var(--danger)' : (isNearBuffer ? 'var(--warning)' : 'var(--text-primary)');
+            const withdrawNote = w
+                ? `<div style="margin-top:6px;padding:6px 8px;background:var(--accent-soft);border-radius:var(--radius-sm);font-size:var(--fs-xs);color:var(--accent)"><strong>Withdrawal window:</strong> ${fmt(w.amount)} safe to take</div>`
+                : '';
 
-            return `<div style="display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm);${rowBg}">
-                    <span style="width:90px;font-weight:${isToday2 ? 'var(--fw-semibold)' : 'var(--fw-regular)'}">${dateLabel}</span>
-                    <span style="width:90px;text-align:right;color:var(--success)">${d.dayIn > 0 ? '+' + fmt(d.dayIn) : ''}</span>
-                    <span style="width:90px;text-align:right;color:var(--danger)">${d.dayOut > 0 ? '-' + fmt(d.dayOut) : ''}</span>
-                    <span style="width:100px;text-align:right;font-weight:var(--fw-semibold);color:${balColour}">${fmtAccounting(d.balance)}</span>
-                    <span style="width:90px;text-align:right">${w ? `<span style="color:var(--accent);font-weight:var(--fw-semibold)">${fmt(w.amount)}</span>` : ''}</span>
-                    <span style="width:30px;text-align:center">${hasRiskItems ? `<span style="color:${riskCount > 0 ? 'var(--danger)' : 'var(--text-muted)'};cursor:help" title="${riskCount > 0 ? riskCount + ' payment(s) flagged as risk' : 'Click row to flag risk payments'}">&#9888;</span>` : ''}</span>
-                </div>${riskToggleHtml}`;
+            return `
+                <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('warow-${idx}', this)">
+                    <td><span class="expand-chevron" id="wa-chev-${idx}">▶</span>${isToday2 ? '<strong>Today</strong>' : '<strong>' + dayName(d.date) + '</strong>'}</td>
+                    <td>${fmtAccounting(d.opening)}</td>
+                    <td class="text-green">${d.dayIn > 0 ? '+' + fmt(d.dayIn) : ''}</td>
+                    <td class="text-red">${d.dayOut > 0 ? '-' + fmt(d.dayOut) : ''}</td>
+                    <td class="${closingClass}"><strong>${fmtAccounting(d.balance)}</strong></td>
+                    <td>${w ? '<span style="color:var(--accent);font-weight:var(--fw-semibold)">' + fmt(w.amount) + '</span>' : ''}</td>
+                </tr>
+                <tr class="cashflow-table-row-detail" id="warow-${idx}">
+                    <td colspan="6"><div class="expand-content"><div class="cashflow-detail-list">
+                        <div style="margin-bottom:8px"><strong>Inflows</strong> <span style="font-weight:normal;font-size:var(--fs-xs);color:var(--text-muted)">(tick to flag as risk payment)</span></div>
+                        ${inflowsDetail}
+                        ${withdrawNote}
+                    </div></div></td>
+                </tr>`;
         }).join('');
 
         const riskBanner = riskExcludedTotal > 0
@@ -1337,13 +1332,13 @@
                 <div class="kpi-card-detail" onclick="event.stopPropagation()" style="text-align:left">
                     <div style="padding:16px 0">
                         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-                            <label style="font-weight:var(--fw-medium);white-space:nowrap">Opening balance:</label>
+                            <label style="font-weight:var(--fw-medium);white-space:nowrap">Opening balance (what is in the bank now):</label>
                             <input type="number" id="waOpeningBal" value="${effectiveOpening.toFixed(2)}"
                                 step="0.01"
                                 style="width:140px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)"
                                 onchange="this.dataset.userEdited='1';waRecalc()"
                                 ${userBal !== null ? 'data-user-edited="1"' : ''}>
-                            <span style="color:var(--text-muted);font-size:var(--fs-xs)">Override if your actual bank balance differs from dashboard</span>
+                            <span style="color:var(--text-muted);font-size:var(--fs-xs)">Your actual bank balance right now. Cleared items below are already in this figure.</span>
                         </div>
 
                         ${todayItemsHtml}
@@ -1368,17 +1363,21 @@
                             ${scheduleHtml}
                         </div>
 
-                        <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">31-day daily balance <span style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--text-muted)">(flag risk payments with &#9888;)</span></div>
-                        <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden;max-height:500px;overflow-y:auto">
-                            <div style="display:flex;padding:6px 12px;background:var(--bg-subtle);font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold);position:sticky;top:0;z-index:1">
-                                <span style="width:90px">Date</span>
-                                <span style="width:90px;text-align:right">In</span>
-                                <span style="width:90px;text-align:right">Out</span>
-                                <span style="width:100px;text-align:right">Balance</span>
-                                <span style="width:90px;text-align:right">Withdraw</span>
-                                <span style="width:30px;text-align:center">Risk</span>
-                            </div>
-                            ${dailyBalanceRows}
+                        <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">31-day daily balance <span style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--text-muted)">(click a row to expand and flag risk payments)</span></div>
+                        <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden">
+                            <table class="cashflow-table" style="width:100%;font-size:var(--fs-sm)">
+                                <thead>
+                                    <tr>
+                                        <th style="text-align:left">Date</th>
+                                        <th style="text-align:right">Opening</th>
+                                        <th style="text-align:right">In</th>
+                                        <th style="text-align:right">Out</th>
+                                        <th style="text-align:right">Closing</th>
+                                        <th style="text-align:right">Withdraw</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${dailyBalanceRows}</tbody>
+                            </table>
                         </div>
 
                         ${worstCaseNote ? `<div style="margin-top:16px;padding:10px 14px;background:var(--warning-bg);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)">
