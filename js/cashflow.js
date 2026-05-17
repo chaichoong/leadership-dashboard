@@ -966,3 +966,381 @@
     }
 
     // ══════════════════════════════════════════
+    // WITHDRAWAL ADVISOR
+    // ══════════════════════════════════════════
+
+    const WA_KEY = '_wa_state';
+
+    function getWAState() {
+        try {
+            const raw = localStorage.getItem(WA_KEY);
+            if (!raw) return null;
+            const state = JSON.parse(raw);
+            const todayStr = getCalcStateDate();
+            if (state.date !== todayStr) {
+                localStorage.removeItem(WA_KEY);
+                return null;
+            }
+            return state;
+        } catch { return null; }
+    }
+
+    function saveWAState() {
+        const balInput = document.getElementById('waOpeningBal');
+        const clearedIds = [];
+        document.querySelectorAll('.wa-today-cb:checked').forEach(cb => {
+            clearedIds.push(cb.dataset.waKey);
+        });
+        const state = {
+            date: getCalcStateDate(),
+            openingBal: balInput ? balInput.value : '',
+            userEditedBal: balInput ? !!balInput.dataset.userEdited : false,
+            cleared: clearedIds,
+        };
+        localStorage.setItem(WA_KEY, JSON.stringify(state));
+    }
+
+    function analysePaymentLag(transactions, incomeTenancies) {
+        const lagByTenancy = {};
+        const tenancyDueDay = {};
+        incomeTenancies.forEach(r => {
+            const dueDay = getNumVal(r, F.tenDueDay, 1);
+            tenancyDueDay[r.id] = dueDay;
+        });
+
+        (transactions || []).forEach(r => {
+            if (!getField(r, F.txReconciled)) return;
+            const sc = getField(r, F.txSubCategory);
+            const scIds = Array.isArray(sc) ? sc.map(s => typeof s === 'object' ? s.id : s) : [];
+            if (!scIds.includes(REC.subRentalInc)) return;
+
+            const linked = getField(r, F.txTenancy);
+            const tenIds = Array.isArray(linked)
+                ? linked.map(t => (t && typeof t === 'object') ? t.id : t).filter(Boolean)
+                : [];
+            if (tenIds.length === 0) return;
+
+            const txDateStr = getField(r, F.txDate);
+            if (!txDateStr) return;
+            const txDate = new Date(txDateStr);
+            if (isNaN(txDate.getTime())) return;
+
+            tenIds.forEach(tid => {
+                const dueDay = tenancyDueDay[tid];
+                if (!dueDay) return;
+                const txMonth = txDate.getMonth();
+                const txYear = txDate.getFullYear();
+                const lastDayOfMonth = new Date(txYear, txMonth + 1, 0).getDate();
+                const dueDate = new Date(txYear, txMonth, Math.min(dueDay, lastDayOfMonth));
+                if (txDate < dueDate) {
+                    const prevMonthLastDay = new Date(txYear, txMonth, 0).getDate();
+                    const prevMonth = new Date(txYear, txMonth - 1, Math.min(dueDay, prevMonthLastDay));
+                    const lagPrev = Math.round((txDate - prevMonth) / 86400000);
+                    if (lagPrev >= 0 && lagPrev <= 15) {
+                        if (!lagByTenancy[tid]) lagByTenancy[tid] = [];
+                        lagByTenancy[tid].push(lagPrev);
+                        return;
+                    }
+                }
+                const lag = Math.round((txDate - dueDate) / 86400000);
+                if (lag >= -5 && lag <= 30) {
+                    if (!lagByTenancy[tid]) lagByTenancy[tid] = [];
+                    lagByTenancy[tid].push(lag);
+                }
+            });
+        });
+
+        const allLags = [];
+        const tenancyAvgLag = {};
+        for (const tid in lagByTenancy) {
+            const lags = lagByTenancy[tid];
+            if (lags.length < 2) continue;
+            const avg = lags.reduce((s, v) => s + v, 0) / lags.length;
+            const maxLag = Math.max(...lags);
+            tenancyAvgLag[tid] = { avg: Math.round(avg * 10) / 10, max: maxLag, count: lags.length };
+            allLags.push(...lags);
+        }
+
+        let bufferDays = 3;
+        let bufferReason = 'Default 3-day buffer (insufficient transaction history for analysis)';
+        if (allLags.length >= 10) {
+            const sorted = [...allLags].sort((a, b) => a - b);
+            const p80Idx = Math.floor(sorted.length * 0.8);
+            const p80 = sorted[p80Idx];
+            bufferDays = Math.max(2, Math.min(p80 + 1, 10));
+            const avgAll = (allLags.reduce((s, v) => s + v, 0) / allLags.length).toFixed(1);
+            bufferReason = `${bufferDays}-day buffer from ${allLags.length} payments (avg ${avgAll} days lag, 80th pct ${p80} days)`;
+        }
+
+        return { tenancyAvgLag, bufferDays, bufferReason, sampleSize: allLags.length };
+    }
+
+    function buildWithdrawalSchedule(rows, dashboardOpeningBalance, transactions, incomeTenancies) {
+        const container = document.getElementById('withdrawalAdvisorCard');
+        if (!container) return;
+
+        const lagAnalysis = analysePaymentLag(transactions, incomeTenancies);
+        const state = getWAState();
+        const savedCleared = new Set(state && state.cleared ? state.cleared : []);
+
+        const userBal = state && state.userEditedBal && state.openingBal
+            ? parseFloat(state.openingBal) : null;
+        const effectiveOpening = userBal !== null ? userBal : dashboardOpeningBalance;
+
+        const WEEKLY_WAGES = 330;
+        const WEEKLY_TOPUP = 140;
+        const WEEKLY_COMMITMENTS = WEEKLY_WAGES + WEEKLY_TOPUP;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayKey = dateKey(today);
+
+        const todayItems = [];
+        if (rows.length > 0 && rows[0].key === todayKey) {
+            rows[0].inflows.forEach(f => {
+                const key = `in|${f.name}|${f.amount}`;
+                todayItems.push({ ...f, dir: 'in', waKey: key, cleared: savedCleared.has(key) });
+            });
+            rows[0].outflows.forEach(f => {
+                const key = `out|${f.name}|${f.amount}`;
+                todayItems.push({ ...f, dir: 'out', waKey: key, cleared: savedCleared.has(key) });
+            });
+        }
+
+        let adjustedOpening = effectiveOpening;
+        todayItems.forEach(item => {
+            if (item.cleared) {
+                if (item.dir === 'in') adjustedOpening += item.amount;
+                else adjustedOpening -= item.amount;
+            }
+        });
+
+        const projectedDays = [];
+        let runningBalance = adjustedOpening;
+
+        rows.forEach((r, idx) => {
+            let dayIn = 0, dayOut = 0;
+            const isToday = r.key === todayKey;
+
+            r.inflows.forEach(f => {
+                if (f.cleared) return;
+                if (isToday) {
+                    const key = `in|${f.name}|${f.amount}`;
+                    if (savedCleared.has(key)) return;
+                }
+                dayIn += f.amount;
+            });
+            r.outflows.forEach(f => {
+                if (f.cleared) return;
+                if (isToday) {
+                    const key = `out|${f.name}|${f.amount}`;
+                    if (savedCleared.has(key)) return;
+                }
+                dayOut += f.amount;
+            });
+
+            const dow = r.date.getDay();
+            if (dow === 5) {
+                dayOut += WEEKLY_COMMITMENTS;
+            }
+
+            if (!isToday) {
+                runningBalance += dayIn - dayOut;
+            }
+
+            projectedDays.push({
+                date: r.date,
+                key: r.key,
+                dayIn,
+                dayOut,
+                balance: runningBalance,
+            });
+        });
+
+        const maxSingleInflow = rows.reduce((max, r) => {
+            r.inflows.forEach(f => { if (!f.cleared && f.amount > max) max = f.amount; });
+            return max;
+        }, 0);
+        const bufferAmount = Math.max(500, maxSingleInflow * 0.3 * lagAnalysis.bufferDays / 3);
+        const roundedBuffer = Math.ceil(bufferAmount / 50) * 50;
+
+        const withdrawals = [];
+        let lastWithdrawalIdx = -1;
+        const MIN_DAYS_BETWEEN = 3;
+
+        for (let i = 0; i < projectedDays.length; i++) {
+            if (i - lastWithdrawalIdx < MIN_DAYS_BETWEEN && lastWithdrawalIdx >= 0) continue;
+
+            const day = projectedDays[i];
+            const surplus = day.balance - roundedBuffer;
+            if (surplus < 50) continue;
+
+            let minFutureBalance = day.balance;
+            const lookAhead = Math.min(i + lagAnalysis.bufferDays + 2, projectedDays.length);
+            for (let j = i + 1; j < lookAhead; j++) {
+                if (projectedDays[j].balance < minFutureBalance) {
+                    minFutureBalance = projectedDays[j].balance;
+                }
+            }
+
+            const safeToTake = minFutureBalance - roundedBuffer;
+            if (safeToTake < 50) continue;
+
+            const withdrawAmount = Math.floor(safeToTake / 50) * 50;
+            if (withdrawAmount < 50) continue;
+
+            withdrawals.push({
+                date: day.date,
+                key: day.key,
+                amount: withdrawAmount,
+                balanceBefore: day.balance,
+                balanceAfter: day.balance - withdrawAmount,
+            });
+
+            for (let j = i; j < projectedDays.length; j++) {
+                projectedDays[j].balance -= withdrawAmount;
+            }
+            lastWithdrawalIdx = i;
+        }
+
+        const dangerDays = [];
+        const dangerThreshold = roundedBuffer * 1.2;
+        projectedDays.forEach(d => {
+            if (d.balance < roundedBuffer) {
+                dangerDays.push({ date: d.date, key: d.key, balance: d.balance, critical: true });
+            } else if (d.balance < dangerThreshold) {
+                dangerDays.push({ date: d.date, key: d.key, balance: d.balance });
+            }
+        });
+
+        const totalAvailable = withdrawals.reduce((s, w) => s + w.amount, 0);
+        const nextWithdrawal = withdrawals.length > 0 ? withdrawals[0] : null;
+
+        let worstCaseNote = '';
+        if (rows.length > 0) {
+            let biggestInflow = { name: '', amount: 0, date: null };
+            rows.forEach(r => {
+                r.inflows.forEach(f => {
+                    if (!f.cleared && f.amount > biggestInflow.amount) {
+                        biggestInflow = { name: f.name, amount: f.amount, date: r.date };
+                    }
+                });
+            });
+            if (biggestInflow.amount > 0) {
+                worstCaseNote = `If ${escHtml(biggestInflow.name)} (${fmt(biggestInflow.amount)}) doesn't arrive on ${dayName(biggestInflow.date)}, `;
+                const impact = withdrawals.filter(w => w.date >= biggestInflow.date);
+                if (impact.length > 0) {
+                    worstCaseNote += `${impact.length} withdrawal${impact.length > 1 ? 's' : ''} totalling ${fmt(impact.reduce((s, w) => s + w.amount, 0))} would need to be delayed.`;
+                } else {
+                    worstCaseNote += `earlier withdrawals are unaffected but the buffer would be squeezed.`;
+                }
+            }
+        }
+
+        const todayItemsHtml = todayItems.length > 0
+            ? `<div style="margin:12px 0 16px">
+                <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Today's items (tick what's already cleared):</div>
+                ${todayItems.map(item => {
+                    const checked = item.cleared ? ' checked' : '';
+                    const colour = item.dir === 'in' ? 'var(--success)' : 'var(--danger)';
+                    const prefix = item.dir === 'in' ? '+' : '-';
+                    return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">
+                        <input type="checkbox" class="wa-today-cb" data-wa-key="${item.waKey.replace(/"/g, '&quot;')}"${checked} onchange="waRecalc()">
+                        <span style="flex:1">${escHtml(item.name)}</span>
+                        <span style="color:${colour};font-weight:var(--fw-medium)">${prefix}${fmt(item.amount)}</span>
+                    </label>`;
+                }).join('')}
+            </div>`
+            : '';
+
+        const scheduleHtml = withdrawals.length > 0
+            ? withdrawals.map(w => {
+                return `<div style="display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border-subtle)">
+                    <span style="flex:1;font-weight:var(--fw-medium)">${dayName(w.date)}</span>
+                    <span style="width:120px;text-align:right;color:var(--success);font-weight:var(--fw-semibold)">${fmt(w.amount)}</span>
+                    <span style="width:140px;text-align:right;color:var(--text-secondary);font-size:var(--fs-sm)">Balance after: ${fmt(w.balanceAfter)}</span>
+                </div>`;
+            }).join('')
+            : `<div style="padding:12px;color:var(--text-muted)">No safe withdrawal windows in the next 31 days. All surplus is needed to cover commitments and maintain the safety buffer.</div>`;
+
+        const dangerHtml = dangerDays.length > 0
+            ? `<div style="margin-top:16px">
+                <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--warning)">Danger days:</div>
+                ${dangerDays.map(d => {
+                    const colour = d.critical ? 'var(--danger)' : 'var(--warning)';
+                    const label = d.critical ? 'Below buffer' : 'Near buffer';
+                    return `<div style="display:flex;align-items:center;padding:4px 12px;color:${colour}">
+                        <span style="flex:1">${dayName(d.date)}</span>
+                        <span style="font-weight:var(--fw-medium)">${fmtAccounting(d.balance)}</span>
+                        <span style="margin-left:8px;font-size:var(--fs-xs);background:${d.critical ? 'var(--danger-bg)' : 'var(--warning-bg)'};padding:2px 8px;border-radius:var(--radius-sm)">${label}</span>
+                    </div>`;
+                }).join('')}
+            </div>`
+            : '';
+
+        const headerValue = totalAvailable > 0
+            ? `<span style="color:var(--success)">${fmt(totalAvailable)}</span>`
+            : `<span style="color:var(--text-muted)">Nothing safe to withdraw</span>`;
+        const headerSub = nextWithdrawal
+            ? `Next: ${fmt(nextWithdrawal.amount)} on ${dayName(nextWithdrawal.date)}`
+            : 'No withdrawal windows identified';
+
+        container.innerHTML = `
+            <div class="kpi-card clickable" onclick="toggleCard(this)" style="max-width:100%">
+                <div class="kpi-card-label">Safe to withdraw (31 days) <span class="chevron">&#x25B8;</span></div>
+                <div class="kpi-card-value">${headerValue}</div>
+                <div class="kpi-card-sub">${headerSub}</div>
+                <div class="kpi-card-detail" style="text-align:left">
+                    <div style="padding:16px 0">
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+                            <label style="font-weight:var(--fw-medium);white-space:nowrap">Opening balance:</label>
+                            <input type="number" id="waOpeningBal" value="${effectiveOpening.toFixed(2)}"
+                                step="0.01"
+                                style="width:140px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)"
+                                onchange="this.dataset.userEdited='1';waRecalc()"
+                                ${userBal !== null ? 'data-user-edited="1"' : ''}>
+                            <span style="color:var(--text-muted);font-size:var(--fs-xs)">Override if your actual bank balance differs from dashboard</span>
+                        </div>
+
+                        ${todayItemsHtml}
+
+                        <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)">
+                            <strong>Safety buffer:</strong> ${fmt(roundedBuffer)} &#8212; ${escHtml(lagAnalysis.bufferReason)}
+                        </div>
+
+                        <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)">
+                            <strong>Weekly commitments:</strong> Wages ${fmt(WEEKLY_WAGES)} + Top-up ${fmt(WEEKLY_TOPUP)} = ${fmt(WEEKLY_COMMITMENTS)}/week (applied every Friday)
+                        </div>
+
+                        <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Withdrawal schedule:</div>
+                        <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden">
+                            <div style="display:flex;padding:8px 12px;background:var(--bg-subtle);font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)">
+                                <span style="flex:1">Date</span>
+                                <span style="width:120px;text-align:right">Amount</span>
+                                <span style="width:140px;text-align:right">Balance after</span>
+                            </div>
+                            ${scheduleHtml}
+                        </div>
+
+                        ${dangerHtml}
+
+                        ${worstCaseNote ? `<div style="margin-top:16px;padding:10px 14px;background:var(--warning-bg);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)">
+                            <strong>Worst case:</strong> ${worstCaseNote}
+                        </div>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        window._waRows = rows;
+        window._waDashboardOpening = dashboardOpeningBalance;
+        window._waTransactions = transactions;
+        window._waIncomeTenancies = incomeTenancies;
+    }
+
+    function waRecalc() {
+        saveWAState();
+        if (window._waRows && window._waDashboardOpening !== undefined) {
+            buildWithdrawalSchedule(window._waRows, window._waDashboardOpening, window._waTransactions, window._waIncomeTenancies);
+        }
+    }
