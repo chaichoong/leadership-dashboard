@@ -991,11 +991,16 @@
         document.querySelectorAll('.wa-today-cb:checked').forEach(cb => {
             clearedIds.push(cb.dataset.waKey);
         });
+        const riskIds = [];
+        document.querySelectorAll('.wa-risk-cb:checked').forEach(cb => {
+            riskIds.push(cb.dataset.waKey);
+        });
         const state = {
             date: getCalcStateDate(),
             openingBal: balInput ? balInput.value : '',
             userEditedBal: balInput ? !!balInput.dataset.userEdited : false,
             cleared: clearedIds,
+            riskExcluded: riskIds,
         };
         localStorage.setItem(WA_KEY, JSON.stringify(state));
     }
@@ -1082,6 +1087,7 @@
         const lagAnalysis = analysePaymentLag(transactions, incomeTenancies);
         const state = getWAState();
         const savedCleared = new Set(state && state.cleared ? state.cleared : []);
+        const savedRisk = new Set(state && state.riskExcluded ? state.riskExcluded : []);
 
         const userBal = state && state.userEditedBal && state.openingBal
             ? parseFloat(state.openingBal) : null;
@@ -1118,17 +1124,23 @@
         const projectedDays = [];
         let runningBalance = adjustedOpening;
 
+        const allDayInflows = [];
+
         rows.forEach((r, idx) => {
             let dayIn = 0, dayOut = 0;
             const isToday = r.key === todayKey;
+            const dayInflowItems = [];
 
             r.inflows.forEach(f => {
                 if (f.cleared) return;
+                const inflowKey = `risk|${r.key}|${f.name}|${f.amount}`;
+                const isRisk = savedRisk.has(inflowKey);
                 if (isToday) {
-                    const key = `in|${f.name}|${f.amount}`;
-                    if (savedCleared.has(key)) return;
+                    const todayKey2 = `in|${f.name}|${f.amount}`;
+                    if (savedCleared.has(todayKey2)) return;
                 }
-                dayIn += f.amount;
+                dayInflowItems.push({ name: f.name, amount: f.amount, riskKey: inflowKey, excluded: isRisk });
+                if (!isRisk) dayIn += f.amount;
             });
             r.outflows.forEach(f => {
                 if (f.cleared) return;
@@ -1148,12 +1160,15 @@
                 runningBalance += dayIn - dayOut;
             }
 
+            allDayInflows.push({ key: r.key, date: r.date, items: dayInflowItems });
+
             projectedDays.push({
                 date: r.date,
                 key: r.key,
                 dayIn,
                 dayOut,
                 balance: runningBalance,
+                isFriday: dow === 5,
             });
         });
 
@@ -1203,18 +1218,13 @@
             lastWithdrawalIdx = i;
         }
 
-        const dangerDays = [];
-        const dangerThreshold = roundedBuffer * 1.2;
-        projectedDays.forEach(d => {
-            if (d.balance < roundedBuffer) {
-                dangerDays.push({ date: d.date, key: d.key, balance: d.balance, critical: true });
-            } else if (d.balance < dangerThreshold) {
-                dangerDays.push({ date: d.date, key: d.key, balance: d.balance });
-            }
-        });
+        const withdrawalByKey = {};
+        withdrawals.forEach(w => { withdrawalByKey[w.key] = w; });
 
         const totalAvailable = withdrawals.reduce((s, w) => s + w.amount, 0);
         const nextWithdrawal = withdrawals.length > 0 ? withdrawals[0] : null;
+        const riskExcludedTotal = allDayInflows.reduce((sum, d) =>
+            sum + d.items.filter(i => i.excluded).reduce((s, i) => s + i.amount, 0), 0);
 
         let worstCaseNote = '';
         if (rows.length > 0) {
@@ -1263,18 +1273,52 @@
             }).join('')
             : `<div style="padding:12px;color:var(--text-muted)">No safe withdrawal windows in the next 31 days. All surplus is needed to cover commitments and maintain the safety buffer.</div>`;
 
-        const dangerHtml = dangerDays.length > 0
-            ? `<div style="margin-top:16px">
-                <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--warning)">Danger days:</div>
-                ${dangerDays.map(d => {
-                    const colour = d.critical ? 'var(--danger)' : 'var(--warning)';
-                    const label = d.critical ? 'Below buffer' : 'Near buffer';
-                    return `<div style="display:flex;align-items:center;padding:4px 12px;color:${colour}">
-                        <span style="flex:1">${dayName(d.date)}</span>
-                        <span style="font-weight:var(--fw-medium)">${fmtAccounting(d.balance)}</span>
-                        <span style="margin-left:8px;font-size:var(--fs-xs);background:${d.critical ? 'var(--danger-bg)' : 'var(--warning-bg)'};padding:2px 8px;border-radius:var(--radius-sm)">${label}</span>
-                    </div>`;
-                }).join('')}
+        const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const dailyBalanceRows = projectedDays.map((d, idx) => {
+            const isToday2 = d.key === todayKey;
+            const w = withdrawalByKey[d.key];
+            const isBelowBuffer = d.balance < roundedBuffer;
+            const isNearBuffer = !isBelowBuffer && d.balance < roundedBuffer * 1.2;
+            let rowBg = '';
+            if (isBelowBuffer) rowBg = 'background:var(--danger-bg);';
+            else if (isNearBuffer) rowBg = 'background:var(--warning-bg);';
+            else if (isToday2) rowBg = 'background:var(--accent-soft);';
+
+            const dayInflows = allDayInflows[idx];
+            const hasRiskItems = dayInflows && dayInflows.items.length > 0;
+            const riskCount = hasRiskItems ? dayInflows.items.filter(i => i.excluded).length : 0;
+
+            let riskToggleHtml = '';
+            if (hasRiskItems) {
+                riskToggleHtml = `<div style="padding:4px 12px 8px 36px;font-size:var(--fs-xs);border-bottom:1px solid var(--border-subtle);background:var(--bg-surface-2)">` +
+                    dayInflows.items.map(item => {
+                        const chk = item.excluded ? ' checked' : '';
+                        return `<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;color:${item.excluded ? 'var(--danger)' : 'var(--text-secondary)'}">
+                            <input type="checkbox" class="wa-risk-cb" data-wa-key="${item.riskKey.replace(/"/g, '&quot;')}"${chk} onchange="waRecalc()">
+                            <span style="${item.excluded ? 'text-decoration:line-through;' : ''}">${escHtml(item.name)}</span>
+                            <span style="margin-left:auto;font-weight:var(--fw-medium)">+${fmt(item.amount)}</span>
+                            ${item.excluded ? '<span style="color:var(--danger);font-size:var(--fs-xs)">excluded</span>' : ''}
+                        </label>`;
+                    }).join('') +
+                    `</div>`;
+            }
+
+            const dateLabel = isToday2 ? `<strong>Today</strong>` : `${dayNames[d.date.getDay()]} ${d.date.getDate()}/${d.date.getMonth()+1}`;
+            const balColour = isBelowBuffer ? 'var(--danger)' : (isNearBuffer ? 'var(--warning)' : 'var(--text-primary)');
+
+            return `<div style="display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm);${rowBg}">
+                    <span style="width:90px;font-weight:${isToday2 ? 'var(--fw-semibold)' : 'var(--fw-regular)'}">${dateLabel}</span>
+                    <span style="width:90px;text-align:right;color:var(--success)">${d.dayIn > 0 ? '+' + fmt(d.dayIn) : ''}</span>
+                    <span style="width:90px;text-align:right;color:var(--danger)">${d.dayOut > 0 ? '-' + fmt(d.dayOut) : ''}</span>
+                    <span style="width:100px;text-align:right;font-weight:var(--fw-semibold);color:${balColour}">${fmtAccounting(d.balance)}</span>
+                    <span style="width:90px;text-align:right">${w ? `<span style="color:var(--accent);font-weight:var(--fw-semibold)">${fmt(w.amount)}</span>` : ''}</span>
+                    <span style="width:30px;text-align:center">${hasRiskItems ? `<span style="color:${riskCount > 0 ? 'var(--danger)' : 'var(--text-muted)'};cursor:help" title="${riskCount > 0 ? riskCount + ' payment(s) flagged as risk' : 'Click row to flag risk payments'}">&#9888;</span>` : ''}</span>
+                </div>${riskToggleHtml}`;
+        }).join('');
+
+        const riskBanner = riskExcludedTotal > 0
+            ? `<div style="padding:10px 14px;background:var(--danger-bg);border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-primary)">
+                <strong>Risk adjustments active:</strong> ${fmt(riskExcludedTotal)} in expected inflows excluded from forecast. Withdrawal schedule reflects reduced income.
             </div>`
             : '';
 
@@ -1290,7 +1334,7 @@
                 <div class="kpi-card-label">Safe to withdraw (31 days) <span class="chevron">&#x25B8;</span></div>
                 <div class="kpi-card-value">${headerValue}</div>
                 <div class="kpi-card-sub">${headerSub}</div>
-                <div class="kpi-card-detail" style="text-align:left">
+                <div class="kpi-card-detail" onclick="event.stopPropagation()" style="text-align:left">
                     <div style="padding:16px 0">
                         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
                             <label style="font-weight:var(--fw-medium);white-space:nowrap">Opening balance:</label>
@@ -1304,8 +1348,10 @@
 
                         ${todayItemsHtml}
 
+                        ${riskBanner}
+
                         <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)">
-                            <strong>Safety buffer:</strong> ${fmt(roundedBuffer)} &#8212; ${escHtml(lagAnalysis.bufferReason)}
+                            <strong>Safety buffer:</strong> ${fmt(roundedBuffer)} . ${escHtml(lagAnalysis.bufferReason)}
                         </div>
 
                         <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)">
@@ -1313,7 +1359,7 @@
                         </div>
 
                         <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Withdrawal schedule:</div>
-                        <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden">
+                        <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden;margin-bottom:20px">
                             <div style="display:flex;padding:8px 12px;background:var(--bg-subtle);font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold)">
                                 <span style="flex:1">Date</span>
                                 <span style="width:120px;text-align:right">Amount</span>
@@ -1322,7 +1368,18 @@
                             ${scheduleHtml}
                         </div>
 
-                        ${dangerHtml}
+                        <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">31-day daily balance <span style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--text-muted)">(flag risk payments with &#9888;)</span></div>
+                        <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden;max-height:500px;overflow-y:auto">
+                            <div style="display:flex;padding:6px 12px;background:var(--bg-subtle);font-size:var(--fs-xs);color:var(--text-secondary);font-weight:var(--fw-semibold);position:sticky;top:0;z-index:1">
+                                <span style="width:90px">Date</span>
+                                <span style="width:90px;text-align:right">In</span>
+                                <span style="width:90px;text-align:right">Out</span>
+                                <span style="width:100px;text-align:right">Balance</span>
+                                <span style="width:90px;text-align:right">Withdraw</span>
+                                <span style="width:30px;text-align:center">Risk</span>
+                            </div>
+                            ${dailyBalanceRows}
+                        </div>
 
                         ${worstCaseNote ? `<div style="margin-top:16px;padding:10px 14px;background:var(--warning-bg);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary)">
                             <strong>Worst case:</strong> ${worstCaseNote}
@@ -1339,8 +1396,14 @@
     }
 
     function waRecalc() {
+        const card = document.querySelector('#withdrawalAdvisorCard .kpi-card');
+        const wasExpanded = card && card.classList.contains('expanded');
         saveWAState();
         if (window._waRows && window._waDashboardOpening !== undefined) {
             buildWithdrawalSchedule(window._waRows, window._waDashboardOpening, window._waTransactions, window._waIncomeTenancies);
+        }
+        if (wasExpanded) {
+            const newCard = document.querySelector('#withdrawalAdvisorCard .kpi-card');
+            if (newCard && !newCard.classList.contains('expanded')) newCard.classList.add('expanded');
         }
     }
