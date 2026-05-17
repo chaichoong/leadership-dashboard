@@ -1330,8 +1330,6 @@
             }
         });
 
-        const cashFlowRows = buildCashFlow(today, openingBalance, incTenancies, activeCosts, tenancies, transactions, monthlyIncome, tenancyIsUC);
-
         // ── SECTION 6: AI Analysis ──
         // Credit card balances
         const lloydsCCRec = accounts.find(r => r.id === REC.lloydsCreditCard);
@@ -1340,208 +1338,24 @@
         const lloydsCCBal = Number(getField(lloydsCCRec, F.accGBP)) || 0;
         const amexBal = Number(getField(amexRec, F.accGBP)) || 0;
         const santanderCCBal = Number(getField(santanderCCRec, F.accGBP)) || 0;
-        // Lloyds: shows negative balance = owed amount
-        // AmEx: shows positive balance = owed amount
-        // Santander CC: shows available credit; owed = limit − available
         const lloydsCCOwed = Math.abs(lloydsCCBal);
         const amexOwed = Math.max(0, amexBal);
         const santanderCCOwed = Math.max(0, SANTANDER_CC_LIMIT - santanderCCBal);
         const totalCCDebt = lloydsCCOwed + amexOwed + santanderCCOwed;
+
+        const creditCards = [
+            { name: 'American Express', owed: amexOwed, dueDay: 28 },
+            { name: 'Santander Credit Card', owed: santanderCCOwed, dueDay: 14 },
+            { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 21 },
+        ].filter(c => c.owed > 0.01);
+
+        const cashFlowRows = buildCashFlow(today, openingBalance, incTenancies, activeCosts, tenancies, transactions, monthlyIncome, tenancyIsUC, creditCards);
 
         const voidCostPerMonth = monthlyIncome > 0 && occupiedCount > 0
             ? (monthlyIncome / occupiedCount).toFixed(0)
             : 0;
 
         const cfvUnactioned = cfvTenancies.reduce((s, r) => s + (Number(getField(r, F.tenRent)) || 0), 0);
-
-        // ── CREDIT CARD STRATEGIC REPAYMENT PLAN ──
-        // Payment deadlines: AmEx 28th, Santander CC 14th, Lloyds CC 21st
-        // Minimum payments estimated at ~2% of balance or £25 whichever is greater
-        const ccRepaymentPlan = (() => {
-            const cards = [
-                { name: 'American Express', owed: amexOwed, dueDay: 28, recId: REC.americanExpress },
-                { name: 'Santander Credit Card', owed: santanderCCOwed, dueDay: 14, recId: REC.santanderCC },
-                { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 21, recId: REC.lloydsCreditCard },
-            ].filter(c => c.owed > 0.01);
-
-            // Estimate minimum payment for each card (2% of balance or £25, whichever is greater)
-            cards.forEach(c => { c.minPayment = Math.max(25, c.owed * 0.02); });
-
-            // Find minimum payment deadlines within the 31-day window
-            const windowEnd = new Date(today);
-            windowEnd.setDate(windowEnd.getDate() + 30);
-            const deadlines = [];
-            cards.forEach(c => {
-                // Check this month and next month for the due day
-                for (let m = 0; m <= 1; m++) {
-                    const dueDate = new Date(today.getFullYear(), today.getMonth() + m, c.dueDay);
-                    if (dueDate >= today && dueDate <= windowEnd) {
-                        deadlines.push({ card: c.name, date: dueDate, minPayment: c.minPayment, dueDay: c.dueDay });
-                    }
-                }
-            });
-            deadlines.sort((a, b) => a.date - b.date);
-
-            // Walk the 31-day window to find Fridays
-            const fridays = [];
-            let d = new Date(today);
-            while (d <= windowEnd) {
-                if (d.getDay() === 5) fridays.push(new Date(d));
-                d.setDate(d.getDate() + 1);
-            }
-
-            const MIN_BUFFER = 750;
-
-            // Use actual cash flow forecast rows for accurate balance estimates
-            const cfRows = cashFlowRows || [];
-            function getClosingBal(dayIdx) {
-                if (dayIdx >= 0 && dayIdx < cfRows.length) return cfRows[dayIdx].closing;
-                return cfRows.length > 0 ? cfRows[cfRows.length - 1].closing : openingBalance;
-            }
-
-            const plans = [];
-            let remainingDebt = cards.map(c => ({ ...c }));
-            let cumulativePaid = 0;
-            const minPaidFor = {};
-
-            fridays.forEach((fri, idx) => {
-                const daysFromNow = Math.round((fri - today) / 86400000);
-                // Use actual closing balance from cash flow forecast, minus already-committed CC payments
-                const estBalance = getClosingBal(daysFromNow) - cumulativePaid;
-
-                // Look ahead 7 days using actual forecast data to find lowest point
-                let worstAhead = estBalance;
-                for (let ahead = 1; ahead <= 7; ahead++) {
-                    const futBal = getClosingBal(daysFromNow + ahead) - cumulativePaid;
-                    if (futBal < worstAhead) worstAhead = futBal;
-                }
-
-                // The limiting factor is whichever is tighter:
-                // - Today's balance minus buffer
-                // - Lowest upcoming balance minus buffer (protects against a dip next week)
-                const fromToday = Math.max(0, estBalance - MIN_BUFFER);
-                const fromLookAhead = Math.max(0, worstAhead - MIN_BUFFER);
-                const available = Math.min(fromToday, fromLookAhead);
-
-                // Build a plain-English reason for the payment amount
-                let reason;
-                const balanceAfterPay = estBalance - available;
-                if (available < 10) {
-                    reason = `Balance of ${fmt(estBalance)} is too close to the ${fmt(MIN_BUFFER)} safety buffer to make a payment.`;
-                } else if (fromLookAhead < fromToday) {
-                    const lowestDay = (() => {
-                        let minBal = estBalance, minD = 0;
-                        for (let a = 1; a <= 7; a++) {
-                            const b = getClosingBal(daysFromNow + a) - cumulativePaid;
-                            if (b < minBal) { minBal = b; minD = a; }
-                        }
-                        const d2 = new Date(fri); d2.setDate(d2.getDate() + minD);
-                        return d2.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'});
-                    })();
-                    reason = `Payment limited because the balance dips to ${fmt(worstAhead)} on ${lowestDay} next week. Keeping ${fmt(MIN_BUFFER)} buffer means ${fmt(available)} is safe to spend.`;
-                } else {
-                    reason = `Balance of ${fmt(estBalance)} minus ${fmt(MIN_BUFFER)} buffer = ${fmt(available)} available for payment.`;
-                }
-
-                // Check which minimum payments are due before the NEXT Friday (or end of window)
-                const nextFri = fridays[idx + 1] || windowEnd;
-                const upcomingMins = deadlines.filter(dl =>
-                    dl.date >= fri && dl.date < nextFri && !minPaidFor[dl.card + '-' + dl.date.getMonth()]
-                );
-
-                // Priority 1: Cover minimum payments due before next Friday
-                let budget = available;
-                const payments = [];
-                upcomingMins.forEach(dl => {
-                    if (budget <= 0) return;
-                    const card = remainingDebt.find(c => c.name === dl.card);
-                    if (!card || card.owed <= 0) return;
-                    const minPay = Math.min(dl.minPayment, card.owed, budget);
-                    payments.push({ name: dl.card, pay: minPay, isMinimum: true, dueDate: dl.date });
-                    card.owed -= minPay;
-                    budget -= minPay;
-                    cumulativePaid += minPay;
-                    minPaidFor[dl.card + '-' + dl.date.getMonth()] = true;
-                });
-
-                // Priority 2: Allocate remaining surplus to highest-balance card
-                const sortedDebt = [...remainingDebt].sort((a, b) => b.owed - a.owed);
-                for (const card of sortedDebt) {
-                    if (card.owed <= 0 || budget <= 0) continue;
-                    const pay = Math.min(card.owed, budget);
-                    const existing = payments.find(p => p.name === card.name);
-                    if (existing) {
-                        existing.pay += pay;
-                        existing.isMinimum = false;
-                    } else {
-                        payments.push({ name: card.name, pay, isMinimum: false });
-                    }
-                    card.owed -= pay;
-                    budget -= pay;
-                    cumulativePaid += pay;
-                }
-
-                const totalPay = payments.reduce((s, p) => s + p.pay, 0);
-                plans.push({
-                    date: fri, estBalance, available, totalPay,
-                    noFunds: totalPay < 1,
-                    payments, buffer: MIN_BUFFER,
-                    upcomingDeadlines: upcomingMins,
-                    reason, worstAhead, balanceAfterPay: estBalance - totalPay
-                });
-            });
-            return { cards, plans, remaining: remainingDebt, minBuffer: MIN_BUFFER, deadlines };
-        })();
-
-        const ccTableRows = ccRepaymentPlan.plans.map(p => {
-            const dayStr = p.date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-
-            if (p.noFunds) {
-                return `<div style="padding:12px 0;border-bottom:1px solid var(--border-default);">
-                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                        <strong style="color:var(--text-primary);font-size:14px">${dayStr}</strong>
-                        <span style="color:var(--text-muted);font-size:13px;font-weight:600">No payment this week</span>
-                    </div>
-                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.5">${p.reason}</div>
-                </div>`;
-            }
-
-            const paymentLines = p.payments.map(pay => {
-                const dueBadge = pay.dueDate
-                    ? `<span class="od-status-badge danger" style="margin-left:6px">due ${pay.dueDate.toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</span>`
-                    : '';
-                const minBadge = pay.isMinimum
-                    ? `<span class="od-status-badge warning" style="margin-left:6px">min. payment</span>`
-                    : '';
-                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px;color:var(--text-secondary);">
-                    <span>${escHtml(pay.name)}${dueBadge}${minBadge}</span>
-                    <strong>${fmt(pay.pay)}</strong>
-                </div>`;
-            }).join('');
-
-            return `<div style="padding:12px 0;border-bottom:1px solid var(--border-default);">
-                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                    <strong style="color:var(--text-primary);font-size:14px">${dayStr}</strong>
-                    <span style="color:var(--success);font-weight:700;font-size:15px">Pay ${fmt(p.totalPay)}</span>
-                </div>
-                ${paymentLines}
-                <div style="margin-top:8px;padding:8px 10px;background:var(--bg-surface);border-radius:6px;font-size:12px;color:var(--text-secondary);line-height:1.6">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                        <span>Account balance on this date</span><strong style="color:var(--text-primary)">${fmt(p.estBalance)}</strong>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                        <span>Credit card payment</span><strong style="color:var(--danger)">-${fmt(p.totalPay)}</strong>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;padding-top:4px;border-top:1px solid var(--border-default);margin-top:2px">
-                        <span>Balance after payment</span><strong style="color:${p.balanceAfterPay >= p.buffer ? 'var(--success)' : 'var(--warning)'}">${fmt(p.balanceAfterPay)}</strong>
-                    </div>
-                    <div style="display:flex;justify-content:space-between">
-                        <span>Safety buffer</span><span>${fmt(p.buffer)}</span>
-                    </div>
-                    <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-default);color:var(--text-secondary);font-size:11px">${p.reason}</div>
-                </div>
-            </div>`;
-        }).join('');
 
         // ── AI COMMENTARY — titled sections ──
         const maintStatus = maintSpend < MAINT_TARGET_GBP ? 'green' : maintSpend <= MAINT_TARGET_GBP * 1.1 ? 'amber' : 'red';
@@ -1567,46 +1381,9 @@
             <p>${voidUnits.length > 0 ? '(1) Fill voids — biggest revenue impact per action. ' : ''}${cfvTenancies.length > 0 ? `(${voidUnits.length > 0 ? '2' : '1'}) Action ${cfvTenancies.length} unactioned CFV${cfvTenancies.length !== 1 ? 's' : ''} to secure ${fmt(cfvUnactioned)}/month. ` : ''}${maintStatus !== 'green' ? `(${(voidUnits.length > 0 ? 1 : 0) + (cfvTenancies.length > 0 ? 1 : 0) + 1}) Reduce maintenance from ${fmt(maintSpend)} to below ${fmt(MAINT_TARGET_GBP)} budget. ` : ''}Monitor cash flow pinch points around mortgage payment clusters (typically days 1-6).</p>
 
             <hr style="border:none;border-top:1px solid var(--border-default);margin:20px 0;">
-            <h3 class="od-section-header" style="margin:0 0 12px">Strategic Credit Card Repayment Plan</h3>
-            <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong> across ${ccRepaymentPlan.cards.length} card${ccRepaymentPlan.cards.length !== 1 ? 's' : ''}.</p>
-            <p style="margin:0 0 12px;font-size:13px;color:var(--text-secondary)">Strategy: weekly payments each Friday. Minimum payments are prioritised before each card's due date. Remaining surplus allocated highest-balance first. Buffer of <strong>${fmt(ccRepaymentPlan.minBuffer)}</strong> always retained. 7-day look-ahead ensures no cash flow shortfall.</p>
-            <div style="margin-bottom:16px">
-                ${ccRepaymentPlan.cards.map(c => {
-                    // Proper English ordinal: 11/12/13 are always 'th'; otherwise
-                    // the last digit picks st/nd/rd/th. The previous one-liner
-                    // matched only the literal numbers 1/2/3, so 21st rendered
-                    // as "21th".
-                    const d = c.dueDay;
-                    const lastTwo = d % 100;
-                    const last = d % 10;
-                    const suffix = (lastTwo >= 11 && lastTwo <= 13) ? 'th'
-                        : last === 1 ? 'st'
-                        : last === 2 ? 'nd'
-                        : last === 3 ? 'rd' : 'th';
-                    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:14px;">
-                        <span style="color:var(--text-secondary)">${escHtml(c.name)} <span style="color:var(--text-muted);font-size:12px">(due ${d}${suffix} | min. ${fmt(c.minPayment)})</span></span>
-                        <span style="font-weight:600;color:${c.owed > 5000 ? 'var(--danger)' : 'var(--warning)'}">${fmt(c.owed)}</span>
-                    </div>`;
-                }).join('')}
-            </div>
-            <div>${ccTableRows}</div>
-            ${ccRepaymentPlan.remaining.some(c => c.owed > 0.01)
-                ? `<p style="margin:12px 0 0;font-size:13px;color:var(--text-secondary)">After 31 days, remaining: ${ccRepaymentPlan.remaining.filter(c=>c.owed>0.01).map(c=>`${c.name} ${fmt(c.owed)}`).join(', ')}.</p>`
-                : `<p style="margin:12px 0 0;font-size:13px;color:var(--success)">All credit card debt could be cleared within this 31-day window based on current projections.</p>`
-            }
+            <h3 class="od-section-header" style="margin:0 0 12px">Credit Card Debt</h3>
+            <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong>. Card balances and clearance projections are shown below the cash flow forecast table.</p>
         `;
-
-        // Balance Calculator — populate with forecast inflows/outflows
-        populateCalcFromForecast(cashFlowRows);
-        const calcBalInput = document.getElementById('calcOpeningBal');
-        if (calcBalInput && !calcBalInput.dataset.userEdited) {
-            calcBalInput.value = openingBalance.toFixed(2);
-        }
-
-        // Withdrawal Advisor — analyse forecast and produce withdrawal schedule
-        if (typeof buildWithdrawalSchedule === 'function') {
-            buildWithdrawalSchedule(cashFlowRows, openingBalance, transactions, incTenancies);
-        }
 
         // (Removed) — the "Last bank sync" footer was dropped from index.html; the
         // Fintable Sync Monitor OS page surfaces this same timestamp more clearly.
