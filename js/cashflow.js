@@ -397,7 +397,7 @@
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Net Change (Range)</div>
-                <div class="kpi-card-value"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">${fmtRangeVal(netChangeLow)}</span> <span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span> <span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">${fmtRangeVal(netChangeHigh)}</span></div>
+                <div class="kpi-card-value"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">£${Math.floor(Math.abs(netChangeLow)).toLocaleString('en-GB')}</span> <span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span> <span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">£${Math.floor(Math.abs(netChangeHigh)).toLocaleString('en-GB')}</span></div>
                 <div class="kpi-card-sub">Best case - worst case</div>
             </div>
         `;
