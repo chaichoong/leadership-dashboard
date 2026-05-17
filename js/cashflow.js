@@ -376,42 +376,33 @@
         const lowestBalLow = lowestBal;
         const lowestBalHigh = lowestBalAfterVar;
 
-        // Cash flow KPI cards — range-based with stacked layout for range values
-        const fmtK = v => { const abs = Math.abs(v); return (abs >= 1000 ? '£' + (v/1000).toFixed(1) + 'k' : fmt(v)); };
+        // Cash flow KPI cards — range format "£X – £Y" whole pounds, post-withdrawal metrics
+        const fmtWhole = v => '£' + Math.round(Math.abs(v)).toLocaleString('en-GB');
+        const fmtRange = (lo, hi) => `${fmtWhole(lo)} – ${fmtWhole(hi)}`;
         const cfLabelStyle = 'min-height:36px;display:flex;align-items:flex-start';
-        const rangeStyle = 'display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.2';
         document.getElementById('cashflowKPIs').innerHTML = `
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Opening Balance</div>
-                <div class="kpi-card-value">${fmt(openingBalance)}</div>
+                <div class="kpi-card-value">${fmtWhole(openingBalance)}</div>
                 <div class="kpi-card-sub">Santander + TNT Zempler</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Total In</div>
-                <div class="kpi-card-value text-green">${fmt(totalIn)}</div>
+                <div class="kpi-card-value text-green">${fmtWhole(totalIn)}</div>
                 <div class="kpi-card-sub">Projected inflows over 31 days</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Total Out (Range)</div>
-                <div class="kpi-card-value text-red" style="${rangeStyle}"><span>${fmtK(totalOut)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span>${fmtK(totalOutHigh)}</span></div>
+                <div class="kpi-card-value text-red">${fmtRange(totalOut, totalOutHigh)}</div>
                 <div class="kpi-card-sub">Fixed to incl. reserves</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Net Change (Range)</div>
-                <div class="kpi-card-value" style="${rangeStyle}"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">${netChangeLow >= 0 ? '+' : ''}${fmtK(netChangeLow)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">${netChangeHigh >= 0 ? '+' : ''}${fmtK(netChangeHigh)}</span></div>
+                <div class="kpi-card-value"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">${netChangeLow >= 0 ? '+' : '-'}${fmtWhole(netChangeLow)}</span> – <span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">${netChangeHigh >= 0 ? '+' : '-'}${fmtWhole(netChangeHigh)}</span></div>
                 <div class="kpi-card-sub">Best case to worst case</div>
             </div>
-            <div class="kpi-card">
-                <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance (Range)</div>
-                <div class="kpi-card-value" style="${rangeStyle}"><span class="text-green">${fmtK(finalBalanceLow)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span style="color:var(--warning)">${fmtK(finalBalanceHigh)}</span></div>
-                <div class="kpi-card-sub">Day 31: green line to red line</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance (Range)</div>
-                <div class="kpi-card-value" style="${rangeStyle}"><span class="${lowestBalLow >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(lowestBalLow)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span class="${lowestBalHigh >= 0 ? 'text-green' : 'text-red'}" style="${lowestBalHigh >= 0 ? 'color:var(--warning)' : ''}">${fmtAccounting(lowestBalHigh)}</span></div>
-                <div class="kpi-card-sub">${lowestDay} / ${lowestDayAfterVar}</div>
-            </div>
         `;
+        // Post-withdrawal KPI cards are rendered after waProjected is built (below)
 
         // ── Withdrawal Schedule (integrated into forecast) ──
         const waSettings = getWASettings();
@@ -421,11 +412,14 @@
             ? parseFloat(waState.openingBal) : null;
         const effectiveOpening = userBal !== null ? userBal : openingBalance;
 
-        const WEEKLY_WAGES = waSettings.wages !== undefined ? waSettings.wages : 330;
-        const WEEKLY_TOPUP = waSettings.topup !== undefined ? waSettings.topup : 140;
-        const COMMIT_DAY = waSettings.commitDay !== undefined ? waSettings.commitDay : 5;
-        const WEEKLY_COMMITMENTS = WEEKLY_WAGES + WEEKLY_TOPUP;
         const DAY_NAMES_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const defaultCommitments = [
+            { label: 'Wages', amount: 330, day: 5 },
+            { label: 'Top-up', amount: 140, day: 5 },
+        ];
+        const commitments = Array.isArray(waSettings.commitments) && waSettings.commitments.length > 0
+            ? waSettings.commitments : defaultCommitments;
+        const WEEKLY_COMMITMENTS = commitments.reduce((s, c) => s + (c.amount || 0), 0);
 
         // Today's items section removed — items are already visible in the forecast table
 
@@ -451,7 +445,7 @@
             });
 
             const dow = r.date.getDay();
-            if (dow === COMMIT_DAY) dayOut += WEEKLY_COMMITMENTS;
+            commitments.forEach(c => { if (dow === c.day) dayOut += (c.amount || 0); });
 
             const waOpening = waRunning;
             waRunning += dayIn - dayOut;
@@ -501,18 +495,59 @@
         waWithdrawals.forEach(w => { waByKey[w.key] = w; });
         const waTotalAvailable = waWithdrawals.reduce((s, w) => s + w.amount, 0);
 
+        // Post-withdrawal KPI cards (Final Balance, Lowest Balance, Net Change from waProjected)
+        const waFinalBalance = waProjected.length > 0 ? waProjected[waProjected.length - 1].balance : finalBalance;
+        let waLowestBal = Infinity, waLowestIdx = 0;
+        waProjected.forEach((d, i) => { if (d.balance < waLowestBal) { waLowestBal = d.balance; waLowestIdx = i; } });
+        if (!isFinite(waLowestBal)) waLowestBal = 0;
+        const waLowestDay = rows[waLowestIdx] ? dayName(rows[waLowestIdx].date) : '';
+        const waNetChange = waFinalBalance - effectiveOpening;
+        const kpisEl = document.getElementById('cashflowKPIs');
+        kpisEl.innerHTML += `
+            <div class="kpi-card">
+                <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance</div>
+                <div class="kpi-card-value ${waFinalBalance >= 0 ? 'text-green' : 'text-red'}">${fmtWhole(waFinalBalance)}</div>
+                <div class="kpi-card-sub">Post-withdrawal day 31</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance</div>
+                <div class="kpi-card-value ${waLowestBal >= 0 ? 'text-green' : 'text-red'}">${fmtWhole(waLowestBal)}</div>
+                <div class="kpi-card-sub">${waLowestDay}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label" style="${cfLabelStyle}">Net Change</div>
+                <div class="kpi-card-value ${waNetChange >= 0 ? 'text-green' : 'text-red'}">${waNetChange >= 0 ? '+' : '-'}${fmtWhole(Math.abs(waNetChange))}</div>
+                <div class="kpi-card-sub">Post-withdrawal projection</div>
+            </div>
+        `;
+
         // Render WA controls below chart, above table
         const waControlsEl = document.getElementById('cfWaControls');
         if (waControlsEl) {
             const balanceWarning = userBal !== null && Math.abs(effectiveOpening - openingBalance) > 200;
 
-            const dayOptions = [0,1,2,3,4,5,6].map(d => {
-                const sel = d === COMMIT_DAY ? ' selected' : '';
-                return `<option value="${d}"${sel}>${DAY_NAMES_SHORT[d]}</option>`;
-            }).join('');
-
             const floorVal = usingCustomFloor ? floorOverride : calculatedRounded;
             const floorEdited = usingCustomFloor ? ' data-user-edited="1"' : '';
+
+            const costRowsHtml = commitments.map((c, idx) => {
+                const dayOpts = [0,1,2,3,4,5,6].map(d => {
+                    const sel = d === c.day ? ' selected' : '';
+                    return `<option value="${d}"${sel}>${DAY_NAMES_SHORT[d]}</option>`;
+                }).join('');
+                return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px" data-cost-row="${idx}">
+                    <input type="text" value="${escHtml(c.label || '')}" placeholder="Label"
+                        style="width:120px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
+                        data-cost-field="label" onchange="saveWeeklyCosts()">
+                    <input type="number" value="${c.amount || 0}" step="10" min="0"
+                        style="width:80px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
+                        data-cost-field="amount" onchange="saveWeeklyCosts()">
+                    <select data-cost-field="day" onchange="saveWeeklyCosts()"
+                        style="padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)">
+                        ${dayOpts}
+                    </select>
+                    <button onclick="removeWeeklyCost(${idx})" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px;padding:2px 6px" title="Remove">✕</button>
+                </div>`;
+            }).join('');
 
             waControlsEl.innerHTML = `
                 <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:16px;margin:16px 0">
@@ -524,37 +559,26 @@
                             onchange="this.dataset.userEdited='1';waRecalc()"
                             ${userBal !== null ? 'data-user-edited="1"' : ''}>
                         <span style="color:var(--text-muted);font-size:var(--fs-xs)">Your actual bank balance right now</span>
-                        ${waTotalAvailable > 0 ? `<span style="margin-left:auto;font-weight:var(--fw-semibold);color:var(--success)">Safe to withdraw: ${fmt(waTotalAvailable)}</span>` : '<span style="margin-left:auto;color:var(--text-muted);font-size:var(--fs-sm)">No safe withdrawal windows</span>'}
+                        ${waTotalAvailable > 0 ? `<span style="margin-left:auto;font-weight:var(--fw-semibold);color:var(--success)">Safe to withdraw (31-day cycle): ${fmt(waTotalAvailable)}</span>` : '<span style="margin-left:auto;color:var(--text-muted);font-size:var(--fs-sm)">No safe withdrawal windows</span>'}
                     </div>
 
                     ${balanceWarning ? `<div style="padding:8px 12px;background:var(--warning-bg);border-radius:var(--radius-sm);margin-bottom:8px;font-size:var(--fs-xs);color:var(--text-primary)">
                         <strong>Balance mismatch:</strong> Entered balance (${fmt(effectiveOpening)}) differs from dashboard (${fmt(openingBalance)}) by ${fmt(Math.abs(effectiveOpening - openingBalance))}.
                     </div>` : ''}
 
-                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-secondary)">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-secondary)">
                         <span>Safety floor:</span>
                         <input type="number" id="waFloorOverride" value="${floorVal}"
                             step="50" min="0"
                             style="width:90px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
                             onchange="this.dataset.userEdited='1';waRecalc()"${floorEdited}>
                         ${usingCustomFloor ? '<button onclick="waResetFloor()" style="font-size:var(--fs-xs);color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Reset</button>' : ''}
-                        <span style="color:var(--border-default)">|</span>
-                        <span>Commitments:</span>
-                        <input type="number" id="waWagesAmount" value="${WEEKLY_WAGES}"
-                            step="10" min="0"
-                            style="width:80px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
-                            onchange="this.dataset.userEdited='1';waRecalc()"${waSettings.wages !== undefined ? ' data-user-edited="1"' : ''}>
-                        <span>+</span>
-                        <input type="number" id="waTopupAmount" value="${WEEKLY_TOPUP}"
-                            step="10" min="0"
-                            style="width:80px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
-                            onchange="this.dataset.userEdited='1';waRecalc()"${waSettings.topup !== undefined ? ' data-user-edited="1"' : ''}>
-                        <span>on</span>
-                        <select id="waCommitDay"
-                            style="padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
-                            onchange="this.dataset.userEdited='1';waRecalc()"${waSettings.commitDay !== undefined ? ' data-user-edited="1"' : ''}>
-                            ${dayOptions}
-                        </select>
+                    </div>
+
+                    <div style="font-size:var(--fs-sm);color:var(--text-secondary)">
+                        <div style="font-weight:var(--fw-medium);margin-bottom:6px">Weekly costs:</div>
+                        <div id="weeklyCostRows">${costRowsHtml}</div>
+                        <button onclick="addWeeklyCost()" style="font-size:var(--fs-xs);color:var(--accent);background:none;border:none;cursor:pointer;padding:4px 0">+ Add</button>
                     </div>
                 </div>
             `;
@@ -564,7 +588,6 @@
         const tbody = document.getElementById('cashflowBody');
         tbody.innerHTML = rows.map((r, i) => {
             const wknd = isWeekend(r.date) ? ' weekend' : '';
-            const closingClass = r.closing < 0 ? 'text-red' : r.closing < 500 ? 'text-amber' : 'text-green';
             const w = waByKey[r.key];
 
             const acctTag = (acct) => acct
@@ -607,9 +630,8 @@
                 : '';
 
             const waDay = waProjected[i];
-            const afterWdBalance = waDay ? waDay.balance : r.closing;
-            const afterWdClass = afterWdBalance < 0 ? 'text-red' : afterWdBalance < 500 ? 'text-amber' : '';
-            const afterWdDiffers = Math.abs(afterWdBalance - r.closing) > 0.01;
+            const closingBalance = waDay ? waDay.balance : r.closing;
+            const closingBalClass = closingBalance < 0 ? 'text-red' : closingBalance < 500 ? 'text-amber' : 'text-green';
 
             return `
                 <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}', this)">
@@ -617,13 +639,12 @@
                     <td>${fmtAccounting(r.opening)}</td>
                     <td class="text-green">${r.dayIn > 0 ? '+' + fmt(r.dayIn) : ''}</td>
                     <td class="text-red">${r.dayOut > 0 ? '-' + fmt(r.dayOut) : ''}</td>
-                    <td class="${closingClass}"><strong>${fmtAccounting(r.closing)}</strong></td>
-                    <td class="${afterWdClass}" style="${afterWdDiffers ? 'font-weight:var(--fw-medium)' : 'color:var(--text-muted)'}">${fmtAccounting(afterWdBalance)}</td>
+                    <td class="${closingBalClass}"><strong>${fmtAccounting(closingBalance)}</strong></td>
                     <td>${withdrawCell}</td>
                     <td class="od-text-muted-sm" style="white-space:nowrap">${acctSummary}</td>
                 </tr>
                 <tr class="cashflow-table-row-detail" id="cfrow-${i}">
-                    <td colspan="8"><div class="expand-content"><div class="cashflow-detail-list">
+                    <td colspan="7"><div class="expand-content"><div class="cashflow-detail-list">
                         <div style="margin-bottom:8px;"><strong>Inflows</strong> <span style="font-weight:normal;font-size:var(--fs-xs);color:var(--text-muted)">(tick = expected, untick = cleared)</span></div>
                         ${inflowsHtml}
                         <div style="margin-top:8px;margin-bottom:8px;"><strong>Outflows:</strong></div>
@@ -656,10 +677,9 @@
                 <td class="${totalNet >= 0 ? 'text-green' : 'text-red'}">${totalNet >= 0 ? '+' : '-'}${fmt(totalNet)}</td>
                 <td></td>
                 <td></td>
-                <td></td>
             </tr>
             <tr style="background:var(--bg-surface-2);font-size:0.8rem;color:var(--text-secondary)">
-                <td colspan="8" style="padding:8px 12px;line-height:1.6">
+                <td colspan="7" style="padding:8px 12px;line-height:1.6">
                     <strong>Cross-check vs Dashboard metrics:</strong><br>
                     Inflows: ${fmt(fullInflows)} forecast (incl. reconciled) vs ${fmt(monthlyIncome)} monthly income
                     <span style="color:${inMatch ? 'var(--success)' : 'var(--warning)'}">${inMatch ? '✓ Match' : '△ Differs'}</span>
@@ -689,6 +709,7 @@
         const successColor   = cv('--success',        '#16a34a');
         const warningColor   = cv('--warning',        '#d97706');
         const dangerColor    = cv('--danger',         '#dc2626');
+        const plumColor      = cv('--tone-plum',      '#8B6FAE');
         const textPrimary    = cv('--text-primary',   '#1C2422');
         const textSecondary  = cv('--text-secondary', '#5A6660');
         const borderDefault  = cv('--border-default', '#DDE1D9');
@@ -742,6 +763,20 @@
                     pointBorderWidth: 2,
                     pointHoverRadius: 6,
                     hidden: !hasAnyExclusions(),
+                }, {
+                    label: 'Projected Reality (Incl. Withdrawals)',
+                    data: waProjected.map(d => d.balance),
+                    borderColor: plumColor,
+                    backgroundColor: 'rgba(139, 111, 174, 0.05)',
+                    borderWidth: 2,
+                    borderDash: [6, 3],
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: plumColor,
+                    pointBorderColor: surfaceColor,
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 6,
                 }]
             },
             options: {
@@ -1018,15 +1053,46 @@
 
     function saveWASettings() {
         const floorInput = document.getElementById('waFloorOverride');
-        const wagesInput = document.getElementById('waWagesAmount');
-        const topupInput = document.getElementById('waTopupAmount');
-        const daySelect = document.getElementById('waCommitDay');
         const settings = getWASettings();
         if (floorInput && floorInput.dataset.userEdited) settings.floorOverride = parseFloat(floorInput.value) || null;
-        if (wagesInput && wagesInput.dataset.userEdited) settings.wages = parseFloat(wagesInput.value);
-        if (topupInput && topupInput.dataset.userEdited) settings.topup = parseFloat(topupInput.value);
-        if (daySelect && daySelect.dataset.userEdited) settings.commitDay = parseInt(daySelect.value);
+        const costRows = document.querySelectorAll('[data-cost-row]');
+        if (costRows.length > 0) {
+            settings.commitments = Array.from(costRows).map(row => ({
+                label: (row.querySelector('[data-cost-field="label"]').value || '').trim(),
+                amount: parseFloat(row.querySelector('[data-cost-field="amount"]').value) || 0,
+                day: parseInt(row.querySelector('[data-cost-field="day"]').value) || 0,
+            }));
+        }
         localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings));
+    }
+
+    function saveWeeklyCosts() {
+        saveWASettings();
+        waRecalc();
+    }
+
+    function addWeeklyCost() {
+        const settings = getWASettings();
+        const commitments = Array.isArray(settings.commitments) ? settings.commitments : [
+            { label: 'Wages', amount: 330, day: 5 },
+            { label: 'Top-up', amount: 140, day: 5 },
+        ];
+        commitments.push({ label: '', amount: 0, day: 5 });
+        settings.commitments = commitments;
+        localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings));
+        waRecalc();
+    }
+
+    function removeWeeklyCost(idx) {
+        const settings = getWASettings();
+        const commitments = Array.isArray(settings.commitments) ? settings.commitments : [
+            { label: 'Wages', amount: 330, day: 5 },
+            { label: 'Top-up', amount: 140, day: 5 },
+        ];
+        commitments.splice(idx, 1);
+        settings.commitments = commitments;
+        localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings));
+        waRecalc();
     }
 
     function getWAState() {
