@@ -1603,6 +1603,11 @@
             calcBalInput.value = openingBalance.toFixed(2);
         }
 
+        // Withdrawal Advisor — analyse forecast and produce withdrawal schedule
+        if (typeof buildWithdrawalSchedule === 'function') {
+            buildWithdrawalSchedule(cashFlowRows, openingBalance, transactions, incTenancies);
+        }
+
         // (Removed) — the "Last bank sync" footer was dropped from index.html; the
         // Fintable Sync Monitor OS page surfaces this same timestamp more clearly.
 
