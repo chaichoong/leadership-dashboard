@@ -376,8 +376,10 @@
         const lowestBalLow = lowestBal;
         const lowestBalHigh = lowestBalAfterVar;
 
-        // Cash flow KPI cards — range-based (green low / red high)
+        // Cash flow KPI cards — range-based with stacked layout for range values
+        const fmtK = v => { const abs = Math.abs(v); return (abs >= 1000 ? '£' + (v/1000).toFixed(1) + 'k' : fmt(v)); };
         const cfLabelStyle = 'min-height:36px;display:flex;align-items:flex-start';
+        const rangeStyle = 'display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.2';
         document.getElementById('cashflowKPIs').innerHTML = `
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Opening Balance</div>
@@ -391,22 +393,22 @@
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Total Out (Range)</div>
-                <div class="kpi-card-value text-red">${fmt(totalOut)} – ${fmt(totalOutHigh)}</div>
-                <div class="kpi-card-sub">Fixed ${fmt(totalOut)} to incl. reserves ${fmt(totalOutHigh)}</div>
+                <div class="kpi-card-value text-red" style="${rangeStyle}"><span>${fmtK(totalOut)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span>${fmtK(totalOutHigh)}</span></div>
+                <div class="kpi-card-sub">Fixed to incl. reserves</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Net Change (Range)</div>
-                <div class="kpi-card-value">${netChangeLow >= 0 ? '<span class="text-green">+' + fmt(netChangeLow) + '</span>' : '<span class="text-red">-' + fmt(netChangeLow) + '</span>'} to ${netChangeHigh >= 0 ? '<span class="text-green">+' + fmt(netChangeHigh) + '</span>' : '<span class="text-red">-' + fmt(netChangeHigh) + '</span>'}</div>
+                <div class="kpi-card-value" style="${rangeStyle}"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">${netChangeLow >= 0 ? '+' : ''}${fmtK(netChangeLow)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">${netChangeHigh >= 0 ? '+' : ''}${fmtK(netChangeHigh)}</span></div>
                 <div class="kpi-card-sub">Best case to worst case</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance (Range)</div>
-                <div class="kpi-card-value"><span class="text-green">${fmt(finalBalanceLow)}</span> to <span style="color:var(--warning)">${fmt(finalBalanceHigh)}</span></div>
+                <div class="kpi-card-value" style="${rangeStyle}"><span class="text-green">${fmtK(finalBalanceLow)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span style="color:var(--warning)">${fmtK(finalBalanceHigh)}</span></div>
                 <div class="kpi-card-sub">Day 31: green line to red line</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance (Range)</div>
-                <div class="kpi-card-value"><span class="${lowestBalLow >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(lowestBalLow)}</span> to <span class="${lowestBalHigh >= 0 ? 'text-red' : 'text-red'}" style="${lowestBalHigh >= 0 ? 'color:var(--warning)' : ''}">${fmtAccounting(lowestBalHigh)}</span></div>
+                <div class="kpi-card-value" style="${rangeStyle}"><span class="${lowestBalLow >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(lowestBalLow)}</span><span style="font-size:0.65em;color:var(--text-muted)">to</span><span class="${lowestBalHigh >= 0 ? 'text-green' : 'text-red'}" style="${lowestBalHigh >= 0 ? 'color:var(--warning)' : ''}">${fmtAccounting(lowestBalHigh)}</span></div>
                 <div class="kpi-card-sub">${lowestDay} / ${lowestDayAfterVar}</div>
             </div>
         `;
@@ -414,8 +416,6 @@
         // ── Withdrawal Schedule (integrated into forecast) ──
         const waSettings = getWASettings();
         const waState = getWAState();
-        const waSavedCleared = new Set(waState && waState.cleared ? waState.cleared : []);
-        const waSavedRisk = new Set(waState && waState.riskExcluded ? waState.riskExcluded : []);
 
         const userBal = waState && waState.userEditedBal && waState.openingBal
             ? parseFloat(waState.openingBal) : null;
@@ -427,41 +427,26 @@
         const WEEKLY_COMMITMENTS = WEEKLY_WAGES + WEEKLY_TOPUP;
         const DAY_NAMES_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-        const todayItems = [];
-        if (rows.length > 0 && rows[0].key === todayKey) {
-            rows[0].inflows.forEach(f => {
-                const key = `in|${f.name}|${f.amount}`;
-                todayItems.push({ ...f, dir: 'in', waKey: key, cleared: waSavedCleared.has(key) });
-            });
-            rows[0].outflows.forEach(f => {
-                const key = `out|${f.name}|${f.amount}`;
-                todayItems.push({ ...f, dir: 'out', waKey: key, cleared: waSavedCleared.has(key) });
-            });
-        }
+        // Today's items section removed — items are already visible in the forecast table
 
         // Build WA projection from effective opening balance
+        // Uses the single-checkbox exclusion system: unchecked items are excluded
+        const cfExcl = getCFExclusions();
         const waProjected = [];
         let waRunning = effectiveOpening;
         rows.forEach((r, idx) => {
             let dayIn = 0, dayOut = 0;
-            const isToday = r.key === todayKey;
 
             r.inflows.forEach(f => {
                 if (f.cleared) return;
-                const inflowKey = `risk|${r.key}|${f.name}|${f.amount}`;
-                const isRisk = waSavedRisk.has(inflowKey);
-                if (isToday) {
-                    const ck = `in|${f.name}|${f.amount}`;
-                    if (waSavedCleared.has(ck)) return;
-                }
-                if (!isRisk) dayIn += f.amount;
+                const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
+                if (cfExcl[cbId]) return;
+                dayIn += f.amount;
             });
             r.outflows.forEach(f => {
                 if (f.cleared) return;
-                if (isToday) {
-                    const ck = `out|${f.name}|${f.amount}`;
-                    if (waSavedCleared.has(ck)) return;
-                }
+                const cbId = cfStableKey(r.key, 'out', f.name, f.amount);
+                if (cfExcl[cbId]) return;
                 dayOut += f.amount;
             });
 
@@ -516,26 +501,10 @@
         waWithdrawals.forEach(w => { waByKey[w.key] = w; });
         const waTotalAvailable = waWithdrawals.reduce((s, w) => s + w.amount, 0);
 
-        // Render WA controls above KPIs
+        // Render WA controls below chart, above table
         const waControlsEl = document.getElementById('cfWaControls');
         if (waControlsEl) {
             const balanceWarning = userBal !== null && Math.abs(effectiveOpening - openingBalance) > 200;
-            const todayItemsHtml = todayItems.length > 0
-                ? `<div style="margin:12px 0 0">
-                    <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Today's items (tick what's already cleared in the bank):</div>
-                    ${todayItems.map(item => {
-                        const checked = item.cleared ? ' checked' : '';
-                        const colour = item.dir === 'in' ? 'var(--success)' : 'var(--danger)';
-                        const prefix = item.dir === 'in' ? '+' : '-';
-                        return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">
-                            <input type="checkbox" class="wa-today-cb" data-wa-key="${item.waKey.replace(/"/g, '&quot;')}"${checked} onchange="waRecalc()">
-                            <span style="flex:1">${escHtml(item.name)}</span>
-                            <span style="color:${colour};font-weight:var(--fw-medium)">${prefix}${fmt(item.amount)}</span>
-                        </label>`;
-                    }).join('')}
-                    <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">Ticked = already in your bank balance. Unticked = still expected today and included in the forecast.</div>
-                </div>`
-                : '';
 
             const dayOptions = [0,1,2,3,4,5,6].map(d => {
                 const sel = d === COMMIT_DAY ? ' selected' : '';
@@ -546,7 +515,7 @@
             const floorEdited = usingCustomFloor ? ' data-user-edited="1"' : '';
 
             waControlsEl.innerHTML = `
-                <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:16px;margin-bottom:16px">
+                <div style="background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:16px;margin:16px 0">
                     <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
                         <label style="font-weight:var(--fw-medium);white-space:nowrap">Opening balance:</label>
                         <input type="number" id="waOpeningBal" value="${effectiveOpening.toFixed(2)}"
@@ -587,8 +556,6 @@
                             ${dayOptions}
                         </select>
                     </div>
-
-                    ${todayItemsHtml}
                 </div>
             `;
         }
@@ -612,10 +579,8 @@
                     }
                     const cbId = cfStableKey(r.key, 'in', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
-                    const riskKey = `risk|${r.key}|${f.name}|${f.amount}`;
-                    const isRisk = waSavedRisk.has(riskKey);
-                    const riskLabel = isRisk ? ' <span style="background:var(--danger-bg);color:var(--danger);padding:1px 6px;border-radius:3px;font-size:0.75rem">Risk</span>' : '';
-                    return `<div class="cashflow-detail-item in" style="${isRisk ? 'opacity:0.5' : ''}"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="in" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><input type="checkbox" class="wa-risk-cb" data-wa-key="${riskKey.replace(/"/g, '&quot;')}" ${isRisk ? 'checked' : ''} onchange="waRecalc()" title="Flag as risk" style="accent-color:var(--danger)"><span class="cashflow-detail-item-name" style="flex:1;${isRisk ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(f.name)}${riskLabel}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value" style="${isRisk ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">+${fmt(f.amount)}</span></div>`;
+                    const excluded = !checked;
+                    return `<div class="cashflow-detail-item in" style="${excluded ? 'opacity:0.5' : ''}"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="in" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1;${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value" style="${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">+${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
             const outflowsHtml = r.outflows.length > 0
@@ -625,7 +590,8 @@
                     }
                     const cbId = cfStableKey(r.key, 'out', f.name, f.amount);
                     const checked = !isCFExcluded(cbId) ? 'checked' : '';
-                    return `<div class="cashflow-detail-item out"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value">-${fmt(f.amount)}</span></div>`;
+                    const excluded = !checked;
+                    return `<div class="cashflow-detail-item out" style="${excluded ? 'opacity:0.5' : ''}"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1;${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value" style="${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">-${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
 
@@ -640,6 +606,11 @@
                 ? `<span style="color:var(--accent);font-weight:var(--fw-semibold)">${fmt(w.amount)}</span>`
                 : '';
 
+            const waDay = waProjected[i];
+            const afterWdBalance = waDay ? waDay.balance : r.closing;
+            const afterWdClass = afterWdBalance < 0 ? 'text-red' : afterWdBalance < 500 ? 'text-amber' : '';
+            const afterWdDiffers = Math.abs(afterWdBalance - r.closing) > 0.01;
+
             return `
                 <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}', this)">
                     <td><span class="expand-chevron" id="cf-chev-${i}">▶</span><strong>${dayName(r.date)}</strong></td>
@@ -647,12 +618,13 @@
                     <td class="text-green">${r.dayIn > 0 ? '+' + fmt(r.dayIn) : ''}</td>
                     <td class="text-red">${r.dayOut > 0 ? '-' + fmt(r.dayOut) : ''}</td>
                     <td class="${closingClass}"><strong>${fmtAccounting(r.closing)}</strong></td>
+                    <td class="${afterWdClass}" style="${afterWdDiffers ? 'font-weight:var(--fw-medium)' : 'color:var(--text-muted)'}">${fmtAccounting(afterWdBalance)}</td>
                     <td>${withdrawCell}</td>
                     <td class="od-text-muted-sm" style="white-space:nowrap">${acctSummary}</td>
                 </tr>
                 <tr class="cashflow-table-row-detail" id="cfrow-${i}">
-                    <td colspan="7"><div class="expand-content"><div class="cashflow-detail-list">
-                        <div style="margin-bottom:8px;"><strong>Inflows</strong> <span style="font-weight:normal;font-size:var(--fs-xs);color:var(--text-muted)">(left checkbox = what-if, right checkbox = risk flag)</span></div>
+                    <td colspan="8"><div class="expand-content"><div class="cashflow-detail-list">
+                        <div style="margin-bottom:8px;"><strong>Inflows</strong> <span style="font-weight:normal;font-size:var(--fs-xs);color:var(--text-muted)">(tick = expected, untick = cleared)</span></div>
                         ${inflowsHtml}
                         <div style="margin-top:8px;margin-bottom:8px;"><strong>Outflows:</strong></div>
                         ${outflowsHtml}
@@ -684,9 +656,10 @@
                 <td class="${totalNet >= 0 ? 'text-green' : 'text-red'}">${totalNet >= 0 ? '+' : '-'}${fmt(totalNet)}</td>
                 <td></td>
                 <td></td>
+                <td></td>
             </tr>
             <tr style="background:var(--bg-surface-2);font-size:0.8rem;color:var(--text-secondary)">
-                <td colspan="7" style="padding:8px 12px;line-height:1.6">
+                <td colspan="8" style="padding:8px 12px;line-height:1.6">
                     <strong>Cross-check vs Dashboard metrics:</strong><br>
                     Inflows: ${fmt(fullInflows)} forecast (incl. reconciled) vs ${fmt(monthlyIncome)} monthly income
                     <span style="color:${inMatch ? 'var(--success)' : 'var(--warning)'}">${inMatch ? '✓ Match' : '△ Differs'}</span>
@@ -997,7 +970,7 @@
             excl[cbId] = true;
         }
         localStorage.setItem('_cf_exclusions', JSON.stringify(excl));
-        updateWhatIfChart();
+        waRecalc();
     }
 
     function buildWhatIfLine(rows, openingBalance) {
@@ -1022,16 +995,6 @@
         });
     }
 
-    function updateWhatIfChart() {
-        if (!cashflowChartInstance || !window._cfRows || !window._cfOpeningBalance) return;
-        const whatIfData = buildWhatIfLine(window._cfRows, window._cfOpeningBalance);
-        // Dataset index 2 is the what-if line
-        if (cashflowChartInstance.data.datasets[2]) {
-            cashflowChartInstance.data.datasets[2].data = whatIfData;
-            cashflowChartInstance.data.datasets[2].hidden = !hasAnyExclusions();
-            cashflowChartInstance.update();
-        }
-    }
 
     // ══════════════════════════════════════════
     // WITHDRAWAL ADVISOR
@@ -1082,20 +1045,10 @@
 
     function saveWAState() {
         const balInput = document.getElementById('waOpeningBal');
-        const clearedIds = [];
-        document.querySelectorAll('.wa-today-cb:checked').forEach(cb => {
-            clearedIds.push(cb.dataset.waKey);
-        });
-        const riskIds = [];
-        document.querySelectorAll('.wa-risk-cb:checked').forEach(cb => {
-            riskIds.push(cb.dataset.waKey);
-        });
         const state = {
             date: getCalcStateDate(),
             openingBal: balInput ? balInput.value : '',
             userEditedBal: balInput ? !!balInput.dataset.userEdited : false,
-            cleared: clearedIds,
-            riskExcluded: riskIds,
         };
         localStorage.setItem(WA_KEY, JSON.stringify(state));
         saveWASettings();

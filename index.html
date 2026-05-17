@@ -191,7 +191,6 @@
         <div id="fintableAlertBanner" style="display:none"></div>
 
         <!-- Cash Flow Opening Balance Override -->
-        <div id="cfOpeningBalSection"></div>
 
         <!-- Utility Bar: Unreconciled Transactions -->
         <div id="reconBar" class="cards-grid" style="margin-bottom:16px"></div>
@@ -230,12 +229,12 @@
         <!-- Section 5: 31-Day Cash Flow Forecast -->
         <div class="section">
             <h2 class="section-title">31-Day Cash Flow Forecast</h2>
-            <div id="cfWaControls"></div>
             <div class="cards-grid" id="cashflowKPIs"></div>
             <div class="cashflow-container">
                 <div class="chart-container">
                     <canvas id="cashflowChart"></canvas>
                 </div>
+                <div id="cfWaControls"></div>
                 <table class="cashflow-table">
                     <thead>
                         <tr>
@@ -244,6 +243,7 @@
                             <th>In</th>
                             <th>Out</th>
                             <th>Closing</th>
+                            <th>After W/D</th>
                             <th>Withdraw</th>
                             <th>Last Acct</th>
                         </tr>
