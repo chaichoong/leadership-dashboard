@@ -522,7 +522,7 @@
             const floorVal = usingCustomFloor ? floorOverride : calculatedRounded;
             const floorEdited = usingCustomFloor ? ' data-user-edited="1"' : '';
 
-            const scOptions = (window.allSubCategories || []).map(sc => {
+            const scOptions = (typeof allSubCategories !== 'undefined' ? allSubCategories : []).map(sc => {
                 const name = getField(sc, 'fldO4BTJhFv5EsN6i');
                 const label = typeof name === 'string' ? name : (name && name.name ? name.name : '');
                 return { id: sc.id, label };
