@@ -392,12 +392,12 @@
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Total Out (Range)</div>
-                <div class="kpi-card-value text-red">${fmtRangeVal(totalOut)} – ${fmtRangeVal(totalOutHigh)}</div>
+                <div class="kpi-card-value text-red">£${Math.floor(Math.abs(totalOut)).toLocaleString('en-GB')} <span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span> £${Math.floor(Math.abs(totalOutHigh)).toLocaleString('en-GB')}</div>
                 <div class="kpi-card-sub">Fixed costs - incl. operational budgets</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Net Change (Range)</div>
-                <div class="kpi-card-value"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">${fmtRangeVal(netChangeLow)}</span> – <span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">${fmtRangeVal(netChangeHigh)}</span></div>
+                <div class="kpi-card-value"><span class="${netChangeLow >= 0 ? 'text-green' : 'text-red'}">${fmtRangeVal(netChangeLow)}</span> <span style="color:var(--text-muted);font-size:20px;margin:0 4px">–</span> <span class="${netChangeHigh >= 0 ? 'text-green' : 'text-red'}">${fmtRangeVal(netChangeHigh)}</span></div>
                 <div class="kpi-card-sub">Best case - worst case</div>
             </div>
         `;
@@ -644,7 +644,7 @@
             return `
                 <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}', this)">
                     <td><span class="expand-chevron" id="cf-chev-${i}">▶</span><strong>${dayName(r.date)}</strong></td>
-                    <td>${fmtAccounting(r.opening)}</td>
+                    <td>${fmtAccounting(waDay ? waDay.opening : r.opening)}</td>
                     <td class="text-green">${r.dayIn > 0 ? '+' + fmt(r.dayIn) : ''}</td>
                     <td class="text-red">${r.dayOut > 0 ? '-' + fmt(r.dayOut) : ''}</td>
                     <td class="${closingBalClass}"><strong>${fmtAccounting(closingBalance)}</strong></td>
