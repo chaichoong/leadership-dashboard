@@ -970,6 +970,28 @@
     // ══════════════════════════════════════════
 
     const WA_KEY = '_wa_state';
+    const WA_SETTINGS_KEY = '_wa_settings';
+
+    function getWASettings() {
+        try {
+            const raw = localStorage.getItem(WA_SETTINGS_KEY);
+            if (!raw) return {};
+            return JSON.parse(raw);
+        } catch { return {}; }
+    }
+
+    function saveWASettings() {
+        const floorInput = document.getElementById('waFloorOverride');
+        const wagesInput = document.getElementById('waWagesAmount');
+        const topupInput = document.getElementById('waTopupAmount');
+        const daySelect = document.getElementById('waCommitDay');
+        const settings = getWASettings();
+        if (floorInput && floorInput.dataset.userEdited) settings.floorOverride = parseFloat(floorInput.value) || null;
+        if (wagesInput && wagesInput.dataset.userEdited) settings.wages = parseFloat(wagesInput.value);
+        if (topupInput && topupInput.dataset.userEdited) settings.topup = parseFloat(topupInput.value);
+        if (daySelect && daySelect.dataset.userEdited) settings.commitDay = parseInt(daySelect.value);
+        localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(settings));
+    }
 
     function getWAState() {
         try {
@@ -1003,6 +1025,7 @@
             riskExcluded: riskIds,
         };
         localStorage.setItem(WA_KEY, JSON.stringify(state));
+        saveWASettings();
     }
 
     function analysePaymentLag(transactions, incomeTenancies) {
@@ -1086,6 +1109,7 @@
 
         const lagAnalysis = analysePaymentLag(transactions, incomeTenancies);
         const state = getWAState();
+        const settings = getWASettings();
         const savedCleared = new Set(state && state.cleared ? state.cleared : []);
         const savedRisk = new Set(state && state.riskExcluded ? state.riskExcluded : []);
 
@@ -1093,9 +1117,14 @@
             ? parseFloat(state.openingBal) : null;
         const effectiveOpening = userBal !== null ? userBal : dashboardOpeningBalance;
 
-        const WEEKLY_WAGES = 330;
-        const WEEKLY_TOPUP = 140;
+        const WEEKLY_WAGES = settings.wages !== undefined ? settings.wages : 330;
+        const WEEKLY_TOPUP = settings.topup !== undefined ? settings.topup : 140;
+        const COMMIT_DAY = settings.commitDay !== undefined ? settings.commitDay : 5;
         const WEEKLY_COMMITMENTS = WEEKLY_WAGES + WEEKLY_TOPUP;
+        const DAY_NAMES_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+        const balanceDiff = Math.abs(effectiveOpening - dashboardOpeningBalance);
+        const balanceWarning = userBal !== null && balanceDiff > 200;
 
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -1115,6 +1144,7 @@
 
         const projectedDays = [];
         let runningBalance = effectiveOpening;
+        let naturalBalance = effectiveOpening;
 
         const allDayInflows = [];
 
@@ -1144,12 +1174,14 @@
             });
 
             const dow = r.date.getDay();
-            if (dow === 5) {
+            if (dow === COMMIT_DAY) {
                 dayOut += WEEKLY_COMMITMENTS;
             }
 
             const opening = runningBalance;
+            const naturalOpening = naturalBalance;
             runningBalance += dayIn - dayOut;
+            naturalBalance += dayIn - dayOut;
 
             allDayInflows.push({ key: r.key, date: r.date, items: dayInflowItems });
 
@@ -1160,16 +1192,53 @@
                 dayOut,
                 opening,
                 balance: runningBalance,
-                isFriday: dow === 5,
+                naturalOpening,
+                naturalBalance,
+                isFriday: dow === COMMIT_DAY,
+                isPadded: false,
             });
         });
+
+        const EXTRA_DAYS = 14;
+        if (rows.length > 0) {
+            const lastForecastDate = new Date(rows[rows.length - 1].date);
+            for (let d = 1; d <= EXTRA_DAYS; d++) {
+                const padDate = new Date(lastForecastDate);
+                padDate.setDate(padDate.getDate() + d);
+                const dow = padDate.getDay();
+                const dayOut = dow === COMMIT_DAY ? WEEKLY_COMMITMENTS : 0;
+                const opening = runningBalance;
+                const naturalOpening = naturalBalance;
+                runningBalance -= dayOut;
+                naturalBalance -= dayOut;
+
+                projectedDays.push({
+                    date: padDate,
+                    key: dateKey(padDate),
+                    dayIn: 0,
+                    dayOut,
+                    opening,
+                    balance: runningBalance,
+                    naturalOpening,
+                    naturalBalance,
+                    isFriday: dow === COMMIT_DAY,
+                    isPadded: true,
+                });
+                allDayInflows.push({ key: dateKey(padDate), date: padDate, items: [] });
+            }
+        }
 
         const maxSingleInflow = rows.reduce((max, r) => {
             r.inflows.forEach(f => { if (!f.cleared && f.amount > max) max = f.amount; });
             return max;
         }, 0);
-        const bufferAmount = Math.max(500, maxSingleInflow * 0.3 * lagAnalysis.bufferDays / 3);
-        const roundedBuffer = Math.ceil(bufferAmount / 50) * 50;
+        const calculatedBuffer = Math.max(500, maxSingleInflow * 0.3 * lagAnalysis.bufferDays / 3);
+        const calculatedRounded = Math.ceil(calculatedBuffer / 50) * 50;
+        const floorOverride = settings.floorOverride;
+        const roundedBuffer = floorOverride !== null && floorOverride !== undefined
+            ? Math.ceil(floorOverride / 50) * 50
+            : calculatedRounded;
+        const usingCustomFloor = floorOverride !== null && floorOverride !== undefined;
 
         const withdrawals = [];
         let lastWithdrawalIdx = -1;
@@ -1263,7 +1332,10 @@
                     <span style="width:140px;text-align:right;color:var(--text-secondary);font-size:var(--fs-sm)">Balance after: ${fmt(w.balanceAfter)}</span>
                 </div>`;
             }).join('')
-            : `<div style="padding:12px;color:var(--text-muted)">No safe withdrawal windows in the next 31 days. All surplus is needed to cover commitments and maintain the safety buffer.</div>`;
+            : `<div style="padding:12px;color:var(--text-muted)">No safe withdrawal windows in the forecast period. All surplus is needed to cover commitments and maintain the safety buffer.</div>`;
+
+        const forecastDayCount = rows.length;
+        const totalDayCount = projectedDays.length;
 
         const dailyBalanceRows = projectedDays.map((d, idx) => {
             const isToday2 = d.key === todayKey;
@@ -1272,6 +1344,7 @@
             const isNearBuffer = !isBelowBuffer && d.balance < roundedBuffer * 1.2;
             const closingClass = isBelowBuffer ? 'text-red' : isNearBuffer ? 'text-amber' : 'text-green';
             const wknd = [0, 6].includes(d.date.getDay()) ? ' weekend' : '';
+            const paddedStyle = d.isPadded ? ' style="opacity:0.7;font-style:italic"' : '';
 
             const dayInflows = allDayInflows[idx];
             const hasRiskItems = dayInflows && dayInflows.items.length > 0;
@@ -1293,20 +1366,30 @@
                 ? `<div style="margin-top:6px;padding:6px 8px;background:var(--accent-soft);border-radius:var(--radius-sm);font-size:var(--fs-xs);color:var(--accent)"><strong>Withdrawal window:</strong> ${fmt(w.amount)} safe to take</div>`
                 : '';
 
+            const naturalDiff = d.naturalBalance - d.balance;
+            const naturalNote = naturalDiff > 0
+                ? `<div style="margin-top:6px;font-size:var(--fs-xs);color:var(--text-muted)">Without withdrawals, closing would be ${fmtAccounting(d.naturalBalance)}</div>`
+                : '';
+
+            const dateLabel = isToday2 ? '<strong>Today</strong>' : '<strong>' + dayName(d.date) + '</strong>';
+            const paddedTag = d.isPadded ? ' <span style="font-size:0.7rem;color:var(--text-muted);font-weight:normal">(est.)</span>' : '';
+
             return `
-                <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('warow-${idx}', this)">
-                    <td><span class="expand-chevron" id="wa-chev-${idx}">▶</span>${isToday2 ? '<strong>Today</strong>' : '<strong>' + dayName(d.date) + '</strong>'}</td>
+                <tr class="cashflow-row${wknd}"${paddedStyle} onclick="toggleCashflowRow('warow-${idx}', this)">
+                    <td><span class="expand-chevron" id="wa-chev-${idx}">▶</span>${dateLabel}${paddedTag}</td>
                     <td>${fmtAccounting(d.opening)}</td>
                     <td class="text-green">${d.dayIn > 0 ? '+' + fmt(d.dayIn) : ''}</td>
                     <td class="text-red">${d.dayOut > 0 ? '-' + fmt(d.dayOut) : ''}</td>
                     <td class="${closingClass}"><strong>${fmtAccounting(d.balance)}</strong></td>
+                    <td style="color:var(--text-muted);font-size:var(--fs-xs)">${fmtAccounting(d.naturalBalance)}</td>
                     <td>${w ? '<span style="color:var(--accent);font-weight:var(--fw-semibold)">' + fmt(w.amount) + '</span>' : ''}</td>
                 </tr>
                 <tr class="cashflow-table-row-detail" id="warow-${idx}">
-                    <td colspan="6"><div class="expand-content"><div class="cashflow-detail-list">
+                    <td colspan="7"><div class="expand-content"><div class="cashflow-detail-list">
                         <div style="margin-bottom:8px"><strong>Inflows</strong> <span style="font-weight:normal;font-size:var(--fs-xs);color:var(--text-muted)">(tick to flag as risk payment)</span></div>
                         ${inflowsDetail}
                         ${withdrawNote}
+                        ${naturalNote}
                     </div></div></td>
                 </tr>`;
         }).join('');
@@ -1317,6 +1400,12 @@
             </div>`
             : '';
 
+        const balanceWarningHtml = balanceWarning
+            ? `<div style="padding:10px 14px;background:var(--warning-bg);border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-primary)">
+                <strong>Balance mismatch:</strong> Your entered balance (${fmt(effectiveOpening)}) differs from the dashboard calculated balance (${fmt(dashboardOpeningBalance)}) by ${fmt(balanceDiff)}. The entered balance is used for all calculations. If this is wrong, clear the field and recalculate.
+            </div>`
+            : '';
+
         const headerValue = totalAvailable > 0
             ? `<span style="color:var(--success)">${fmt(totalAvailable)}</span>`
             : `<span style="color:var(--text-muted)">Nothing safe to withdraw</span>`;
@@ -1324,9 +1413,17 @@
             ? `Next: ${fmt(nextWithdrawal.amount)} on ${dayName(nextWithdrawal.date)}`
             : 'No withdrawal windows identified';
 
+        const dayOptions = [0,1,2,3,4,5,6].map(d => {
+            const sel = d === COMMIT_DAY ? ' selected' : '';
+            return `<option value="${d}"${sel}>${DAY_NAMES_SHORT[d]}</option>`;
+        }).join('');
+
+        const floorVal = usingCustomFloor ? floorOverride : calculatedRounded;
+        const floorEdited = usingCustomFloor ? ' data-user-edited="1"' : '';
+
         container.innerHTML = `
             <div class="kpi-card clickable" onclick="toggleCard(this)" style="max-width:100%">
-                <div class="kpi-card-label">Safe to withdraw (31 days) <span class="chevron">&#x25B8;</span></div>
+                <div class="kpi-card-label">Safe to withdraw (${totalDayCount} days) <span class="chevron">&#x25B8;</span></div>
                 <div class="kpi-card-value">${headerValue}</div>
                 <div class="kpi-card-sub">${headerSub}</div>
                 <div class="kpi-card-detail" onclick="event.stopPropagation()" style="text-align:left">
@@ -1341,16 +1438,40 @@
                             <span style="color:var(--text-muted);font-size:var(--fs-xs)">Your actual bank balance right now. Cleared items below are already in this figure.</span>
                         </div>
 
+                        ${balanceWarningHtml}
+
                         ${todayItemsHtml}
 
                         ${riskBanner}
 
                         <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)">
-                            <strong>Safety buffer:</strong> ${fmt(roundedBuffer)} . ${escHtml(lagAnalysis.bufferReason)}
+                            <strong>Safety floor:</strong>
+                            <input type="number" id="waFloorOverride" value="${floorVal}"
+                                step="50" min="0"
+                                style="width:100px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface);margin:0 6px"
+                                onchange="this.dataset.userEdited='1';waRecalc()"${floorEdited}>
+                            <span style="font-size:var(--fs-xs);color:var(--text-muted)">${usingCustomFloor ? 'Custom override' : 'Auto-calculated'} . ${escHtml(lagAnalysis.bufferReason)}</span>
+                            ${usingCustomFloor ? ' <button onclick="waResetFloor()" style="font-size:var(--fs-xs);color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Reset to auto</button>' : ''}
                         </div>
 
-                        <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary)">
-                            <strong>Weekly commitments:</strong> Wages ${fmt(WEEKLY_WAGES)} + Top-up ${fmt(WEEKLY_TOPUP)} = ${fmt(WEEKLY_COMMITMENTS)}/week (applied every Friday)
+                        <div style="background:var(--bg-surface-2);padding:10px 14px;border-radius:var(--radius-md);margin-bottom:16px;font-size:var(--fs-sm);color:var(--text-secondary);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                            <strong>Weekly commitments:</strong>
+                            Wages
+                            <input type="number" id="waWagesAmount" value="${WEEKLY_WAGES}"
+                                step="10" min="0"
+                                style="width:90px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
+                                onchange="this.dataset.userEdited='1';waRecalc()"${settings.wages !== undefined ? ' data-user-edited="1"' : ''}>
+                            + Top-up
+                            <input type="number" id="waTopupAmount" value="${WEEKLY_TOPUP}"
+                                step="10" min="0"
+                                style="width:90px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
+                                onchange="this.dataset.userEdited='1';waRecalc()"${settings.topup !== undefined ? ' data-user-edited="1"' : ''}>
+                            = ${fmt(WEEKLY_COMMITMENTS)}/week on
+                            <select id="waCommitDay"
+                                style="padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface)"
+                                onchange="this.dataset.userEdited='1';waRecalc()"${settings.commitDay !== undefined ? ' data-user-edited="1"' : ''}>
+                                ${dayOptions}
+                            </select>
                         </div>
 
                         <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">Withdrawal schedule:</div>
@@ -1363,7 +1484,7 @@
                             ${scheduleHtml}
                         </div>
 
-                        <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">31-day daily balance <span style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--text-muted)">(click a row to expand and flag risk payments)</span></div>
+                        <div style="font-weight:var(--fw-semibold);margin-bottom:8px;color:var(--text-primary)">${totalDayCount}-day daily balance <span style="font-weight:var(--fw-regular);font-size:var(--fs-xs);color:var(--text-muted)">(click a row to expand and flag risk payments${EXTRA_DAYS > 0 ? '; last ' + EXTRA_DAYS + ' days are estimates with weekly commitments only' : ''})</span></div>
                         <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);overflow:hidden">
                             <table class="cashflow-table" style="width:100%;font-size:var(--fs-sm)">
                                 <thead>
@@ -1373,6 +1494,7 @@
                                         <th style="text-align:right">In</th>
                                         <th style="text-align:right">Out</th>
                                         <th style="text-align:right">Closing</th>
+                                        <th style="text-align:right;font-size:var(--fs-xs);color:var(--text-muted)">Natural</th>
                                         <th style="text-align:right">Withdraw</th>
                                     </tr>
                                 </thead>
@@ -1405,4 +1527,13 @@
             const newCard = document.querySelector('#withdrawalAdvisorCard .kpi-card');
             if (newCard && !newCard.classList.contains('expanded')) newCard.classList.add('expanded');
         }
+    }
+
+    function waResetFloor() {
+        const s = getWASettings();
+        delete s.floorOverride;
+        localStorage.setItem(WA_SETTINGS_KEY, JSON.stringify(s));
+        const floorInput = document.getElementById('waFloorOverride');
+        if (floorInput) delete floorInput.dataset.userEdited;
+        waRecalc();
     }
