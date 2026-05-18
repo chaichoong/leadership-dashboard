@@ -429,38 +429,10 @@
             return;
         }
 
-        // Forward qt:open-new-task-drawer from child iframes to the tasks iframe
+        // Open lightweight task creation modal on the current page (no tab switch)
         if (e.data.type === 'qt:open-new-task-drawer') {
-            const frame = document.getElementById('tasksFrame');
-            if (frame) {
-                // Ensure the tasks tab is visible and iframe is loaded
-                try { window.switchTab('tasks'); } catch (err) {}
-                // Lazy-loaded iframes may not have src set yet; ensure it loads
-                if (!frame.src && frame.dataset.src) {
-                    frame.src = frame.dataset.src;
-                }
-                // Wait for iframe to fully load and be ready (tasks page needs
-                // 5-10s to load data from Airtable and initialize functions)
-                const msgData = e.data;
-                let attempts = 0;
-                const tryPost = () => {
-                    attempts++;
-                    try {
-                        if (frame.contentWindow && typeof frame.contentWindow.openNewTaskDrawer === 'function') {
-                            frame.contentWindow.postMessage(msgData, '*');
-                        } else if (attempts < 50) {
-                            setTimeout(tryPost, 300);
-                        } else {
-                            // Last resort: post anyway and hope the listener picks it up
-                            try { frame.contentWindow.postMessage(msgData, '*'); } catch (err2) {}
-                        }
-                    } catch (err) {
-                        if (attempts < 50) setTimeout(tryPost, 300);
-                    }
-                };
-                // Start checking after 1 second to give iframe time to begin loading
-                setTimeout(tryPost, 1000);
-            }
+            const opts = e.data.opts || {};
+            openQuickTaskModal(opts);
             return;
         }
     });
@@ -863,5 +835,130 @@ if (tabId === 'comms') {
             document.body.appendChild(overlay);
             okBtn.focus();
         });
+    }
+
+    // ── Quick Task Creation Modal ──
+    // Opens a lightweight task creation form as an overlay on the current page.
+    // No tab switching required. Creates the task directly via Airtable API.
+    function openQuickTaskModal(opts) {
+        const existing = document.getElementById('quickTaskOverlay');
+        if (existing) existing.remove();
+
+        const todayStr = new Date().toISOString().split('T')[0];
+        const name = opts.name || '';
+        const description = opts.description || '';
+
+        const overlay = document.createElement('div');
+        overlay.id = 'quickTaskOverlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center';
+
+        const teamOptions = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).map(m =>
+            `<option value="${escHtml(m.key)}">${escHtml(m.name)}</option>`
+        ).join('');
+
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:var(--bg-surface,#fff);border-radius:var(--radius-lg,12px);padding:24px;width:520px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg,0 8px 32px rgba(0,0,0,0.2))';
+        panel.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="margin:0;font-size:var(--fs-lg,18px);color:var(--text-primary,#1C2422)">Create Task</h3>
+                <button id="qtClose" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C);padding:4px 8px">&times;</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+                <div>
+                    <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Task Name</label>
+                    <input id="qtName" type="text" value="${escHtml(name)}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box" />
+                </div>
+                <div>
+                    <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Description</label>
+                    <textarea id="qtDesc" rows="5" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;resize:vertical;box-sizing:border-box">${escHtml(description)}</textarea>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div>
+                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Assignee</label>
+                        <select id="qtAssignee" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box">
+                            <option value="">Select assignee...</option>
+                            ${teamOptions}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Due Date</label>
+                        <input id="qtDue" type="date" value="${todayStr}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box" />
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div>
+                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Priority</label>
+                        <select id="qtPriority" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box">
+                            <option value="Not Urgent" selected>Not Urgent</option>
+                            <option value="Important">Important</option>
+                            <option value="Urgent">Urgent</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Time Estimate</label>
+                        <select id="qtTime" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box">
+                            <option value="15 min" selected>15 min</option>
+                            <option value="30 min">30 min</option>
+                            <option value="1 hour">1 hour</option>
+                            <option value="2 hours">2 hours</option>
+                            <option value="Half day">Half day</option>
+                            <option value="Full day">Full day</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+                <button id="qtCancel" style="padding:8px 16px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-primary,#1C2422);cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit">Cancel</button>
+                <button id="qtSubmit" style="padding:8px 16px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit;font-weight:var(--fw-semibold,600)">Create Task</button>
+            </div>
+        `;
+
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        const closeModal = () => overlay.remove();
+        panel.querySelector('#qtClose').onclick = closeModal;
+        panel.querySelector('#qtCancel').onclick = closeModal;
+        overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+
+        panel.querySelector('#qtSubmit').onclick = async () => {
+            const taskName = panel.querySelector('#qtName').value.trim();
+            if (!taskName) { showToast('Task name is required', { type: 'warning' }); return; }
+
+            const submitBtn = panel.querySelector('#qtSubmit');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating...';
+
+            try {
+                const assigneeKey = panel.querySelector('#qtAssignee').value;
+                const member = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).find(m => m.key === assigneeKey);
+
+                const fields = {};
+                fields[TASK_FIELDS.name] = taskName;
+                fields[TASK_FIELDS.description] = panel.querySelector('#qtDesc').value;
+                fields[TASK_FIELDS.dueDate] = panel.querySelector('#qtDue').value || todayStr;
+                fields[TASK_FIELDS.priority] = panel.querySelector('#qtPriority').value;
+                fields[TASK_FIELDS.timeEstimate] = panel.querySelector('#qtTime').value;
+                fields[TASK_FIELDS.status] = 'Today';
+                if (member) fields[TASK_FIELDS.assignee] = member.email;
+
+                const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`, {
+                    method: 'POST',
+                    headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records: [{ fields }] })
+                });
+
+                if (!res.ok) throw new Error('Airtable error: ' + res.status);
+
+                closeModal();
+                showToast('Task created: ' + taskName, { type: 'success' });
+            } catch (err) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Task';
+                showToast('Failed to create task: ' + err.message, { type: 'danger' });
+            }
+        };
+
+        panel.querySelector('#qtName').focus();
     }
 

@@ -622,11 +622,12 @@ async function loadData(){
 
 async function checkVideoTasks(){
     const wfIds = allWorkflows.map(w=>w.id);
-    const pendingIds = wfIds.filter(id=>getWfVideoTaskId(id) && getWfVideoTaskStatus(id)==='pending');
-    if(!pendingIds.length) return;
+    // Check ALL workflows with a linked video task (not just pending)
+    const trackedIds = wfIds.filter(id=>getWfVideoTaskId(id));
+    if(!trackedIds.length) return;
     const newlyCompleted = [];
     try {
-        const taskIds = pendingIds.map(id=>getWfVideoTaskId(id)).filter(Boolean);
+        const taskIds = trackedIds.map(id=>getWfVideoTaskId(id)).filter(Boolean);
         const formula = taskIds.length===1
             ? `RECORD_ID()='${taskIds[0]}'`
             : `OR(${taskIds.map(id=>`RECORD_ID()='${id}'`).join(',')})`;
@@ -641,25 +642,35 @@ async function checkVideoTasks(){
         if(!res.ok) return;
         const data = await res.json();
         allVideoTasks = data.records||[];
-        for(const wfId of pendingIds){
+        for(const wfId of trackedIds){
             const taskId = getWfVideoTaskId(wfId);
             const task = allVideoTasks.find(t=>t.id===taskId);
-            if(!task) continue;
+            // Task was deleted from Airtable: clear localStorage
+            if(!task){
+                setWfVideoTaskId(wfId, '');
+                setWfVideoTaskStatus(wfId, '');
+                continue;
+            }
             const status = selName(gf(task,TF.status))||'';
             if(status==='Complete'||status==='Done'){
-                setWfVideoTaskStatus(wfId, 'complete');
-                const notes = gf(task,TF.notes)||'';
-                const desc = gf(task,TF.description)||'';
-                const combined = notes + ' ' + desc;
-                const bracketMatch = combined.match(/\[loom:(https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+)\]/);
-                const plainMatch = combined.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
-                const loomUrl = bracketMatch ? bracketMatch[1] : (plainMatch ? plainMatch[0] : null);
-                if(loomUrl && !getWfLoomUrl(wfId)){
-                    await setWfLoomUrl(wfId, loomUrl);
-                    const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
-                    toast('Loom URL auto-imported for "'+wName+'"');
-                    newlyCompleted.push(wfId);
+                if(getWfVideoTaskStatus(wfId)!=='complete'){
+                    setWfVideoTaskStatus(wfId, 'complete');
+                    const notes = gf(task,TF.notes)||'';
+                    const desc = gf(task,TF.description)||'';
+                    const combined = notes + ' ' + desc;
+                    const bracketMatch = combined.match(/\[loom:(https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+)\]/);
+                    const plainMatch = combined.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
+                    const loomUrl = bracketMatch ? bracketMatch[1] : (plainMatch ? plainMatch[0] : null);
+                    if(loomUrl && !getWfLoomUrl(wfId)){
+                        await setWfLoomUrl(wfId, loomUrl);
+                        const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
+                        toast('Loom URL auto-imported for "'+wName+'"');
+                        newlyCompleted.push(wfId);
+                    }
                 }
+            } else {
+                // Sync current status from Airtable
+                setWfVideoTaskStatus(wfId, 'pending');
             }
         }
     } catch(e){ console.error('Video task check failed:', e); }
@@ -965,13 +976,18 @@ function renderAll(){
     const wfs = filteredWorkflows().slice().sort((a,b)=>{
         if(_allSortMode==='alpha') return nameCmp(a,b);
         if(_allSortMode==='department'){
-            const da=(selName(gf(a,WF.department))||'zzz').toLowerCase(), db=(selName(gf(b,WF.department))||'zzz').toLowerCase();
-            if(da!==db) return da<db?-1:1;
+            const da=selName(gf(a,WF.department))||'', db=selName(gf(b,WF.department))||'';
+            const ai=DEPARTMENTS.indexOf(da), bi=DEPARTMENTS.indexOf(db);
+            const aIdx=ai>=0?ai:DEPARTMENTS.length, bIdx=bi>=0?bi:DEPARTMENTS.length;
+            if(aIdx!==bIdx) return aIdx-bIdx;
             return nameCmp(a,b);
         }
         if(_allSortMode==='journey'){
-            const fa=(selName(gf(a,WF.fulfillStage))||'zzz').toLowerCase(), fb=(selName(gf(b,WF.fulfillStage))||'zzz').toLowerCase();
-            if(fa!==fb) return fa<fb?-1:1;
+            const fa=selName(gf(a,WF.fulfillStage))||'', fb=selName(gf(b,WF.fulfillStage))||'';
+            const fsKeys=FULFILL_STAGES.map(s=>s.key), fsLabels=FULFILL_STAGES.map(s=>s.label);
+            let ai=fsKeys.indexOf(fa); if(ai<0)ai=fsLabels.indexOf(fa); if(ai<0)ai=FULFILL_STAGES.length;
+            let bi=fsKeys.indexOf(fb); if(bi<0)bi=fsLabels.indexOf(fb); if(bi<0)bi=FULFILL_STAGES.length;
+            if(ai!==bi) return ai-bi;
             return nameCmp(a,b);
         }
         // default: method
@@ -1058,7 +1074,7 @@ function renderAll(){
         } else if(_allSortMode==='department'){
             DEPARTMENTS.forEach(d => grouped.set(d, []));
         } else if(_allSortMode==='journey'){
-            FULFILL_STAGES.forEach(s => grouped.set(s.label, []));
+            FULFILL_STAGES.forEach(s => grouped.set(s.key, []));
         }
         grouped.set(UNASSIGNED, []);
         wfs.forEach(w => {
@@ -1083,6 +1099,9 @@ function renderAll(){
                 if(_allSortMode==='method'){
                     const method = allMethods.find(m=>m.id===key);
                     label = method ? (gf(method,MM.name)||'Unnamed') : 'Unnamed';
+                } else if(_allSortMode==='journey'){
+                    const stage = FULFILL_STAGES.find(s=>s.key===key);
+                    label = stage ? stage.label : key;
                 } else {
                     label = key;
                 }
