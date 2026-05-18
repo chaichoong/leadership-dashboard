@@ -255,10 +255,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .loom-embed-container{grid-column:1/-1;margin-top:4px}
 .loom-embed-container iframe{width:100%;height:280px;border:none;border-radius:var(--radius-md)}
 
-.loom-import-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 14px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:var(--radius-md)}
-.loom-import-bar input{flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-surface);color:var(--text-primary);font-family:inherit}
-.loom-import-bar input:focus{outline:none;border-color:var(--accent)}
-.loom-import-bar .btn{flex-shrink:0}
 
 .settings-icon{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);padding:4px}
 .settings-icon:hover{color:var(--text-primary)}
@@ -463,8 +459,25 @@ function isSkillCreated(stepId){
 }
 function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)==='1'; }
 
-function getWfLoomUrl(wfId){ return localStorage.getItem('sys_loom_'+wfId)||''; }
-function setWfLoomUrl(wfId, url){ if(url) localStorage.setItem('sys_loom_'+wfId, url); else localStorage.removeItem('sys_loom_'+wfId); }
+function getWfLoomUrl(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return '';
+    const desc = gf(w,WF.description)||'';
+    const m = desc.match(/\[loom:(https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+)\]/);
+    return m ? m[1] : (localStorage.getItem('sys_loom_'+wfId)||'');
+}
+async function setWfLoomUrl(wfId, url){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    let desc = gf(w,WF.description)||'';
+    desc = desc.replace(/\s*\[loom:https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+\]/g, '').trim();
+    if(url) desc = (desc ? desc + '\n' : '') + '[loom:' + url + ']';
+    try {
+        await atUpdate(TBL.workflows, wfId, {[WF.description]: desc});
+        w.fields[WF.description] = desc;
+    } catch(e){ console.error('Loom URL save error:', e); }
+    if(url) localStorage.setItem('sys_loom_'+wfId, url); else localStorage.removeItem('sys_loom_'+wfId);
+}
 function getWfDriveUrl(wfId){
     const w = allWorkflows.find(w=>w.id===wfId);
     return (w && gf(w,WF.driveUrl)) || localStorage.getItem('sys_drive_'+wfId) || '';
@@ -631,7 +644,7 @@ async function checkVideoTasks(){
                 const plainMatch = combined.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
                 const loomUrl = bracketMatch ? bracketMatch[1] : (plainMatch ? plainMatch[0] : null);
                 if(loomUrl && !getWfLoomUrl(wfId)){
-                    setWfLoomUrl(wfId, loomUrl);
+                    await setWfLoomUrl(wfId, loomUrl);
                     const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
                     toast('Loom URL auto-imported for "'+wName+'"');
                     newlyCompleted.push(wfId);
@@ -2553,39 +2566,26 @@ function renderSteps(){
                 </div>`;
             }
 
-            html += `<div class="resources-panel${loomUrl||driveUrl?' open':''}" id="resources-${w.id}">
+            const hasResources = loomUrl || driveUrl;
+            html += `<div class="resources-panel${hasResources?' open':''}" id="resources-${w.id}">
                 <div class="resources-header" onclick="this.parentElement.classList.toggle('open')">
                     <span class="resources-chevron">&#x25B6;</span>
                     Resources
                 </div>
                 <div class="resources-body">
                     <div class="resources-grid">
-                        <div class="resources-item">
-                            <label>Loom Video URL</label>
-                            <input type="url" placeholder="https://www.loom.com/share/..." value="${esc(loomUrl)}" onblur="setWfLoomUrl('${w.id}',this.value);renderStepsResourceEmbed('${w.id}')">
-                        </div>
-                        <div class="resources-item">
-                            <label>Google Drive Folder</label>
-                            <input type="url" placeholder="https://drive.google.com/..." value="${esc(driveUrl)}" onblur="setWfDriveUrl('${w.id}',this.value)">
-                        </div>
                         ${loomUrl?`<div class="resources-item">
-                            <label>Loom SOP</label>
-                            <a href="${esc(loomUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open in Loom to generate SOP &#x2197;</a>
+                            <label>Loom Video</label>
+                            <a href="${esc(loomUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open in Loom &#x2197;</a>
                         </div>`:''}
                         ${driveUrl?`<div class="resources-item">
                             <label>Drive Folder</label>
                             <a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open folder &#x2197;</a>
                         </div>`:''}
                     </div>
-                    <div class="loom-embed-container" id="loomEmbed-${w.id}" style="margin-top:12px">
-                        ${loomUrl?renderLoomEmbed(loomUrl):''}
-                    </div>
+                    ${loomUrl?`<div class="loom-embed-container" id="loomEmbed-${w.id}" style="margin-top:12px">${renderLoomEmbed(loomUrl)}</div>`:''}
+                    ${!hasResources?'<p style="font-size:var(--fs-xs);color:var(--text-muted);margin:4px 0">Add a Loom URL to the workflow description using <code>[loom:URL]</code> to link a video here.</p>':''}
                 </div>
-            </div>`;
-
-            html += `<div class="loom-import-bar">
-                <input type="url" placeholder="Paste Loom URL to import steps from transcript..." id="loomImportUrl-${w.id}" value="${esc(loomUrl)}">
-                <button class="btn btn-sm btn-ai" onclick="importFromLoom('${w.id}')">Import from Loom</button>
             </div>`;
 
             html += '<table class="wf-grid"><thead><tr>';
@@ -3050,14 +3050,13 @@ async function autoAddSteps(suggestions, wfId){
 }
 
 async function importFromLoom(wfId, auto){
-    const urlInput = document.getElementById('loomImportUrl-'+wfId);
-    let loomUrl = urlInput ? urlInput.value.trim() : getWfLoomUrl(wfId);
-    if(!loomUrl){ if(!auto) toast('Paste a Loom URL first'); return; }
+    let loomUrl = getWfLoomUrl(wfId);
+    if(!loomUrl){ if(!auto) toast('No Loom URL found. Add [loom:URL] to the workflow description first.'); return; }
 
     const match = loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
     if(!match){ if(!auto) toast('Invalid Loom URL. Use format: https://www.loom.com/share/...'); return; }
 
-    setWfLoomUrl(wfId, loomUrl);
+    await setWfLoomUrl(wfId, loomUrl);
 
     if(!auto) toast('Fetching transcript from Loom...');
     const transcript = await fetchLoomTranscript(loomUrl);
