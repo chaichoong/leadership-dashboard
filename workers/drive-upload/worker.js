@@ -1,6 +1,6 @@
 // Google Drive SOP Upload Worker
 // POST /upload  { workflowName, htmlContent, fileName }
-// Returns { folderId, folderUrl, fileId, fileUrl }
+// Returns { folderId, folderUrl, fileId, fileUrl, docId, docUrl }
 // GET /auth/start — redirects to Google OAuth consent screen
 // GET /auth/callback — exchanges code for refresh token, displays it
 
@@ -65,8 +65,9 @@ export default {
 
             const folder = await createFolder(accessToken, workflowName, parentFolderId);
 
-            const safeName = (fileName || workflowName).replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '-') + '.html';
-            const file = await uploadFile(accessToken, safeName, htmlContent, folder.id);
+            const safeName = (fileName || workflowName).replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '-');
+            const file = await uploadFile(accessToken, safeName + '.html', htmlContent, folder.id);
+            const doc = await uploadAsGoogleDoc(accessToken, safeName, htmlContent, folder.id);
 
             await shareFolder(accessToken, folder.id);
 
@@ -75,6 +76,8 @@ export default {
                 folderUrl: `https://drive.google.com/drive/folders/${folder.id}`,
                 fileId: file.id,
                 fileUrl: `https://drive.google.com/file/d/${file.id}/view`,
+                docId: doc.id,
+                docUrl: `https://docs.google.com/document/d/${doc.id}/edit`,
             });
         } catch (e) {
             return jsonResponse({ error: e.message }, 500);
@@ -143,6 +146,36 @@ async function uploadFile(token, fileName, htmlContent, folderId) {
         body,
     });
     if (!res.ok) throw new Error('File upload failed: ' + await res.text());
+    return res.json();
+}
+
+async function uploadAsGoogleDoc(token, docName, htmlContent, folderId) {
+    const metadata = {
+        name: docName,
+        parents: [folderId],
+        mimeType: 'application/vnd.google-apps.document',
+    };
+    const boundary = '----CloudflareWorkerBoundaryDoc';
+
+    const body = [
+        `--${boundary}\r\n`,
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+        JSON.stringify(metadata) + '\r\n',
+        `--${boundary}\r\n`,
+        'Content-Type: text/html\r\n\r\n',
+        htmlContent + '\r\n',
+        `--${boundary}--`,
+    ].join('');
+
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+    });
+    if (!res.ok) throw new Error('Google Doc upload failed: ' + await res.text());
     return res.json();
 }
 
