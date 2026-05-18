@@ -3377,11 +3377,7 @@ function assignVideoTask(wfId){
         }
     }, '*');
 
-    // Also store the video task tracking locally
-    setWfVideoTaskId(wfId, 'pending-' + Date.now());
-    setWfVideoTaskStatus(wfId, 'pending');
-    toast('Task drawer opened. Create the video recording task there.');
-    render();
+    toast('Opening task drawer...');
 }
 
 async function createVideoTask(wfId){
