@@ -59,6 +59,30 @@
         workflowSteps: 'tblTadoyWXFHbmYxm', // Workflow Steps (within Systemisation Workflows)
     };
 
+    // ── Task field IDs (Airtable table: Tasks / tblqB8b22hKBL4PF1) ──
+    const TASK_FIELDS = {
+        name:        'fldgFjGBw6bTKJFCD',
+        status:      'fldx4qCw17UfrKpaN',
+        assignee:    'fldELMncVJYPDRJNc',
+        description: 'fldRGhBQViKZKtkQ6',
+        category:    'fldVDvfhfOUBNvAxe',
+        notes:       'fldR7apBzSp3oxFxz',
+        dueDate:     'fld7XP8w8kbxfETV4',
+        priority:    'fldS21RwmwOqt71LI',
+        attachments: 'fldEbs9cscRr8elcw',
+        timeEstimate:'fld10VzzbiNNgRmIi',
+        collaborators:'fldcq3t6uAPgWSOP8',
+    };
+
+    const TASK_TEAM = [
+        { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
+        { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
+        { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
+        { key:'gary',  name:'Gary Marsh',      email:'gkm.property.maintenance@outlook.com' },
+        { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
+        { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
+    ];
+
     // ── Arrears Records field IDs (Airtable table: Arrears Records / tblzG0B9oRRpszcgC) ──
     // 7-stage credit control pipeline. One record per arrears journey (per missed payment).
     // Branches by tenant type (read from tenantPayType on linked Tenant): Working / Universal Credit / Agent-Managed.

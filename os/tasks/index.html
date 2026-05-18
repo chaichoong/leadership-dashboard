@@ -793,6 +793,10 @@ const saveDebounce = {};
 function todayStr(){const d=new Date();const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${dd}`}
 function teamKey(email){const m=TEAM.find(t=>t.email===email);return m?m.key:'other'}
 function escHtml(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
+function linkifyUrls(text){
+    if(!text) return '';
+    return escHtml(text).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline;word-break:break-all">$1</a>').replace(/\n/g,'<br>');
+}
 function toast(msg, err){const el=document.getElementById('toast');if(!el)return;try{el.textContent=msg;el.className='toast show'+(err?' err':'');clearTimeout(el._t);el._t=setTimeout(()=>{if(el&&el.classList)el.classList.remove('show')},err?6000:1800)}catch(e){console.warn('toast failed',e)}}
 
 // ═══ Save-state tracker ═══
@@ -2338,7 +2342,7 @@ function openDrillDownTaskDetail(taskId){
     <div class="field-row"><label>Time Estimate</label><div class="field-val"><select onchange="updateTaskField('${t.id}','timeEst',this.value);renderAll()"><option value="">-</option>${TIME_OPTIONS.map(o=>`<option value="${o}" ${t.timeEst===o?'selected':''}>${o}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Priority</label><div class="field-val"><select id="drwPrioritySel" onchange="updateTaskField('${t.id}','priority',this.value);renderAll()"><option value="">-</option>${PRIORITY_OPTIONS.map(p=>`<option value="${p}" ${t.priority===p?'selected':''}>${p}</option>`).join('')}${t.priority==='High'?'<option value="High" selected>High (legacy)</option>':''}</select></div></div>
     <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'-'}</option>`).join('')}</select></div></div>
-    <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
+    <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value);updateDescPreview(this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div>${t.description&&/(https?:\/\/)/.test(t.description)?`<div id="drwDescPreview" style="margin-top:6px;padding:8px 10px;background:var(--bg-surface-2);border-radius:var(--radius-sm);font-size:var(--fs-xs);line-height:1.5;color:var(--text-secondary)">${linkifyUrls(t.description)}</div>`:''}</div>
     <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
     <div class="field-row"><label>Project</label><div class="field-val" id="drwProjectWrap">${renderProjectPicker(t)}</div></div>
@@ -2432,7 +2436,7 @@ function openTaskDrawer(taskId){
       <div class="field-row"><label>Status</label><div class="field-val"><select onchange="updateTaskField('${t.id}','status',this.value);renderAll()">${STATUS_OPTIONS.map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Business</label><div class="field-val"><select id="drwBusinessSel" onchange="updateTaskField('${t.id}','business',this.value);renderAll()"><option value="">-</option>${BUSINESS_OPTIONS.map(b=>`<option value="${b}" ${t.business===b?'selected':''}>${b}</option>`).join('')}</select></div></div>
       <div class="field-row"><label>Recurring</label><div class="field-val"><select onchange="updateTaskField('${t.id}','recurring',this.value);renderAll()">${RECUR_OPTIONS.map(r=>`<option value="${r}" ${t.recurring===r?'selected':''}>${r||'-'}</option>`).join('')}</select></div></div>
-      <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label style="display:flex;align-items:center;gap:8px">Description <button class="btn" style="padding:1px 8px;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500" onclick="toggleDescExpand(this)">Expand</button></label><div class="field-val"><textarea id="drwDescTA" oninput="drwSaveText('${t.id}','description',this.value);updateDescPreview(this.value)" onblur="drwSaveText('${t.id}','description',this.value,true)" placeholder="Describe the task or the end result...">${escHtml(t.description)}</textarea></div>${t.description&&/(https?:\/\/)/.test(t.description)?`<div id="drwDescPreview" style="margin-top:6px;padding:8px 10px;background:var(--bg-surface-2);border-radius:var(--radius-sm);font-size:var(--fs-xs);line-height:1.5;color:var(--text-secondary)">${linkifyUrls(t.description)}</div>`:''}</div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
       <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:var(--fs-sm);background:var(--accent);color:#fff;border-color:var(--accent)">Add &amp; view comments</button></div></div>
@@ -2521,6 +2525,22 @@ function toggleDescExpand(btn){
   }
 }
 window.toggleDescExpand=toggleDescExpand;
+function updateDescPreview(text){
+    let preview=document.getElementById('drwDescPreview');
+    if(/(https?:\/\/)/.test(text)){
+        if(!preview){
+            preview=document.createElement('div');
+            preview.id='drwDescPreview';
+            preview.style.cssText='margin-top:6px;padding:8px 10px;background:var(--bg-surface-2);border-radius:var(--radius-sm);font-size:var(--fs-xs);line-height:1.5;color:var(--text-secondary)';
+            const ta=document.getElementById('drwDescTA');
+            if(ta&&ta.parentNode&&ta.parentNode.parentNode)ta.parentNode.parentNode.appendChild(preview);
+        }
+        preview.innerHTML=linkifyUrls(text);
+    } else if(preview){
+        preview.remove();
+    }
+}
+window.updateDescPreview=updateDescPreview;
 // Manually re-fire the assignee Slack DM. Used when the automatic
 // notification didn't land (e.g. creator was on a stale cache, the
 // task was created in Airtable directly, etc.). Uses the task's
