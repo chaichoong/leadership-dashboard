@@ -432,11 +432,35 @@
         // Forward qt:open-new-task-drawer from child iframes to the tasks iframe
         if (e.data.type === 'qt:open-new-task-drawer') {
             const frame = document.getElementById('tasksFrame');
-            if (frame && frame.contentWindow) {
+            if (frame) {
+                // Ensure the tasks tab is visible and iframe is loaded
                 try { window.switchTab('tasks'); } catch (err) {}
-                setTimeout(() => {
+                // Lazy-loaded iframes may not have src set yet; ensure it loads
+                if (!frame.src && frame.dataset.src) {
+                    frame.src = frame.dataset.src;
+                }
+                // Wait for iframe to be ready before posting
+                const sendMsg = () => {
                     try { frame.contentWindow.postMessage(e.data, '*'); } catch (err) {}
-                }, 300);
+                };
+                // Retry a few times in case iframe is still loading
+                let attempts = 0;
+                const tryPost = () => {
+                    attempts++;
+                    try {
+                        if (frame.contentWindow && typeof frame.contentWindow.openNewTaskDrawer === 'function') {
+                            sendMsg();
+                        } else if (attempts < 20) {
+                            setTimeout(tryPost, 200);
+                        } else {
+                            sendMsg(); // last resort, post anyway
+                        }
+                    } catch (err) {
+                        if (attempts < 20) setTimeout(tryPost, 200);
+                        else sendMsg();
+                    }
+                };
+                setTimeout(tryPost, 300);
             }
             return;
         }

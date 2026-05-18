@@ -955,20 +955,32 @@ function renderDept(){
 }
 
 // ── All Workflows ──
+let _allSortMode = 'method';
 function renderAll(){
     const pane = document.getElementById('pane-all');
     const methodOrder = [];
     allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); }); });
     allMethods.forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); });
+    const nameCmp = (a,b)=>{ const na=(gf(a,WF.name)||'').toLowerCase(), nb=(gf(b,WF.name)||'').toLowerCase(); return na<nb?-1:na>nb?1:0; };
     const wfs = filteredWorkflows().slice().sort((a,b)=>{
+        if(_allSortMode==='alpha') return nameCmp(a,b);
+        if(_allSortMode==='department'){
+            const da=(selName(gf(a,WF.department))||'zzz').toLowerCase(), db=(selName(gf(b,WF.department))||'zzz').toLowerCase();
+            if(da!==db) return da<db?-1:1;
+            return nameCmp(a,b);
+        }
+        if(_allSortMode==='journey'){
+            const fa=(selName(gf(a,WF.fulfillStage))||'zzz').toLowerCase(), fb=(selName(gf(b,WF.fulfillStage))||'zzz').toLowerCase();
+            if(fa!==fb) return fa<fb?-1:1;
+            return nameCmp(a,b);
+        }
+        // default: method
         const aMethodIds = linkIds(gf(a,WF.mainMethodStage));
         const bMethodIds = linkIds(gf(b,WF.mainMethodStage));
         const aIdx = aMethodIds.length ? methodOrder.indexOf(aMethodIds[0]) : methodOrder.length;
         const bIdx = bMethodIds.length ? methodOrder.indexOf(bMethodIds[0]) : methodOrder.length;
         if(aIdx !== bIdx) return aIdx - bIdx;
-        const na = (gf(a,WF.name)||'').toLowerCase();
-        const nb = (gf(b,WF.name)||'').toLowerCase();
-        return na < nb ? -1 : na > nb ? 1 : 0;
+        return nameCmp(a,b);
     });
 
     if(!wfs.length && !allWorkflows.length){
@@ -978,10 +990,23 @@ function renderAll(){
 
     const paneEl = document.createElement('div');
 
+    const topBar = document.createElement('div');
+    topBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px';
     const hint = document.createElement('p');
-    hint.style.cssText = 'font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px';
+    hint.style.cssText = 'font-size:var(--fs-sm);color:var(--text-secondary);margin:0';
     hint.textContent = 'All workflows in one place. Edit inline or use the other tabs to organise by stage.';
-    paneEl.appendChild(hint);
+    topBar.appendChild(hint);
+    const sortWrap = document.createElement('div');
+    sortWrap.style.cssText = 'display:flex;align-items:center;gap:8px';
+    sortWrap.innerHTML = `<label style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap">Sort by</label>
+        <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_allSortMode=this.value;renderAll()">
+            <option value="method"${_allSortMode==='method'?' selected':''}>Main Method</option>
+            <option value="department"${_allSortMode==='department'?' selected':''}>Department</option>
+            <option value="journey"${_allSortMode==='journey'?' selected':''}>Customer Journey</option>
+            <option value="alpha"${_allSortMode==='alpha'?' selected':''}>Alphabetical (A-Z)</option>
+        </select>`;
+    topBar.appendChild(sortWrap);
+    paneEl.appendChild(topBar);
 
     const toolbar = document.createElement('div');
     toolbar.className = 'bulk-toolbar';
@@ -1023,27 +1048,50 @@ function renderAll(){
     const tbody = document.createElement('tbody');
     tbody.id = 'allGridBody';
 
-    const grouped = new Map();
     const UNASSIGNED = '__unassigned__';
-    methodOrder.forEach(mid => grouped.set(mid, []));
-    grouped.set(UNASSIGNED, []);
-    wfs.forEach(w => {
-        const mIds = linkIds(gf(w,WF.mainMethodStage));
-        const key = mIds.length ? mIds[0] : UNASSIGNED;
-        if(!grouped.has(key)) grouped.set(key, []);
-        grouped.get(key).push(w);
-    });
-
-    grouped.forEach((groupWfs, key) => {
-        if(!groupWfs.length) return;
-        const headerTr = document.createElement('tr');
-        headerTr.className = 'wf-grid-group-header';
-        const method = key !== UNASSIGNED ? allMethods.find(m=>m.id===key) : null;
-        const label = method ? (gf(method,MM.name)||'Unnamed') : 'Unassigned';
-        headerTr.innerHTML = `<td colspan="8">${esc(label)} (${groupWfs.length})</td>`;
-        tbody.appendChild(headerTr);
-        groupWfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
-    });
+    if(_allSortMode==='alpha'){
+        wfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
+    } else {
+        const grouped = new Map();
+        if(_allSortMode==='method'){
+            methodOrder.forEach(mid => grouped.set(mid, []));
+        } else if(_allSortMode==='department'){
+            DEPARTMENTS.forEach(d => grouped.set(d, []));
+        } else if(_allSortMode==='journey'){
+            FULFILL_STAGES.forEach(s => grouped.set(s.label, []));
+        }
+        grouped.set(UNASSIGNED, []);
+        wfs.forEach(w => {
+            let key = UNASSIGNED;
+            if(_allSortMode==='method'){
+                const mIds = linkIds(gf(w,WF.mainMethodStage));
+                key = mIds.length ? mIds[0] : UNASSIGNED;
+            } else if(_allSortMode==='department'){
+                key = selName(gf(w,WF.department)) || UNASSIGNED;
+            } else if(_allSortMode==='journey'){
+                key = selName(gf(w,WF.fulfillStage)) || UNASSIGNED;
+            }
+            if(!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(w);
+        });
+        grouped.forEach((groupWfs, key) => {
+            if(!groupWfs.length) return;
+            const headerTr = document.createElement('tr');
+            headerTr.className = 'wf-grid-group-header';
+            let label = 'Unassigned';
+            if(key !== UNASSIGNED){
+                if(_allSortMode==='method'){
+                    const method = allMethods.find(m=>m.id===key);
+                    label = method ? (gf(method,MM.name)||'Unnamed') : 'Unnamed';
+                } else {
+                    label = key;
+                }
+            }
+            headerTr.innerHTML = `<td colspan="8">${esc(label)} (${groupWfs.length})</td>`;
+            tbody.appendChild(headerTr);
+            groupWfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
+        });
+    }
 
     tbody.appendChild(buildAllNewRow());
 
@@ -3318,17 +3366,22 @@ function assignVideoTask(wfId){
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
 
-    const teamOptions = TEAM.map(m=>`<option value="${m.key}">${esc(m.name)}</option>`).join('');
-    const body = `
-        <div class="field-row"><label>Task Name</label><input id="vtaskName" value="Record video: ${esc(wName)}"></div>
-        <div class="field-row"><label>Assignee</label><select id="vtaskAssignee"><option value="">Select team member...</option>${teamOptions}</select></div>
-        <div class="field-row"><label>Description</label><textarea id="vtaskDesc" rows="5">Record a Loom video walkthrough of the "${esc(wName)}" workflow.\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]</textarea></div>
-        <div style="margin-top:8px;padding:10px;background:var(--bg-surface-2);border-radius:var(--radius-md);font-size:var(--fs-xs);color:var(--text-secondary)">
-            <strong>Auto-set fields:</strong> Due today &middot; Not Urgent &middot; 15 min estimate &middot; Kevin as collaborator
-        </div>
-        <p style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px">When the task is marked complete, the Loom URL is auto-imported into the SOP resources. The system then generates the SOP, uploads to Drive, and creates an AI skill automatically.</p>`;
-    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="createVideoTask('${wfId}')">Create Task</button>`;
-    showModal('Assign Video Recording Task', body, footer);
+    const taskName = 'Record video: ' + wName;
+    const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
+
+    window.parent.postMessage({
+        type: 'qt:open-new-task-drawer',
+        opts: {
+            name: taskName,
+            description: taskDesc,
+        }
+    }, '*');
+
+    // Also store the video task tracking locally
+    setWfVideoTaskId(wfId, 'pending-' + Date.now());
+    setWfVideoTaskStatus(wfId, 'pending');
+    toast('Task drawer opened. Create the video recording task there.');
+    render();
 }
 
 async function createVideoTask(wfId){
