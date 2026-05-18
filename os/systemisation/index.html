@@ -3173,6 +3173,8 @@ Return ONLY the JSON object, no markdown fences, no explanation.`;
 
         skillDef.source = 'sop';
         skillDef.workflowId = wfId;
+        if (driveUrl) skillDef.driveUrl = driveUrl;
+        if (driveDocUrl) skillDef.driveDocUrl = driveDocUrl;
 
         const existing = gf(w,WF.skillDefinition);
         let skills = [];

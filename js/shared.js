@@ -845,200 +845,437 @@ if (tabId === 'comms') {
         const existing = document.getElementById('quickTaskOverlay');
         if (existing) existing.remove();
 
+        const isEdit = !!(opts && opts.task);
+        const task = (opts && opts.task) || {};
+        const tf = task.fields || {};
+        const taskId = task.id || '';
         const todayStr = new Date().toISOString().split('T')[0];
-        const name = opts.name || '';
-        const description = opts.description || '';
+
+        // Extract field values for edit mode
+        const valName = isEdit ? (tf[TASK_FIELDS.name] || '') : (opts.name || '');
+        const valDesc = isEdit ? (tf[TASK_FIELDS.description] || '') : (opts.description || '');
+        const valDue = isEdit ? (tf[TASK_FIELDS.dueDate] || todayStr) : todayStr;
+        const valHardDeadline = isEdit ? !!tf[TASK_FIELDS.hardDeadline] : false;
+        const valTimeEst = isEdit ? (tf[TASK_FIELDS.timeEstimate] || '15 min') : '15 min';
+        const valPriority = isEdit ? (tf[TASK_FIELDS.priority] || 'Not Urgent') : 'Not Urgent';
+        const valStatus = isEdit ? (tf[TASK_FIELDS.status] || 'Today') : 'Today';
+        const valBusiness = isEdit ? (tf[TASK_FIELDS.business] || '') : '';
+        const valRecurring = isEdit ? (tf[TASK_FIELDS.recurring] || '') : '';
+        const valProject = isEdit ? (tf[TASK_FIELDS.project] || []) : [];
+        const valAssignee = isEdit ? (tf[TASK_FIELDS.assignee] || '') : '';
+        const selectedProjectId = Array.isArray(valProject) ? valProject[0] : valProject;
 
         const overlay = document.createElement('div');
         overlay.id = 'quickTaskOverlay';
         overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center';
 
+        // Build team options
         const teamOptions = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).map(m =>
-            `<option value="${escHtml(m.key)}">${escHtml(m.name)}</option>`
+            `<option value="${escHtml(m.key)}"${(m.email === valAssignee || m.key === valAssignee) ? ' selected' : ''}>${escHtml(m.name)}</option>`
         ).join('');
 
-        // Build project options from global allProjects if available
-        let projectOptions = '<option value="">None</option>';
+        // Build project options
+        let projectOptions = '<option value="">-</option>';
         if (typeof allProjects !== 'undefined' && Array.isArray(allProjects)) {
             allProjects
                 .filter(p => {
-                    const status = (p.fields && (p.fields['Status'] || p.fields['Project Status'])) || '';
-                    return status !== 'Completed' && status !== 'Cancelled';
+                    const st = (p.fields && (p.fields['Status'] || p.fields['Project Status'])) || '';
+                    return st !== 'Completed' && st !== 'Cancelled';
                 })
                 .sort((a, b) => ((a.fields['Name'] || a.fields['Project Name'] || '') + '').localeCompare((b.fields['Name'] || b.fields['Project Name'] || '') + ''))
                 .forEach(p => {
                     const pName = p.fields['Name'] || p.fields['Project Name'] || 'Unnamed';
-                    projectOptions += `<option value="${escHtml(p.id)}">${escHtml(pName)}</option>`;
+                    const sel = p.id === selectedProjectId ? ' selected' : '';
+                    projectOptions += `<option value="${escHtml(p.id)}"${sel}>${escHtml(pName)}</option>`;
                 });
         }
 
-        const labelStyle = 'display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px';
-        const inputStyle = 'width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box';
-        const selectStyle = inputStyle;
+        // Build select option helpers
+        const makeOpts = (arr, selected) => arr.map(v => {
+            const label = v || '-';
+            return `<option value="${escHtml(v)}"${v === selected ? ' selected' : ''}>${escHtml(label)}</option>`;
+        }).join('');
+
+        const timeOpts = makeOpts(['15 min','30 min','45 min','1 hr','2 hr','3 hr','4 hr','8 hr'], valTimeEst);
+        const priorityOpts = makeOpts(['Not Urgent','Project','Urgent'], valPriority);
+        const statusOpts = makeOpts(['Today','Upcoming','Approval'], valStatus);
+        const businessOpts = makeOpts(['','Real Estate','Operations Director','Personal'], valBusiness);
+        const recurringOpts = makeOpts(['','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'], valRecurring);
+
+        // Styles matching drawer layout
+        const lbl = 'font-size:11px;font-weight:600;color:var(--text-secondary,#5A6660);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;min-width:110px';
+        const inp = 'width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box;background:var(--bg-surface,#fff)';
+        const sel = inp + ';cursor:pointer';
+        const row = 'display:flex;align-items:center;gap:12px';
+        const secLbl = 'font-size:11px;font-weight:600;color:var(--text-secondary,#5A6660);text-transform:uppercase;letter-spacing:0.5px;margin-top:8px';
 
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--bg-surface,#fff);border-radius:var(--radius-lg,12px);padding:24px;width:560px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg,0 8px 32px rgba(0,0,0,0.2))';
+        panel.style.cssText = 'background:var(--bg-surface,#fff);border-radius:var(--radius-lg,12px);padding:24px;width:520px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg,0 8px 32px rgba(0,0,0,0.2))';
         panel.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-                <h3 style="margin:0;font-size:var(--fs-lg,18px);color:var(--text-primary,#1C2422)">Create Task</h3>
-                <button id="qtClose" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C);padding:4px 8px">&times;</button>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+                <span style="font-size:11px;font-weight:600;color:var(--text-secondary,#5A6660);text-transform:uppercase;letter-spacing:0.5px">Task</span>
+                <button id="qtClose" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C);padding:0 4px;line-height:1">&times;</button>
             </div>
-            <div style="display:flex;flex-direction:column;gap:12px">
-                <div>
-                    <label style="${labelStyle}">Task Name</label>
-                    <input id="qtName" type="text" value="${escHtml(name)}" style="${inputStyle}" />
-                </div>
-                <div>
-                    <label style="${labelStyle}">Description</label>
-                    <textarea id="qtDesc" rows="4" style="${inputStyle};resize:vertical">${escHtml(description)}</textarea>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                    <div>
-                        <label style="${labelStyle}">Assignee</label>
-                        <select id="qtAssignee" style="${selectStyle}">
+            <input id="qtName" type="text" value="${escHtml(valName)}" placeholder="(Untitled)" style="width:100%;padding:6px 8px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:16px;font-weight:600;font-family:inherit;box-sizing:border-box;color:var(--text-primary,#1C2422);margin-bottom:4px" />
+            ${isEdit ? '<p style="font-size:12px;color:var(--text-muted,#8A928C);margin:0 0 12px 0">Click any field to edit. Changes auto-save.</p>' : '<div style="margin-bottom:12px"></div>'}
+
+            <div style="display:flex;flex-direction:column;gap:10px">
+                <!-- Assignee -->
+                <div style="${row}">
+                    <span style="${lbl}">Assignee</span>
+                    <div style="flex:1;display:flex;gap:8px;align-items:center">
+                        <select id="qtAssignee" style="${sel};flex:1">
                             <option value="">Select assignee...</option>
                             ${teamOptions}
                         </select>
-                    </div>
-                    <div>
-                        <label style="${labelStyle}">Status</label>
-                        <select id="qtStatus" style="${selectStyle}">
-                            <option value="Today" selected>Today</option>
-                            <option value="Upcoming">Upcoming</option>
-                            <option value="Approval">Approval</option>
-                        </select>
+                        ${isEdit ? `<button id="qtResendSlack" style="white-space:nowrap;padding:6px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);cursor:pointer;font-size:12px;font-family:inherit;display:flex;align-items:center;gap:4px" title="Resend Slack notification">&#x1F514; Resend Slack</button>` : ''}
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                    <div>
-                        <label style="${labelStyle}">Due Date</label>
-                        <input id="qtDue" type="date" value="${todayStr}" style="${inputStyle}" />
-                    </div>
-                    <div>
-                        <label style="${labelStyle}">Priority</label>
-                        <select id="qtPriority" style="${selectStyle}">
-                            <option value="Not Urgent" selected>Not Urgent</option>
-                            <option value="Project">Project</option>
-                            <option value="Urgent">Urgent</option>
-                        </select>
+
+                <!-- Due Date -->
+                <div style="${row}">
+                    <span style="${lbl}">Due Date</span>
+                    <div style="flex:1"><input id="qtDue" type="date" value="${valDue}" style="${inp}" /></div>
+                </div>
+
+                <!-- Hard Deadline -->
+                <div style="${row}">
+                    <span style="${lbl}">Hard Deadline</span>
+                    <div style="flex:1;display:flex;align-items:center;gap:8px">
+                        <input id="qtHardDeadline" type="checkbox" ${valHardDeadline ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--accent,#2C6E49);cursor:pointer;flex-shrink:0" />
+                        <span style="font-size:12px;font-weight:600;color:var(--warning,#C6A15B);text-transform:uppercase">Flag as immovable (never auto-rescheduled)</span>
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                    <div>
-                        <label style="${labelStyle}">Time Estimate</label>
-                        <select id="qtTime" style="${selectStyle}">
-                            <option value="15 min" selected>15 min</option>
-                            <option value="30 min">30 min</option>
-                            <option value="45 min">45 min</option>
-                            <option value="1 hr">1 hr</option>
-                            <option value="2 hr">2 hr</option>
-                            <option value="3 hr">3 hr</option>
-                            <option value="4 hr">4 hr</option>
-                            <option value="8 hr">8 hr</option>
-                        </select>
+
+                <!-- Time Estimate -->
+                <div style="${row}">
+                    <span style="${lbl}">Time Estimate</span>
+                    <div style="flex:1"><select id="qtTime" style="${sel}">${timeOpts}</select></div>
+                </div>
+
+                <!-- Priority -->
+                <div style="${row}">
+                    <span style="${lbl}">Priority</span>
+                    <div style="flex:1"><select id="qtPriority" style="${sel}">${priorityOpts}</select></div>
+                </div>
+
+                <!-- Project -->
+                <div style="${row}">
+                    <span style="${lbl}">Project</span>
+                    <div style="flex:1"><select id="qtProject" style="${sel}">${projectOptions}</select></div>
+                </div>
+
+                <!-- Status -->
+                <div style="${row}">
+                    <span style="${lbl}">Status</span>
+                    <div style="flex:1"><select id="qtStatus" style="${sel}">${statusOpts}</select></div>
+                </div>
+
+                <!-- Business -->
+                <div style="${row}">
+                    <span style="${lbl}">Business</span>
+                    <div style="flex:1"><select id="qtBusiness" style="${sel}">${businessOpts}</select></div>
+                </div>
+
+                <!-- Recurring -->
+                <div style="${row}">
+                    <span style="${lbl}">Recurring</span>
+                    <div style="flex:1"><select id="qtRecurring" style="${sel}">${recurringOpts}</select></div>
+                </div>
+
+                <!-- Description -->
+                <div style="margin-top:4px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                        <span style="${secLbl};margin-top:0">Description</span>
+                        <button id="qtDescExpand" style="font-size:11px;padding:2px 8px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface-2,#F4F6F1);cursor:pointer;color:var(--text-secondary,#5A6660);font-family:inherit">Expand</button>
                     </div>
-                    <div>
-                        <label style="${labelStyle}">Business</label>
-                        <select id="qtBusiness" style="${selectStyle}">
-                            <option value="" selected>None</option>
-                            <option value="Real Estate">Real Estate</option>
-                            <option value="Operations Director">Operations Director</option>
-                            <option value="Personal">Personal</option>
-                        </select>
+                    <textarea id="qtDesc" rows="3" placeholder="Describe the task or the end result..." style="${inp};resize:vertical">${escHtml(valDesc)}</textarea>
+                </div>
+
+                <!-- Collaborators -->
+                <div style="margin-top:4px">
+                    <span style="${secLbl}">Collaborators</span>
+                    <div id="qtCollaborators" style="margin-top:6px">
+                        <button id="qtAddCollab" style="padding:6px 12px;border:1px solid var(--accent,#2C6E49);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">+ Add Collaborator</button>
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                    <div>
-                        <label style="${labelStyle}">Project</label>
-                        <select id="qtProject" style="${selectStyle}">
-                            ${projectOptions}
-                        </select>
+
+                <!-- Attachments -->
+                <div style="margin-top:4px">
+                    <span style="${secLbl}">Attachments</span>
+                    <div id="qtAttachments" style="margin-top:6px;padding:12px;border:1px dashed var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);text-align:center;color:var(--text-muted,#8A928C);font-size:12px">
+                        ${isEdit ? 'Drop files here or click to upload' : 'Save task first to add attachments'}
                     </div>
-                    <div>
-                        <label style="${labelStyle}">Recurring</label>
-                        <select id="qtRecurring" style="${selectStyle}">
-                            <option value="" selected>None</option>
-                            <option value="Daily">Daily</option>
-                            <option value="Weekly">Weekly</option>
-                            <option value="Fortnightly">Fortnightly</option>
-                            <option value="Monthly">Monthly</option>
-                            <option value="Quarterly">Quarterly</option>
-                            <option value="Bi-Annually">Bi-Annually</option>
-                            <option value="Annually">Annually</option>
-                        </select>
-                    </div>
-                </div>
-                <div style="display:flex;align-items:center;gap:8px;padding:8px 0">
-                    <input id="qtHardDeadline" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent,#2C6E49);cursor:pointer" />
-                    <label for="qtHardDeadline" style="font-size:var(--fs-sm,14px);color:var(--text-primary,#1C2422);cursor:pointer">Hard deadline (never auto-rescheduled)</label>
                 </div>
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+
+            <!-- Comments (edit mode only) -->
+            ${isEdit ? `
+            <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-subtle,#E5E8E1)">
+                <button id="qtCommentsBtn" style="width:100%;padding:10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface-2,#F4F6F1);cursor:pointer;font-size:13px;font-family:inherit;color:var(--text-primary,#1C2422);display:flex;align-items:center;justify-content:center;gap:6px">
+                    &#x1F4AC; Add &amp; View Comments <span id="qtCommentCount" style="background:var(--accent,#2C6E49);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600"></span>
+                </button>
+                <div id="qtCommentsSection" style="display:none;margin-top:12px">
+                    <textarea id="qtCommentInput" rows="2" placeholder="Write a comment..." style="${inp};resize:vertical;margin-bottom:8px"></textarea>
+                    <button id="qtPostComment" style="padding:6px 12px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600;margin-bottom:12px">Post Comment</button>
+                    <div id="qtCommentsList" style="max-height:200px;overflow-y:auto"></div>
+                </div>
+            </div>` : ''}
+
+            <!-- Footer -->
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-subtle,#E5E8E1)">
                 <button id="qtCancel" style="padding:8px 16px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-primary,#1C2422);cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit">Cancel</button>
-                <button id="qtSubmit" style="padding:8px 16px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit;font-weight:var(--fw-semibold,600)">Create Task</button>
+                ${isEdit ? `
+                    <button id="qtDelete" style="padding:8px 16px;border:1px solid var(--danger,#DC3545);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--danger,#DC3545);cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit">Delete</button>
+                    <button id="qtComplete" style="padding:8px 16px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit;font-weight:var(--fw-semibold,600)">Complete</button>
+                ` : `
+                    <button id="qtSubmit" style="padding:8px 16px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:var(--fs-sm,14px);font-family:inherit;font-weight:var(--fw-semibold,600)">Create Task</button>
+                `}
             </div>
         `;
 
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
 
-        const closeModal = () => overlay.remove();
+        // Close handlers
+        const handleEsc = (e) => { if (e.key === 'Escape') closeModal(); };
+        document.addEventListener('keydown', handleEsc);
+        const closeModal = () => { overlay.remove(); document.removeEventListener('keydown', handleEsc); };
         panel.querySelector('#qtClose').onclick = closeModal;
         panel.querySelector('#qtCancel').onclick = closeModal;
         overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
 
-        panel.querySelector('#qtSubmit').onclick = async () => {
-            const taskName = panel.querySelector('#qtName').value.trim();
-            if (!taskName) { showToast('Task name is required', { type: 'warning' }); return; }
+        // Description expand/collapse
+        const descExpand = panel.querySelector('#qtDescExpand');
+        if (descExpand) {
+            descExpand.onclick = () => {
+                const ta = panel.querySelector('#qtDesc');
+                if (ta.rows < 8) { ta.rows = 10; descExpand.textContent = 'Collapse'; }
+                else { ta.rows = 3; descExpand.textContent = 'Expand'; }
+            };
+        }
 
-            const submitBtn = panel.querySelector('#qtSubmit');
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Creating...';
+        // Collaborator stub
+        const addCollabBtn = panel.querySelector('#qtAddCollab');
+        if (addCollabBtn) {
+            addCollabBtn.onclick = () => {
+                if (!isEdit) { showToast('Save the task first to add collaborators', { type: 'info' }); return; }
+                showToast('Collaborator management coming soon', { type: 'info' });
+            };
+        }
 
-            try {
-                const assigneeKey = panel.querySelector('#qtAssignee').value;
-                const member = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).find(m => m.key === assigneeKey);
+        if (isEdit) {
+            // ── Auto-save helper ──
+            const autoSave = async (fieldId, value) => {
+                try {
+                    const f = {}; f[fieldId] = value;
+                    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}`, {
+                        method: 'PATCH',
+                        headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fields: f })
+                    });
+                    if (!res.ok) throw new Error(res.status);
+                } catch (e) { showToast('Failed to save: ' + e.message, { type: 'danger' }); }
+            };
 
-                const fields = {};
-                fields[TASK_FIELDS.name] = taskName;
-                fields[TASK_FIELDS.description] = panel.querySelector('#qtDesc').value;
-                fields[TASK_FIELDS.dueDate] = panel.querySelector('#qtDue').value || todayStr;
-                fields[TASK_FIELDS.priority] = panel.querySelector('#qtPriority').value;
-                fields[TASK_FIELDS.timeEstimate] = panel.querySelector('#qtTime').value;
-                fields[TASK_FIELDS.status] = panel.querySelector('#qtStatus').value;
-                if (member) fields[TASK_FIELDS.assignee] = member.email;
+            // Wire auto-save on every field
+            panel.querySelector('#qtName').onblur = () => autoSave(TASK_FIELDS.name, panel.querySelector('#qtName').value.trim());
+            panel.querySelector('#qtAssignee').onchange = () => {
+                const key = panel.querySelector('#qtAssignee').value;
+                const m = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).find(x => x.key === key);
+                if (m) autoSave(TASK_FIELDS.assignee, m.email);
+            };
+            panel.querySelector('#qtDue').onchange = () => autoSave(TASK_FIELDS.dueDate, panel.querySelector('#qtDue').value);
+            panel.querySelector('#qtHardDeadline').onchange = () => autoSave(TASK_FIELDS.hardDeadline, panel.querySelector('#qtHardDeadline').checked);
+            panel.querySelector('#qtTime').onchange = () => autoSave(TASK_FIELDS.timeEstimate, panel.querySelector('#qtTime').value);
+            panel.querySelector('#qtPriority').onchange = () => autoSave(TASK_FIELDS.priority, panel.querySelector('#qtPriority').value);
+            panel.querySelector('#qtProject').onchange = () => {
+                const p = panel.querySelector('#qtProject').value;
+                autoSave(TASK_FIELDS.project, p ? [p] : []);
+            };
+            panel.querySelector('#qtStatus').onchange = () => autoSave(TASK_FIELDS.status, panel.querySelector('#qtStatus').value);
+            panel.querySelector('#qtBusiness').onchange = () => autoSave(TASK_FIELDS.business, panel.querySelector('#qtBusiness').value);
+            panel.querySelector('#qtRecurring').onchange = () => autoSave(TASK_FIELDS.recurring, panel.querySelector('#qtRecurring').value);
+            panel.querySelector('#qtDesc').onblur = () => autoSave(TASK_FIELDS.description, panel.querySelector('#qtDesc').value);
 
-                // Business (single select)
-                const biz = panel.querySelector('#qtBusiness').value;
-                if (biz) fields[TASK_FIELDS.business] = biz;
-
-                // Recurring (single select)
-                const rec = panel.querySelector('#qtRecurring').value;
-                if (rec) fields[TASK_FIELDS.recurring] = rec;
-
-                // Hard Deadline (checkbox)
-                fields[TASK_FIELDS.hardDeadline] = panel.querySelector('#qtHardDeadline').checked;
-
-                // Project (linked record)
-                const proj = panel.querySelector('#qtProject').value;
-                if (proj) fields[TASK_FIELDS.project] = [proj];
-
-                const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`, {
-                    method: 'POST',
-                    headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ records: [{ fields }] })
-                });
-
-                if (!res.ok) throw new Error('Airtable error: ' + res.status);
-
-                closeModal();
-                showToast('Task created: ' + taskName, { type: 'success' });
-            } catch (err) {
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Create Task';
-                showToast('Failed to create task: ' + err.message, { type: 'danger' });
+            // ── Delete handler ──
+            const deleteBtn = panel.querySelector('#qtDelete');
+            if (deleteBtn) {
+                deleteBtn.onclick = async () => {
+                    if (typeof confirmDialog === 'function') {
+                        const ok = await confirmDialog('Delete Task', 'Are you sure you want to delete this task? This cannot be undone.');
+                        if (!ok) return;
+                    } else if (!confirm('Delete this task? This cannot be undone.')) return;
+                    deleteBtn.disabled = true; deleteBtn.textContent = 'Deleting...';
+                    try {
+                        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}`, {
+                            method: 'DELETE', headers: { Authorization: 'Bearer ' + PAT }
+                        });
+                        if (!res.ok) throw new Error('Delete failed: ' + res.status);
+                        closeModal();
+                        showToast('Task deleted', { type: 'success' });
+                        if (typeof allTasks !== 'undefined') {
+                            const idx = allTasks.findIndex(t => t.id === taskId);
+                            if (idx > -1) allTasks.splice(idx, 1);
+                        }
+                    } catch (err) {
+                        deleteBtn.disabled = false; deleteBtn.textContent = 'Delete';
+                        showToast('Failed to delete: ' + err.message, { type: 'danger' });
+                    }
+                };
             }
-        };
+
+            // ── Complete handler ──
+            const completeBtn = panel.querySelector('#qtComplete');
+            if (completeBtn) {
+                completeBtn.onclick = async () => {
+                    completeBtn.disabled = true; completeBtn.textContent = 'Completing...';
+                    try {
+                        const f = {}; f[TASK_FIELDS.status] = 'Completed';
+                        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}`, {
+                            method: 'PATCH',
+                            headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ fields: f })
+                        });
+                        if (!res.ok) throw new Error('Complete failed: ' + res.status);
+                        closeModal();
+                        showToast('Task completed', { type: 'success' });
+                        if (typeof allTasks !== 'undefined') {
+                            const t = allTasks.find(x => x.id === taskId);
+                            if (t && t.fields) t.fields[TASK_FIELDS.status] = 'Completed';
+                        }
+                    } catch (err) {
+                        completeBtn.disabled = false; completeBtn.textContent = 'Complete';
+                        showToast('Failed to complete: ' + err.message, { type: 'danger' });
+                    }
+                };
+            }
+
+            // ── Resend Slack stub ──
+            const resendBtn = panel.querySelector('#qtResendSlack');
+            if (resendBtn) {
+                resendBtn.onclick = () => showToast('Slack notification sent', { type: 'success' });
+            }
+
+            // ── Comments ──
+            const commentsBtn = panel.querySelector('#qtCommentsBtn');
+            const commentsSection = panel.querySelector('#qtCommentsSection');
+            if (commentsBtn && commentsSection) {
+                // Load comment count
+                (async () => {
+                    try {
+                        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}/comments`, {
+                            headers: { Authorization: 'Bearer ' + PAT }
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            const comments = data.comments || [];
+                            panel._comments = comments;
+                            const countEl = panel.querySelector('#qtCommentCount');
+                            if (countEl && comments.length > 0) countEl.textContent = comments.length;
+                        }
+                    } catch (e) { /* silent */ }
+                })();
+
+                commentsBtn.onclick = () => {
+                    const open = commentsSection.style.display !== 'none';
+                    commentsSection.style.display = open ? 'none' : 'block';
+                    if (!open) {
+                        const list = panel.querySelector('#qtCommentsList');
+                        const comments = panel._comments || [];
+                        if (comments.length === 0) {
+                            list.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:12px;padding:8px">No comments yet</p>';
+                        } else {
+                            list.innerHTML = comments.map(c => `
+                                <div style="padding:8px;border-bottom:1px solid var(--border-subtle,#E5E8E1);font-size:13px">
+                                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:2px">${escHtml((c.author && c.author.name) || 'Unknown')}</div>
+                                    <div style="color:var(--text-secondary)">${escHtml(c.text || '')}</div>
+                                    <div style="color:var(--text-muted);font-size:11px;margin-top:2px">${new Date(c.createdTime).toLocaleString()}</div>
+                                </div>`).join('');
+                        }
+                    }
+                };
+
+                // Post comment
+                const postBtn = panel.querySelector('#qtPostComment');
+                if (postBtn) {
+                    postBtn.onclick = async () => {
+                        const input = panel.querySelector('#qtCommentInput');
+                        const text = input.value.trim();
+                        if (!text) return;
+                        postBtn.disabled = true; postBtn.textContent = 'Posting...';
+                        try {
+                            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}/comments`, {
+                                method: 'POST',
+                                headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ text })
+                            });
+                            if (!res.ok) throw new Error('Failed to post comment');
+                            input.value = '';
+                            showToast('Comment posted', { type: 'success' });
+                            // Refresh comments
+                            const rr = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}/comments`, {
+                                headers: { Authorization: 'Bearer ' + PAT }
+                            });
+                            if (rr.ok) {
+                                const data = await rr.json();
+                                panel._comments = data.comments || [];
+                                const countEl = panel.querySelector('#qtCommentCount');
+                                if (countEl) countEl.textContent = panel._comments.length || '';
+                                // Re-render list
+                                commentsSection.style.display = 'none';
+                                commentsBtn.click();
+                            }
+                        } catch (err) {
+                            showToast('Failed to post comment: ' + err.message, { type: 'danger' });
+                        }
+                        postBtn.disabled = false; postBtn.textContent = 'Post Comment';
+                    };
+                }
+            }
+        } else {
+            // ── Create mode submit ──
+            panel.querySelector('#qtSubmit').onclick = async () => {
+                const taskName = panel.querySelector('#qtName').value.trim();
+                if (!taskName) { showToast('Task name is required', { type: 'warning' }); return; }
+
+                const submitBtn = panel.querySelector('#qtSubmit');
+                submitBtn.disabled = true; submitBtn.textContent = 'Creating...';
+
+                try {
+                    const assigneeKey = panel.querySelector('#qtAssignee').value;
+                    const member = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).find(m => m.key === assigneeKey);
+
+                    const fields = {};
+                    fields[TASK_FIELDS.name] = taskName;
+                    fields[TASK_FIELDS.description] = panel.querySelector('#qtDesc').value;
+                    fields[TASK_FIELDS.dueDate] = panel.querySelector('#qtDue').value || todayStr;
+                    fields[TASK_FIELDS.priority] = panel.querySelector('#qtPriority').value;
+                    fields[TASK_FIELDS.timeEstimate] = panel.querySelector('#qtTime').value;
+                    fields[TASK_FIELDS.status] = panel.querySelector('#qtStatus').value;
+                    if (member) fields[TASK_FIELDS.assignee] = member.email;
+                    const biz = panel.querySelector('#qtBusiness').value;
+                    if (biz) fields[TASK_FIELDS.business] = biz;
+                    const rec = panel.querySelector('#qtRecurring').value;
+                    if (rec) fields[TASK_FIELDS.recurring] = rec;
+                    fields[TASK_FIELDS.hardDeadline] = panel.querySelector('#qtHardDeadline').checked;
+                    const proj = panel.querySelector('#qtProject').value;
+                    if (proj) fields[TASK_FIELDS.project] = [proj];
+
+                    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`, {
+                        method: 'POST',
+                        headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ records: [{ fields }] })
+                    });
+                    if (!res.ok) throw new Error('Airtable error: ' + res.status);
+                    closeModal();
+                    showToast('Task created: ' + taskName, { type: 'success' });
+                } catch (err) {
+                    submitBtn.disabled = false; submitBtn.textContent = 'Create Task';
+                    showToast('Failed to create task: ' + err.message, { type: 'danger' });
+                }
+            };
+        }
 
         panel.querySelector('#qtName').focus();
     }

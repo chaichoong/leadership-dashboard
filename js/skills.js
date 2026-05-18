@@ -17,7 +17,8 @@
             const baseId = 'appnqjDpqDniH3IRl';
             const tableId = 'tblLPoRHFBl0vqR24';
             const fieldId = 'fldmRF1UDkbHtl1AG';
-            const url = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${fieldId}&filterByFormula=NOT({Skill Definition}='')`;
+            const driveFieldId = 'fldNtXnxGrpUivWxU';
+            const url = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${fieldId}&fields[]=${driveFieldId}&filterByFormula=NOT({Skill Definition}='')`;
             const res = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
             if (!res.ok) return;
             const data = await res.json();
@@ -25,12 +26,14 @@
             (data.records || []).forEach(r => {
                 const raw = r.fields[fieldId];
                 if (!raw) return;
+                const driveUrl = r.fields[driveFieldId] || '';
                 try {
                     const parsed = JSON.parse(raw);
                     const arr = Array.isArray(parsed) ? parsed : [parsed];
                     arr.forEach(sk => {
                         if (sk && sk.id && sk.name) {
                             sk.source = sk.source || 'sop';
+                            if (driveUrl && !sk.driveUrl) sk.driveUrl = driveUrl;
                             if (!SKILLS_LIBRARY.some(s => s.id === sk.id)) skills.push(sk);
                         }
                     });
@@ -89,6 +92,7 @@
             skills.forEach(s => {
                 const sourceBadge = SKILLS_SOURCE_LABELS[s.source] || s.source;
                 const sourceClass = 'skills-source-' + s.source;
+                const hasDrive = s.driveUrl || s.driveDocUrl;
                 html += `<div class="skills-card" data-skill-id="${escHtml(s.id)}">
                     <div class="skills-card-header" onclick="toggleSkillDetail('${escHtml(s.id)}')" role="button" tabindex="0" aria-expanded="false"
                          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSkillDetail('${escHtml(s.id)}')}">
@@ -96,6 +100,10 @@
                         <span class="skills-source-badge ${sourceClass}">${escHtml(sourceBadge)}</span>
                     </div>
                     <div class="skills-card-desc">${escHtml(s.description)}</div>
+                    <div class="skills-card-actions" style="padding:8px 16px 4px;display:flex;gap:8px;align-items:center">
+                        <button class="skills-run-btn" onclick="event.stopPropagation();runSkill('${escHtml(s.id)}')" style="padding:6px 14px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;display:flex;align-items:center;gap:4px">&#x25B6; Run Skill</button>
+                        ${hasDrive ? `<a href="${escHtml(s.driveUrl || s.driveDocUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:6px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-secondary,#5A6660);cursor:pointer;font-size:12px;font-family:inherit;text-decoration:none;display:flex;align-items:center;gap:4px">&#x1F4C2; Drive Folder</a>` : ''}
+                    </div>
                     <div class="skills-card-detail" id="skill-detail-${escHtml(s.id)}" style="display:none">
                         <div class="skills-detail-row">
                             <span class="skills-detail-label">Command</span>
@@ -143,6 +151,29 @@
         };
         return icons[cat] || '&#x1F4E6;';
     }
+
+    window.runSkill = function (id) {
+        const skill = allSkills().find(s => s.id === id);
+        if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
+
+        // Build the command text to copy
+        let clipText = skill.command || skill.id;
+        if (skill.instructions) clipText += '\n\n' + skill.instructions;
+
+        // Copy to clipboard
+        navigator.clipboard.writeText(clipText).then(() => {
+            let msg = 'Skill command copied to clipboard. Paste it in Claude Co-Work to run.';
+            if (skill.driveUrl) {
+                msg += ' Drive folder will open in a new tab.';
+                window.open(skill.driveUrl, '_blank', 'noopener');
+            }
+            showToast(msg, { type: 'success', duration: 6000 });
+        }).catch(() => {
+            // Fallback: show the command in a prompt
+            prompt('Copy this skill command to use in Claude Co-Work:', clipText);
+            if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
+        });
+    };
 
     window.toggleSkillDetail = function (id) {
         const detail = document.getElementById('skill-detail-' + id);
