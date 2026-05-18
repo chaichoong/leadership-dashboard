@@ -2585,7 +2585,13 @@ function closeDrawer(){
   // don't unexpectedly delete it. Only the explicit Cancel button
   // discards the placeholder.
   if(window._draftTaskId&&window._draftTaskId===drawerTaskId)window._draftTaskId=null;
-  const ov=document.getElementById('drawerOverlay');if(ov)ov.remove();
+  // Remove the overlay — use parentNode.removeChild as a more reliable
+  // fallback than .remove() which can silently fail in some iframe contexts.
+  let ov=document.getElementById('drawerOverlay');
+  if(ov&&ov.parentNode)try{ov.parentNode.removeChild(ov)}catch(e){try{ov.remove()}catch(_){}}
+  // Belt-and-suspenders: verify it's actually gone
+  ov=document.getElementById('drawerOverlay');
+  if(ov&&ov.parentNode)try{ov.parentNode.removeChild(ov)}catch(e){}
   drawerTaskId=null;
 }
 
