@@ -439,28 +439,27 @@
                 if (!frame.src && frame.dataset.src) {
                     frame.src = frame.dataset.src;
                 }
-                // Wait for iframe to be ready before posting
-                const sendMsg = () => {
-                    try { frame.contentWindow.postMessage(e.data, '*'); } catch (err) {}
-                };
-                // Retry a few times in case iframe is still loading
+                // Wait for iframe to fully load and be ready (tasks page needs
+                // 5-10s to load data from Airtable and initialize functions)
+                const msgData = e.data;
                 let attempts = 0;
                 const tryPost = () => {
                     attempts++;
                     try {
                         if (frame.contentWindow && typeof frame.contentWindow.openNewTaskDrawer === 'function') {
-                            sendMsg();
-                        } else if (attempts < 20) {
-                            setTimeout(tryPost, 200);
+                            frame.contentWindow.postMessage(msgData, '*');
+                        } else if (attempts < 50) {
+                            setTimeout(tryPost, 300);
                         } else {
-                            sendMsg(); // last resort, post anyway
+                            // Last resort: post anyway and hope the listener picks it up
+                            try { frame.contentWindow.postMessage(msgData, '*'); } catch (err2) {}
                         }
                     } catch (err) {
-                        if (attempts < 20) setTimeout(tryPost, 200);
-                        else sendMsg();
+                        if (attempts < 50) setTimeout(tryPost, 300);
                     }
                 };
-                setTimeout(tryPost, 300);
+                // Start checking after 1 second to give iframe time to begin loading
+                setTimeout(tryPost, 1000);
             }
             return;
         }
