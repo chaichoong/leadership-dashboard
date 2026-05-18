@@ -3250,7 +3250,12 @@ function deleteTask(taskId,ev){
   if(ev){ev.stopPropagation();ev.preventDefault()}
   const task=allTasks.find(t=>t.id===taskId);
   if(!task)return;
-  if(drawerTaskId===taskId)closeDrawer();
+  // Always close the drawer first, then force-remove the overlay as a
+  // defensive fallback (the overlay can survive closeDrawer if a pending
+  // save flush triggers a re-render mid-removal).
+  const wasDrawer=(drawerTaskId===taskId);
+  if(wasDrawer)closeDrawer();
+  if(wasDrawer){const ov=document.getElementById('drawerOverlay');if(ov)ov.remove()}
   const existing=document.getElementById('deleteConfirmModal');if(existing)existing.remove();
   performDeleteTask(taskId);
 }
@@ -3299,6 +3304,8 @@ async function performDeleteTask(taskId){
     pushUndo({type:'delete',snapshot,label:`Deleted "${task.name}"`});
     showDeleteUndoToast(task.name);
     renderAll();
+    // Defensive: ensure drawer overlay is gone after renderAll
+    {const ov=document.getElementById('drawerOverlay');if(ov&&!drawerTaskId)ov.remove()}
     if(document.getElementById('drillModal')&&drillDownState)renderDrillDownList();
     _saveState.ok++;entry.status='ok';
   }catch(e){
@@ -6842,6 +6849,7 @@ async function openNewTaskDrawer(opts){
   const t=allTasks.find(x=>x.id===created.id);
   if(t){
     t.name=opts.name||'(Untitled)';
+    if(opts.description)t.description=opts.description;
     if(!t.dueDate)t.dueDate=opts.dueDate||todayStr();
     if(!t.priority)t.priority=opts.priority||'Not Urgent';
     if(!t.timeEst)t.timeEst=opts.timeEst||'15 min';
