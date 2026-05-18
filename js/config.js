@@ -72,6 +72,10 @@
         attachments: 'fldEbs9cscRr8elcw',
         timeEstimate:'fld10VzzbiNNgRmIi',
         collaborators:'fldcq3t6uAPgWSOP8',
+        hardDeadline: 'fldZKzIxgyrQ8CG8a',
+        project:      'fld889If2Y3EvrLiL',
+        business:     'fldthW4i7551wOXa1',
+        recurring:    'fldNhDWBX5gQm2p6b',
     };
 
     const TASK_TEAM = [

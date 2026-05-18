@@ -840,6 +840,7 @@ if (tabId === 'comms') {
     // ── Quick Task Creation Modal ──
     // Opens a lightweight task creation form as an overlay on the current page.
     // No tab switching required. Creates the task directly via Airtable API.
+    // Fields match the full Task Drawer in os/tasks/index.html.
     function openQuickTaskModal(opts) {
         const existing = document.getElementById('quickTaskOverlay');
         if (existing) existing.remove();
@@ -856,8 +857,27 @@ if (tabId === 'comms') {
             `<option value="${escHtml(m.key)}">${escHtml(m.name)}</option>`
         ).join('');
 
+        // Build project options from global allProjects if available
+        let projectOptions = '<option value="">None</option>';
+        if (typeof allProjects !== 'undefined' && Array.isArray(allProjects)) {
+            allProjects
+                .filter(p => {
+                    const status = (p.fields && (p.fields['Status'] || p.fields['Project Status'])) || '';
+                    return status !== 'Completed' && status !== 'Cancelled';
+                })
+                .sort((a, b) => ((a.fields['Name'] || a.fields['Project Name'] || '') + '').localeCompare((b.fields['Name'] || b.fields['Project Name'] || '') + ''))
+                .forEach(p => {
+                    const pName = p.fields['Name'] || p.fields['Project Name'] || 'Unnamed';
+                    projectOptions += `<option value="${escHtml(p.id)}">${escHtml(pName)}</option>`;
+                });
+        }
+
+        const labelStyle = 'display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px';
+        const inputStyle = 'width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box';
+        const selectStyle = inputStyle;
+
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--bg-surface,#fff);border-radius:var(--radius-lg,12px);padding:24px;width:520px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg,0 8px 32px rgba(0,0,0,0.2))';
+        panel.style.cssText = 'background:var(--bg-surface,#fff);border-radius:var(--radius-lg,12px);padding:24px;width:560px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg,0 8px 32px rgba(0,0,0,0.2))';
         panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
                 <h3 style="margin:0;font-size:var(--fs-lg,18px);color:var(--text-primary,#1C2422)">Create Task</h3>
@@ -865,46 +885,92 @@ if (tabId === 'comms') {
             </div>
             <div style="display:flex;flex-direction:column;gap:12px">
                 <div>
-                    <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Task Name</label>
-                    <input id="qtName" type="text" value="${escHtml(name)}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box" />
+                    <label style="${labelStyle}">Task Name</label>
+                    <input id="qtName" type="text" value="${escHtml(name)}" style="${inputStyle}" />
                 </div>
                 <div>
-                    <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Description</label>
-                    <textarea id="qtDesc" rows="5" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;resize:vertical;box-sizing:border-box">${escHtml(description)}</textarea>
+                    <label style="${labelStyle}">Description</label>
+                    <textarea id="qtDesc" rows="4" style="${inputStyle};resize:vertical">${escHtml(description)}</textarea>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div>
-                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Assignee</label>
-                        <select id="qtAssignee" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box">
+                        <label style="${labelStyle}">Assignee</label>
+                        <select id="qtAssignee" style="${selectStyle}">
                             <option value="">Select assignee...</option>
                             ${teamOptions}
                         </select>
                     </div>
                     <div>
-                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Due Date</label>
-                        <input id="qtDue" type="date" value="${todayStr}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box" />
+                        <label style="${labelStyle}">Status</label>
+                        <select id="qtStatus" style="${selectStyle}">
+                            <option value="Today" selected>Today</option>
+                            <option value="Upcoming">Upcoming</option>
+                            <option value="Approval">Approval</option>
+                        </select>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div>
-                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Priority</label>
-                        <select id="qtPriority" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box">
+                        <label style="${labelStyle}">Due Date</label>
+                        <input id="qtDue" type="date" value="${todayStr}" style="${inputStyle}" />
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Priority</label>
+                        <select id="qtPriority" style="${selectStyle}">
                             <option value="Not Urgent" selected>Not Urgent</option>
-                            <option value="Important">Important</option>
+                            <option value="Project">Project</option>
                             <option value="Urgent">Urgent</option>
                         </select>
                     </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div>
-                        <label style="display:block;font-size:var(--fs-xs,12px);color:var(--text-secondary,#5A6660);margin-bottom:4px">Time Estimate</label>
-                        <select id="qtTime" style="width:100%;padding:8px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,14px);font-family:inherit;box-sizing:border-box">
+                        <label style="${labelStyle}">Time Estimate</label>
+                        <select id="qtTime" style="${selectStyle}">
                             <option value="15 min" selected>15 min</option>
                             <option value="30 min">30 min</option>
-                            <option value="1 hour">1 hour</option>
-                            <option value="2 hours">2 hours</option>
-                            <option value="Half day">Half day</option>
-                            <option value="Full day">Full day</option>
+                            <option value="45 min">45 min</option>
+                            <option value="1 hr">1 hr</option>
+                            <option value="2 hr">2 hr</option>
+                            <option value="3 hr">3 hr</option>
+                            <option value="4 hr">4 hr</option>
+                            <option value="8 hr">8 hr</option>
                         </select>
                     </div>
+                    <div>
+                        <label style="${labelStyle}">Business</label>
+                        <select id="qtBusiness" style="${selectStyle}">
+                            <option value="" selected>None</option>
+                            <option value="Real Estate">Real Estate</option>
+                            <option value="Operations Director">Operations Director</option>
+                            <option value="Personal">Personal</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div>
+                        <label style="${labelStyle}">Project</label>
+                        <select id="qtProject" style="${selectStyle}">
+                            ${projectOptions}
+                        </select>
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Recurring</label>
+                        <select id="qtRecurring" style="${selectStyle}">
+                            <option value="" selected>None</option>
+                            <option value="Daily">Daily</option>
+                            <option value="Weekly">Weekly</option>
+                            <option value="Fortnightly">Fortnightly</option>
+                            <option value="Monthly">Monthly</option>
+                            <option value="Quarterly">Quarterly</option>
+                            <option value="Bi-Annually">Bi-Annually</option>
+                            <option value="Annually">Annually</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;padding:8px 0">
+                    <input id="qtHardDeadline" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent,#2C6E49);cursor:pointer" />
+                    <label for="qtHardDeadline" style="font-size:var(--fs-sm,14px);color:var(--text-primary,#1C2422);cursor:pointer">Hard deadline (never auto-rescheduled)</label>
                 </div>
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
@@ -939,8 +1005,23 @@ if (tabId === 'comms') {
                 fields[TASK_FIELDS.dueDate] = panel.querySelector('#qtDue').value || todayStr;
                 fields[TASK_FIELDS.priority] = panel.querySelector('#qtPriority').value;
                 fields[TASK_FIELDS.timeEstimate] = panel.querySelector('#qtTime').value;
-                fields[TASK_FIELDS.status] = 'Today';
+                fields[TASK_FIELDS.status] = panel.querySelector('#qtStatus').value;
                 if (member) fields[TASK_FIELDS.assignee] = member.email;
+
+                // Business (single select)
+                const biz = panel.querySelector('#qtBusiness').value;
+                if (biz) fields[TASK_FIELDS.business] = biz;
+
+                // Recurring (single select)
+                const rec = panel.querySelector('#qtRecurring').value;
+                if (rec) fields[TASK_FIELDS.recurring] = rec;
+
+                // Hard Deadline (checkbox)
+                fields[TASK_FIELDS.hardDeadline] = panel.querySelector('#qtHardDeadline').checked;
+
+                // Project (linked record)
+                const proj = panel.querySelector('#qtProject').value;
+                if (proj) fields[TASK_FIELDS.project] = [proj];
 
                 const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}`, {
                     method: 'POST',
