@@ -94,8 +94,7 @@
     }
     // Parent shell but NOT on the Tasks tab: use the lightweight modal.
     if (typeof window.openQuickTaskModal === 'function') {
-      const currentTab = document.querySelector('.tab-panel[style*="block"]');
-      const isTasksTab = currentTab && currentTab.id === 'tab-tasks';
+      const isTasksTab = location.hash.replace(/\?.*/,'') === '#tasks';
       if (!isTasksTab) {
         window.openQuickTaskModal({});
         return;
