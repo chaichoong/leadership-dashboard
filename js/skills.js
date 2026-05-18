@@ -156,21 +156,21 @@
         const skill = allSkills().find(s => s.id === id);
         if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
 
-        // Build the command text to copy
-        let clipText = skill.command || skill.id;
+        // Build the command text to copy as a slash command for Claude Co-Work
+        const cmd = skill.command || skill.id;
+        let clipText = '/' + cmd;
         if (skill.instructions) clipText += '\n\n' + skill.instructions;
 
         // Copy to clipboard
         navigator.clipboard.writeText(clipText).then(() => {
-            let msg = 'Skill command copied to clipboard. Paste it in Claude Co-Work to run.';
+            let msg = 'Copied: /' + cmd + ' — paste into Claude Code or Co-Work to run.';
             if (skill.driveUrl) {
-                msg += ' Drive folder will open in a new tab.';
+                msg += ' Drive folder opening.';
                 window.open(skill.driveUrl, '_blank', 'noopener');
             }
             showToast(msg, { type: 'success', duration: 6000 });
         }).catch(() => {
-            // Fallback: show the command in a prompt
-            prompt('Copy this skill command to use in Claude Co-Work:', clipText);
+            prompt('Copy this slash command to use in Claude Code or Co-Work:', clipText);
             if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
         });
     };

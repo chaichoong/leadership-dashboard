@@ -859,10 +859,12 @@ if (tabId === 'comms') {
         const valTimeEst = isEdit ? (tf[TASK_FIELDS.timeEstimate] || '15 min') : '15 min';
         const valPriority = isEdit ? (tf[TASK_FIELDS.priority] || 'Not Urgent') : 'Not Urgent';
         const valStatus = isEdit ? (tf[TASK_FIELDS.status] || 'Today') : 'Today';
-        const valBusiness = isEdit ? (tf[TASK_FIELDS.business] || '') : '';
+        const valBusinessRaw = isEdit ? (tf[TASK_FIELDS.business] || []) : [];
+        const selectedBusinessId = Array.isArray(valBusinessRaw) ? valBusinessRaw[0] : valBusinessRaw;
         const valRecurring = isEdit ? (tf[TASK_FIELDS.recurring] || '') : '';
         const valProject = isEdit ? (tf[TASK_FIELDS.project] || []) : [];
-        const valAssignee = isEdit ? (tf[TASK_FIELDS.assignee] || '') : '';
+        const assigneeRaw = isEdit ? (tf[TASK_FIELDS.assignee] || '') : '';
+        const valAssignee = typeof assigneeRaw === 'object' ? (assigneeRaw.email || '') : assigneeRaw;
         const selectedProjectId = Array.isArray(valProject) ? valProject[0] : valProject;
 
         const overlay = document.createElement('div');
@@ -899,7 +901,17 @@ if (tabId === 'comms') {
         const timeOpts = makeOpts(['15 min','30 min','45 min','1 hr','2 hr','3 hr','4 hr','8 hr'], valTimeEst);
         const priorityOpts = makeOpts(['Not Urgent','Project','Urgent'], valPriority);
         const statusOpts = makeOpts(['Today','Upcoming','Approval'], valStatus);
-        const businessOpts = makeOpts(['','Real Estate','Operations Director','Personal'], valBusiness);
+        let businessOpts = '<option value="">-</option>';
+        if (typeof allBusinesses !== 'undefined' && Array.isArray(allBusinesses)) {
+            allBusinesses
+                .filter(b => b.fields && b.fields['Active'])
+                .sort((a, b) => ((a.fields['Business Name'] || a.fields['Name'] || '') + '').localeCompare((b.fields['Business Name'] || b.fields['Name'] || '') + ''))
+                .forEach(b => {
+                    const bName = b.fields['Business Name'] || b.fields['Name'] || 'Unnamed';
+                    const sel = b.id === selectedBusinessId ? ' selected' : '';
+                    businessOpts += `<option value="${escHtml(b.id)}"${sel}>${escHtml(bName)}</option>`;
+                });
+        }
         const recurringOpts = makeOpts(['','Daily','Weekly','Fortnightly','Monthly','Quarterly','Bi-Annually','Annually'], valRecurring);
 
         // Styles matching drawer layout
@@ -1003,8 +1015,10 @@ if (tabId === 'comms') {
                 <!-- Attachments -->
                 <div style="margin-top:4px">
                     <span style="${secLbl}">Attachments</span>
-                    <div id="qtAttachments" style="margin-top:6px;padding:12px;border:1px dashed var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);text-align:center;color:var(--text-muted,#8A928C);font-size:12px">
-                        ${isEdit ? 'Drop files here or click to upload' : 'Save task first to add attachments'}
+                    <div id="qtAttachmentsList" style="margin-top:6px"></div>
+                    <div id="qtAttachmentsDrop" style="margin-top:6px;padding:16px;border:2px dashed var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);text-align:center;color:var(--text-muted,#8A928C);font-size:12px;cursor:${isEdit ? 'pointer' : 'default'};transition:border-color 0.2s,background 0.2s">
+                        ${isEdit ? '<span style="pointer-events:none">&#x1F4CE; Drop files here or click to upload</span>' : '<span>Save task first to add attachments</span>'}
+                        ${isEdit ? '<input type="file" id="qtFileInput" multiple style="display:none">' : ''}
                     </div>
                 </div>
             </div>
@@ -1083,7 +1097,7 @@ if (tabId === 'comms') {
             panel.querySelector('#qtAssignee').onchange = () => {
                 const key = panel.querySelector('#qtAssignee').value;
                 const m = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).find(x => x.key === key);
-                if (m) autoSave(TASK_FIELDS.assignee, m.email);
+                if (m) autoSave(TASK_FIELDS.assignee, { email: m.email });
             };
             panel.querySelector('#qtDue').onchange = () => autoSave(TASK_FIELDS.dueDate, panel.querySelector('#qtDue').value);
             panel.querySelector('#qtHardDeadline').onchange = () => autoSave(TASK_FIELDS.hardDeadline, panel.querySelector('#qtHardDeadline').checked);
@@ -1094,7 +1108,10 @@ if (tabId === 'comms') {
                 autoSave(TASK_FIELDS.project, p ? [p] : []);
             };
             panel.querySelector('#qtStatus').onchange = () => autoSave(TASK_FIELDS.status, panel.querySelector('#qtStatus').value);
-            panel.querySelector('#qtBusiness').onchange = () => autoSave(TASK_FIELDS.business, panel.querySelector('#qtBusiness').value);
+            panel.querySelector('#qtBusiness').onchange = () => {
+                const b = panel.querySelector('#qtBusiness').value;
+                autoSave(TASK_FIELDS.business, b ? [b] : []);
+            };
             panel.querySelector('#qtRecurring').onchange = () => autoSave(TASK_FIELDS.recurring, panel.querySelector('#qtRecurring').value);
             panel.querySelector('#qtDesc').onblur = () => autoSave(TASK_FIELDS.description, panel.querySelector('#qtDesc').value);
 
@@ -1155,6 +1172,69 @@ if (tabId === 'comms') {
             const resendBtn = panel.querySelector('#qtResendSlack');
             if (resendBtn) {
                 resendBtn.onclick = () => showToast('Slack notification sent', { type: 'success' });
+            }
+
+            // ── Attachments ──
+            const attDrop = panel.querySelector('#qtAttachmentsDrop');
+            const attFileInput = panel.querySelector('#qtFileInput');
+            const attListEl = panel.querySelector('#qtAttachmentsList');
+            if (attDrop && isEdit) {
+                // Show existing attachments
+                const existingAtts = tf[TASK_FIELDS.attachments] || [];
+                function renderExistingAttachments(atts) {
+                    if (!attListEl || !atts || atts.length === 0) { if (attListEl) attListEl.innerHTML = ''; return; }
+                    attListEl.innerHTML = atts.map((a, i) => {
+                        const fname = escHtml(a.filename || 'file');
+                        const thumb = a.thumbnails && a.thumbnails.small ? a.thumbnails.small.url : '';
+                        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-surface-2,#F4F6F1);border-radius:var(--radius-sm,4px);margin-bottom:4px">
+                            ${thumb ? `<img src="${escHtml(thumb)}" style="width:28px;height:28px;object-fit:cover;border-radius:3px">` : '<span style="font-size:16px">&#x1F4CE;</span>'}
+                            <a href="${escHtml(a.url)}" target="_blank" rel="noopener" style="flex:1;color:var(--accent,#2C6E49);font-size:12px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fname}</a>
+                            <span style="font-size:10px;color:var(--text-muted,#8A928C)">${a.size ? (a.size / 1024).toFixed(0) + ' KB' : ''}</span>
+                        </div>`;
+                    }).join('');
+                }
+                renderExistingAttachments(existingAtts);
+
+                // Drag-drop handlers
+                attDrop.ondragover = (e) => { e.preventDefault(); attDrop.style.borderColor = 'var(--accent,#2C6E49)'; attDrop.style.background = 'var(--accent-soft,#DDE8DF)'; };
+                attDrop.ondragleave = () => { attDrop.style.borderColor = 'var(--border-default,#DDE1D9)'; attDrop.style.background = ''; };
+                attDrop.ondrop = (e) => {
+                    e.preventDefault();
+                    attDrop.style.borderColor = 'var(--border-default,#DDE1D9)'; attDrop.style.background = '';
+                    if (e.dataTransfer.files.length) uploadAttachments(e.dataTransfer.files);
+                };
+                attDrop.onclick = () => { if (attFileInput) attFileInput.click(); };
+                if (attFileInput) attFileInput.onchange = () => { if (attFileInput.files.length) uploadAttachments(attFileInput.files); attFileInput.value = ''; };
+
+                async function uploadAttachments(files) {
+                    attDrop.innerHTML = '<span style="color:var(--text-muted,#8A928C);font-size:12px">Uploading...</span>';
+                    try {
+                        for (const file of files) {
+                            const formData = new FormData();
+                            formData.append('file', file);
+                            const res = await fetch(`https://content.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}/${TASK_FIELDS.attachments}/uploadAttachment`, {
+                                method: 'POST',
+                                headers: { Authorization: 'Bearer ' + PAT },
+                                body: formData
+                            });
+                            if (!res.ok) throw new Error('Upload failed: ' + res.status);
+                        }
+                        // Refresh attachments list
+                        const recRes = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}?fields[]=${TASK_FIELDS.attachments}`, {
+                            headers: { Authorization: 'Bearer ' + PAT }
+                        });
+                        if (recRes.ok) {
+                            const recData = await recRes.json();
+                            renderExistingAttachments(recData.fields[TASK_FIELDS.attachments] || []);
+                        }
+                        showToast(files.length + ' file(s) uploaded', { type: 'success' });
+                    } catch (err) {
+                        showToast('Upload failed: ' + err.message, { type: 'danger' });
+                    }
+                    attDrop.innerHTML = '<span style="pointer-events:none">&#x1F4CE; Drop files here or click to upload</span><input type="file" id="qtFileInput" multiple style="display:none">';
+                    const newInput = attDrop.querySelector('#qtFileInput');
+                    if (newInput) newInput.onchange = () => { if (newInput.files.length) uploadAttachments(newInput.files); newInput.value = ''; };
+                }
             }
 
             // ── Comments ──
@@ -1253,9 +1333,9 @@ if (tabId === 'comms') {
                     fields[TASK_FIELDS.priority] = panel.querySelector('#qtPriority').value;
                     fields[TASK_FIELDS.timeEstimate] = panel.querySelector('#qtTime').value;
                     fields[TASK_FIELDS.status] = panel.querySelector('#qtStatus').value;
-                    if (member) fields[TASK_FIELDS.assignee] = member.email;
+                    if (member) fields[TASK_FIELDS.assignee] = { email: member.email };
                     const biz = panel.querySelector('#qtBusiness').value;
-                    if (biz) fields[TASK_FIELDS.business] = biz;
+                    if (biz) fields[TASK_FIELDS.business] = [biz];
                     const rec = panel.querySelector('#qtRecurring').value;
                     if (rec) fields[TASK_FIELDS.recurring] = rec;
                     fields[TASK_FIELDS.hardDeadline] = panel.querySelector('#qtHardDeadline').checked;
