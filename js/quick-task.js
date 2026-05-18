@@ -83,8 +83,25 @@
     location.href = up + 'index.html#tasks?qa=1';
   }
 
-  // Public entry point. Tries Tasks page first; falls back to navigation.
+  // Public entry point. On the Tasks page, use the full drawer. On any
+  // other page in the parent shell, use the lightweight quick-task modal
+  // so the user stays on their current page.
   function openQuickAdd() {
+    // If we are on the Tasks page (standalone), use the full drawer.
+    if (typeof window.openNewTaskDrawer === 'function') {
+      window.openNewTaskDrawer();
+      return;
+    }
+    // Parent shell but NOT on the Tasks tab: use the lightweight modal.
+    if (typeof window.openQuickTaskModal === 'function') {
+      const currentTab = document.querySelector('.tab-panel[style*="block"]');
+      const isTasksTab = currentTab && currentTab.id === 'tab-tasks';
+      if (!isTasksTab) {
+        window.openQuickTaskModal({});
+        return;
+      }
+    }
+    // On the Tasks tab or fallback: use the full drawer via iframe.
     if (openOnTasksPage()) return;
     navigateToShellTasks();
   }
