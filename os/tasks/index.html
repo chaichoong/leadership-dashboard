@@ -6826,7 +6826,8 @@ async function openNewTaskDrawer(opts){
   let created=null;
   try{
     created=await createSimpleTask({
-      name:'(Untitled)',
+      name:opts.name||'(Untitled)',
+      description:opts.description||undefined,
       dueDate:opts.dueDate||todayStr(),
       timeEst:opts.timeEst||'15 min',
       assigneeEmail,
@@ -6840,7 +6841,7 @@ async function openNewTaskDrawer(opts){
   // sensible defaults even if parseTask missed echoed fields.
   const t=allTasks.find(x=>x.id===created.id);
   if(t){
-    t.name='(Untitled)';
+    t.name=opts.name||'(Untitled)';
     if(!t.dueDate)t.dueDate=opts.dueDate||todayStr();
     if(!t.priority)t.priority=opts.priority||'Not Urgent';
     if(!t.timeEst)t.timeEst=opts.timeEst||'15 min';

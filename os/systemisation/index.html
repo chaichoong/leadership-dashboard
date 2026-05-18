@@ -374,6 +374,7 @@ const WF = {
     steps:           'fldjmfqk77Wr1aOs5',
     skillDefinition: 'fldmRF1UDkbHtl1AG',
     driveUrl:        'fldNtXnxGrpUivWxU',
+    driveDocUrl:     'fldgXZCvwDKgTHGsH',
     sopDocument:     'fldW4qoDv2mrTNvu7',
 };
 const ST = {
@@ -488,6 +489,16 @@ async function setWfDriveUrl(wfId, url){
     if(url) localStorage.setItem('sys_drive_'+wfId, url); else localStorage.removeItem('sys_drive_'+wfId);
     try { await atUpdate(TBL.workflows, wfId, {[WF.driveUrl]: url||null}); } catch(e){ console.error('Drive URL save error:', e); }
 }
+function getWfDriveDocUrl(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    return (w && gf(w,WF.driveDocUrl)) || localStorage.getItem('sys_drivedoc_'+wfId) || '';
+}
+async function setWfDriveDocUrl(wfId, url){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(w) w.fields[WF.driveDocUrl] = url||null;
+    if(url) localStorage.setItem('sys_drivedoc_'+wfId, url); else localStorage.removeItem('sys_drivedoc_'+wfId);
+    try { await atUpdate(TBL.workflows, wfId, {[WF.driveDocUrl]: url||null}); } catch(e){ console.error('Drive Doc URL save error:', e); }
+}
 function getWfVideoTaskId(wfId){ return localStorage.getItem('sys_vtask_'+wfId)||''; }
 function setWfVideoTaskId(wfId, taskId){ if(taskId) localStorage.setItem('sys_vtask_'+wfId, taskId); else localStorage.removeItem('sys_vtask_'+wfId); }
 function getWfVideoTaskStatus(wfId){ return localStorage.getItem('sys_vtask_status_'+wfId)||''; }
@@ -593,7 +604,7 @@ function showAuthBar(){
 // ═══════════════════════════════════════════════════════════════════════
 async function loadData(){
     const [wf, st, mm, bz, os] = await Promise.all([
-        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business,WF.skillDefinition,WF.driveUrl,WF.sopDocument]),
+        atFetch(TBL.workflows, [WF.name,WF.description,WF.fulfillStage,WF.department,WF.status,WF.sortOrder,WF.mainMethodStage,WF.business,WF.skillDefinition,WF.driveUrl,WF.driveDocUrl,WF.sopDocument]),
         atFetch(TBL.steps, [ST.name,ST.description,ST.workflow,ST.stepType,ST.sopContent,ST.sopStatus,ST.sortOrder,ST.skillId]),
         atFetch(TBL.mainMethods, [MM.name,MM.description,MM.business]),
         atFetch(TBL.businesses, [BIZ_NAME,BIZ_ACTIVE]),
@@ -2319,6 +2330,7 @@ async function uploadSOPToDrive(wfId){
         if(result.error) throw new Error(result.error);
 
         await setWfDriveUrl(wfId, result.folderUrl);
+        if(result.docUrl) await setWfDriveDocUrl(wfId, result.docUrl);
         toast('SOP uploaded to Google Drive');
         render();
     } catch(e){
@@ -2543,6 +2555,7 @@ function renderSteps(){
             const steps = stepsForWorkflow(w.id);
             const loomUrl = getWfLoomUrl(w.id);
             const driveUrl = getWfDriveUrl(w.id);
+            const driveDocUrl = getWfDriveDocUrl(w.id);
             const vtaskId = getWfVideoTaskId(w.id);
             const vtaskStatus = getWfVideoTaskStatus(w.id);
 
@@ -2566,7 +2579,7 @@ function renderSteps(){
                 </div>`;
             }
 
-            const hasResources = loomUrl || driveUrl;
+            const hasResources = loomUrl || driveUrl || driveDocUrl;
             html += `<div class="resources-panel${hasResources?' open':''}" id="resources-${w.id}">
                 <div class="resources-header" onclick="this.parentElement.classList.toggle('open')">
                     <span class="resources-chevron">&#x25B6;</span>
@@ -2577,6 +2590,10 @@ function renderSteps(){
                         ${loomUrl?`<div class="resources-item">
                             <label>Loom Video</label>
                             <a href="${esc(loomUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open in Loom &#x2197;</a>
+                        </div>`:''}
+                        ${driveDocUrl?`<div class="resources-item">
+                            <label>SOP Document</label>
+                            <a href="${esc(driveDocUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">Open SOP &#x2197;</a>
                         </div>`:''}
                         ${driveUrl?`<div class="resources-item">
                             <label>Drive Folder</label>
@@ -2743,7 +2760,43 @@ function renderAutomation(){
         html += '</tbody></table></div>';
     }
 
-    if(!stepsWithSop.length && !wfsWithTasks.length){
+    // Completed SOPs section — workflows with generated SOP documents
+    const wfsWithSop = wfs.filter(w=>!!gf(w,WF.sopDocument));
+    if(wfsWithSop.length){
+        html += '<div class="auto-wf-group" style="margin-top:16px">';
+        html += '<div class="auto-wf-header">Completed SOPs <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithSop.length + ' workflows)</span></div>';
+        html += '<p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 8px 0">Workflows with generated SOP documents. Assign as a recurring task or convert to an AI skill.</p>';
+        html += `<table class="wf-grid"><thead><tr>
+            <th style="width:25%">Workflow</th>
+            <th style="width:20%">Department</th>
+            <th style="width:15%">SOP</th>
+            <th style="width:15%">Drive</th>
+            <th>Actions</th>
+        </tr></thead><tbody>`;
+
+        wfsWithSop.forEach(w=>{
+            const wName = gf(w,WF.name)||'Untitled';
+            const dept = selName(gf(w,WF.department))||'';
+            const driveDocUrl = getWfDriveDocUrl(w.id);
+            const driveUrl = getWfDriveUrl(w.id);
+            const hasSkill = !!gf(w,WF.skillDefinition);
+
+            html += `<tr>
+                <td style="font-weight:var(--fw-semibold);cursor:pointer;color:var(--accent)" onclick="selectedStepsWf='${w.id}';switchView('steps')">${esc(wName)}</td>
+                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(dept)}</td>
+                <td>${driveDocUrl?`<a href="${esc(driveDocUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Open SOP &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Local only</span>'}</td>
+                <td>${driveUrl?`<a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Folder &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Not uploaded</span>'}</td>
+                <td style="display:flex;gap:4px;flex-wrap:wrap">
+                    <button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="assignRecurringTask('${w.id}')">Assign Task</button>
+                    ${!hasSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill('${w.id}')">Convert to Skill</button>`:`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`}
+                </td>
+            </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+    }
+
+    if(!stepsWithSop.length && !wfsWithTasks.length && !wfsWithSop.length){
         pane.innerHTML = '<div class="empty-state"><p>No automation activity yet.</p><p>Assign video tasks in the SOPs tab, or complete SOPs to convert them to Skills or Tasks.</p></div>';
         return;
     }
@@ -2939,6 +2992,161 @@ function doConvertToTask(stepId){
     const name = s ? (gf(s,ST.name)||'Untitled') : 'Step';
     toast(`"${name}" linked to Tasks & Projects as a recurring task`);
     render();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Workflow-Level Automation (Completed SOPs)
+// ═══════════════════════════════════════════════════════════════════════
+function assignRecurringTask(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    const driveDocUrl = getWfDriveDocUrl(wfId);
+    const driveUrl = getWfDriveUrl(wfId);
+    const sopPageUrl = window.location.origin + window.location.pathname + '?wf=' + wfId;
+
+    let descLines = ['Recurring task for: ' + wName, ''];
+    if(driveDocUrl) descLines.push('SOP Document: ' + driveDocUrl);
+    if(driveUrl) descLines.push('Drive Folder: ' + driveUrl);
+    descLines.push('Web App SOP: ' + sopPageUrl);
+
+    const description = descLines.join('\n');
+
+    try {
+        window.parent.postMessage({
+            type: 'qt:open-new-task-drawer',
+            opts: {
+                name: wName + ' (Recurring)',
+                description: description,
+            }
+        }, '*');
+        toast('Task drawer opened with SOP links');
+    } catch(e){
+        const body = `<div style="font-size:var(--fs-sm);color:var(--text-secondary)">
+            <p style="margin:0 0 8px 0">Copy the following into your task description:</p>
+            <textarea readonly style="width:100%;height:120px;font-size:var(--fs-xs);font-family:var(--font-family-base);padding:8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);resize:none" onclick="this.select()">${esc(description)}</textarea>
+        </div>`;
+        const footer = `<button class="btn btn-primary" onclick="closeModal()">Done</button>`;
+        showModal('Assign Recurring Task: ' + esc(wName), body, footer);
+    }
+}
+
+async function convertWorkflowToSkill(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    const dept = selName(gf(w,WF.department))||'';
+    const driveDocUrl = getWfDriveDocUrl(wfId);
+
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:4px">This will use AI to generate a Claude Cowork skill from the "${esc(wName)}" SOP. The skill will be saved and available to run from here and the Skills Library.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="closeModal();doConvertWorkflowToSkill('${wfId}')">Generate Skill</button>`;
+    showModal('Convert to AI Skill', body, footer);
+}
+
+async function doConvertWorkflowToSkill(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    const dept = selName(gf(w,WF.department))||'';
+    const driveDocUrl = getWfDriveDocUrl(wfId);
+    const driveUrl = getWfDriveUrl(wfId);
+    const steps = stepsForWorkflow(wfId);
+    const stepSummary = steps.map(s => '- ' + (gf(s,ST.name)||'')).join('\n');
+
+    let sopContent = '';
+    const raw = gf(w,WF.sopDocument);
+    if(raw){
+        try {
+            const sopData = JSON.parse(raw);
+            sopContent = (sopData.sopSteps||[]).map(s=>s.title+': '+(s.body||'')).join('\n');
+        } catch(e){}
+    }
+
+    toast('Generating skill definition...');
+
+    try {
+        const prompt = `You are generating a Claude Cowork skill definition for an entire workflow SOP. Create a JSON skill definition that automates or guides execution of this workflow.
+
+Workflow: ${wName}
+${dept ? `Department: ${dept}` : ''}
+${driveDocUrl ? `SOP Document URL: ${driveDocUrl}` : ''}
+${driveUrl ? `Drive Folder URL: ${driveUrl}` : ''}
+
+Steps:
+${stepSummary}
+
+${sopContent ? `SOP Content:\n${sopContent}` : ''}
+
+Generate a JSON object with these exact fields:
+- "id": a kebab-case identifier (e.g. "process-new-tenant-onboarding")
+- "name": a clean human-readable name
+- "command": a command string in format "anthropic-skills:<id>"
+- "description": a clear 1-2 sentence description of what this skill does
+- "category": one of: "Property Management", "Finance", "Operations", "Legal", "Data & Analytics", "Customer Support", "Productivity", "Documents & Media", "Automation", "Development"
+- "tags": an array of 3-6 relevant lowercase keyword tags
+- "instructions": the full step-by-step instructions the skill should follow when run (as a single string with numbered steps)
+
+Return ONLY the JSON object, no markdown fences, no explanation.`;
+
+        const res = await fetch(CLAUDE_PROXY, {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 2048,
+                messages: [{role:'user', content: prompt}]
+            }),
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'{}';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if(!jsonMatch) throw new Error('Invalid AI response');
+        const skillDef = JSON.parse(jsonMatch[0]);
+
+        skillDef.source = 'sop';
+        skillDef.workflowId = wfId;
+
+        const existing = gf(w,WF.skillDefinition);
+        let skills = [];
+        try { skills = existing ? JSON.parse(existing) : []; } catch(e){ skills = []; }
+        if(!Array.isArray(skills)) skills = [skills];
+        skills = skills.filter(sk => !sk.workflowId || sk.workflowId !== wfId || sk.stepId);
+        skills.unshift(skillDef);
+        const json = JSON.stringify(skills);
+        w.fields[WF.skillDefinition] = json;
+        await atUpdate(TBL.workflows, wfId, {[WF.skillDefinition]: json});
+
+        toast(`Skill "${skillDef.name}" created and saved`);
+        render();
+    } catch(e){
+        toast('Skill generation error: '+e.message);
+    }
+}
+
+function runWorkflowSkill(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    let skills = [];
+    try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){ return; }
+    const wfSkill = skills.find(sk => sk.workflowId === wfId && !sk.stepId) || skills[0];
+    if(!wfSkill) return;
+
+    const skillCommand = wfSkill.command || ('anthropic-skills:' + (wfSkill.id||'unknown'));
+    const instructions = wfSkill.instructions || wfSkill.description || '';
+
+    const body = `<div style="font-size:var(--fs-sm);color:var(--text-secondary)">
+        <p style="margin:0 0 8px 0"><strong>${esc(wfSkill.name||wName)}</strong></p>
+        <p style="margin:0 0 12px 0">${esc(wfSkill.description||'')}</p>
+        <p style="margin:0 0 8px 0;font-size:var(--fs-xs)">Run this skill by pasting the command below into Claude Code or Cowork:</p>
+        <div style="display:flex;gap:8px;align-items:center">
+            <code style="flex:1;background:var(--bg-subtle);padding:8px 12px;border-radius:var(--radius-sm);font-size:var(--fs-xs);word-break:break-all">/${esc(skillCommand)}</code>
+            <button class="btn btn-sm btn-primary" onclick="navigator.clipboard.writeText('/${skillCommand.replace(/'/g,"\\'")}');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+        </div>
+    </div>`;
+    const footer = `<button class="btn" onclick="closeModal()">Close</button>`;
+    showModal('Run Skill: ' + esc(wfSkill.name||wName), body, footer);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

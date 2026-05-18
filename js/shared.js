@@ -421,9 +421,25 @@
     }
     // Listen for status pings from iframe pages.
     window.addEventListener('message', (e) => {
-        if (!e.data || e.data.type !== 'syncBarStatus' || !e.data.tabId) return;
+        if (!e.data || typeof e.data !== 'object') return;
         if (e.origin !== 'null' && e.origin !== window.location.origin) return;
-        updateSidebarHealth(e.data.tabId, e.data.status);
+
+        if (e.data.type === 'syncBarStatus' && e.data.tabId) {
+            updateSidebarHealth(e.data.tabId, e.data.status);
+            return;
+        }
+
+        // Forward qt:open-new-task-drawer from child iframes to the tasks iframe
+        if (e.data.type === 'qt:open-new-task-drawer') {
+            const frame = document.getElementById('tasksFrame');
+            if (frame && frame.contentWindow) {
+                try { window.switchTab('tasks'); } catch (err) {}
+                setTimeout(() => {
+                    try { frame.contentWindow.postMessage(e.data, '*'); } catch (err) {}
+                }, 300);
+            }
+            return;
+        }
     });
 
     // ── Sidebar collapsible sections (Phase 3 restructure) ──
