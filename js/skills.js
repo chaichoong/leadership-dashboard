@@ -13,6 +13,13 @@
     let _sopSkillsFetched = false;
     let _activePresetIds = [];
     let _activePresetsFetched = false;
+
+    // Strip namespace prefix from commands for display (e.g. "anthropic-skills:skill-name" -> "skill-name")
+    function displayCommand(cmd) {
+        if (!cmd) return '';
+        const i = cmd.indexOf(':');
+        return i > -1 ? cmd.substring(i + 1) : cmd;
+    }
     const SETTINGS_TABLE = 'tblHGNzDmOs59r9QD';
     const SETTINGS_RECORD = 'recqbcIz2R2griDn3';
     const ACTIVE_SKILLS_FIELD = 'Active Skill IDs';
@@ -146,7 +153,10 @@
                     <div class="skills-card-header" onclick="toggleSkillDetail('${escHtml(s.id)}')" role="button" tabindex="0" aria-expanded="false"
                          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSkillDetail('${escHtml(s.id)}')}">
                         <div class="skills-card-title">${escHtml(s.name)}</div>
-                        <span class="skills-source-badge ${sourceClass}">${escHtml(sourceBadge)}</span>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <span class="skills-source-badge ${sourceClass}">${escHtml(sourceBadge)}</span>
+                            <span class="skills-chevron" style="font-size:12px;color:var(--text-muted,#8A928C);transition:transform 0.2s">&#x25BC;</span>
+                        </div>
                     </div>
                     <div class="skills-card-desc">${escHtml(s.description)}</div>
                     <div class="skills-card-actions" style="padding:8px 16px 4px;display:flex;gap:8px;align-items:center">
@@ -156,7 +166,7 @@
                     <div class="skills-card-detail" id="skill-detail-${escHtml(s.id)}" style="display:none">
                         <div class="skills-detail-row">
                             <span class="skills-detail-label">Command</span>
-                            <code class="skills-detail-value">/${escHtml(s.command)}</code>
+                            <code class="skills-detail-value">/${escHtml(displayCommand(s.command))}</code>
                         </div>
                         <div class="skills-detail-row">
                             <span class="skills-detail-label">Category</span>
@@ -283,7 +293,11 @@
         const header = card ? card.querySelector('.skills-card-header') : null;
         const isOpen = detail.style.display !== 'none';
         detail.style.display = isOpen ? 'none' : 'block';
-        if (header) header.setAttribute('aria-expanded', String(!isOpen));
+        if (header) {
+            header.setAttribute('aria-expanded', String(!isOpen));
+            const chevron = header.querySelector('.skills-chevron');
+            if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+        }
     };
 
     window.setSkillsCategory = function (cat) {
@@ -372,7 +386,11 @@
             const card = d.closest('.skills-card');
             if (card) {
                 const hdr = card.querySelector('.skills-card-header');
-                if (hdr) hdr.setAttribute('aria-expanded', 'true');
+                if (hdr) {
+                    hdr.setAttribute('aria-expanded', 'true');
+                    const chev = hdr.querySelector('.skills-chevron');
+                    if (chev) chev.style.transform = 'rotate(180deg)';
+                }
             }
         });
     };
@@ -391,7 +409,7 @@
             <p style="color:var(--text-secondary,#5A6660);font-size:14px;line-height:1.6;margin:0 0 20px">${escHtml(skill.description)}</p>
             <div style="display:grid;grid-template-columns:120px 1fr;gap:8px 16px;margin-bottom:20px;font-size:13px">
                 <span style="font-weight:600;color:var(--text-secondary,#5A6660)">Command</span>
-                <code style="background:var(--bg-surface-2,#F4F6F1);padding:2px 8px;border-radius:4px;font-size:12px">/${escHtml(skill.command)}</code>
+                <code style="background:var(--bg-surface-2,#F4F6F1);padding:2px 8px;border-radius:4px;font-size:12px">/${escHtml(displayCommand(skill.command))}</code>
                 <span style="font-weight:600;color:var(--text-secondary,#5A6660)">Category</span>
                 <span>${escHtml(skill.category)}</span>
                 <span style="font-weight:600;color:var(--text-secondary,#5A6660)">Source</span>
@@ -435,7 +453,11 @@
             const card = d.closest('.skills-card');
             if (card) {
                 const hdr = card.querySelector('.skills-card-header');
-                if (hdr) hdr.setAttribute('aria-expanded', 'false');
+                if (hdr) {
+                    hdr.setAttribute('aria-expanded', 'false');
+                    const chev = hdr.querySelector('.skills-chevron');
+                    if (chev) chev.style.transform = '';
+                }
             }
         });
     };
