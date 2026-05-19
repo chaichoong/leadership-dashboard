@@ -221,6 +221,8 @@
     }
 
     const SKILL_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
+    let _skillConversation = [];
+    let _skillBusy = false;
 
     window.runSkill = async function (id) {
         const skill = allSkills().find(s => s.id === id);
@@ -230,35 +232,87 @@
 
         if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
 
-        const modal = showSkillRunModal(skill);
-        const outputEl = modal.querySelector('#skill-run-output');
+        _skillConversation = [];
+        showSkillRunModal(skill);
+
+        const instructions = skill.instructions || skill.description || '';
+        const systemMsg = 'You are executing the "' + skill.name + '" skill.\n\nInstructions:\n' + instructions + '\n\nExecute this skill step by step. If the skill requires user inputs, ask for them clearly. When the user provides inputs, continue execution. Be concise and practical.';
+
+        await sendSkillMessage(skill, systemMsg, 'Run this skill now.');
+    };
+
+    window.sendSkillReply = async function () {
+        const input = document.getElementById('skill-chat-input');
+        if (!input || !input.value.trim() || _skillBusy) return;
+        const text = input.value.trim();
+        input.value = '';
+
+        const skillId = document.getElementById('skill-run-modal')?.dataset?.skillId;
+        const skill = skillId ? allSkills().find(s => s.id === skillId) : null;
+        if (!skill) return;
+
+        const instructions = skill.instructions || skill.description || '';
+        const systemMsg = 'You are executing the "' + skill.name + '" skill.\n\nInstructions:\n' + instructions + '\n\nContinue executing the skill with the information the user provides. Be concise and practical.';
+
+        appendSkillBubble('user', text);
+        await sendSkillMessage(skill, systemMsg, text);
+    };
+
+    async function sendSkillMessage(skill, systemMsg, userText) {
+        _skillBusy = true;
+        _skillConversation.push({ role: 'user', content: userText });
+
+        const chatEl = document.getElementById('skill-chat-messages');
+        const inputArea = document.getElementById('skill-chat-area');
+        if (inputArea) inputArea.style.display = 'none';
+
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'skill-msg-loading';
+        loadingEl.style.cssText = 'padding:12px 0;text-align:center';
+        loadingEl.innerHTML = '<div style="display:inline-block;width:20px;height:20px;border:2px solid var(--border-default,#DDE1D9);border-top-color:var(--accent,#2C6E49);border-radius:50%;animation:spin 1s linear infinite"></div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>';
+        if (chatEl) { chatEl.appendChild(loadingEl); chatEl.scrollTop = chatEl.scrollHeight; }
 
         try {
-            const instructions = skill.instructions || skill.description || '';
-            const prompt = `You are executing the "${skill.name}" skill.\n\nInstructions:\n${instructions}\n\nExecute this skill now. If the skill requires user inputs that have not been provided, list each required input as a short question so the user can provide them. Be concise and practical.`;
-
             const res = await fetch(SKILL_PROXY, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     model: 'claude-sonnet-4-20250514',
                     max_tokens: 4096,
-                    messages: [{ role: 'user', content: prompt }],
+                    system: systemMsg,
+                    messages: _skillConversation,
                 }),
             });
 
             if (!res.ok) throw new Error('AI returned ' + res.status);
             const data = await res.json();
             const text = data.content?.[0]?.text || 'No response received.';
-            const usage = data.usage;
-            outputEl.innerHTML = renderSkillMarkdown(text);
-            if (usage) {
-                outputEl.insertAdjacentHTML('beforeend', '<div style="font-size:11px;color:var(--text-muted,#8A928C);margin-top:12px;padding-top:8px;border-top:1px solid var(--border-subtle,#E5E8E1)">Tokens: ' + usage.input_tokens + ' in, ' + usage.output_tokens + ' out</div>');
-            }
+            _skillConversation.push({ role: 'assistant', content: text });
+
+            loadingEl.remove();
+            appendSkillBubble('assistant', text);
         } catch (e) {
-            outputEl.innerHTML = '<div style="color:var(--danger,#dc3545)">Error: ' + escHtml(e.message) + '</div>';
+            loadingEl.remove();
+            appendSkillBubble('assistant', 'Error: ' + e.message);
         }
-    };
+
+        if (inputArea) inputArea.style.display = 'flex';
+        _skillBusy = false;
+        const input = document.getElementById('skill-chat-input');
+        if (input) input.focus();
+    }
+
+    function appendSkillBubble(role, text) {
+        const chatEl = document.getElementById('skill-chat-messages');
+        if (!chatEl) return;
+        const div = document.createElement('div');
+        div.style.cssText = role === 'user'
+            ? 'padding:8px 14px;background:var(--accent-soft,#DDE8DF);border-radius:var(--radius-md,8px);margin-bottom:8px;font-size:13px;line-height:1.6;align-self:flex-end;max-width:85%'
+            : 'padding:10px 14px;background:var(--bg-surface-2,#F4F6F1);border-radius:var(--radius-md,8px);border:1px solid var(--border-subtle,#E5E8E1);margin-bottom:8px;font-size:13px;line-height:1.7;max-width:95%';
+        div.innerHTML = role === 'user' ? escHtml(text) : renderSkillMarkdown(text);
+        chatEl.appendChild(div);
+        chatEl.scrollTop = chatEl.scrollHeight;
+    }
 
     function renderSkillMarkdown(text) {
         return text
@@ -280,24 +334,22 @@
 
         const overlay = document.createElement('div');
         overlay.id = 'skill-run-modal';
+        overlay.dataset.skillId = skill.id;
         overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)';
-        panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:0;max-width:860px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)';
+        panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 12px;border-bottom:1px solid var(--border-subtle,#E5E8E1)">
             <h2 style="margin:0;font-size:18px">${escHtml(skill.name)}</h2>
             <button onclick="this.closest('#skill-run-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C)">&times;</button>
         </div>
-        <div id="skill-run-output" style="font-size:13px;line-height:1.7;max-height:65vh;overflow-y:auto">
-            <div style="text-align:center;padding:40px">
-                <div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-default,#DDE1D9);border-top-color:var(--accent,#2C6E49);border-radius:50%;animation:spin 1s linear infinite"></div>
-                <p style="margin-top:12px;color:var(--text-secondary,#5A6660)">Running ${escHtml(skill.name)}...</p>
-                <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
-            </div>
+        <div id="skill-chat-messages" style="flex:1;overflow-y:auto;padding:16px 24px;display:flex;flex-direction:column;min-height:200px;max-height:60vh"></div>
+        <div id="skill-chat-area" style="display:none;padding:12px 24px 16px;border-top:1px solid var(--border-subtle,#E5E8E1);gap:8px;align-items:center">
+            <input id="skill-chat-input" type="text" placeholder="Type your response..." onkeydown="if(event.key==='Enter'){event.preventDefault();sendSkillReply()}" style="flex:1;padding:10px 14px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-md,8px);font-size:13px;font-family:inherit;outline:none;background:var(--bg-surface,#FBFBF9)">
+            <button onclick="sendSkillReply()" style="padding:10px 20px;border:none;border-radius:var(--radius-md,8px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;white-space:nowrap">Send</button>
         </div>`;
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
         overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
-        return panel;
     }
 
     window.toggleSkillDetail = function (id) {
