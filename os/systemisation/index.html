@@ -791,9 +791,8 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     const sopComplete = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
     document.getElementById('stepsCount').textContent=sopComplete;
-    const autoReady = sopComplete;
-    const pendingVideoTasks = allWorkflows.filter(w=>getWfVideoTaskId(w.id)&&getWfVideoTaskStatus(w.id)==='pending').length;
-    document.getElementById('autoCount').textContent=autoReady+pendingVideoTasks;
+    const skillsBuilt = allSteps.filter(s=>isSkillCreated(s.id)).length;
+    document.getElementById('autoCount').textContent=skillsBuilt;
 }
 
 // ── Customer Journey (FULFILL) ──
