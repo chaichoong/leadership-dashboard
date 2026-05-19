@@ -63,6 +63,52 @@ export default {
     if (request.method === 'GET' && url.pathname === '/health') {
       return json({ status: 'ok', worker: 'apple-inbound' });
     }
+    // Diagnostic endpoint: test the parsing pipeline with a sample transcription
+    if (request.method === 'GET' && url.pathname === '/test-parse') {
+      if (!verifyBearer(request, env.BEARER_TOKEN)) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      try {
+        const testText = url.searchParams.get('q') || 'This is a task for Kevin to build a module for meeting notes due next week, one hour, project based for operations director modules';
+        const todayStr = new Date().toLocaleString('en-CA', { timeZone: 'Europe/London' }).slice(0, 10);
+        // Test Airtable connectivity directly
+        const tmUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TEAM_MEMBERS}?fields[]=fldh16yvEgBy8uLKQ&returnFieldsByFieldId=true&pageSize=2`;
+        const tmRes = await fetch(tmUrl, { headers: { 'Authorization': `Bearer ${env.AIRTABLE_PAT}` } });
+        const tmStatus = tmRes.status;
+        const tmBody = tmRes.ok ? await tmRes.json() : await tmRes.text();
+
+        const pjUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_PROJECTS}?fields[]=${PF.name}&returnFieldsByFieldId=true&pageSize=2`;
+        const pjRes = await fetch(pjUrl, { headers: { 'Authorization': `Bearer ${env.AIRTABLE_PAT}` } });
+        const pjStatus = pjRes.status;
+        const pjBody = pjRes.ok ? await pjRes.json() : await pjRes.text();
+
+        const teamMembers = await fetchTeamMembers(env);
+        const projects = await fetchProjects(env, teamMembers);
+        const projectList = projects.map(p => `- "${p.name}" (ID: ${p.id})`).join('\n');
+        const parsed = await parseWithClaude(env, testText, todayStr, projectList);
+        const projectId = resolveProjectId(parsed.projectId, projects);
+        const matchedProject = projectId ? projects.find(p => p.id === projectId) : null;
+        return json({
+          input: testText,
+          today: todayStr,
+          hasApiKey: !!env.ANTHROPIC_API_KEY,
+          hasAirtablePat: !!env.AIRTABLE_PAT,
+          airtablePatLength: env.AIRTABLE_PAT ? env.AIRTABLE_PAT.length : 0,
+          teamMembersApiStatus: tmStatus,
+          teamMembersApiResponse: tmRes.ok ? `${(tmBody.records||[]).length} records` : tmBody,
+          projectsApiStatus: pjStatus,
+          projectsApiResponse: pjRes.ok ? `${(pjBody.records||[]).length} records` : pjBody,
+          projectCount: projects.length,
+          teamMemberCount: Object.keys(teamMembers).length,
+          projectList: projects.map(p => p.name),
+          parsed,
+          resolvedProjectId: projectId,
+          matchedProjectName: matchedProject ? matchedProject.name : null,
+        });
+      } catch (err) {
+        return json({ error: 'Test failed', detail: String(err), stack: err.stack }, 500);
+      }
+    }
     if (request.method !== 'POST') {
       return json({ error: 'Method not allowed' }, 405);
     }
@@ -319,14 +365,15 @@ function resolveProjectId(projectId, projects) {
 async function fetchTeamMembers(env) {
   const tmMember = 'fldh16yvEgBy8uLKQ'; // singleCollaborator field (holds Airtable user + email)
   const tmActive = 'fld2YLfcPqSe6b60u'; // active checkbox
-  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TEAM_MEMBERS}?fields[]=${tmMember}&fields[]=${tmActive}&pageSize=100`;
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TEAM_MEMBERS}?fields[]=${tmMember}&fields[]=${tmActive}&returnFieldsByFieldId=true&pageSize=100`;
 
   try {
     const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${env.AIRTABLE_PAT}` },
     });
     if (!res.ok) {
-      console.error('Failed to fetch team members:', res.status);
+      const errBody = await res.text().catch(() => '');
+      console.error('Failed to fetch team members:', res.status, errBody);
       return {};
     }
     const data = await res.json();
@@ -348,14 +395,15 @@ async function fetchTeamMembers(env) {
 async function fetchProjects(env, teamMemberMap) {
   const fieldParams = [PF.name, PF.completed, PF.business, PF.projCollabs]
     .map(f => `fields[]=${f}`).join('&');
-  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_PROJECTS}?${fieldParams}&pageSize=100`;
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_PROJECTS}?${fieldParams}&returnFieldsByFieldId=true&pageSize=100`;
 
   try {
     const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${env.AIRTABLE_PAT}` },
     });
     if (!res.ok) {
-      console.error('Failed to fetch projects:', res.status);
+      const errBody = await res.text().catch(() => '');
+      console.error('Failed to fetch projects:', res.status, errBody);
       return [];
     }
     const data = await res.json();
