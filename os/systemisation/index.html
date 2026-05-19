@@ -789,8 +789,9 @@ function updateCounts(){
     document.getElementById('methodCount').textContent=mc;
     document.getElementById('deptCount').textContent=dc;
     document.getElementById('allCount').textContent=wfs.length;
-    document.getElementById('stepsCount').textContent=allSteps.length;
-    const autoReady = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
+    const sopComplete = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
+    document.getElementById('stepsCount').textContent=sopComplete;
+    const autoReady = sopComplete;
     const pendingVideoTasks = allWorkflows.filter(w=>getWfVideoTaskId(w.id)&&getWfVideoTaskStatus(w.id)==='pending').length;
     document.getElementById('autoCount').textContent=autoReady+pendingVideoTasks;
 }
