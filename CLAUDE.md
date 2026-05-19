@@ -1,3 +1,11 @@
+# TOP 5 — BREAK THESE AND THINGS BREAK
+
+1. Never edit files outside your feature. Check the file-to-feature table below.
+2. All user-supplied or Airtable-sourced text rendered in HTML must use escHtml().
+3. Never hardcode colours, fonts, or spacing. Use design tokens from css/tokens.css.
+4. Verify every change in the browser before declaring done. "I've made the changes" is not done.
+5. Never hand off debugging, testing, or terminal commands to Kevin. If Claude Code can do it, Claude Code does it.
+
 # Operations Director Platform — Claude Code Rules
 
 ## File Architecture (Split for Concurrent Editing)
