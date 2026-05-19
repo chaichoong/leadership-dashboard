@@ -661,10 +661,12 @@ async function checkVideoTasks(){
                     const bracketMatch = combined.match(/\[loom:(https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+)\]/);
                     const plainMatch = combined.match(/https:\/\/www\.loom\.com\/share\/[a-zA-Z0-9]+/);
                     const loomUrl = bracketMatch ? bracketMatch[1] : (plainMatch ? plainMatch[0] : null);
-                    if(loomUrl && !getWfLoomUrl(wfId)){
+                    if(loomUrl){
+                        const existingUrl = getWfLoomUrl(wfId);
+                        const isUpdate = !!existingUrl && existingUrl !== loomUrl;
                         await setWfLoomUrl(wfId, loomUrl);
                         const wName = (allWorkflows.find(w=>w.id===wfId)&&gf(allWorkflows.find(w=>w.id===wfId),WF.name))||'workflow';
-                        toast('Loom URL auto-imported for "'+wName+'"');
+                        toast(isUpdate ? 'Loom URL updated for "'+wName+'" — regenerating SOP...' : 'Loom URL auto-imported for "'+wName+'"');
                         newlyCompleted.push(wfId);
                     }
                 }
@@ -689,8 +691,25 @@ async function autoGenerateSOPPipeline(wfId){
     }
     if(stepsForWorkflow(wfId).length > 0){
         toast('Auto-generating SOP for "'+wName+'"...');
-        try { await generateWorkflowSOP(wfId); } catch(e){ console.error('SOP generation failed for '+wfId, e); }
+        try {
+            await generateWorkflowSOP(wfId);
+            // generateWorkflowSOP chains into autoUploadToDrive automatically.
+            // After SOP + Drive are done, auto-create or update the skill.
+            try {
+                await autoConvertToSkill(wfId);
+            } catch(e){ console.error('Auto skill creation failed for '+wfId, e); }
+        } catch(e){ console.error('SOP generation failed for '+wfId, e); }
     }
+}
+
+async function autoConvertToSkill(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    const sopDoc = gf(w,WF.sopDocument);
+    if(!sopDoc) return;
+    toast('Auto-generating skill for "'+wName+'"...');
+    await doConvertWorkflowToSkill(wfId);
 }
 
 function buildMethodBizMap(){
@@ -2160,7 +2179,7 @@ No other text outside the JSON object.`;
             if(wi>=0) allWorkflows[wi].fields[WF.sopDocument] = sopJson;
         } catch(e){ console.error('SOP save error:', e); }
         toast('SOP generated');
-        autoUploadToDrive(wfId);
+        await autoUploadToDrive(wfId);
     } catch(e){
         toast('SOP generation error: '+e.message);
         container.innerHTML = `<div style="padding:20px;color:var(--danger)">Error generating SOP: ${esc(e.message)}</div>`;
