@@ -789,9 +789,9 @@ function updateCounts(){
     document.getElementById('methodCount').textContent=mc;
     document.getElementById('deptCount').textContent=dc;
     document.getElementById('allCount').textContent=wfs.length;
-    const sopComplete = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
-    document.getElementById('stepsCount').textContent=sopComplete;
-    const skillsBuilt = allSteps.filter(s=>isSkillCreated(s.id)).length;
+    const sopCount = wfs.filter(w=>!!gf(w,WF.sopDocument)).length;
+    document.getElementById('stepsCount').textContent=sopCount;
+    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition)).length;
     document.getElementById('autoCount').textContent=skillsBuilt;
 }
 
