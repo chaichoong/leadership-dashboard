@@ -460,21 +460,6 @@ function isSkillCreated(stepId){
 }
 function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)==='1'; }
 
-function findSkillInLibrary(workflowName){
-    try {
-        let lib = null;
-        if(window.parent && typeof window.parent.allSkills === 'function') lib = window.parent.allSkills();
-        if(!lib && window.parent) lib = window.parent.SKILLS_LIBRARY;
-        if(!lib || !Array.isArray(lib)) return null;
-        const wn = workflowName.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-        return lib.find(sk => {
-            const sn = (sk.name||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-            const sid = (sk.id||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-            return sn === wn || sid === wn || sn.includes(wn) || wn.includes(sn);
-        }) || null;
-    } catch(e){ return null; }
-}
-
 function getWfLoomUrl(wfId){
     const w = allWorkflows.find(w=>w.id===wfId);
     if(!w) return '';
@@ -806,7 +791,7 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     const sopCount = wfs.filter(w=>!!gf(w,WF.sopDocument)).length;
     document.getElementById('stepsCount').textContent=sopCount;
-    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition) || !!localStorage.getItem('sys_wfskill_'+w.id) || !!findSkillInLibrary(gf(w,WF.name)||'')).length;
+    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition) || !!localStorage.getItem('sys_wfskill_'+w.id)).length;
     document.getElementById('autoCount').textContent=skillsBuilt;
 }
 
@@ -2879,15 +2864,12 @@ function renderAutomation(){
             const lsSkill = localStorage.getItem('sys_wfskill_'+w.id);
             let lsSkillData = null;
             if(lsSkill){ try { lsSkillData = JSON.parse(lsSkill); } catch(e){} }
-            const libraryMatch = findSkillInLibrary(wName);
-            const hasSkill = hasWfSkill || stepsWithSkills.length > 0 || !!lsSkillData || !!libraryMatch;
+            const hasSkill = hasWfSkill || stepsWithSkills.length > 0 || !!lsSkillData;
             let skillName = '';
             if(hasWfSkill){
                 try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){}
             } else if(lsSkillData){
                 skillName = lsSkillData.name||'';
-            } else if(libraryMatch){
-                skillName = libraryMatch.name||'';
             } else if(stepsWithSkills.length){
                 const sid = gf(stepsWithSkills[0],ST.skillId);
                 skillName = sid || (gf(stepsWithSkills[0],ST.name)||'');
@@ -2960,13 +2942,7 @@ function renderAutomation(){
     }
 
     pane.innerHTML = html;
-    updateAutoCount();
-}
-
-function updateAutoCount(){
-    const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete').length;
-    const pendingTasks = allWorkflows.filter(w=>getWfVideoTaskId(w.id)&&getWfVideoTaskStatus(w.id)==='pending').length;
-    document.getElementById('autoCount').textContent = stepsWithSop + pendingTasks;
+    updateCounts();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
