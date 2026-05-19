@@ -460,6 +460,19 @@ function isSkillCreated(stepId){
 }
 function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)==='1'; }
 
+function findSkillInLibrary(workflowName){
+    try {
+        const lib = window.parent && window.parent.SKILLS_LIBRARY;
+        if(!lib || !Array.isArray(lib)) return null;
+        const wn = workflowName.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+        return lib.find(sk => {
+            const sn = (sk.name||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+            const sid = (sk.id||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+            return sn === wn || sid === wn || sn.includes(wn) || wn.includes(sn);
+        }) || null;
+    } catch(e){ return null; }
+}
+
 function getWfLoomUrl(wfId){
     const w = allWorkflows.find(w=>w.id===wfId);
     if(!w) return '';
@@ -791,7 +804,7 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     const sopCount = wfs.filter(w=>!!gf(w,WF.sopDocument)).length;
     document.getElementById('stepsCount').textContent=sopCount;
-    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition)).length;
+    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition) || !!localStorage.getItem('sys_wfskill_'+w.id) || !!findSkillInLibrary(gf(w,WF.name)||'')).length;
     document.getElementById('autoCount').textContent=skillsBuilt;
 }
 
@@ -2861,10 +2874,18 @@ function renderAutomation(){
             const driveUrl = getWfDriveUrl(w.id);
             const hasWfSkill = !!gf(w,WF.skillDefinition);
             const stepsWithSkills = stepsForWorkflow(w.id).filter(s=>isSkillCreated(s.id));
-            const hasSkill = hasWfSkill || stepsWithSkills.length > 0;
+            const lsSkill = localStorage.getItem('sys_wfskill_'+w.id);
+            let lsSkillData = null;
+            if(lsSkill){ try { lsSkillData = JSON.parse(lsSkill); } catch(e){} }
+            const libraryMatch = findSkillInLibrary(wName);
+            const hasSkill = hasWfSkill || stepsWithSkills.length > 0 || !!lsSkillData || !!libraryMatch;
             let skillName = '';
             if(hasWfSkill){
                 try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){}
+            } else if(lsSkillData){
+                skillName = lsSkillData.name||'';
+            } else if(libraryMatch){
+                skillName = libraryMatch.name||'';
             } else if(stepsWithSkills.length){
                 const sid = gf(stepsWithSkills[0],ST.skillId);
                 skillName = sid || (gf(stepsWithSkills[0],ST.name)||'');
@@ -3179,6 +3200,7 @@ Return ONLY the JSON object, no markdown fences, no explanation.`;
         w.fields[WF.skillDefinition] = json;
         await atUpdate(TBL.workflows, wfId, {[WF.skillDefinition]: json});
 
+        localStorage.setItem('sys_wfskill_'+wfId, JSON.stringify({name:skillDef.name,id:skillDef.id,command:skillDef.command}));
         toast(`Skill "${skillDef.name}" created and saved`);
         render();
     } catch(e){
