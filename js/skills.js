@@ -8,25 +8,60 @@
     let _skillsRendered = false;
     let _activeCategory = null;
     let _searchTerm = '';
+    let _sourceFilter = 'active'; // 'active' (My Skills + Active Presets), 'all' (everything), 'mine' (SOP only)
     let _sopSkills = [];
     let _sopSkillsFetched = false;
+    let _activePresetIds = [];
+    let _activePresetsFetched = false;
+    const SETTINGS_TABLE = 'tblHGNzDmOs59r9QD';
+    const SETTINGS_RECORD = 'recqbcIz2R2griDn3';
+    const ACTIVE_SKILLS_FIELD = 'Active Skill IDs';
+
+    async function fetchActivePresets() {
+        if (_activePresetsFetched || typeof PAT === 'undefined' || !PAT) return;
+        try {
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${SETTINGS_TABLE}/${SETTINGS_RECORD}?fields[]=${encodeURIComponent(ACTIVE_SKILLS_FIELD)}`;
+            const res = await fetch(url, { headers: { Authorization: 'Bearer ' + PAT } });
+            if (!res.ok) return;
+            const data = await res.json();
+            const raw = data.fields[ACTIVE_SKILLS_FIELD];
+            if (raw) {
+                try { _activePresetIds = JSON.parse(raw); } catch (e) { _activePresetIds = []; }
+            }
+            _activePresetsFetched = true;
+        } catch (e) {}
+    }
+
+    async function saveActivePreset(skillId) {
+        if (typeof PAT === 'undefined' || !PAT) return;
+        if (_activePresetIds.includes(skillId)) return;
+        _activePresetIds.push(skillId);
+        try {
+            const f = {}; f[ACTIVE_SKILLS_FIELD] = JSON.stringify(_activePresetIds);
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${SETTINGS_TABLE}/${SETTINGS_RECORD}`, {
+                method: 'PATCH',
+                headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: f })
+            });
+        } catch (e) {}
+    }
 
     async function fetchSOPSkills() {
         if (_sopSkillsFetched || typeof PAT === 'undefined' || !PAT) return;
         try {
             const baseId = 'appnqjDpqDniH3IRl';
             const tableId = 'tblLPoRHFBl0vqR24';
-            const fieldId = 'fldmRF1UDkbHtl1AG';
-            const driveFieldId = 'fldNtXnxGrpUivWxU';
-            const url = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${fieldId}&fields[]=${driveFieldId}&filterByFormula=NOT({Skill Definition}='')`;
+            const skillFieldName = 'Skill Definition';
+            const driveFieldName = 'Drive URL';
+            const url = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
             const res = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
             if (!res.ok) return;
             const data = await res.json();
             const skills = [];
             (data.records || []).forEach(r => {
-                const raw = r.fields[fieldId];
+                const raw = r.fields[skillFieldName];
                 if (!raw) return;
-                const driveUrl = r.fields[driveFieldId] || '';
+                const driveUrl = r.fields[driveFieldName] || '';
                 try {
                     const parsed = JSON.parse(raw);
                     const arr = Array.isArray(parsed) ? parsed : [parsed];
@@ -54,6 +89,13 @@
 
         const all = allSkills();
         const filtered = all.filter(s => {
+            // Source filter
+            if (_sourceFilter === 'mine' && s.source !== 'sop') return false;
+            if (_sourceFilter === 'active') {
+                // Show SOP skills + active presets only (hide unused presets)
+                if (s.source !== 'sop' && !_activePresetIds.includes(s.id)) return false;
+            }
+            // 'all' shows everything
             if (_activeCategory && s.category !== _activeCategory) return false;
             if (_searchTerm) {
                 const q = _searchTerm.toLowerCase();
@@ -107,15 +149,23 @@
                     <div class="skills-card-detail" id="skill-detail-${escHtml(s.id)}" style="display:none">
                         <div class="skills-detail-row">
                             <span class="skills-detail-label">Command</span>
-                            <code class="skills-detail-value">${escHtml(s.command)}</code>
+                            <code class="skills-detail-value">/${escHtml(s.command)}</code>
                         </div>
                         <div class="skills-detail-row">
                             <span class="skills-detail-label">Category</span>
                             <span class="skills-detail-value">${escHtml(s.category)}</span>
                         </div>
+                        <div class="skills-detail-row">
+                            <span class="skills-detail-label">Source</span>
+                            <span class="skills-detail-value">${escHtml(SKILLS_SOURCE_LABELS[s.source] || s.source)}</span>
+                        </div>
                         ${s.tags && s.tags.length ? `<div class="skills-detail-row">
                             <span class="skills-detail-label">Tags</span>
                             <span class="skills-detail-value skills-tags">${s.tags.map(t => '<span class="skills-tag">' + escHtml(t) + '</span>').join('')}</span>
+                        </div>` : ''}
+                        ${s.instructions ? `<div class="skills-detail-row" style="flex-direction:column;align-items:stretch">
+                            <span class="skills-detail-label" style="margin-bottom:6px">Instructions</span>
+                            <div class="skills-detail-value" style="max-height:200px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.5;background:var(--bg-surface-2,#F4F6F1);padding:10px 12px;border-radius:var(--radius-sm,4px);border:1px solid var(--border-subtle,#E5E8E1)">${escHtml(s.instructions)}</div>
                         </div>` : ''}
                     </div>
                 </div>`;
@@ -155,6 +205,9 @@
     window.runSkill = function (id) {
         const skill = allSkills().find(s => s.id === id);
         if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
+
+        // Track as active preset (persists to Airtable for all users)
+        if (skill.source !== 'sop') saveActivePreset(id);
 
         // Build the command text to copy as a slash command for Claude Co-Work
         const cmd = skill.command || skill.id;
@@ -201,11 +254,41 @@
     window.clearSkillsFilters = function () {
         _activeCategory = null;
         _searchTerm = '';
+        _sourceFilter = 'active';
         const input = document.getElementById('skillsSearchInput');
         if (input) input.value = '';
         document.querySelectorAll('.skills-filter-pill').forEach(p => p.classList.remove('active'));
+        renderSourcePills();
         renderSkillsLibrary();
     };
+
+    function renderSourcePills() {
+        const bar = document.getElementById('skillsSourceBar');
+        if (!bar) return;
+        const all = allSkills();
+        const myCount = all.filter(s => s.source === 'sop').length;
+        const activeCount = all.filter(s => s.source !== 'sop' && _activePresetIds.includes(s.id)).length;
+        const allCount = all.length;
+        bar.innerHTML = '';
+        const sources = [
+            { key: 'active', label: 'Active (' + (myCount + activeCount) + ')', desc: 'My Skills + used presets' },
+            { key: 'mine', label: 'My Skills (' + myCount + ')', desc: 'SOP-generated only' },
+            { key: 'all', label: 'All Presets (' + allCount + ')', desc: 'Show everything' },
+        ];
+        sources.forEach(src => {
+            const pill = document.createElement('button');
+            pill.className = 'skills-source-pill' + (_sourceFilter === src.key ? ' active' : '');
+            pill.textContent = src.label;
+            pill.title = src.desc;
+            pill.onclick = function () {
+                _sourceFilter = src.key;
+                document.querySelectorAll('.skills-source-pill').forEach(p => p.classList.remove('active'));
+                pill.classList.add('active');
+                renderSkillsLibrary();
+            };
+            bar.appendChild(pill);
+        });
+    }
 
     function renderFilterPills() {
         const bar = document.getElementById('skillsFilterBar');
@@ -226,6 +309,8 @@
 
     window.renderSkillsTab = async function () {
         await fetchSOPSkills();
+        await fetchActivePresets();
+        renderSourcePills();
         renderFilterPills();
         renderSkillsLibrary();
     };

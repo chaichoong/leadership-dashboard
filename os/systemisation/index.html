@@ -2397,8 +2397,12 @@ async function uploadSOPToDrive(wfId){
         if(result.error) throw new Error(result.error);
 
         await setWfDriveUrl(wfId, result.folderUrl);
-        if(result.docUrl) await setWfDriveDocUrl(wfId, result.docUrl);
-        toast('SOP uploaded to Google Drive');
+        if(result.docUrl) {
+            await setWfDriveDocUrl(wfId, result.docUrl);
+            toast('SOP uploaded to Google Drive (HTML + Google Doc)');
+        } else {
+            toast('SOP uploaded to Google Drive (HTML only, Google Doc creation failed)');
+        }
         render();
     } catch(e){
         toast('Drive upload error: '+e.message);
