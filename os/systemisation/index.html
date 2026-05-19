@@ -685,21 +685,29 @@ async function autoGenerateSOPPipeline(wfId){
     const w = allWorkflows.find(w=>w.id===wfId);
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
+
+    // Step 0: Import steps from Loom
+    showPipelineProgress(wName, 0);
     const hasSteps = stepsForWorkflow(wfId).length > 0;
     if(!hasSteps){
         try { await importFromLoom(wfId, true); } catch(e){ console.error('Step import failed for '+wfId, e); }
     }
     if(stepsForWorkflow(wfId).length > 0){
-        toast('Auto-generating SOP for "'+wName+'"...');
+        // Step 1: Generate SOP
+        showPipelineProgress(wName, 1);
         try {
             await generateWorkflowSOP(wfId);
             // generateWorkflowSOP chains into autoUploadToDrive automatically.
-            // After SOP + Drive are done, auto-create or update the skill.
+            // Step 2 (Uploading to Drive) is shown inside generateWorkflowSOP via autoUploadToDrive.
+
+            // Step 3: Create AI skill
+            showPipelineProgress(wName, 3);
             try {
                 await autoConvertToSkill(wfId);
             } catch(e){ console.error('Auto skill creation failed for '+wfId, e); }
         } catch(e){ console.error('SOP generation failed for '+wfId, e); }
     }
+    hidePipelineProgress();
 }
 
 async function autoConvertToSkill(wfId){
@@ -2385,6 +2393,9 @@ function exportSOPAsHTML(wfId){
 }
 
 async function autoUploadToDrive(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    const wName = w ? (gf(w,WF.name)||'Untitled') : 'Untitled';
+    showPipelineProgress(wName, 2);
     try {
         await uploadSOPToDrive(wfId);
     } catch(e){
@@ -3407,6 +3418,7 @@ function assignVideoTask(wfId){
         opts: {
             name: taskName,
             description: taskDesc,
+            _wfId: wfId,
         }
     }, '*');
 
@@ -3487,6 +3499,67 @@ function toggleSettings(){
     main.parentElement.insertBefore(panel, main);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// PostMessage listener — receive task ID back from parent shell
+// ═══════════════════════════════════════════════════════════════════════
+window.addEventListener('message', (e) => {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'qt:task-created' && e.data.wfId && e.data.taskId) {
+        setWfVideoTaskId(e.data.wfId, e.data.taskId);
+        setWfVideoTaskStatus(e.data.wfId, 'pending');
+        renderSteps();
+        updateCounts();
+        toast('Video task linked to workflow');
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Pipeline Progress Indicator
+// ═══════════════════════════════════════════════════════════════════════
+const PIPELINE_STEPS = [
+    'Importing steps from Loom',
+    'Generating SOP',
+    'Uploading to Google Drive',
+    'Creating AI skill',
+];
+
+function showPipelineProgress(wfName, stepIndex) {
+    let el = document.getElementById('pipelineProgress');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'pipelineProgress';
+        el.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-surface,#fff);border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-lg,12px);padding:16px 20px;box-shadow:var(--shadow-lg,0 8px 32px rgba(0,0,0,0.15));z-index:9999;min-width:280px;max-width:360px;font-family:inherit';
+        document.body.appendChild(el);
+    }
+    const total = PIPELINE_STEPS.length;
+    const pct = Math.round(((stepIndex + 1) / total) * 100);
+    const stepsHtml = PIPELINE_STEPS.map((s, i) => {
+        let icon = '&#9675;'; // empty circle
+        let col = 'var(--text-muted,#8A928C)';
+        let fw = 'normal';
+        if (i < stepIndex) { icon = '&#10003;'; col = 'var(--success,#2C6E49)'; }
+        else if (i === stepIndex) { icon = '&#9654;'; col = 'var(--accent,#2C6E49)'; fw = '600'; }
+        return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;color:${col};font-weight:${fw};font-size:13px"><span>${icon}</span>${esc(s)}</div>`;
+    }).join('');
+    el.innerHTML = `
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary,#5A6660);font-weight:600;margin-bottom:6px">Pipeline: ${esc(wfName)}</div>
+        <div style="background:var(--bg-subtle,#E5E8E1);border-radius:4px;height:6px;margin-bottom:10px;overflow:hidden">
+            <div style="background:var(--accent,#2C6E49);height:100%;width:${pct}%;transition:width 0.4s ease;border-radius:4px"></div>
+        </div>
+        ${stepsHtml}
+        <div style="font-size:11px;color:var(--text-muted,#8A928C);margin-top:6px">Step ${stepIndex + 1} of ${total}</div>
+    `;
+}
+
+function hidePipelineProgress() {
+    const el = document.getElementById('pipelineProgress');
+    if (el) {
+        el.style.transition = 'opacity 0.3s ease';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 350);
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // Boot

@@ -1348,6 +1348,22 @@ if (tabId === 'comms') {
                         body: JSON.stringify({ records: [{ fields }] })
                     });
                     if (!res.ok) throw new Error('Airtable error: ' + res.status);
+                    const resData = await res.json();
+                    const createdId = resData.records && resData.records[0] ? resData.records[0].id : null;
+
+                    // Send task ID back to source iframe (e.g. Systemisation)
+                    if (createdId && opts && opts._wfId) {
+                        document.querySelectorAll('iframe').forEach(f => {
+                            try {
+                                f.contentWindow.postMessage({
+                                    type: 'qt:task-created',
+                                    taskId: createdId,
+                                    wfId: opts._wfId,
+                                }, '*');
+                            } catch(e) { /* cross-origin iframe, skip */ }
+                        });
+                    }
+
                     closeModal();
                     showToast('Task created: ' + taskName, { type: 'success' });
                 } catch (err) {
