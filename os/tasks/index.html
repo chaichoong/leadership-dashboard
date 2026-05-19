@@ -7297,7 +7297,7 @@ function jobsPriorityCell(taskId,current){
                   :current==='Low Priority'?'background:var(--success-bg);color:var(--success);font-weight:600'
                   :'background:var(--bg-subtle);color:var(--text-secondary)';
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${o==='High Priority'?'🔴 High':o==='Low Priority'?'🟢 Low':escHtml(o||'-')}</option>`).join('');
-  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:var(--fs-sm);${pillStyle}" onchange="updateTaskField('${taskId}','priorityLevel',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
+  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:var(--fs-sm);${pillStyle}" onchange="updateTaskField('${taskId}','priorityLevel',this.value).then(()=>{renderTeamBar();renderKPIs();renderJobs()})" onclick="event.stopPropagation()">${opts}</select>`;
 }
 function jobsStatusCell(taskId,current){
   const options=STATUS_OPTIONS;
@@ -7310,7 +7310,7 @@ function jobsStatusCell(taskId,current){
     'Overdue':  'background:var(--danger-bg);color:var(--danger);font-weight:600',
   }[current]||'background:var(--bg-subtle);color:var(--text-secondary)';
   const opts=optList.map(o=>`<option value="${escHtml(o)}" ${o===current?'selected':''}>${escHtml(o||'-')}</option>`).join('');
-  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:var(--fs-sm);${statusStyle}" onchange="updateTaskField('${taskId}','status',this.value).then(()=>renderJobs())" onclick="event.stopPropagation()">${opts}</select>`;
+  return `<select class="inline-select" style="border:none;padding:4px 8px;border-radius:12px;font-size:var(--fs-sm);${statusStyle}" onchange="updateTaskField('${taskId}','status',this.value).then(()=>{renderTeamBar();renderKPIs();renderJobs()})" onclick="event.stopPropagation()">${opts}</select>`;
 }
 function jobsPropertyCell(taskId,currentId){
   const props=getPropertyOptions();
@@ -7330,7 +7330,7 @@ async function updateTaskProperty(taskId,propId){
     } else {task.propertyIds=[];task.property=[]}
     toast('Property updated');
   } catch(e){console.error('property save',e);toast('Save failed: '+e.message,true);recordSaveFailure(taskId,'property',e.message);}
-  finally{_saveState.pending--;renderSyncPill();renderJobs();}
+  finally{_saveState.pending--;renderSyncPill();renderTeamBar();renderKPIs();renderJobs();}
 }
 // Compute age in days from an ISO datetime string
 function ageDays(iso){if(!iso)return null;const d=new Date(iso);if(isNaN(d))return null;const now=new Date();return Math.max(0,Math.floor((now-d)/86400000))}
