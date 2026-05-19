@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOP Update Process Map</title>
+<link rel="stylesheet" href="../css/tokens.css?v=1">
+<style>
+body { background: var(--bg-app); color: var(--text-primary); font-family: var(--font-family-base); padding: 40px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin-bottom: 8px; }
+.subtitle { color: var(--text-secondary); font-size: var(--fs-sm); margin-bottom: 32px; }
+
+.process-container { position: relative; }
+
+/* Swimlane headers */
+.swimlane { margin-bottom: 40px; }
+.swimlane-label {
+    font-size: var(--fs-xs); font-weight: var(--fw-bold); text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-muted); margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--border-subtle);
+}
+
+/* Flow row */
+.flow-row {
+    display: flex; align-items: flex-start; gap: 12px; flex-wrap: nowrap;
+    margin-bottom: 12px;
+}
+
+/* Process nodes */
+.node {
+    border-radius: var(--radius-md); padding: 14px 16px;
+    min-width: 160px; max-width: 320px; flex: 1; position: relative;
+    box-shadow: var(--shadow-sm); font-size: var(--fs-sm);
+}
+.node-title { font-weight: var(--fw-semibold); margin-bottom: 4px; }
+.node-desc { color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.5; }
+
+/* Node types */
+.node-trigger { background: var(--warning-bg); border: 2px solid var(--warning); }
+.node-action { background: var(--bg-surface); border: 2px solid var(--accent); }
+.node-decision { background: var(--info-bg); border: 2px solid var(--info); border-radius: var(--radius-lg); }
+.node-auto { background: var(--accent-soft); border: 2px solid var(--accent); }
+.node-end { background: var(--success-bg); border: 2px solid var(--success); }
+.node-data { background: var(--bg-surface-2); border: 2px solid var(--border-default); border-style: dashed; }
+
+/* Arrow connector */
+.arrow {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 32px; max-width: 32px; color: var(--text-muted); font-size: 20px;
+    padding-top: 12px; flex-shrink: 0; flex-grow: 0;
+}
+.arrow-down {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-size: 20px; padding: 8px 0;
+    margin-left: 90px;
+}
+
+/* Legend */
+.legend {
+    display: flex; flex-wrap: wrap; gap: 16px; margin-top: 40px;
+    padding: 16px 20px; background: var(--bg-surface); border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+}
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.legend-swatch {
+    width: 20px; height: 20px; border-radius: 4px; flex-shrink: 0;
+}
+
+/* Phase headers */
+.phase-header {
+    font-size: var(--fs-lg); font-weight: var(--fw-bold); color: var(--accent);
+    margin: 32px 0 16px; padding: 8px 0;
+    border-bottom: 3px solid var(--accent);
+}
+.phase-number {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+    color: #fff; font-size: var(--fs-sm); font-weight: var(--fw-bold); margin-right: 8px;
+}
+
+/* Notes */
+.note-box {
+    background: var(--bg-surface); border: 1px solid var(--border-default);
+    border-left: 4px solid var(--accent-gold); border-radius: var(--radius-md);
+    padding: 16px 20px; margin: 24px 0; font-size: var(--fs-sm);
+}
+.note-box strong { color: var(--accent-gold); }
+</style>
+</head>
+<body>
+
+<h1>SOP Update Process Map</h1>
+<p class="subtitle">How SOPs are versioned, updated, and cascaded to linked skills</p>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- PHASE 1: DETECTION -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="phase-header"><span class="phase-number">1</span> Detection: Identifying Stale SOPs</div>
+
+<div class="flow-row">
+    <div class="node node-trigger">
+        <div class="node-title">Trigger: SOP Needs Update</div>
+        <div class="node-desc">Three possible triggers:<br>
+            1. User clicks "Flag for Update" on a workflow<br>
+            2. Scheduled drift monitor detects changes<br>
+            3. Workflow steps are edited after SOP was generated
+        </div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-auto">
+        <div class="node-title">Set Status: "Needs Update"</div>
+        <div class="node-desc">Airtable field "SOP Status" set to "Needs Update". Warning badge appears on the workflow card. Sidebar badge count increments.</div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-data">
+        <div class="node-title">Airtable Fields Updated</div>
+        <div class="node-desc">
+            SOP Status: "Needs Update"<br>
+            SOP Version: (unchanged)<br>
+            SOP Last Updated: (unchanged)<br>
+            Skill Status: "Stale"
+        </div>
+    </div>
+</div>
+
+<div class="note-box">
+    <strong>Drift Monitor (Scheduled Skill):</strong> The existing "Drift Monitor" scheduled skill can be extended to compare workflow step timestamps against SOP generation date. If steps were modified after the SOP was last generated, it auto-flags the SOP as needing update.
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- PHASE 2: REGENERATION -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="phase-header"><span class="phase-number">2</span> Regeneration: Updating the SOP</div>
+
+<div class="flow-row">
+    <div class="node node-action">
+        <div class="node-title">User Clicks "Regenerate SOP"</div>
+        <div class="node-desc">Button appears on flagged workflows. Opens the SOP generator with pre-populated workflow data. User can review before generating.</div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-auto">
+        <div class="node-title">AI Generates Updated SOP</div>
+        <div class="node-desc">Same SOP generation process as initial creation. Uses current workflow steps, descriptions, and metadata. Produces HTML output.</div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-decision">
+        <div class="node-title">User Reviews SOP</div>
+        <div class="node-desc">Preview shown in modal. User can approve or request changes. No auto-publish without review.</div>
+    </div>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<div class="flow-row">
+    <div class="node node-auto">
+        <div class="node-title">Overwrite Drive Files</div>
+        <div class="node-desc">HTML file replaced in existing folder. Google Doc updated (or recreated). Same folder URL preserved. No duplicate files.</div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-data">
+        <div class="node-title">Version Incremented</div>
+        <div class="node-desc">
+            SOP Status: "Current"<br>
+            SOP Version: v1 &rarr; v2<br>
+            SOP Last Updated: now<br>
+            SOP Change Log: appended
+        </div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-trigger">
+        <div class="node-title">Cascade: Flag Linked Skill</div>
+        <div class="node-desc">If a skill was generated from this SOP, its status changes to "Needs Re-generation". Warning badge appears in Skills Library.</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- PHASE 3: SKILL SYNC -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="phase-header"><span class="phase-number">3</span> Skill Sync: Updating Linked Skills</div>
+
+<div class="flow-row">
+    <div class="node node-trigger">
+        <div class="node-title">Skill Flagged: "Needs Re-generation"</div>
+        <div class="node-desc">Warning badge in Skills Library. "Regenerate Skill" button appears on the skill card and in the Automation section.</div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-action">
+        <div class="node-title">User Clicks "Regenerate Skill"</div>
+        <div class="node-desc">Takes the updated SOP content as input. Re-runs the skill generation AI to produce updated skill definition (instructions, command, tags).</div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-auto">
+        <div class="node-title">Skill Definition Updated</div>
+        <div class="node-desc">Skill Definition field in Airtable overwritten with new JSON. Skill version incremented. Old definition not preserved (SOP is the source of truth).</div>
+    </div>
+</div>
+
+<div class="arrow-down">&darr;</div>
+
+<div class="flow-row">
+    <div class="node node-end">
+        <div class="node-title">Sync Complete</div>
+        <div class="node-desc">
+            SOP Status: "Current"<br>
+            Skill Status: "Active"<br>
+            Both version numbers aligned<br>
+            Warning badges cleared
+        </div>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="node node-data">
+        <div class="node-title">Skills Library Updated</div>
+        <div class="node-desc">Next time user opens Skills Library, the updated skill definition loads from Airtable. No stale cache (fetched fresh each time).</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- AIRTABLE FIELDS -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="phase-header"><span class="phase-number">4</span> Airtable Data Model</div>
+
+<div class="note-box">
+    <strong>New fields on Systemisation Workflows table:</strong><br><br>
+    <strong>SOP Status</strong> (Single Select): "Not Started" | "Current" | "Needs Update"<br>
+    <strong>SOP Version</strong> (Number): Integer starting at 1, incremented on each regeneration<br>
+    <strong>SOP Last Updated</strong> (Date): Timestamp of last SOP generation/regeneration<br>
+    <strong>SOP Change Log</strong> (Long Text): Append-only log. Each entry: "v2 | 2026-05-19 | Reason: Steps updated"<br>
+    <strong>Skill Status</strong> (Single Select): "Not Created" | "Active" | "Needs Re-generation" | "Stale"<br>
+    <strong>Skill Version</strong> (Number): Integer, incremented when skill is regenerated from updated SOP
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- EDGE CASES -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="phase-header"><span class="phase-number">5</span> Edge Cases and Rules</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div class="node node-data">
+        <div class="node-title">No Skill Exists Yet</div>
+        <div class="node-desc">If SOP is updated but no skill was ever created, skip Phase 3 entirely. Only the SOP version increments.</div>
+    </div>
+    <div class="node node-data">
+        <div class="node-title">User Edits Steps After SOP</div>
+        <div class="node-desc">Any change to workflow steps (add, edit, delete, reorder) after SOP generation auto-flags the SOP as "Needs Update".</div>
+    </div>
+    <div class="node node-data">
+        <div class="node-title">Multiple Skills from One SOP</div>
+        <div class="node-desc">If one workflow has multiple skills, ALL linked skills get flagged when the SOP is updated. Each must be regenerated individually.</div>
+    </div>
+    <div class="node node-data">
+        <div class="node-title">Drive Folder Preserved</div>
+        <div class="node-desc">Regeneration overwrites files in the SAME Drive folder. The folder URL never changes. Bookmarks and links remain valid.</div>
+    </div>
+    <div class="node node-data">
+        <div class="node-title">Manual SOP Edits</div>
+        <div class="node-desc">If someone edits the Google Doc directly, the system cannot detect this. Only changes via the platform trigger the cascade. Document this limitation.</div>
+    </div>
+    <div class="node node-data">
+        <div class="node-title">Version History</div>
+        <div class="node-desc">The SOP Change Log is append-only. Previous SOP versions are NOT stored (the Drive file is overwritten). If version history is needed later, Google Drive's own version history provides it.</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- LEGEND -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--warning-bg);border:2px solid var(--warning)"></div> Trigger / Alert</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-surface);border:2px solid var(--accent)"></div> User Action</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--accent-soft);border:2px solid var(--accent)"></div> Automated Step</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--info-bg);border:2px solid var(--info)"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--success-bg);border:2px solid var(--success)"></div> Completion</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--bg-surface-2);border:2px dashed var(--border-default)"></div> Data / Airtable</div>
+</div>
+
+</body>
+</html>
