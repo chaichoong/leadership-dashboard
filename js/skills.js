@@ -94,6 +94,7 @@
     function allSkills() {
         return SKILLS_LIBRARY.concat(_sopSkills);
     }
+    window.allSkills = allSkills;
 
     function renderSkillsLibrary() {
         const container = document.getElementById('skillsLibraryContent');
@@ -224,6 +225,19 @@
     let _skillConversation = [];
     let _skillBusy = false;
 
+    function buildSkillSystem(skill) {
+        const instructions = skill.instructions || skill.description || '';
+        return 'You are an AI assistant running the "' + skill.name + '" skill inside a web dashboard chat window.\n\n'
+            + 'CRITICAL CONSTRAINTS:\n'
+            + '- You are running in a browser chat. You have NO access to a file system, terminal, bash, Python, or any tools.\n'
+            + '- NEVER pretend to run commands, scripts, or code. NEVER show bash/python code blocks as if you are executing them.\n'
+            + '- NEVER claim files have been saved or generated somewhere. You cannot create files.\n'
+            + '- If the skill would normally produce a document (agreement, report, letter, plan), you MUST generate the FULL document text directly in your response so the user can copy it.\n'
+            + '- If the skill needs information from the user, ask clearly and concisely. When the user provides it, proceed immediately.\n'
+            + '- Be direct. Do not explain what you would do. Just do it.\n\n'
+            + 'SKILL INSTRUCTIONS:\n' + instructions;
+    }
+
     window.runSkill = async function (id) {
         const skill = allSkills().find(s => s.id === id);
         if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
@@ -235,10 +249,7 @@
         _skillConversation = [];
         showSkillRunModal(skill);
 
-        const instructions = skill.instructions || skill.description || '';
-        const systemMsg = 'You are executing the "' + skill.name + '" skill.\n\nInstructions:\n' + instructions + '\n\nExecute this skill step by step. If the skill requires user inputs, ask for them clearly. When the user provides inputs, continue execution. Be concise and practical.';
-
-        await sendSkillMessage(skill, systemMsg, 'Run this skill now.');
+        await sendSkillMessage(skill, buildSkillSystem(skill), 'Run this skill now.');
     };
 
     window.sendSkillReply = async function () {
@@ -251,11 +262,8 @@
         const skill = skillId ? allSkills().find(s => s.id === skillId) : null;
         if (!skill) return;
 
-        const instructions = skill.instructions || skill.description || '';
-        const systemMsg = 'You are executing the "' + skill.name + '" skill.\n\nInstructions:\n' + instructions + '\n\nContinue executing the skill with the information the user provides. Be concise and practical.';
-
         appendSkillBubble('user', text);
-        await sendSkillMessage(skill, systemMsg, text);
+        await sendSkillMessage(skill, buildSkillSystem(skill), text);
     };
 
     async function sendSkillMessage(skill, systemMsg, userText) {
@@ -310,6 +318,13 @@
             ? 'padding:8px 14px;background:var(--accent-soft,#DDE8DF);border-radius:var(--radius-md,8px);margin-bottom:8px;font-size:13px;line-height:1.6;align-self:flex-end;max-width:85%'
             : 'padding:10px 14px;background:var(--bg-surface-2,#F4F6F1);border-radius:var(--radius-md,8px);border:1px solid var(--border-subtle,#E5E8E1);margin-bottom:8px;font-size:13px;line-height:1.7;max-width:95%';
         div.innerHTML = role === 'user' ? escHtml(text) : renderSkillMarkdown(text);
+        if (role === 'assistant' && text.length > 200) {
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'Copy Response';
+            copyBtn.style.cssText = 'margin-top:8px;padding:4px 12px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-secondary,#5A6660);cursor:pointer;font-size:11px;font-family:inherit';
+            copyBtn.onclick = function() { navigator.clipboard.writeText(text).then(function() { copyBtn.textContent = 'Copied'; setTimeout(function() { copyBtn.textContent = 'Copy Response'; }, 1500); }); };
+            div.appendChild(copyBtn);
+        }
         chatEl.appendChild(div);
         chatEl.scrollTop = chatEl.scrollHeight;
     }

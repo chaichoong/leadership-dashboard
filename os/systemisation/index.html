@@ -462,7 +462,9 @@ function isTaskCreated(stepId){ return localStorage.getItem('sys_task_'+stepId)=
 
 function findSkillInLibrary(workflowName){
     try {
-        const lib = window.parent && window.parent.SKILLS_LIBRARY;
+        let lib = null;
+        if(window.parent && typeof window.parent.allSkills === 'function') lib = window.parent.allSkills();
+        if(!lib && window.parent) lib = window.parent.SKILLS_LIBRARY;
         if(!lib || !Array.isArray(lib)) return null;
         const wn = workflowName.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
         return lib.find(sk => {
