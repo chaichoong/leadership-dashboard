@@ -4,6 +4,7 @@
 const AIRTABLE_BASE = 'appnqjDpqDniH3IRl';
 const TABLE_TASKS   = 'tblqB8b22hKBL4PF1';
 const TABLE_PROJECTS = 'tblHrpTMd5LNYn8v1';
+const TABLE_TEAM_MEMBERS = 'tblco0p2OnlLQVAX7';
 const AIRTABLE_URL  = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TASKS}`;
 const RECIPIENT_EMAIL = 'kevinbrittain@gmail.com';
 
@@ -22,6 +23,15 @@ const FIELD = {
   dueDate:      'fld7XP8w8kbxfETV4',
   timeEstimate: 'fld10VzzbiNNgRmIi',
   projects:     'fldBg0rQy0FrOAkRN',
+  business:     'fldLu1Y4GzyWcDoxr',
+};
+
+// Project table field IDs (for reading project details to cascade to tasks)
+const PF = {
+  name:         'fldiMZICg1KOORpte',
+  completed:    'fldliObR7TdTdjht7',
+  business:     'fldtdJTFkMtldxEVf',
+  projCollabs:  'fldN5l2H4WCsM0S3x',
 };
 
 const TEAM = [
@@ -83,8 +93,9 @@ async function handleVoiceTask(request, env) {
 
   const todayStr = new Date().toLocaleString('en-CA', { timeZone: 'Europe/London' }).slice(0, 10);
 
-  // Fetch active projects from Airtable for AI context
-  const projects = await fetchProjects(env);
+  // Fetch team members (for collaborator resolution) and active projects
+  const teamMembers = await fetchTeamMembers(env);
+  const projects = await fetchProjects(env, teamMembers);
   const projectList = projects.map(p => `- "${p.name}" (ID: ${p.id})`).join('\n');
 
   // Parse the voice transcription with Claude
@@ -105,8 +116,9 @@ async function handleVoiceTask(request, env) {
   // Resolve priority
   const priority = VALID_PRIORITIES.includes(parsed.priority) ? parsed.priority : 'Not Urgent';
 
-  // Resolve project
-  const projectId = resolveProject(parsed.projectName, projects);
+  // Resolve project — Claude returns the Airtable record ID directly
+  const projectId = resolveProjectId(parsed.projectId, projects);
+  const matchedProject = projectId ? projects.find(p => p.id === projectId) : null;
 
   // Build Airtable fields
   const fields = {
@@ -122,16 +134,32 @@ async function handleVoiceTask(request, env) {
   if (parsed.description) {
     fields[FIELD.description] = parsed.description;
   }
+
+  // CASCADE from project: link project, inherit business + collaborators
   if (projectId) {
     fields[FIELD.projects] = [projectId];
+    // When linked to a project, priority is always "Project"
+    fields[FIELD.priority] = 'Project';
+
+    if (matchedProject) {
+      // Inherit business from project
+      if (matchedProject.businessId) {
+        fields[FIELD.business] = [matchedProject.businessId];
+      }
+      // Inherit collaborators from project
+      if (matchedProject.collaboratorEmails && matchedProject.collaboratorEmails.length) {
+        fields[FIELD.collaborators] = matchedProject.collaboratorEmails.map(email => ({ email }));
+      }
+    }
   }
 
   const record = await createAirtableRecord(fields, env);
 
+  const finalPriority = fields[FIELD.priority];
   if (env.SLACK_BOT_TOKEN) {
     const parts = [`New task from Apple Watch: *${parsed.taskTitle || rawText.trim()}*`];
-    if (projectId) parts.push(`Project: ${parsed.projectName}`);
-    parts.push(`Due: ${dueDate} | ${timeEstimate} | ${priority}`);
+    if (matchedProject) parts.push(`Project: ${matchedProject.name}`);
+    parts.push(`Due: ${dueDate} | ${timeEstimate} | ${finalPriority}`);
     await notifySlack(env, parts.join('\n'));
   }
 
@@ -139,7 +167,7 @@ async function handleVoiceTask(request, env) {
     ok: true,
     recordId: record.id,
     task: parsed.taskTitle || rawText.trim(),
-    parsed: { dueDate, timeEstimate, priority, status, project: parsed.projectName || null, assignee: assigneeEmail },
+    parsed: { dueDate, timeEstimate, priority: finalPriority, status, project: matchedProject ? matchedProject.name : null, assignee: assigneeEmail },
   });
 }
 
@@ -149,7 +177,7 @@ async function parseWithClaude(env, transcription, todayStr, projectList) {
   // Fallback if no API key configured
   if (!env.ANTHROPIC_API_KEY) {
     console.warn('No ANTHROPIC_API_KEY — falling back to defaults');
-    return { taskTitle: transcription.trim(), dueDate: todayStr, timeMinutes: 15, priority: 'Not Urgent', assignee: 'kevin', projectName: null, description: null };
+    return { taskTitle: transcription.trim(), dueDate: todayStr, timeMinutes: 15, priority: 'Not Urgent', assignee: 'kevin', projectId: null, description: null };
   }
 
   const todayDate = new Date(todayStr + 'T12:00:00Z');
@@ -177,15 +205,22 @@ Rules:
 - If no due date is mentioned, use today
 - If no time estimate is mentioned, default to 30 minutes
 - If no assignee is mentioned, default to "kevin"
-- If the task mentions a project by name or context, match it to the closest project from the list
 - Extract a clean, concise task title (imperative voice, under 80 chars)
-- If the transcription contains extra context beyond the title, put it in description`;
+- If the transcription contains extra context beyond the title, put it in description
+
+PROJECT MATCHING (critical):
+- The user may refer to a project using loose keywords, abbreviations, or context clues
+- Match the intent to the closest active project from the list above
+- Examples: "operations director building modules" matches a project about building OD modules; "module building" or "OD modules" also match
+- If the user says the task is "project-based" or mentions it relates to a project, you MUST try to match one
+- Return the exact Airtable record ID (starts with "rec") from the project list, not the project name
+- If no project matches, return null for projectId`;
 
   const userPrompt = `Parse this voice transcription into a task:
 
 "${transcription}"
 
-Return JSON: { "taskTitle": "...", "dueDate": "YYYY-MM-DD", "timeMinutes": <number>, "priority": "...", "assignee": "<team key>", "projectName": "<exact project name or null>", "description": "<extra context or null>" }`;
+Return JSON: { "taskTitle": "...", "dueDate": "YYYY-MM-DD", "timeMinutes": <number>, "priority": "...", "assignee": "<team key>", "projectId": "<exact rec... ID from project list or null>", "description": "<extra context or null>" }`;
 
   try {
     const res = await fetch(ANTHROPIC_URL, {
@@ -222,7 +257,7 @@ Return JSON: { "taskTitle": "...", "dueDate": "YYYY-MM-DD", "timeMinutes": <numb
       timeMinutes: typeof parsed.timeMinutes === 'number' ? parsed.timeMinutes : 30,
       priority:    typeof parsed.priority === 'string' ? parsed.priority : 'Not Urgent',
       assignee:    typeof parsed.assignee === 'string' ? parsed.assignee : 'kevin',
-      projectName: typeof parsed.projectName === 'string' ? parsed.projectName : null,
+      projectId:   typeof parsed.projectId === 'string' && parsed.projectId.startsWith('rec') ? parsed.projectId : null,
       description: typeof parsed.description === 'string' ? parsed.description : null,
     };
   } catch (err) {
@@ -238,7 +273,7 @@ function fallbackParse(transcription, todayStr) {
     timeMinutes: 30,
     priority: 'Not Urgent',
     assignee: 'kevin',
-    projectName: null,
+    projectId: null,
     description: null,
   };
 }
@@ -271,23 +306,49 @@ function deriveStatus(dueDate, todayStr) {
   return 'Upcoming';
 }
 
-function resolveProject(projectName, projects) {
-  if (!projectName) return null;
-  const lower = projectName.toLowerCase();
-  // Exact match first
-  const exact = projects.find(p => p.name.toLowerCase() === lower);
-  if (exact) return exact.id;
-  // Partial match
-  const partial = projects.find(p => p.name.toLowerCase().includes(lower) || lower.includes(p.name.toLowerCase()));
-  return partial ? partial.id : null;
+function resolveProjectId(projectId, projects) {
+  if (!projectId) return null;
+  // Validate the ID exists in our project list (prevents hallucinated IDs)
+  const match = projects.find(p => p.id === projectId);
+  return match ? match.id : null;
 }
 
 // ─── Airtable Helpers ───────────────────────────────────────────────
 
-async function fetchProjects(env) {
-  const projectNameField = 'fldiMZICg1KOORpte'; // Name field on Projects table
-  const projectCompletedField = 'fldliObR7TdTdjht7'; // Completed checkbox
-  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_PROJECTS}?fields[]=${projectNameField}&fields[]=${projectCompletedField}&pageSize=100`;
+// Fetch Team Members table — maps record IDs to emails for collaborator resolution
+async function fetchTeamMembers(env) {
+  const tmMember = 'fldh16yvEgBy8uLKQ'; // singleCollaborator field (holds Airtable user + email)
+  const tmActive = 'fld2YLfcPqSe6b60u'; // active checkbox
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_TEAM_MEMBERS}?fields[]=${tmMember}&fields[]=${tmActive}&pageSize=100`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${env.AIRTABLE_PAT}` },
+    });
+    if (!res.ok) {
+      console.error('Failed to fetch team members:', res.status);
+      return {};
+    }
+    const data = await res.json();
+    // Build map: record ID → email
+    const map = {};
+    for (const r of (data.records || [])) {
+      const member = r.fields[tmMember];
+      if (member && member.email) {
+        map[r.id] = member.email;
+      }
+    }
+    return map;
+  } catch (err) {
+    console.error('Team members fetch error:', err);
+    return {};
+  }
+}
+
+async function fetchProjects(env, teamMemberMap) {
+  const fieldParams = [PF.name, PF.completed, PF.business, PF.projCollabs]
+    .map(f => `fields[]=${f}`).join('&');
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_PROJECTS}?${fieldParams}&pageSize=100`;
 
   try {
     const res = await fetch(url, {
@@ -299,7 +360,25 @@ async function fetchProjects(env) {
     }
     const data = await res.json();
     return (data.records || [])
-      .map(r => ({ id: r.id, name: r.fields[projectNameField] || '', completed: !!r.fields[projectCompletedField] }))
+      .map(r => {
+        const f = r.fields;
+        // Business is a linked record field — extract the first record ID
+        const bizRaw = f[PF.business];
+        const businessId = Array.isArray(bizRaw) ? bizRaw[0] : (typeof bizRaw === 'string' ? bizRaw : null);
+        // Collaborators — resolve Team Member record IDs to emails
+        const collabRaw = f[PF.projCollabs] || [];
+        const collabIds = Array.isArray(collabRaw) ? collabRaw : [];
+        const collabEmails = collabIds
+          .map(id => teamMemberMap[id])
+          .filter(Boolean);
+        return {
+          id: r.id,
+          name: f[PF.name] || '',
+          completed: !!f[PF.completed],
+          businessId,
+          collaboratorEmails: collabEmails,
+        };
+      })
       .filter(p => p.name && !p.completed);
   } catch (err) {
     console.error('Project fetch error:', err);
