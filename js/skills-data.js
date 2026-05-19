@@ -5,7 +5,7 @@
 // To add a new skill, append an entry to SKILLS_LIBRARY below.
 // The skill-creator skill auto-appends here after creating a new skill.
 
-const SKILLS_LIBRARY = [
+var SKILLS_LIBRARY = [
 
     // ── Property Management ──────────────────────────────────────────
     {
