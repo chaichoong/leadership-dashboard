@@ -1,5 +1,31 @@
 # Operations Director Platform — Claude Code Rules
 
+## Stack
+
+**Current:** Vanilla JS, Airtable (API + linked records), GitHub Pages, plain `<script>` tags (no bundler).
+**Planned (SaaS migration):** Supabase (Postgres + RLS), Cloudflare Workers, Vercel, Stripe. Migration starts after product finish + dogfooding.
+
+## Standard Workflow
+
+Two commands cover all work. Kevin talks conversationally after either one. Claude handles the full pipeline.
+
+- **`/build-feature`** — for anything new: new tab, new page, new OS, new feature, significant extension of an existing feature. Rewrites Kevin's input into a BILD prompt, plans, gets approval, builds, runs the full quality pipeline (simplify, test-gaps, review, security-review if auth/data/money, pre-deploy), deploys, verifies live.
+- **`/fix`** — for bugs, errors, feedback, amendments, tweaks to existing work. Rewrites Kevin's input into a focused BILD prompt, diagnoses, fixes, runs the quality pipeline (verify, simplify, test-gaps, pre-deploy), deploys, verifies live.
+
+Both skills run start-to-finish. Kevin approves the plan once, then receives a working, deployed result. No manual skill-chaining needed.
+
+## Forbidden Patterns
+
+These patterns cause production bugs. Never introduce them:
+
+- `console.log` or `debugger` left in production code paths
+- Inline SQL or Airtable formulas without parameterisation
+- `catch` blocks that swallow errors silently (must log or toast)
+- `TODO` / `FIXME` comments without a linked issue or concrete next action
+- Secrets, API keys, or PAT tokens hardcoded anywhere (use env vars or runtime auth)
+- `eval()`, `document.write()`, or `Function()` constructor
+- `innerHTML` with unescaped external data (use `escHtml()`)
+
 ## File Architecture (Split for Concurrent Editing)
 
 The platform has been split from a single monolith into separate files so that **multiple Claude sessions can work on different features at the same time** without overwriting each other.
@@ -267,3 +293,9 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - After pushing changes, verify the deploy is live before declaring done (check for stale browser cache, hard reload if needed)
 - Be aware that parallel sessions can sweep uncommitted edits into other commits — commit before context-switching
 - When a feature gets overwritten by another commit, check git history before reimplementing
+
+### Branch Strategy
+
+- **Small fixes, bug fixes, single-file tweaks:** push directly to main
+- **New features, multi-file changes, anything touching shared files (config.js, shared.js, index.html, styles.css):** work on a branch, push, create a PR. This protects against concurrent session conflicts
+- Branch naming: `feature/short-description` or `fix/short-description`

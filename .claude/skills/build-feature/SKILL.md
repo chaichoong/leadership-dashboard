@@ -5,17 +5,79 @@ description: End-to-end workflow for building or extending a feature on the Oper
 
 # Build Feature — Zero-Rework Workflow
 
-A structured build process that front-loads every decision and check so features ship right on the first pass. The entire point of this skill is to eliminate back-and-forth: gather everything upfront, plan precisely, build once, verify thoroughly.
+A structured build process that front-loads every decision and check so features ship right on the first pass. Kevin provides conversational input. Claude restructures it, plans it, builds it, tests it, and deploys it. One command, fully working result.
 
 ## Why this workflow exists
 
 Building features iteratively — code a bit, show Kevin, fix, repeat — burns tokens and time. Most rework comes from:
-1. **Missing requirements** discovered mid-build (field names, business rules, edge cases)
-2. **Forgetting platform conventions** (tokens.css, health bar, sidebar wiring, config.js entries)
-3. **Not testing thoroughly** before declaring done (stale cache, empty states, mobile layout)
-4. **Self-introduced bugs** from the fix itself (badge mismatches, filter logic, double-submit)
+1. **Vague requirements** from conversational input (no clear deliverable or constraints)
+2. **Missing requirements** discovered mid-build (field names, business rules, edge cases)
+3. **Forgetting platform conventions** (tokens.css, health bar, sidebar wiring, config.js entries)
+4. **Not testing thoroughly** before declaring done (stale cache, empty states, mobile layout)
+5. **Self-introduced bugs** from the fix itself (badge mismatches, filter logic, double-submit)
+6. **Skipping the quality pipeline** (no simplify pass, no test coverage check, no pre-deploy checklist)
 
 This workflow eliminates those by making every step explicit.
+
+---
+
+## Phase 0: BILD PROMPT (restructure Kevin's input)
+
+Kevin talks conversationally. Before doing anything else, restructure his input into a precise BILD prompt. This eliminates the #1 source of rework: misunderstanding what to build.
+
+### 0a. Parse what Kevin gave you
+
+Map every piece of information to one of four sections:
+- **B (Background):** role, domain, current state, what exists already
+- **I (Instruction):** the actual task, stated as a direct command
+- **L (Limitations):** constraints, files not to touch, tone/audience, scope boundaries
+- **D (Deliverable):** what "done" looks like, format, success criteria
+
+Note which sections are thin or empty.
+
+### 0b. Fill gaps from available context
+
+Before asking Kevin questions, check what you can answer yourself:
+- Read CLAUDE.md for conventions, file architecture, design tokens
+- Read `js/config.js` for existing field maps and table IDs
+- Check memory files for project state and preferences
+- Look at git history for recent changes and patterns
+- Read the most similar existing feature's code
+
+### 0c. Ask targeted questions (maximum one round)
+
+Use AskUserQuestion to fill remaining gaps. Batch into a single call (max 4 questions). Only ask where the answer materially changes the output.
+
+**If Background is thin:** What exists already? What prompted this?
+**If Instruction is ambiguous:** What is the single most important outcome?
+**If Limitations are missing:** What must not change? Any scope boundaries?
+**If Deliverable is vague:** What format? How will you judge whether this is done?
+
+Skip questions you can answer from context. One round maximum. Work with what you have.
+
+### 0d. Present the BILD prompt
+
+Format:
+
+```
+## B — Background
+[Context. 2-5 sentences.]
+
+## I — Instruction
+[The task. 1-2 sentences, imperative voice. Priority stated if multi-part.]
+
+## L — Limitations
+- [Constraint 1]
+- [Constraint 2]
+
+## D — Deliverable
+- [Output with success criteria]
+- [How to verify it works]
+```
+
+Ask: "Should I build this as-is, or adjust anything?"
+
+On approval, the BILD prompt becomes the instruction set for the rest of this workflow. Proceed to Phase 1.
 
 ---
 
@@ -321,7 +383,83 @@ The feature is not done until the audit score is reported. Target: 80+ before sh
 
 ---
 
-## Phase 8: SOP & SITEMAP
+## Phase 8: QUALITY PIPELINE (automated, no user input needed)
+
+Run these checks sequentially after the audit passes. Fix any issues found before proceeding. Do not ask Kevin for permission at each step — run them all, fix as you go, report the summary at the end.
+
+### 8a. Simplify pass
+
+Scan all changed code for:
+1. Duplicate logic that can be extracted
+2. Premature abstractions (interfaces with one implementation, factories with one type)
+3. Dead code introduced during the build
+4. Over-engineered error handling
+5. Functions doing more than one thing
+6. Comments that restate what the code says
+
+Fix anything found. Do not ask for approval on simplification — just do it and note what changed.
+
+### 8b. Test gaps
+
+If Vitest is set up in the project:
+1. List functions in changed files with no test coverage
+2. Identify critical paths and edge cases for each
+3. Write tests matching the project's test conventions
+4. Prioritise: data writes, business logic, filter/calculation functions, error handling
+5. Skip trivial getters and pure UI rendering
+6. Run the tests. Fix any failures.
+
+If no test framework exists, skip this step and note it in the final report.
+
+### 8c. Code review
+
+Review all changed files for:
+1. Logic bugs (off-by-one, wrong operator, missing null check)
+2. Style inconsistencies with the rest of the codebase
+3. Performance issues (N+1 queries, unnecessary re-renders, missing pagination)
+4. Accessibility gaps (missing aria attributes, broken keyboard nav)
+
+Fix anything found.
+
+### 8d. Security review (always run if the feature touches auth, data writes, or money)
+
+Review changed files for:
+1. Secrets in code (keys, tokens, passwords)
+2. Missing `escHtml()` on user-supplied or Airtable-sourced text
+3. `innerHTML` with unescaped external data
+4. API tokens exposed in console logs or error messages
+5. Unvalidated user input reaching Airtable writes or LLM prompts
+6. Auth bypass paths
+
+Output a numbered list of issues with severity (critical, high, medium, low). Fix all critical and high issues before proceeding.
+
+### 8e. Pre-deploy checklist
+
+Run and report pass/fail for each:
+
+**Current stack (GitHub Pages):**
+1. No `console.log` or `debugger` in production code paths
+2. HTML passes htmlhint (the PostToolUse hook covers this, but verify)
+3. All PAGE_REGISTRY entries correct (pageVer, sopFile, standalone URL)
+4. `escHtml()` used on all external data rendered in HTML
+5. Design tokens used (no hardcoded colours, fonts, or spacing)
+6. `sitemap.xml` updated if new pages added
+7. Pre-commit mapping updated in `scripts/pre-commit-action.py` if new pages added
+8. Rollback path identified (which commit to revert to if this breaks production)
+
+**Future stack (activate when SaaS migration begins):**
+9. Supabase RLS policies on any new tables
+10. Supabase migrations run on production
+11. Cloudflare Worker env vars documented and set
+12. CORS origins set correctly on Workers
+13. Rate limiting on public endpoints
+14. Error tracking/logging in place for new endpoints
+
+Block deployment if any current-stack item fails. Future-stack items are informational until migration begins.
+
+---
+
+## Phase 9: SOP & SITEMAP
 
 Every new page or significant feature extension needs its documentation and registry updated.
 
@@ -358,15 +496,15 @@ Add the new file-to-page mapping in `scripts/pre-commit-action.py` so that the a
 
 ---
 
-## Phase 9: SHIP
+## Phase 10: SHIP
 
-### 9a. Commit
+### 10a. Commit
 
 - One logical commit per feature (not micro-commits per file)
 - Commit message: `<Feature name>: <what it does>` (match existing style from `git log`)
 - Include all files changed in the commit (feature code + SOP + sitemap + config)
 
-### 9b. Deploy
+### 10b. Deploy
 
 ```bash
 git pull --rebase origin main && git push origin main
@@ -374,7 +512,7 @@ git pull --rebase origin main && git push origin main
 
 Then verify the deploy is live (pageVer matches, hard reload).
 
-### 9c. Report to Kevin
+### 10c. Report to Kevin
 
 Short summary:
 
