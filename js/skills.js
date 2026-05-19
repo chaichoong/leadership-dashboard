@@ -220,67 +220,47 @@
         return icons[cat] || '&#x1F4E6;';
     }
 
-    const SKILL_RUNNER_URL = 'https://skill-runner.kevinbrittain.workers.dev';
-
     window.runSkill = async function (id) {
         const skill = allSkills().find(s => s.id === id);
         if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
 
-        // Track as active preset (persists to Airtable for all users)
         if (skill.source !== 'sop' && skill.source !== 'custom') saveActivePreset(id);
 
         if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
 
-        // Try running via the skill-runner worker
-        showSkillRunModal(skill, 'Running skill...');
-        try {
-            const res = await fetch(SKILL_RUNNER_URL + '/run', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    skillName: skill.name,
-                    command: skill.command,
-                    instructions: skill.instructions || skill.description,
-                }),
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: 'Worker returned ' + res.status }));
-                throw new Error(err.error || 'Worker error');
-            }
-            const result = await res.json();
-            showSkillRunModal(skill, result.output, result.usage);
-        } catch (e) {
-            // Fallback: copy to clipboard if worker is not deployed
-            const cmd = skill.command || skill.id;
-            let clipText = '/' + cmd;
-            if (skill.instructions) clipText += '\n\n' + skill.instructions;
-            navigator.clipboard.writeText(clipText).catch(() => {});
-            showSkillRunModal(skill, 'Worker not available (' + e.message + ').\n\nThe skill command has been copied to your clipboard. Paste it into Claude Code or Co-Work to run.\n\n/' + cmd);
-        }
+        const cmd = skill.command || skill.id;
+        const fullCmd = '/' + cmd;
+        navigator.clipboard.writeText(fullCmd).catch(() => {});
+
+        showSkillRunModal(skill, cmd);
     };
 
-    function showSkillRunModal(skill, content, usage) {
-        const isLoading = content === 'Running skill...';
-        const usageInfo = usage ? `<div style="font-size:11px;color:var(--text-muted,#8A928C);margin-top:12px;padding-top:8px;border-top:1px solid var(--border-subtle,#E5E8E1)">Tokens: ${usage.input_tokens} in, ${usage.output_tokens} out</div>` : '';
-
-        const html = `<div style="max-width:800px;margin:0 auto">
-            ${isLoading ? '<div style="text-align:center;padding:40px"><div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div><p style="margin-top:12px;color:var(--text-secondary)">Executing ${escHtml(skill.name)}...</p><style>@keyframes spin{to{transform:rotate(360deg)}}</style></div>' :
-            `<div style="white-space:pre-wrap;font-size:13px;line-height:1.7;background:var(--bg-surface-2,#F4F6F1);padding:16px 20px;border-radius:var(--radius-md,8px);border:1px solid var(--border-subtle,#E5E8E1);max-height:60vh;overflow-y:auto">${escHtml(content)}</div>${usageInfo}`}
-        </div>`;
-
-        // Remove existing modal if present
+    function showSkillRunModal(skill, cmd) {
         const existing = document.getElementById('skill-run-modal');
         if (existing) existing.remove();
+
+        const fullCmd = '/' + cmd;
+        const desc = skill.description || '';
+
+        const html = `<div style="max-width:600px;margin:0 auto">
+            <p style="font-size:var(--fs-sm,13px);color:var(--text-secondary,#5A6660);margin:0 0 16px 0">${escHtml(desc)}</p>
+            <p style="font-size:var(--fs-xs,12px);color:var(--text-muted,#8A928C);margin:0 0 8px 0">Paste this command into Claude Code or Cowork to run the skill:</p>
+            <div style="display:flex;gap:8px;align-items:center">
+                <code style="flex:1;background:var(--bg-subtle,#E5E8E1);padding:10px 14px;border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,13px);word-break:break-all">${escHtml(fullCmd)}</code>
+                <button onclick="navigator.clipboard.writeText('${fullCmd.replace(/'/g,"\\'")}');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)" style="padding:8px 16px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">Copy</button>
+            </div>
+            <p style="font-size:var(--fs-xs,12px);color:var(--success,#2C6E49);margin:12px 0 0 0">Command copied to clipboard.</p>
+        </div>`;
 
         const overlay = document.createElement('div');
         overlay.id = 'skill-run-modal';
         overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
-        if (!isLoading) overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+        overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)';
+        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:660px;width:100%;box-shadow:var(--shadow-lg)';
         panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h2 style="margin:0;font-size:18px">${escHtml(skill.name)}</h2>
-            ${!isLoading ? '<button onclick="this.closest(\'#skill-run-modal\').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C)">&times;</button>' : ''}
+            <button onclick="this.closest('#skill-run-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C)">&times;</button>
         </div>` + html;
         overlay.appendChild(panel);
         document.body.appendChild(overlay);

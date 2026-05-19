@@ -2859,10 +2859,15 @@ function renderAutomation(){
             const dept = selName(gf(w,WF.department))||'';
             const driveDocUrl = getWfDriveDocUrl(w.id);
             const driveUrl = getWfDriveUrl(w.id);
-            const hasSkill = !!gf(w,WF.skillDefinition);
+            const hasWfSkill = !!gf(w,WF.skillDefinition);
+            const stepsWithSkills = stepsForWorkflow(w.id).filter(s=>isSkillCreated(s.id));
+            const hasSkill = hasWfSkill || stepsWithSkills.length > 0;
             let skillName = '';
-            if(hasSkill){
+            if(hasWfSkill){
                 try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){}
+            } else if(stepsWithSkills.length){
+                const sid = gf(stepsWithSkills[0],ST.skillId);
+                skillName = sid || (gf(stepsWithSkills[0],ST.name)||'');
             }
 
             html += `<tr>
@@ -2870,11 +2875,11 @@ function renderAutomation(){
                 <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(dept)}</td>
                 <td>${driveDocUrl?`<a href="${esc(driveDocUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Open SOP &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Local only</span>'}</td>
                 <td>${driveUrl?`<a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Folder &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Not uploaded</span>'}</td>
-                <td>${hasSkill?'<span style="font-size:var(--fs-xs);color:var(--text-muted);opacity:0.6">Skill Converted</span>':'<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill(\''+w.id+'\')">Convert to Skill</button>'}</td>
+                <td>${hasSkill?'<span style="font-size:var(--fs-xs);color:var(--success)">Skill Created</span>':'<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill(\''+w.id+'\')">Convert to Skill</button>'}</td>
                 <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(skillName)}</td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap">
                     <button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="assignRecurringTask('${w.id}')">Assign Task</button>
-                    ${hasSkill?`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`:''}
+                    ${hasWfSkill?`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`:''}
                 </td>
             </tr>`;
         });
