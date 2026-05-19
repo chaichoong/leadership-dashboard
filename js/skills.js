@@ -220,6 +220,8 @@
         return icons[cat] || '&#x1F4E6;';
     }
 
+    const SKILL_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
+
     window.runSkill = async function (id) {
         const skill = allSkills().find(s => s.id === id);
         if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
@@ -228,42 +230,74 @@
 
         if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
 
-        const cmd = skill.command || skill.id;
-        const fullCmd = '/' + cmd;
-        navigator.clipboard.writeText(fullCmd).catch(() => {});
+        const modal = showSkillRunModal(skill);
+        const outputEl = modal.querySelector('#skill-run-output');
 
-        showSkillRunModal(skill, cmd);
+        try {
+            const instructions = skill.instructions || skill.description || '';
+            const prompt = `You are executing the "${skill.name}" skill.\n\nInstructions:\n${instructions}\n\nExecute this skill now. If the skill requires user inputs that have not been provided, list each required input as a short question so the user can provide them. Be concise and practical.`;
+
+            const res = await fetch(SKILL_PROXY, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'claude-sonnet-4-20250514',
+                    max_tokens: 4096,
+                    messages: [{ role: 'user', content: prompt }],
+                }),
+            });
+
+            if (!res.ok) throw new Error('AI returned ' + res.status);
+            const data = await res.json();
+            const text = data.content?.[0]?.text || 'No response received.';
+            const usage = data.usage;
+            outputEl.innerHTML = renderSkillMarkdown(text);
+            if (usage) {
+                outputEl.insertAdjacentHTML('beforeend', '<div style="font-size:11px;color:var(--text-muted,#8A928C);margin-top:12px;padding-top:8px;border-top:1px solid var(--border-subtle,#E5E8E1)">Tokens: ' + usage.input_tokens + ' in, ' + usage.output_tokens + ' out</div>');
+            }
+        } catch (e) {
+            outputEl.innerHTML = '<div style="color:var(--danger,#dc3545)">Error: ' + escHtml(e.message) + '</div>';
+        }
     };
 
-    function showSkillRunModal(skill, cmd) {
+    function renderSkillMarkdown(text) {
+        return text
+            .replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg-subtle,#E5E8E1);padding:10px 14px;border-radius:6px;font-size:12px;overflow-x:auto;margin:8px 0"><code>$1</code></pre>')
+            .replace(/`([^`]+)`/g, '<code style="background:var(--bg-subtle,#E5E8E1);padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/^### (.+)$/gm, '<h4 style="margin:10px 0 4px;font-size:14px">$1</h4>')
+            .replace(/^## (.+)$/gm, '<h3 style="margin:12px 0 6px;font-size:15px">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2 style="margin:14px 0 8px;font-size:16px">$1</h2>')
+            .replace(/^- (.+)$/gm, '<div style="padding-left:12px">• $1</div>')
+            .replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px">$&</div>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function showSkillRunModal(skill) {
         const existing = document.getElementById('skill-run-modal');
         if (existing) existing.remove();
-
-        const fullCmd = '/' + cmd;
-        const desc = skill.description || '';
-
-        const html = `<div style="max-width:600px;margin:0 auto">
-            <p style="font-size:var(--fs-sm,13px);color:var(--text-secondary,#5A6660);margin:0 0 16px 0">${escHtml(desc)}</p>
-            <p style="font-size:var(--fs-xs,12px);color:var(--text-muted,#8A928C);margin:0 0 8px 0">Paste this command into Claude Code or Cowork to run the skill:</p>
-            <div style="display:flex;gap:8px;align-items:center">
-                <code style="flex:1;background:var(--bg-subtle,#E5E8E1);padding:10px 14px;border-radius:var(--radius-sm,4px);font-size:var(--fs-sm,13px);word-break:break-all">${escHtml(fullCmd)}</code>
-                <button onclick="navigator.clipboard.writeText('${fullCmd.replace(/'/g,"\\'")}');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)" style="padding:8px 16px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">Copy</button>
-            </div>
-            <p style="font-size:var(--fs-xs,12px);color:var(--success,#2C6E49);margin:12px 0 0 0">Command copied to clipboard.</p>
-        </div>`;
 
         const overlay = document.createElement('div');
         overlay.id = 'skill-run-modal';
         overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
-        overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:660px;width:100%;box-shadow:var(--shadow-lg)';
+        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)';
         panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h2 style="margin:0;font-size:18px">${escHtml(skill.name)}</h2>
             <button onclick="this.closest('#skill-run-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C)">&times;</button>
-        </div>` + html;
+        </div>
+        <div id="skill-run-output" style="font-size:13px;line-height:1.7;max-height:65vh;overflow-y:auto">
+            <div style="text-align:center;padding:40px">
+                <div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-default,#DDE1D9);border-top-color:var(--accent,#2C6E49);border-radius:50%;animation:spin 1s linear infinite"></div>
+                <p style="margin-top:12px;color:var(--text-secondary,#5A6660)">Running ${escHtml(skill.name)}...</p>
+                <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+            </div>
+        </div>`;
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        return panel;
     }
 
     window.toggleSkillDetail = function (id) {
