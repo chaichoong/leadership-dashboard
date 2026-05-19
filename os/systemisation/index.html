@@ -2401,7 +2401,8 @@ async function uploadSOPToDrive(wfId){
             await setWfDriveDocUrl(wfId, result.docUrl);
             toast('SOP uploaded to Google Drive (HTML + Google Doc)');
         } else {
-            toast('SOP uploaded to Google Drive (HTML only, Google Doc creation failed)');
+            const reason = result.docError ? ': ' + result.docError : '';
+            toast('SOP uploaded to Google Drive (HTML only, Google Doc failed' + reason + ')', 'warning');
         }
         render();
     } catch(e){
@@ -2605,11 +2606,14 @@ function renderSteps(){
     const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
     wfs.forEach(w=>{
         const name = gf(w,WF.name)||'Untitled';
-        const stepCount = stepsForWorkflow(w.id).length;
+        const hasSop = !!gf(w,WF.sopDocument);
         const active = selectedStepsWf===w.id ? ' active' : '';
+        const sopIndicator = hasSop
+            ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--success,#2C6E49);flex-shrink:0" title="SOP complete"></span>'
+            : '<span style="width:8px;height:8px;border-radius:50%;background:var(--border-default,#DDE1D9);flex-shrink:0" title="No SOP"></span>';
         html += `<div class="steps-wf-item${active}" onclick="selectStepsWf('${w.id}')" title="${esc(name)}">
             <span class="steps-wf-name">${esc(name)}</span>
-            <span class="steps-wf-count">${stepCount}</span>
+            ${sopIndicator}
         </div>`;
     });
     html += '</div>';
@@ -2630,12 +2634,15 @@ function renderSteps(){
             const vtaskId = getWfVideoTaskId(w.id);
             const vtaskStatus = getWfVideoTaskStatus(w.id);
 
+            const hasSopDoc = !!gf(w,WF.sopDocument);
+            const hasLoom = !!loomUrl;
             html += `<div class="steps-header">
                 <h3 style="margin:0;font-size:var(--fs-lg)">${esc(wName)}</h3>
                 <div style="display:flex;gap:8px">
-                    ${steps.length?`<button class="btn btn-sm btn-ai" onclick="generateWorkflowSOP('${w.id}')">Generate SOP</button>`:''}
-                    <button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>
-                    ${!vtaskId?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="assignVideoTask('${w.id}')">Assign Video Task</button>`:''}
+                    ${steps.length && !hasSopDoc ?`<button class="btn btn-sm btn-ai" onclick="generateWorkflowSOP('${w.id}')">Generate SOP</button>`:''}
+                    ${!hasLoom && !hasSopDoc ?`<button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>`:''}
+                    ${!vtaskId && !hasSopDoc ?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="assignVideoTask('${w.id}')">Assign Video Task</button>`:''}
+                    ${!vtaskId && hasSopDoc ?`<button class="btn btn-sm" style="border-color:var(--warning);color:var(--warning)" onclick="assignVideoTask('${w.id}')">Re-record Process</button>`:''}
                 </div>
             </div>`;
 
@@ -2838,10 +2845,12 @@ function renderAutomation(){
         html += '<div class="auto-wf-header">Completed SOPs <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithSop.length + ' workflows)</span></div>';
         html += '<p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 8px 0">Workflows with generated SOP documents. Assign as a recurring task or convert to an AI skill.</p>';
         html += `<table class="wf-grid"><thead><tr>
-            <th style="width:25%">Workflow</th>
-            <th style="width:20%">Department</th>
-            <th style="width:15%">SOP</th>
-            <th style="width:15%">Drive</th>
+            <th style="width:22%">Workflow</th>
+            <th style="width:15%">Department</th>
+            <th style="width:12%">SOP</th>
+            <th style="width:12%">Drive</th>
+            <th style="width:12%">Skill Status</th>
+            <th style="width:15%">Skill Name</th>
             <th>Actions</th>
         </tr></thead><tbody>`;
 
@@ -2851,15 +2860,21 @@ function renderAutomation(){
             const driveDocUrl = getWfDriveDocUrl(w.id);
             const driveUrl = getWfDriveUrl(w.id);
             const hasSkill = !!gf(w,WF.skillDefinition);
+            let skillName = '';
+            if(hasSkill){
+                try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){}
+            }
 
             html += `<tr>
                 <td style="font-weight:var(--fw-semibold);cursor:pointer;color:var(--accent)" onclick="selectedStepsWf='${w.id}';switchView('steps')">${esc(wName)}</td>
                 <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(dept)}</td>
                 <td>${driveDocUrl?`<a href="${esc(driveDocUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Open SOP &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Local only</span>'}</td>
                 <td>${driveUrl?`<a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Folder &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Not uploaded</span>'}</td>
+                <td>${hasSkill?'<span style="font-size:var(--fs-xs);color:var(--text-muted);opacity:0.6">Skill Converted</span>':'<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill(\''+w.id+'\')">Convert to Skill</button>'}</td>
+                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(skillName)}</td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap">
                     <button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="assignRecurringTask('${w.id}')">Assign Task</button>
-                    ${!hasSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill('${w.id}')">Convert to Skill</button>`:`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`}
+                    ${hasSkill?`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`:''}
                 </td>
             </tr>`;
         });
@@ -2914,37 +2929,6 @@ function renderAutomation(){
 
             html += '</tbody></table></div>';
         });
-    }
-
-    const wfsWithSkills = wfs.filter(w=>{
-        const raw = gf(w,WF.skillDefinition);
-        if(!raw) return false;
-        try { const arr = JSON.parse(raw); return Array.isArray(arr) ? arr.length > 0 : !!arr; } catch(e){ return false; }
-    });
-    if(wfsWithSkills.length){
-        html += '<div class="auto-wf-group" style="margin-top:20px">';
-        html += '<div class="auto-wf-header">Generated Skills <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithSkills.length + ' workflows)</span></div>';
-        html += `<table class="wf-grid"><thead><tr>
-            <th style="width:25%">Workflow</th>
-            <th style="width:30%">Skill Name</th>
-            <th style="width:25%">Category</th>
-            <th style="width:20%">Status</th>
-        </tr></thead><tbody>`;
-
-        wfsWithSkills.forEach(w=>{
-            const wName = gf(w,WF.name)||'Untitled';
-            let skills = [];
-            try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){}
-            skills.forEach(sk=>{
-                html += `<tr>
-                    <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
-                    <td>${esc(sk.name||'')}</td>
-                    <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sk.category||'')}</td>
-                    <td><span class="pipeline-badge pipeline-skill">In Skills Library</span></td>
-                </tr>`;
-            });
-        });
-        html += '</tbody></table></div>';
     }
 
     pane.innerHTML = html;

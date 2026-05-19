@@ -8,7 +8,7 @@
     let _skillsRendered = false;
     let _activeCategory = null;
     let _searchTerm = '';
-    let _sourceFilter = 'active'; // 'active' (My Skills + Active Presets), 'all' (everything), 'mine' (SOP only)
+    let _sourceFilter = 'mine'; // 'mine' (custom + SOP), 'active' (mine + used presets), 'presets' (preset only), 'all' (everything)
     let _sopSkills = [];
     let _sopSkillsFetched = false;
     let _activePresetIds = [];
@@ -90,11 +90,13 @@
         const all = allSkills();
         const filtered = all.filter(s => {
             // Source filter
-            if (_sourceFilter === 'mine' && s.source !== 'sop') return false;
+            const isCustomOrSop = s.source === 'custom' || s.source === 'sop' || s.source === 'project' || s.source === 'scheduled';
+            if (_sourceFilter === 'mine' && !isCustomOrSop) return false;
             if (_sourceFilter === 'active') {
-                // Show SOP skills + active presets only (hide unused presets)
-                if (s.source !== 'sop' && !_activePresetIds.includes(s.id)) return false;
+                // My skills + any preset that has been run
+                if (!isCustomOrSop && !_activePresetIds.includes(s.id)) return false;
             }
+            if (_sourceFilter === 'presets' && s.source !== 'preset' && s.source !== 'system') return false;
             // 'all' shows everything
             if (_activeCategory && s.category !== _activeCategory) return false;
             if (_searchTerm) {
@@ -164,9 +166,10 @@
                             <span class="skills-detail-value skills-tags">${s.tags.map(t => '<span class="skills-tag">' + escHtml(t) + '</span>').join('')}</span>
                         </div>` : ''}
                         ${s.instructions ? `<div class="skills-detail-row" style="flex-direction:column;align-items:stretch">
-                            <span class="skills-detail-label" style="margin-bottom:6px">Instructions</span>
-                            <div class="skills-detail-value" style="max-height:200px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.5;background:var(--bg-surface-2,#F4F6F1);padding:10px 12px;border-radius:var(--radius-sm,4px);border:1px solid var(--border-subtle,#E5E8E1)">${escHtml(s.instructions)}</div>
+                            <span class="skills-detail-label" style="margin-bottom:6px">Instructions <button onclick="event.stopPropagation();openSkillDetail('${escHtml(s.id)}')" style="margin-left:8px;padding:2px 8px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:11px;font-family:inherit">View Full</button></span>
+                            <div class="skills-detail-value" style="max-height:120px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.5;background:var(--bg-surface-2,#F4F6F1);padding:10px 12px;border-radius:var(--radius-sm,4px);border:1px solid var(--border-subtle,#E5E8E1)">${escHtml(s.instructions)}</div>
                         </div>` : ''}
+                        ${!s.instructions ? `<div style="padding:4px 0"><button onclick="event.stopPropagation();openSkillDetail('${escHtml(s.id)}')" style="padding:4px 12px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:12px;font-family:inherit">View Full Details</button></div>` : ''}
                     </div>
                 </div>`;
             });
@@ -202,31 +205,71 @@
         return icons[cat] || '&#x1F4E6;';
     }
 
-    window.runSkill = function (id) {
+    const SKILL_RUNNER_URL = 'https://skill-runner.kevinbrittain.workers.dev';
+
+    window.runSkill = async function (id) {
         const skill = allSkills().find(s => s.id === id);
         if (!skill) { showToast('Skill not found', { type: 'warning' }); return; }
 
         // Track as active preset (persists to Airtable for all users)
-        if (skill.source !== 'sop') saveActivePreset(id);
+        if (skill.source !== 'sop' && skill.source !== 'custom') saveActivePreset(id);
 
-        // Build the command text to copy as a slash command for Claude Co-Work
-        const cmd = skill.command || skill.id;
-        let clipText = '/' + cmd;
-        if (skill.instructions) clipText += '\n\n' + skill.instructions;
+        if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
 
-        // Copy to clipboard
-        navigator.clipboard.writeText(clipText).then(() => {
-            let msg = 'Copied: /' + cmd + ' — paste into Claude Code or Co-Work to run.';
-            if (skill.driveUrl) {
-                msg += ' Drive folder opening.';
-                window.open(skill.driveUrl, '_blank', 'noopener');
+        // Try running via the skill-runner worker
+        showSkillRunModal(skill, 'Running skill...');
+        try {
+            const res = await fetch(SKILL_RUNNER_URL + '/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    skillName: skill.name,
+                    command: skill.command,
+                    instructions: skill.instructions || skill.description,
+                }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Worker returned ' + res.status }));
+                throw new Error(err.error || 'Worker error');
             }
-            showToast(msg, { type: 'success', duration: 6000 });
-        }).catch(() => {
-            prompt('Copy this slash command to use in Claude Code or Co-Work:', clipText);
-            if (skill.driveUrl) window.open(skill.driveUrl, '_blank', 'noopener');
-        });
+            const result = await res.json();
+            showSkillRunModal(skill, result.output, result.usage);
+        } catch (e) {
+            // Fallback: copy to clipboard if worker is not deployed
+            const cmd = skill.command || skill.id;
+            let clipText = '/' + cmd;
+            if (skill.instructions) clipText += '\n\n' + skill.instructions;
+            navigator.clipboard.writeText(clipText).catch(() => {});
+            showSkillRunModal(skill, 'Worker not available (' + e.message + ').\n\nThe skill command has been copied to your clipboard. Paste it into Claude Code or Co-Work to run.\n\n/' + cmd);
+        }
     };
+
+    function showSkillRunModal(skill, content, usage) {
+        const isLoading = content === 'Running skill...';
+        const usageInfo = usage ? `<div style="font-size:11px;color:var(--text-muted,#8A928C);margin-top:12px;padding-top:8px;border-top:1px solid var(--border-subtle,#E5E8E1)">Tokens: ${usage.input_tokens} in, ${usage.output_tokens} out</div>` : '';
+
+        const html = `<div style="max-width:800px;margin:0 auto">
+            ${isLoading ? '<div style="text-align:center;padding:40px"><div style="display:inline-block;width:32px;height:32px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div><p style="margin-top:12px;color:var(--text-secondary)">Executing ${escHtml(skill.name)}...</p><style>@keyframes spin{to{transform:rotate(360deg)}}</style></div>' :
+            `<div style="white-space:pre-wrap;font-size:13px;line-height:1.7;background:var(--bg-surface-2,#F4F6F1);padding:16px 20px;border-radius:var(--radius-md,8px);border:1px solid var(--border-subtle,#E5E8E1);max-height:60vh;overflow-y:auto">${escHtml(content)}</div>${usageInfo}`}
+        </div>`;
+
+        // Remove existing modal if present
+        const existing = document.getElementById('skill-run-modal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'skill-run-modal';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
+        if (!isLoading) overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)';
+        panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h2 style="margin:0;font-size:18px">${escHtml(skill.name)}</h2>
+            ${!isLoading ? '<button onclick="this.closest(\'#skill-run-modal\').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C)">&times;</button>' : ''}
+        </div>` + html;
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+    }
 
     window.toggleSkillDetail = function (id) {
         const detail = document.getElementById('skill-detail-' + id);
@@ -254,7 +297,7 @@
     window.clearSkillsFilters = function () {
         _activeCategory = null;
         _searchTerm = '';
-        _sourceFilter = 'active';
+        _sourceFilter = 'mine';
         const input = document.getElementById('skillsSearchInput');
         if (input) input.value = '';
         document.querySelectorAll('.skills-filter-pill').forEach(p => p.classList.remove('active'));
@@ -266,14 +309,17 @@
         const bar = document.getElementById('skillsSourceBar');
         if (!bar) return;
         const all = allSkills();
-        const myCount = all.filter(s => s.source === 'sop').length;
-        const activeCount = all.filter(s => s.source !== 'sop' && _activePresetIds.includes(s.id)).length;
+        const isCustomOrSop = s => s.source === 'custom' || s.source === 'sop' || s.source === 'project' || s.source === 'scheduled';
+        const myCount = all.filter(isCustomOrSop).length;
+        const activePresetCount = all.filter(s => !isCustomOrSop(s) && _activePresetIds.includes(s.id)).length;
+        const presetCount = all.filter(s => s.source === 'preset' || s.source === 'system').length;
         const allCount = all.length;
         bar.innerHTML = '';
         const sources = [
-            { key: 'active', label: 'Active (' + (myCount + activeCount) + ')', desc: 'My Skills + used presets' },
-            { key: 'mine', label: 'My Skills (' + myCount + ')', desc: 'SOP-generated only' },
-            { key: 'all', label: 'All Presets (' + allCount + ')', desc: 'Show everything' },
+            { key: 'mine', label: 'My Skills (' + myCount + ')', desc: 'Custom + SOP-generated skills' },
+            { key: 'active', label: 'Active (' + (myCount + activePresetCount) + ')', desc: 'My Skills + presets you have used' },
+            { key: 'presets', label: 'Presets (' + presetCount + ')', desc: 'Generic Claude presets' },
+            { key: 'all', label: 'All (' + allCount + ')', desc: 'Show everything' },
         ];
         sources.forEach(src => {
             const pill = document.createElement('button');
@@ -324,6 +370,58 @@
                 if (hdr) hdr.setAttribute('aria-expanded', 'true');
             }
         });
+    };
+
+    window.openSkillDetail = function (id) {
+        const skill = allSkills().find(s => s.id === id);
+        if (!skill) return;
+        const sourceBadge = SKILLS_SOURCE_LABELS[skill.source] || skill.source;
+        const hasDrive = skill.driveUrl || skill.driveDocUrl;
+
+        let html = `<div style="max-width:800px;margin:0 auto">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+                <h2 style="margin:0;font-size:20px;color:var(--text-primary,#1C2422)">${escHtml(skill.name)}</h2>
+                <span class="skills-source-badge skills-source-${escHtml(skill.source)}" style="font-size:11px">${escHtml(sourceBadge)}</span>
+            </div>
+            <p style="color:var(--text-secondary,#5A6660);font-size:14px;line-height:1.6;margin:0 0 20px">${escHtml(skill.description)}</p>
+            <div style="display:grid;grid-template-columns:120px 1fr;gap:8px 16px;margin-bottom:20px;font-size:13px">
+                <span style="font-weight:600;color:var(--text-secondary,#5A6660)">Command</span>
+                <code style="background:var(--bg-surface-2,#F4F6F1);padding:2px 8px;border-radius:4px;font-size:12px">/${escHtml(skill.command)}</code>
+                <span style="font-weight:600;color:var(--text-secondary,#5A6660)">Category</span>
+                <span>${escHtml(skill.category)}</span>
+                <span style="font-weight:600;color:var(--text-secondary,#5A6660)">Source</span>
+                <span>${escHtml(sourceBadge)}</span>
+                ${skill.tags && skill.tags.length ? `<span style="font-weight:600;color:var(--text-secondary,#5A6660)">Tags</span>
+                <span>${skill.tags.map(t => '<span style="display:inline-block;padding:2px 8px;background:var(--bg-subtle,#E5E8E1);border-radius:10px;font-size:11px;margin-right:4px;margin-bottom:2px">' + escHtml(t) + '</span>').join('')}</span>` : ''}
+            </div>`;
+
+        if (skill.instructions) {
+            html += `<div style="margin-bottom:20px">
+                <h3 style="font-size:14px;font-weight:600;margin:0 0 8px;color:var(--text-primary,#1C2422)">Full Instructions</h3>
+                <div style="white-space:pre-wrap;font-size:13px;line-height:1.7;background:var(--bg-surface-2,#F4F6F1);padding:16px 20px;border-radius:var(--radius-md,8px);border:1px solid var(--border-subtle,#E5E8E1);max-height:60vh;overflow-y:auto">${escHtml(skill.instructions)}</div>
+            </div>`;
+        }
+
+        html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border-subtle,#E5E8E1)">
+            <button onclick="runSkill('${escHtml(skill.id)}')" style="padding:8px 20px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">&#x25B6; Run Skill</button>
+            ${hasDrive ? `<a href="${escHtml(skill.driveUrl || skill.driveDocUrl)}" target="_blank" rel="noopener" style="padding:8px 16px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-secondary,#5A6660);cursor:pointer;font-size:13px;font-family:inherit;text-decoration:none">&#x1F4C2; Drive Folder</a>` : ''}
+        </div></div>`;
+
+        // Use the platform's showModal if available, otherwise create a simple overlay
+        if (typeof showModal === 'function') {
+            showModal(skill.name, html, '');
+        } else {
+            // Fallback modal
+            const overlay = document.createElement('div');
+            overlay.id = 'skill-detail-modal';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
+            overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+            const panel = document.createElement('div');
+            panel.style.cssText = 'background:var(--bg-surface,#FBFBF9);border-radius:var(--radius-lg,12px);padding:28px 32px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)';
+            panel.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button onclick="this.closest('#skill-detail-modal').remove()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted,#8A928C)">&times;</button></div>` + html;
+            overlay.appendChild(panel);
+            document.body.appendChild(overlay);
+        }
     };
 
     window.collapseAllSkills = function () {
