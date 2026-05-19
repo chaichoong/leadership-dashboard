@@ -1,0 +1,20 @@
+# Apple Inbound Worker
+# Receives webhook POSTs from Apple Shortcuts.
+# /voice-task creates Airtable tasks. /text-forward and /voice-forward
+# send emails to Gmail for inbound comms processing.
+# Also serves uploaded audio files from R2.
+
+name = "apple-inbound"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "apple-inbound-attachments"
+
+# Secrets (set via `wrangler secret put <NAME>`):
+#   AIRTABLE_PAT       - PAT with data.records:read + data.records:write on base appnqjDpqDniH3IRl
+#   BEARER_TOKEN       - Shared secret for authenticating Apple Shortcuts requests
+#   SLACK_BOT_TOKEN    - xoxb-... for sending Slack DMs (optional, for notifications)
+#   RESEND_API_KEY     - Resend API key for sending forwarded emails
+#   FROM_EMAIL         - Sending address (e.g. shortcuts@operationsdirector.co.uk)
