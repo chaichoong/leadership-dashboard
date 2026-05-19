@@ -14,7 +14,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:airtable-tenant-onboarding',
         description: 'End-to-end workflow that registers a new tenant, creates their tenancy record, links deposit and rent schedules, and sends welcome documents.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tenant', 'onboarding', 'airtable', 'automation']
     },
     {
@@ -23,7 +23,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:airtable-tenant-creator',
         description: 'Automates the process of adding a new tenant record to Airtable with all required fields, linked records, and validation.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tenant', 'airtable', 'record creation']
     },
     {
@@ -32,7 +32,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:airtable-tenancy-creator',
         description: 'Automates the creation of a new tenancy record including rent amount, start date, linked tenant, unit assignment, and deposit tracking.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tenancy', 'airtable', 'record creation', 'rent']
     },
     {
@@ -41,7 +41,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:airtable-tenancy-ender',
         description: 'Automates the process of ending a tenancy — marks records inactive, calculates final balances, triggers deposit return workflow, and updates void tracking.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tenancy', 'end', 'void', 'deposit return']
     },
     {
@@ -50,7 +50,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:tenant-complaint-handler',
         description: 'Handles tenant complaints by logging the issue, categorising severity, creating follow-up tasks, and drafting acknowledgement communications.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tenant', 'complaint', 'maintenance', 'communication']
     },
     {
@@ -59,7 +59,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:tenant-doc-generator',
         description: 'Generates standardised tenant documents — tenancy agreements, welcome packs, notice letters, rent increase letters, and reference requests.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tenant', 'documents', 'letters', 'agreements']
     },
     // contractor-job-creator skill RETIRED 2026-05-08 — superseded by the
@@ -75,7 +75,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:schedule-of-works',
         description: 'Professional property survey tool — generates a detailed schedule of works with costings, priorities, and contractor assignments for refurbishment or maintenance programmes.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['survey', 'refurbishment', 'maintenance', 'costings']
     },
     {
@@ -84,7 +84,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:uc47-form-automation',
         description: 'Automates the completion of UC47 forms for Universal Credit tenants — pulls tenant and tenancy data, fills the form fields, and prepares for submission.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['universal credit', 'UC47', 'forms', 'benefits']
     },
     {
@@ -93,7 +93,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:commercial-loan-agreement-generator',
         description: 'Generates a commercial loan agreement document with customisable terms, interest rates, repayment schedules, and security provisions.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['loan', 'agreement', 'commercial', 'finance', 'legal']
     },
     {
@@ -102,7 +102,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:adobe-sign-field-setup',
         description: 'Configures Adobe Sign document fields for e-signatures — maps form fields, sets signing order, and prepares the document template for automated sending.',
         category: 'Property Management',
-        source: 'cowork',
+        source: 'custom',
         tags: ['adobe sign', 'e-signature', 'documents', 'automation']
     },
 
@@ -113,7 +113,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:transaction-reconciler',
         description: 'Daily reconciliation of financial transactions — categorises unreconciled bank transactions, matches against expected payments, and flags discrepancies.',
         category: 'Finance',
-        source: 'scheduled',
+        source: 'custom',
         tags: ['reconciliation', 'transactions', 'bank', 'matching']
     },
     {
@@ -122,7 +122,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:cash-flow-forecast',
         description: 'Generate a 30-day rolling cash flow forecast using live Airtable data — rent due, costs payable, and known invoices to project daily balances.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['cash flow', 'forecast', 'projection', 'balance']
     },
     {
@@ -131,7 +131,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:airtable-cost-creator',
         description: 'Add new fixed costs to the accounts payable system — captures amount, frequency, category, supplier, and creates the recurring cost record in Airtable.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'custom',
         tags: ['costs', 'accounts payable', 'fixed costs', 'supplier']
     },
     {
@@ -140,7 +140,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:reconciliation',
         description: 'Reconcile accounts by comparing ledger entries against bank statements, flagging discrepancies and producing a reconciliation report.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['reconciliation', 'ledger', 'bank statements']
     },
     {
@@ -149,7 +149,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:journal-entry',
         description: 'Prepare journal entries with proper debits/credits, supporting documentation references, and approval routing.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['journal entry', 'debits', 'credits', 'accounting']
     },
     {
@@ -158,7 +158,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:financial-statements',
         description: 'Generate financial statements (P&L, balance sheet, cash flow statement) from ledger data with period comparisons.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['P&L', 'balance sheet', 'cash flow', 'statements']
     },
     {
@@ -167,7 +167,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:variance-analysis',
         description: 'Decompose financial variances between budget and actual — identifies root causes, quantifies impact, and produces a management commentary.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['variance', 'budget', 'actual', 'analysis']
     },
     {
@@ -176,7 +176,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:close-management',
         description: 'Manage the month-end close process — tracks checklist completion, dependencies, blockers, and produces a close status dashboard.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['month-end', 'close', 'checklist', 'process']
     },
     {
@@ -185,7 +185,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:audit-support',
         description: 'Support SOX 404 compliance and external audit preparation — gathers evidence, maps controls, and prepares audit working papers.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['audit', 'SOX', 'compliance', 'controls']
     },
     {
@@ -194,7 +194,7 @@ const SKILLS_LIBRARY = [
         command: 'finance:sox-testing',
         description: 'Generate SOX sample selections and testing templates for control testing — random sampling, attribute testing, and exception reporting.',
         category: 'Finance',
-        source: 'cowork',
+        source: 'preset',
         tags: ['SOX', 'testing', 'controls', 'sampling']
     },
 
@@ -205,7 +205,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:airtable-task-creator',
         description: 'Create tasks in the Airtable task management system — captures title, description, assignee, priority, due date, and linked records.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tasks', 'airtable', 'project management']
     },
     {
@@ -214,7 +214,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:process-doc',
         description: 'Document a business process end-to-end — captures steps, roles, systems, decision points, and produces a formatted process map.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['process', 'documentation', 'workflow', 'SOP']
     },
     {
@@ -223,7 +223,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:process-optimization',
         description: 'Analyse and improve business processes — identifies bottlenecks, waste, and automation opportunities with ROI estimates.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['process', 'optimization', 'efficiency', 'automation']
     },
     {
@@ -232,7 +232,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:vendor-review',
         description: 'Evaluate a vendor — cost analysis, service quality assessment, contract terms review, and renewal recommendation.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['vendor', 'supplier', 'review', 'procurement']
     },
     {
@@ -241,7 +241,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:risk-assessment',
         description: 'Identify, assess, and mitigate operational risks — probability/impact scoring, control mapping, and mitigation action plans.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['risk', 'assessment', 'mitigation', 'controls']
     },
     {
@@ -250,7 +250,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:status-report',
         description: 'Generate a status report with RAG ratings, key metrics, blockers, and next actions — suitable for stakeholder or board updates.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['status', 'report', 'RAG', 'stakeholder']
     },
     {
@@ -259,7 +259,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:compliance-tracking',
         description: 'Track compliance requirements — regulatory deadlines, certificate renewals, inspection schedules, and action items.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['compliance', 'regulatory', 'tracking', 'deadlines']
     },
     {
@@ -268,7 +268,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:change-request',
         description: 'Create a change management request — impact assessment, stakeholder analysis, rollback plan, and approval routing.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['change management', 'request', 'approval']
     },
     {
@@ -277,7 +277,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:capacity-plan',
         description: 'Plan resource capacity — workload forecasting, headcount modelling, utilisation tracking, and bottleneck identification.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['capacity', 'planning', 'resources', 'headcount']
     },
     {
@@ -286,7 +286,7 @@ const SKILLS_LIBRARY = [
         command: 'operations:runbook',
         description: 'Create or update an operational runbook — step-by-step procedures for routine operations, incident response, or system maintenance.',
         category: 'Operations',
-        source: 'cowork',
+        source: 'preset',
         tags: ['runbook', 'procedures', 'incident', 'operations']
     },
 
@@ -297,7 +297,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:review-contract',
         description: 'Review a contract against standard terms — flags deviations, risky clauses, missing provisions, and produces a redline summary.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['contract', 'review', 'redline', 'terms']
     },
     {
@@ -306,7 +306,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:triage-nda',
         description: 'Rapidly triage an incoming NDA — checks standard vs non-standard terms, flags problematic clauses, and recommends accept/negotiate/reject.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['NDA', 'triage', 'confidentiality', 'review']
     },
     {
@@ -315,7 +315,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:compliance-check',
         description: 'Run a compliance check on a document or process against regulatory requirements and internal policies.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['compliance', 'regulatory', 'check', 'policy']
     },
     {
@@ -324,7 +324,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:legal-risk-assessment',
         description: 'Assess and classify legal risks — likelihood/impact scoring, jurisdiction considerations, and recommended mitigations.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['legal risk', 'assessment', 'jurisdiction']
     },
     {
@@ -333,7 +333,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:brief',
         description: 'Generate contextual briefing notes on a legal topic — research summary, key precedents, and practical recommendations.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['brief', 'research', 'legal', 'summary']
     },
     {
@@ -342,7 +342,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:meeting-briefing',
         description: 'Prepare structured briefing notes for a legal meeting — agenda items, background context, talking points, and desired outcomes.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['meeting', 'briefing', 'preparation', 'legal']
     },
     {
@@ -351,7 +351,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:vendor-check',
         description: 'Check the status of existing vendor agreements — contract expiry dates, renewal terms, and compliance with agreed SLAs.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['vendor', 'contract', 'SLA', 'renewal']
     },
     {
@@ -360,7 +360,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:signature-request',
         description: 'Prepare and route a document for e-signature — identifies signers, sets signing order, and configures the signature workflow.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['signature', 'e-sign', 'routing', 'document']
     },
     {
@@ -369,7 +369,7 @@ const SKILLS_LIBRARY = [
         command: 'legal:legal-response',
         description: 'Generate a response to a correspondence or claim — structured reply with legal reasoning, cited provisions, and recommended next steps.',
         category: 'Legal',
-        source: 'cowork',
+        source: 'preset',
         tags: ['response', 'correspondence', 'claim', 'legal']
     },
 
@@ -380,7 +380,7 @@ const SKILLS_LIBRARY = [
         command: 'data:analyze',
         description: 'Answer data questions — from exploratory analysis to hypothesis testing. Connects to your data, runs queries, and presents findings with visualisations.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['analysis', 'data', 'queries', 'insights']
     },
     {
@@ -389,7 +389,7 @@ const SKILLS_LIBRARY = [
         command: 'data:write-query',
         description: 'Write optimised SQL for your database — handles joins, aggregations, CTEs, and window functions with performance considerations.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['SQL', 'query', 'database', 'optimisation']
     },
     {
@@ -398,7 +398,7 @@ const SKILLS_LIBRARY = [
         command: 'data:build-dashboard',
         description: 'Build an interactive HTML dashboard from your data — charts, tables, filters, and KPI cards in a single self-contained file.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['dashboard', 'HTML', 'charts', 'KPIs']
     },
     {
@@ -407,7 +407,7 @@ const SKILLS_LIBRARY = [
         command: 'data:create-viz',
         description: 'Create publication-quality data visualisations — charts, graphs, and diagrams with proper labelling, colour schemes, and annotations.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['visualisation', 'charts', 'graphs', 'design']
     },
     {
@@ -416,7 +416,7 @@ const SKILLS_LIBRARY = [
         command: 'data:explore-data',
         description: 'Profile and explore a dataset — schema inspection, distribution analysis, null checks, outlier detection, and relationship mapping.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['exploration', 'profiling', 'schema', 'quality']
     },
     {
@@ -425,7 +425,7 @@ const SKILLS_LIBRARY = [
         command: 'data:validate-data',
         description: 'QA an analysis before sharing — checks methodology, validates calculations, tests edge cases, and reviews presentation.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['validation', 'QA', 'methodology', 'review']
     },
     {
@@ -434,7 +434,7 @@ const SKILLS_LIBRARY = [
         command: 'data:statistical-analysis',
         description: 'Apply statistical methods to data — regression, hypothesis testing, confidence intervals, clustering, and time series analysis.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['statistics', 'regression', 'hypothesis', 'time series']
     },
     {
@@ -443,7 +443,7 @@ const SKILLS_LIBRARY = [
         command: 'data:sql-queries',
         description: 'Write correct, performant SQL queries with proper indexing hints, execution plan awareness, and dialect-specific optimisations.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['SQL', 'performance', 'indexing', 'execution plan']
     },
     {
@@ -452,7 +452,7 @@ const SKILLS_LIBRARY = [
         command: 'data:data-visualization',
         description: 'Create effective data visualisations — selects the right chart type, applies design best practices, and ensures accessibility.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['visualisation', 'chart selection', 'accessibility']
     },
     {
@@ -461,7 +461,7 @@ const SKILLS_LIBRARY = [
         command: 'data:data-context-extractor',
         description: 'Generate or improve a comprehensive data context document — schema descriptions, business rules, relationships, and data dictionary.',
         category: 'Data & Analytics',
-        source: 'cowork',
+        source: 'preset',
         tags: ['data dictionary', 'schema', 'context', 'documentation']
     },
 
@@ -472,7 +472,7 @@ const SKILLS_LIBRARY = [
         command: 'customer-support:draft-response',
         description: 'Draft a professional customer support response — matches tone to the situation, references relevant policies, and suggests next steps.',
         category: 'Customer Support',
-        source: 'cowork',
+        source: 'custom',
         tags: ['response', 'customer', 'email', 'communication']
     },
     {
@@ -481,7 +481,7 @@ const SKILLS_LIBRARY = [
         command: 'customer-support:ticket-triage',
         description: 'Triage and prioritise a support ticket — categorises the issue, assesses urgency, routes to the right team, and suggests resolution paths.',
         category: 'Customer Support',
-        source: 'cowork',
+        source: 'custom',
         tags: ['triage', 'priority', 'routing', 'ticket']
     },
     {
@@ -490,7 +490,7 @@ const SKILLS_LIBRARY = [
         command: 'customer-support:customer-research',
         description: 'Multi-source research on a customer — pulls account history, recent interactions, open tickets, and relationship context.',
         category: 'Customer Support',
-        source: 'cowork',
+        source: 'custom',
         tags: ['research', 'customer', 'history', 'context']
     },
     {
@@ -499,7 +499,7 @@ const SKILLS_LIBRARY = [
         command: 'customer-support:kb-article',
         description: 'Draft a knowledge base article — structured with problem/solution format, screenshots placeholder, and SEO-friendly headings.',
         category: 'Customer Support',
-        source: 'cowork',
+        source: 'custom',
         tags: ['knowledge base', 'article', 'documentation', 'self-service']
     },
     {
@@ -508,7 +508,7 @@ const SKILLS_LIBRARY = [
         command: 'customer-support:customer-escalation',
         description: 'Package an escalation for handoff — timeline of events, attempted resolutions, customer sentiment, and recommended resolution.',
         category: 'Customer Support',
-        source: 'cowork',
+        source: 'preset',
         tags: ['escalation', 'handoff', 'resolution', 'customer']
     },
 
@@ -519,7 +519,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:daily-schedule',
         description: 'Generates a structured daily schedule pulling from calendar, tasks, and priorities — time-blocks the day with focus periods and buffer time.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['schedule', 'calendar', 'time management', 'planning']
     },
     {
@@ -528,7 +528,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:meeting-manager',
         description: 'Manage meeting rescheduling, preparation, and follow-up — agenda creation, attendee coordination, minutes capture, and action tracking.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['meetings', 'agenda', 'minutes', 'scheduling']
     },
     {
@@ -537,7 +537,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:weekly-checkin-task-manager',
         description: 'Automates the extraction and structuring of weekly check-in data — pulls task progress, blockers, and priorities into a formatted update.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['weekly', 'check-in', 'progress', 'update']
     },
     {
@@ -546,7 +546,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:gmail-respond-manager',
         description: 'Manages the full "To Respond" Gmail workflow — surfaces emails needing replies, drafts contextual responses, and tracks completion.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['gmail', 'email', 'responses', 'inbox']
     },
     {
@@ -555,7 +555,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:gmail-to-airtable-inbound',
         description: 'Monitors kevin@runpreneur.org.uk inbox and automatically creates Airtable task records from inbound emails matching configured rules.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['gmail', 'airtable', 'automation', 'inbound']
     },
     {
@@ -564,7 +564,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:post-manager',
         description: 'Processes scanned post from ~/Documents/ScannedPost/. Splits combined PDFs by sender using AI vision, extracts metadata, and emails each document to your inbox for triage through the Inbound Comms email workflow.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['post', 'mail', 'scanning', 'document processing']
     },
     {
@@ -573,7 +573,7 @@ const SKILLS_LIBRARY = [
         command: 'productivity:task-management',
         description: 'Simple task management using natural language — create, update, prioritise, and track tasks with due dates and categories.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['tasks', 'todo', 'management', 'tracking']
     },
     {
@@ -582,7 +582,7 @@ const SKILLS_LIBRARY = [
         command: 'productivity:memory-management',
         description: 'Two-tier memory system that stores and retrieves context across conversations — short-term working memory and long-term reference memory.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'preset',
         tags: ['memory', 'context', 'persistence', 'recall']
     },
     {
@@ -591,7 +591,7 @@ const SKILLS_LIBRARY = [
         command: 'productivity:start',
         description: 'Initialise the productivity system — loads your task list, calendar, and priorities to set up the working context for the session.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'preset',
         tags: ['initialise', 'setup', 'session', 'context']
     },
     {
@@ -600,7 +600,7 @@ const SKILLS_LIBRARY = [
         command: 'productivity:update',
         description: 'Sync tasks and refresh memory — pulls latest changes from all connected sources and updates the working context.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'preset',
         tags: ['sync', 'update', 'refresh', 'tasks']
     },
     {
@@ -609,7 +609,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:consolidate-memory',
         description: 'Reflective pass over your memory files — deduplicates, prunes stale entries, merges related memories, and updates the MEMORY.md index.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['memory', 'cleanup', 'consolidation', 'maintenance']
     },
     {
@@ -618,7 +618,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:llm-council',
         description: 'Run any question, idea, or decision through a panel of simulated expert perspectives — each "councillor" argues a different viewpoint to surface blind spots.',
         category: 'Productivity',
-        source: 'cowork',
+        source: 'custom',
         tags: ['decision making', 'perspectives', 'brainstorming', 'analysis']
     },
 
@@ -629,7 +629,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:docx',
         description: 'Create or process Word (.docx) documents — formatting, template filling, mail merge, and content extraction.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'preset',
         tags: ['docx', 'Word', 'document', 'formatting']
     },
     {
@@ -638,7 +638,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:xlsx',
         description: 'Create or process Excel (.xlsx) files — data entry, formula creation, pivot tables, charts, and data transformation.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'preset',
         tags: ['xlsx', 'Excel', 'spreadsheet', 'formulas']
     },
     {
@@ -647,7 +647,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:pdf',
         description: 'Process PDF files — text extraction, form filling, merging, splitting, and content analysis.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'preset',
         tags: ['PDF', 'extraction', 'forms', 'processing']
     },
     {
@@ -656,7 +656,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:pptx',
         description: 'Create or process PowerPoint (.pptx) presentations — slide design, content structuring, template application, and export.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'preset',
         tags: ['pptx', 'PowerPoint', 'presentation', 'slides']
     },
     {
@@ -665,7 +665,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:evernote-pdf-processor',
         description: 'Automates processing of multiple PDFs from Evernote — batch extraction, categorisation, and structured data output.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'custom',
         tags: ['Evernote', 'PDF', 'batch', 'extraction']
     },
     {
@@ -674,7 +674,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:video-generator',
         description: 'Professional AI video production — script writing, scene planning, voiceover generation, and video assembly.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'preset',
         tags: ['video', 'production', 'script', 'media']
     },
     {
@@ -683,7 +683,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:similarweb-analytics',
         description: 'Analyse websites and domains using SimilarWeb data — traffic estimates, audience demographics, competitor benchmarking, and market positioning.',
         category: 'Documents & Media',
-        source: 'cowork',
+        source: 'preset',
         tags: ['analytics', 'traffic', 'competitor', 'web']
     },
 
@@ -739,7 +739,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:schedule',
         description: 'Create a scheduled task that runs on a cron schedule — configure timing, target skill, and parameters for recurring automated work.',
         category: 'Automation',
-        source: 'cowork',
+        source: 'preset',
         tags: ['schedule', 'cron', 'automation', 'recurring']
     },
 
@@ -777,7 +777,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:sop-generator',
         description: 'Generates a complete SOP HTML page from live source code — reads the feature JS, extracts functionality, and produces a structured guide with the platform design system.',
         category: 'Development',
-        source: 'cowork',
+        source: 'custom',
         tags: ['SOP', 'documentation', 'generation', 'HTML']
     },
     {
@@ -786,7 +786,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:skill-creator',
         description: 'Create new skills, modify and improve existing skills, and measure skill performance. Includes eval benchmarking and description optimisation for trigger accuracy.',
         category: 'Development',
-        source: 'cowork',
+        source: 'preset',
         tags: ['skill', 'creation', 'development', 'eval']
     },
     {
@@ -795,7 +795,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:skill-creator-from-manus',
         description: 'Guide for creating or updating Claude Code skills based on Manus workflow patterns — converts Manus-style automation into Claude Code skill format.',
         category: 'Development',
-        source: 'cowork',
+        source: 'preset',
         tags: ['skill', 'Manus', 'conversion', 'migration']
     },
     {
@@ -804,7 +804,7 @@ const SKILLS_LIBRARY = [
         command: 'anthropic-skills:setup-cowork',
         description: 'Guided Cowork setup — installs role-matched plugins, connects your tools, and walks you through trying a first skill.',
         category: 'Development',
-        source: 'cowork',
+        source: 'preset',
         tags: ['setup', 'cowork', 'onboarding', 'plugins']
     },
     {
@@ -813,7 +813,7 @@ const SKILLS_LIBRARY = [
         command: 'cowork-plugin-management:create-cowork-plugin',
         description: 'Guide for creating a new plugin from scratch in a cowork session — scaffolds the plugin structure, defines skills, and produces a .plugin file.',
         category: 'Development',
-        source: 'cowork',
+        source: 'preset',
         tags: ['plugin', 'creation', 'cowork', 'scaffold']
     },
     {
@@ -822,7 +822,7 @@ const SKILLS_LIBRARY = [
         command: 'cowork-plugin-management:cowork-plugin-customizer',
         description: 'Customise a Claude Code plugin for your organisation — adjust skill parameters, configure connectors, and tailor workflows to your tools.',
         category: 'Development',
-        source: 'cowork',
+        source: 'preset',
         tags: ['plugin', 'customisation', 'configuration', 'cowork']
     },
     {
@@ -922,10 +922,10 @@ const SKILLS_CATEGORIES = [
 ];
 
 const SKILLS_SOURCE_LABELS = {
+    custom:    'Custom Skill',
+    preset:    'Preset',
     project:   'Project Skill',
     scheduled: 'Scheduled Task',
-    cowork:    'Cowork / Plugin',
     system:    'Built-in',
-    marketplace: 'Marketplace',
     sop:       'SOP Generated',
 };

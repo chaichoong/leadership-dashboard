@@ -46,6 +46,21 @@ export default {
             return new Response('Error: ' + JSON.stringify(tokenData), { status: 400 });
         }
 
+        if (url.pathname === '/test') {
+            try {
+                const accessToken = await getAccessToken(env);
+                const parentId = env.DRIVE_PARENT_FOLDER_ID;
+                // Verify we can list the parent folder
+                const listRes = await fetch(`https://www.googleapis.com/drive/v3/files/${parentId}?fields=id,name,mimeType`, {
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                });
+                const folderInfo = listRes.ok ? await listRes.json() : { error: await listRes.text() };
+                return jsonResponse({ status: 'ok', auth: 'valid', parentFolder: folderInfo });
+            } catch (e) {
+                return jsonResponse({ status: 'error', message: e.message }, 500);
+            }
+        }
+
         if (request.method === 'OPTIONS') {
             return new Response(null, { status: 204, headers: CORS_HEADERS });
         }
@@ -67,7 +82,16 @@ export default {
 
             const safeName = (fileName || workflowName).replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, '-');
             const file = await uploadFile(accessToken, safeName + '.html', htmlContent, folder.id);
-            const doc = await uploadAsGoogleDoc(accessToken, safeName, htmlContent, folder.id);
+
+            // Google Doc creation is non-blocking — if it fails, we still return the HTML file
+            let doc = null;
+            let docError = null;
+            try {
+                doc = await uploadAsGoogleDoc(accessToken, safeName, htmlContent, folder.id);
+            } catch (docErr) {
+                docError = docErr.message;
+                console.error('Google Doc creation failed:', docErr.message);
+            }
 
             await shareFolder(accessToken, folder.id);
 
@@ -76,8 +100,9 @@ export default {
                 folderUrl: `https://drive.google.com/drive/folders/${folder.id}`,
                 fileId: file.id,
                 fileUrl: `https://drive.google.com/file/d/${file.id}/view`,
-                docId: doc.id,
-                docUrl: `https://docs.google.com/document/d/${doc.id}/edit`,
+                docId: doc ? doc.id : null,
+                docUrl: doc ? `https://docs.google.com/document/d/${doc.id}/edit` : null,
+                docError: docError,
             });
         } catch (e) {
             return jsonResponse({ error: e.message }, 500);
