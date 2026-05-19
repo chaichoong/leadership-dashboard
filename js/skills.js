@@ -53,27 +53,32 @@
             const tableId = 'tblLPoRHFBl0vqR24';
             const skillFieldName = 'Skill Definition';
             const driveFieldName = 'Drive URL';
-            const url = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
-            const res = await fetch(url, { headers: { Authorization: `Bearer ${PAT}` } });
-            if (!res.ok) return;
-            const data = await res.json();
+            const baseUrl = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
             const skills = [];
-            (data.records || []).forEach(r => {
-                const raw = r.fields[skillFieldName];
-                if (!raw) return;
-                const driveUrl = r.fields[driveFieldName] || '';
-                try {
-                    const parsed = JSON.parse(raw);
-                    const arr = Array.isArray(parsed) ? parsed : [parsed];
-                    arr.forEach(sk => {
-                        if (sk && sk.id && sk.name) {
-                            sk.source = sk.source || 'sop';
-                            if (driveUrl && !sk.driveUrl) sk.driveUrl = driveUrl;
-                            if (!SKILLS_LIBRARY.some(s => s.id === sk.id)) skills.push(sk);
-                        }
-                    });
-                } catch (e) {}
-            });
+            let offset = '';
+            do {
+                const pageUrl = offset ? `${baseUrl}&offset=${encodeURIComponent(offset)}` : baseUrl;
+                const res = await fetch(pageUrl, { headers: { Authorization: `Bearer ${PAT}` } });
+                if (!res.ok) break;
+                const data = await res.json();
+                (data.records || []).forEach(r => {
+                    const raw = r.fields[skillFieldName];
+                    if (!raw) return;
+                    const driveUrl = r.fields[driveFieldName] || '';
+                    try {
+                        const parsed = JSON.parse(raw);
+                        const arr = Array.isArray(parsed) ? parsed : [parsed];
+                        arr.forEach(sk => {
+                            if (sk && sk.id && sk.name) {
+                                sk.source = sk.source || 'sop';
+                                if (driveUrl && !sk.driveUrl) sk.driveUrl = driveUrl;
+                                if (!SKILLS_LIBRARY.some(s => s.id === sk.id)) skills.push(sk);
+                            }
+                        });
+                    } catch (e) {}
+                });
+                offset = data.offset || '';
+            } while (offset);
             _sopSkills = skills;
             _sopSkillsFetched = true;
         } catch (e) {}
