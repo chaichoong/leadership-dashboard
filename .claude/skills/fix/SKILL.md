@@ -74,9 +74,19 @@ Before writing any fix:
 3. If a data issue: check what Airtable returns (read the fetch logic, check filter formulas)
 4. If a recent regression: run `git log --oneline -10` and `git diff HEAD~3 HEAD -- [file]` to see what changed
 
-### 2b. Identify root cause
+### 2b. Rank possible root causes
 
-State the root cause in one sentence before writing any code. "The filter in line 142 excludes dismissed items but the badge count on line 87 includes them" is a root cause. "Something is wrong with the badge" is not.
+Before writing any code, list the top 3 possible root causes ranked by likelihood. For each, state how you would confirm it is the actual cause:
+
+```
+1. [Most likely cause] — Confirm by: [specific check: console log, DOM inspection, network request, git diff, variable value]
+2. [Second most likely] — Confirm by: [specific check]
+3. [Third most likely] — Confirm by: [specific check]
+```
+
+Then run the confirmation checks. Do not guess. Gather evidence: read the console, inspect the DOM via Chrome MCP, check network requests, read variable values, or add temporary logging.
+
+State the confirmed root cause in one sentence with the evidence that proves it. "The filter in line 142 excludes dismissed items but the badge count on line 87 includes them — confirmed by DOM inspection showing 3 visible rows but badge reads 5" is a confirmed root cause. "Something is wrong with the badge" is not.
 
 ### 2c. Assess blast radius
 
