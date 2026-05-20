@@ -18,7 +18,15 @@ Run a robustness audit on the specified page/dashboard.
    git pull --rebase origin main && git push origin main
    ```
    Then verify the GitHub Pages deploy is actually live (hard reload, check `pageVer` in `js/config.js` matches what's served).
-6. **Score readiness out of 100** using this rubric (20 pts each):
+6. **Filtering standards check** — if the page has any filtering, dropdowns, or date inputs, verify all four:
+   - **Clear All Filters button** exists and resets every filter to its default state
+   - **Date format is DD/MM/YYYY** throughout (not MM/DD/YYYY or YYYY-MM-DD in user-facing UI)
+   - **Active-only filter on dropdowns** — business, tenant, and property dropdowns default to showing only active records, not archived or inactive
+   - **renderAll vs renderTasks after edits** — after any inline edit, status change, or filter change, the correct re-render function is called (full list re-render, not just the single item) so counts, badges, and visible rows stay in sync
+   
+   Report each as PASS / FAIL with a one-line explanation. Fix any failures before scoring.
+
+7. **Score readiness out of 100** using this rubric (20 pts each):
    - **Correctness** — no logic bugs, counts match underlying data
    - **Error handling** — failed API calls, empty states, auth expiry
    - **Performance** — no obvious N+1 fetches, pagination respected
@@ -39,6 +47,12 @@ Run a robustness audit on the specified page/dashboard.
 ### Fixes applied
 - <commit sha> <message>
 ...
+
+### Filtering standards
+- Clear All Filters: PASS / FAIL / N/A
+- Date format DD/MM/YYYY: PASS / FAIL / N/A
+- Active-only dropdowns: PASS / FAIL / N/A
+- Correct re-render after edits: PASS / FAIL / N/A
 
 ### Re-audit
 <self-introduced issues, or "clean">
