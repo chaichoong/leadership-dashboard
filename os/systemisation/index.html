@@ -994,6 +994,7 @@ function renderDept(){
 
 // ── All Workflows ──
 let _allSortMode = 'alpha';
+let _autoSortMode = 'alpha';
 function renderAll(){
     const pane = document.getElementById('pane-all');
     const methodOrder = [];
@@ -1080,8 +1081,12 @@ function renderAll(){
     table.className = 'wf-grid';
     table.innerHTML = `<thead><tr>
         <th style="width:36px"><input type="checkbox" class="bulk-check" id="bulkSelectAll" onchange="bulkToggleAll(this.checked)"></th>
-        <th style="width:35%">Name</th>
-        <th>Description</th>
+        <th style="width:18%">Name</th>
+        <th style="width:20%">Description</th>
+        <th style="width:13%">Department</th>
+        <th style="width:15%">Customer Journey</th>
+        <th style="width:13%">Main Method</th>
+        <th style="width:80px">Status</th>
         <th style="width:40px"></th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
@@ -1129,7 +1134,7 @@ function renderAll(){
                     label = key;
                 }
             }
-            headerTr.innerHTML = `<td colspan="4">${esc(label)} (${groupWfs.length})</td>`;
+            headerTr.innerHTML = `<td colspan="8">${esc(label)} (${groupWfs.length})</td>`;
             tbody.appendChild(headerTr);
             groupWfs.forEach(w => tbody.appendChild(buildAllGridRow(w)));
         });
@@ -1148,6 +1153,14 @@ function buildAllGridRow(w){
     tr.dataset.id = w.id;
     const name = gf(w,WF.name)||'';
     const desc = gf(w,WF.description)||'';
+    const status = selName(gf(w,WF.status))||'Not Started';
+    const dept = selName(gf(w,WF.department))||'';
+    const fulfill = selName(gf(w,WF.fulfillStage))||'';
+    const methodIds = linkIds(gf(w,WF.mainMethodStage));
+
+    const orderedMethods = [];
+    allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); }); });
+    allMethods.forEach(m=>{ if(!orderedMethods.includes(m)) orderedMethods.push(m); });
 
     tr.innerHTML = `
         <td><input type="checkbox" class="bulk-check" data-wf-id="${w.id}" onchange="bulkUpdateCount()"></td>
@@ -1156,15 +1169,35 @@ function buildAllGridRow(w){
             <textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc">${esc(desc)}</textarea>
             <button class="btn btn-ai btn-sm btn-ai-inline" title="Click to auto-generate a description using AI" onclick="aiDescRow(this)">&#x1F916; Write with AI</button>
         </div></td>
+        <td class="ss-dept"></td>
+        <td class="ss-fulfill"></td>
+        <td class="ss-method"></td>
+        <td><select class="wf-grid-status" data-field="status">
+            <option${status==='Not Started'?' selected':''}>Not Started</option>
+            <option${status==='In Progress'?' selected':''}>In Progress</option>
+            <option${status==='Complete'?' selected':''}>Complete</option>
+        </select></td>
         <td style="white-space:nowrap">
             <button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:11px" title="Delete" onclick="deleteWorkflowRow(this,'${w.id}')">&#x2715;</button>
         </td>`;
 
+    const deptOpts = DEPARTMENTS.map(d=>({value:d, label:d}));
+    tr.querySelector('.ss-dept').appendChild(createSearchableSelect(deptOpts, dept, (v)=> gridSave(w.id, {[WF.department]: v||null}, tr)));
+
+    const fulfillOpts = FULFILL_STAGES.map(s=>({value:s.key, label:s.label}));
+    tr.querySelector('.ss-fulfill').appendChild(createSearchableSelect(fulfillOpts, fulfill, (v)=> gridSave(w.id, {[WF.fulfillStage]: v||null}, tr)));
+
+    const methodOpts = orderedMethods.map(m=>({value:m.id, label:gf(m,MM.name)||'Unnamed'}));
+    const currentMethodId = methodIds.length ? methodIds[0] : '';
+    tr.querySelector('.ss-method').appendChild(createSearchableSelect(methodOpts, currentMethodId, (v)=> gridSave(w.id, {[WF.mainMethodStage]: v ? [v] : []}, tr)));
+
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
+    const statusSel = tr.querySelector('[data-field="status"]');
 
     nameInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.name]: nameInput.value.trim()}, tr));
     descInput.addEventListener('blur', ()=> gridSave(w.id, {[WF.description]: descInput.value.trim()}, tr));
+    statusSel.addEventListener('change', ()=> gridSave(w.id, {[WF.status]: statusSel.value}, tr));
 
     autoGrowTextarea(descInput);
     return tr;
@@ -1177,7 +1210,8 @@ function buildAllNewRow(){
         <td></td>
         <td><input class="wf-grid-input" placeholder="Type name and press Enter" data-field="name"></td>
         <td><textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc"></textarea></td>
-        <td style="white-space:nowrap"></td>`;
+        <td></td><td></td><td></td><td></td>
+        <td></td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
@@ -2407,12 +2441,13 @@ async function uploadSOPToDrive(wfId){
         if(result.error) throw new Error(result.error);
 
         await setWfDriveUrl(wfId, result.folderUrl);
-        if(result.docUrl) {
-            await setWfDriveDocUrl(wfId, result.docUrl);
-            toast('SOP uploaded to Google Drive (HTML + Google Doc)');
+        // Prefer the HTML file preview (cleaner formatting) over the Google Doc conversion
+        const sopLink = result.fileUrl || result.docUrl;
+        if(sopLink) {
+            await setWfDriveDocUrl(wfId, sopLink);
+            toast('SOP uploaded to Google Drive');
         } else {
-            const reason = result.docError ? ': ' + result.docError : '';
-            toast('SOP uploaded to Google Drive (HTML only, Google Doc failed' + reason + ')', 'warning');
+            toast('SOP uploaded to Google Drive (folder only, no file link)', 'warning');
         }
         render();
     } catch(e){
@@ -2807,10 +2842,33 @@ async function deleteStepInline(stepId){
 // ═══════════════════════════════════════════════════════════════════════
 function renderAutomation(){
     const pane = document.getElementById('pane-automation');
-    const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
+    const wfs = filteredWorkflows().slice().sort((a,b)=>{
+        if(_autoSortMode==='alpha') return (gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
+        if(_autoSortMode==='department'){
+            const da = selName(gf(a,WF.department))||'zzz', db = selName(gf(b,WF.department))||'zzz';
+            return da<db?-1:da>db?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
+        }
+        if(_autoSortMode==='journey'){
+            const fa = selName(gf(a,WF.fulfillStage))||'zzz', fb = selName(gf(b,WF.fulfillStage))||'zzz';
+            return fa<fb?-1:fa>fb?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
+        }
+        // method
+        const mA = linkIds(gf(a,WF.mainMethodStage)), mB = linkIds(gf(b,WF.mainMethodStage));
+        const mAn = mA.length ? (gf(allMethods.find(m=>m.id===mA[0]),MM.name)||'zzz') : 'zzz';
+        const mBn = mB.length ? (gf(allMethods.find(m=>m.id===mB[0]),MM.name)||'zzz') : 'zzz';
+        return mAn<mBn?-1:mAn>mBn?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
+    });
     const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
 
-    let html = '';
+    let html = `<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="font-size:var(--fs-xs);color:var(--text-secondary)">Sort by:</span>
+        <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_autoSortMode=this.value;renderAutomation()">
+            <option value="method"${_autoSortMode==='method'?' selected':''}>Main Method</option>
+            <option value="department"${_autoSortMode==='department'?' selected':''}>Department</option>
+            <option value="journey"${_autoSortMode==='journey'?' selected':''}>Customer Journey</option>
+            <option value="alpha"${_autoSortMode==='alpha'?' selected':''}>Alphabetical (A-Z)</option>
+        </select>
+    </div>`;
 
     const wfsWithTasks = wfs.filter(w=>getWfVideoTaskId(w.id));
     if(wfsWithTasks.length){
@@ -3205,20 +3263,108 @@ function runWorkflowSkill(wfId){
     const wfSkill = skills.find(sk => sk.workflowId === wfId && !sk.stepId) || skills[0];
     if(!wfSkill) return;
 
-    const skillCommand = wfSkill.command || ('anthropic-skills:' + (wfSkill.id||'unknown'));
     const instructions = wfSkill.instructions || wfSkill.description || '';
+    const skillName = wfSkill.name || wName;
 
+    // Build the chat-based run skill modal
     const body = `<div style="font-size:var(--fs-sm);color:var(--text-secondary)">
-        <p style="margin:0 0 8px 0"><strong>${esc(wfSkill.name||wName)}</strong></p>
-        <p style="margin:0 0 12px 0">${esc(wfSkill.description||'')}</p>
-        <p style="margin:0 0 8px 0;font-size:var(--fs-xs)">Run this skill by pasting the command below into Claude Code or Cowork:</p>
-        <div style="display:flex;gap:8px;align-items:center">
-            <code style="flex:1;background:var(--bg-subtle);padding:8px 12px;border-radius:var(--radius-sm);font-size:var(--fs-xs);word-break:break-all">/${esc(skillCommand)}</code>
-            <button class="btn btn-sm btn-primary" onclick="navigator.clipboard.writeText('/${skillCommand.replace(/'/g,"\\'")}');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+        <p style="margin:0 0 4px 0"><strong>${esc(skillName)}</strong></p>
+        <p style="margin:0 0 12px 0;font-size:var(--fs-xs)">${esc(wfSkill.description||'')}</p>
+        <div id="runSkillChat" style="border:1px solid var(--border-default);border-radius:var(--radius-md);height:300px;overflow-y:auto;padding:12px;background:var(--bg-surface-2);margin-bottom:12px;font-size:var(--fs-xs);line-height:1.6">
+            <div style="color:var(--text-muted);text-align:center;padding:8px">Click "Run" to execute this skill via AI</div>
+        </div>
+        <div style="display:flex;gap:8px">
+            <input id="runSkillInput" class="wf-grid-input" placeholder="Optional: add context or instructions for this run" style="flex:1;font-size:var(--fs-xs);padding:8px">
+            <button id="runSkillBtn" class="btn btn-sm btn-primary" onclick="executeWorkflowSkill('${wfId}')">Run</button>
         </div>
     </div>`;
     const footer = `<button class="btn" onclick="closeModal()">Close</button>`;
-    showModal('Run Skill: ' + esc(wfSkill.name||wName), body, footer);
+    showModal('Run Skill: ' + esc(skillName), body, footer);
+}
+
+async function executeWorkflowSkill(wfId){
+    const w = allWorkflows.find(w=>w.id===wfId);
+    if(!w) return;
+    const wName = gf(w,WF.name)||'Untitled';
+    let skills = [];
+    try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){ return; }
+    const wfSkill = skills.find(sk => sk.workflowId === wfId && !sk.stepId) || skills[0];
+    if(!wfSkill) return;
+
+    const chatDiv = document.getElementById('runSkillChat');
+    const inputEl = document.getElementById('runSkillInput');
+    const runBtn = document.getElementById('runSkillBtn');
+    if(!chatDiv || !runBtn) return;
+
+    const userContext = inputEl ? inputEl.value.trim() : '';
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running...';
+    if(inputEl) inputEl.disabled = true;
+
+    // Show user message if they typed context
+    if(userContext){
+        chatDiv.innerHTML += `<div style="text-align:right;margin-bottom:8px"><span style="display:inline-block;background:var(--accent);color:#fff;padding:6px 12px;border-radius:var(--radius-md);max-width:80%">${esc(userContext)}</span></div>`;
+    }
+
+    // Show "thinking" indicator
+    chatDiv.innerHTML += `<div id="runSkillThinking" style="margin-bottom:8px;color:var(--text-muted)"><span class="sop-spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px;border-width:2px"></span> AI is executing the skill...</div>`;
+    chatDiv.scrollTop = chatDiv.scrollHeight;
+
+    const instructions = wfSkill.instructions || wfSkill.description || '';
+    const steps = stepsForWorkflow(wfId);
+    const stepsText = steps.map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||'Untitled'} - ${gf(s,ST.description)||''}`).join('\n');
+
+    const systemPrompt = [{type:'text', text:`You are an AI assistant executing a business workflow skill called "${wfSkill.name||wName}".
+
+Your job is to execute this skill by following the instructions precisely. Report what you are doing at each step, what actions you are taking, and the outcome.
+
+Skill instructions:
+${instructions}
+
+Workflow steps:
+${stepsText}
+
+If you need to interact with external systems (Airtable, email, etc.), describe what action should be taken and the expected outcome. Be specific and actionable.`}];
+
+    const userMessage = userContext
+        ? `Execute this skill now. Additional context: ${userContext}`
+        : 'Execute this skill now. Follow the instructions step by step and report the outcome.';
+
+    try {
+        const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+                model:'claude-sonnet-4-20250514',
+                max_tokens:4000,
+                system: systemPrompt,
+                messages:[{role:'user',content:userMessage}],
+            })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text||'No response from AI';
+
+        // Remove thinking indicator
+        const thinking = document.getElementById('runSkillThinking');
+        if(thinking) thinking.remove();
+
+        // Format the AI response with basic line breaks
+        const formatted = esc(text).replace(/\n/g,'<br>');
+        chatDiv.innerHTML += `<div style="margin-bottom:8px;background:var(--bg-surface);border:1px solid var(--border-subtle);padding:10px 14px;border-radius:var(--radius-md);max-width:90%">${formatted}</div>`;
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+        toast('Skill executed');
+    } catch(e){
+        const thinking = document.getElementById('runSkillThinking');
+        if(thinking) thinking.remove();
+        chatDiv.innerHTML += `<div style="margin-bottom:8px;color:var(--danger);padding:8px">Error: ${esc(e.message)}</div>`;
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+        toast('Skill execution error: '+e.message);
+    } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = 'Run';
+        if(inputEl){ inputEl.disabled = false; inputEl.value = ''; inputEl.focus(); }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
