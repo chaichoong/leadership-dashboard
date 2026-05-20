@@ -26,6 +26,16 @@ These patterns cause production bugs. Never introduce them:
 - `eval()`, `document.write()`, or `Function()` constructor
 - `innerHTML` with unescaped external data (use `escHtml()`)
 
+## Known Anti-Patterns (bugs we have hit before)
+
+These have caused production bugs in this codebase. Check for them during every build, fix, and audit.
+
+- **Missing typecast on PATCH calls** — Airtable number fields must receive a Number, not a string. Always wrap with `Number()` before sending: `fields: { [F.amount]: Number(value) }`
+- **renderTasks vs renderAll stale-state** — after an inline edit, status change, or filter change, call the full list re-render function (e.g. `renderAll()`), not just the single-item updater. Partial re-renders leave badges, counts, and visible rows out of sync
+- **returnFieldsByFieldId returning IDs not names** — when using `returnFieldsByFieldId=true` in Airtable API calls, field keys in the response are field IDs (e.g. `fldXyz123`), not human-readable names. If your code expects `rec.fields['Amount']` but gets `rec.fields['fldXyz123']`, every field read silently returns undefined. Match the approach used by the rest of the codebase (this project uses field names via the `F` constants in config.js, not raw field IDs)
+- **CSS overflow truncation** — long tenant names, property addresses, and note text clip without ellipsis or wrapping. Use `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` on single-line cells, or `word-break: break-word` on multi-line content
+- **localStorage quota issues** — Safari has a 5MB localStorage limit. Large cached datasets (100+ transaction records with all fields) can exceed this. Use IndexedDB for large caches (follow the `dashboard.js` pattern), keep localStorage for small UI state only
+
 ## File Architecture (Split for Concurrent Editing)
 
 The platform has been split from a single monolith into separate files so that **multiple Claude sessions can work on different features at the same time** without overwriting each other.
