@@ -652,7 +652,7 @@ async function checkVideoTasks(){
                 continue;
             }
             const status = selName(gf(task,TF.status))||'';
-            if(status==='Complete'||status==='Done'){
+            if(status==='Complete'||status==='Completed'||status==='Done'){
                 if(getWfVideoTaskStatus(wfId)!=='complete'){
                     setWfVideoTaskStatus(wfId, 'complete');
                     const notes = gf(task,TF.notes)||'';
@@ -2068,8 +2068,17 @@ async function generateWorkflowSOP(wfId){
 
     if(!steps.length){ toast('Add steps to this workflow first'); return; }
 
-    const container = document.getElementById('sopDoc-'+wfId);
-    if(!container) return;
+    let container = document.getElementById('sopDoc-'+wfId);
+    let tempContainer = false;
+    if(!container){
+        // Auto-pipeline: create a hidden temporary container so the SOP generation
+        // can proceed even when the workflow detail row is not expanded/visible.
+        container = document.createElement('div');
+        container.id = 'sopDoc-'+wfId;
+        container.style.display = 'none';
+        document.body.appendChild(container);
+        tempContainer = true;
+    }
 
     container.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text-muted)">
         <div class="sop-spinner"></div>
@@ -2159,6 +2168,9 @@ No other text outside the JSON object.`;
     } catch(e){
         toast('SOP generation error: '+e.message);
         container.innerHTML = `<div style="padding:20px;color:var(--danger)">Error generating SOP: ${esc(e.message)}</div>`;
+    } finally {
+        // Clean up temporary container created for auto-pipeline
+        if(tempContainer && container.parentNode) container.remove();
     }
 }
 
