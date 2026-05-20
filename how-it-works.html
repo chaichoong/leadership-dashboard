@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How Operations Director Works</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-family-base);background:var(--bg-app);color:var(--text-primary);line-height:1.6;overflow-x:hidden}
+.page{max-width:1100px;margin:0 auto;padding:24px 20px 80px}
+
+/* ── Hero ── */
+.hero{text-align:center;padding:48px 0 32px}
+.hero h1{font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:var(--accent);margin-bottom:8px}
+.hero p{font-size:var(--fs-lg);color:var(--text-secondary);max-width:520px;margin:0 auto}
+.hero-back{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-muted);text-decoration:none;margin-bottom:16px}
+.hero-back:hover{color:var(--accent)}
+
+/* ── Story Flow (3 steps) ── */
+.story{display:flex;align-items:center;justify-content:center;gap:0;margin:0 auto 48px;max-width:800px;flex-wrap:wrap}
+.story-step{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:24px 20px;text-align:center;flex:1;min-width:180px;position:relative;transition:transform .2s,box-shadow .2s}
+.story-step:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.story-icon{font-size:40px;margin-bottom:8px}
+.story-step h3{font-size:var(--fs-base);font-weight:var(--fw-semibold);margin-bottom:4px}
+.story-step p{font-size:var(--fs-sm);color:var(--text-secondary)}
+.story-arrow{font-size:28px;color:var(--accent);padding:0 4px;flex-shrink:0;animation:pulse-arrow 2s infinite}
+@keyframes pulse-arrow{0%,100%{opacity:.4;transform:translateX(0)}50%{opacity:1;transform:translateX(4px)}}
+@media(max-width:640px){.story{flex-direction:column;gap:8px}.story-arrow{transform:rotate(90deg)}}
+
+/* ── Section Headers ── */
+.section-title{font-size:var(--fs-xl);font-weight:var(--fw-bold);margin:48px 0 8px;display:flex;align-items:center;gap:10px}
+.section-title .title-emoji{font-size:28px}
+.section-subtitle{font-size:var(--fs-base);color:var(--text-secondary);margin-bottom:24px;max-width:640px}
+
+/* ── Department Grid ── */
+.dept-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;margin-bottom:48px}
+.dept-card{background:var(--bg-surface);border:2px solid var(--border-default);border-radius:var(--radius-lg);overflow:hidden;transition:border-color .2s}
+.dept-card:hover{border-color:var(--accent)}
+.dept-header{padding:16px 20px;cursor:pointer;display:flex;align-items:center;gap:12px;user-select:none}
+.dept-header:hover{background:var(--bg-surface-2)}
+.dept-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.dept-dot.leadership{background:var(--tone-sage)}
+.dept-dot.operations{background:var(--tone-olive)}
+.dept-dot.finance{background:var(--tone-gold)}
+.dept-dot.hr{background:var(--tone-blue)}
+.dept-dot.system{background:var(--tone-plum)}
+.dept-name{font-size:var(--fs-lg);font-weight:var(--fw-semibold);flex:1}
+.dept-count{font-size:var(--fs-sm);color:var(--text-muted);background:var(--bg-subtle);border-radius:var(--radius-full);padding:2px 10px}
+.dept-chevron{font-size:18px;color:var(--text-muted);transition:transform .2s}
+.dept-card.open .dept-chevron{transform:rotate(180deg)}
+.dept-body{display:none;padding:0 16px 16px}
+.dept-card.open .dept-body{display:block}
+.dept-desc{font-size:var(--fs-sm);color:var(--text-secondary);padding:0 4px 12px;border-bottom:1px solid var(--border-subtle);margin-bottom:12px}
+
+/* ── Section Cards (inside departments) ── */
+.sec-card{background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-radius:var(--radius-md);margin-bottom:10px;overflow:hidden;transition:box-shadow .2s}
+.sec-card:hover{box-shadow:var(--shadow-sm)}
+.sec-head{padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:10px}
+.sec-head:hover{background:var(--bg-subtle)}
+.sec-emoji{font-size:22px;flex-shrink:0}
+.sec-info{flex:1}
+.sec-name{font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+.sec-oneliner{font-size:var(--fs-xs);color:var(--text-secondary)}
+.sec-chevron{font-size:14px;color:var(--text-muted);transition:transform .2s}
+.sec-card.open .sec-chevron{transform:rotate(180deg)}
+.sec-detail{display:none;padding:0 14px 14px;border-top:1px solid var(--border-subtle)}
+.sec-card.open .sec-detail{display:block}
+
+/* ── Detail Sections ── */
+.detail-block{margin-top:12px}
+.detail-label{font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.detail-list{list-style:none;padding:0}
+.detail-list li{font-size:var(--fs-sm);color:var(--text-secondary);padding:3px 0;padding-left:16px;position:relative}
+.detail-list li::before{content:'';position:absolute;left:0;top:10px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.detail-tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--radius-full);background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-medium);cursor:pointer;transition:background .15s}
+.tag:hover{background:var(--accent);color:#fff}
+.tag.robot{background:var(--info-bg);color:var(--info)}
+.tag.robot:hover{background:var(--info);color:#fff}
+.tag.data-in{background:var(--success-bg);color:var(--success)}
+.tag.data-out{background:var(--warning-bg);color:var(--warning)}
+
+/* ── Brain Section (Airtable) ── */
+.brain-section{background:var(--bg-surface);border:2px solid var(--accent);border-radius:var(--radius-lg);padding:28px;margin-bottom:48px;position:relative;overflow:hidden}
+.brain-section::before{content:'';position:absolute;top:-60px;right:-60px;width:180px;height:180px;border-radius:50%;background:var(--accent-soft);opacity:.3}
+.brain-header{display:flex;align-items:center;gap:12px;margin-bottom:16px;position:relative}
+.brain-header h3{font-size:var(--fs-lg);font-weight:var(--fw-bold)}
+.brain-desc{font-size:var(--fs-base);color:var(--text-secondary);margin-bottom:20px;position:relative}
+.tables-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;position:relative}
+.table-chip{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:10px 12px;text-align:center;font-size:var(--fs-sm);transition:transform .15s,border-color .15s}
+.table-chip:hover{transform:translateY(-2px);border-color:var(--accent)}
+.table-chip .chip-icon{font-size:20px;display:block;margin-bottom:4px}
+.table-chip .chip-name{font-weight:var(--fw-medium)}
+.table-chip .chip-count{font-size:var(--fs-xs);color:var(--text-muted)}
+
+/* ── Data Flow Diagram ── */
+.flow-section{margin-bottom:48px}
+.flow-diagram{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:32px 24px;position:relative;overflow:hidden}
+.flow-row{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.flow-row:last-child{margin-bottom:0}
+.flow-box{background:var(--bg-surface-2);border:2px solid var(--border-default);border-radius:var(--radius-md);padding:12px 16px;text-align:center;min-width:120px;position:relative;transition:border-color .2s,transform .2s}
+.flow-box:hover{border-color:var(--accent);transform:scale(1.03)}
+.flow-box .fb-icon{font-size:24px;display:block}
+.flow-box .fb-label{font-size:var(--fs-sm);font-weight:var(--fw-medium);margin-top:4px}
+.flow-box .fb-desc{font-size:var(--fs-xs);color:var(--text-muted)}
+.flow-box.highlight{border-color:var(--accent);background:var(--accent-soft)}
+.flow-arrow{color:var(--accent);font-size:24px;animation:pulse-arrow 2s infinite;flex-shrink:0}
+.flow-arrow.down{writing-mode:vertical-rl;transform:rotate(0)}
+.flow-divider{width:100%;text-align:center;font-size:var(--fs-xs);color:var(--text-muted);padding:8px 0;text-transform:uppercase;letter-spacing:1px;font-weight:var(--fw-semibold)}
+
+/* ── Robots Section ── */
+.robots-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:48px}
+.robot-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:20px;display:flex;gap:14px;transition:transform .15s,box-shadow .15s}
+.robot-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.robot-icon{font-size:32px;flex-shrink:0;animation:robot-bob 3s ease-in-out infinite}
+@keyframes robot-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+.robot-info h4{font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:4px}
+.robot-info p{font-size:var(--fs-xs);color:var(--text-secondary)}
+.robot-freq{display:inline-block;font-size:10px;font-weight:var(--fw-semibold);color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:var(--radius-full);margin-top:6px}
+
+/* ── Health Section ── */
+.health-visual{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:28px;margin-bottom:48px}
+.health-row{display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.health-dot-demo{width:16px;height:16px;border-radius:50%;flex-shrink:0}
+.health-dot-demo.green{background:var(--success);animation:pulse-dot 2s infinite}
+.health-dot-demo.amber{background:var(--warning)}
+.health-dot-demo.red{background:var(--danger)}
+.health-dot-demo.grey{background:var(--text-muted)}
+@keyframes pulse-dot{0%,100%{box-shadow:0 0 0 0 rgba(44,110,73,.4)}50%{box-shadow:0 0 0 6px rgba(44,110,73,0)}}
+.health-label{font-size:var(--fs-sm)}
+.health-label strong{font-weight:var(--fw-semibold)}
+.health-explainer{font-size:var(--fs-sm);color:var(--text-secondary);margin-top:8px;padding-top:12px;border-top:1px solid var(--border-subtle)}
+
+/* ── Guides Section ── */
+.guides-section{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:28px;margin-bottom:48px}
+.guides-section p{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:12px}
+.guides-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.guide-chip{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-radius:var(--radius-md);font-size:var(--fs-sm);color:var(--text-primary);text-decoration:none;transition:border-color .15s}
+.guide-chip:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── Connection Highlight ── */
+.sec-card[data-highlight="true"]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sec-card[data-dimmed="true"]{opacity:.35}
+
+/* ── Footer ── */
+.footer{text-align:center;padding:32px 0;color:var(--text-muted);font-size:var(--fs-xs)}
+
+/* ── Glossary Tooltip ── */
+.glossary{cursor:help;border-bottom:1px dashed var(--text-muted);position:relative}
+.glossary:hover::after{content:attr(data-tip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--bg-sidebar);color:#fff;padding:6px 12px;border-radius:var(--radius-md);font-size:var(--fs-xs);white-space:nowrap;z-index:10;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- Hero -->
+<div class="hero">
+    <a class="hero-back" href="index.html">&#8592; Back to Operations Director</a>
+    <h1>How Operations Director Works</h1>
+    <p>A visual guide to how everything connects. Click anything to learn more.</p>
+</div>
+
+<!-- The Story (3-step overview) -->
+<div class="story">
+    <div class="story-step">
+        <div class="story-icon">📥</div>
+        <h3>Data Comes In</h3>
+        <p>Rent payments, bank transactions, emails, and invoices arrive from the real world</p>
+    </div>
+    <div class="story-arrow">&#10132;</div>
+    <div class="story-step">
+        <div class="story-icon">⚙️</div>
+        <h3>The App Organises It</h3>
+        <p>Sorts everything, does the maths, matches payments, and spots problems</p>
+    </div>
+    <div class="story-arrow">&#10132;</div>
+    <div class="story-step">
+        <div class="story-icon">📊</div>
+        <h3>Kevin Sees the Picture</h3>
+        <p>Clear numbers, alerts when something needs attention, and one-click actions</p>
+    </div>
+</div>
+
+<!-- The Departments -->
+<div class="section-title"><span class="title-emoji">🏢</span> The Departments</div>
+<p class="section-subtitle">Operations Director is organised into departments, just like a real company. Each department has sections that handle specific jobs. Click a department to see its sections.</p>
+
+<div class="dept-grid" id="deptGrid"></div>
+
+<!-- The Brain (Airtable) -->
+<div class="section-title"><span class="title-emoji">🧠</span> The Brain</div>
+<p class="section-subtitle">Every section reads from and writes to the same central database. Think of it as a giant filing cabinet that remembers everything.</p>
+
+<div class="brain-section">
+    <div class="brain-header">
+        <span style="font-size:32px">🗄️</span>
+        <h3>Airtable Database</h3>
+    </div>
+    <div class="brain-desc">Airtable is like a super-powered spreadsheet. It stores all the data for the business in separate tables (like different drawers in a filing cabinet). When Kevin logs in, the app pulls data from these tables and shows it on screen.</div>
+    <div class="tables-grid" id="tablesGrid"></div>
+</div>
+
+<!-- Data Flow -->
+<div class="section-title"><span class="title-emoji">🔄</span> How Data Flows</div>
+<p class="section-subtitle">Here is the journey data takes from the moment it enters the system to when Kevin sees it on screen.</p>
+
+<div class="flow-section">
+    <div class="flow-diagram">
+        <div class="flow-row">
+            <div class="flow-box"><span class="fb-icon">🏦</span><span class="fb-label">Bank Accounts</span><span class="fb-desc">Transactions sync automatically</span></div>
+            <div class="flow-box"><span class="fb-icon">📧</span><span class="fb-label">Gmail</span><span class="fb-desc">Invoices detected every 30 min</span></div>
+            <div class="flow-box"><span class="fb-icon">🏠</span><span class="fb-label">Tenants</span><span class="fb-desc">Rent payments arrive monthly</span></div>
+        </div>
+        <div class="flow-divider">&#8595; data arrives in the database &#8595;</div>
+        <div class="flow-row">
+            <div class="flow-box highlight"><span class="fb-icon">🗄️</span><span class="fb-label">Airtable</span><span class="fb-desc">Stores everything in tables</span></div>
+        </div>
+        <div class="flow-divider">&#8595; the app loads it on login &#8595;</div>
+        <div class="flow-row">
+            <div class="flow-box"><span class="fb-icon">📊</span><span class="fb-label">Dashboard</span><span class="fb-desc">Loads 6 core data sets</span></div>
+        </div>
+        <div class="flow-divider">&#8595; shares data with every tab &#8595;</div>
+        <div class="flow-row">
+            <div class="flow-box"><span class="fb-icon">💷</span><span class="fb-label">Income</span></div>
+            <div class="flow-box"><span class="fb-icon">📋</span><span class="fb-label">Costs</span></div>
+            <div class="flow-box"><span class="fb-icon">🧾</span><span class="fb-label">Invoices</span></div>
+            <div class="flow-box"><span class="fb-icon">🚨</span><span class="fb-label">CFVs</span></div>
+            <div class="flow-box"><span class="fb-icon">💰</span><span class="fb-label">P&amp;L</span></div>
+            <div class="flow-box"><span class="fb-icon">🔍</span><span class="fb-label">Transactions</span></div>
+        </div>
+        <div class="flow-divider">&#8595; some tabs write changes back &#8595;</div>
+        <div class="flow-row">
+            <div class="flow-box" style="border-color:var(--warning)"><span class="fb-icon">🤖</span><span class="fb-label">Reconciliation</span><span class="fb-desc">Categorises transactions</span></div>
+            <div class="flow-box" style="border-color:var(--warning)"><span class="fb-icon">🚨</span><span class="fb-label">CFV Engine</span><span class="fb-desc">Updates tenant status</span></div>
+            <div class="flow-box" style="border-color:var(--warning)"><span class="fb-icon">🧾</span><span class="fb-label">Invoice Matcher</span><span class="fb-desc">Marks invoices as paid</span></div>
+        </div>
+    </div>
+</div>
+
+<!-- The Robots -->
+<div class="section-title"><span class="title-emoji">🤖</span> The Robots (Automations)</div>
+<p class="section-subtitle">These run automatically in the background. Kevin does not need to press any buttons for them to work.</p>
+
+<div class="robots-grid" id="robotsGrid"></div>
+
+<!-- The Health Monitor -->
+<div class="section-title"><span class="title-emoji">🏥</span> The Health Monitor</div>
+<p class="section-subtitle">Every section has a built-in health check, like a doctor's checkup for the system. It tells Kevin if everything is working or if something needs attention.</p>
+
+<div class="health-visual">
+    <div class="health-row">
+        <div class="health-dot-demo green"></div>
+        <div class="health-label"><strong>Green</strong> = Everything is working. Data is fresh (updated less than 5 minutes ago) and all checks passed.</div>
+    </div>
+    <div class="health-row">
+        <div class="health-dot-demo amber"></div>
+        <div class="health-label"><strong>Amber</strong> = Something needs attention. Data might be slightly old (5 to 30 minutes) or a check found a warning.</div>
+    </div>
+    <div class="health-row">
+        <div class="health-dot-demo red"></div>
+        <div class="health-label"><strong>Red</strong> = Something is wrong. Data is stale (over 30 minutes old) or a check failed.</div>
+    </div>
+    <div class="health-row">
+        <div class="health-dot-demo grey"></div>
+        <div class="health-label"><strong>Grey</strong> = Not checked yet. The section has not been opened since login.</div>
+    </div>
+    <div class="health-explainer">
+        <strong>Where to see it:</strong> Every section in the sidebar has a small coloured dot next to its name. That dot is the health status. Inside each section, there is a "health bar" at the top that shows exactly what was checked and whether it passed or failed. Click "Re-run" to run the checks again.
+        <br><br>
+        <strong>How it works:</strong> When a section loads data, it runs "passive" checks automatically (things like "is the data fresh?"). There are also "active" checks that do heavier work (like testing if the database connection is alive). Active checks only run when Kevin clicks the "Re-run" button.
+        <br><br>
+        <strong>The sidebar rollup:</strong> Each department heading also has a dot. It shows the worst status of any section inside it. So if one section in Finance is red, the Finance department dot turns red too. This lets Kevin spot problems at a glance without opening every section.
+    </div>
+</div>
+
+<!-- The Guidebooks -->
+<div class="section-title"><span class="title-emoji">📚</span> The Guidebooks (SOPs)</div>
+<p class="section-subtitle">Every section has a Standard Operating Procedure (SOP). Think of it as an instruction manual that explains how to use that section step by step.</p>
+
+<div class="guides-section">
+    <p>SOPs live on the "Site Map &amp; Guides" page. Each one is a separate web page that explains:</p>
+    <ul class="detail-list" style="margin-bottom:16px">
+        <li>What the section does and why it matters</li>
+        <li>Step-by-step instructions for every action</li>
+        <li>What the health checks look for</li>
+        <li>Troubleshooting tips if something goes wrong</li>
+    </ul>
+    <p><strong>Version tracking:</strong> Every section has a version number (like v2.31). When the code changes, the version number goes up automatically. The Site Map page compares the section version to its SOP version. If they do not match, it means the guide needs updating.</p>
+</div>
+
+<!-- How It All Connects -->
+<div class="section-title"><span class="title-emoji">🕸️</span> How It All Connects</div>
+<p class="section-subtitle">Click any section above and look at the "Connects To" tags. Here is the summary of the biggest connections.</p>
+
+<div class="brain-section" style="border-color:var(--border-default)">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
+        <div>
+            <div style="font-weight:var(--fw-semibold);margin-bottom:8px;font-size:var(--fs-sm)">💷 Rent comes in</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">Tenants pay rent &#8594; appears as a bank transaction &#8594; Reconciliation matches it to the right tenant &#8594; Income tab shows it &#8594; P&amp;L counts it as revenue &#8594; Cash Flow forecasts future balance</div>
+        </div>
+        <div>
+            <div style="font-weight:var(--fw-semibold);margin-bottom:8px;font-size:var(--fs-sm)">🧾 Invoice arrives</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">Email arrives in Gmail &#8594; Gmail Script detects it &#8594; Creates record in Airtable &#8594; Invoices tab shows it &#8594; Kevin approves payment &#8594; Reconciliation matches the bank transaction &#8594; P&amp;L counts it as an expense</div>
+        </div>
+        <div>
+            <div style="font-weight:var(--fw-semibold);margin-bottom:8px;font-size:var(--fs-sm)">🚨 Tenant misses rent</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">Due date passes with no payment &#8594; CFV engine detects it &#8594; Flags the tenancy &#8594; Rent Statements calculate the balance &#8594; Sidebar badge shows alert count &#8594; When tenant pays, CFV auto-returns status to normal</div>
+        </div>
+        <div>
+            <div style="font-weight:var(--fw-semibold);margin-bottom:8px;font-size:var(--fs-sm)">📋 Monthly cost due</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">Cost record has a due day &#8594; Costs tab checks if a matching transaction arrived &#8594; If yes, marks "In Payment" &#8594; If no, marks "Overdue" &#8594; Variance flag shows if amount differs from expected &#8594; P&amp;L totals it</div>
+        </div>
+        <div>
+            <div style="font-weight:var(--fw-semibold);margin-bottom:8px;font-size:var(--fs-sm)">🎯 Strategy to tasks</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">Kevin sets quarterly objectives &#8594; Strategy page creates projects &#8594; Projects break into tasks &#8594; Tasks appear on the Tasks page &#8594; Team members get assigned &#8594; KPIs track project progress</div>
+        </div>
+        <div>
+            <div style="font-weight:var(--fw-semibold);margin-bottom:8px;font-size:var(--fs-sm)">🤖 AI Assistant</div>
+            <div style="font-size:var(--fs-xs);color:var(--text-secondary)">Gathers context from whatever tab Kevin is viewing &#8594; Sends it plus Kevin's question to Claude &#8594; Returns a data-aware answer &#8594; Can reference SOPs, transactions, KPIs, and more</div>
+        </div>
+    </div>
+</div>
+
+<div class="footer">Operations Director &middot; Built by Kevin Brittain &middot; Powered by Airtable, Claude AI, and GitHub Pages</div>
+</div>
+
+<script>
+// ── Data: Departments ──
+const DEPTS = [
+    {
+        id: 'leadership', name: 'Leadership', dot: 'leadership',
+        desc: 'The big-picture department. Sets goals, tracks the most important numbers, and plans the future.',
+        sections: [
+            {
+                id: 'overview', emoji: '📊', name: 'Leadership Dashboard',
+                oneliner: 'The main screen with all the key numbers at a glance.',
+                howItWorks: [
+                    'When Kevin logs in, this page loads 6 sets of data from Airtable (tenants, transactions, costs, businesses, categories, sub-categories)',
+                    'It calculates Key Performance Indicators (KPIs) like total rent, profit, void count, and overdue costs',
+                    'Shows each KPI as a card you can click to see more detail',
+                    'Shares this data with every other tab so they do not need to fetch it again',
+                    'Refreshes automatically every 15 minutes (but waits if Kevin is clicking around)'
+                ],
+                reads: ['Tenancies', 'Transactions', 'Costs', 'Businesses', 'Categories', 'Sub-Categories'],
+                writes: ['KPI values (auto-computed on each load)'],
+                connects: ['cfv', 'income', 'costs', 'pnl', 'fintable', 'cashflow'],
+                robots: ['Smart Refresh (updates data every 15 min, defers if active)', 'KPI Auto-Calculator', 'IndexedDB Cache (loads faster on return visits)']
+            },
+            {
+                id: 'os-strategy', emoji: '🎯', name: 'Objective & Strategy',
+                oneliner: 'Where Kevin writes down his goals and plans for the quarter.',
+                howItWorks: [
+                    'Kevin picks a business and a quarter (e.g. Q2 2026)',
+                    'Fills in the Objective page: what the business does, who it serves, and 20 key undertakings',
+                    'Fills in the Strategy page: 9-year, 3-year, and 1-year targets',
+                    'Creates up to 3 quarterly projects with measurable goals',
+                    'An AI "Boardroom Mentor" can review and challenge his plans'
+                ],
+                reads: ['Objectives & Strategy table', 'Businesses', 'Projects'],
+                writes: ['Strategy records', 'Project records'],
+                connects: ['tasks', 'os-bplan'],
+                robots: ['AI Boardroom Mentor (reviews plans on request)']
+            },
+            {
+                id: 'os-bplan', emoji: '📋', name: 'Plan Builder',
+                oneliner: 'An AI assistant that builds a business launch plan step by step.',
+                howItWorks: [
+                    'Kevin answers questions in a chat window',
+                    'The AI builds sections of a business plan based on his answers',
+                    'Covers: market analysis, pricing, operations, marketing, and finances',
+                    'Can export the finished plan as a PDF'
+                ],
+                reads: ['Chat context (in-memory)'],
+                writes: ['None (exports to PDF only)'],
+                connects: ['os-strategy'],
+                robots: ['AI Chat Engine (Claude-powered)']
+            }
+        ]
+    },
+    {
+        id: 'operations', name: 'Operations', dot: 'operations',
+        desc: 'The day-to-day running of the business. Tasks, communications, processes, and property management.',
+        sections: [
+            {
+                id: 'tasks', emoji: '✅', name: 'Tasks & Projects',
+                oneliner: 'A to-do list for the whole team. Who is doing what and when.',
+                howItWorks: [
+                    'Shows tasks grouped by status: Today, Upcoming, Overdue, Completed, Approval Needed',
+                    'Each task has an assignee, due date, priority, and project link',
+                    'Team members can be filtered so you see only your tasks',
+                    'Tasks can be created, edited, and completed inline',
+                    'Recurring tasks automatically regenerate after completion'
+                ],
+                reads: ['Tasks table', 'Projects table', 'Businesses'],
+                writes: ['Task records (create, edit, complete, delete)'],
+                connects: ['os-strategy', 'overview'],
+                robots: ['Recurring Task Regeneration', 'Overdue Detection']
+            },
+            {
+                id: 'operations-page', emoji: '🏢', name: 'Operations',
+                oneliner: 'All properties, tenants, units, and tenancies in one place.',
+                howItWorks: [
+                    'Shows a KPI grid for each property (occupancy, rent, voids)',
+                    'Lists all rental units with status (occupied, void, maintenance)',
+                    'Links tenancies to tenants with contact details',
+                    'Shows valuation history charts for each property',
+                    'Inline editing for quick updates'
+                ],
+                reads: ['Properties', 'Rental Units', 'Tenancies', 'Tenants', 'Transactions'],
+                writes: ['Property records', 'Unit records', 'Tenancy records'],
+                connects: ['income', 'cfv', 'compliance'],
+                robots: ['None (manual management page)']
+            },
+            {
+                id: 'comms', emoji: '📨', name: 'Inbound Comms',
+                oneliner: 'Reads Kevin\'s emails and sorts them by what needs doing.',
+                howItWorks: [
+                    'Connects to Gmail via Google OAuth',
+                    'Shows emails sorted by label: Inbox, To Pay, Compliance, Archive, Newsletters',
+                    'Each email shows the sender, subject, date, and a preview',
+                    'Kevin can re-label emails to move them between categories',
+                    'Stats bar shows counts for each category'
+                ],
+                reads: ['Gmail API (live email data)'],
+                writes: ['Gmail labels (re-categorises emails)'],
+                connects: ['invoices'],
+                robots: ['Gmail Label Stats Counter']
+            },
+            {
+                id: 'systemisation', emoji: '⚙️', name: 'Systemisation',
+                oneliner: 'Turns repeating work into step-by-step processes anyone can follow.',
+                howItWorks: [
+                    'Organises work into Pipelines (like departments)',
+                    'Each pipeline has Workflows (like procedures)',
+                    'Each workflow has Steps (like instructions)',
+                    'Steps can be marked as AI, Staff, or Both',
+                    'Can auto-generate SOP documents from workflows'
+                ],
+                reads: ['Systemisation Workflows table', 'Workflow Steps table'],
+                writes: ['Workflow records', 'Step records'],
+                connects: ['sitemap'],
+                robots: ['SOP Auto-Generator']
+            },
+            {
+                id: 'skills', emoji: '🧠', name: 'Skills Library',
+                oneliner: 'A collection of AI skills (like mini apps) that do specific jobs.',
+                howItWorks: [
+                    'Lists all available AI skills with search and filtering',
+                    'Each skill has a name, category, description, and command',
+                    'Kevin can mark skills as "active" (his favourites)',
+                    'Click "Run" to execute a skill via Claude Code',
+                    'Skills cover: tenant onboarding, document generation, data analysis, and more'
+                ],
+                reads: ['Skills data (static + Airtable settings)'],
+                writes: ['Active skill preferences'],
+                connects: ['ai-assistant'],
+                robots: ['None (manual execution)']
+            }
+        ]
+    },
+    {
+        id: 'finance', name: 'Finance', dot: 'finance',
+        desc: 'All money in and out. Tracks rent, invoices, costs, profit, and bank account health.',
+        sections: [
+            {
+                id: 'income', emoji: '💷', name: 'Accounts Receivable (Fixed)',
+                oneliner: 'Money coming IN every month from tenants paying rent.',
+                howItWorks: [
+                    'Lists every active tenancy with rent amount, due day, and payment status',
+                    'Groups by property so Kevin can see income per building',
+                    'Shows total expected rent vs actual received',
+                    'Flags tenancies where payment is overdue'
+                ],
+                reads: ['Tenancies', 'Tenants'],
+                writes: ['None (read-only view)'],
+                connects: ['cfv', 'pnl', 'cashflow', 'overview'],
+                robots: ['None (displays data from Dashboard load)']
+            },
+            {
+                id: 'ar-variable', emoji: '📤', name: 'Accounts Receivable (Variable)',
+                oneliner: 'Money coming IN from one-off invoices Kevin sends to customers.',
+                howItWorks: [
+                    'Shows outbound invoices Kevin has sent',
+                    'Tracks status: Draft, Sent, Overdue, Paid, Written Off',
+                    'Filters by business and status',
+                    'Can mark invoices as paid when payment arrives'
+                ],
+                reads: ['Outbound Invoices table'],
+                writes: ['Invoice status updates'],
+                connects: ['pnl', 'transactions'],
+                robots: ['None (manual tracking)']
+            },
+            {
+                id: 'costs', emoji: '📋', name: 'Accounts Payable (Fixed)',
+                oneliner: 'Bills Kevin pays every month, like insurance and maintenance contracts.',
+                howItWorks: [
+                    'Lists every recurring cost with expected amount and due day',
+                    'Reconciliation robot matches bank transactions to costs automatically',
+                    'Shows variance: did Kevin pay the expected amount or more/less?',
+                    'Flags overdue costs that have no matching payment',
+                    'Syncs derived fields back to Airtable in the background'
+                ],
+                reads: ['Costs', 'Transactions (via reconciliation)'],
+                writes: ['Cost status fields', 'Variance fields', 'Last reconciled fields'],
+                connects: ['reconciliation', 'pnl', 'cashflow'],
+                robots: ['Background Field Sync (updates cost status after reconciliation)']
+            },
+            {
+                id: 'invoices', emoji: '🧾', name: 'Accounts Payable (Variable)',
+                oneliner: 'One-off invoices Kevin receives and needs to pay.',
+                howItWorks: [
+                    'A robot checks Gmail every 30 minutes for new invoice emails',
+                    'Creates a record in Airtable for each invoice found',
+                    'Kevin reviews, approves, and marks invoices as paid',
+                    'Can match invoices to bank transactions',
+                    'Filters by business, status, and date'
+                ],
+                reads: ['Invoices table', 'Gmail (via Apps Script)'],
+                writes: ['Invoice status (Paid/Unpaid)', 'Matched transaction links'],
+                connects: ['comms', 'reconciliation', 'pnl'],
+                robots: ['Gmail Invoice Sync (every 30 min)', 'Invoice-Transaction Matcher']
+            },
+            {
+                id: 'pnl', emoji: '💰', name: 'Profit & Loss',
+                oneliner: 'Shows if the business is making or losing money each month.',
+                howItWorks: [
+                    'Groups all transactions by month and sub-category',
+                    'Calculates: Revenue (money in) minus Expenses (money out) equals Profit',
+                    'Shows bar charts comparing months',
+                    'Breaks down by business so Kevin can see which company is most profitable',
+                    'Can drill into any number to see the transactions behind it'
+                ],
+                reads: ['Transactions', 'Sub-Categories', 'Businesses'],
+                writes: ['None (read-only calculation)'],
+                connects: ['income', 'costs', 'invoices', 'transactions'],
+                robots: ['None (computed on tab load from shared data)']
+            },
+            {
+                id: 'transactions', emoji: '🔍', name: 'Transactions',
+                oneliner: 'Every bank transaction, searchable and sortable.',
+                howItWorks: [
+                    'Shows every transaction from all bank accounts',
+                    'Full-text search across description, vendor, amount, date',
+                    'Filter by account, category, business, date range',
+                    'Virtual scrolling handles 1000+ transactions smoothly',
+                    'Click any transaction to see its full details and linked records'
+                ],
+                reads: ['Transactions', 'Sub-Categories', 'Categories', 'Businesses', 'Costs', 'Tenancies'],
+                writes: ['None (read-only explorer)'],
+                connects: ['reconciliation', 'pnl', 'costs', 'income'],
+                robots: ['None (data explorer)']
+            },
+            {
+                id: 'fintable', emoji: '🏦', name: 'Accounts (Bank Sync)',
+                oneliner: 'Shows which bank accounts are connected and up to date.',
+                howItWorks: [
+                    'Lists every bank account with its last sync timestamp',
+                    'Classifies accounts: Healthy (synced recently), Stale (not synced in 24+ hours), Error',
+                    'Shows alert banners on the Dashboard if any account needs attention',
+                    'Kevin can see which bank feeds are working and which are broken'
+                ],
+                reads: ['Accounts table (sync timestamps)'],
+                writes: ['None (read-only monitor)'],
+                connects: ['overview', 'transactions'],
+                robots: ['Background Sync Check (runs on Dashboard load)']
+            }
+        ]
+    },
+    {
+        id: 'property', name: 'Property Safety', dot: 'operations',
+        desc: 'Keeps tenants safe and the business legal. Tracks rent chasing and safety certificates.',
+        sections: [
+            {
+                id: 'cfv', emoji: '🚨', name: 'Cash Flow Voids (CFVs)',
+                oneliner: 'Spots when a tenant has not paid rent and starts the chase process.',
+                howItWorks: [
+                    'Checks every active tenancy: has rent been paid this month?',
+                    'If not, flags it as a CFV (Cash Flow Void)',
+                    'Shows the amount owed, days overdue, and contact details',
+                    'Links to Rent Statements that show the tenant\'s full payment history',
+                    'When the tenant pays, the system automatically marks them as "back to normal"'
+                ],
+                reads: ['Tenancies', 'Tenants', 'Transactions'],
+                writes: ['Tenancy status (auto-return to "In Payment")', 'Audit comments'],
+                connects: ['income', 'arrears', 'overview', 'cashflow'],
+                robots: ['CFV Detection Engine (runs on tab load)', 'Auto-Return (marks paid tenants as OK)', 'Sidebar Badge (shows CFV count)']
+            },
+            {
+                id: 'compliance', emoji: '✅', name: 'Property Compliance',
+                oneliner: 'Checks that safety certificates (gas, electric, PAT) are up to date.',
+                howItWorks: [
+                    'Lists every property and unit with their certificate expiry dates',
+                    'Colour-codes: Green (current), Amber (expiring soon), Red (expired), Grey (none)',
+                    'Summary bar at the top shows total counts per status',
+                    'Helps Kevin stay legal by spotting expired certificates early'
+                ],
+                reads: ['Properties', 'Rental Units (certificate fields)'],
+                writes: ['None (read-only tracker)'],
+                connects: ['operations-page'],
+                robots: ['None (computed from certificate dates on load)']
+            },
+            {
+                id: 'arrears', emoji: '📑', name: 'Rent Statements',
+                oneliner: 'Calculates the daily rent balance for each tenancy.',
+                howItWorks: [
+                    'For each tenancy, builds a day-by-day statement: rent charged vs rent paid',
+                    'Shows running balance (positive = tenant owes money, negative = tenant overpaid)',
+                    'Detects Section 8 eligibility (2+ months of arrears for legal action)',
+                    'Data starts from April 2025 onward'
+                ],
+                reads: ['Tenancies', 'Tenants', 'Transactions'],
+                writes: ['None (read-only calculation)'],
+                connects: ['cfv', 'income'],
+                robots: ['Rent Statement Engine (computes on demand)']
+            }
+        ]
+    },
+    {
+        id: 'hr', name: 'HR / Admin', dot: 'hr',
+        desc: 'People management. Who works here, what they do, and their training progress.',
+        sections: [
+            {
+                id: 'os-team', emoji: '👥', name: 'Team Members',
+                oneliner: 'Directory of everyone who works for Kevin, their roles and training.',
+                howItWorks: [
+                    'Directory tab: searchable list of all team members with roles and departments',
+                    'Org Chart tab: visual tree showing who reports to whom',
+                    'Training tab: shows training coverage with progress bars',
+                    'Achievements tab: feed of team accomplishments'
+                ],
+                reads: ['Team Members table'],
+                writes: ['Team records (roles, training, status)'],
+                connects: ['tasks'],
+                robots: ['None (manual management page)']
+            }
+        ]
+    },
+    {
+        id: 'system', name: 'System', dot: 'system',
+        desc: 'Tools that keep the platform itself running smoothly.',
+        sections: [
+            {
+                id: 'sitemap', emoji: '🗺️', name: 'Site Map & Guides',
+                oneliner: 'A directory of every page, with links to guides and version tracking.',
+                howItWorks: [
+                    'Lists every page in the platform with its current version number',
+                    'Links to the SOP (guide) for each page',
+                    'Compares page version to SOP version and flags mismatches',
+                    'Can check GitHub for the latest code changes'
+                ],
+                reads: ['PAGE_REGISTRY (in-code)', 'GitHub API (commit history)'],
+                writes: ['None (read-only directory)'],
+                connects: ['systemisation'],
+                robots: ['GitHub Sync Check (compares deployed vs latest code)']
+            },
+            {
+                id: 'ai-assistant', emoji: '🤖', name: 'AI Assistant',
+                oneliner: 'A chat window that can answer questions about any of Kevin\'s data.',
+                howItWorks: [
+                    'Floating button in the bottom-right corner of every page',
+                    'Gathers context from whatever tab Kevin is currently viewing',
+                    'Sends Kevin\'s question plus that context to Claude AI',
+                    'Returns a data-aware answer (e.g. "Your total rent roll is X")',
+                    'Can reference SOPs, transaction totals, KPIs, and more'
+                ],
+                reads: ['Current tab context', 'SOP files', 'All dashboard data'],
+                writes: ['None (chat only)'],
+                connects: ['overview', 'pnl', 'cfv', 'income', 'costs'],
+                robots: ['Context Gatherer (snapshots current tab data before each question)']
+            },
+            {
+                id: 'reconciliation', emoji: '🔄', name: 'Reconciliation Engine',
+                oneliner: 'Matches bank transactions to the right category, tenant, or cost.',
+                howItWorks: [
+                    'Looks at each unreconciled transaction and tries to figure out what it is for',
+                    'Uses a "knowledge base" of rules built from past matches',
+                    'Matches by: vendor name, amount, description, linked tenant, linked cost',
+                    'Kevin reviews AI suggestions and confirms or corrects them',
+                    'Each confirmed match makes future matching more accurate'
+                ],
+                reads: ['Transactions', 'Sub-Categories', 'Categories', 'Tenancies', 'Costs', 'Businesses'],
+                writes: ['Transaction fields (category, business, cost, tenancy links)'],
+                connects: ['costs', 'invoices', 'pnl', 'transactions'],
+                robots: ['Pattern Matcher (builds rules from historical data)', 'AI Accuracy Tracker (logs whether AI suggestions were correct)']
+            }
+        ]
+    }
+];
+
+// ── Data: Airtable Tables ──
+const TABLES_DATA = [
+    { icon: '🏠', name: 'Tenancies', count: 'Rental agreements' },
+    { icon: '👤', name: 'Tenants', count: 'People who rent' },
+    { icon: '🏗️', name: 'Properties', count: 'Buildings owned' },
+    { icon: '🚪', name: 'Rental Units', count: 'Individual rooms/flats' },
+    { icon: '💳', name: 'Transactions', count: 'Bank movements' },
+    { icon: '📋', name: 'Costs', count: 'Monthly bills' },
+    { icon: '🧾', name: 'Invoices', count: 'Bills to pay' },
+    { icon: '📤', name: 'Outbound Invoices', count: 'Bills Kevin sends' },
+    { icon: '🏢', name: 'Businesses', count: 'Kevin\'s companies' },
+    { icon: '📂', name: 'Categories', count: 'Accounting groups' },
+    { icon: '✅', name: 'Tasks', count: 'To-do items' },
+    { icon: '🎯', name: 'Objectives', count: 'Quarterly goals' },
+    { icon: '📊', name: 'Projects', count: 'Quarterly projects' },
+    { icon: '⚙️', name: 'Workflows', count: 'Process templates' },
+    { icon: '🚨', name: 'Arrears', count: 'Missed payments' }
+];
+
+// ── Data: Robots ──
+const ROBOTS = [
+    {
+        icon: '📧', name: 'Gmail Invoice Scanner',
+        desc: 'Checks Kevin\'s email for invoices. When it finds one, it reads the sender, amount, and due date, then creates a record in Airtable.',
+        freq: 'Every 30 minutes'
+    },
+    {
+        icon: '🏦', name: 'Bank Account Sync',
+        desc: 'Banks send transaction data to Airtable automatically via FinTable. This robot checks if the sync is healthy and alerts Kevin if any account stops updating.',
+        freq: 'On every Dashboard load'
+    },
+    {
+        icon: '🔄', name: 'Smart Refresh',
+        desc: 'Updates all data automatically, but is polite about it. If Kevin is actively clicking around, it waits until he stops for 15 minutes before refreshing.',
+        freq: 'Every 15 minutes (deferred if active)'
+    },
+    {
+        icon: '📊', name: 'KPI Auto-Calculator',
+        desc: 'Computes Key Performance Indicators (total rent, profit, void count, overdue costs) from raw data every time the Dashboard loads.',
+        freq: 'On every Dashboard load'
+    },
+    {
+        icon: '🚨', name: 'CFV Detection Engine',
+        desc: 'Checks every active tenancy: has this tenant paid rent this month? If not, flags it as a Cash Flow Void so Kevin can chase payment.',
+        freq: 'When CFV tab opens'
+    },
+    {
+        icon: '✅', name: 'CFV Auto-Return',
+        desc: 'When a flagged tenant finally pays, this robot automatically marks them as "back to normal" and logs the change.',
+        freq: 'Runs with CFV Detection'
+    },
+    {
+        icon: '🤖', name: 'AI Reconciliation Matcher',
+        desc: 'Looks at unreconciled bank transactions and suggests which category, tenant, or cost they belong to, based on patterns from past matches.',
+        freq: 'When Reconciliation runs'
+    },
+    {
+        icon: '📑', name: 'Cost Field Sync',
+        desc: 'After reconciliation matches a transaction to a cost, this robot updates the cost record with the latest payment date, amount, and variance.',
+        freq: 'Background (after reconciliation)'
+    },
+    {
+        icon: '🏥', name: 'Health Monitor',
+        desc: 'Runs automatic checks on every section: is the data fresh? Are the calculations correct? Shows green, amber, or red dots so Kevin can spot issues at a glance.',
+        freq: 'On every tab load'
+    },
+    {
+        icon: '💾', name: 'Smart Cache',
+        desc: 'Saves data locally in the browser (IndexedDB) so pages load instantly on return. Checks if the cache is stale and refreshes in the background if needed.',
+        freq: 'On every login'
+    }
+];
+
+// ── Build all section IDs into a lookup for connections ──
+const sectionLookup = {};
+DEPTS.forEach(d => d.sections.forEach(s => { sectionLookup[s.id] = s; }));
+
+// ── Render Departments ──
+function renderDepts() {
+    const grid = document.getElementById('deptGrid');
+    grid.innerHTML = DEPTS.map(d => `
+        <div class="dept-card" data-dept="${d.id}" id="dept-${d.id}">
+            <div class="dept-header" onclick="toggleDept('${d.id}')">
+                <div class="dept-dot ${d.dot}"></div>
+                <div class="dept-name">${esc(d.name)}</div>
+                <div class="dept-count">${d.sections.length} section${d.sections.length > 1 ? 's' : ''}</div>
+                <div class="dept-chevron">&#9662;</div>
+            </div>
+            <div class="dept-body">
+                <div class="dept-desc">${esc(d.desc)}</div>
+                ${d.sections.map(s => renderSection(s)).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderSection(s) {
+    return `
+        <div class="sec-card" data-sec="${s.id}" id="sec-${s.id}">
+            <div class="sec-head" onclick="toggleSec('${s.id}')">
+                <span class="sec-emoji">${s.emoji}</span>
+                <div class="sec-info">
+                    <div class="sec-name">${esc(s.name)}</div>
+                    <div class="sec-oneliner">${esc(s.oneliner)}</div>
+                </div>
+                <span class="sec-chevron">&#9662;</span>
+            </div>
+            <div class="sec-detail">
+                <div class="detail-block">
+                    <div class="detail-label">📖 How it works</div>
+                    <ol class="detail-list" style="list-style:decimal;padding-left:20px">
+                        ${s.howItWorks.map(step => `<li style="padding-left:4px">${esc(step)}</li>`).join('')}
+                    </ol>
+                </div>
+                <div class="detail-block" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div>
+                        <div class="detail-label">📥 Reads from</div>
+                        <div class="detail-tags">${s.reads.map(r => `<span class="tag data-in">${esc(r)}</span>`).join('')}</div>
+                    </div>
+                    <div>
+                        <div class="detail-label">📤 Writes to</div>
+                        <div class="detail-tags">${s.writes.map(w => `<span class="tag data-out">${esc(w)}</span>`).join('')}</div>
+                    </div>
+                </div>
+                ${s.connects.length ? `
+                <div class="detail-block">
+                    <div class="detail-label">🔗 Connects to</div>
+                    <div class="detail-tags">${s.connects.map(c => {
+                        const target = sectionLookup[c];
+                        return target ? `<span class="tag" onclick="scrollToSec('${c}')">${target.emoji} ${esc(target.name)}</span>` : '';
+                    }).join('')}</div>
+                </div>` : ''}
+                ${s.robots.length ? `
+                <div class="detail-block">
+                    <div class="detail-label">🤖 Robots (automations)</div>
+                    <div class="detail-tags">${s.robots.map(r => `<span class="tag robot">${esc(r)}</span>`).join('')}</div>
+                </div>` : ''}
+            </div>
+        </div>`;
+}
+
+// ── Render Tables Grid ──
+function renderTables() {
+    document.getElementById('tablesGrid').innerHTML = TABLES_DATA.map(t => `
+        <div class="table-chip">
+            <span class="chip-icon">${t.icon}</span>
+            <span class="chip-name">${esc(t.name)}</span>
+            <span class="chip-count">${esc(t.count)}</span>
+        </div>
+    `).join('');
+}
+
+// ── Render Robots Grid ──
+function renderRobots() {
+    document.getElementById('robotsGrid').innerHTML = ROBOTS.map(r => `
+        <div class="robot-card">
+            <div class="robot-icon">${r.icon}</div>
+            <div class="robot-info">
+                <h4>${esc(r.name)}</h4>
+                <p>${esc(r.desc)}</p>
+                <span class="robot-freq">${esc(r.freq)}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ── Toggle Logic ──
+function toggleDept(id) {
+    const card = document.getElementById('dept-' + id);
+    card.classList.toggle('open');
+}
+
+function toggleSec(id) {
+    const card = document.getElementById('sec-' + id);
+    const wasOpen = card.classList.contains('open');
+    // Close all other open sections
+    document.querySelectorAll('.sec-card.open').forEach(c => c.classList.remove('open'));
+    clearHighlights();
+    if (!wasOpen) {
+        card.classList.add('open');
+        highlightConnections(id);
+    }
+}
+
+// ── Connection Highlighting ──
+function highlightConnections(secId) {
+    const sec = sectionLookup[secId];
+    if (!sec || !sec.connects.length) return;
+    const connectedIds = new Set(sec.connects);
+    connectedIds.add(secId);
+    document.querySelectorAll('.sec-card').forEach(card => {
+        const cid = card.dataset.sec;
+        if (connectedIds.has(cid)) {
+            card.setAttribute('data-highlight', 'true');
+            // Auto-open parent dept if needed
+            const parent = card.closest('.dept-card');
+            if (parent && !parent.classList.contains('open') && cid !== secId) {
+                parent.classList.add('open');
+            }
+        } else if (cid !== secId) {
+            card.setAttribute('data-dimmed', 'true');
+        }
+    });
+}
+
+function clearHighlights() {
+    document.querySelectorAll('.sec-card').forEach(card => {
+        card.removeAttribute('data-highlight');
+        card.removeAttribute('data-dimmed');
+    });
+}
+
+function scrollToSec(secId) {
+    const el = document.getElementById('sec-' + secId);
+    if (!el) return;
+    const dept = el.closest('.dept-card');
+    if (dept && !dept.classList.contains('open')) dept.classList.add('open');
+    // Close current, open target
+    document.querySelectorAll('.sec-card.open').forEach(c => c.classList.remove('open'));
+    clearHighlights();
+    el.classList.add('open');
+    highlightConnections(secId);
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ── Escape HTML ──
+function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// ── Open all departments by default ──
+function openAllDepts() {
+    document.querySelectorAll('.dept-card').forEach(c => c.classList.add('open'));
+}
+
+// ── Init ──
+renderDepts();
+renderTables();
+renderRobots();
+openAllDepts();
+</script>
+</body>
+</html>
