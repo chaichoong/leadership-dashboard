@@ -243,7 +243,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 /* Timeline split */
 .myday-split{display:grid;grid-template-columns:70% 30%;gap:16px;min-height:600px}
 @media(max-width:900px){.myday-split{grid-template-columns:1fr}}
-.tl-wrap{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:12px;overflow-y:auto;position:relative}
+.tl-wrap{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:12px;overflow-y:auto;position:relative;max-height:calc(100vh - 120px)}
 .tl-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .tl-header h3{font-size:var(--fs-md)}
 .tl-canvas{position:relative;margin-left:56px;border-left:2px solid var(--border-default);min-height:400px}
@@ -7482,6 +7482,7 @@ function switchView(view){
   ['myday','list','kanban','projects','capacity','recurring','jobs'].forEach(v=>{
     const el=document.getElementById('view-'+v);if(el)el.style.display=v===view?'':'none';
   });
+  window.scrollTo(0, 0);
   if(view==='myday')renderMyDay();
   if(view==='list')renderTasks();
   if(view==='kanban')renderKanban();
