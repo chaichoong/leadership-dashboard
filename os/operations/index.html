@@ -1113,6 +1113,7 @@ function switchSubTab(tab){
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
   document.getElementById('pane-'+tab).classList.add('active');
   if (history.replaceState) history.replaceState(null, '', '#'+tab);
+  window.scrollTo(0, 0);
   renderActiveTab();
 }
 

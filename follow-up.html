@@ -2469,6 +2469,7 @@
 
     function switchToLabelView() {
         isInboxView = false;
+        window.scrollTo(0, 0);
         document.getElementById('statsBar').style.display = 'flex';
         document.getElementById('inboxStatsBar').style.display = 'none';
         const header = document.getElementById('emailListHeader');
@@ -2542,6 +2543,7 @@
 
     function switchToInboxView() {
         isInboxView = true;
+        window.scrollTo(0, 0);
         document.getElementById('statsBar').style.display = 'none';
         document.getElementById('inboxStatsBar').style.display = 'flex';
         const header = document.getElementById('emailListHeader');
