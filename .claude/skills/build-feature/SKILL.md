@@ -512,7 +512,15 @@ git pull --rebase origin main && git push origin main
 
 Then verify the deploy is live (pageVer matches, hard reload).
 
-### 10c. Report to Kevin
+### 10c. Live test
+
+After deploy is confirmed live, run `/test` against the deployed site. This creates real test data, exercises the feature through the browser, verifies backend state, and cleans up. The feature is not done until `/test` passes.
+
+Skip `/test` only if:
+- The feature is purely informational (read-only display with no actions or backend writes)
+- Kevin explicitly says to skip testing
+
+### 10d. Report to Kevin
 
 Short summary:
 
@@ -522,6 +530,7 @@ Files changed: [list]
 What it does: [2-3 sentences]
 Health checks: [count] checks registered
 Audit score: XX/100
+Test result: [PASS/FAIL]
 SOP: [created/updated] at [path]
 Live at: [URL if applicable]
 ```
