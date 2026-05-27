@@ -1154,7 +1154,13 @@
     }
 
     // Labels that should show a count in the dropdown
-    const LABELS_WITH_COUNTS = ['1', '2', '3', '8'];
+    const LABELS_WITH_COUNTS = ['1', '2', '3', '8', '12', '13'];
+
+    // Extract the numeric prefix from a label name (e.g. "13: Maintenance" → "13").
+    function getLabelNumber(labelName) {
+        const m = labelName.match(/^(\d+)[.:]\s/);
+        return m ? m[1] : '';
+    }
 
     async function fetchLabels() {
         try {
@@ -1167,7 +1173,7 @@
             // Fetch counts for selected labels (1, 2, 3, 8, 9, Property Compliance)
             const labelCounts = {};
             const countPromises = allLabels
-                .filter(l => LABELS_WITH_COUNTS.includes(l.name.charAt(0)) || l.name.startsWith('10'))
+                .filter(l => LABELS_WITH_COUNTS.includes(getLabelNumber(l.name)) || l.name.startsWith('10'))
                 .map(async (l) => {
                     try {
                         const detail = await gapi.client.gmail.users.labels.get({ userId: 'me', id: l.id });
@@ -1236,7 +1242,7 @@
         try {
             const labelCounts = {};
             const countPromises = allLabels
-                .filter(l => LABELS_WITH_COUNTS.includes(l.name.charAt(0)) || l.name.startsWith('10'))
+                .filter(l => LABELS_WITH_COUNTS.includes(getLabelNumber(l.name)) || l.name.startsWith('10'))
                 .map(async (l) => {
                     try {
                         const detail = await gapi.client.gmail.users.labels.get({ userId: 'me', id: l.id });
@@ -1791,10 +1797,9 @@
             updateStats(allEmails);
             document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleString();
 
-            // Auto-check Airtable for completed tasks when viewing label 8
-            // (Task Created) OR label 12 (Kevin to Respond) — both feed the
-            // same auto-move-to-label-9 flow.
-            if (isTaskCreatedView() || /^12[.:]\s/.test(currentLabel || '')) {
+            // Auto-check Airtable for completed tasks when viewing any
+            // task-source label (8, 12, 13).
+            if (isTaskCreatedView() || isKevinToRespondView() || isMaintenanceView()) {
                 checkCompletedAirtableTasks();
             }
 
@@ -2201,6 +2206,18 @@
         return currentLabel.toLowerCase().includes('task completed') || /^9[.:]\s/.test(currentLabel);
     }
 
+    function isKevinToRespondView() {
+        return currentLabel.toLowerCase().includes('kevin to respond') || /^12[.:]\s/.test(currentLabel);
+    }
+
+    function isMaintenanceView() {
+        return currentLabel.toLowerCase().includes('maintenance') && !currentLabel.toLowerCase().includes('completed') || /^13[.:]\s/.test(currentLabel);
+    }
+
+    function isMaintenanceCompletedView() {
+        return currentLabel.toLowerCase().includes('maintenance completed') || /^14[.:]\s/.test(currentLabel);
+    }
+
     // Unsubscribe tracking
     function getUnsubscribeLog() {
         try { return JSON.parse(localStorage.getItem('unsubscribe_log') || '[]'); } catch { return []; }
@@ -2582,7 +2599,9 @@
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain — used by label 12
+    const AIRTABLE_ASSIGNEE_ERICAMAE = 'usrejWz04hiXxxgVa'; // Ericamae Atenta
     const AIRTABLE_COMPLETED_STATUS_ID = 'selI6Otekm3JyaBSJ';
+    const AIRTABLE_COLLABORATORS_FIELD = 'fldcq3t6uAPgWSOP8'; // multipleCollaborators
 
     // Tenancies table — used by label 11 (tenancy docs) auto-link flow.
     const AIRTABLE_TENANCIES_TABLE_ID = 'tblN51a88qTDB6iMH';
@@ -2713,6 +2732,13 @@ Respond with ONLY the JSON object, no markdown.`;
             'Original message:\n' +
             bodyExcerpt;
 
+        // Build collaborators list — everyone except the assignee.
+        const assigneeId = opts.assigneeId || getAirtableAssignee();
+        const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
+        const collaboratorIds = allTeamIds
+            .filter(id => id !== assigneeId)
+            .map(id => ({ id }));
+
         const record = {
             fields: {
                 [AIRTABLE_FIELDS.taskName]: content.title,
@@ -2722,7 +2748,7 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.status]: 'Today',
                 // singleCollaborator (Assignee) expects a bare object, not an
                 // array — wrapping in [] returns 422.
-                [AIRTABLE_FIELDS.assignee]: { id: opts.assigneeId || getAirtableAssignee() },
+                [AIRTABLE_FIELDS.assignee]: { id: assigneeId },
                 [AIRTABLE_FIELDS.priority]: 'Urgent',
                 [AIRTABLE_FIELDS.timeEstimate]: '15 min',
                 [AIRTABLE_FIELDS.description]: richDescription,
@@ -2732,7 +2758,8 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
                 [AIRTABLE_FIELDS.dateReceived]: today,
                 [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
-                [AIRTABLE_FIELDS.dueDate]: today
+                [AIRTABLE_FIELDS.dueDate]: today,
+                [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds
             }
         };
 
@@ -2761,8 +2788,8 @@ Respond with ONLY the JSON object, no markdown.`;
                 'usrKkopUJSGsBhWMD': 'kevin@runpreneur.org.uk',
                 'usrP7K5pmPSdVVgTN': 'micaa.work@gmail.com',
             };
-            const assigneeId = opts.assigneeId || getAirtableAssignee();
-            const assigneeEmail = ASSIGNEE_EMAIL_MAP[assigneeId] || '';
+            const slackAssigneeId = opts.assigneeId || getAirtableAssignee();
+            const assigneeEmail = ASSIGNEE_EMAIL_MAP[slackAssigneeId] || '';
             if (assigneeEmail && content.title) {
                 try {
                     fetch('https://slack-notify.kevinbrittain.workers.dev/', {
@@ -2791,6 +2818,224 @@ Respond with ONLY the JSON object, no markdown.`;
             showError('Failed to create Airtable task: ' + err.message);
             return false;
         }
+    }
+
+    // ============================================================
+    // AIRTABLE TASK SYNC HELPERS
+    // ============================================================
+    // Used by label transitions to find, update, complete, and reopen
+    // existing Airtable tasks linked to Gmail threads.
+
+    // Find an existing Airtable task by Gmail threadId.
+    // Returns { id, assigneeId, status } or null if not found.
+    async function findExistingAirtableTask(threadId) {
+        const pat = getAirtablePat();
+        if (!pat) return null;
+        try {
+            const gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + threadId;
+            const formula = encodeURIComponent(`FIND("${threadId}", {${AIRTABLE_FIELDS.noteUrl}})`);
+            const fields = [AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.status, AIRTABLE_FIELDS.noteUrl]
+                .map(f => 'fields%5B%5D=' + f).join('&');
+            const resp = await fetch(
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=1`,
+                { headers: { 'Authorization': 'Bearer ' + pat } }
+            );
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const rec = data.records?.[0];
+            if (!rec) return null;
+            const assigneeField = rec.fields[AIRTABLE_FIELDS.assignee];
+            return {
+                id: rec.id,
+                assigneeId: assigneeField?.id || null,
+                status: rec.fields[AIRTABLE_FIELDS.status] || ''
+            };
+        } catch (err) {
+            console.warn('[sync] findExistingAirtableTask failed:', err);
+            return null;
+        }
+    }
+
+    // Reassign an existing Airtable task to a new assignee.
+    // Also updates collaborators so the old assignee becomes a collaborator.
+    async function updateAirtableTaskAssignee(taskRecordId, newAssigneeId) {
+        const pat = getAirtablePat();
+        if (!pat) return false;
+        const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
+        const collaboratorIds = allTeamIds
+            .filter(id => id !== newAssigneeId)
+            .map(id => ({ id }));
+        try {
+            const resp = await fetch(
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${taskRecordId}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fields: {
+                            [AIRTABLE_FIELDS.assignee]: { id: newAssigneeId },
+                            [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds
+                        }
+                    })
+                }
+            );
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                console.error('[sync] reassign failed:', errData);
+                return false;
+            }
+            addAuditEntry('airtable_reassign', `Reassigned Airtable task ${taskRecordId} to ${newAssigneeId}`);
+            return true;
+        } catch (err) {
+            console.error('[sync] updateAirtableTaskAssignee error:', err);
+            return false;
+        }
+    }
+
+    // Mark an existing Airtable task as Completed.
+    async function completeAirtableTask(taskRecordId) {
+        const pat = getAirtablePat();
+        if (!pat) return false;
+        try {
+            const resp = await fetch(
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${taskRecordId}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fields: {
+                            [AIRTABLE_FIELDS.status]: 'Completed'
+                        }
+                    })
+                }
+            );
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                console.error('[sync] complete task failed:', errData);
+                return false;
+            }
+            addAuditEntry('airtable_complete_sync', `Marked Airtable task ${taskRecordId} as Completed`);
+            return true;
+        } catch (err) {
+            console.error('[sync] completeAirtableTask error:', err);
+            return false;
+        }
+    }
+
+    // Reopen a completed Airtable task (set status back to Today).
+    async function reopenAirtableTask(taskRecordId, newAssigneeId) {
+        const pat = getAirtablePat();
+        if (!pat) return false;
+        const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
+        const collaboratorIds = allTeamIds
+            .filter(id => id !== newAssigneeId)
+            .map(id => ({ id }));
+        try {
+            const resp = await fetch(
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}/${taskRecordId}`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + pat, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fields: {
+                            [AIRTABLE_FIELDS.status]: 'Today',
+                            [AIRTABLE_FIELDS.assignee]: { id: newAssigneeId },
+                            [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds
+                        }
+                    })
+                }
+            );
+            if (!resp.ok) {
+                const errData = await resp.json().catch(() => ({}));
+                console.error('[sync] reopen task failed:', errData);
+                return false;
+            }
+            addAuditEntry('airtable_reopen', `Reopened Airtable task ${taskRecordId}, assigned to ${newAssigneeId}`);
+            return true;
+        } catch (err) {
+            console.error('[sync] reopenAirtableTask error:', err);
+            return false;
+        }
+    }
+
+    // Determine the correct assignee for a destination label.
+    function getAssigneeForLabel(labelName) {
+        if (/^12[.:]\s/.test(labelName)) return AIRTABLE_ASSIGNEE_KEVIN;
+        // Labels 8 and 13 both assign to Mica by default
+        return AIRTABLE_ASSIGNEE_DEFAULT;
+    }
+
+    // Returns true if the destination label is a "task-linked" label (8, 12, 13).
+    function isTaskLinkedLabel(labelName) {
+        return /^8[.:]\s/.test(labelName) || /^12[.:]\s/.test(labelName) || /^13[.:]\s/.test(labelName);
+    }
+
+    // Returns true if the source label is a "task-linked" label (8, 12, 13).
+    function isSourceTaskLabel(labelName) {
+        return /^8[.:]\s/.test(labelName) || /^12[.:]\s/.test(labelName) || /^13[.:]\s/.test(labelName);
+    }
+
+    // Returns true if moving to this label should auto-complete the linked task.
+    // Labels 4 (Paid), 5 (Responded), 6 (Newsletter), 7 (Delete),
+    // 9 (Task Completed), 14 (Maintenance Completed) all indicate work is done.
+    function isCompletionLabel(labelName) {
+        return /^4[.:]\s/.test(labelName) ||
+               /^5[.:]\s/.test(labelName) ||
+               /^6[.:]\s/.test(labelName) ||
+               /^7[.:]\s/.test(labelName) ||
+               /^9[.:]\s/.test(labelName) ||
+               /^14[.:]\s/.test(labelName);
+    }
+
+    // Handle the full task sync when an email label changes.
+    // This is the single entry point for all label transitions.
+    async function handleLabelTransitionSync(email, fromLabelName, toLabelName) {
+        const movingToTaskLabel = isTaskLinkedLabel(toLabelName);
+        const movingFromTaskLabel = isSourceTaskLabel(fromLabelName);
+
+        // Case 1: Moving TO a task-linked label (8, 12, 13)
+        if (movingToTaskLabel) {
+            const newAssignee = getAssigneeForLabel(toLabelName);
+            const existing = await findExistingAirtableTask(email.threadId);
+
+            if (existing) {
+                // Task already exists — reassign or reopen, no new task
+                if (existing.status === 'Completed') {
+                    // Reopen from completed state (e.g. moving from label 9/14 back to 8/12/13)
+                    const ok = await reopenAirtableTask(existing.id, newAssignee);
+                    if (ok) showSuccess('Reopened and reassigned task for "' + truncate(email.subject, 40) + '"');
+                } else if (existing.assigneeId !== newAssignee) {
+                    // Already open but assigned to someone else — reassign
+                    const ok = await updateAirtableTaskAssignee(existing.id, newAssignee);
+                    if (ok) showSuccess('Reassigned task for "' + truncate(email.subject, 40) + '"');
+                } else {
+                    // Same assignee, task already open — nothing to do
+                    showSuccess('Task already exists for this email.');
+                }
+            } else {
+                // No task exists — create one
+                const ok = await createAirtableTask(email, { assigneeId: newAssignee });
+                if (ok) {
+                    const assigneeName = newAssignee === AIRTABLE_ASSIGNEE_KEVIN ? 'Kevin' : 'Mica';
+                    showSuccess('Task created for ' + assigneeName + ': "' + truncate(email.subject, 40) + '"');
+                }
+            }
+            return;
+        }
+
+        // Case 2: Moving FROM a task-linked label to a completion label
+        if (movingFromTaskLabel && isCompletionLabel(toLabelName)) {
+            const existing = await findExistingAirtableTask(email.threadId);
+            if (existing && existing.status !== 'Completed') {
+                const ok = await completeAirtableTask(existing.id);
+                if (ok) showSuccess('Task auto-completed for "' + truncate(email.subject, 40) + '"');
+            }
+            return;
+        }
+
+        // Case 3: Moving FROM a task-linked label to a non-completion label
+        // (1, 2, 3, 10, 11) — leave the task as-is. User is re-triaging.
+        // No action needed.
     }
 
     // ============================================================
@@ -4100,26 +4345,67 @@ Body: ${bodyText}`;
         }
     }
 
-    // Foreground check — runs when user is on label 8. Updates the on-screen list.
+    // Fetch all active (non-completed) inbound tasks with their assignees.
+    // Returns Map<threadId, { taskName, assigneeId }>.
+    // Used by the reassignment sweep to detect when the web app changed assignees.
+    async function fetchActiveInboundTaskAssignees() {
+        const pat = getAirtablePat();
+        if (!pat) return new Map();
+
+        try {
+            const formula = encodeURIComponent(
+                'AND({' + AIRTABLE_FIELDS.isInbound + '}, {' + AIRTABLE_FIELDS.status + '} != "Completed", {' + AIRTABLE_FIELDS.noteUrl + '} != "")'
+            );
+            const fields = [AIRTABLE_FIELDS.taskName, AIRTABLE_FIELDS.assignee, AIRTABLE_FIELDS.noteUrl]
+                .map(f => 'fields%5B%5D=' + f).join('&');
+            const resp = await fetch(
+                `https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}?returnFieldsByFieldId=true&fieldIdsInFormula=true&${fields}&filterByFormula=${formula}&maxRecords=200`,
+                { headers: { 'Authorization': 'Bearer ' + pat } }
+            );
+            if (!resp.ok) return new Map();
+            const data = await resp.json();
+            const map = new Map();
+            for (const rec of (data.records || [])) {
+                const url = rec.fields[AIRTABLE_FIELDS.noteUrl] || '';
+                const match = url.match(/#(?:inbox|all)\/([a-f0-9]+)$/i);
+                if (match) {
+                    const assignee = rec.fields[AIRTABLE_FIELDS.assignee];
+                    map.set(match[1], {
+                        taskName: rec.fields[AIRTABLE_FIELDS.taskName] || 'Unknown task',
+                        assigneeId: assignee?.id || null
+                    });
+                }
+            }
+            return map;
+        } catch (err) {
+            console.warn('Failed to fetch active inbound task assignees:', err);
+            return new Map();
+        }
+    }
+
+    // Foreground check — runs when user is on a task-source label. Updates the on-screen list.
     async function checkCompletedAirtableTasks() {
         const pat = getAirtablePat();
         if (!pat) return;
-        // Fires when the user is viewing label 8 (Task Created) OR label 12
-        // (Kevin to Respond) — both are "task source" labels whose entries
-        // should auto-move to label 9 when their Airtable tasks complete.
-        const onTaskSourceView = isTaskCreatedView() || /^12[.:]\s/.test(currentLabel || '');
+        // Fires when viewing label 8, 12, or 13 — all task source labels
+        const onTaskSourceView = isTaskCreatedView() || isKevinToRespondView() || isMaintenanceView();
         if (!onTaskSourceView) return;
 
         const completedThreadIds = await fetchCompletedInboundThreadIds();
         if (completedThreadIds.size === 0) return;
 
-        const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
         const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
+        const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
         const label12 = allLabelsRaw.find(l => /^12[.:]\s/.test(l.name));
+        const label13 = allLabelsRaw.find(l => /^13[.:]\s/.test(l.name));
+        const label14 = allLabelsRaw.find(l => /^14[.:]\s/.test(l.name));
         if (!label9) return;
-        // Remove whichever source label(s) the thread carries — passing
-        // both is safe (Gmail no-ops on labels not present).
-        const removeIds = [label8, label12].filter(Boolean).map(l => l.id);
+
+        // Determine destination based on current view
+        const isMaintView = isMaintenanceView();
+        const destLabel = (isMaintView && label14) ? label14 : label9;
+        // Remove all possible source labels (safe no-op for absent ones)
+        const removeIds = [label8, label12, label13].filter(Boolean).map(l => l.id);
         if (removeIds.length === 0) return;
 
         const toMove = [];
@@ -4138,11 +4424,11 @@ Body: ${bodyText}`;
                     await gapi.client.gmail.users.messages.modify({
                         userId: 'me',
                         id: email.msgIds[m],
-                        resource: { addLabelIds: [label9.id], removeLabelIds: removeIds }
+                        resource: { addLabelIds: [destLabel.id], removeLabelIds: removeIds }
                     });
                 }
                 movedCount++;
-                addAuditEntry('airtable_complete', `Auto-moved "${truncate(email.subject, 40)}" to Task Completed (Airtable task: "${truncate(taskName, 30)}")`);
+                addAuditEntry('airtable_complete', `Auto-moved "${truncate(email.subject, 40)}" to ${destLabel.name} (Airtable task: "${truncate(taskName, 30)}")`);
             } catch (err) {
                 console.error('Failed to move completed email:', err);
             }
@@ -4155,16 +4441,17 @@ Body: ${bodyText}`;
             renderEmailsWithPagination();
             updateStats(allEmails);
             scheduleLabelCountRefresh();
-            showSuccess(`${movedCount} completed task${movedCount > 1 ? 's' : ''} auto-moved to "Task Completed".`);
+            const destName = isMaintView ? 'Maintenance Completed' : 'Task Completed';
+            showSuccess(`${movedCount} completed task${movedCount > 1 ? 's' : ''} auto-moved to "${destName}".`);
         }
     }
 
     // Background sweep — runs regardless of current view.
-    // Fetches the current thread list for both label 8 (Task Created) and
-    // label 12 (Kevin to Respond), intersects with Airtable-completed
-    // threadIds, and moves each matching thread to label 9 — stripping
-    // whichever of 8 or 12 it was tagged with. Gmail's threads.list ANDs
-    // labelIds, so we need two separate queries to cover both sources.
+    // Three jobs:
+    //  1. COMPLETION: move completed task emails to label 9 (from 8/12) or 14 (from 13).
+    //  2. REASSIGNMENT: if a task was reassigned in the web app, move the
+    //     Gmail email to match (e.g. Kevin-assigned task on label 8 → label 12).
+    //  3. MAINTENANCE COMPLETION: label 13 tasks completed → label 14.
     let sweepInFlight = false;
     async function sweepCompletedInboundTasks() {
         if (sweepInFlight) return;
@@ -4192,23 +4479,20 @@ Body: ${bodyText}`;
             const label8 = allLabelsRaw.find(l => /^8[.:]\s/.test(l.name));
             const label9 = allLabelsRaw.find(l => /^9[.:]\s/.test(l.name));
             const label12 = allLabelsRaw.find(l => /^12[.:]\s/.test(l.name));
+            const label13 = allLabelsRaw.find(l => /^13[.:]\s/.test(l.name));
+            const label14 = allLabelsRaw.find(l => /^14[.:]\s/.test(l.name));
             if (!label9) { console.warn('[sweep] no label "9: ..." found'); return; }
 
+            // ── JOB 1 + 3: COMPLETION SWEEP ──
             const completedMap = await fetchCompletedInboundThreadIds();
             console.log(`[sweep] ${completedMap.size} completed inbound task(s) in Airtable`);
-            if (completedMap.size === 0) return;
 
-            // Both label 8 (Task Created) and label 12 (Kevin to Respond)
-            // create Airtable tasks, so both are valid sources for the
-            // auto-move-to-label-9 flow.
-            const sourceLabels = [label8, label12].filter(Boolean);
-            if (sourceLabels.length === 0) {
-                console.warn('[sweep] no source labels (8 or 12) found');
-                return;
-            }
-            const sourceLabelIds = sourceLabels.map(l => l.id);
+            // All task-source labels
+            const sourceLabels = [label8, label12, label13].filter(Boolean);
+            const allSourceIds = sourceLabels.map(l => l.id);
 
-            const candidateThreadIds = new Set();
+            // Collect threads across all source labels
+            const threadToSourceLabel = new Map(); // threadId → Set of label objects
             for (const sourceLabel of sourceLabels) {
                 try {
                     const listResp = await gapi.client.gmail.users.threads.list({
@@ -4217,49 +4501,98 @@ Body: ${bodyText}`;
                         maxResults: 500
                     });
                     for (const t of (listResp.result.threads || [])) {
-                        candidateThreadIds.add(t.id);
+                        if (!threadToSourceLabel.has(t.id)) threadToSourceLabel.set(t.id, new Set());
+                        threadToSourceLabel.get(t.id).add(sourceLabel);
                     }
                 } catch (err) {
                     console.warn(`[sweep] failed to list ${sourceLabel.name} threads:`, err);
                 }
             }
-            console.log(`[sweep] ${candidateThreadIds.size} thread(s) across labels 8/12`);
-            if (candidateThreadIds.size === 0) return;
+            console.log(`[sweep] ${threadToSourceLabel.size} thread(s) across labels 8/12/13`);
 
-            const toMove = [];
-            for (const threadId of candidateThreadIds) {
-                if (completedMap.has(threadId)) {
-                    toMove.push({ threadId, taskName: completedMap.get(threadId) });
-                }
-            }
-            console.log(`[sweep] ${toMove.length} thread(s) to move → label 9`);
-            if (toMove.length === 0) return;
-
-            let movedCount = 0;
-            for (const { threadId, taskName } of toMove) {
-                try {
-                    // removeLabelIds on labels the thread doesn't have is a
-                    // no-op, so we can safely pass both 8 and 12 every time.
-                    await gapi.client.gmail.users.threads.modify({
-                        userId: 'me',
-                        id: threadId,
-                        resource: { addLabelIds: [label9.id], removeLabelIds: sourceLabelIds }
-                    });
-                    movedCount++;
-                    addAuditEntry('airtable_complete_bg', `Background auto-moved thread to Task Completed (task: "${truncate(taskName, 30)}")`);
-                } catch (err) {
-                    console.warn('Background move failed for thread', threadId, err);
+            let completionMoved = 0;
+            if (completedMap.size > 0) {
+                for (const [threadId, taskName] of completedMap) {
+                    if (!threadToSourceLabel.has(threadId)) continue;
+                    const labels = threadToSourceLabel.get(threadId);
+                    // Determine destination: label 13 → label 14; labels 8/12 → label 9
+                    const isFromMaintenance = label13 && labels.has(label13);
+                    const destLabel = (isFromMaintenance && label14) ? label14 : label9;
+                    try {
+                        await gapi.client.gmail.users.threads.modify({
+                            userId: 'me',
+                            id: threadId,
+                            resource: { addLabelIds: [destLabel.id], removeLabelIds: allSourceIds }
+                        });
+                        completionMoved++;
+                        addAuditEntry('airtable_complete_bg', `Background auto-moved thread to ${destLabel.name} (task: "${truncate(taskName, 30)}")`);
+                    } catch (err) {
+                        console.warn('Background completion move failed for thread', threadId, err);
+                    }
                 }
             }
 
-            if (movedCount > 0) {
+            // ── JOB 2: REASSIGNMENT SWEEP ──
+            // Check if active tasks on labels 8/12 have been reassigned in the web app.
+            // If a task on label 8 is now assigned to Kevin → move email to label 12.
+            // If a task on label 12 is now assigned to Mica → move email to label 8.
+            // Label 13 tasks stay on label 13 regardless of reassignment.
+            let reassignMoved = 0;
+            if (label8 && label12) {
+                const activeMap = await fetchActiveInboundTaskAssignees();
+                console.log(`[sweep] ${activeMap.size} active inbound task(s) for reassignment check`);
+
+                for (const [threadId, taskInfo] of activeMap) {
+                    if (!threadToSourceLabel.has(threadId)) continue;
+                    const labels = threadToSourceLabel.get(threadId);
+
+                    // Skip label 13 threads — maintenance stays regardless
+                    if (label13 && labels.has(label13)) continue;
+
+                    const isOnLabel8 = labels.has(label8);
+                    const isOnLabel12 = labels.has(label12);
+
+                    // Task assigned to Kevin but email is on label 8 → move to label 12
+                    if (isOnLabel8 && !isOnLabel12 && taskInfo.assigneeId === AIRTABLE_ASSIGNEE_KEVIN) {
+                        try {
+                            await gapi.client.gmail.users.threads.modify({
+                                userId: 'me',
+                                id: threadId,
+                                resource: { addLabelIds: [label12.id], removeLabelIds: [label8.id] }
+                            });
+                            reassignMoved++;
+                            addAuditEntry('airtable_reassign_bg', `Background moved thread to Kevin to Respond (reassigned in web app: "${truncate(taskInfo.taskName, 30)}")`);
+                        } catch (err) {
+                            console.warn('Background reassign move failed for thread', threadId, err);
+                        }
+                    }
+
+                    // Task assigned to Mica but email is on label 12 → move to label 8
+                    if (isOnLabel12 && !isOnLabel8 && taskInfo.assigneeId === AIRTABLE_ASSIGNEE_DEFAULT) {
+                        try {
+                            await gapi.client.gmail.users.threads.modify({
+                                userId: 'me',
+                                id: threadId,
+                                resource: { addLabelIds: [label8.id], removeLabelIds: [label12.id] }
+                            });
+                            reassignMoved++;
+                            addAuditEntry('airtable_reassign_bg', `Background moved thread to Task Created (reassigned in web app: "${truncate(taskInfo.taskName, 30)}")`);
+                        } catch (err) {
+                            console.warn('Background reassign move failed for thread', threadId, err);
+                        }
+                    }
+                }
+            }
+
+            const totalMoved = completionMoved + reassignMoved;
+            if (totalMoved > 0) {
                 localStorage.setItem('last_completion_sweep', new Date().toISOString());
                 scheduleLabelCountRefresh();
-                // If we happen to be on label 8 or label 12 right now, refresh the view
+                // If we happen to be on a task source label, refresh the view
                 const onSource = typeof isTaskCreatedView === 'function' &&
-                    (isTaskCreatedView() || /^12[.:]\s/.test(currentLabel || ''));
+                    (isTaskCreatedView() || isKevinToRespondView() || isMaintenanceView());
                 if (onSource) loadEmails();
-                console.log(`Completion sweep moved ${movedCount} thread(s) to Task Completed`);
+                console.log(`[sweep] Completion: ${completionMoved}, Reassignment: ${reassignMoved}`);
             }
         } catch (err) {
             console.error('Completion sweep failed:', err);
@@ -4661,12 +4994,10 @@ Respond with ONLY valid JSON, no markdown.`;
 
             addAuditEntry('label_move', `Moved "${truncate(email.subject, 50)}" from ${currentLabel} to ${newLabelName}`);
 
-            // Auto-create Airtable task if moved to label 8 (Task Created)
-            if (/^8[.:]\s/.test(newLabelName)) {
-                createAirtableTask(email).then(ok => {
-                    if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
-                });
-            }
+            // Unified task sync — handles create, reassign, complete, reopen
+            // for all task-linked labels (8, 12, 13) and completion labels.
+            handleLabelTransitionSync(email, currentLabel, newLabelName)
+                .catch(err => console.error('[sync] label transition failed:', err));
 
             // Trigger immediate Gmail → Airtable invoice sync if moved to label 3 (To Pay)
             if (/^3[.:]\s/.test(newLabelName)) {
@@ -4681,13 +5012,6 @@ Respond with ONLY valid JSON, no markdown.`;
             // Tenancy docs (11) → AI-auto-link to tenancy + star email
             if (/^11[.:]\s/.test(newLabelName)) {
                 processTenancyDocsEmail(email).catch(err => console.error('Tenancy doc auto-link failed:', err));
-            }
-
-            // Kevin to respond (12) → create Airtable task assigned to Kevin
-            if (/^12[.:]\s/.test(newLabelName)) {
-                createAirtableTask(email, { assigneeId: AIRTABLE_ASSIGNEE_KEVIN }).then(ok => {
-                    if (ok) showSuccess('Airtable task created for Kevin: "' + truncate(email.subject, 40) + '"');
-                });
             }
 
             // Remove from current list and re-render
@@ -4752,12 +5076,12 @@ Respond with ONLY valid JSON, no markdown.`;
             showSuccess('Applied "' + labelName + '" and removed from inbox.');
             addAuditEntry('inbox_label', `Applied "${labelName}" to "${truncate(email.subject, 50)}"${suggestion ? ' (AI: ' + suggestion.label + ')' : ''}`);
 
-            // Auto-create Airtable task if applied to label 8 (Task Created)
-            if (/^8[.:]\s/.test(labelName)) {
-                createAirtableTask(email).then(ok => {
-                    if (ok) showSuccess('Airtable task created for "' + truncate(email.subject, 40) + '"');
-                });
-            }
+            // Unified task sync — handles create/reassign/complete/reopen
+            // for all task-linked labels (8, 12, 13) and completion labels.
+            // From inbox, the "from" label is INBOX which is not task-linked,
+            // so this will create tasks for 8/12/13 and complete for 4/5/6/7/9/14.
+            handleLabelTransitionSync(email, 'INBOX', labelName)
+                .catch(err => console.error('[sync] inbox label transition failed:', err));
 
             // Trigger immediate Gmail → Airtable invoice sync if applied to label 3 (To Pay)
             if (/^3[.:]\s/.test(labelName)) {
@@ -4772,13 +5096,6 @@ Respond with ONLY valid JSON, no markdown.`;
             // Tenancy docs (11) → AI-auto-link to tenancy + star email
             if (/^11[.:]\s/.test(labelName)) {
                 processTenancyDocsEmail(email).catch(err => console.error('Tenancy doc auto-link failed:', err));
-            }
-
-            // Kevin to respond (12) → create Airtable task assigned to Kevin
-            if (/^12[.:]\s/.test(labelName)) {
-                createAirtableTask(email, { assigneeId: AIRTABLE_ASSIGNEE_KEVIN }).then(ok => {
-                    if (ok) showSuccess('Airtable task created for Kevin: "' + truncate(email.subject, 40) + '"');
-                });
             }
 
             // Update applied today count
@@ -4864,10 +5181,9 @@ Respond with ONLY valid JSON, no markdown.`;
                 successCount++;
                 appliedTodayCount++;
 
-                // Auto-create Airtable task if applied to label 8 (Task Created)
-                if (/^8[.:]\s/.test(labelName)) {
-                    createAirtableTask(email).catch(err => console.error('Bulk Airtable task creation failed:', err));
-                }
+                // Unified task sync for bulk apply
+                handleLabelTransitionSync(email, 'INBOX', labelName)
+                    .catch(err => console.error('[sync] bulk label transition failed:', err));
 
                 // Trigger immediate Gmail → Airtable invoice sync if applied to label 3 (To Pay).
                 // The trigger is debounced so a bulk apply with multiple label-3 emails
@@ -4884,11 +5200,6 @@ Respond with ONLY valid JSON, no markdown.`;
                 // Tenancy docs (11) → AI-auto-link to tenancy + star email
                 if (/^11[.:]\s/.test(labelName)) {
                     processTenancyDocsEmail(email).catch(err => console.error('Bulk tenancy doc auto-link failed:', err));
-                }
-
-                // Kevin to respond (12) → create Airtable task assigned to Kevin
-                if (/^12[.:]\s/.test(labelName)) {
-                    createAirtableTask(email, { assigneeId: AIRTABLE_ASSIGNEE_KEVIN }).catch(err => console.error('Bulk Kevin task creation failed:', err));
                 }
 
                 // Remove suggestion and email
@@ -5349,6 +5660,8 @@ ${emailDescriptions}`;
     function getActionButtonLabel() {
         const cl = currentLabel.toLowerCase();
         if (cl.includes('to respond') || cl.startsWith('1')) return 'Respond';
+        if (cl.includes('task created') || cl.startsWith('8')) return 'Respond';
+        if (cl.includes('kevin to respond') || cl.startsWith('12')) return 'Respond';
         if (cl.includes('to pay') || cl.startsWith('3')) return 'Delay Payment';
         return 'Follow up';
     }
