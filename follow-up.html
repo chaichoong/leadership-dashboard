@@ -2577,7 +2577,8 @@
         sender: 'fldzf4xlbrQuktx0i',
         dateReceived: 'fldR4peEZRXo7tjoI',
         noteUrl: 'fldXf1p0vtHqOZcKl',
-        dueDate: 'fld7XP8w8kbxfETV4'
+        dueDate: 'fld7XP8w8kbxfETV4',
+        attachments: 'fldEbs9cscRr8elcw'
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain — used by label 12
@@ -2778,11 +2779,86 @@ Respond with ONLY the JSON object, no markdown.`;
                     }).catch(e => console.warn('[inbound notify] failed (non-blocking)', e));
                 } catch (e) { console.warn('[inbound notify] threw', e); }
             }
+            // Upload Gmail attachments to the task (fire-and-forget so the
+            // UI returns immediately while files transfer in the background).
+            if (taskId) {
+                uploadGmailAttachmentsToTask(taskId, email)
+                    .catch(e => console.warn('[attach-upload] top-level error', e));
+            }
             return true;
         } catch (err) {
             console.error('Airtable task creation failed:', err);
             showError('Failed to create Airtable task: ' + err.message);
             return false;
+        }
+    }
+
+    // ============================================================
+    // GMAIL → AIRTABLE ATTACHMENT UPLOAD
+    // ============================================================
+    // After creating an Airtable task from an inbound email, download
+    // each real attachment (non-inline-image) from Gmail and upload it
+    // to the task's Attachments field via Airtable's content API.
+    // Runs fire-and-forget after the task record exists. Failures are
+    // logged but do not block the task-creation success path.
+
+    async function uploadGmailAttachmentsToTask(taskId, email) {
+        // Collect all real attachments across every message in the thread.
+        // Include PDFs, docs, spreadsheets, and image attachments (scans,
+        // photos). Exclude only inline images that are part of the email
+        // HTML (logos, signatures) by checking the inlineImages map.
+        const items = [];
+        for (const msg of (email.messages || [])) {
+            const inlineIds = new Set(
+                Object.values(msg.inlineImages || {}).map(i => i.attachmentId)
+            );
+            for (const att of (msg.attachments || [])) {
+                // Skip inline images (embedded in HTML body via cid:)
+                if (inlineIds.has(att.attachmentId)) continue;
+                items.push({ msgId: msg.id, ...att });
+            }
+        }
+        if (items.length === 0) return;
+
+        const pat = getAirtablePat();
+        const baseId = getAirtableBaseId();
+        let uploaded = 0;
+
+        for (const item of items) {
+            try {
+                // 1. Download from Gmail
+                const gmailData = await fetchAttachmentData(item.msgId, item.attachmentId);
+                // gmailData is base64url; convert to standard base64
+                const b64 = gmailData.replace(/-/g, '+').replace(/_/g, '/');
+
+                // 2. Upload to Airtable via content API
+                const res = await fetch(
+                    `https://content.airtable.com/v0/${baseId}/${taskId}/${AIRTABLE_FIELDS.attachments}/uploadAttachment`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Bearer ' + pat,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            contentType: item.mimeType || 'application/octet-stream',
+                            filename: item.filename || 'attachment',
+                            file: b64
+                        })
+                    }
+                );
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => '');
+                    console.warn('[attach-upload] failed for', item.filename, 'HTTP', res.status, errText.slice(0, 200));
+                    continue;
+                }
+                uploaded++;
+            } catch (err) {
+                console.warn('[attach-upload] error for', item.filename, err);
+            }
+        }
+        if (uploaded > 0) {
+            console.log(`[attach-upload] ${uploaded}/${items.length} attachment(s) uploaded to task ${taskId}`);
         }
     }
 
