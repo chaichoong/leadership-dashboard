@@ -176,7 +176,16 @@ Work on a branch, push, create a PR.
 
 Then verify the deploy is live (hard reload, check the fix in the browser).
 
-### 5c. Report to Kevin
+### 5c. Live test (if the fix is testable end-to-end)
+
+After deploy is confirmed live, run `/test` against the deployed site to prove the fix works in production. This creates real test data, exercises the fix through the browser, verifies backend state, and cleans up.
+
+Skip `/test` only if:
+- The fix is purely cosmetic (CSS-only change with no logic)
+- The fix cannot be exercised without specific data conditions that do not currently exist
+- Kevin explicitly says to skip testing
+
+### 5d. Report to Kevin
 
 Short summary:
 
@@ -185,6 +194,7 @@ Fixed: [what was broken]
 Root cause: [one sentence]
 Files changed: [list]
 Verified: [what was tested in browser]
+Test result: [PASS/FAIL or SKIPPED with reason]
 Live at: [URL]
 ```
 
