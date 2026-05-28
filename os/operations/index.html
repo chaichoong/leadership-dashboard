@@ -1553,7 +1553,7 @@ function renderTable(entityKey, sch, rows){
     const actionTd = hasDrawer
       ? `<td><button class="row-open" onclick="event.stopPropagation();openDrawer('${entityKey}','${r.id}')" title="Open detail">↗</button></td>`
       : '<td></td>';
-    const dataRow = `<tr class="expandable" data-rec="${r.id}" data-entity="${entityKey}" onclick="toggleExpandRow('${entityKey}','${r.id}',this)">${firstTd}${restTds}${actionTd}</tr>`;
+    const dataRow = `<tr class="expandable" data-rec="${r.id}" data-entity="${entityKey}" onclick="toggleExpandRow('${entityKey}','${r.id}',this,event)">${firstTd}${restTds}${actionTd}</tr>`;
     const expandRow = `<tr class="expand-row" id="exp-${r.id}" style="display:none"><td colspan="${cols.length+1}"></td></tr>`;
     return dataRow + expandRow;
   }).join('');
@@ -3080,7 +3080,8 @@ function sortTransactionsByDate(txs){
 
 let _expandedRow = {};
 
-function toggleExpandRow(entityKey, recId, rowEl){
+function toggleExpandRow(entityKey, recId, rowEl, evt){
+  if (evt && evt.target.closest('.editable')) return;
   const expTr = document.getElementById('exp-' + recId);
   const chevron = document.getElementById('chev-' + recId);
   if (!expTr) return;
