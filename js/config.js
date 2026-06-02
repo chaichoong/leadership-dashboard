@@ -198,7 +198,10 @@
         costAccountAlias: 'fldX2QMLkSYzDEpIF',   // legacy lookup
         costInactive:     'fldQJPGLFMbwVelsW',
         costDueDateNext:  'fldQZBF4JzBsmWU87',
-        costSubCategory:  'fldRO90pSCj6ahVMC',   // legacy Chart of Accounts - Sub Categories (linked)
+        costSubCategory:  'fldRO90pSCj6ahVMC',   // Chart of Accounts - Sub Categories (linked)
+        costCategory:     'fldv3szZSuR2fWBFt',   // Chart of Accounts - Categories (linked)
+        costBusiness:     'fldrPjvdFPCKWqeyd',   // Business (linked)
+        costProperty:     'fld7nikJBPz3BoZJG',   // Property (linked)
         // Costs — clean fields owned by the dashboard (single source of truth, written by reconciliation)
         costEndDate:           'fldhTpqQsVAnHpTCz',  // existing "Last Payment Date" field — UI label: "End Date"
         costLastReconDate:     'fldeMdOxYemcJwVRD',  // Last Reconciled Payment Date (new)
