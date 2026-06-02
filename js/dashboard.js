@@ -1340,7 +1340,7 @@
         const santanderCCBal = Number(getField(santanderCCRec, F.accGBP)) || 0;
         const lloydsCCOwed = Math.abs(lloydsCCBal);
         const amexOwed = Math.max(0, amexBal);
-        const santanderCCOwed = Math.max(0, SANTANDER_CC_LIMIT - santanderCCBal);
+        const santanderCCOwed = Math.max(0, santanderCCBal);
         const totalCCDebt = lloydsCCOwed + amexOwed + santanderCCOwed;
 
         const creditCards = [

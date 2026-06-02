@@ -491,9 +491,6 @@
         sopType:        'fldzhsJD96JFDRho6',   // singleSelect
     };
 
-    // Key record IDs
-    const SANTANDER_CC_LIMIT = 5500;
-
     // Budget targets
     const MAINT_TARGET_GBP = 3000;     // £3,000/month maintenance budget
     const WAGES_TARGET_GBP = 1500;     // £1,500/month wages budget
