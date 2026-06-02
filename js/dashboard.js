@@ -1344,10 +1344,38 @@
         const totalCCDebt = lloydsCCOwed + amexOwed + santanderCCOwed;
 
         const creditCards = [
-            { name: 'American Express', owed: amexOwed, dueDay: 28 },
-            { name: 'Santander Credit Card', owed: santanderCCOwed, dueDay: 14 },
-            { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 21 },
+            { name: 'American Express', owed: amexOwed, dueDay: 28, recId: REC.americanExpress },
+            { name: 'Santander Credit Card', owed: santanderCCOwed, dueDay: 14, recId: REC.santanderCC },
+            { name: 'Lloyds Credit Card', owed: lloydsCCOwed, dueDay: 21, recId: REC.lloydsCreditCard },
         ].filter(c => c.owed > 0.01);
+
+        // ── Interest rate estimation from transaction history ──
+        const threeMonthsAgo = new Date(today);
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        const cutoff3m = threeMonthsAgo.toISOString().slice(0, 10);
+
+        function txMatchesAccount(tx, accountRecId) {
+            const link = getField(tx, F.txAccountLink) || [];
+            return (Array.isArray(link) ? link : []).some(v => (v.id || v) === accountRecId);
+        }
+
+        creditCards.forEach(card => {
+            const interestTxs = (allTransactions || []).filter(tx => {
+                const desc = String(getField(tx, F.txDescription) || '').toUpperCase();
+                const date = (getField(tx, F.txDate) || '').slice(0, 10);
+                return date >= cutoff3m && txMatchesAccount(tx, card.recId) && desc.includes('INTEREST') && !desc.includes('CREDIT FOR');
+            });
+            const totalInterest = interestTxs.reduce((s, tx) => s + Math.abs(Number(getField(tx, F.txAmount)) || 0), 0);
+            const months = interestTxs.length > 0 ? Math.max(1, interestTxs.length) : 0;
+            card.avgMonthlyInterest = months > 0 ? totalInterest / months : 0;
+            card.estMonthlyRate = card.owed > 0 && card.avgMonthlyInterest > 0 ? card.avgMonthlyInterest / card.owed : 0;
+            card.estAPR = card.estMonthlyRate * 12;
+            card.minPayment = card.avgMonthlyInterest > 0 ? Math.max(25, card.owed * 0.01 + card.avgMonthlyInterest) : Math.max(25, card.owed * 0.025);
+        });
+
+        const defaultPayment = Math.max(0, Math.floor(operatingCushionLow));
+        window._ccStrategyCards = creditCards;
+        window._ccDefaultPayment = defaultPayment;
 
         const cashFlowRows = buildCashFlow(today, openingBalance, incTenancies, activeCosts, tenancies, transactions, monthlyIncome, tenancyIsUC, creditCards);
 
@@ -1383,7 +1411,70 @@
             <hr style="border:none;border-top:1px solid var(--border-default);margin:20px 0;">
             <h3 class="od-section-header" style="margin:0 0 12px">Credit Card Debt</h3>
             <p style="margin:0 0 8px">Total credit card debt: <strong>${fmt(totalCCDebt)}</strong>. Card balances and clearance projections are shown below the cash flow forecast table.</p>
+            ${creditCards.length > 0 ? `
+            <div id="ccPaymentStrategy" style="margin-top:16px;padding:16px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md)">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <span style="font-weight:var(--fw-semibold);color:var(--text-primary)">Payment Strategy</span>
+                    <label style="font-size:var(--fs-sm);color:var(--text-secondary)">Monthly payment:
+                        <input id="ccPaymentInput" type="number" min="0" step="50" value="${defaultPayment}"
+                            style="width:90px;margin-left:4px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-app);color:var(--text-primary)"
+                        />
+                    </label>
+                </div>
+                <p style="margin:0 0 10px;font-size:var(--fs-xs);color:var(--text-muted)">Avalanche method: pay minimums on all cards, direct remaining funds to the highest-interest card first. This minimises total interest paid.</p>
+                <div id="ccStrategyRows"></div>
+                <div id="ccStrategySummary" style="margin-top:10px;font-size:var(--fs-xs);color:var(--text-secondary)"></div>
+            </div>` : ''}
         `;
+
+        // ── Payment strategy recalculation ──
+        function recalcCCStrategy(totalPayment) {
+            const cards = window._ccStrategyCards || [];
+            if (!cards.length) return;
+            const sorted = [...cards].sort((a, b) => b.estAPR - a.estAPR);
+            const totalMin = sorted.reduce((s, c) => s + c.minPayment, 0);
+            const effectivePayment = Math.max(totalPayment, totalMin);
+            let surplus = effectivePayment - totalMin;
+
+            sorted.forEach(c => { c.allocation = c.minPayment; });
+            for (const c of sorted) {
+                if (surplus <= 0) break;
+                const extra = Math.min(surplus, c.owed - c.allocation);
+                if (extra > 0) { c.allocation += extra; surplus -= extra; }
+            }
+
+            const rowsEl = document.getElementById('ccStrategyRows');
+            const summaryEl = document.getElementById('ccStrategySummary');
+            if (!rowsEl) return;
+
+            rowsEl.innerHTML = sorted.map(c => {
+                const aprStr = c.estAPR > 0 ? (c.estAPR * 100).toFixed(1) + '% APR' : '0% (no interest detected)';
+                const pct = effectivePayment > 0 ? Math.round(c.allocation / effectivePayment * 100) : 0;
+                return `<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm);gap:8px">
+                    <span style="flex:1;min-width:0"><span style="font-weight:var(--fw-medium)">${escHtml(c.name)}</span> <span style="color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(aprStr)}</span></span>
+                    <span style="width:80px;text-align:right;color:var(--text-secondary);font-size:var(--fs-xs)">bal ${fmt(c.owed)}</span>
+                    <span style="width:70px;text-align:right;font-weight:var(--fw-semibold);color:var(--accent)">${fmt(c.allocation)}</span>
+                    <span style="width:40px;text-align:right;font-size:var(--fs-xs);color:var(--text-muted)">${pct}%</span>
+                </div>`;
+            }).join('');
+
+            const totalInterestPerMonth = sorted.reduce((s, c) => {
+                const remaining = Math.max(0, c.owed - c.allocation);
+                return s + remaining * c.estMonthlyRate;
+            }, 0);
+
+            if (summaryEl) {
+                const minNote = effectivePayment > totalPayment ? `Minimum payments total ${fmt(totalMin)}, so the effective payment is ${fmt(effectivePayment)}. ` : '';
+                summaryEl.textContent = `${minNote}Estimated interest next month: ${fmt(totalInterestPerMonth)}. ${sorted[0] && sorted[0].estAPR > 0 ? sorted[0].name + ' has the highest rate and receives priority.' : 'No interest detected on any card.'}`;
+            }
+        }
+
+        // Initial render + attach listener
+        setTimeout(() => {
+            recalcCCStrategy(defaultPayment);
+            const inp = document.getElementById('ccPaymentInput');
+            if (inp) inp.addEventListener('input', () => recalcCCStrategy(Number(inp.value) || 0));
+        }, 0);
 
         // (Removed) — the "Last bank sync" footer was dropped from index.html; the
         // Fintable Sync Monitor OS page surfaces this same timestamp more clearly.
