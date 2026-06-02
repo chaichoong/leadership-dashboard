@@ -1632,12 +1632,12 @@ function startEdit(el){
   if (type === 'select') {
     const sel = document.createElement('select');
     sel.className = 'inline-select';
-    const cur = typeof raw === 'object' ? raw?.name : raw;
+    const cur = (raw && typeof raw === 'object') ? raw.name : (raw || null);
     sel.innerHTML = '<option value="">—</option>' + (fieldDef.options?.choices||[]).map(c=>`<option value="${escapeHtml(c.name)}" ${c.name===cur?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
     replaceWithEditor(el, sel, async () => {
       const newVal = sel.value || null;
       if (newVal === cur) { finishEdit(el, record, entityKey); return; }
-      await saveField(entityKey, recId, fieldId, newVal === null ? null : { name: newVal }, el);
+      await saveField(entityKey, recId, fieldId, newVal, el);
     });
     sel.focus(); return;
   }
@@ -1708,17 +1708,24 @@ function replaceWithEditor(el, editor, commit){
 }
 
 function finishEdit(el, record, entityKey){
-  // Re-render the cell fresh
   const fieldId = el.dataset.edit;
   const sch = SCHEMA_RESOLVED[entityKey];
   const fieldDef = sch.byId[fieldId];
   const html = renderCell(record, fieldDef, entityKey);
-  // Replace the editor + the hidden span
   const next = el.nextSibling;
   if (next && next !== el) next.remove();
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
-  el.replaceWith(tmp.firstChild || document.createTextNode(''));
+  const newNode = tmp.firstChild || document.createTextNode('');
+  // Select cells: the .editable span sits inside a .badge wrapper.
+  // renderCell returns a full badge+editable structure, so replace the
+  // badge parent (not just the inner span) to avoid nested badges.
+  const badgeParent = el.parentNode?.classList?.contains('badge') ? el.parentNode : null;
+  if (badgeParent) {
+    badgeParent.replaceWith(newNode);
+  } else {
+    el.replaceWith(newNode);
+  }
 }
 
 async function saveField(entityKey, recId, fieldId, value, el){
