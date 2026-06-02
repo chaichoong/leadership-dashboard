@@ -1415,7 +1415,7 @@
             <div id="ccPaymentStrategy" style="margin-top:16px;padding:16px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md)">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                     <span style="font-weight:var(--fw-semibold);color:var(--text-primary)">Payment Strategy</span>
-                    <label style="font-size:var(--fs-sm);color:var(--text-secondary)">Monthly payment:
+                    <label style="font-size:var(--fs-sm);color:var(--text-secondary)">Payment:
                         <input id="ccPaymentInput" type="number" min="0" step="50" value="${defaultPayment}"
                             style="width:90px;margin-left:4px;padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-sm);background:var(--bg-app);color:var(--text-primary)"
                         />
