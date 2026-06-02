@@ -1733,11 +1733,14 @@ async function saveField(entityKey, recId, fieldId, value, el){
   el.classList.add('cell-saving');
   try {
     const body = { fields: { [fieldId]: value }, typecast: true };
-    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`, { method:'PATCH', body: JSON.stringify(body) });
-    // Update local record
+    await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify(body) });
+    // Update local record with the value we sent. The PATCH response keys
+    // fields by name (not ID) despite returnFieldsByFieldId, so merging it
+    // would leave the ID-keyed local data stale. Direct assignment is safe
+    // because we know which field changed and what we set it to.
     const rec = INDEX[entityKey][recId];
-    if (rec && res.fields) {
-      rec.fields = { ...rec.fields, ...res.fields };
+    if (rec) {
+      rec.fields[fieldId] = value;
     }
     el.classList.remove('cell-saving');
     el.classList.remove('cell-error');
@@ -1759,9 +1762,9 @@ async function saveCheckbox(input, recId, fieldId, entityKey){
   const v = input.checked;
   const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
   try {
-    const res = await airtableFetch(`${BASE_ID}/${tableId}/${recId}?returnFieldsByFieldId=true`, { method:'PATCH', body: JSON.stringify({ fields: { [fieldId]: v }, typecast: true }) });
+    await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify({ fields: { [fieldId]: v }, typecast: true }) });
     const rec = INDEX[entityKey][recId];
-    if (rec && res.fields) rec.fields = { ...rec.fields, ...res.fields };
+    if (rec) rec.fields[fieldId] = v;
     toast('Saved', 'success');
   } catch (e) {
     input.checked = !v;
