@@ -37,6 +37,31 @@
         return rec ? (getField(rec, 'fldii4oUzSfmplihO') || '') : '';
     }
 
+    // Helper: get property record ID from a rental unit record ID
+    function getPropertyIdFromUnit(unitId) {
+        if (!unitId) return '';
+        const unit = (allRentalUnits || []).find(u => u.id === unitId);
+        if (!unit) return '';
+        const propLink = getField(unit, F.unitProperty);
+        return Array.isArray(propLink) ? (propLink[0] || '') : (propLink || '');
+    }
+
+    // Helper: find category record ID by name
+    function findCategoryIdByName(name) {
+        if (!name) return '';
+        const lower = name.toLowerCase();
+        const rec = allCategories.find(r => (getField(r, 'fldii4oUzSfmplihO') || '').toLowerCase() === lower);
+        return rec ? rec.id : '';
+    }
+
+    // Helper: find business record ID by name
+    function findBusinessIdByName(name) {
+        if (!name) return '';
+        const lower = name.toLowerCase();
+        const rec = (allBusinesses || []).find(r => (getField(r, 'fldbbRqVxLxUdHwIR') || '').toLowerCase() === lower);
+        return rec ? rec.id : '';
+    }
+
     // Build dropdown options for reconciliation columns
     // ── Searchable dropdown helpers ──
     // Uses <input list="datalist"> for type-to-search. All sorted A-Z.
@@ -88,17 +113,19 @@
         });
         return reconDropdown(id, items, selectedId, 'width:120px', 'od-filter-select');
     }
-    function buildPropertyDropdown(id, selectedName) {
+    function buildPropertyDropdown(id, selectedId) {
         const seen = new Set();
         const items = [];
-        allTenancies.forEach(r => {
-            const prop = getField(r, F.tenProperty);
-            const propName = Array.isArray(prop) ? prop[0] : (prop || '');
-            if (!propName || seen.has(propName)) return;
-            seen.add(propName);
-            items.push({ id: propName, name: propName });
+        (allRentalUnits || []).forEach(u => {
+            const propLink = getField(u, F.unitProperty);
+            const propId = Array.isArray(propLink) ? propLink[0] : propLink;
+            const propNameArr = getField(u, F.unitPropName);
+            const propName = Array.isArray(propNameArr) ? propNameArr[0] : (propNameArr || '');
+            if (!propId || !propName || seen.has(propId)) return;
+            seen.add(propId);
+            items.push({ id: propId, name: propName });
         });
-        return reconDropdown(id, items, selectedName, 'width:120px', 'od-filter-select');
+        return reconDropdown(id, items, selectedId, 'width:120px', 'od-filter-select');
     }
     function buildCostDropdown(id, selectedId) {
         const items = allCosts.filter(r => isCostActive(r)).map(r => ({
@@ -291,7 +318,7 @@
                 subCatId: '', subCatName: '',
                 businessId: '', businessName: '',
                 tenantName: '', tenantId: '', tenancyLabel: '', tenancyId: '',
-                unitName: '', unitId: '', propertyName: '',
+                unitName: '', unitId: '', propertyId: '',
                 costLabel: '', costId: '',
                 matchType: '', score: 0, status: 'unmatched',
             };
@@ -384,7 +411,7 @@
         result.tenancyId = rule.tenancyId || '';
         result.unitName = rule.unitName || '';
         result.unitId = rule.unitId || '';
-        result.propertyName = rule.propertyName || '';
+        result.propertyId = rule.propertyId || '';
         result.matchType = matchType;
         result.score = score;
         result.status = 'suggestion';
@@ -420,8 +447,7 @@
                 result.tenantId = tenant ? tenant.id : '';
                 const unitRef = getField(ten, F.tenUnitRef);
                 result.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
-                const prop = getField(ten, F.tenProperty);
-                result.propertyName = Array.isArray(prop) ? prop[0] : (prop || '');
+                result.propertyId = getPropertyIdFromUnit(result.unitId);
             }
         }
         // When includeVariableFields is false, tenancy/tenant/unit/property stay blank
@@ -487,7 +513,7 @@
         window._reconOriginals = results.map(r => ({
             categoryId: r.categoryId, subCatId: r.subCatId,
             businessId: r.businessId, tenancyId: r.tenancyId,
-            unitId: r.unitId, costId: r.costId,
+            unitId: r.unitId, propertyId: r.propertyId, costId: r.costId,
             status: r.status
         }));
     }
@@ -533,8 +559,8 @@
             <td class="${cc}">${buildTenantDropdown('recon-tenant-' + i, r.tenantId || '')}</td>
             <td class="${cc}" onchange="reconTenancyChanged(${i})">${buildTenancyDropdown('recon-tenancy-' + i, r.tenancyId || '')}</td>
             <td class="${cc}">${buildRentalUnitDropdown('recon-unit-' + i, r.unitId || '')}</td>
-            <td class="${cc}">${buildPropertyDropdown('recon-property-' + i, r.propertyName || '')}</td>
-            <td class="${cc}">${buildCostDropdown('recon-cost-' + i, r.costId || '')}</td>
+            <td class="${cc}">${buildPropertyDropdown('recon-property-' + i, r.propertyId || '')}</td>
+            <td class="${cc}" onchange="reconCostChanged(${i})">${buildCostDropdown('recon-cost-' + i, r.costId || '')}</td>
             <td class="${cc}" style="text-align:center;min-width:60px">${actionHtml}</td>
         </tr>`;
     }
@@ -561,7 +587,7 @@
         r.tenantId     = resolveDropdownId('recon-tenant-' + idx)   || '';
         r.tenancyId    = resolveDropdownId('recon-tenancy-' + idx)  || '';
         r.unitId       = resolveDropdownId('recon-unit-' + idx)     || '';
-        r.propertyName = resolveDropdownId('recon-property-' + idx) || '';
+        r.propertyId = resolveDropdownId('recon-property-' + idx) || '';
         r.costId       = resolveDropdownId('recon-cost-' + idx)     || '';
         // Refresh display labels so re-render shows the right text
         r.categoryName = r.categoryId ? getCatName(r.categoryId) : '';
@@ -634,21 +660,19 @@
         }
         setByRecordId('recon-unit-' + idx, unitId, unitFallbackName);
 
-        // ── Property — uses the lookup string as both ID and name in
-        //   buildPropertyDropdown, so matching by name is fine here.
-        const propField = getField(tenancy, F.tenProperty);
-        const propInput = document.getElementById('recon-property-' + idx);
-        if (propInput) {
-            let propName = '';
-            if (Array.isArray(propField) && propField.length && propField[0]) {
-                propName = String(propField[0]);
-            } else if (propField && typeof propField === 'string') {
-                propName = propField;
-            }
-            propInput.value = propName;
-        }
+        // ── Property — resolve from the unit's property link (record ID)
+        const propRecId = getPropertyIdFromUnit(unitId);
+        setByRecordId('recon-property-' + idx, propRecId, '');
 
-        // Set sub-category to Rental Income if empty
+        // ── Business — tenancy always belongs to Real Estate
+        const reBizId = findBusinessIdByName('Real Estate');
+        if (reBizId) setByRecordId('recon-business-' + idx, reBizId, 'Real Estate');
+
+        // ── Category — Revenue for rental income
+        const revenueCatId = findCategoryIdByName('Revenue');
+        if (revenueCatId) setByRecordId('recon-cat-' + idx, revenueCatId, 'Revenue');
+
+        // ── Sub-category — Rental Income
         const subCatInput = document.getElementById('recon-subcat-' + idx);
         if (subCatInput && !subCatInput.value) subCatInput.value = getSubCatName(REC.subRentalInc);
 
@@ -658,6 +682,51 @@
         // events on each, so we explicitly call the persistence helper.
         persistReconRow(idx);
     }
+
+    // When cost input changes, auto-fill business, category, subcategory, property
+    function reconCostChanged(idx) {
+        const input = document.getElementById('recon-cost-' + idx);
+        if (!input || !input.value) return;
+        const costId = resolveDropdownId('recon-cost-' + idx);
+        const cost = (allCosts || []).find(c => c.id === costId);
+        if (!cost) return;
+
+        function setByRecordId(inputId, recId, fallbackName) {
+            const inp = document.getElementById(inputId);
+            if (!inp) return;
+            if (!recId) { inp.value = fallbackName || ''; return; }
+            const dl = document.getElementById(inp.getAttribute('list'));
+            const opt = dl ? [...dl.options].find(o => o.getAttribute('data-id') === recId) : null;
+            inp.value = opt ? opt.value : (fallbackName || '');
+        }
+
+        // ── Business from cost
+        const costBizField = getField(cost, F.costBusiness);
+        const costBizId = extractLinkedId(costBizField);
+        if (costBizId) {
+            const bizRec = (allBusinesses || []).find(r => r.id === costBizId);
+            const bizName = bizRec ? (getField(bizRec, 'fldbbRqVxLxUdHwIR') || '') : '';
+            setByRecordId('recon-business-' + idx, costBizId, bizName);
+        }
+
+        // ── Category from cost
+        const costCatField = getField(cost, F.costCategory);
+        const costCatId = extractLinkedId(costCatField);
+        if (costCatId) setByRecordId('recon-cat-' + idx, costCatId, getCatName(costCatId));
+
+        // ── Sub-category from cost
+        const costSubField = getField(cost, F.costSubCategory);
+        const costSubId = extractLinkedId(costSubField);
+        if (costSubId) setByRecordId('recon-subcat-' + idx, costSubId, getSubCatName(costSubId));
+
+        // ── Property from cost
+        const costPropField = getField(cost, F.costProperty);
+        const costPropId = extractLinkedId(costPropField);
+        if (costPropId) setByRecordId('recon-property-' + idx, costPropId, '');
+
+        persistReconRow(idx);
+    }
+    window.reconCostChanged = reconCostChanged;
 
     function toggleAmendRow(idx) {
         const row = document.getElementById('recon-amend-' + idx);
@@ -702,11 +771,10 @@
                 r.tenancyId = ten.id;
                 r.tenantName = r.tenantName || getField(ten, F.tenSurname);
                 const unitRef = getField(ten, F.tenUnitRef);
-                const property = getField(ten, F.tenProperty);
                 const unitId = getField(ten, F.tenUnit);
                 r.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
                 r.unitId = Array.isArray(unitId) ? unitId[0] : unitId;
-                r.propertyName = Array.isArray(property) ? property[0] : (property || '');
+                r.propertyId = getPropertyIdFromUnit(r.unitId);
             }
         });
         // Match against cost names
@@ -916,6 +984,7 @@
         const businessId = resolveDropdownId('recon-business-' + idx);
         const tenancyId = resolveDropdownId('recon-tenancy-' + idx);
         const unitId = resolveDropdownId('recon-unit-' + idx);
+        const propertyId = resolveDropdownId('recon-property-' + idx);
         const costId = resolveDropdownId('recon-cost-' + idx);
 
         if (catId) fields[F.txCategory] = [catId];
@@ -923,6 +992,7 @@
         if (businessId) fields[F.txBusiness] = [businessId];
         if (tenancyId) fields[F.txTenancy] = [tenancyId];
         if (unitId) fields[F.txUnit] = [unitId];
+        if (propertyId) fields[F.txProperty] = [propertyId];
         if (costId) fields[F.txCost] = [costId];
 
         const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${r.txId}`, {
@@ -946,9 +1016,12 @@
             if (!localTx.fields) localTx.fields = {};
             localTx.fields[F.txReconciled] = true;
             if (catId) localTx.fields[F.txCategory] = [catId];
-            if (tenancyId) localTx.fields[F.txTenancy] = [{ id: tenancyId }];
-            if (costId) localTx.fields[F.txCost] = [costId];
             if (subCatId) localTx.fields[F.txSubCategory] = [subCatId];
+            if (businessId) localTx.fields[F.txBusiness] = [businessId];
+            if (tenancyId) localTx.fields[F.txTenancy] = [{ id: tenancyId }];
+            if (unitId) localTx.fields[F.txUnit] = [unitId];
+            if (propertyId) localTx.fields[F.txProperty] = [propertyId];
+            if (costId) localTx.fields[F.txCost] = [costId];
         }
 
         // ── Cost sync ──
@@ -988,8 +1061,8 @@
         // Track AI reconciliation accuracy
         const orig = (window._reconOriginals || [])[idx];
         if (orig && orig.status === 'suggestion') {
-            const final = { categoryId: catId, subCatId, businessId, tenancyId, unitId, costId };
-            const wasAccurate = ['categoryId', 'subCatId', 'businessId', 'tenancyId', 'unitId', 'costId']
+            const final = { categoryId: catId, subCatId, businessId, tenancyId, unitId, propertyId, costId };
+            const wasAccurate = ['categoryId', 'subCatId', 'businessId', 'tenancyId', 'unitId', 'propertyId', 'costId']
                 .every(f => (final[f] || '') === (orig[f] || ''));
             logReconAccuracy(r.txId, wasAccurate);
         }
@@ -1005,7 +1078,7 @@
                 tenantName: getInputVal('recon-tenant-' + idx),
                 tenancyLabel: getInputVal('recon-tenancy-' + idx), tenancyId,
                 unitName: getInputVal('recon-unit-' + idx), unitId,
-                propertyName: getInputVal('recon-property-' + idx),
+                propertyId: resolveDropdownId('recon-property-' + idx),
             });
         }
 
@@ -1556,7 +1629,7 @@
                 tenantName: '', tenantId: '',
                 tenancyLabel: '', tenancyId: '',
                 unitName: '', unitId: '',
-                propertyName: '',
+                propertyId: '',
                 matchType: `Split 1/${N}`,
                 score: 0,
                 status: 'unmatched',
@@ -1574,7 +1647,7 @@
                     tenantName: '', tenantId: '',
                     tenancyLabel: '', tenancyId: portionCats[portionIdx].tenancyId || '',
                     unitName: '', unitId: portionCats[portionIdx].unitId || '',
-                    propertyName: '',
+                    propertyId: '',
                     costLabel: '', costId: portionCats[portionIdx].costId || '',
                 } : {
                     // Equal mode: keep parent's category/sub-cat/business/cost
@@ -1588,7 +1661,7 @@
                     tenantName: '', tenantId: '',
                     tenancyLabel: '', tenancyId: '',
                     unitName: '', unitId: '',
-                    propertyName: '',
+                    propertyId: '',
                     costLabel: r.costLabel, costId: r.costId,
                 };
                 newResults.push({
@@ -1618,7 +1691,7 @@
                     businessId: '', businessName: '',
                     tenantName: '', tenantId: '',
                     tenancyLabel: '', tenancyId: '',
-                    unitName: '', unitId: '', propertyName: '',
+                    unitName: '', unitId: '', propertyId: '',
                     costLabel: '', costId: '',
                     matchType: 'Pending', score: 0, status: 'pending',
                 });
