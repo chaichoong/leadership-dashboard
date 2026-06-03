@@ -7288,14 +7288,117 @@ function renderRecurring(){
 // ======================================================
 // CONTRACTOR TASKS
 // ======================================================
-// Tabs switch between Gary Marsh / Rob Jackson / Roy Lavin (and reassignment
-// between them is live — counts update instantly). Filters on the `Contractor`
-// singleSelect field. Rows are grouped by Property (linked Rental Unit).
+// Tabs switch between Gary Marsh / Rob Jackson / Roy Lavin + Unassigned
+// (and reassignment between them is live — counts update instantly).
+// Rows are grouped by Property (linked Rental Unit).
 // Columns: Task · Description · Property · Created · Age · Priority · Status · Attachments
 let activeContractor='Gary Marsh';
+
+// ── Property auto-match (client-side) ──
+// Matches task text against PROPERTY_ID_TO_NAME. Returns record ID or null.
+function matchPropertyFromText(text){
+  if(!text||!PROPERTY_ID_TO_NAME)return null;
+  const norm=text.toLowerCase().replace(/[^\w\s]/g,' ');
+  let bestId=null,bestLen=0;
+  for(const[id,name]of Object.entries(PROPERTY_ID_TO_NAME)){
+    const lo=name.toLowerCase();
+    if(norm.includes(lo)&&lo.length>bestLen){bestId=id;bestLen=lo.length;continue}
+    const words=lo.replace(/[^\w\s]/g,' ').split(/\s+/).filter(w=>w.length>=3);
+    if(words.length<2)continue;
+    const matched=words.filter(w=>norm.includes(w));
+    if(matched.length>=2&&matched.length/words.length>=0.6){
+      const score=matched.join('').length;
+      if(score>bestLen){bestId=id;bestLen=score}
+    }
+  }
+  return bestId;
+}
+
+// ── Auto-match unlinked maintenance tasks on load ──
+async function autoMatchUnlinkedMaintenance(){
+  const unlinked=allTasks.filter(t=>t.maintenance&&t.status!=='Completed'&&(!t.propertyIds||!t.propertyIds.length));
+  if(!unlinked.length)return;
+  let patched=0;
+  for(const t of unlinked){
+    const propId=matchPropertyFromText((t.name||'')+' '+(t.description||''));
+    if(!propId)continue;
+    try{
+      const res=await patchTask(t.id,{[F.property]:[propId]});
+      if(res.ok){t.propertyIds=[propId];t.property=[PROPERTY_ID_TO_NAME[propId]||propId];patched++}
+    }catch(e){console.warn('[auto-match] patch failed',t.id,e)}
+  }
+  if(patched)renderJobs();
+}
+
+// ── Create maintenance task ──
+async function createMaintenanceTask(opts){
+  opts=opts||{};
+  const fields={};
+  fields[F.name]=opts.name||'New maintenance task';
+  if(opts.description)fields[F.description]=opts.description;
+  fields[F.maintenance]=true;
+  fields[F.status]='Upcoming';
+  fields[F.createdDate]=todayStr();
+  fields[F.priority]='Not Urgent';
+  const reBiz=BUSINESS_MAP&&BUSINESS_MAP['Real Estate'];
+  if(reBiz)fields[F.business]=[reBiz];
+  if(opts.assigneeEmail)fields[F.assignee]={email:opts.assigneeEmail};
+  if(opts.priorityLevel)fields[F.priorityLvl]=opts.priorityLevel;
+  if(opts.propertyId){
+    fields[F.property]=[opts.propertyId];
+  } else {
+    const matched=matchPropertyFromText((opts.name||'')+' '+(opts.description||''));
+    if(matched)fields[F.property]=[matched];
+  }
+  const collabEmails=['kevin@runpreneur.org.uk','micaa.work@gmail.com','atentaerica@gmail.com'];
+  const taskCollabs=collabEmails.filter(e=>e!==opts.assigneeEmail).map(e=>({email:e}));
+  if(taskCollabs.length)fields[F.collaborators]=taskCollabs;
+  const creatorEmail=(currentUser&&currentUser.email)||'';
+  if(creatorEmail)fields[F.createdByEmail]=creatorEmail;
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}?returnFieldsByFieldId=true`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({fields,typecast:true})
+    });
+    if(!res.ok){const t=await res.text();throw new Error('HTTP '+res.status+' '+t)}
+    const data=await res.json();
+    const parsed=parseTask(data);
+    allTasks.push(parsed);
+    toast('Maintenance task created');
+    renderAll();
+    return parsed;
+  }catch(e){
+    console.error('[createMaintenanceTask]',e);
+    toast('Failed to create task: '+e.message,true);
+    return null;
+  }
+}
 let jobsMaintenanceFilter='all'; // 'all' | 'maintenance' | 'non-maintenance'
 function setActiveContractor(name){activeContractor=name;renderJobs()}
 function setJobsMaintenanceFilter(f){jobsMaintenanceFilter=f;renderJobs()}
+function toggleAddMaintenanceForm(){
+  const el=document.getElementById('addMaintForm');
+  if(el)el.style.display=el.style.display==='none'?'block':'none';
+}
+async function submitMaintenanceTask(){
+  const nameEl=document.getElementById('maint-name');
+  const name=(nameEl&&nameEl.value||'').trim();
+  if(!name){toast('Task name is required',true);return}
+  const desc=(document.getElementById('maint-desc')?.value||'').trim();
+  const contractor=document.getElementById('maint-contractor')?.value||'';
+  const propId=document.getElementById('maint-property')?.value||'';
+  const priority=document.getElementById('maint-priority')?.value||'Low Priority';
+  const result=await createMaintenanceTask({
+    name,description:desc,assigneeEmail:contractor||undefined,
+    propertyId:propId||undefined,priorityLevel:priority
+  });
+  if(result){
+    toggleAddMaintenanceForm();
+    if(nameEl)nameEl.value='';
+    const descEl=document.getElementById('maint-desc');if(descEl)descEl.value='';
+  }
+}
 // Build property options from the full Properties table (fetched on load).
 // Falls back to any properties that happen to be linked on existing tasks,
 // in case the Properties fetch failed.
@@ -7337,6 +7440,30 @@ function jobsPropertyCell(taskId,currentId){
   const opts=['<option value="">—</option>',...props.map(p=>`<option value="${p.id}" ${p.id===currentId?'selected':''}>${escHtml(p.name)}</option>`)].join('');
   return `<select class="inline-select" onchange="updateTaskProperty('${taskId}',this.value)" onclick="event.stopPropagation()" style="max-width:180px">${opts}</select>`;
 }
+function jobsAssignCell(taskId,currentEmail){
+  const CTRS=[
+    {name:'Gary Marsh',email:'gkm.property.maintenance@outlook.com'},
+    {name:'Rob Jackson',email:'rjm320@hotmail.com'},
+    {name:'Roy Lavin',email:'roy.lavin1978@gmail.com'},
+  ];
+  const opts=['<option value="">Unassigned</option>',...CTRS.map(c=>`<option value="${c.email}" ${currentEmail&&currentEmail.toLowerCase()===c.email.toLowerCase()?'selected':''}>${escHtml(c.name)}</option>`)].join('');
+  return `<select class="inline-select" style="max-width:160px" onchange="assignMaintenanceToContractor('${taskId}',this.value)" onclick="event.stopPropagation()">${opts}</select>`;
+}
+async function assignMaintenanceToContractor(taskId,email){
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const payload={};
+  payload[F.assignee]=email?{email:email}:null;
+  _saveState.pending++;renderSyncPill();
+  try{
+    const res=await patchTask(taskId,payload);
+    if(!res.ok)throw new Error('PATCH failed '+res.status);
+    task.assigneeEmail=email||'';
+    const m=TEAM.find(x=>x.email===email);
+    task.assigneeName=m?m.name:'';
+    toast(email?'Assigned to '+(m?m.name:email):'Unassigned');
+  }catch(e){console.error('assign contractor',e);toast('Assignment failed: '+e.message,true);recordSaveFailure(taskId,'assignee',e.message);}
+  finally{_saveState.pending--;renderSyncPill();renderTeamBar();renderKPIs();renderJobs();}
+}
 async function updateTaskProperty(taskId,propId){
   const task=allTasks.find(t=>t.id===taskId);if(!task)return;
   const payload={};payload[F.property]=propId?[propId]:[];
@@ -7369,17 +7496,30 @@ function renderJobs(){
   // guarantee case stability on collaborator emails, so a "Gary@..." vs
   // "gary@..." mismatch would silently hide tasks from the tab.
   const contractorEmailsLc=new Set(CONTRACTORS.map(c=>c.email.toLowerCase()));
-  const pool=allTasks.filter(t=>t.status!=='Completed' && t.assigneeEmail && contractorEmailsLc.has(t.assigneeEmail.toLowerCase()));
+  const contractorPool=allTasks.filter(t=>t.status!=='Completed' && t.assigneeEmail && contractorEmailsLc.has(t.assigneeEmail.toLowerCase()));
+  const unassignedPool=allTasks.filter(t=>t.status!=='Completed' && t.maintenance && (!t.assigneeEmail || !contractorEmailsLc.has(t.assigneeEmail.toLowerCase())));
+  const pool=[...contractorPool,...unassignedPool];
   // Header tabs with counts (matches teamBar count for the same person).
   let tabs=CONTRACTORS.map(c=>{
-    const n=pool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===c.email.toLowerCase()).length;
+    const n=contractorPool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===c.email.toLowerCase()).length;
     const active=activeContractor===c.name;
     return `<button class="view-tab ${active?'active':''}" onclick="setActiveContractor('${c.name}')" style="${active?`border-bottom:2px solid ${c.colour};`:''}">
       <span class="avatar avatar-${c.key}" style="width:20px;height:20px;font-size:11px;margin-right:6px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff">${c.name[0]}</span>${escHtml(c.name)} <span style="color:var(--text-secondary);font-weight:400">(${n})</span>
     </button>`;
   }).join('');
-  const activeEmail=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();
-  let list=pool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===activeEmail);
+  if(unassignedPool.length||activeContractor==='Unassigned'){
+    const ua=activeContractor==='Unassigned';
+    tabs+=`<button class="view-tab ${ua?'active':''}" onclick="setActiveContractor('Unassigned')" style="${ua?'border-bottom:2px solid var(--accent-gold);':''}">
+      <span style="width:20px;height:20px;font-size:11px;margin-right:6px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:var(--accent-gold);color:#fff">?</span>Unassigned <span style="color:var(--text-secondary);font-weight:400">(${unassignedPool.length})</span>
+    </button>`;
+  }
+  let list;
+  if(activeContractor==='Unassigned'){
+    list=[...unassignedPool];
+  } else {
+    const activeEmail=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();
+    list=contractorPool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===activeEmail);
+  }
   // Apply maintenance filter
   if(jobsMaintenanceFilter==='maintenance')list=list.filter(t=>t.maintenance);
   else if(jobsMaintenanceFilter==='non-maintenance')list=list.filter(t=>!t.maintenance);
@@ -7428,9 +7568,10 @@ function renderJobs(){
       return `<a href="${a.url}" target="_blank" style="font-size:11px;color:var(--accent)" title="${escHtml(a.filename||'')}">📎</a>`;
     }).join(' ')+(arr.length>3?`<span style="font-size:10px;color:var(--text-secondary);margin-left:4px">+${arr.length-3}</span>`:'');
   };
+  const isUnassignedTab=activeContractor==='Unassigned';
   let body='';
   if(!groupNames.length){
-    body=`<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-secondary)"><p>No open contractor tasks for ${escHtml(activeContractor)}.</p></div>`;
+    body=`<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-secondary)"><p>No ${isUnassignedTab?'unassigned maintenance':'open contractor'} tasks${isUnassignedTab?'':' for '+escHtml(activeContractor)}.</p></div>`;
   } else {
     groupNames.forEach(prop=>{
       const g=groups[prop];
@@ -7459,7 +7600,7 @@ function renderJobs(){
             <th>Created</th>
             <th>Age</th>
             <th>Priority</th>
-            <th>Status</th>
+            <th>${isUnassignedTab?'Assign to':'Status'}</th>
             <th>Attachments</th>
             <th>Property</th>
           </tr></thead>
@@ -7473,7 +7614,7 @@ function renderJobs(){
           <td>${fmtCreated(t.createdDate)}</td>
           <td>${ageBadge(t.createdDate)}</td>
           <td onclick="event.stopPropagation()">${jobsPriorityCell(t.id,t.priorityLevel||'')}</td>
-          <td onclick="event.stopPropagation()">${jobsStatusCell(t.id,t.status||'Upcoming')}</td>
+          <td onclick="event.stopPropagation()">${isUnassignedTab?jobsAssignCell(t.id,t.assigneeEmail):jobsStatusCell(t.id,t.status||'Upcoming')}</td>
           <td>${attThumbs(t)}</td>
           <td onclick="event.stopPropagation()">${jobsPropertyCell(t.id,currentPropId)}</td>
         </tr>`;
@@ -7481,10 +7622,10 @@ function renderJobs(){
       body+='</tbody></table></div></div>';
     });
   }
-  // Maintenance filter counts for active contractor
-  const allForContractor=pool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===activeEmail);
-  const maintCount=allForContractor.filter(t=>t.maintenance).length;
-  const nonMaintCount=allForContractor.length-maintCount;
+  // Maintenance filter counts for active tab
+  const allForTab=activeContractor==='Unassigned'?unassignedPool:contractorPool.filter(t=>{const ae=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();return t.assigneeEmail&&t.assigneeEmail.toLowerCase()===ae});
+  const maintCount=allForTab.filter(t=>t.maintenance).length;
+  const nonMaintCount=allForTab.length-maintCount;
   const mfBtn=(label,val,count)=>{
     const active=jobsMaintenanceFilter===val;
     return `<button onclick="setJobsMaintenanceFilter('${val}')" style="padding:4px 12px;border-radius:16px;border:1px solid ${active?'var(--accent)':'var(--border-default)'};background:${active?'var(--accent)':'var(--bg-surface)'};color:${active?'#fff':'var(--text-secondary)'};cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)">${label} <span style="opacity:0.7">(${count})</span></button>`;
@@ -7496,9 +7637,25 @@ function renderJobs(){
     <div class="view-tabs" style="margin-bottom:16px;position:static">${tabs}</div>
     <div style="display:flex;gap:6px;margin-bottom:14px;align-items:center">
       <span style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);margin-right:4px">Filter:</span>
-      ${mfBtn('All','all',allForContractor.length)}
+      ${mfBtn('All','all',allForTab.length)}
       ${mfBtn('Maintenance','maintenance',maintCount)}
       ${mfBtn('Non-maintenance','non-maintenance',nonMaintCount)}
+      <button onclick="toggleAddMaintenanceForm()" style="margin-left:auto;padding:6px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);display:inline-flex;align-items:center;gap:6px">+ Add Maintenance Task</button>
+    </div>
+    <div id="addMaintForm" style="display:none;margin-bottom:16px;padding:16px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;box-shadow:var(--shadow-sm)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);display:block;margin-bottom:4px">Task Name</label><input id="maint-name" type="text" placeholder="e.g. Fix leaking roof" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base)"></div>
+        <div><label style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);display:block;margin-bottom:4px">Contractor</label><select id="maint-contractor" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base)"><option value="">Unassigned</option>${CONTRACTORS.map(c=>`<option value="${c.email}">${escHtml(c.name)}</option>`).join('')}</select></div>
+      </div>
+      <div style="margin-bottom:10px"><label style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);display:block;margin-bottom:4px">Description</label><textarea id="maint-desc" rows="2" placeholder="Details about the issue..." style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base);resize:vertical"></textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div><label style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);display:block;margin-bottom:4px">Property</label><select id="maint-property" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base)"><option value="">Auto-detect / None</option>${getPropertyOptions().map(p=>`<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}</select></div>
+        <div><label style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-semibold);display:block;margin-bottom:4px">Priority</label><select id="maint-priority" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base)"><option value="Low Priority">Low Priority</option><option value="High Priority">High Priority</option></select></div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="toggleAddMaintenanceForm()" style="padding:6px 16px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;font-size:var(--fs-sm)">Cancel</button>
+        <button onclick="submitMaintenanceTask()" style="padding:6px 16px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)">Create Task</button>
+      </div>
     </div>
     ${body}
   `;
@@ -7613,6 +7770,7 @@ async function loadAllData(){
     const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
     if(loader)loader.style.display='none';
     renderAll();
+    autoMatchUnlinkedMaintenance().catch(e=>console.warn('[auto-match] error',e));
     try{runNotificationCatchup()}catch(e){console.warn('[notification catchup] error',e)}
     loadAllCommentCounts().catch(e=>console.warn('Comment count fetch failed',e));
 
