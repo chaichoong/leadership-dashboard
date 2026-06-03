@@ -2596,7 +2596,9 @@
         noteUrl: 'fldXf1p0vtHqOZcKl',
         dueDate: 'fld7XP8w8kbxfETV4',
         attachments: 'fldEbs9cscRr8elcw',
-        maintenance: 'fldSEUvVA98as1HW6'
+        maintenance: 'fldSEUvVA98as1HW6',
+        property: 'fldZKFvEpJ6NZeFKz',
+        createdDate: 'fldRpwiBGqEVaN20H'
     };
     const AIRTABLE_ASSIGNEE_DEFAULT = 'usrP7K5pmPSdVVgTN'; // Mica Albovias
     const AIRTABLE_ASSIGNEE_KEVIN = 'usrKkopUJSGsBhWMD'; // Kevin Brittain — used by label 12
@@ -2683,6 +2685,46 @@ Respond with ONLY the JSON object, no markdown.`;
 
     // Optional opts:
     //   assigneeId — override the default Mica assignee (e.g. for label 12 → Kevin)
+    async function matchPropertyForMaintenance(taskTitle, taskDescription) {
+        const pat = getAirtablePat();
+        if (!pat) return null;
+        const PROPS_TABLE = 'tbl6f0OkAmTC2jbuG';
+        const PROP_FULL = 'fldy2t735TV5e1DIL';
+        const PROP_SHORT = 'fldqMbR329TNY974G';
+        try {
+            const url = `https://api.airtable.com/v0/${getAirtableBaseId()}/${PROPS_TABLE}?returnFieldsByFieldId=true&fields%5B%5D=${PROP_FULL}&fields%5B%5D=${PROP_SHORT}&pageSize=100`;
+            const resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + pat } });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const text = ((taskTitle || '') + ' ' + (taskDescription || '')).toLowerCase().replace(/[^\w\s]/g, ' ');
+            let bestId = null;
+            let bestScore = 0;
+            for (const rec of data.records || []) {
+                const c = rec.fields || {};
+                for (const name of [c[PROP_FULL], c[PROP_SHORT]]) {
+                    if (!name) continue;
+                    const nameLower = name.toLowerCase();
+                    if (text.includes(nameLower) && nameLower.length > bestScore) {
+                        bestId = rec.id;
+                        bestScore = nameLower.length;
+                        continue;
+                    }
+                    const words = nameLower.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3);
+                    if (words.length < 2) continue;
+                    const matched = words.filter(w => text.includes(w));
+                    if (matched.length >= 2 && matched.length / words.length >= 0.6) {
+                        const score = matched.join('').length;
+                        if (score > bestScore) { bestId = rec.id; bestScore = score; }
+                    }
+                }
+            }
+            return bestId;
+        } catch (e) {
+            console.warn('[property-match] error:', e);
+            return null;
+        }
+    }
+
     async function createAirtableTask(email, opts) {
         opts = opts || {};
         const pat = getAirtablePat();
@@ -2734,7 +2776,7 @@ Respond with ONLY the JSON object, no markdown.`;
             bodyExcerpt;
 
         // Build collaborators list — everyone except the assignee.
-        const assigneeId = opts.assigneeId || getAirtableAssignee();
+        const assigneeId = 'assigneeId' in opts ? opts.assigneeId : getAirtableAssignee();
         const allTeamIds = [AIRTABLE_ASSIGNEE_DEFAULT, AIRTABLE_ASSIGNEE_KEVIN, AIRTABLE_ASSIGNEE_ERICAMAE];
         const collaboratorIds = allTeamIds
             .filter(id => id !== assigneeId)
@@ -2743,14 +2785,9 @@ Respond with ONLY the JSON object, no markdown.`;
         const record = {
             fields: {
                 [AIRTABLE_FIELDS.taskName]: content.title,
-                // singleSelect fields (Status, Priority, Time Estimate, Source
-                // Type) must be passed as a plain string — Airtable rejects
-                // the {name: '...'} format with "Cannot parse value for field".
-                [AIRTABLE_FIELDS.status]: 'Today',
-                // singleCollaborator (Assignee) expects a bare object, not an
-                // array — wrapping in [] returns 422.
-                [AIRTABLE_FIELDS.assignee]: { id: assigneeId },
-                [AIRTABLE_FIELDS.priority]: 'Urgent',
+                [AIRTABLE_FIELDS.status]: opts.maintenance ? 'Upcoming' : 'Today',
+                ...(assigneeId ? { [AIRTABLE_FIELDS.assignee]: { id: assigneeId } } : {}),
+                [AIRTABLE_FIELDS.priority]: opts.maintenance ? 'Not Urgent' : 'Urgent',
                 [AIRTABLE_FIELDS.timeEstimate]: '15 min',
                 [AIRTABLE_FIELDS.description]: richDescription,
                 [AIRTABLE_FIELDS.isInbound]: true,
@@ -2759,11 +2796,22 @@ Respond with ONLY the JSON object, no markdown.`;
                 [AIRTABLE_FIELDS.sender]: email.fromEmail || email.from,
                 [AIRTABLE_FIELDS.dateReceived]: today,
                 [AIRTABLE_FIELDS.noteUrl]: gmailUrl,
-                [AIRTABLE_FIELDS.dueDate]: today,
+                ...(opts.maintenance ? {} : { [AIRTABLE_FIELDS.dueDate]: today }),
                 [AIRTABLE_COLLABORATORS_FIELD]: collaboratorIds,
-                ...(opts.maintenance ? { [AIRTABLE_FIELDS.maintenance]: true } : {})
+                ...(opts.maintenance ? {
+                    [AIRTABLE_FIELDS.maintenance]: true,
+                    [AIRTABLE_FIELDS.createdDate]: today,
+                } : {})
             }
         };
+
+        // Property auto-match for maintenance tasks
+        if (opts.maintenance) {
+            try {
+                const propId = await matchPropertyForMaintenance(content.title, richDescription);
+                if (propId) record.fields[AIRTABLE_FIELDS.property] = [propId];
+            } catch (e) { console.warn('[property-match] skipped:', e); }
+        }
 
         try {
             const resp = await fetch(`https://api.airtable.com/v0/${getAirtableBaseId()}/${getAirtableTableId()}`, {
@@ -2790,8 +2838,8 @@ Respond with ONLY the JSON object, no markdown.`;
                 'usrKkopUJSGsBhWMD': 'kevin@runpreneur.org.uk',
                 'usrP7K5pmPSdVVgTN': 'micaa.work@gmail.com',
             };
-            const slackAssigneeId = opts.assigneeId || getAirtableAssignee();
-            const assigneeEmail = ASSIGNEE_EMAIL_MAP[slackAssigneeId] || '';
+            const slackAssigneeId = assigneeId;
+            const assigneeEmail = slackAssigneeId ? (ASSIGNEE_EMAIL_MAP[slackAssigneeId] || '') : '';
             if (assigneeEmail && content.title) {
                 try {
                     fetch('https://slack-notify.kevinbrittain.workers.dev/', {
@@ -2965,7 +3013,7 @@ Respond with ONLY the JSON object, no markdown.`;
     // Determine the correct assignee for a destination label.
     function getAssigneeForLabel(labelName) {
         if (/^12[.:]\s/.test(labelName)) return AIRTABLE_ASSIGNEE_KEVIN;
-        // Labels 8 and 13 both assign to Mica by default
+        if (/^13[.:]\s/.test(labelName)) return null; // maintenance: leave unassigned for contractor triage
         return AIRTABLE_ASSIGNEE_DEFAULT;
     }
 
@@ -3022,8 +3070,12 @@ Respond with ONLY the JSON object, no markdown.`;
                 const isMaint = /^13[.:]\s/.test(toLabelName);
                 const ok = await createAirtableTask(email, { assigneeId: newAssignee, maintenance: isMaint });
                 if (ok) {
-                    const assigneeName = newAssignee === AIRTABLE_ASSIGNEE_KEVIN ? 'Kevin' : 'Mica';
-                    showSuccess('Task created for ' + assigneeName + ': "' + truncate(email.subject, 40) + '"');
+                    if (isMaint) {
+                        showSuccess('Maintenance task created: "' + truncate(email.subject, 40) + '"');
+                    } else {
+                        const assigneeName = newAssignee === AIRTABLE_ASSIGNEE_KEVIN ? 'Kevin' : 'Mica';
+                        showSuccess('Task created for ' + assigneeName + ': "' + truncate(email.subject, 40) + '"');
+                    }
                 }
             }
             return;
