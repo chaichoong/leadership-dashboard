@@ -386,6 +386,16 @@
                 }
             }
 
+            // ── Guard: costs are outgoings only ──
+            // Incoming payments (positive amount) must never carry a cost link.
+            // The historical matcher can bleed a costId from an outgoing payment
+            // onto an incoming one when they share a vendor prefix (e.g. "BANK
+            // GIRO CREDIT" matched to Home Protect). Strip it.
+            if (result.txAmount >= 0 && result.costId) {
+                result.costId = '';
+                result.costLabel = '';
+            }
+
             results.push(result);
         });
 
