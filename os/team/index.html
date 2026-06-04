@@ -115,6 +115,27 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .achievement-card-title{font-weight:var(--fw-semibold);margin-bottom:4px}
 .achievement-card-desc{font-size:var(--fs-sm);color:var(--text-secondary)}
 
+/* HR components (Reviews, Onboarding tracker, drawer HR details) */
+.hr-group{margin-bottom:28px}
+.hr-group-title{font-size:var(--fs-base);font-weight:var(--fw-bold);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.hr-group-title .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
+.checklist{display:flex;flex-direction:column;gap:5px;margin-top:10px}
+.checklist-item{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm)}
+.checklist-icon{width:16px;text-align:center;flex-shrink:0}
+.check-done{color:var(--success)}
+.check-missing{color:var(--text-muted)}
+.lifecycle-card-meta{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px;display:flex;flex-direction:column;gap:2px}
+.review-row{display:flex;align-items:center;gap:6px}
+.hr-banner{background:var(--accent-soft);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.hr-banner-text h3{font-size:var(--fs-base);font-weight:var(--fw-bold);margin-bottom:2px}
+.hr-banner-text p{font-size:var(--fs-sm);color:var(--text-secondary)}
+.hr-note{font-size:var(--fs-xs);color:var(--text-muted);font-style:italic}
+.value-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:24px}
+.value-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:16px 18px}
+.value-card h4{font-size:var(--fs-sm);font-weight:var(--fw-bold);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.value-card p{font-size:var(--fs-sm);color:var(--text-secondary)}
+.phase2-tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);background:var(--bg-subtle);color:var(--text-muted)}
+
 .empty-state{text-align:center;padding:60px 20px;color:var(--text-muted)}
 .empty-state-icon{font-size:48px;margin-bottom:12px}
 .empty-state-text{font-size:var(--fs-base)}
@@ -163,8 +184,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 <div class="tab-bar" id="tabBar">
     <button class="tab-btn active" data-tab="directory" onclick="switchInternalTab('directory')">&#x1F4C7; Directory <span class="badge" id="dirBadge">0</span></button>
+    <button class="tab-btn" data-tab="onboarding" onclick="switchInternalTab('onboarding')">&#x1F6EB; Onboarding <span class="badge" id="lifecycleBadge">0</span></button>
     <button class="tab-btn" data-tab="orgchart" onclick="switchInternalTab('orgchart')">&#x1F3D7; Org Chart</button>
     <button class="tab-btn" data-tab="training" onclick="switchInternalTab('training')">&#x1F4DA; Training <span class="badge" id="trainBadge">0</span></button>
+    <button class="tab-btn" data-tab="reviews" onclick="switchInternalTab('reviews')">&#x1F4CA; Reviews <span class="badge" id="reviewBadge">0</span></button>
+    <button class="tab-btn" data-tab="handbook" onclick="switchInternalTab('handbook')">&#x1F4D6; Handbook <span class="badge" id="handbookBadge">0</span></button>
     <button class="tab-btn" data-tab="achievements" onclick="switchInternalTab('achievements')">&#x1F3C6; Achievements <span class="badge" id="achieveBadge">0</span></button>
 </div>
 
@@ -188,6 +212,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <div id="directoryGrid" class="card-grid"></div>
 </div>
 
+<!-- TAB: Onboarding / Offboarding tracker -->
+<div class="tab-pane" id="pane-onboarding">
+    <div id="onboardingContainer"></div>
+</div>
+
 <!-- TAB 2: Org Chart -->
 <div class="tab-pane" id="pane-orgchart">
     <div id="orgChartContainer" class="org-tree"></div>
@@ -201,6 +230,27 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         </select>
     </div>
     <div id="trainingContainer" style="overflow-x:auto"></div>
+</div>
+
+<!-- TAB: Performance Reviews -->
+<div class="tab-pane" id="pane-reviews">
+    <div class="controls">
+        <input class="search-input" type="text" id="reviewSearch" placeholder="Search by name, role..." oninput="renderReviews()">
+        <select class="filter-select" id="reviewDeptFilter" onchange="renderReviews()">
+            <option value="">All Departments</option>
+        </select>
+        <select class="filter-select" id="reviewStateFilter" onchange="renderReviews()">
+            <option value="">All Members</option>
+            <option value="due">Needs review (none on record)</option>
+            <option value="onrecord">Has reviews on record</option>
+        </select>
+    </div>
+    <div id="reviewsGrid" class="card-grid"></div>
+</div>
+
+<!-- TAB: Team Member Handbook (lite) -->
+<div class="tab-pane" id="pane-handbook">
+    <div id="handbookContainer"></div>
 </div>
 
 <!-- TAB 4: Achievements -->
@@ -319,8 +369,11 @@ function switchInternalTab(id) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === `pane-${id}`));
     window.scrollTo(0, 0);
+    if (id === 'onboarding') renderOnboarding();
     if (id === 'orgchart') renderOrgChart();
     if (id === 'training') renderTraining();
+    if (id === 'reviews') renderReviews();
+    if (id === 'handbook') renderHandbook();
     if (id === 'achievements') renderAchievements();
 }
 
@@ -334,7 +387,8 @@ async function loadAll(force) {
             TEAM.startDate, TEAM.active, TEAM.contractDocs, TEAM.achievements, TEAM.sops, TEAM.sopsTask,
             TEAM.performanceReviews, TEAM.emergencyName, TEAM.emergencyPhone, TEAM.country,
             TEAM.workingDays, TEAM.weeklyCapacity, TEAM.utilisation, TEAM.business, TEAM.slackHandle,
-            TEAM.managerEmail, TEAM.constraints, TEAM.handbookLink, TEAM.member].map(f => `fields%5B%5D=${f}`).join('&');
+            TEAM.managerEmail, TEAM.constraints, TEAM.handbookLink, TEAM.member,
+            TEAM.dob, TEAM.contractHR].map(f => `fields%5B%5D=${f}`).join('&');
 
         const achieveFields = [ACHIEVE.title, ACHIEVE.teamMember, ACHIEVE.description, ACHIEVE.date,
             ACHIEVE.type, ACHIEVE.source, ACHIEVE.status].map(f => `fields%5B%5D=${f}`).join('&');
@@ -374,6 +428,20 @@ async function loadAll(force) {
 
 function gf(rec, fid) {
     return rec.fields?.[fid] ?? '';
+}
+
+// Count items in a linked-record / attachment field, tolerant of both
+// string-ID arrays and {id,name} object arrays (the API returns both shapes here).
+function linkCount(rec, fid) {
+    const v = gf(rec, fid);
+    return Array.isArray(v) ? v.length : 0;
+}
+
+function fmtDate(d) {
+    if (!d) return '';
+    const dt = new Date(d);
+    if (isNaN(dt)) return escHtml(String(d));
+    return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function memberName(m) {
@@ -448,6 +516,7 @@ function populateFilters() {
     const deptHtml = '<option value="">All Departments</option>' + sorted.map(d => `<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('');
     document.getElementById('dirDeptFilter').innerHTML = deptHtml;
     document.getElementById('trainDeptFilter').innerHTML = deptHtml;
+    document.getElementById('reviewDeptFilter').innerHTML = deptHtml;
 
     const memberOpts = allMembers.filter(m => isActive(m)).sort((a,b) => memberName(a).localeCompare(memberName(b)));
     document.getElementById('achieveMemberFilter').innerHTML = '<option value="">All Members</option>' +
@@ -458,6 +527,19 @@ function updateBadges() {
     const active = allMembers.filter(m => isActive(m));
     document.getElementById('dirBadge').textContent = active.length;
     document.getElementById('achieveBadge').textContent = allAchievements.length;
+
+    const inLifecycle = allMembers.filter(m => {
+        const s = statusName(m);
+        return s === 'Onboarding' || s === 'Offboarding';
+    }).length;
+    document.getElementById('lifecycleBadge').textContent = inLifecycle;
+
+    const dueReviews = active.filter(m => linkCount(m, TEAM.performanceReviews) === 0).length;
+    document.getElementById('reviewBadge').textContent = dueReviews;
+
+    // Handbook outstanding = active members with no handbook link issued
+    const handbookOutstanding = active.filter(m => !gf(m, TEAM.handbookLink)).length;
+    document.getElementById('handbookBadge').textContent = handbookOutstanding;
 
     const sopCount = allSOPs.filter(s => {
         const tm = gf(s, SOP.teamMember);
@@ -566,6 +648,22 @@ function openDrawer(recId) {
     if (managerName) html += `<div class="drawer-field"><span class="drawer-field-label">Reports To</span><span class="drawer-field-value">${escHtml(managerName)}</span></div>`;
     if (startDate) html += `<div class="drawer-field"><span class="drawer-field-label">Start Date</span><span class="drawer-field-value">${escHtml(startDate)}</span></div>`;
     html += `</div>`;
+
+    const dob = gf(m, TEAM.dob);
+    const utilisation = gf(m, TEAM.utilisation);
+    const contractHRCount = linkCount(m, TEAM.contractHR);
+    const reviewCount = linkCount(m, TEAM.performanceReviews);
+    if (dob || utilisation !== '' || contractHRCount || reviewCount) {
+        html += `<div class="drawer-section"><h3>HR Details</h3>`;
+        if (dob) html += `<div class="drawer-field"><span class="drawer-field-label">Date of Birth</span><span class="drawer-field-value">${fmtDate(dob)}</span></div>`;
+        if (utilisation !== '' && utilisation != null) {
+            const pct = Math.round(Number(utilisation) * (Number(utilisation) <= 1 ? 100 : 1));
+            html += `<div class="drawer-field"><span class="drawer-field-label">Utilisation</span><span class="drawer-field-value">${escHtml(pct)}%</span></div>`;
+        }
+        html += `<div class="drawer-field"><span class="drawer-field-label">Performance Reviews</span><span class="drawer-field-value">${reviewCount ? escHtml(reviewCount) + ' on record' : 'None on record'}</span></div>`;
+        if (contractHRCount) html += `<div class="drawer-field"><span class="drawer-field-label">HR Contract</span><span class="drawer-field-value">${escHtml(contractHRCount)} linked</span></div>`;
+        html += `</div>`;
+    }
 
     if (capacity || (Array.isArray(workingDays) && workingDays.length)) {
         html += `<div class="drawer-section"><h3>Availability</h3>`;
@@ -813,6 +911,186 @@ function renderAchievements() {
             <div class="achievement-card-desc">${escHtml(desc)}</div>
         </div>`;
     }).join('');
+}
+
+function renderReviews() {
+    const grid = document.getElementById('reviewsGrid');
+    const search = (document.getElementById('reviewSearch').value || '').toLowerCase();
+    const deptFilter = document.getElementById('reviewDeptFilter').value;
+    const stateFilter = document.getElementById('reviewStateFilter').value;
+
+    let filtered = allMembers.filter(m => isActive(m));
+    filtered = filtered.filter(m => {
+        const count = linkCount(m, TEAM.performanceReviews);
+        if (stateFilter === 'due' && count !== 0) return false;
+        if (stateFilter === 'onrecord' && count === 0) return false;
+        if (deptFilter && !deptNames(m).includes(deptFilter)) return false;
+        if (search) {
+            const hay = [memberName(m), gf(m, TEAM.jobTitle), ...deptNames(m), ...roleNames(m)].join(' ').toLowerCase();
+            if (!hay.includes(search)) return false;
+        }
+        return true;
+    });
+
+    filtered.sort((a, b) => {
+        const ca = linkCount(a, TEAM.performanceReviews);
+        const cb = linkCount(b, TEAM.performanceReviews);
+        if (ca !== cb) return ca - cb; // members needing a review first
+        return memberName(a).localeCompare(memberName(b));
+    });
+
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#x1F4CA;</div><div class="empty-state-text">No team members match your filters.</div></div>';
+        return;
+    }
+
+    grid.innerHTML = filtered.map(m => {
+        const name = memberName(m);
+        const roles = roleNames(m);
+        const depts = deptNames(m);
+        const jobTitle = gf(m, TEAM.jobTitle);
+        const count = linkCount(m, TEAM.performanceReviews);
+        const chip = count > 0
+            ? `<span class="chip chip-status chip-active">${escHtml(count)} review${count !== 1 ? 's' : ''} on record</span>`
+            : `<span class="chip chip-status chip-offboarded">No reviews on record</span>`;
+
+        return `<div class="member-card" onclick="openDrawer('${m.id}')">
+            <div class="member-card-top">
+                ${avatarHtml(m)}
+                <div>
+                    <div class="member-name">${escHtml(name)}</div>
+                    <div class="member-role">${escHtml(jobTitle || roles.join(', ') || 'No role assigned')}</div>
+                </div>
+            </div>
+            <div class="member-meta">
+                ${chip}
+                ${depts.map(d => `<span class="chip chip-dept">${escHtml(d)}</span>`).join('')}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// Lightweight onboarding completeness derived from data already on the record.
+const ONBOARD_CHECKS = [
+    { label: 'Work email', test: m => !!gf(m, TEAM.workEmail) },
+    { label: 'Manager assigned', test: m => linkCount(m, TEAM.manager) > 0 },
+    { label: 'Contract on file', test: m => linkCount(m, TEAM.contractDocs) > 0 },
+    { label: 'SOPs assigned', test: m => linkCount(m, TEAM.sops) > 0 || linkCount(m, TEAM.sopsTask) > 0 },
+    { label: 'Profile photo', test: m => linkCount(m, TEAM.profilePhoto) > 0 },
+];
+
+function lifecycleCard(m, withChecklist) {
+    const name = memberName(m);
+    const roles = roleNames(m);
+    const jobTitle = gf(m, TEAM.jobTitle);
+    const startDate = gf(m, TEAM.startDate);
+    const depts = deptNames(m);
+
+    let checklistHtml = '';
+    if (withChecklist) {
+        const done = ONBOARD_CHECKS.filter(c => c.test(m)).length;
+        const pct = Math.round((done / ONBOARD_CHECKS.length) * 100);
+        checklistHtml = `<div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+            <div class="coverage-bar" style="flex:1"><div class="coverage-fill" style="width:${pct}%"></div></div>
+            <span style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap">${done}/${ONBOARD_CHECKS.length}</span>
+        </div>
+        <div class="checklist">${ONBOARD_CHECKS.map(c => {
+            const ok = c.test(m);
+            return `<div class="checklist-item ${ok ? 'check-done' : 'check-missing'}"><span class="checklist-icon">${ok ? '&#x2713;' : '&#x25CB;'}</span>${escHtml(c.label)}</div>`;
+        }).join('')}</div>`;
+    }
+
+    return `<div class="member-card" onclick="openDrawer('${m.id}')">
+        <div class="member-card-top">
+            ${avatarHtml(m)}
+            <div>
+                <div class="member-name">${escHtml(name)}</div>
+                <div class="member-role">${escHtml(jobTitle || roles.join(', ') || 'No role assigned')}</div>
+            </div>
+        </div>
+        <div class="member-meta">
+            ${depts.map(d => `<span class="chip chip-dept">${escHtml(d)}</span>`).join('')}
+        </div>
+        <div class="lifecycle-card-meta">${startDate ? `Start date: ${fmtDate(startDate)}` : 'No start date set'}</div>
+        ${checklistHtml}
+    </div>`;
+}
+
+function renderOnboarding() {
+    const container = document.getElementById('onboardingContainer');
+    const onboarding = allMembers.filter(m => statusName(m) === 'Onboarding')
+        .sort((a, b) => memberName(a).localeCompare(memberName(b)));
+    const offboarding = allMembers.filter(m => statusName(m) === 'Offboarding')
+        .sort((a, b) => memberName(a).localeCompare(memberName(b)));
+
+    if (onboarding.length === 0 && offboarding.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#x1F6EB;</div><div class="empty-state-text">No team members are currently onboarding or offboarding.</div></div>';
+        return;
+    }
+
+    let html = '';
+    html += `<div class="hr-group">
+        <div class="hr-group-title">&#x1F6EB; Onboarding <span class="count">${onboarding.length}</span></div>`;
+    html += onboarding.length
+        ? `<div class="card-grid">${onboarding.map(m => lifecycleCard(m, true)).join('')}</div>`
+        : `<div style="color:var(--text-muted);font-size:var(--fs-sm)">No one is currently onboarding.</div>`;
+    html += `</div>`;
+
+    html += `<div class="hr-group">
+        <div class="hr-group-title">&#x1F6EC; Offboarding <span class="count">${offboarding.length}</span></div>`;
+    html += offboarding.length
+        ? `<div class="card-grid">${offboarding.map(m => lifecycleCard(m, false)).join('')}</div>`
+        : `<div style="color:var(--text-muted);font-size:var(--fs-sm)">No one is currently offboarding.</div>`;
+    html += `</div>`;
+
+    container.innerHTML = html;
+}
+
+function renderHandbook() {
+    const container = document.getElementById('handbookContainer');
+    const active = allMembers.filter(m => isActive(m)).sort((a, b) => memberName(a).localeCompare(memberName(b)));
+
+    // Canonical handbook link derives from the existing per-member handbookLink field (no new fields added).
+    const links = active.map(m => gf(m, TEAM.handbookLink)).filter(Boolean);
+    const canonical = [...new Set(links)][0] || '';
+    const issued = links.length;
+
+    let html = `<div class="hr-banner">
+        <div class="hr-banner-text">
+            <h3>&#x1F4D6; Team Member Handbook</h3>
+            <p>Core values and onboarding information in one place, issued at onboarding so every new starter reads it.</p>
+            <div class="hr-note">Issued to ${issued} of ${active.length} active member${active.length !== 1 ? 's' : ''}. Watch-and-acknowledge tracking arrives in phase two.</div>
+        </div>
+        <div>${canonical
+            ? `<a class="btn btn-primary" href="${escHtml(canonical)}" target="_blank" rel="noopener">Open handbook</a>`
+            : `<span class="phase2-tag">No handbook link set</span>`}</div>
+    </div>`;
+
+    // Handbook contents — structure only; HR content populated at integration (no field to store it yet).
+    const sections = [
+        { icon: '&#x2B50;', title: 'Core Values', body: 'Company core values — to be populated by HR.' },
+        { icon: '&#x1F9ED;', title: 'Mission &amp; Vision', body: 'Mission and vision statement — to be populated by HR.' },
+        { icon: '&#x1F91D;', title: 'Ways of Working', body: 'Standards, communication norms and expectations — to be populated by HR.' },
+        { icon: '&#x1F4CB;', title: 'Onboarding Essentials', body: 'First-week checklist, tools access and key contacts — to be populated by HR.' }
+    ];
+    html += `<div class="hr-group-title">Handbook contents <span class="phase2-tag">content to be populated</span></div>`;
+    html += `<div class="value-grid">${sections.map(s => `<div class="value-card"><h4>${s.icon} ${s.title}</h4><p>${escHtml(s.body)}</p></div>`).join('')}</div>`;
+
+    html += `<div class="hr-group-title">Issued status <span class="count">${active.length}</span></div>`;
+    if (active.length === 0) {
+        html += '<div class="empty-state"><div class="empty-state-icon">&#x1F4D6;</div><div class="empty-state-text">No active team members.</div></div>';
+    } else {
+        html += `<table class="training-table"><thead><tr><th>Team Member</th><th>Handbook issued</th><th>Acknowledged</th></tr></thead><tbody>`;
+        active.forEach(m => {
+            const has = !!gf(m, TEAM.handbookLink);
+            html += `<tr><td>${escHtml(memberName(m))}</td>`
+                + `<td><span class="training-badge ${has ? 'training-trained' : 'training-not'}">${has ? 'Issued' : 'Not issued'}</span></td>`
+                + `<td><span class="phase2-tag">Phase two</span></td></tr>`;
+        });
+        html += `</tbody></table>`;
+    }
+
+    container.innerHTML = html;
 }
 
 function toggleAddAchievement() {

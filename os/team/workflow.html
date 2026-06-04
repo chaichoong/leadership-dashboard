@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HR / Team Members — How It All Connects</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{line-height:1.55;background:var(--bg-app);color:var(--text-primary);padding:32px 24px 80px}
+.wrap{max-width:1100px;margin:0 auto}
+h1{font-size:var(--fs-2xl);font-weight:var(--fw-bold);margin-bottom:6px}
+.lede{font-size:var(--fs-base);color:var(--text-secondary);margin-bottom:28px;max-width:760px}
+h2{font-size:var(--fs-lg);font-weight:var(--fw-bold);margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border-default)}
+.plain{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:16px;max-width:780px}
+
+/* Legend */
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.legend-item{display:flex;align-items:center;gap:7px;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+.dot{width:14px;height:14px;border-radius:4px;flex-shrink:0}
+.sys-hr{background:var(--tone-sage)}
+.sys-comms{background:var(--tone-blue)}
+.sys-sys{background:var(--tone-olive)}
+.sys-tasks{background:var(--tone-plum)}
+.sys-phase2{background:var(--bg-subtle);border:1px solid var(--border-default)}
+
+/* Flow rows */
+.flow{display:flex;align-items:stretch;flex-wrap:wrap;gap:0;margin:8px 0 6px}
+.step{position:relative;flex:1 1 0;min-width:150px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:14px 14px;box-shadow:var(--shadow-sm)}
+.step + .step{margin-left:34px}
+.step + .step::before{content:'\2192';position:absolute;left:-28px;top:50%;transform:translateY(-50%);font-size:22px;color:var(--text-muted)}
+.step-num{font-size:var(--fs-xs);font-weight:var(--fw-bold);color:var(--text-muted);margin-bottom:4px}
+.step-title{font-size:var(--fs-sm);font-weight:var(--fw-bold);margin-bottom:4px}
+.step-desc{font-size:var(--fs-xs);color:var(--text-secondary)}
+.step-tag{display:inline-block;margin-top:8px;font-size:10px;font-weight:var(--fw-bold);text-transform:uppercase;letter-spacing:.03em;padding:2px 7px;border-radius:10px;color:#fff}
+.tag-hr{background:var(--tone-sage)}
+.tag-comms{background:var(--tone-blue)}
+.tag-sys{background:var(--tone-olive)}
+.tag-tasks{background:var(--tone-plum)}
+.tag-phase2{background:var(--bg-subtle);color:var(--text-muted)}
+.step.is-link{border-width:2px;border-style:dashed}
+.step.link-comms{border-color:var(--tone-blue)}
+.step.link-sys{border-color:var(--tone-olive)}
+.step.link-tasks{border-color:var(--tone-plum)}
+
+/* Component map */
+.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.comp{background:var(--bg-surface);border:1px solid var(--border-default);border-left:4px solid var(--tone-sage);border-radius:var(--radius-md);padding:14px 16px}
+.comp h3{font-size:var(--fs-sm);font-weight:var(--fw-bold);margin-bottom:4px}
+.comp p{font-size:var(--fs-xs);color:var(--text-secondary)}
+.comp .links{font-size:10px;color:var(--text-muted);margin-top:8px}
+
+.note{background:var(--accent-soft);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:14px 16px;font-size:var(--fs-sm);color:var(--text-primary);margin-top:14px}
+.note b{font-weight:var(--fw-bold)}
+.foot{margin-top:40px;font-size:var(--fs-xs);color:var(--text-muted)}
+@media(max-width:760px){.flow{flex-direction:column}.step + .step{margin-left:0;margin-top:30px}.step + .step::before{left:50%;top:-26px;transform:translateX(-50%) rotate(90deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>&#x1F465; HR / Team Members — How It All Connects</h1>
+<p class="lede">A picture of how the Team Members section works, and where it plugs into the rest of the Operations Director app. If you can follow a recipe, you can follow this. Each colour is a different part of the app.</p>
+
+<div class="legend">
+    <span class="legend-item"><span class="dot sys-hr"></span> HR / Team Members</span>
+    <span class="legend-item"><span class="dot sys-comms"></span> Inbound Comms</span>
+    <span class="legend-item"><span class="dot sys-sys"></span> Systemisation</span>
+    <span class="legend-item"><span class="dot sys-tasks"></span> Tasks &amp; Projects</span>
+    <span class="legend-item"><span class="dot sys-phase2"></span> Phase two (later)</span>
+</div>
+
+<h2>1. The six parts of the Team Members section</h2>
+<p class="plain">Everything about a person lives here. Six parts, all hanging off one record per team member.</p>
+<div class="comp-grid">
+    <div class="comp"><h3>&#x1F4C7; Team Member Records</h3><p>One card per person: status, department, contact details, contracts.</p><div class="links">Links to: Inbound Comms (contracts)</div></div>
+    <div class="comp"><h3>&#x1F3D7; Org Chart</h3><p>A picture of who reports to whom, built from the &ldquo;manager&rdquo; field.</p><div class="links">Built from: Team Member Records</div></div>
+    <div class="comp"><h3>&#x1F4DA; Training Record</h3><p>A grid of who has watched which workflow / SOP.</p><div class="links">Links to: Systemisation, Tasks</div></div>
+    <div class="comp"><h3>&#x1F4CA; Reviews</h3><p>A record of each performance review (6-monthly cycle in phase two).</p><div class="links">Phase two: review topics + reminders</div></div>
+    <div class="comp"><h3>&#x1F4D6; Handbook</h3><p>Core values + onboarding info, issued to each new starter.</p><div class="links">Phase two: read-and-acknowledge</div></div>
+    <div class="comp"><h3>&#x1F3C6; Achievements</h3><p>Good things each person has done, recorded and shown on their card.</p><div class="links">Self-contained</div></div>
+</div>
+
+<h2>2. Onboarding a new team member &mdash; start to finish</h2>
+<p class="plain">From the moment they say yes, to a complete record with training booked in.</p>
+<div class="flow">
+    <div class="step"><div class="step-num">STEP 1</div><div class="step-title">Offer accepted</div><div class="step-desc">New starter agrees to join. Create their Team Member record, set status to &ldquo;Onboarding&rdquo;.</div><span class="step-tag tag-hr">HR</span></div>
+    <div class="step is-link link-comms"><div class="step-num">STEP 2</div><div class="step-title">Contract signed</div><div class="step-desc">Signed contract arrives by email and is labelled in Inbound Comms, then pulled onto the right person&rsquo;s record.</div><span class="step-tag tag-comms">Inbound Comms</span></div>
+    <div class="step"><div class="step-num">STEP 3</div><div class="step-title">Record completed</div><div class="step-desc">Department, manager, personal info and emergency contact filled in. Org chart updates itself.</div><span class="step-tag tag-hr">HR</span></div>
+    <div class="step is-link link-sys"><div class="step-num">STEP 4</div><div class="step-title">Training assigned</div><div class="step-desc">SOP-watch tasks for their role are assigned from Systemisation. Training grid starts filling in.</div><span class="step-tag tag-sys">Systemisation</span></div>
+    <div class="step"><div class="step-num">STEP 5</div><div class="step-title">Handbook issued</div><div class="step-desc">Handbook is issued. New starter reads it and (phase two) ticks to confirm.</div><span class="step-tag tag-hr">HR</span></div>
+</div>
+<div class="note"><b>Where it plugs in:</b> Step 2 needs <b>Inbound Comms</b> (the contract label route). Step 4 needs <b>Systemisation + Tasks &amp; Projects</b> (the SOP-watch tasks). Both are finished by Kevin at integration &mdash; see HR-WORKFLOW.md.</div>
+
+<h2>3. Offboarding a team member &mdash; start to finish</h2>
+<p class="plain">A tidy, repeatable exit so nothing is forgotten.</p>
+<div class="flow">
+    <div class="step"><div class="step-num">STEP 1</div><div class="step-title">Leaving confirmed</div><div class="step-desc">Set the person&rsquo;s status to &ldquo;Offboarding&rdquo;. They appear in the Onboarding/Offboarding tracker.</div><span class="step-tag tag-hr">HR</span></div>
+    <div class="step is-link link-tasks"><div class="step-num">STEP 2</div><div class="step-title">Exit checklist</div><div class="step-desc">Return equipment, revoke access, reassign their open tasks and SOPs to others.</div><span class="step-tag tag-tasks">Tasks</span></div>
+    <div class="step"><div class="step-num">STEP 3</div><div class="step-title">Record archived</div><div class="step-desc">Final pay and documents stored on the record. Org chart drops them from the live tree.</div><span class="step-tag tag-hr">HR</span></div>
+    <div class="step"><div class="step-num">STEP 4</div><div class="step-title">Marked &ldquo;Offboarded&rdquo;</div><div class="step-desc">Status set to &ldquo;Offboarded&rdquo;. They leave active counts but the record is kept for the future.</div><span class="step-tag tag-hr">HR</span></div>
+</div>
+
+<h2>4. The three plug-in points, in one line each</h2>
+<div class="comp-grid">
+    <div class="comp" style="border-left-color:var(--tone-blue)"><h3>&#x1F4E5; Inbound Comms</h3><p>A &ldquo;personnel contract&rdquo; email label pulls a signed contract onto the matching person&rsquo;s record.</p></div>
+    <div class="comp" style="border-left-color:var(--tone-olive)"><h3>&#x2699;&#xFE0F; Systemisation</h3><p>Each workflow&rsquo;s SOPs become watch-tasks; finishing one ticks the person&rsquo;s training grid.</p></div>
+    <div class="comp" style="border-left-color:var(--tone-plum)"><h3>&#x2705; Tasks &amp; Projects</h3><p>Training-watch tasks and offboarding to-dos live here, assigned to the team member.</p></div>
+</div>
+
+<p class="foot">Diagram generated for the Operations Director app &middot; HR / Team Members section &middot; Phase one. Dashed boxes are where this section talks to another part of the app. See <b>HR-WORKFLOW.md</b> for the exact automations and Kevin&rsquo;s integration steps.</p>
+
+</div>
+</body>
+</html>
