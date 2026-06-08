@@ -396,6 +396,40 @@
                 result.costLabel = '';
             }
 
+            // ── Guard: tenancy amount tiebreaker ──
+            // When the AI suggests a tenancy but the transaction amount doesn't
+            // match that tenancy's rent, check if a sibling tenancy (same tenant,
+            // different unit) has a rent that matches. Prevents mislinks when
+            // multiple tenancies share a surname (e.g. Peters Unit 1 vs Unit 2).
+            if (result.tenancyId && result.txAmount > 0) {
+                const suggestedTen = tenancyLookup[result.tenancyId];
+                const suggestedRent = suggestedTen ? (Number(getField(suggestedTen, F.tenRent)) || 0) : 0;
+                const txAbs = Math.abs(result.txAmount);
+                if (suggestedRent > 0 && Math.abs(txAbs - suggestedRent) > 1) {
+                    const suggestedTenant = getTenantForTenancy(suggestedTen, tenantLookup);
+                    if (suggestedTenant) {
+                        const siblingTenancies = allTenancies.filter(t => {
+                            if (t.id === result.tenancyId) return false;
+                            const otherTenant = getTenantForTenancy(t, tenantLookup);
+                            return otherTenant && otherTenant.id === suggestedTenant.id;
+                        });
+                        const betterMatch = siblingTenancies.find(t => {
+                            const rent = Number(getField(t, F.tenRent)) || 0;
+                            return rent > 0 && Math.abs(txAbs - rent) <= 1;
+                        });
+                        if (betterMatch) {
+                            result.tenancyId = betterMatch.id;
+                            result.tenancyLabel = String(getField(betterMatch, F.tenRef) || '');
+                            const unitRef = getField(betterMatch, F.tenUnitRef);
+                            result.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
+                            const unitLink = getField(betterMatch, F.tenUnit);
+                            result.unitId = Array.isArray(unitLink) ? (typeof unitLink[0] === 'object' ? unitLink[0].id : unitLink[0]) : (typeof unitLink === 'object' ? unitLink.id : (unitLink || ''));
+                            result.propertyId = getPropertyIdFromUnit(result.unitId);
+                        }
+                    }
+                }
+            }
+
             results.push(result);
         });
 
