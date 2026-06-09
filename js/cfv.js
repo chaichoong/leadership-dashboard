@@ -341,25 +341,26 @@
             return;
         }
 
+        // Show immediate loading indicator so the tab doesn't appear frozen
+        // while Airtable API calls (dismissal sync, comment counts) run.
+        const summaryCards = document.getElementById('cfvSummaryCards');
+        const tbody = document.getElementById('cfvTableBody');
+        if (summaryCards && !summaryCards.querySelector('.kpi-card-value')) {
+            summaryCards.innerHTML = `<div class="kpi-card" style="grid-column:1/-1;text-align:center;padding:24px">
+                <div class="spinner" style="margin:0 auto 12px"></div>
+                <div class="kpi-card-label">Loading Cash Flow Voids…</div>
+            </div>`;
+        }
+
         const cfvList = detectCFVs();
         const today = new Date();
 
         // DO NOT auto-update Airtable — show potential CFVs for user approval
         // User must confirm before status changes in Airtable
 
-        // Before filtering: restore dismissals from Airtable comments for any potential
-        // CFV where localStorage is empty (e.g. user cleared site data). Keeps dismissals
-        // persistent across browsers/devices.
-        const potentialEntries = cfvList.filter(e => e.status === 'potential');
-        if (potentialEntries.length > 0) {
-            await syncDismissalsFromAirtable(potentialEntries);
-        }
-
-        // Filter out dismissed potential CFVs (user clicked "Not a CFV")
-        // Dismissal holds until the NEXT due day (plus tolerance) has passed —
-        // i.e. the start of the next rent cycle. A fixed 25-day expiry was
-        // wrong because it could expire within the same month (e.g. dismiss
-        // on the 3rd, expire on the 28th — well before next month's due day).
+        // Filter out dismissed potential CFVs using localStorage (instant, no API).
+        // syncDismissalsFromAirtable runs in the background below to restore any
+        // localStorage entries lost by cache clears; if it finds any, it re-renders.
         const filteredList = cfvList.filter(entry => {
             if (entry.status === 'potential') {
                 const dismissedAt = localStorage.getItem('cfv_dismissed_' + entry.tenancyId);
@@ -383,6 +384,18 @@
             return true;
         });
 
+        // Background: restore dismissals from Airtable comments for potential
+        // CFVs where localStorage is empty (e.g. user cleared site data). If any
+        // are restored, re-render so the dismissed entries disappear.
+        const potentialEntries = cfvList.filter(e => e.status === 'potential');
+        if (potentialEntries.length > 0) {
+            syncDismissalsFromAirtable(potentialEntries).then(() => {
+                const anyRestored = potentialEntries.some(e =>
+                    localStorage.getItem('cfv_dismissed_' + e.tenancyId));
+                if (anyRestored) renderCFVTab();
+            });
+        }
+
         // Summary
         const potentialCfvs = filteredList.filter(e => e.status === 'potential');
         const cfvOnly = filteredList.filter(e => e.status === 'cfv' || e.status === 'potential');
@@ -391,7 +404,6 @@
         const totalExposure = filteredList.reduce((s, e) => s + e.rent, 0);
         const oldestOverdue = cfvOnly.length ? Math.max(...cfvOnly.map(e => e.daysOverdue)) : 0;
 
-        const summaryCards = document.getElementById('cfvSummaryCards');
         if (summaryCards) {
             summaryCards.innerHTML = `
                 ${potentialCfvs.length > 0 ? `<div class="kpi-card" style="border-color:var(--warning);border-width:2px">
@@ -433,7 +445,6 @@
         }
 
         // Table
-        const tbody = document.getElementById('cfvTableBody');
         if (!tbody) return;
 
         if (filteredList.length === 0) {
@@ -441,21 +452,10 @@
             return;
         }
 
-        // Fetch comment counts with concurrency limiter (Airtable: 5 req/sec)
+        // Render table immediately with placeholder comment buttons.
+        // Comment counts are fetched in the background and button labels
+        // are updated as they arrive (no blocking await).
         const commentCounts = {};
-        await Promise.all(filteredList.map(entry => limitedApiFetch(async () => {
-            try {
-                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${entry.tenancyId}/comments`, {
-                    headers: { 'Authorization': 'Bearer ' + PAT }
-                });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    commentCounts[entry.tenancyId] = (data.comments || []).length;
-                } else {
-                    commentCounts[entry.tenancyId] = 0;
-                }
-            } catch (e) { commentCounts[entry.tenancyId] = 0; }
-        })));
 
         // Sort: Potential first, then CFV, then CFV Actioned — by due day
         filteredList.sort((a, b) => {
@@ -539,6 +539,27 @@
                 <td style="min-width:100px" onclick="event.stopPropagation()">${actionsHtml}</td>
             </tr>`;
         }).join('');
+
+        // Background: fetch comment counts and update button labels as they arrive.
+        // The table is already visible with "Comments" placeholders; this just
+        // adds the count badges without blocking the initial render.
+        Promise.all(filteredList.map(entry => limitedApiFetch(async () => {
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tenancies}/${entry.tenancyId}/comments`, {
+                    headers: { 'Authorization': 'Bearer ' + PAT }
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const cc = (data.comments || []).length;
+                    if (cc > 0) {
+                        const label = `💬 ${cc} comment${cc !== 1 ? 's' : ''}`;
+                        document.querySelectorAll(`[data-comment-btn="${entry.tenancyId}"]`).forEach(btn => {
+                            btn.textContent = label;
+                        });
+                    }
+                }
+            } catch (e) { /* non-fatal — buttons keep their placeholder label */ }
+        })));
 
         // ── Sync Bar + Health Checks ──
         if (typeof registerSyncBar === 'function') {
