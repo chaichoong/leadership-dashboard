@@ -5,6 +5,10 @@
 **Current:** Vanilla JS, Airtable (API + linked records), GitHub Pages, plain `<script>` tags (no bundler).
 **Planned (SaaS migration):** Supabase (Postgres + RLS), Cloudflare Workers, Vercel, Stripe. Migration starts after product finish + dogfooding.
 
+## File Locations
+
+`STRUCTURE.md` is the single source of truth for where every file lives: repo folders, the AI context layer (CLAUDE.md, memory, skills), and Google Drive. Read it before creating any file. If you add a file in a location it does not cover, update STRUCTURE.md in the same commit. Code is ONLY edited in this repo; copies found in Google Drive are stale exports.
+
 ## Standard Workflow
 
 Two commands cover all work. Kevin talks conversationally after either one. Claude handles the full pipeline.
