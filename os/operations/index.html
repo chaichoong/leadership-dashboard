@@ -1286,8 +1286,11 @@ function renderCell(record, fieldDef, entityKey){
   if (fieldDef.type === 'number')  return wrapEditable(String(v),      fieldDef, record, entityKey, 'number');
   if (fieldDef.type === 'check')   return `<input type="checkbox" ${v?'checked':''} ${fieldDef.edit&&!fieldDef.readOnly?`onchange="saveCheckbox(this,'${record.id}','${fieldDef.id}','${entityKey}')"`:'disabled'}>`;
   if (fieldDef.type === 'long') {
-    const trimmed = String(v).length > 80 ? String(v).slice(0,80)+'…' : String(v);
-    return wrapEditable(escapeHtml(trimmed), fieldDef, record, entityKey, 'long', v);
+    // Render the full value. In the table the cell CSS (overflow:hidden +
+    // text-overflow:ellipsis) truncates it to one line; in the drawer the
+    // .field-value wraps it so the whole address/postcode is visible — needed
+    // for security checks that require the full postcode.
+    return wrapEditable(escapeHtml(String(v)), fieldDef, record, entityKey, 'long', v);
   }
 
   // text / formula / fallback
@@ -1620,6 +1623,12 @@ document.addEventListener('click', e => {
 function startEdit(el){
   if (el.dataset._editing) return;
   el.dataset._editing = '1';
+  // Hide the row's expand chevron while editing this cell. It sits in the same
+  // table cell as the editable name, so a click landing on it would blur (and
+  // instantly close) the editor AND bubble to the row's expand toggle. Removing
+  // it lets the editor fill the cell. Restored when editing ends.
+  const chevron = el.closest('td')?.querySelector('.expand-chevron');
+  if (chevron) chevron.style.display = 'none';
   const type = el.dataset.type;
   const fieldId = el.dataset.edit;
   const recId = el.dataset.rec;
@@ -1689,6 +1698,10 @@ function replaceWithEditor(el, editor, commit){
   el.dataset._original = original;
   el.style.display = 'none';
   el.parentNode.insertBefore(editor, el.nextSibling);
+  // Clicks inside the editor must not reach the row's onclick (toggleExpandRow)
+  // — otherwise clicking into the field to edit expands the row.
+  editor.addEventListener('mousedown', e => e.stopPropagation());
+  editor.addEventListener('click', e => e.stopPropagation());
   let committed = false;
   const commitOnce = async () => {
     if (committed) return; committed = true;
@@ -1703,11 +1716,15 @@ function replaceWithEditor(el, editor, commit){
       editor.remove();
       el.style.display = '';
       delete el.dataset._editing;
+      const chev = el.closest('td')?.querySelector('.expand-chevron');
+      if (chev) chev.style.display = '';
     }
   });
 }
 
 function finishEdit(el, record, entityKey){
+  const chevron = el.closest('td')?.querySelector('.expand-chevron');
+  if (chevron) chevron.style.display = '';
   const fieldId = el.dataset.edit;
   const sch = SCHEMA_RESOLVED[entityKey];
   const fieldDef = sch.byId[fieldId];
@@ -1752,6 +1769,8 @@ async function saveField(entityKey, recId, fieldId, value, el){
     el.classList.add('cell-error');
     delete el.dataset._editing;
     el.style.display = '';
+    const chev = el.closest('td')?.querySelector('.expand-chevron');
+    if (chev) chev.style.display = '';
     const next = el.nextSibling;
     if (next && next.tagName && /input|select|textarea/i.test(next.tagName)) next.remove();
     toast('Save failed: ' + (e.message||'unknown'), 'error');
