@@ -73,7 +73,15 @@ Use throwaway data wherever possible. Never test with production data that canno
 
 ## Phase 2: PREPARE
 
-### 2a. Confirm deploy is live
+### 2a. Establish browser connection
+
+Before anything else, connect to Chrome MCP. If the first `tabs_context_mcp` call fails:
+1. Retry up to 3 times with a short pause between attempts
+2. If Chrome MCP still fails, fall back to preview tools (`preview_start`, `preview_eval`, `preview_snapshot`, `preview_screenshot`) to run the tests
+3. Only ask Kevin to check Chrome is open as an absolute last resort after all retries and fallbacks are exhausted
+4. NEVER ask Kevin to test manually or "check it yourself". Testing is always Claude's job. A connection failure is Claude's problem to solve.
+
+### 2b. Confirm deploy is live
 
 Before testing, verify the latest code is deployed:
 
@@ -83,7 +91,7 @@ git log --oneline -1
 
 Check that the live site reflects the changes (use Chrome MCP to navigate and verify).
 
-### 2b. Record the starting state
+### 2c. Record the starting state
 
 Before creating any test data, document the current state of everything you will touch:
 - Record IDs of existing items
@@ -93,7 +101,7 @@ Before creating any test data, document the current state of everything you will
 
 This is your restoration target. If anything goes wrong, you revert to this state.
 
-### 2c. Authenticate
+### 2d. Authenticate
 
 If the feature requires authentication (Airtable, Gmail, Slack):
 1. Navigate to the page in Chrome MCP
