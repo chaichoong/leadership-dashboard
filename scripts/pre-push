@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pre-push hook — runs sync-invariant tests before pushing to main.
+# Install: ln -sf ../../scripts/pre-push .git/hooks/pre-push
+#
+# Skips if:
+#   - Not pushing to main
+#   - Playwright is not installed
+#   - SKIP_SYNC_TESTS=1 is set (escape hatch)
+
+set -e
+
+if [ "$SKIP_SYNC_TESTS" = "1" ]; then
+    exit 0
+fi
+
+# Only gate pushes to main
+remote="$1"
+while read local_ref local_sha remote_ref remote_sha; do
+    if echo "$remote_ref" | grep -q "refs/heads/main"; then
+        # Check if playwright is installed
+        if ! command -v npx >/dev/null 2>&1; then
+            echo "⚠️  npx not found — skipping sync-invariant tests"
+            exit 0
+        fi
+
+        if [ ! -d "node_modules/@playwright" ]; then
+            echo "⚠️  Playwright not installed — run 'npm install' to enable pre-push tests"
+            exit 0
+        fi
+
+        echo "🧪 Running sync-invariant tests before push to main..."
+        if npx playwright test tests/sync-invariants/ --reporter=dot --workers=2 --retries=1; then
+            echo "✅ All sync-invariant tests passed"
+        else
+            echo ""
+            echo "❌ Sync-invariant tests FAILED — push to main blocked."
+            echo "   Fix the failing tests or use SKIP_SYNC_TESTS=1 git push to bypass."
+            exit 1
+        fi
+    fi
+done
+
+exit 0
