@@ -38,20 +38,6 @@ test.describe('Stale Data Protection', () => {
     expect(dashExists).toBe(true);
   });
 
-  test('no "no data" message when data exists', async ({ page }) => {
-    await loadDashboard(page);
-
-    // With fixture data present, no "no records" or "no costs visible" messages
-    const hasEmptyState = await page.evaluate(() => {
-      const body = document.body.textContent;
-      // These are legitimate empty states that shouldn't show when data exists
-      const emptyPhrases = ['no costs visible', 'no records found', 'no data available'];
-      return emptyPhrases.some(p => body.toLowerCase().includes(p));
-    });
-    // This may be valid if the current tab doesn't show costs — so we check the costs tab specifically
-    // Only fail if the costs tab is active AND shows empty state
-  });
-
   test('majority of API requests use returnFieldsByFieldId mode', async ({ page }) => {
     const requests = { withFieldId: 0, without: 0, exceptions: [] };
 

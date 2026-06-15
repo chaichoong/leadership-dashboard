@@ -12,7 +12,10 @@ test.describe('Active Business Filter', () => {
     await loadDashboard(page, 'invoices');
     // Switch to invoices tab
     await page.evaluate(() => switchTab('invoices'));
-    await page.waitForTimeout(1000);
+    // Wait for the business dropdowns to actually render, rather than a blind sleep.
+    await page.waitForFunction(() => {
+      return [...document.querySelectorAll('select')].some(s => s.innerHTML.includes('Active Corp'));
+    }, { timeout: 10000 });
 
     // Get all business <select> options in the invoice table
     const bizOptions = await page.evaluate(() => {
@@ -52,7 +55,9 @@ test.describe('Active Business Filter', () => {
   test('inactive business is preserved as current value on existing record', async ({ page }) => {
     await loadDashboard(page, 'invoices');
     await page.evaluate(() => switchTab('invoices'));
-    await page.waitForTimeout(1000);
+    await page.waitForFunction(() => {
+      return [...document.querySelectorAll('select')].some(s => s.innerHTML.includes('Inactive Ltd'));
+    }, { timeout: 10000 });
 
     // recInv2 has business=recBiz2 (Inactive Ltd) — it should still show as selected
     const hasInactiveSelected = await page.evaluate(() => {

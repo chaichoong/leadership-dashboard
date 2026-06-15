@@ -2,8 +2,12 @@
 // Bug: JS-side split feature POSTed duplicate transactions alongside the Airtable automation,
 //      creating N × (N-1) extras. Data corruption incident.
 // Rule 1: Split operations must only PATCH the source record (set Split Count), never POST children.
-// Rule 2: Stale "(Split X of N)" in *Name with Split Count=1 must NOT grey out the Split button.
-// Rule 3: Split button must be greyed out when Split Count > 1 (truly already split).
+//
+// Rules 2/3 (the Split button's enabled/disabled state) are now enforced at source:
+// reconciliation.js derives `isAlreadySplit` purely from Number(Split Count) > 1, not from
+// parsing the "(Split X of N)" name string. Asserting the rendered button state needs a fixture
+// that renders the reconciliation panel under mock data — tracked as a follow-up rather than
+// shipped as a DOM test that passes whether or not the button exists.
 
 const { test, expect } = require('@playwright/test');
 const { loadDashboardWithFixtures, FIELDS, makeFixtures } = require('./helpers');
@@ -64,24 +68,5 @@ test.describe('Split Transaction Safety', () => {
     // If any split was triggered during load, verify no POSTs to transactions table
     const txPostRequests = postRequests.filter(url => url.includes('tbln0gzhCAorFc3zB'));
     expect(txPostRequests.length).toBe(0);
-  });
-
-  test('stale split name (Split Count=1) does not disable split button', async ({ page }) => {
-    // recTx3 has "(Split 1 of 3)" in name but Split Count = 1 (stale name, children deleted)
-    await loadDashboardWithFixtures(page, {}, 'reconciliation');
-    await page.waitForTimeout(500);
-
-    // Find the split button for recTx3 — it should NOT be disabled
-    const splitBtnDisabled = await page.evaluate(() => {
-      // Look for any split buttons that reference the stale record
-      const buttons = document.querySelectorAll('[data-split-id="recTx3"], .split-btn');
-      for (const btn of buttons) {
-        if (btn.disabled || btn.classList.contains('disabled')) return true;
-      }
-      return false;
-    });
-
-    // With Split Count = 1, the button should be ENABLED despite stale name
-    expect(splitBtnDisabled).toBe(false);
   });
 });

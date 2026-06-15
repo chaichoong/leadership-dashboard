@@ -4,7 +4,7 @@ Playwright tests that guard the exact sync bug classes listed in `CLAUDE.md` →
 "Known Anti-Patterns". They mock the Airtable API with deterministic fixtures
 (no PAT needed) and boot the app from a local `python3 -m http.server`.
 
-**36 tests, ~40-55s, all green.** They catch regressions before they reach the
+**33 tests, ~37s, all green.** They catch regressions before they reach the
 live GitHub Pages site.
 
 ## What each spec guards
@@ -15,13 +15,22 @@ live GitHub Pages site.
 | `stale-data-protection` | UI state derives from live field values, not parsed display strings; loading overlay clears |
 | `pagination-dedup` | `airtableFetch` follows offset tokens fully; no duplicate creates from partial reads |
 | `badge-count-sync` | Badge/count numbers stay in sync with rendered rows |
-| `record-id-matching` | Linked-record lookups match by record ID, not display string |
+| `record-id-matching` | Linked-record fields are stored as record IDs, not display strings |
 | `split-safety` | Split operations PATCH only, never POST children (data-corruption guard) |
-| `cfv-detection` | CFV detection logic fires on the right conditions |
+| `cfv-detection` | `isCurrentlyInArrears` driven directly: reconciled payment clears arrears; UC future-dueDay tenants still evaluated; unreconciled payment does not clear |
 | `active-business-filter` | Only Active businesses appear in dropdowns |
 | `auth-token-handling` | PAT handling: stored, cleared, never leaked |
 | `cascade-sync` | Cascading updates propagate across linked records |
 | `no-crash-on-load` | Every tab loads and tab-switching never throws uncaught errors |
+
+## Known follow-ups (UI-layer invariants not yet covered)
+
+Two invariants need a fixture that renders the reconciliation panel under mock data,
+so they are tracked rather than guarded by a DOM test that passes whether or not the
+element exists:
+
+- Recon dropdown resolves a linked unit by record ID, not by display string.
+- The Split button's enabled/disabled state (now driven at source by `Split Count > 1`).
 
 ## Run
 
