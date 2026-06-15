@@ -17,7 +17,7 @@
  *   6. Copy the URL into dashboard index.html as GMAIL_SCRIPT_URL
  *   7. Set up a time-driven trigger:
  *      - Triggers → Add Trigger → syncGmailToAirtable
- *      - Time-driven → Minutes timer → Every 15 minutes
+ *      - Time-driven → Minutes timer → Every 30 minutes
  *
  * ACTIONS (via query string):
  *   ?action=sync          → Manually trigger Gmail → Airtable sync
@@ -141,9 +141,9 @@ function syncGmailToAirtable() {
   if (!label) return { error: 'Gmail label starting with "3:" not found', synced: 0 };
 
   var threads = label.getThreads(0, 50);
-  var cache = PropertiesService.getScriptProperties();
+  if (threads.length === 0) return { success: true, threadsScanned: 0, created: 0, skippedExisting: 0 };
 
-  // Fetch existing Airtable records to avoid duplicates
+  var cache = PropertiesService.getScriptProperties();
   var existingThreadIds = getExistingThreadIds(config);
 
   var created = 0;
@@ -153,16 +153,12 @@ function syncGmailToAirtable() {
     var thread = threads[t];
     var threadId = thread.getId();
 
-    // Parse the email
-    var parsed = parseThread(thread, cache);
-
     if (existingThreadIds[threadId]) {
-      // Record exists — only update fields that were originally extracted (not user-edited ones)
-      // We update: payee, desc, gmailUrl (in case message ID changed)
-      // We do NOT overwrite: amount, dueDate, ref (user may have manually entered these)
       updated++;
-      continue; // Skip updates for now — user edits take priority
+      continue;
     }
+
+    var parsed = parseThread(thread, cache);
 
     // Create new record in Airtable
     var fields = {};
