@@ -528,7 +528,8 @@
     async function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
-        document.getElementById('tab-' + tabId).classList.add('active');
+        const tabEl = document.getElementById('tab-' + tabId);
+        if (tabEl) tabEl.classList.add('active');
         window.scrollTo(0, 0);
         // Update URL hash for deep-linking
         if (history.replaceState) history.replaceState(null, '', '#' + tabId);
