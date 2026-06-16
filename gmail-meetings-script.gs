@@ -363,10 +363,15 @@ function parseMeeting(msg) {
   var from    = msg.getFrom() || '';
   var date    = msg.getDate();
 
-  // Prefer plain body; fall back to a stripped HTML body.
-  var body = msg.getPlainBody() || '';
-  if (!body || body.trim().length < 40) {
-    body = htmlToText(msg.getBody() || '');
+  // Choose the richer of the plain-text and HTML bodies. Zoom summaries put the
+  // structured "Next steps / Quick recap / Summary" content in the HTML part,
+  // while the plain-text part is often sparse — so pick whichever exposes more
+  // recognised section headings (falling back to HTML if plain text is empty).
+  var plainBody = msg.getPlainBody() || '';
+  var htmlBody  = htmlToText(msg.getBody() || '');
+  var body = plainBody;
+  if (sectionScore(htmlBody) > sectionScore(plainBody) || plainBody.trim().length < 40) {
+    body = htmlBody;
   }
   var lowSubj = subject.toLowerCase();
   var lowBody = body.toLowerCase();
@@ -393,15 +398,13 @@ function parseMeeting(msg) {
   // Project, if explicitly named in the subject ("X Project Meeting")
   var projectName = (subject.match(/([A-Z][\w&]+(?:\s+[A-Z][\w&]+)*)\s+project\b/i) || [])[1] || '';
 
-  // Tasks from the action lines. A clear owner + commitment always makes a task.
-  // For weekly check-ins ONLY, an owner-less imperative ("Update the tracker
-  // daily") also becomes a task — it gets assigned to the weekly default (Mica).
-  var tasks = [];
-  for (var i = 0; i < actionLines.length; i++) {
-    var parsedTask = parseActionLine(actionLines[i]);
-    if (!parsedTask && isWeeklyCheckin) parsedTask = parseImperativeLine(actionLines[i]);
-    if (parsedTask) tasks.push(parsedTask);
-  }
+  // Tasks from the action lines. Handles three real-world shapes:
+  //  1. Inline owner   — "Mica will draft the SOP by Friday."
+  //  2. Grouped by person — a bare name heading ("Erica") followed by imperative
+  //     bullets ("Create a workflow…") that all belong to that person. This is
+  //     the standard Zoom "Next steps" format.
+  //  3. Weekly check-in owner-less imperative ("Update the tracker daily") → Mica.
+  var tasks = extractGroupedActionItems(nextSteps, isWeeklyCheckin);
 
   return {
     meetingName: meetingName,
@@ -432,8 +435,13 @@ function parseActionLine(line) {
   if (!m) return null;
 
   var owner = m[1];
+  var ownerFirst = owner.split(' ')[0];
   // Skip filler that isn't really a person (very rough guard).
-  if (/^(The|This|That|We|They|It|Next|Action|Summary|Quick|Recap)$/i.test(owner.split(' ')[0])) return null;
+  if (/^(The|This|That|We|They|It|Next|Action|Summary|Quick|Recap)$/i.test(ownerFirst)) return null;
+  // Reject imperative lines mis-read as "Name to …" — e.g. "Respond to Hayden",
+  // "Talk to the council", "Reply to the email". The leading word is a verb,
+  // not a person, so leave it for the grouped-owner / weekly handlers.
+  if (ACTION_VERBS.indexOf(ownerFirst.toLowerCase().replace(/[^a-z]/g, '')) !== -1) return null;
 
   var cadence = detectCadence(clean);
   return { owner: owner, text: capitalise(clean), cadence: cadence };
@@ -458,7 +466,10 @@ var ACTION_VERBS = ['update','send','review','prepare','create','draft','call',
   'check','schedule','finalise','finalize','book','order','follow','complete',
   'add','set','build','write','confirm','track','post','email','plan','organise',
   'organize','arrange','submit','research','contact','assign','record','publish',
-  'test','fix','design','chase','collate','compile','reconcile','upload','share'];
+  'test','fix','design','chase','collate','compile','reconcile','upload','share',
+  'respond','reply','liaise','notify','talk','speak','refer','return','present',
+  'report','attend','agree','commit','use','make','appeal','work','approve',
+  'escalate','migrate','transition','draft','remind','reach','respond'];
 
 function parseImperativeLine(line) {
   var clean = String(line || '').replace(/\s+/g, ' ').trim();
@@ -488,7 +499,20 @@ function htmlToText(html) {
     .trim();
 }
 
-// Pull the body of a labelled section up to the next ALL-CAPS-ish heading.
+// How many recognised section headings a body exposes — used to pick the richer
+// of the plain-text vs HTML body.
+function sectionScore(s) {
+  var t = String(s || '').toLowerCase();
+  var marks = ['next steps', 'action items', 'action points', 'quick recap',
+               'overview', 'summary', 'follow-ups', 'follow ups'];
+  var n = 0;
+  for (var i = 0; i < marks.length; i++) { if (t.indexOf(marks[i]) !== -1) n++; }
+  return n;
+}
+
+// Pull the body of a labelled section up to the next section heading. Internal
+// blank lines are skipped (Zoom groups "Next steps" into per-person sub-blocks
+// separated by blank lines), and a footer/sign-off/URL line ends the section.
 function extractSection(body, headings) {
   var lines = String(body || '').split('\n');
   for (var h = 0; h < headings.length; h++) {
@@ -499,9 +523,9 @@ function extractSection(body, headings) {
         var out = [];
         for (var j = i + 1; j < lines.length; j++) {
           var raw = lines[j].trim();
-          if (!raw) { if (out.length) break; else continue; }
-          // Stop at the next section heading
-          if (isHeading(raw)) break;
+          if (!raw) continue;                  // skip blanks — don't end the section
+          if (isHeading(raw)) break;           // next known section ends this one
+          if (isSectionBoundary(raw)) break;   // footer / sign-off / bare URL ends it
           out.push(raw);
         }
         if (out.length) return out.join('\n');
@@ -517,6 +541,79 @@ function isHeading(line) {
                'action items', 'action points', 'tasks', 'follow-ups', 'follow ups',
                'attendees', 'participants', 'details'];
   return heads.indexOf(l) !== -1;
+}
+
+// A line that marks the end of the meaningful summary content (email footer,
+// sign-off, share link, address, rating prompt).
+function isSectionBoundary(line) {
+  if (/^(thank you|thanks[,!]|the zoom team|view in zoom|view meeting recap|watch:|join:|unsubscribe|sent from|ai can make mistakes|please rate|shareable link|recording duration|duration:|©)/i.test(line)) return true;
+  if (/^https?:\/\/\S+$/.test(line)) return true;                         // bare URL line
+  if (/^\d{1,4}\s+\w+.*\b(blvd|street|st|ave|avenue|road|rd|suite)\b/i.test(line)) return true;
+  return false;
+}
+
+// Split a section into ordered, bullet-stripped, non-empty lines (keeps short
+// name-heading lines, unlike splitBullets which drops anything ≤3 chars).
+function sectionLines(section) {
+  return String(section || '').split('\n')
+    .map(function (s) { return s.replace(/^[\s•\*\-–—·]+/, '').trim(); })
+    .filter(function (s) { return s.length > 0; });
+}
+
+// Is this line a person-name heading (Zoom groups tasks under "Erica", "Mica"…)
+// or a shared-group heading ("Collaboration")? Returns 'PERSON', 'GROUP', or false.
+function isPersonHeading(line) {
+  var l = String(line || '').replace(/[:\-–—\s]+$/, '').trim();
+  if (!l || l.length > 30) return false;
+  if (/[.!?]$/.test(String(line).trim())) return false;     // a full sentence, not a heading
+  var words = l.split(/\s+/);
+  if (words.length > 3) return false;
+  var firstWord = words[0].toLowerCase().replace(/[^a-z]/g, '');
+  if (ACTION_VERBS.indexOf(firstWord) !== -1) return false;  // imperative, not a name
+  if (/^(collaboration|collaborate|team|group|everyone|all|shared|joint|others?|general)$/i.test(l)) return 'GROUP';
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    if (/^(and|&|\/|the|of|with)$/i.test(w)) continue;       // connectors are fine
+    if (!/^[A-Z][A-Za-z'’.\-]*$/.test(w)) return false;       // every name word is capitalised
+  }
+  return 'PERSON';
+}
+
+// Turn a "Next steps" section into task objects, inheriting the current person
+// heading for owner-less imperative bullets. Inline "Name will/Name:" forms and
+// "Name and Name:" shared lines are also recognised.
+function extractGroupedActionItems(section, isWeekly) {
+  var lines = sectionLines(section);
+  var items = [], currentOwner = null;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // Inline owner form always wins ("Mica will…", "Mica: …").
+    var inline = parseActionLine(line);
+    if (inline) { items.push(inline); currentOwner = inline.owner; continue; }
+
+    // Bare name / group heading switches the owner context.
+    var ht = isPersonHeading(line);
+    if (ht === 'PERSON') { currentOwner = line.replace(/[:\-–—\s]+$/, '').trim(); continue; }
+    if (ht === 'GROUP')  { currentOwner = null; continue; }
+
+    if (line.length < 6) continue;
+
+    // Imperative bullet — assign to the person heading it sits under.
+    if (currentOwner) {
+      items.push({ owner: currentOwner, text: capitalise(line), cadence: detectCadence(line) });
+      continue;
+    }
+    // No current owner: catch a "Name and Name: do X" shared line, else (weekly only) keep it.
+    var lead = line.match(/^([A-Z][a-zA-Z]+)\s+(?:and|&)\s+[A-Z][a-zA-Z]+\s*[:\-]\s*(.+)$/);
+    if (lead) {
+      items.push({ owner: lead[1], text: capitalise(lead[2]), cadence: detectCadence(line) });
+    } else if (isWeekly) {
+      var imp = parseImperativeLine(line);
+      if (imp) items.push(imp);
+    }
+  }
+  return items;
 }
 
 function splitBullets(section) {
@@ -542,6 +639,11 @@ function extractAttendees(body, nextSteps) {
     if (m) names[m[1]] = true;
     var m2 = l.match(/^([A-Z][a-zA-Z]+)\s+will\b/);
     if (m2) names[m2[1]] = true;
+  });
+  // Standalone person-name sub-headings (Zoom groups tasks under "Erica", "Mica").
+  sectionLines(nextSteps).forEach(function (l) {
+    var clean = l.replace(/[:\-–—\s]+$/, '').trim();
+    if (isPersonHeading(l) === 'PERSON' && clean.split(/\s+/).length <= 2) names[clean] = true;
   });
   return Object.keys(names);
 }
