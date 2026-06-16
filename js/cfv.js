@@ -342,14 +342,26 @@
         }
 
         // Show immediate loading indicator so the tab doesn't appear frozen
-        // while Airtable API calls (dismissal sync, comment counts) run.
+        // while the synchronous detectCFVs() sweep runs. That sweep scans every
+        // tenancy against the full transactions array (and the arrears engine),
+        // which blocks the main thread for a noticeable beat on first open.
         const summaryCards = document.getElementById('cfvSummaryCards');
         const tbody = document.getElementById('cfvTableBody');
-        if (summaryCards && !summaryCards.querySelector('.kpi-card-value')) {
+        const showedSpinner = summaryCards && !summaryCards.querySelector('.kpi-card-value');
+        if (showedSpinner) {
             summaryCards.innerHTML = `<div class="kpi-card" style="grid-column:1/-1;text-align:center;padding:24px">
                 <div class="spinner" style="margin:0 auto 12px"></div>
                 <div class="kpi-card-label">Loading Cash Flow Voids…</div>
+                <div class="kpi-card-sub">Checking every tenancy against this month's payments</div>
             </div>`;
+            if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="od-empty-state">
+                <div class="spinner" style="margin:0 auto 8px"></div>Loading…</td></tr>`;
+            // Yield two animation frames so the browser actually PAINTS the spinner
+            // before detectCFVs() blocks the main thread. Without this the spinner
+            // HTML is set but never rendered — the user sees the previous tab frozen
+            // and assumes the page has crashed.
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
         }
 
         const cfvList = detectCFVs();
