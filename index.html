@@ -89,6 +89,7 @@
                     <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
                 </div>
                 <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('money')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('money')}"><span class="sidebar-icon">&#x1F9ED;</span><span class="sidebar-label">Money Confidence</span><span class="sidebar-health-dot unknown" data-sidebar-health="money" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" data-tab-group="accounts" onclick="switchTab('income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('income')}"><span class="sidebar-icon">&#x1F4B7;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="accounts" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('pnl')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('pnl')}"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
                 </div>
@@ -578,6 +579,9 @@
         <!-- Tab: Transactions -->
         <div class="tab-panel" id="tab-transactions"></div>
 
+        <!-- Tab: Money Confidence (isolated — does not touch the Leadership Dashboard) -->
+        <div class="tab-panel" id="tab-money"></div>
+
         <!-- Tab 4: CFVs -->
         <div class="tab-panel" id="tab-cfv">
             <div data-sync-bar="cfv"></div>
@@ -758,6 +762,7 @@
     <script defer src="js/sync-bar.js?v=4"></script>
     <script defer src="js/dashboard.js?v=19"></script>
     <script defer src="js/cashflow.js?v=20"></script>
+    <script defer src="js/money.js?v=1"></script>
     <script defer src="js/sitemap.js?v=25"></script>
     <script defer src="js/income.js?v=1"></script>
     <script defer src="js/costs.js?v=13"></script>
