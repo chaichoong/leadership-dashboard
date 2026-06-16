@@ -385,7 +385,7 @@ function parseMeeting(msg) {
   // Sections
   var summary  = extractSection(body, ['quick recap', 'summary', 'overview', 'recap']);
   var nextSteps = extractSection(body, ['next steps', 'action items', 'action points', 'tasks', 'follow-ups', 'follow ups']);
-  var aiSummary = summary || firstChars(body, 1500);
+  var aiSummary = cleanSummaryText(summary || firstChars(body, 1500));
   var actionLines = splitBullets(nextSteps);
 
   // Meeting name — short plain-language label
@@ -658,16 +658,55 @@ function deriveMeetingName(subject, body) {
     // Strip leading provider words if they survived.
     .replace(/^(?:your\s+)?(?:loom|zoom|fathom|otter|cloud recording)\b[\s:–—-]*/i, '')
     // Strip trailing notification phrases.
-    .replace(/\s*[-–—|:]?\s*(?:is now available|is ready|recording|meeting summary|summary)\s*$/i, '')
+    .replace(/\s*[-–—|:]?\s*(?:are\s+ready|is now available|is ready|recording|meeting summary|summary)[\s!.]*$/i, '')
     // Only cut on a SPACED separator (a real divider like " | " or " – "),
     // never a bare hyphen — that keeps "Check-in", "Follow-up", "Catch-up".
     .replace(/\s+[|–—]\s+.*$/, '')
     .replace(/\s+/g, ' ').trim();
-  if (s.length >= 4 && s.length <= 60) return s;
+  // Use the cleaned subject only when it's a meaningful length AND isn't a generic
+  // provider/room phrase ("…Personal Meeting Room", "Cloud Recording").
+  if (s.length >= 4 && s.length <= 60 && !isGenericMeetingName(s)) return s;
+  // Otherwise derive a descriptive name from the body — Zoom puts a short topic
+  // heading at the top of its "Summary" section (e.g. "Meeting Automation Module
+  // Implementation"), which captures the gist far better than a canned fallback.
+  var topic = topicHeadingFromBody(body);
+  if (topic) return topic;
   var low = (subject + ' ' + body).toLowerCase();
   if (/weekly check|catch[\s-]?up/.test(low)) return 'Weekly Check-in';
   if (/project/.test(low)) return 'Project Meeting';
   return 'Meeting Summary';
+}
+
+// A subject so generic it tells you nothing about the meeting — e.g. a Zoom
+// "Personal Meeting Room" assets-ready notice. These should defer to a
+// content-derived name instead.
+function isGenericMeetingName(s) {
+  return /\b(personal meeting room|meeting room|cloud recording|recording|meeting assets|assets)\b/i.test(s) ||
+         /^meeting(\s+summary)?$/i.test(s.trim());
+}
+
+// Pull a short, title-like topic heading from the body's detailed "Summary"
+// section (Zoom/Fathom lead each summary block with an <h3> topic title).
+// Returns '' when no clean title-line is found.
+// Tidy a summary: collapse the email's hard line-wrapping into clean prose and,
+// defensively, drop any trailing section heading that bled in ("…before launch.
+// Next steps Erica" → "…before launch.").
+function cleanSummaryText(s) {
+  s = String(s || '').replace(/\s+/g, ' ').trim();
+  var cut = s.search(/\b(next steps|action items|action points|follow[\s-]?ups)\b/i);
+  if (cut > 40) s = s.slice(0, cut).trim();
+  return s;
+}
+
+function topicHeadingFromBody(body) {
+  var sec = extractSection(body, ['summary', 'overview', 'quick recap', 'recap']);
+  if (!sec) return '';
+  var first = (sectionLines(sec)[0] || '').replace(/[:\s]+$/, '').trim();
+  if (first.length >= 6 && first.length <= 60 &&
+      first.split(/\s+/).length <= 9 && !/[.!?]$/.test(first)) {
+    return capitalise(first);
+  }
+  return '';
 }
 
 function extractLink(body, isLoom) {
