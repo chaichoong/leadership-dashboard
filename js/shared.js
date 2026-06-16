@@ -612,6 +612,10 @@ if (tabId === 'comms') {
         if (tabId === 'transactions') {
             if (typeof renderTransactionsTab === 'function') renderTransactionsTab();
         }
+        // Render Money Confidence on switch
+        if (tabId === 'money') {
+            if (typeof renderMoneyTab === 'function') renderMoneyTab();
+        }
         // Render CFV tab on switch
         if (tabId === 'cfv') {
             renderCFVTab();
