@@ -7792,7 +7792,7 @@ function _meetingTaskRow(t){
       <span style="font-size:var(--fs-sm);color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>
       <span style="display:flex;gap:8px;align-items:center;flex-shrink:0;font-size:var(--fs-xs);color:var(--text-secondary)">
         ${t.assignee?`<span>${escHtml(t.assignee)}</span>`:''}
-        ${t.status?`<span style="background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-full)">${escHtml(t.status)}</span>`:''}
+        ${t.status?statusBadge(t.status):''}
         <span>${due}</span>
       </span>
     </div>`;
