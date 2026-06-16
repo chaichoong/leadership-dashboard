@@ -106,24 +106,52 @@ function computeSafeToAct() {
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
+// Readiness gates on allAccounts specifically — it is the LAST global set
+// (inside renderDashboard, after allTenancies/allCosts). Gating on it guarantees
+// a full dashboard load completed, so the balance, rent and cost figures are all
+// populated together. Gating on allTenancies alone would let the figure compute
+// with a £0 balance during the brief window before renderDashboard runs.
+function moneyDataReady() {
+    return typeof allAccounts !== 'undefined' && allAccounts && allAccounts.length > 0;
+}
+
+// Wait for an IN-PROGRESS dashboard load to populate the shared globals.
+// We deliberately do NOT call loadDashboard() here: init (and the switchTab
+// refresh tail) already trigger it. A second concurrent call doubles the
+// Airtable request burst (18+ simultaneous requests), trips the 5/sec rate
+// limit, and forces retries/backoff that drag the load out to minutes. We
+// simply wait for the data the existing load produces.
+function waitForMoneyData(timeoutMs) {
+    return new Promise(resolve => {
+        if (moneyDataReady()) { resolve(true); return; }
+        const started = Date.now();
+        const timer = setInterval(() => {
+            if (moneyDataReady()) { clearInterval(timer); resolve(true); return; }
+            if (Date.now() - started >= timeoutMs) { clearInterval(timer); resolve(false); }
+        }, 400);
+    });
+}
+
 async function renderMoneyTab() {
     const el = document.getElementById('tab-money');
     if (!el) return;
 
-    const dataReady = (typeof allAccounts !== 'undefined' && allAccounts && allAccounts.length) ||
-                      (typeof allTenancies !== 'undefined' && allTenancies && allTenancies.length);
-    if (!dataReady) {
-        el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:240px;color:var(--text-muted)">
-            <div style="text-align:center">
-                <div class="spinner" style="margin:0 auto 12px"></div>
-                <div>Loading money data…</div>
-            </div></div>`;
-        if (typeof PAT !== 'undefined' && PAT && typeof loadDashboard === 'function') {
-            try { await loadDashboard(); } catch (e) { /* surfaced by dashboard's own error handling */ }
-        }
-        if (!((allAccounts && allAccounts.length) || (allTenancies && allTenancies.length))) return;
-    }
+    if (moneyDataReady()) { renderMoneyContent(el, computeSafeToAct()); return; }
 
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:240px;color:var(--text-muted)">
+        <div style="text-align:center">
+            <div class="spinner" style="margin:0 auto 12px"></div>
+            <div>Loading money data…</div>
+        </div></div>`;
+
+    const ok = await waitForMoneyData(90000);
+    if (!ok) {
+        el.innerHTML = `<div style="max-width:920px;margin:0 auto"><div class="kpi-card" style="text-align:center;color:var(--text-secondary)">
+            <div style="font-weight:var(--fw-semibold);margin-bottom:6px;color:var(--text-primary)">Money data did not load</div>
+            <div style="font-size:var(--fs-sm)">Use the Refresh button, or switch to the Leadership Dashboard and back.</div>
+        </div></div>`;
+        return;
+    }
     renderMoneyContent(el, computeSafeToAct());
 }
 
