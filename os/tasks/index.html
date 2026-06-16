@@ -7684,7 +7684,8 @@ const MF = {
 };
 const MEETING_FIELD_IDS = Object.values(MF);
 let allMeetings = [];
-let _meetingTaskMap = {};   // task id → {name,assignee,status,due}
+let _meetingTaskMap = {};   // task id → {name,assignee,status,due} (lightweight, for row display)
+let _meetingMissingTasks = {};  // task id → full parseTask() object for linked tasks NOT in allTasks (Completed / Some Day). Lazily injected into allTasks when opened so the drawer works identically to the Task List tab.
 let _meetingsLoaded = false;
 let _meetingsLoading = false;
 const _expandedMeetings = new Set();
@@ -7732,19 +7733,23 @@ async function loadMeetings(force){
     // remainder (Completed / Some Day, which the main fetch filters out) need
     // a targeted fetch so the linked-task list is never missing rows.
     _meetingTaskMap={};
+    _meetingMissingTasks={};
     (allTasks||[]).forEach(t=>{_meetingTaskMap[t.id]={name:t.name,assignee:t.assignee,status:t.status,due:t.dueDate}});
     const wanted=[...new Set(allMeetings.flatMap(m=>m.taskIds))];
     const missing=wanted.filter(id=>!_meetingTaskMap[id]);
     if(missing.length){
       // Chunk to keep the filterByFormula / URL within Airtable limits.
+      // Fetch the FULL field set and parseTask() so clicking a linked task can
+      // open the same drawer the Task List tab uses (it reads from allTasks).
       for(let i=0;i<missing.length;i+=40){
         const slice=missing.slice(i,i+40);
         const formula='OR('+slice.map(id=>`RECORD_ID()='${id}'`).join(',')+')';
         try{
-          const recs=await fetchTable(TASKS_TABLE,[F.name,F.assignee,F.status,F.dueDate],formula);
+          const recs=await fetchTable(TASKS_TABLE,TASK_FIELD_IDS,formula);
           (recs||[]).forEach(r=>{
-            const a=gf(r,F.assignee);
-            _meetingTaskMap[r.id]={name:gf(r,F.name)||'(Untitled)',assignee:a?a.name:'',status:selectName(gf(r,F.status)),due:gf(r,F.dueDate)||''};
+            const parsed=parseTask(r);
+            _meetingMissingTasks[parsed.id]=parsed;
+            _meetingTaskMap[parsed.id]={name:parsed.name,assignee:parsed.assignee,status:parsed.status,due:parsed.dueDate};
           });
         }catch(e){console.warn('[meetings] linked-task fetch failed',e)}
       }
@@ -7768,9 +7773,22 @@ function toggleMeeting(id){
   renderMeetings();
 }
 
+// Open a meeting's linked task in the same drawer the Task List tab uses.
+// Active tasks already live in allTasks; Completed / Some Day linked tasks were
+// fetched separately into _meetingMissingTasks — inject them on demand so
+// openTaskDrawer (which reads from allTasks) finds them.
+function openMeetingTask(id){
+  if(typeof openTaskDrawer!=='function')return;
+  if(!allTasks.find(t=>t.id===id)){
+    const full=_meetingMissingTasks[id];
+    if(full)allTasks.push(full);
+  }
+  openTaskDrawer(id);
+}
+
 function _meetingTaskRow(t){
   const due=t.due?fmtMeetingDate(t.due):'No due date';
-  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 12px">
+  return `<div onclick="openMeetingTask('${t.id}')" title="Open task details" style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 12px;cursor:pointer;transition:background .12s,border-color .12s" onmouseover="this.style.background='var(--bg-surface-2)';this.style.borderColor='var(--border-default)'" onmouseout="this.style.background='var(--bg-surface)';this.style.borderColor='var(--border-subtle)'">
       <span style="font-size:var(--fs-sm);color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>
       <span style="display:flex;gap:8px;align-items:center;flex-shrink:0;font-size:var(--fs-xs);color:var(--text-secondary)">
         ${t.assignee?`<span>${escHtml(t.assignee)}</span>`:''}
@@ -7806,7 +7824,7 @@ async function renderMeetings(){
     const attendees=m.attendeeIds.map(id=>teamMap[id]).filter(Boolean);
     if(m.extAttendees)m.extAttendees.split(/[,\n]/).map(s=>s.trim()).filter(Boolean).forEach(n=>attendees.push(n));
     const expanded=_expandedMeetings.has(m.id);
-    const tasks=m.taskIds.map(id=>_meetingTaskMap[id]).filter(Boolean);
+    const tasks=m.taskIds.map(id=>{const lt=_meetingTaskMap[id];return lt?{id,...lt}:null}).filter(Boolean);
     return `<div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);margin-bottom:14px;overflow:hidden">
         <div style="padding:16px 18px;cursor:pointer" onclick="toggleMeeting('${m.id}')">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
@@ -8068,7 +8086,7 @@ if(initAuth()){checkIdentityAndLoad()}
  'openDeleteProjectConfirm','performDeleteProject','toggleProject','renderProjects',
  'changeKpiTemplate','openKpiRequestModal','refreshAutomatedKpis',
  'setKanbanMode','kanbanMonthsNav','kanbanMonthsToday','kanbanNav','dropKanbanMonthCard','dropKanbanCard','dragKanbanCard','renderKanban',
- 'switchView','renderMeetings','refreshMeetings','toggleMeeting','loadMeetings'].forEach(n=>{
+ 'switchView','renderMeetings','refreshMeetings','toggleMeeting','loadMeetings','openMeetingTask'].forEach(n=>{
   try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
 });
 
