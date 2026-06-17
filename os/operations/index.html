@@ -1749,7 +1749,17 @@ async function saveField(entityKey, recId, fieldId, value, el){
   const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
   el.classList.add('cell-saving');
   try {
-    const body = { fields: { [fieldId]: value }, typecast: true };
+    // singleSelect / multipleSelects fields reject raw numbers — Airtable
+    // returns a 422 "Cannot parse value" even with typecast on. A column can
+    // be styled as `number` (eg. Tenancy "Due") while its backing field is a
+    // singleSelect of "1".."31", so coerce numeric values to their string form
+    // (19 → "19") before sending.
+    let outVal = value;
+    const atType = SCHEMA_RESOLVED?.[entityKey]?.byId?.[fieldId]?.atType;
+    if ((atType === 'singleSelect' || atType === 'multipleSelects') && typeof outVal === 'number') {
+      outVal = String(outVal);
+    }
+    const body = { fields: { [fieldId]: outVal }, typecast: true };
     await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify(body) });
     // Update local record with the value we sent. The PATCH response keys
     // fields by name (not ID) despite returnFieldsByFieldId, so merging it
@@ -1757,7 +1767,7 @@ async function saveField(entityKey, recId, fieldId, value, el){
     // because we know which field changed and what we set it to.
     const rec = INDEX[entityKey][recId];
     if (rec) {
-      rec.fields[fieldId] = value;
+      rec.fields[fieldId] = outVal;
     }
     el.classList.remove('cell-saving');
     el.classList.remove('cell-error');
