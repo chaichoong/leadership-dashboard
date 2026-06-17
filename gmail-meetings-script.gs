@@ -24,6 +24,10 @@
  *
  * ACTIONS (via query string on the web-app URL):
  *   ?action=sync   → run the intake now and return a JSON summary
+ *   ?action=repair → finish any Meeting records stuck at "Summarised":
+ *                    create + link their missing tasks and set them to "Done".
+ *                    Safe to re-run; never duplicates tasks. Bookmark this URL
+ *                    as your one-click "fix stuck meetings" button.
  *   ?action=count  → how many threads currently carry the label
  *   (no action)    → { status: 'ok' } health check
  */
@@ -196,6 +200,10 @@ function doGet(e) {
       return jsonResponse(syncMeetings());
     }
 
+    if (params.action === 'repair') {
+      return jsonResponse(repairStuckMeetings());
+    }
+
     return jsonResponse({ status: 'ok', message: 'Gmail Meetings Intake v1' });
   } catch (err) {
     return jsonResponse({ error: String(err) });
@@ -281,52 +289,8 @@ function syncMeetings() {
       existingUuids[msgId] = meetingId;
 
       // ---- Tasks from action points ----
-      var taskIds = [];
-      var isWeekly = parsed.isWeeklyCheckin;
-      // Collaborators = the team members who were present at this meeting.
-      var collabEmails = presentCollaboratorEmails(parsed.attendees);
-      var collabValue  = collabEmails.map(function (e) { return { email: e }; });
-
-      for (var p = 0; p < parsed.tasks.length; p++) {
-        var item = parsed.tasks[p];
-        var ownerRaw = item.owner;
-        if (!ownerRaw && isWeekly) ownerRaw = 'Mica';     // weekly check-in default
-        var email = resolveAssigneeEmail(ownerRaw);
-
-        // Phase 1: create with name + assignee only (lets base automation run)
-        var tFields = {};
-        tFields[TF.name]     = item.text;
-        tFields[TF.assignee] = { email: email };
-        var taskId = createRecord(config, T.tasks, tFields);
-        if (!taskId) continue;
-
-        // Phase 2: fill every relevant field.
-        var upd = {};
-        upd[TF.dueDate]     = todayStr;                 // always the creation date
-        upd[TF.timeEst]     = TASK_DEFAULT_TIME;        // default 15 min
-        upd[TF.priority]    = TASK_DEFAULT_PRIORITY;    // default Not Urgent
-        if (parsed.aiSummary) upd[TF.description] = parsed.aiSummary;   // from AI summary
-        if (collabValue.length) upd[TF.collaborators] = collabValue;    // team present
-        if (item.cadence) upd[TF.recurring] = item.cadence;
-
-        // Weekly check-in special case: Project priority + Profit project link.
-        if (isWeekly) {
-          upd[TF.priority] = 'Project';
-          var profitId = matchProject('Profit', projectMap);
-          if (profitId) upd[TF.projects] = [profitId];
-        }
-        updateRecord(config, T.tasks, taskId, upd);
-
-        taskIds.push(taskId);
-        tasksCreated++;
-
-        // Slack DM the assignee (except Kevin) via the always-on worker.
-        if (email !== KEVIN_EMAIL) {
-          notifySlack(config, slackEmailFor(email), item.text, taskId, todayStr,
-                      TASK_DEFAULT_TIME);
-        }
-        if (taskIds.length % 4 === 0) Utilities.sleep(1000);
-      }
+      var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr);
+      tasksCreated += taskIds.length;
 
       // Link the new tasks back into the meeting, then close it out.
       var close = {};
@@ -352,6 +316,175 @@ function syncMeetings() {
   Logger.log('RESULT: ' + JSON.stringify(result));
   return result;
 }
+
+// Create every task for a parsed meeting (two-phase: name+assignee, then all
+// fields), DM each non-Kevin assignee, and return the new task ids so the caller
+// can link them into the meeting. Shared by the live sync and the repair action
+// so both paths build tasks identically.
+function createTasksForMeeting(config, parsed, projectMap, todayStr) {
+  var taskIds = [];
+  var isWeekly = parsed.isWeeklyCheckin;
+  // Collaborators = the team members who were present at this meeting.
+  var collabEmails = presentCollaboratorEmails(parsed.attendees);
+  var collabValue  = collabEmails.map(function (e) { return { email: e }; });
+
+  for (var p = 0; p < parsed.tasks.length; p++) {
+    var item = parsed.tasks[p];
+    var ownerRaw = item.owner;
+    if (!ownerRaw && isWeekly) ownerRaw = 'Mica';     // weekly check-in default
+    var email = resolveAssigneeEmail(ownerRaw);
+
+    // Phase 1: create with name + assignee only (lets base automation run)
+    var tFields = {};
+    tFields[TF.name]     = item.text;
+    tFields[TF.assignee] = { email: email };
+    var taskId = createRecord(config, T.tasks, tFields);
+    if (!taskId) continue;
+
+    // Phase 2: fill every relevant field.
+    var upd = {};
+    upd[TF.dueDate]     = todayStr;                 // always the creation date
+    upd[TF.timeEst]     = TASK_DEFAULT_TIME;        // default 15 min
+    upd[TF.priority]    = TASK_DEFAULT_PRIORITY;    // default Not Urgent
+    if (parsed.aiSummary) upd[TF.description] = parsed.aiSummary;   // from AI summary
+    if (collabValue.length) upd[TF.collaborators] = collabValue;    // team present
+    if (item.cadence) upd[TF.recurring] = item.cadence;
+
+    // Weekly check-in special case: Project priority + Profit project link.
+    if (isWeekly) {
+      upd[TF.priority] = 'Project';
+      var profitId = matchProject('Profit', projectMap);
+      if (profitId) upd[TF.projects] = [profitId];
+    }
+    updateRecord(config, T.tasks, taskId, upd);
+
+    taskIds.push(taskId);
+
+    // Slack DM the assignee (except Kevin) via the always-on worker.
+    if (email !== KEVIN_EMAIL) {
+      notifySlack(config, slackEmailFor(email), item.text, taskId, todayStr,
+                  TASK_DEFAULT_TIME);
+    }
+    if (taskIds.length % 4 === 0) Utilities.sleep(1000);
+  }
+  return taskIds;
+}
+
+
+// ═══════════════════════════════════════════
+// Repair — finish records stuck at "Summarised"
+// ═══════════════════════════════════════════
+
+// A meeting record is "stuck" when the email was parsed and the record created
+// (Status "Summarised") but task creation never finished — so the action points
+// never became tasks. The live sync can't fix it (it dedupes on Meeting UUID and
+// skips the already-created record), so this is the manual recovery path.
+//
+// Run it any of three ways:
+//   • open  <web-app-url>/exec?action=repair   ← bookmark this, one click
+//   • run   repairStuckMeetings()              from the Apps Script editor
+//   • (optionally) add a daily time trigger on repairStuckMeetings as a safety net
+//
+// Safe to re-run: a record that already has linked tasks is just flipped to
+// "Done" (never re-created), so you can never get duplicate tasks.
+function repairStuckMeetings() {
+  var config = getConfig();
+  if (!config.pat) {
+    var e1 = { error: 'AIRTABLE_PAT not set in Script Properties' };
+    Logger.log('REPAIR: ' + JSON.stringify(e1));
+    return e1;
+  }
+
+  var projectMap = getLinkNameMap(config, T.projects, PROJECT_PRIMARY);
+  var todayStr   = fmtDate(new Date());
+  var stuck      = getStuckMeetings(config);
+
+  var repaired = 0, tasksCreated = 0, closedExisting = 0, skippedNoContent = 0;
+
+  for (var i = 0; i < stuck.length; i++) {
+    var rec = stuck[i];
+    var existingLinks = rec.fields[MF.tasks] || [];
+
+    // Already has tasks (a partial run) — just close it out; never re-create.
+    if (existingLinks.length > 0) {
+      updateRecord(config, T.meetings, rec.id, mkStatus('Done'));
+      closedExisting++;
+      continue;
+    }
+
+    // No tasks and no usable transcript to rebuild from — leave it visible
+    // (still "Summarised") so it's obvious it needs a human, rather than
+    // silently flipping an empty record to "Done".
+    if (String(rec.fields[MF.transcript] || '').trim().length < 20) {
+      skippedNoContent++;
+      continue;
+    }
+
+    var parsed  = parseMeetingFromRecord(rec);
+    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr);
+
+    var close = mkStatus('Done');
+    if (taskIds.length) close[MF.tasks] = taskIds;
+    updateRecord(config, T.meetings, rec.id, close);
+
+    repaired++;
+    tasksCreated += taskIds.length;
+    Utilities.sleep(400);
+  }
+
+  var result = {
+    success: true,
+    stuckFound: stuck.length,
+    meetingsRepaired: repaired,
+    tasksCreated: tasksCreated,
+    closedAlreadyHadTasks: closedExisting,
+    skippedNoContent: skippedNoContent,
+  };
+  Logger.log('REPAIR: ' + JSON.stringify(result));
+  return result;
+}
+
+// All Meeting records that haven't reached "Done" — i.e. stuck at the
+// intermediate "Summarised" (or legacy "Tasks Created") state.
+function getStuckMeetings(config) {
+  var out = [], offset = null;
+  var fieldParams = [MF.status, MF.tasks, MF.transcript, MF.aiSummary, MF.name]
+    .map(function (f) { return 'fields%5B%5D=' + f; }).join('&');
+  do {
+    var url = 'https://api.airtable.com/v0/' + config.base + '/' + T.meetings +
+      '?' + fieldParams + '&returnFieldsByFieldId=true&pageSize=100';
+    if (offset) url += '&offset=' + offset;
+    var resp = UrlFetchApp.fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + config.pat },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) { Logger.log('stuck list: ' + resp.getContentText()); break; }
+    var data = JSON.parse(resp.getContentText());
+    (data.records || []).forEach(function (r) {
+      var st = r.fields[MF.status];
+      if (st === 'Summarised' || st === 'Tasks Created') out.push(r);
+    });
+    offset = data.offset || null;
+  } while (offset);
+  return out;
+}
+
+// Rebuild the parsed-meeting shape that createTasksForMeeting needs, using the
+// fields already stored on the Meeting record (the Transcript holds the email
+// body, so the same section/owner parsing the live sync uses applies cleanly).
+function parseMeetingFromRecord(rec) {
+  var f = rec.fields || {};
+  var body      = f[MF.transcript] || '';
+  var name      = f[MF.name] || '';
+  var aiSummary = f[MF.aiSummary] || '';
+  var nextSteps = extractSection(body, ['next steps', 'action items', 'action points', 'tasks', 'follow-ups', 'follow ups']);
+  var isWeeklyCheckin = /weekly check[\s-]?in|weekly check\b|weekly catch[\s-]?up/.test((name + ' ' + body).toLowerCase());
+  var attendees = extractAttendees(body, nextSteps);
+  var tasks     = extractGroupedActionItems(nextSteps, isWeeklyCheckin);
+  return { tasks: tasks, isWeeklyCheckin: isWeeklyCheckin, attendees: attendees, aiSummary: aiSummary };
+}
+
+function mkStatus(s) { var o = {}; o[MF.status] = s; return o; }
 
 
 // ═══════════════════════════════════════════
