@@ -824,6 +824,12 @@ function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_
 // SaaS migration: change SLACK_NOTIFY_URL to the Supabase Edge Function
 // URL when migrating; the request shape and behaviour stay identical.
 const SLACK_NOTIFY_URL='https://slack-notify.kevinbrittain.workers.dev/';
+// Meetings intake Apps Script web app (gmail-meetings-script.gs). Used by the
+// Meetings tab's "Fix stuck" button to call ?action=repair, which finishes any
+// meeting stuck at "Summarised" (creates + links its missing tasks, sets Done).
+// Paste the deployed /exec URL of the MEETINGS project here (this is a separate
+// Apps Script project from the invoice script). Leave '' to disable the button.
+const MEETINGS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbz370Y29A3Wcak9GenyVHdCQRsqbmgK503qSaucQ2vi4NlWqE0FewIURKpxq8o2dPIWHw/exec';
 // Translate the Airtable collaborator email to the Slack-registered email
 // for any team member whose two emails differ. Falls through unchanged
 // when the team member has the same email on both sides.
@@ -7768,6 +7774,35 @@ async function refreshMeetings(){
   renderMeetings();
 }
 
+// "Fix stuck" — finish any meeting stuck at "Summarised" by calling the
+// meetings Apps Script's ?action=repair (which rebuilds + links the missing
+// tasks and flips the record to Done). Apps Script web apps are cross-origin,
+// so this is a fire-and-forget no-cors request (we can't read the response);
+// we then wait and re-fetch from Airtable to show the now-fixed records. This
+// mirrors the Invoices tab's "Sync now" trigger.
+let _meetingsRepairing=false;
+async function repairStuckMeetings(){
+  if(_meetingsRepairing)return;
+  if(!MEETINGS_SCRIPT_URL){
+    toast('Set MEETINGS_SCRIPT_URL in the page config to enable the Fix button.',true);
+    return;
+  }
+  _meetingsRepairing=true;
+  renderMeetings();                       // reflect the "Fixing…" / disabled state
+  try{
+    fetch(MEETINGS_SCRIPT_URL+'?action=repair',{mode:'no-cors',redirect:'follow'});
+    toast('Fixing stuck meetings… this can take up to a minute.');
+    await new Promise(r=>setTimeout(r,15000));   // give it time to create tasks
+    await loadMeetings(true);
+  }catch(e){
+    console.warn('[meetings] repair trigger failed',e);
+    toast('Could not trigger the fix — try again.',true);
+  }finally{
+    _meetingsRepairing=false;
+    renderMeetings();
+  }
+}
+
 function toggleMeeting(id){
   if(_expandedMeetings.has(id))_expandedMeetings.delete(id);else _expandedMeetings.add(id);
   renderMeetings();
@@ -7807,12 +7842,20 @@ async function renderMeetings(){
   }
   const teamMap={};(allTeamMembers||[]).forEach(m=>{teamMap[m.id]=m.name});
 
+  // A meeting "stuck" at Summarised (or legacy Tasks Created) means its tasks
+  // were never created — surface a one-click Fix button only when there are any.
+  const stuckCount=allMeetings.filter(m=>m.status==='Summarised'||m.status==='Tasks Created').length;
+  const fixBtn=stuckCount?`<button class="btn btn-sm" style="background:var(--accent-gold);border-color:var(--accent-gold);color:#fff${_meetingsRepairing?';opacity:.6;cursor:default':''}" ${_meetingsRepairing?'disabled':''} onclick="repairStuckMeetings()" title="Finish ${stuckCount} meeting${stuckCount===1?'':'s'} stuck at Summarised: create &amp; link their missing tasks and set them to Done">${_meetingsRepairing?'Fixing…':'⚠ Fix '+stuckCount+' stuck'}</button>`:'';
+
   const header=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
       <div>
         <h2 style="margin:0;font-size:var(--fs-xl);font-weight:var(--fw-semibold);color:var(--text-primary)">Meetings</h2>
         <p style="margin:4px 0 0;font-size:var(--fs-sm);color:var(--text-secondary)">${allMeetings.length} meeting${allMeetings.length===1?'':'s'} on record · click a meeting to see its summary and linked tasks</p>
       </div>
-      <button class="btn btn-sm" onclick="refreshMeetings()">Refresh</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        ${fixBtn}
+        <button class="btn btn-sm" onclick="refreshMeetings()">Refresh</button>
+      </div>
     </div>`;
 
   if(!allMeetings.length){
