@@ -73,6 +73,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Timeline drop-back zone */
 .side-panel.drop-target{background:var(--accent-soft);outline:2px dashed var(--accent)}
 .tl-time-tooltip{position:fixed;background:var(--bg-sidebar);color:#fff;padding:5px 10px;border-radius:6px;font-size:var(--fs-sm);pointer-events:none;z-index:10002;font-weight:var(--fw-bold);box-shadow:var(--shadow-md);letter-spacing:0.3px}
+/* Snap guide: a solid line marking exactly where a dragged block's TOP edge
+   will land (snapped to the grid). The block's top is the scheduled time, so
+   this line shows the real drop position — no guessing from the cursor. */
+.tl-snap-guide{position:absolute;left:0;right:0;height:0;border-top:2px solid var(--accent);pointer-events:none;z-index:9;box-shadow:0 0 0 1px rgba(255,255,255,0.6)}
 .tl-block.routine{cursor:move}
 .tl-block.routine .resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:linear-gradient(to bottom, transparent, rgba(0,0,0,0.08))}
 .kpi .value{font-size:var(--fs-3xl);font-weight:var(--fw-bold);margin-bottom:2px}
@@ -3743,12 +3747,6 @@ function renderMyDay(){
   plan.blocks.forEach(b=>{
     const top=(b.start-plan.dayStart)*PIXELS_PER_MIN;
     const height=Math.max(22,(b.end-b.start)*PIXELS_PER_MIN);
-    // Short blocks (e.g. 15-min tasks) are too small to host a 6px resize
-    // handle without it swallowing most of the block — that forces drags
-    // into the tiny top strip, where the grab offset is ~0, so the block
-    // top never leads the cursor. Drop the handle below this height so the
-    // WHOLE short block is grabbable for moving (resize via the drawer).
-    const showResizeHandle=height>=34;
     // Convert _col / _totalCols to a horizontal slice of the canvas.
     // Single-occupancy blocks keep the existing 6px padding on both sides;
     // overlapping ones split with a 2px inner gap between columns.
@@ -3771,7 +3769,7 @@ function renderMyDay(){
         style="top:${top}px;height:${height}px;${posStyle}">
         <div class="tb-title">${escHtml(b.name)}</div>
         <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)}</div>
-        ${showResizeHandle?`<div class="resize-handle" onmousedown="event.stopPropagation();routineResizeStart(event,'${rKey}','${escHtml(b.name)}',${b.start},${b.duration})"></div>`:''}
+        <div class="resize-handle" onmousedown="event.stopPropagation();routineResizeStart(event,'${rKey}','${escHtml(b.name)}',${b.start},${b.duration})"></div>
       </div>`;
     } else if(b.type==='task'){
       const t=b.task;
@@ -3784,7 +3782,7 @@ function renderMyDay(){
         style="top:${top}px;height:${height}px;${posStyle}">
         <div class="tb-title">${escHtml(b.name)}${flag}</div>
         <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${priorityBadge(t.priority)} ${t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''} ${avatarSmall(t)}</div>
-        ${showResizeHandle?`<div class="resize-handle" onmousedown="event.stopPropagation();tlResizeStart(event,'${t.id}',${b.start},${b.end-b.start})"></div>`:''}
+        <div class="resize-handle" onmousedown="event.stopPropagation();tlResizeStart(event,'${t.id}',${b.start},${b.end-b.start})"></div>
       </div>`;
     }
   });
@@ -4028,7 +4026,7 @@ window.tlDoubleClickAddTask=tlDoubleClickAddTask;
 
 function dropOnTimeline(e){
   e.preventDefault();
-  removeTlTooltip();
+  removeTlDragUI();
   let data;try{data=JSON.parse(e.dataTransfer.getData('text/plain'))}catch(err){return}
   const canvas=document.getElementById('tlCanvas');
   const rect=canvas.getBoundingClientRect();
@@ -4076,11 +4074,13 @@ function dropOnTimeline(e){
 
 // Time tooltip while dragging over timeline
 function removeTlTooltip(){const t=document.getElementById('tlTooltip');if(t)t.remove()}
+function removeTlSnapGuide(){const g=document.getElementById('tlSnapGuide');if(g)g.remove()}
+function removeTlDragUI(){removeTlTooltip();removeTlSnapGuide()}
 document.addEventListener('dragover',function(e){
   const canvas=document.getElementById('tlCanvas');
   if(!canvas)return;
   const rect=canvas.getBoundingClientRect();
-  if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom){removeTlTooltip();return}
+  if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom){removeTlDragUI();return}
   const config=getWorkConfig();
   // Report the time at the block's TOP edge (its start), not the cursor.
   const grab=window._tlGrabOffsetY||0;
@@ -4088,6 +4088,12 @@ document.addEventListener('dragover',function(e){
   let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
   minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
   minOfDay=Math.max(config.startHour*60,minOfDay);
+  // Snap guide: draw a line at the SNAPPED top position so the user sees the
+  // exact gridline the block top will land on — what you see is where it drops.
+  const snapTopY=(minOfDay-config.startHour*60)*PIXELS_PER_MIN;
+  let guide=document.getElementById('tlSnapGuide');
+  if(!guide){guide=document.createElement('div');guide.id='tlSnapGuide';guide.className='tl-snap-guide';canvas.appendChild(guide)}
+  guide.style.top=snapTopY+'px';
   let tip=document.getElementById('tlTooltip');
   if(!tip){tip=document.createElement('div');tip.id='tlTooltip';tip.className='tl-time-tooltip';document.body.appendChild(tip)}
   tip.textContent=minutesToTime(minOfDay);
@@ -4106,8 +4112,8 @@ document.addEventListener('dragover',function(e){
   tip.style.left=left+'px';
   tip.style.top=yClamped+'px';
 });
-document.addEventListener('dragend',function(){removeTlTooltip();window._tlGrabOffsetY=0});
-document.addEventListener('drop',removeTlTooltip);
+document.addEventListener('dragend',function(){removeTlDragUI();window._tlGrabOffsetY=0});
+document.addEventListener('drop',removeTlDragUI);
 
 // Resize handler — listens to mousemove globally
 function tlResizeStart(e,taskId,startMin,durMin){
