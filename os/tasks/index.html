@@ -463,6 +463,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     <button class="view-tab" data-view="capacity" onclick="switchView('capacity')">Capacity</button>
     <button class="view-tab" data-view="recurring" onclick="switchView('recurring')">Recurring</button>
     <button class="view-tab" data-view="jobs" onclick="switchView('jobs')">Contractor Tasks</button>
+    <button class="view-tab" data-view="meetings" onclick="switchView('meetings')">Meetings</button>
   </div>
 
   <div id="view-myday"></div>
@@ -603,6 +604,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     <div id="recurringContent"></div>
   </div>
   <div id="view-jobs" style="display:none"></div>
+  <div id="view-meetings" style="display:none"></div>
 </div>
 
 <div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
@@ -826,6 +828,12 @@ function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_
 // SaaS migration: change SLACK_NOTIFY_URL to the Supabase Edge Function
 // URL when migrating; the request shape and behaviour stay identical.
 const SLACK_NOTIFY_URL='https://slack-notify.kevinbrittain.workers.dev/';
+// Meetings intake Apps Script web app (gmail-meetings-script.gs). Used by the
+// Meetings tab's "Fix stuck" button to call ?action=repair, which finishes any
+// meeting stuck at "Summarised" (creates + links its missing tasks, sets Done).
+// Paste the deployed /exec URL of the MEETINGS project here (this is a separate
+// Apps Script project from the invoice script). Leave '' to disable the button.
+const MEETINGS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbz370Y29A3Wcak9GenyVHdCQRsqbmgK503qSaucQ2vi4NlWqE0FewIURKpxq8o2dPIWHw/exec';
 // Translate the Airtable collaborator email to the Slack-registered email
 // for any team member whose two emails differ. Falls through unchanged
 // when the team member has the same email on both sides.
@@ -7698,12 +7706,238 @@ function renderJobs(){
 }
 
 // ======================================================
+// MEETINGS VIEW
+// Read-only summary of every Meetings record (created by the
+// meetings-intake watcher) with each meeting expandable to reveal the
+// Tasks linked to it. Lazy-loaded on first switch to the Meetings tab.
+// ======================================================
+const MEETINGS_TABLE = 'tblNodbh9B3WLzCIK';
+const MF = {
+  name:         'fldWSPqwJMMAA1mxm', // Meeting Name (singleLineText)
+  date:         'fldTMJFKGqr9VCTns', // Meeting Date (date)
+  status:       'fldUKM6X8PFxbF1HU', // Status (singleSelect)
+  attendees:    'fldZLnxcXALQj2C97', // Attendees (link → Team Members)
+  extAttendees: 'fldxLuW7F8e4acS4x', // External Attendees (multilineText)
+  summary:      'fld7hO6M1Pcsxp1BC', // AI Summary (multilineText)
+  actionPoints: 'fldwkgiZ6JdPBgEeU', // Action Points (multilineText)
+  tasks:        'fld3NpfT3Sbmy3obd', // Tasks (link → Tasks)
+  recording:    'fldrHJGXyIVyPlqCA', // Recording Link (url)
+  source:       'fldAmaevMBxmpezx2', // Source (singleSelect)
+};
+const MEETING_FIELD_IDS = Object.values(MF);
+let allMeetings = [];
+let _meetingTaskMap = {};   // task id → {name,assignee,status,due} (lightweight, for row display)
+let _meetingMissingTasks = {};  // task id → full parseTask() object for linked tasks NOT in allTasks (Completed / Some Day). Lazily injected into allTasks when opened so the drawer works identically to the Task List tab.
+let _meetingsLoaded = false;
+let _meetingsLoading = false;
+const _expandedMeetings = new Set();
+
+// Linked-record fields come back from REST as plain ID strings when
+// returnFieldsByFieldId=true (occasionally as {id,name} objects). Normalise
+// either shape to an array of record IDs.
+function _linkIds(v){
+  if(!Array.isArray(v))return [];
+  return v.map(x=>typeof x==='object'?(x.id||''):x).filter(Boolean);
+}
+
+function fmtMeetingDate(d){
+  if(!d)return '—';
+  const dt=new Date(d);
+  if(isNaN(dt.getTime()))return escHtml(String(d));
+  return dt.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+}
+
+async function loadMeetings(force){
+  if(_meetingsLoading)return;
+  if(_meetingsLoaded&&!force)return;
+  _meetingsLoading=true;
+  const host=document.getElementById('view-meetings');
+  if(host&&!_meetingsLoaded)host.innerHTML='<div style="padding:40px;text-align:center;color:var(--text-secondary)">Loading meetings…</div>';
+  try{
+    const raw=await fetchTable(MEETINGS_TABLE,MEETING_FIELD_IDS,'');
+    allMeetings=(raw||[]).map(r=>({
+      id:r.id,
+      name:gf(r,MF.name)||'(Untitled meeting)',
+      date:gf(r,MF.date)||'',
+      status:selectName(gf(r,MF.status)),
+      source:selectName(gf(r,MF.source)),
+      attendeeIds:_linkIds(gf(r,MF.attendees)),
+      extAttendees:gf(r,MF.extAttendees)||'',
+      summary:gf(r,MF.summary)||'',
+      actionPoints:gf(r,MF.actionPoints)||'',
+      taskIds:_linkIds(gf(r,MF.tasks)),
+      recording:gf(r,MF.recording)||'',
+    }));
+    // Newest meeting first.
+    allMeetings.sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+
+    // Resolve linked tasks. Active tasks are already in allTasks; only the
+    // remainder (Completed / Some Day, which the main fetch filters out) need
+    // a targeted fetch so the linked-task list is never missing rows.
+    _meetingTaskMap={};
+    _meetingMissingTasks={};
+    (allTasks||[]).forEach(t=>{_meetingTaskMap[t.id]={name:t.name,assignee:t.assignee,status:t.status,due:t.dueDate}});
+    const wanted=[...new Set(allMeetings.flatMap(m=>m.taskIds))];
+    const missing=wanted.filter(id=>!_meetingTaskMap[id]);
+    if(missing.length){
+      // Chunk to keep the filterByFormula / URL within Airtable limits.
+      // Fetch the FULL field set and parseTask() so clicking a linked task can
+      // open the same drawer the Task List tab uses (it reads from allTasks).
+      for(let i=0;i<missing.length;i+=40){
+        const slice=missing.slice(i,i+40);
+        const formula='OR('+slice.map(id=>`RECORD_ID()='${id}'`).join(',')+')';
+        try{
+          const recs=await fetchTable(TASKS_TABLE,TASK_FIELD_IDS,formula);
+          (recs||[]).forEach(r=>{
+            const parsed=parseTask(r);
+            _meetingMissingTasks[parsed.id]=parsed;
+            _meetingTaskMap[parsed.id]={name:parsed.name,assignee:parsed.assignee,status:parsed.status,due:parsed.dueDate};
+          });
+        }catch(e){console.warn('[meetings] linked-task fetch failed',e)}
+      }
+    }
+    _meetingsLoaded=true;
+  }catch(e){
+    console.warn('[meetings] load failed',e);
+    if(host)host.innerHTML=`<div style="padding:40px;text-align:center;color:var(--danger)">Failed to load meetings: ${escHtml(e.message||'unknown error')}</div>`;
+  } finally {
+    _meetingsLoading=false;
+  }
+}
+
+async function refreshMeetings(){
+  await loadMeetings(true);
+  renderMeetings();
+}
+
+// "Fix stuck" — finish any meeting stuck at "Summarised" by calling the
+// meetings Apps Script's ?action=repair (which rebuilds + links the missing
+// tasks and flips the record to Done). Apps Script web apps are cross-origin,
+// so this is a fire-and-forget no-cors request (we can't read the response);
+// we then wait and re-fetch from Airtable to show the now-fixed records. This
+// mirrors the Invoices tab's "Sync now" trigger.
+let _meetingsRepairing=false;
+async function repairStuckMeetings(){
+  if(_meetingsRepairing)return;
+  if(!MEETINGS_SCRIPT_URL){
+    toast('Set MEETINGS_SCRIPT_URL in the page config to enable the Fix button.',true);
+    return;
+  }
+  _meetingsRepairing=true;
+  renderMeetings();                       // reflect the "Fixing…" / disabled state
+  try{
+    fetch(MEETINGS_SCRIPT_URL+'?action=repair',{mode:'no-cors',redirect:'follow'});
+    toast('Fixing stuck meetings… this can take up to a minute.');
+    await new Promise(r=>setTimeout(r,15000));   // give it time to create tasks
+    await loadMeetings(true);
+  }catch(e){
+    console.warn('[meetings] repair trigger failed',e);
+    toast('Could not trigger the fix — try again.',true);
+  }finally{
+    _meetingsRepairing=false;
+    renderMeetings();
+  }
+}
+
+function toggleMeeting(id){
+  if(_expandedMeetings.has(id))_expandedMeetings.delete(id);else _expandedMeetings.add(id);
+  renderMeetings();
+}
+
+// Open a meeting's linked task in the same drawer the Task List tab uses.
+// Active tasks already live in allTasks; Completed / Some Day linked tasks were
+// fetched separately into _meetingMissingTasks — inject them on demand so
+// openTaskDrawer (which reads from allTasks) finds them.
+function openMeetingTask(id){
+  if(typeof openTaskDrawer!=='function')return;
+  if(!allTasks.find(t=>t.id===id)){
+    const full=_meetingMissingTasks[id];
+    if(full)allTasks.push(full);
+  }
+  openTaskDrawer(id);
+}
+
+function _meetingTaskRow(t){
+  const due=t.due?fmtMeetingDate(t.due):'No due date';
+  return `<div onclick="openMeetingTask('${t.id}')" title="Open task details" style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:8px 12px;cursor:pointer;transition:background .12s,border-color .12s" onmouseover="this.style.background='var(--bg-surface-2)';this.style.borderColor='var(--border-default)'" onmouseout="this.style.background='var(--bg-surface)';this.style.borderColor='var(--border-subtle)'">
+      <span style="font-size:var(--fs-sm);color:var(--text-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name)}</span>
+      <span style="display:flex;gap:8px;align-items:center;flex-shrink:0;font-size:var(--fs-xs);color:var(--text-secondary)">
+        ${t.assignee?`<span>${escHtml(t.assignee)}</span>`:''}
+        ${t.status?statusBadge(t.status):''}
+        <span>${due}</span>
+      </span>
+    </div>`;
+}
+
+async function renderMeetings(){
+  const host=document.getElementById('view-meetings');
+  if(!host)return;
+  if(!_meetingsLoaded){
+    await loadMeetings();
+    if(!_meetingsLoaded)return; // load failed — host already shows the error
+  }
+  const teamMap={};(allTeamMembers||[]).forEach(m=>{teamMap[m.id]=m.name});
+
+  // A meeting "stuck" at Summarised (or legacy Tasks Created) means its tasks
+  // were never created — surface a one-click Fix button only when there are any.
+  const stuckCount=allMeetings.filter(m=>m.status==='Summarised'||m.status==='Tasks Created').length;
+  const fixBtn=stuckCount?`<button class="btn btn-sm" style="background:var(--accent-gold);border-color:var(--accent-gold);color:#fff${_meetingsRepairing?';opacity:.6;cursor:default':''}" ${_meetingsRepairing?'disabled':''} onclick="repairStuckMeetings()" title="Finish ${stuckCount} meeting${stuckCount===1?'':'s'} stuck at Summarised: create &amp; link their missing tasks and set them to Done">${_meetingsRepairing?'Fixing…':'⚠ Fix '+stuckCount+' stuck'}</button>`:'';
+
+  const header=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
+      <div>
+        <h2 style="margin:0;font-size:var(--fs-xl);font-weight:var(--fw-semibold);color:var(--text-primary)">Meetings</h2>
+        <p style="margin:4px 0 0;font-size:var(--fs-sm);color:var(--text-secondary)">${allMeetings.length} meeting${allMeetings.length===1?'':'s'} on record · click a meeting to see its summary and linked tasks</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        ${fixBtn}
+        <button class="btn btn-sm" onclick="refreshMeetings()">Refresh</button>
+      </div>
+    </div>`;
+
+  if(!allMeetings.length){
+    host.innerHTML=header+'<div style="padding:40px;text-align:center;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg)">No meeting records yet. Meetings appear here automatically once a summary email is processed.</div>';
+    return;
+  }
+
+  const cards=allMeetings.map(m=>{
+    const attendees=m.attendeeIds.map(id=>teamMap[id]).filter(Boolean);
+    if(m.extAttendees)m.extAttendees.split(/[,\n]/).map(s=>s.trim()).filter(Boolean).forEach(n=>attendees.push(n));
+    const expanded=_expandedMeetings.has(m.id);
+    const tasks=m.taskIds.map(id=>{const lt=_meetingTaskMap[id];return lt?{id,...lt}:null}).filter(Boolean);
+    return `<div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);margin-bottom:14px;overflow:hidden">
+        <div style="padding:16px 18px;cursor:pointer" onclick="toggleMeeting('${m.id}')">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+            <div style="min-width:0">
+              <div style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary)">${escHtml(m.name)}</div>
+              <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:4px">${fmtMeetingDate(m.date)}${attendees.length?' · '+escHtml(attendees.join(', ')):''}</div>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+              ${m.source?`<span style="font-size:var(--fs-xs);background:var(--bg-subtle);color:var(--text-secondary);padding:2px 8px;border-radius:var(--radius-full)">${escHtml(m.source)}</span>`:''}
+              ${m.status?`<span style="font-size:var(--fs-xs);background:var(--accent-soft);color:var(--accent-hover);padding:2px 8px;border-radius:var(--radius-full)">${escHtml(m.status)}</span>`:''}
+              <span style="font-size:var(--fs-sm);color:var(--text-muted);white-space:nowrap">${tasks.length} task${tasks.length===1?'':'s'} ${expanded?'▲':'▼'}</span>
+            </div>
+          </div>
+          ${m.summary?`<div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:10px;line-height:1.5;${expanded?'':'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden'}">${escHtml(m.summary)}</div>`:''}
+        </div>
+        ${expanded?`<div style="border-top:1px solid var(--border-subtle);padding:14px 18px;background:var(--bg-surface-2)">
+            ${m.recording?`<div style="margin-bottom:12px"><a href="${escHtml(m.recording)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-sm);font-weight:var(--fw-medium);text-decoration:none">▶ View recording</a></div>`:''}
+            ${m.actionPoints?`<div style="margin-bottom:14px"><div style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px">Action Points</div><div style="font-size:var(--fs-sm);color:var(--text-secondary);white-space:pre-wrap;line-height:1.5">${escHtml(m.actionPoints)}</div></div>`:''}
+            <div style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px">Linked Tasks (${tasks.length})</div>
+            ${tasks.length?`<div style="display:flex;flex-direction:column;gap:6px">${tasks.map(_meetingTaskRow).join('')}</div>`:'<div style="font-size:var(--fs-sm);color:var(--text-muted)">No tasks linked to this meeting.</div>'}
+          </div>`:''}
+      </div>`;
+  }).join('');
+
+  host.innerHTML=header+cards;
+}
+
+// ======================================================
 // VIEW SWITCH
 // ======================================================
 function switchView(view){
   currentView=view;
   document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
-  ['myday','list','kanban','projects','capacity','recurring','jobs'].forEach(v=>{
+  ['myday','list','kanban','projects','capacity','recurring','jobs','meetings'].forEach(v=>{
     const el=document.getElementById('view-'+v);if(el)el.style.display=v===view?'':'none';
   });
   window.scrollTo(0, 0);
@@ -7714,6 +7948,7 @@ function switchView(view){
   if(view==='capacity')renderCapacity();
   if(view==='recurring')renderRecurring();
   if(view==='jobs')renderJobs();
+  if(view==='meetings')renderMeetings();
 }
 function setTeam(key){activeTeam=key;currentPage=1;expandedTask=null;selectedTasks.clear();renderAll()}
 function renderAll(){
@@ -7725,6 +7960,7 @@ function renderAll(){
   if(currentView==='capacity')renderCapacity();
   if(currentView==='recurring')renderRecurring();
   if(currentView==='jobs')renderJobs();
+  if(currentView==='meetings')renderMeetings();
 }
 
 // ======================================================
@@ -7928,7 +8164,8 @@ if(initAuth()){checkIdentityAndLoad()}
  'updateProjectField','projEdit','projEditDebounced','completeProject','deleteProject',
  'openDeleteProjectConfirm','performDeleteProject','toggleProject','renderProjects',
  'changeKpiTemplate','openKpiRequestModal','refreshAutomatedKpis',
- 'setKanbanMode','kanbanMonthsNav','kanbanMonthsToday','kanbanNav','dropKanbanMonthCard','dropKanbanCard','dragKanbanCard','renderKanban'].forEach(n=>{
+ 'setKanbanMode','kanbanMonthsNav','kanbanMonthsToday','kanbanNav','dropKanbanMonthCard','dropKanbanCard','dragKanbanCard','renderKanban',
+ 'switchView','renderMeetings','refreshMeetings','toggleMeeting','loadMeetings','openMeetingTask'].forEach(n=>{
   try{if(typeof eval(n)==='function')window[n]=eval(n)}catch(e){console.warn('[expose] '+n+' not defined')}
 });
 
