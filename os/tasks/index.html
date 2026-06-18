@@ -3851,6 +3851,14 @@ function dragTaskBlock(e,taskId){
   window._tlDragging=true;
   e.dataTransfer.setData('text/plain',JSON.stringify({kind:'tlmove',taskId}));
   e.dataTransfer.effectAllowed='move';
+  // Capture where on the block the user grabbed (cursor offset from the
+  // block's TOP edge). The block's top edge is the start time, so we
+  // subtract this offset during dragover/drop to report the start time
+  // under the block top — not the time under the cursor itself.
+  try{
+    const b=e.currentTarget||e.target.closest('.tl-block');
+    window._tlGrabOffsetY=Math.max(0,e.clientY-b.getBoundingClientRect().top);
+  }catch(_){window._tlGrabOffsetY=0}
   // Use a clean clone of the task block as the drag preview so adjacent
   // tasks don't bleed into the ghost image.
   try{
@@ -3868,6 +3876,8 @@ function dragTaskBlock(e,taskId){
 function dragSideTask(e,taskId){
   e.dataTransfer.setData('text/plain',JSON.stringify({kind:'sideschedule',taskId}));
   e.dataTransfer.effectAllowed='move';
+  // Side cards have no on-timeline top edge to align to — drop at the cursor.
+  window._tlGrabOffsetY=0;
   try{
     const card=e.currentTarget||e.target.closest('.side-card');
     const ghost=_buildDragGhost(card);
@@ -4017,9 +4027,12 @@ function dropOnTimeline(e){
   const canvas=document.getElementById('tlCanvas');
   const rect=canvas.getBoundingClientRect();
   const config=getWorkConfig();
-  const y=e.clientY-rect.top;
+  // Drop position is the block's TOP edge = cursor minus the grab offset.
+  const y=e.clientY-rect.top-(window._tlGrabOffsetY||0);
   let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
   minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
+  // Never let a block start before the configured day start.
+  minOfDay=Math.max(config.startHour*60,minOfDay);
 
   // Routine block: persist its new start time for today
   if(data.kind==='routinemove'){
@@ -4063,26 +4076,31 @@ document.addEventListener('dragover',function(e){
   const rect=canvas.getBoundingClientRect();
   if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom){removeTlTooltip();return}
   const config=getWorkConfig();
-  const y=e.clientY-rect.top;
+  // Report the time at the block's TOP edge (its start), not the cursor.
+  const grab=window._tlGrabOffsetY||0;
+  const y=e.clientY-rect.top-grab;
   let minOfDay=Math.round(y/PIXELS_PER_MIN)+config.startHour*60;
   minOfDay=Math.round(minOfDay/SNAP_MIN)*SNAP_MIN;
+  minOfDay=Math.max(config.startHour*60,minOfDay);
   let tip=document.getElementById('tlTooltip');
   if(!tip){tip=document.createElement('div');tip.id='tlTooltip';tip.className='tl-time-tooltip';document.body.appendChild(tip)}
   tip.textContent=minutesToTime(minOfDay);
   // Position the time chip OUTSIDE the dragged task so it isn't hidden
   // underneath. Default: just past the right edge of the timeline canvas
-  // at the cursor's vertical line. If the right edge is off-screen
+  // at the block top's vertical line. If the right edge is off-screen
   // (narrow viewports), fall back to just past the left edge.
-  // Vertical: clamp to the canvas so the chip never goes off-canvas.
+  // Vertical: align the chip with the block TOP edge (the start line), not
+  // the cursor, and clamp to the canvas so the chip never goes off-canvas.
   const tipH=24;
-  const yClamped=Math.max(rect.top,Math.min(rect.bottom-tipH,e.clientY-tipH/2));
+  const blockTopY=e.clientY-grab;
+  const yClamped=Math.max(rect.top,Math.min(rect.bottom-tipH,blockTopY-tipH/2));
   const viewportW=window.innerWidth||document.documentElement.clientWidth;
   let left=rect.right+10;
   if(left+90>viewportW){left=Math.max(8,rect.left-100)}
   tip.style.left=left+'px';
   tip.style.top=yClamped+'px';
 });
-document.addEventListener('dragend',removeTlTooltip);
+document.addEventListener('dragend',function(){removeTlTooltip();window._tlGrabOffsetY=0});
 document.addEventListener('drop',removeTlTooltip);
 
 // Resize handler — listens to mousemove globally
@@ -4118,6 +4136,12 @@ function dragRoutineBlock(e,rKey,startMin,durMin){
   window._tlDragging=true;
   e.dataTransfer.setData('text/plain',JSON.stringify({kind:'routinemove',rKey,durMin}));
   e.dataTransfer.effectAllowed='move';
+  // Capture grab offset from the block's top edge so the reported start
+  // time tracks the block top, not the cursor (see dragTaskBlock).
+  try{
+    const b=e.currentTarget||e.target.closest('.tl-block');
+    window._tlGrabOffsetY=Math.max(0,e.clientY-b.getBoundingClientRect().top);
+  }catch(_){window._tlGrabOffsetY=0}
   setTimeout(()=>{e.target.classList.add('dragging')},0);
 }
 // Routine resize (drag bottom edge)
