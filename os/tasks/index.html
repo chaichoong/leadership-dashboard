@@ -3743,6 +3743,12 @@ function renderMyDay(){
   plan.blocks.forEach(b=>{
     const top=(b.start-plan.dayStart)*PIXELS_PER_MIN;
     const height=Math.max(22,(b.end-b.start)*PIXELS_PER_MIN);
+    // Short blocks (e.g. 15-min tasks) are too small to host a 6px resize
+    // handle without it swallowing most of the block — that forces drags
+    // into the tiny top strip, where the grab offset is ~0, so the block
+    // top never leads the cursor. Drop the handle below this height so the
+    // WHOLE short block is grabbable for moving (resize via the drawer).
+    const showResizeHandle=height>=34;
     // Convert _col / _totalCols to a horizontal slice of the canvas.
     // Single-occupancy blocks keep the existing 6px padding on both sides;
     // overlapping ones split with a 2px inner gap between columns.
@@ -3765,7 +3771,7 @@ function renderMyDay(){
         style="top:${top}px;height:${height}px;${posStyle}">
         <div class="tb-title">${escHtml(b.name)}</div>
         <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)}</div>
-        <div class="resize-handle" onmousedown="event.stopPropagation();routineResizeStart(event,'${rKey}','${escHtml(b.name)}',${b.start},${b.duration})"></div>
+        ${showResizeHandle?`<div class="resize-handle" onmousedown="event.stopPropagation();routineResizeStart(event,'${rKey}','${escHtml(b.name)}',${b.start},${b.duration})"></div>`:''}
       </div>`;
     } else if(b.type==='task'){
       const t=b.task;
@@ -3778,7 +3784,7 @@ function renderMyDay(){
         style="top:${top}px;height:${height}px;${posStyle}">
         <div class="tb-title">${escHtml(b.name)}${flag}</div>
         <div class="tb-meta">${minutesToTime(b.start)}-${minutesToTime(b.end)} &middot; ${priorityBadge(t.priority)} ${t.business?`<span class="badge badge-business">${escHtml(t.business)}</span>`:''} ${avatarSmall(t)}</div>
-        <div class="resize-handle" onmousedown="event.stopPropagation();tlResizeStart(event,'${t.id}',${b.start},${b.end-b.start})"></div>
+        ${showResizeHandle?`<div class="resize-handle" onmousedown="event.stopPropagation();tlResizeStart(event,'${t.id}',${b.start},${b.end-b.start})"></div>`:''}
       </div>`;
     }
   });
