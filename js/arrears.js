@@ -943,7 +943,7 @@
             const breakdownId = `rentBreakdown_${entry.tenancyId}`;
 
             return `<tr style="border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="toggleRentBreakdown('${breakdownId}', this)">
-                <td style="padding:10px 12px">
+                <td style="padding:10px 12px;word-break:break-word">
                     <span class="expand-chevron" data-chevron>▶</span>
                     <span style="font-weight:600">${escHtml(entry.tenantName)}</span>
                     ${entry.unit ? `<div style="font-size:11px;color:var(--text-muted);margin-left:14px">${escHtml(entry.unit)}</div>` : ''}
@@ -996,15 +996,20 @@
                 </div>
                 ${kpiCardsHtml}
                 <div style="overflow-x:auto">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                    <!-- table-layout:fixed + explicit column widths keep the summary
+                         columns locked. With the default 'auto' layout, expanding a
+                         row inserted the wide detail panel and forced the browser to
+                         recompute every column, so all rows jolted sideways under the
+                         cursor on each expand/collapse. Fixed widths stop that. -->
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">
                         <thead>
                             <tr style="text-align:left;border-bottom:2px solid var(--border-default);background:var(--bg-surface-2)">
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant / Unit</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Monthly rent</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Balance</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Days arrears</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:center">Section 8</th>
+                                <th style="width:28%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant / Unit</th>
+                                <th style="width:14%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
+                                <th style="width:16%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Monthly rent</th>
+                                <th style="width:16%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Balance</th>
+                                <th style="width:13%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Days arrears</th>
+                                <th style="width:13%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:center">Section 8</th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
