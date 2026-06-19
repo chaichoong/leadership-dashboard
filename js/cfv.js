@@ -43,7 +43,7 @@
     // compares expected payments (cycles whose maturity window has passed)
     // against actual reconciled payments — robust to date/month boundary
     // edge cases.
-    function hasLinkedPaymentThisMonth(tenancyId, today) {
+    function hasLinkedPaymentThisMonth(tenancyId, today, txIndex) {
         const tenancy = allTenancies.find(t => t.id === tenancyId);
         if (!tenancy) return true; // unknown — don't flag
 
@@ -51,13 +51,15 @@
         // there is no payment evidence. The arrears engine returns "not in arrears"
         // for tenancies with no start date or no history, producing a false positive
         // "payment detected" that would auto-return new CFVs to In Payment.
-        const hasAnyLinkedTx = allTransactions.some(tx => {
-            if (!getField(tx, F.txReconciled)) return false;
-            const links = getField(tx, F.txTenancy);
-            if (!links) return false;
-            const arr = Array.isArray(links) ? links : [links];
-            return arr.some(item => (typeof item === 'object' ? item.id : item) === tenancyId);
-        });
+        const hasAnyLinkedTx = txIndex
+            ? (txIndex.get(tenancyId) || []).length > 0
+            : allTransactions.some(tx => {
+                if (!getField(tx, F.txReconciled)) return false;
+                const links = getField(tx, F.txTenancy);
+                if (!links) return false;
+                const arr = Array.isArray(links) ? links : [links];
+                return arr.some(item => (typeof item === 'object' ? item.id : item) === tenancyId);
+            });
         if (!hasAnyLinkedTx) return false;
 
         const tenantLookup = buildTenantLookup();
@@ -78,7 +80,7 @@
                 return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
             });
         }
-        return !isCurrentlyInArrears(tenancy, tenantType, today);
+        return !isCurrentlyInArrears(tenancy, tenantType, today, txIndex);
     }
 
     // Detect CFVs using direct tenancy-linked transactions.
@@ -87,6 +89,10 @@
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tenantLookup = buildTenantLookup();
+        // Build the transaction-by-tenancy index ONCE for this whole sweep so the
+        // per-tenancy helpers below read only their own payments instead of
+        // re-scanning the full transactions array each time (was the main freeze).
+        const txIndex = (typeof buildTxByTenancyIndex === 'function') ? buildTxByTenancyIndex() : null;
         const cfvList = [];
         // Tenancies to auto-return to In Payment (processed after loop)
         const autoReturnQueue = [];
@@ -104,7 +110,7 @@
                 // "Former"; new tenancies may have an empty/null rollup and must still show.
                 if (isTenantStatusFormer(tenancy)) return;
 
-                const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today);
+                const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today, txIndex);
 
                 // Auto-return to In Payment if a linked reconciled transaction exists
                 if (paidDetected) {
@@ -113,7 +119,7 @@
                 }
 
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
-                const entry = buildCFVEntry(tenancy, tenant, statusName, today);
+                const entry = buildCFVEntry(tenancy, tenant, statusName, today, txIndex);
 
                 // Re-flag check: CFV Actioned but next due date has passed with no payment
                 if (statusName === 'cfv actioned') {
@@ -145,12 +151,12 @@
             // catches prior-cycle misses for late-due-day tenants which the
             // old daysOverdue gate missed (e.g. UC dueDay=27 on May 5 was
             // invisible until May 27 passed).
-            const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today);
+            const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today, txIndex);
             if (paidThisMonth) return; // Paid — not a CFV
 
             // No linked payment found — flag as potential CFV
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
-            const entry = buildCFVEntry(tenancy, tenant, 'potential', today);
+            const entry = buildCFVEntry(tenancy, tenant, 'potential', today, txIndex);
             entry.autoDetected = true;
             cfvList.push(entry);
         });
@@ -211,7 +217,7 @@
         }
     }
 
-    function buildCFVEntry(tenancy, tenant, status, today) {
+    function buildCFVEntry(tenancy, tenant, status, today, txIndex) {
         const surname = String(getField(tenancy, F.tenSurname) || 'Unknown');
         const ref = String(getField(tenancy, F.tenRef) || '');
         const rent = Number(getField(tenancy, F.tenRent)) || 0;
@@ -268,13 +274,11 @@
         // in the CFV table without having to drill into Operations.
         let lastPaymentDate = null;
         let lastPaymentAmount = null;
-        for (const tx of (allTransactions || [])) {
-            if (!getField(tx, F.txReconciled)) continue;
-            const links = getField(tx, F.txTenancy);
-            if (!links) continue;
-            const arr = Array.isArray(links) ? links : [links];
-            const matches = arr.some(item => (typeof item === 'object' ? item.id : item) === tenancy.id);
-            if (!matches) continue;
+        const lpSource = txIndex
+            ? (txIndex.get(tenancy.id) || [])
+            : (allTransactions || []).filter(tx => getField(tx, F.txReconciled)
+                && (typeof txLinkedToTenancy === 'function' ? txLinkedToTenancy(tx, tenancy.id) : false));
+        for (const tx of lpSource) {
             const dStr = getField(tx, F.txDate);
             if (!dStr) continue;
             const d = new Date(dStr);

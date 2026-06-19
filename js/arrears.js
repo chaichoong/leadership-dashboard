@@ -53,6 +53,37 @@
         return (typeof linked === 'object' ? linked.id : linked) === tenancyId;
     }
 
+    // ── Transaction index (performance) ──
+    // The arrears + CFV sweeps used to scan the ENTIRE transactions array once
+    // per tenancy (computeRentStatement, isCurrentlyInArrears, the CFV helpers),
+    // which is O(tenancies × transactions). With thousands of transactions that
+    // froze the main thread for seconds — the tab "loading" lock-up, the blanked
+    // sub-tab button, and records that wouldn't open.
+    //
+    // Build a Map of reconciled transactions keyed by linked tenancy id ONCE per
+    // render pass and pass it down, so each tenancy reads only its own payments.
+    // The sweep drops from O(tenancies × transactions) to O(transactions).
+    function buildTxByTenancyIndex() {
+        const map = new Map();
+        const list = allTransactions || [];
+        for (let i = 0; i < list.length; i++) {
+            const tx = list[i];
+            if (!getField(tx, F.txReconciled)) continue;
+            const linked = getField(tx, F.txTenancy);
+            if (!linked) continue;
+            const arr = Array.isArray(linked) ? linked : [linked];
+            for (const item of arr) {
+                const id = (typeof item === 'object' && item) ? item.id : item;
+                if (!id) continue;
+                let bucket = map.get(id);
+                if (!bucket) { bucket = []; map.set(id, bucket); }
+                bucket.push(tx);
+            }
+        }
+        return map;
+    }
+    window.buildTxByTenancyIndex = buildTxByTenancyIndex;
+
     // ── Tenancy start date ──
     function getTenancyStartDate(tenancy) {
         const raw = String(getField(tenancy, F.tenStartDate) || '');
@@ -74,7 +105,7 @@
 
     // Compute the rent statement for a single tenancy.
     // Returns a structured object with every component of the maths.
-    function computeRentStatement(tenancy, tenantType, today) {
+    function computeRentStatement(tenancy, tenantType, today, txIndex) {
         const tenStart = getTenancyStartDate(tenancy);
         if (!tenStart) {
             return { applicable: false, reason: 'No tenancy start date' };
@@ -93,12 +124,16 @@
         const daysSinceStart = Math.floor((today - effectiveStart) / 86400000);
         const totalRentOwed = dailyRent * daysSinceStart;
 
-        // Reconciled transactions linked to this tenancy since the effective start
+        // Reconciled transactions linked to this tenancy since the effective start.
+        // Read from the prebuilt index when provided (already filtered to reconciled
+        // + linked) so we only touch THIS tenancy's payments. Fall back to a full
+        // scan for standalone callers that don't pass an index.
         const payments = [];
         let totalRentPaid = 0;
-        for (const tx of allTransactions) {
-            if (!getField(tx, F.txReconciled)) continue;
-            if (!txLinkedToTenancy(tx, tenancy.id)) continue;
+        const txnSource = txIndex
+            ? (txIndex.get(tenancy.id) || [])
+            : allTransactions.filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
+        for (const tx of txnSource) {
             const dateStr = String(getField(tx, F.txDate) || '');
             const txDate = dateStr ? new Date(dateStr) : null;
             if (txDate && txDate < effectiveStart) continue;
@@ -158,6 +193,7 @@
     // Compute statements for all active tenancies. Returns sorted array.
     function computeAllRentStatements(today) {
         const tenantLookup = buildTenantLookup();
+        const txIndex = buildTxByTenancyIndex();
         const statements = [];
 
         for (const tenancy of allTenancies) {
@@ -172,7 +208,7 @@
             const propertyVal = getField(tenancy, F.tenProperty);
             const property = Array.isArray(propertyVal) ? propertyVal[0] : (propertyVal || '');
 
-            const stmt = computeRentStatement(tenancy, tenantType, today);
+            const stmt = computeRentStatement(tenancy, tenantType, today, txIndex);
             if (!stmt.applicable) continue;
 
             statements.push({
@@ -195,7 +231,7 @@
 
     // Used by hasLinkedPaymentThisMonth in cfv.js to determine if a
     // tenancy is currently in arrears. Calendar-month based check.
-    function isCurrentlyInArrears(tenancy, tenantType, today) {
+    function isCurrentlyInArrears(tenancy, tenantType, today, txIndex) {
         if (!getTenancyStartDate(tenancy)) return false;
         const tenStart = getTenancyStartDate(tenancy);
         if (tenStart && tenStart > today) return false;
@@ -203,9 +239,12 @@
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
         const tolerance = 2;
 
-        const paidIn = (y, m) => allTransactions.some(tx => {
-            if (!getField(tx, F.txReconciled)) return false;
-            if (!txLinkedToTenancy(tx, tenancy.id)) return false;
+        // Read this tenancy's reconciled payments from the index when supplied,
+        // else fall back to a full scan (keeps standalone callers correct).
+        const txnSource = txIndex
+            ? (txIndex.get(tenancy.id) || [])
+            : allTransactions.filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
+        const paidIn = (y, m) => txnSource.some(tx => {
             const txDateStr = getField(tx, F.txDate);
             if (!txDateStr) return false;
             const txDate = new Date(txDateStr);
