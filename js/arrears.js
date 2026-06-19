@@ -940,6 +940,15 @@
             </div>
         `;
 
+        // Capture which breakdown rows the user has expanded BEFORE we rebuild the
+        // table. Open/closed state lives only in each row's inline `display`, so a
+        // background re-render (badge sync, dismissal restore, dashboard refresh)
+        // would otherwise collapse a detail the user just opened — the "opens then
+        // auto-closes a moment later" glitch. We re-open them after the rebuild.
+        const _openBreakdownIds = Array.from(container.querySelectorAll('tr.expand-row'))
+            .filter(r => r.style.display === 'table-row')
+            .map(r => r.id);
+
         container.innerHTML = `
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -964,6 +973,17 @@
                 </div>
             </div>
         `;
+
+        // Re-open any breakdown rows that were expanded before this re-render so a
+        // background refresh never collapses a detail the user is actively reading.
+        _openBreakdownIds.forEach(id => {
+            const row = document.getElementById(id);
+            if (!row) return;
+            row.style.display = 'table-row';
+            const parent = row.previousElementSibling;
+            const chevron = parent && parent.querySelector('[data-chevron]');
+            if (chevron) chevron.classList.add('open');
+        });
     }
 
     // ── Debug helper ──
