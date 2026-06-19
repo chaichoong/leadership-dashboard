@@ -541,10 +541,33 @@
     function toggleRentBreakdown(rowId, parentRow) {
         const row = document.getElementById(rowId);
         if (!row) return;
-        const isHidden = row.style.display === 'none';
-        row.style.display = isHidden ? 'table-row' : 'none';
+        const wrap = row.querySelector('.rs-detail-wrap');
+        if (!wrap) return;
+        const isOpen = row.classList.contains('open');
+
+        if (isOpen) {
+            // Collapse: lock the current height, then animate to 0 next frame so
+            // the rows below glide up instead of snapping.
+            wrap.style.maxHeight = wrap.scrollHeight + 'px';
+            void wrap.offsetHeight; // force reflow so the change transitions
+            wrap.style.maxHeight = '0px';
+            row.classList.remove('open');
+        } else {
+            // Expand: animate up to the content's natural height. After the
+            // transition, drop the cap so later content changes (e.g. a tenancy
+            // reassignment re-render) aren't clipped.
+            wrap.style.maxHeight = wrap.scrollHeight + 'px';
+            row.classList.add('open');
+            const onEnd = (e) => {
+                if (e.propertyName !== 'max-height') return;
+                if (row.classList.contains('open')) wrap.style.maxHeight = 'none';
+                wrap.removeEventListener('transitionend', onEnd);
+            };
+            wrap.addEventListener('transitionend', onEnd);
+        }
+
         const chevron = parentRow.querySelector('[data-chevron]');
-        if (chevron) chevron.classList.toggle('open', isHidden);
+        if (chevron) chevron.classList.toggle('open', !isOpen);
     }
     window.toggleRentBreakdown = toggleRentBreakdown;
 
@@ -755,7 +778,7 @@
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const openBreakdowns = document.querySelectorAll('[id^="rentBreakdown_"]');
         for (const row of openBreakdowns) {
-            if (row.style.display === 'none') continue;
+            if (!row.classList.contains('open')) continue;
             const tenancyId = row.id.replace('rentBreakdown_', '');
             const tenancy = allTenancies.find(t => t.id === tenancyId);
             if (!tenancy) continue;
@@ -769,8 +792,12 @@
             const stmt = computeRentStatement(tenancy, tenantType, today);
             if (!stmt.applicable) continue;
             const entry = { tenancyId, tenancy, tenantName, unit, property, stmt };
-            const td = row.querySelector('td');
-            if (td) td.innerHTML = renderBreakdownDetail(entry);
+            // Replace the detail content only, keeping the .rs-detail-wrap intact.
+            const content = row.querySelector('.expand-content');
+            if (content) content.innerHTML = renderBreakdownDetail(entry);
+            // Re-fit the open wrapper so the new content isn't clipped by a stale cap.
+            const wrap = row.querySelector('.rs-detail-wrap');
+            if (wrap) wrap.style.maxHeight = 'none';
             const parentRow = row.previousElementSibling;
             if (parentRow) {
                 const cells = parentRow.querySelectorAll('td');
@@ -954,8 +981,8 @@
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:${daysWeight};color:${daysColour}">${s.daysInArrears}</td>
                 <td style="padding:10px 12px;text-align:center">${s.s8Ready ? s8Badge : ''}</td>
             </tr>
-            <tr class="expand-row" id="${breakdownId}" style="display:none">
-                <td colspan="6"><div class="expand-content">${renderBreakdownDetail(entry)}</div></td>
+            <tr class="expand-row" id="${breakdownId}">
+                <td colspan="6"><div class="rs-detail-wrap"><div class="expand-content">${renderBreakdownDetail(entry)}</div></div></td>
             </tr>`;
         }).join('');
 
@@ -985,7 +1012,7 @@
         // would otherwise collapse a detail the user just opened — the "opens then
         // auto-closes a moment later" glitch. We re-open them after the rebuild.
         const _openBreakdownIds = Array.from(container.querySelectorAll('tr.expand-row'))
-            .filter(r => r.style.display === 'table-row')
+            .filter(r => r.classList.contains('open'))
             .map(r => r.id);
 
         container.innerHTML = `
@@ -1023,7 +1050,17 @@
         _openBreakdownIds.forEach(id => {
             const row = document.getElementById(id);
             if (!row) return;
-            row.style.display = 'table-row';
+            row.classList.add('open');
+            // Open instantly (no slide) on a background re-render: disable the
+            // transition, set the height, then restore the transition so the
+            // user's next manual collapse still animates.
+            const wrap = row.querySelector('.rs-detail-wrap');
+            if (wrap) {
+                wrap.style.transition = 'none';
+                wrap.style.maxHeight = 'none';
+                void wrap.offsetHeight;
+                wrap.style.transition = '';
+            }
             const parent = row.previousElementSibling;
             const chevron = parent && parent.querySelector('[data-chevron]');
             if (chevron) chevron.classList.add('open');
