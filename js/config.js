@@ -26,6 +26,7 @@
         { id: 'fintable',  name: 'Accounts',                       icon: '🏦', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#fintable' },
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
+        { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.16', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.2', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
