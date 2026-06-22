@@ -670,6 +670,14 @@ if (tabId === 'comms') {
                 frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
             }
         }
+        // Content Machine (Marketing) lazy-load — standalone app loaded via iframe,
+        // cache-busted so its Pages deploys are picked up without a hard refresh.
+        if (tabId === 'content-machine') {
+            const frame = document.getElementById('contentMachineFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('content-machine')) {
+                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+            }
+        }
 
         // Refresh data on tab switch — but only if cache is stale.
         // Re-fetching on every tab switch was hammering Airtable and causing the
