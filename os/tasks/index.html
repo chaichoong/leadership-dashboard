@@ -7336,7 +7336,7 @@ function renderRecurring(){
 // (and reassignment between them is live — counts update instantly).
 // Rows are grouped by Property (linked Rental Unit).
 // Columns: Task · Description · Property · Created · Age · Priority · Status · Attachments
-let activeContractor='Gary Marsh';
+let activeContractor='All';
 
 // ── Property auto-match (client-side) ──
 // Matches task text against PROPERTY_ID_TO_NAME. Returns record ID or null.
@@ -7544,7 +7544,12 @@ function renderJobs(){
   const unassignedPool=allTasks.filter(t=>t.status!=='Completed' && t.maintenance && (!t.assigneeEmail || !contractorEmailsLc.has(t.assigneeEmail.toLowerCase())));
   const pool=[...contractorPool,...unassignedPool];
   // Header tabs with counts (matches teamBar count for the same person).
-  let tabs=CONTRACTORS.map(c=>{
+  // "All" tab first — every contractor's open tasks combined into one list.
+  const allActive=activeContractor==='All';
+  let tabs=`<button class="view-tab ${allActive?'active':''}" onclick="setActiveContractor('All')" style="${allActive?'border-bottom:2px solid var(--accent);':''}">
+    <span style="width:20px;height:20px;font-size:11px;margin-right:6px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:var(--accent);color:#fff">∑</span>All <span style="color:var(--text-secondary);font-weight:400">(${contractorPool.length})</span>
+  </button>`;
+  tabs+=CONTRACTORS.map(c=>{
     const n=contractorPool.filter(t=>t.assigneeEmail && t.assigneeEmail.toLowerCase()===c.email.toLowerCase()).length;
     const active=activeContractor===c.name;
     return `<button class="view-tab ${active?'active':''}" onclick="setActiveContractor('${c.name}')" style="${active?`border-bottom:2px solid ${c.colour};`:''}">
@@ -7558,7 +7563,9 @@ function renderJobs(){
     </button>`;
   }
   let list;
-  if(activeContractor==='Unassigned'){
+  if(activeContractor==='All'){
+    list=[...contractorPool];
+  } else if(activeContractor==='Unassigned'){
     list=[...unassignedPool];
   } else {
     const activeEmail=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();
@@ -7613,9 +7620,19 @@ function renderJobs(){
     }).join(' ')+(arr.length>3?`<span style="font-size:10px;color:var(--text-secondary);margin-left:4px">+${arr.length-3}</span>`:'');
   };
   const isUnassignedTab=activeContractor==='Unassigned';
+  const isAllTab=activeContractor==='All';
+  // On the combined "All" tab, show a small chip after the task name so it's
+  // clear which contractor each task belongs to.
+  const contractorChip=t=>{
+    if(!isAllTab)return '';
+    const c=CONTRACTORS.find(c=>c.email.toLowerCase()===(t.assigneeEmail||'').toLowerCase());
+    if(!c)return '';
+    return `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:8px;background:${c.colour};color:#fff;font-size:10px;font-weight:600;vertical-align:middle">${escHtml(c.name.split(' ')[0])}</span>`;
+  };
   let body='';
   if(!groupNames.length){
-    body=`<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-secondary)"><p>No ${isUnassignedTab?'unassigned maintenance':'open contractor'} tasks${isUnassignedTab?'':' for '+escHtml(activeContractor)}.</p></div>`;
+    const emptyMsg=isUnassignedTab?'No unassigned maintenance tasks.':isAllTab?'No open contractor tasks.':'No open contractor tasks for '+escHtml(activeContractor)+'.';
+    body=`<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-secondary)"><p>${emptyMsg}</p></div>`;
   } else {
     groupNames.forEach(prop=>{
       const g=groups[prop];
@@ -7653,7 +7670,7 @@ function renderJobs(){
         const currentPropId=(t.propertyIds&&t.propertyIds[0])||'';
         const mBadge=t.maintenance?'<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:var(--accent-soft);color:var(--accent);font-size:10px;font-weight:600;vertical-align:middle" title="Maintenance task">M</span>':'';
         body+=`<tr onclick="openTaskDrawer('${t.id}')" style="cursor:pointer">
-          <td><strong>${escHtml(t.name)}</strong>${mBadge}</td>
+          <td><strong>${escHtml(t.name)}</strong>${mBadge}${contractorChip(t)}</td>
           <td style="color:var(--text-secondary);max-width:360px">${escHtml((t.description||'').slice(0,160))}${(t.description||'').length>160?'…':''}</td>
           <td>${fmtCreated(t.createdDate)}</td>
           <td>${ageBadge(t.createdDate)}</td>
@@ -7667,7 +7684,7 @@ function renderJobs(){
     });
   }
   // Maintenance filter counts for active tab
-  const allForTab=activeContractor==='Unassigned'?unassignedPool:contractorPool.filter(t=>{const ae=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();return t.assigneeEmail&&t.assigneeEmail.toLowerCase()===ae});
+  const allForTab=activeContractor==='All'?contractorPool:activeContractor==='Unassigned'?unassignedPool:contractorPool.filter(t=>{const ae=((CONTRACTORS.find(c=>c.name===activeContractor)||{}).email||'').toLowerCase();return t.assigneeEmail&&t.assigneeEmail.toLowerCase()===ae});
   const maintCount=allForTab.filter(t=>t.maintenance).length;
   const nonMaintCount=allForTab.length-maintCount;
   const mfBtn=(label,val,count)=>{
