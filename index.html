@@ -105,6 +105,17 @@
                 </div>
             </div>
 
+            <div class="sidebar-section" data-section="marketing" data-tabs="content-machine">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('marketing')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('marketing')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">Marketing</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="marketing"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('content-machine')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('content-machine')}"><span class="sidebar-icon">&#x1F3AC;</span><span class="sidebar-label">Content Machine</span><span class="sidebar-health-dot unknown" data-sidebar-health="content-machine" title="No checks run yet"></span></div>
+                </div>
+            </div>
+
             <div class="sidebar-section" data-section="system" data-tabs="sitemap">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('system')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('system')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
@@ -653,6 +664,11 @@
             <iframe class="tab-panel-iframe" id="osStrategyFrame" src="" data-src="os/strategy/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
+        <!-- Marketing: Content Machine (standalone app at chaichoong.github.io/content-machine — same origin on Pages, so its localStorage keys are shared) -->
+        <div class="tab-panel" id="tab-content-machine">
+            <iframe class="tab-panel-iframe" id="contentMachineFrame" src="" data-src="https://chaichoong.github.io/content-machine/" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
         <!-- Tab 7: Site Map -->
         <div class="tab-panel" id="tab-sitemap">
             <div data-sync-bar="sitemap"></div>
@@ -752,9 +768,9 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <script defer src="js/config.js?v=24"></script>
+    <script defer src="js/config.js?v=25"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
-    <script defer src="js/shared.js?v=26"></script>
+    <script defer src="js/shared.js?v=27"></script>
     <script defer src="js/sync-bar.js?v=4"></script>
     <script defer src="js/dashboard.js?v=19"></script>
     <script defer src="js/cashflow.js?v=20"></script>
