@@ -17,8 +17,14 @@
 //   - In Payment income ...... dashboard.js:940,943
 //   - CFV Actioned income .... dashboard.js:941,944
 //   - monthly fixed costs .... dashboard.js:950-951 (isCostActive + costExpected)
-//   - variable reserve ....... config.js MAINT/WAGES/CFV targets (£6,000)
 //   - payment-lag buffer ..... cashflow.js:1133 analysePaymentLag()
+//
+// MODEL (revised per Kevin): "Safe to act today" is bounded by cash in hand and
+// never exceeds the bank balance. It is the cleared balance minus a wages float,
+// a payment-lag timing cushion, and the fixed costs that reliable rent will NOT
+// cover. Expected rent is not added in — you act only on money you hold today.
+// Maintenance is NOT reserved (paid from the surplus in priority order). The
+// non-payment haircut replaces the old CFV reserve. Only wages remain as a float.
 //
 // NOTE (v1): the rent non-payment haircut uses the CURRENT month's realised
 // miss rate (live CFV exposure ÷ total active rent). Task #2 extends this to a
@@ -62,10 +68,14 @@ function computeSafeToAct() {
     const activeCosts = costs.filter(r => isCostActive(r));
     const monthlyCosts = activeCosts.reduce((s, r) => s + (Number(getField(r, F.costExpected)) || 0), 0);
 
-    // Variable reserve — the shock absorber Kevin already budgets (£6,000)
-    const variableReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP;
+    // Reliable rent covers most fixed costs. Only the shortfall must be held back
+    // from cash. Maintenance is NOT reserved (it is paid from the safe-to-act
+    // surplus in priority order). Missed-payment risk is handled by the haircut
+    // above, so there is no separate CFV reserve. Only wages remain as a fixed float.
+    const uncoveredCosts = Math.max(0, monthlyCosts - netExpectedRent);
+    const wagesFloat = WAGES_TARGET_GBP;
 
-    // Payment-lag timing cushion — fixed costs can land before rent clears
+    // Payment-lag timing cushion — fixed costs can land before rent clears.
     let bufferDays = 3, bufferReason = 'Default 3-day buffer';
     if (typeof analysePaymentLag === 'function') {
         const lag = analysePaymentLag(transactions, [...inPaymentTen, ...cfvActionTen]);
@@ -74,33 +84,34 @@ function computeSafeToAct() {
     }
     const lagCushion = Math.round((bufferDays / 31) * monthlyCosts);
 
-    // The protective floor — cash that must never be touched
-    const floor = variableReserve + lagCushion;
+    // Protective floor — cash that must never be touched.
+    const floor = wagesFloat + lagCushion;
 
-    // Safe to act today: what you can extract now and still end the month at/above
-    // the protective floor, assuming rent arrives net of the current miss rate.
-    const projectedSurplus = clearedBalance + netExpectedRent - monthlyCosts - floor;
-    const safeToActToday = Math.max(0, projectedSurplus);
+    // Safe to act TODAY — bounded by cash in hand, so it can never exceed the bank
+    // balance. Take current cash, set aside the floor and the fixed costs that
+    // reliable rent will not cover. Expected rent is NOT added in: you act only on
+    // money you actually hold today.
+    const safeToActToday = Math.max(0, clearedBalance - floor - uncoveredCosts);
 
-    // Traffic light — judged on cash-in-hand first, surplus second
+    // Traffic light
     let light, headline;
     if (clearedBalance < floor) {
         light = 'red';
         headline = 'Below your protective floor. Pay only essentials. Take nothing for yourself.';
-    } else if (projectedSurplus <= 0) {
+    } else if (safeToActToday <= 0) {
         light = 'amber';
-        headline = 'Cushion intact, but no surplus this month. Cover committed payments only.';
+        headline = 'Cushion intact, but reliable rent does not cover this month’s fixed costs. Cover commitments only.';
     } else {
         light = 'green';
-        headline = 'Surplus available. Act on the plan: clear the priority card, pay critical invoices.';
+        headline = 'Surplus available. Act on the plan: pay critical invoices, then clear the priority card.';
     }
 
     return {
         santBal, zempBal, clearedBalance,
         inPaymentIncome, cfvActionedIncome, cfvExposure,
         grossExpectedRent, nonPaymentRate, rentHaircut, netExpectedRent,
-        monthlyCosts, variableReserve, bufferDays, bufferReason, lagCushion,
-        floor, projectedSurplus, safeToActToday, light, headline,
+        monthlyCosts, uncoveredCosts, wagesFloat, bufferDays, bufferReason, lagCushion,
+        floor, safeToActToday, light, headline,
         counts: { inPayment: inPaymentTen.length, cfvActioned: cfvActionTen.length, cfvOpen: cfvOpenTen.length },
     };
 }
@@ -188,18 +199,27 @@ function renderMoneyContent(el, m) {
             <div style="color:var(--text-primary);font-size:var(--fs-sm);margin-top:10px">${escHtml(m.headline)}</div>
         </div>
 
-        <!-- How the figure is built (auditable) -->
+        <!-- Reliable income this month -->
         <div class="kpi-card" style="margin-bottom:var(--space-5)">
-            <div class="kpi-card-label" style="margin-bottom:12px">How this figure is built</div>
+            <div class="kpi-card-label" style="margin-bottom:12px">Reliable rent this month</div>
+            ${row('Expected rent (In Payment + CFV Actioned)', m.grossExpectedRent)}
+            ${row(`Less: non-payment haircut (${pct}% currently in CFV)`, m.rentHaircut, { sign: '− ', colour: 'var(--danger)' })}
+            ${row('Reliable rent', m.netExpectedRent, { strong: true, border: true, colour: 'var(--success)' })}
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:10px;line-height:1.5">
+                The haircut replaces the old CFV reserve: missed rent is handled here, once, by discounting what you can rely on.
+            </div>
+        </div>
+
+        <!-- How the figure is built (auditable, bounded by cash in hand) -->
+        <div class="kpi-card" style="margin-bottom:var(--space-5)">
+            <div class="kpi-card-label" style="margin-bottom:12px">Safe to act today — from cash in hand</div>
             ${row('Cleared balance (Santander + TNT Zempler)', m.clearedBalance, { strong: true })}
-            ${row('Add: expected rent this month', m.grossExpectedRent, { sign: '+ ', colour: 'var(--success)' })}
-            ${row(`Less: non-payment haircut (${pct}% current miss rate)`, m.rentHaircut, { sign: '− ', colour: 'var(--danger)' })}
-            ${row('Less: monthly fixed costs', m.monthlyCosts, { sign: '− ', colour: 'var(--danger)' })}
-            ${row('Less: variable reserve (maintenance + wages + CFV)', m.variableReserve, { sign: '− ', colour: 'var(--danger)' })}
+            ${row('Less: wages float', m.wagesFloat, { sign: '− ', colour: 'var(--danger)' })}
             ${row(`Less: timing cushion (${m.bufferDays}-day payment lag)`, m.lagCushion, { sign: '− ', colour: 'var(--danger)' })}
+            ${row(`Less: fixed costs reliable rent won't cover (${fmt(m.monthlyCosts)} costs − ${fmt(m.netExpectedRent)} rent)`, m.uncoveredCosts, { sign: '− ', colour: 'var(--danger)' })}
             ${row('Safe to act today', m.safeToActToday, { strong: true, border: true, colour: lightColour })}
             <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:10px;line-height:1.5">
-                The variable reserve and timing cushion (${fmt(m.floor)} combined) are your protective floor. The figure above is what you can act on without dipping into it. Conservative by design: rent is already discounted for missed payments, so the number assumes some tenants do not pay.
+                This figure can never exceed what is in the bank. It is your cash, minus a ${fmt(m.wagesFloat)} wages float, a small timing cushion, and the part of this month's fixed costs your reliable rent will not cover. Maintenance is not reserved — you pay it from this surplus in the order below.
             </div>
         </div>
 
@@ -207,8 +227,8 @@ function renderMoneyContent(el, m) {
         <div class="kpi-card">
             <div class="kpi-card-label" style="margin-bottom:8px">Where it goes (priority order)</div>
             <ol style="margin:0;padding-left:20px;color:var(--text-secondary);font-size:var(--fs-sm);line-height:1.9">
-                <li><strong style="color:var(--text-primary)">Protect the floor</strong> — ${fmt(m.floor)} stays put, always.</li>
-                <li><strong style="color:var(--text-primary)">Consequential payments</strong> — wages, tax, insurance, minimum credit card payments, critical maintenance.</li>
+                <li><strong style="color:var(--text-primary)">Protect the floor</strong> — ${fmt(m.floor)} stays put (wages float + timing cushion).</li>
+                <li><strong style="color:var(--text-primary)">Consequential payments</strong> — tax, insurance, minimum credit card payments, critical maintenance.</li>
                 <li><strong style="color:var(--text-primary)">Highest-interest card</strong> — all remaining surplus (avalanche).</li>
                 <li><strong style="color:var(--text-primary)">Deferrable maintenance</strong> — oldest invoices first.</li>
             </ol>
