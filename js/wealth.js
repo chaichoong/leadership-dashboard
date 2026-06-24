@@ -523,7 +523,12 @@ async function renderPersonalExpenditure() {
         if (isNaN(d.getTime())) return;
         const key = d.getFullYear() + '-' + d.getMonth();
         if (!monthKeys.has(key)) return;
-        const amt = Math.abs((typeof txDisplayAmount === 'function') ? txDisplayAmount(r) : (Number(getField(r, F.txReportAmount)) || 0));
+        // Spend = money out. Report amount is NEGATIVE for outflows and POSITIVE
+        // for refunds / direct-debit reversals, so negate it: outflows add to
+        // spend, reversals net OFF. (Previously Math.abs() added reversals too,
+        // which overstated the totals.)
+        const signed = (typeof txDisplayAmount === 'function') ? txDisplayAmount(r) : (Number(getField(r, F.txReportAmount)) || 0);
+        const amt = -signed;
         data[hit][key] = (data[hit][key] || 0) + amt;
         // Keep the underlying transactions so each category can be drilled into.
         txnsByCat[hit].push({
@@ -548,16 +553,17 @@ async function renderPersonalExpenditure() {
     const colspan = months.length + 3; // Category + months + Avg + Budget
     const fmt2 = n => '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const bodyRows = rows.map(r => {
-        const cells = r.byMonth.map(v => `<td style="text-align:right;padding:6px 8px;color:${v > 0 ? 'var(--text-primary)' : 'var(--text-muted)'}">${v > 0 ? fmt0(v) : '–'}</td>`).join('');
+        const cells = r.byMonth.map(v => `<td style="text-align:right;padding:6px 8px;color:${Math.abs(v) >= 0.005 ? (v < 0 ? 'var(--success)' : 'var(--text-primary)') : 'var(--text-muted)'}">${Math.abs(v) >= 0.005 ? fmt0(v) : '–'}</td>`).join('');
         // Colour the average vs budget: over = danger, within = success, no budget = neutral.
         const avgColour = r.budget > 0 ? (r.avg > r.budget ? 'var(--danger)' : 'var(--success)') : 'var(--text-primary)';
         const flag = r.budget > 0 ? (r.avg > r.budget ? ` (+${fmt0(r.avg - r.budget)})` : ` (−${fmt0(r.budget - r.avg)})`) : '';
-        // Drill-down: the transactions making up this category, biggest first.
-        const txnRows = r.txns.slice().sort((a, b) => b.amt - a.amt).map(t => `<tr style="border-top:1px solid var(--border-subtle)">
+        // Drill-down: the transactions making up this category, most recent first.
+        // Reversals/refunds (negative spend) are shown in green so they stand out.
+        const txnRows = r.txns.slice().sort((a, b) => b.d - a.d).map(t => `<tr style="border-top:1px solid var(--border-subtle)">
             <td style="padding:4px 8px;color:var(--text-secondary);white-space:nowrap">${t.d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</td>
             <td style="padding:4px 8px;color:var(--text-primary)">${escHtml(t.desc)}</td>
             <td style="padding:4px 8px;color:var(--text-muted);white-space:nowrap">${escHtml(t.account)}</td>
-            <td style="padding:4px 8px;text-align:right;color:var(--text-primary);white-space:nowrap">${fmt2(t.amt)}</td>
+            <td style="padding:4px 8px;text-align:right;white-space:nowrap;color:${t.amt < 0 ? 'var(--success)' : 'var(--text-primary)'}">${fmt2(t.amt)}</td>
         </tr>`).join('');
         const detail = r.txns.length
             ? `<table style="width:100%;border-collapse:collapse;font-size:var(--fs-xs);background:var(--bg-surface-2);border-radius:var(--radius-sm)">
