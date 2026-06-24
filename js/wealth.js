@@ -105,6 +105,72 @@ const WEALTH_MONTHS = ['January','February','March','April','May','June','July',
 const WEALTH_CLASS_ORDER = ['Cash','Real Estate','Investments','Businesses','Credit Cards','Loans','Mortgages'];
 const WEALTH_LIVE_CLASSES = ['Cash','Credit Cards'];
 
+// ── Document reader (Claude vision) ──────────────────────────────────────────
+// Drag a screenshot/statement onto a row, or use the clip button, and Claude
+// reads the figure. The value is a SUGGESTION the user confirms — it fills the
+// field but is never saved until the user clicks Save, so a misread cannot slip
+// silently into net worth. Any failure falls back to manual entry.
+const WEALTH_EXTRACT_PROMPT = 'You are reading a financial document or screenshot (a bank, investment, loan or mortgage statement, or an account screen). Identify the single most relevant CURRENT balance or total value in GBP. Respond with ONLY the number — digits and an optional decimal point, no commas, no currency symbol, no words. If there is no clear value, respond exactly: NONE';
+
+function parseWealthNumber(text) {
+    if (!text || /none/i.test(text)) return null;
+    const cleaned = String(text).replace(/[^0-9.]/g, '');
+    if (!cleaned) return null;
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : Math.abs(n);
+}
+
+function wealthReadDoc(btn) {
+    const row = btn.closest('.wealth-row');
+    if (!row) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp,application/pdf';
+    input.onchange = () => { if (input.files && input.files[0]) wealthExtractIntoRow(row, input.files[0]); };
+    input.click();
+}
+
+function wealthDrop(event, row) {
+    event.preventDefault();
+    row.style.background = '';
+    const file = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+    if (file) wealthExtractIntoRow(row, file);
+}
+
+async function wealthExtractIntoRow(row, file) {
+    const status = row.querySelector('.wread-status');
+    const amt = row.querySelector('.wa');
+    const setStatus = (t, c) => { if (status) { status.textContent = t; status.style.color = c || 'var(--text-muted)'; } };
+    if (!file) return;
+    const okTypes = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
+    if (!okTypes.includes(file.type)) { setStatus('use PNG/JPG/PDF', 'var(--danger)'); return; }
+    if (file.size > 8 * 1024 * 1024) { setStatus('file too big (8MB)', 'var(--danger)'); return; }
+    setStatus('reading…');
+    if (amt) amt.style.borderColor = '';
+    try {
+        const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+        const b64 = String(dataUrl).split(',')[1];
+        if (!b64) { setStatus('couldn’t read — enter manually', 'var(--danger)'); return; }
+        const block = (file.type === 'application/pdf')
+            ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+            : { type: 'image', source: { type: 'base64', media_type: file.type, data: b64 } };
+        const messages = [{ role: 'user', content: [block, { type: 'text', text: WEALTH_EXTRACT_PROMPT }] }];
+        const resp = await fetch(AI_PROXY, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 80, system: '', messages }),
+        });
+        if (!resp.ok) { setStatus('couldn’t read — enter manually', 'var(--danger)'); return; }
+        const data = await resp.json();
+        const num = parseWealthNumber(data.content && data.content[0] ? data.content[0].text : '');
+        if (num == null) { setStatus('no figure found — enter manually', 'var(--danger)'); return; }
+        if (amt) { amt.value = num; amt.style.borderColor = 'var(--success)'; }
+        setStatus('AI-read · check it', 'var(--success)');
+    } catch (e) {
+        setStatus('couldn’t read — enter manually', 'var(--danger)');
+    }
+}
+
 // One editable row. Existing items carry their name in data-name (label shown);
 // new items get a name text input so you can add a property/business/loan.
 function wealthRowHtml(cls, name, amount, live, isNew) {
@@ -113,12 +179,15 @@ function wealthRowHtml(cls, name, amount, live, isNew) {
         ? `<input type="text" class="wn" placeholder="Name (e.g. new property)" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">`
         : `<label style="flex:1;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(name)}${tag}</label>`;
     const dataName = isNew ? '' : ` data-name="${escHtml(name)}"`;
-    return `<div class="wealth-row" data-wealth-type="${escHtml(cls)}"${dataName} style="display:flex;align-items:center;gap:10px;padding:5px 0">
+    return `<div class="wealth-row" data-wealth-type="${escHtml(cls)}"${dataName} style="display:flex;align-items:center;gap:8px;padding:5px 0"
+        ondragover="event.preventDefault();this.style.background='var(--bg-surface-2)'" ondragleave="this.style.background=''" ondrop="wealthDrop(event,this)">
         ${nameCell}
+        <span class="wread-status" style="font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap"></span>
         <span style="color:var(--text-muted)">£</span>
         <input type="number" step="0.01" class="wa" value="${amount == null ? '' : amount}"
-            style="width:140px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
-        <button onclick="this.closest('.wealth-row').remove()" title="Remove this item" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:2px 6px;line-height:1">&times;</button>
+            style="width:130px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
+        <button type="button" onclick="wealthReadDoc(this)" title="Read the value from a screenshot or statement" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;padding:3px 7px;line-height:1">&#x1F4CE;</button>
+        <button type="button" onclick="this.closest('.wealth-row').remove()" title="Remove this item" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:2px 4px;line-height:1">&times;</button>
     </div>`;
 }
 
