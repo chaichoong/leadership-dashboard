@@ -54,6 +54,7 @@
         invoices:      'tblkOTKIG2Tyiy9aM',
         netWorthByMonth: 'tblvtDXCBJCHu9hnK', // Specific Net Worth Statement by Month (Wealth tab)
         incomeBuckets:   'tbldMPjXTu7ho5f0T', // Income Buckets (Wealth tab — virtual overlay)
+        personalBudgets: 'tblm5ZxyoiLfaBAS4', // Personal Budgets (Wealth tab — monthly budget per personal category)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
@@ -213,6 +214,14 @@
         { id: 'rec1KfO2hixb1DA2e', name: 'Loan Capital Repayment' },
         { id: 'recICmYNPZBQbeWWE', name: 'Loan Interest' },
     ];
+
+    // ── Personal Budgets field IDs (Airtable: Personal Budgets / tblm5ZxyoiLfaBAS4) ──
+    // Monthly budget per personal-expense category, matched to PERSONAL_EXPENSE_SUBCATS by name.
+    const PBUDGET = {
+        category: 'fldojQ6v6xlaBSyml',  // Category (singleLineText, primary)
+        budget:   'fldhg2PGvzbyC3TbX',  // Monthly Budget (currency £)
+        sort:     'fldPO3rLzSM8DKy8k',  // Sort Order (number)
+    };
 
     // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──
     // Virtual overlay for the Wealth tab. Surplus is split by Allocation % into Balance.

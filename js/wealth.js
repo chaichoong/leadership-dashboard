@@ -468,11 +468,15 @@ function renderWealthContent(el, records) {
     loadWealthBuckets();
 }
 
-// ── Personal expenditure (actual spend per category, from transactions) ──────
+// ── Personal expenditure + budgets (actual spend per category vs budget) ─────
 // Sums transactions coded to the personal-expense sub-categories, by month, over
-// the last 6 months, so Kevin can see what he spends and set sensible budgets.
-// No Airtable fetch — uses the global allTransactions populated by the dashboard.
-function renderPersonalExpenditure() {
+// the last 6 months, and compares the average to a monthly budget per category
+// (Personal Budgets table). Spend comes from the global allTransactions (no
+// fetch); budgets are fetched once and cached.
+let _budgetRecords = null;
+let _budgetPromise = null;
+
+async function renderPersonalExpenditure() {
     const el = document.getElementById('wealthExpenditure');
     if (!el) return;
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
@@ -480,6 +484,19 @@ function renderPersonalExpenditure() {
         el.innerHTML = `<div class="kpi-card" style="color:var(--text-muted);font-size:var(--fs-sm)">Personal expenditure loads once transactions have synced — open the Leadership Dashboard once, then come back.</div>`;
         return;
     }
+
+    // Budgets (fetch once, cache). Failure is non-fatal — table still shows spend.
+    if (!_budgetRecords && typeof PAT !== 'undefined' && PAT) {
+        try {
+            if (!_budgetPromise) _budgetPromise = airtableFetch(TABLES.personalBudgets);
+            _budgetRecords = await _budgetPromise;
+        } catch (e) { _budgetRecords = []; _budgetPromise = null; }
+    }
+    const budgetByName = {}, budgetIdByName = {};
+    (_budgetRecords || []).forEach(r => {
+        const n = getField(r, PBUDGET.category);
+        if (n) { budgetByName[n] = Number(getField(r, PBUDGET.budget)) || 0; budgetIdByName[n] = r.id; }
+    });
 
     const catIds = new Set(PERSONAL_EXPENSE_SUBCATS.map(c => c.id));
 
@@ -512,19 +529,24 @@ function renderPersonalExpenditure() {
     const rows = PERSONAL_EXPENSE_SUBCATS.map(c => {
         const byMonth = months.map(m => data[c.id][m.key] || 0);
         const total = byMonth.reduce((s, v) => s + v, 0);
-        return { name: c.name, byMonth, total, avg: total / months.length };
+        return { name: c.name, byMonth, total, avg: total / months.length, budget: budgetByName[c.name] || 0, budgetId: budgetIdByName[c.name] || '' };
     }).sort((a, b) => b.total - a.total);
 
     const grandAvg = rows.reduce((s, r) => s + r.total, 0) / months.length;
+    const grandBudget = rows.reduce((s, r) => s + r.budget, 0);
     const fmt0 = n => '£' + Math.round(n).toLocaleString('en-GB');
 
     const headCells = months.map(m => `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(m.label)}</th>`).join('');
     const bodyRows = rows.map(r => {
         const cells = r.byMonth.map(v => `<td style="text-align:right;padding:6px 8px;color:${v > 0 ? 'var(--text-primary)' : 'var(--text-muted)'}">${v > 0 ? fmt0(v) : '–'}</td>`).join('');
+        // Colour the average vs budget: over = danger, within = success, no budget = neutral.
+        const avgColour = r.budget > 0 ? (r.avg > r.budget ? 'var(--danger)' : 'var(--success)') : 'var(--text-primary)';
+        const flag = r.budget > 0 ? (r.avg > r.budget ? ` (+${fmt0(r.avg - r.budget)})` : ` (−${fmt0(r.budget - r.avg)})`) : '';
         return `<tr style="border-top:1px solid var(--border-subtle)">
             <td style="padding:6px 8px;color:var(--text-primary)">${escHtml(r.name)}</td>
             ${cells}
-            <td style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(r.avg)}</td>
+            <td style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:${avgColour}">${fmt0(r.avg)}<span style="font-size:var(--fs-xs);font-weight:var(--fw-regular)">${flag}</span></td>
+            <td style="text-align:right;padding:6px 8px"><span style="color:var(--text-muted)">£</span><input type="number" step="1" min="0" class="pbud" data-budget-id="${escHtml(r.budgetId)}" value="${r.budget || ''}" placeholder="0" style="width:84px;padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"></td>
         </tr>`;
     }).join('');
     const totalCells = months.map((m, idx) => {
@@ -534,26 +556,56 @@ function renderPersonalExpenditure() {
 
     el.innerHTML = `<div class="kpi-card">
         <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap">
-            <span class="kpi-card-label">Personal expenditure</span>
-            <span style="margin-left:auto;color:var(--text-secondary);font-size:var(--fs-sm)">Avg/month: <strong style="color:var(--text-primary)">${fmt0(grandAvg)}</strong></span>
+            <span class="kpi-card-label">Personal expenditure vs budget</span>
+            <span style="margin-left:auto;color:var(--text-secondary);font-size:var(--fs-sm)">Avg/month: <strong style="color:var(--text-primary)">${fmt0(grandAvg)}</strong>${grandBudget > 0 ? ` vs budget <strong style="color:${grandAvg > grandBudget ? 'var(--danger)' : 'var(--success)'}">${fmt0(grandBudget)}</strong>` : ''}</span>
         </div>
-        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Actual spend per category, last 6 months, from your reconciled transactions. Biggest spend first. Use it to see where the money goes; budgets per category come next.</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Actual spend per category, last 6 months, from your reconciled transactions (biggest first). Set a monthly budget per category; the Avg turns red when you are over it, green when under. Save to persist.</div>
+        <div id="budgetSaveError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-bottom:8px"></div>
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
             <thead><tr>
                 <th style="text-align:left;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Category</th>
                 ${headCells}
                 <th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Avg</th>
+                <th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Budget</th>
             </tr></thead>
             <tbody>${bodyRows}</tbody>
             <tfoot><tr style="border-top:2px solid var(--border-default)">
                 <td style="padding:8px;font-weight:var(--fw-semibold);color:var(--text-primary)">Total</td>
                 ${totalCells}
                 <td style="text-align:right;padding:8px;font-weight:var(--fw-bold);color:var(--text-primary)">${fmt0(grandAvg)}</td>
+                <td style="text-align:right;padding:8px;font-weight:var(--fw-bold);color:var(--text-primary)">${grandBudget > 0 ? fmt0(grandBudget) : '–'}</td>
             </tr></tfoot>
         </table>
         </div>
+        <div style="margin-top:14px"><button id="budgetSaveBtn" onclick="saveBudgets()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save budgets</button></div>
     </div>`;
+}
+
+async function saveBudgets() {
+    const btn = document.getElementById('budgetSaveBtn');
+    const errEl = document.getElementById('budgetSaveError');
+    const records = [...document.querySelectorAll('.pbud')]
+        .filter(i => i.dataset.budgetId)
+        .map(i => ({ id: i.dataset.budgetId, fields: { [PBUDGET.budget]: Number(i.value) || 0 } }));
+    if (!records.length) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        for (let i = 0; i < records.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.personalBudgets}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: records.slice(i, i + 10) }),
+            });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+        }
+        _budgetRecords = null;
+        _budgetPromise = null;
+        await renderPersonalExpenditure();
+    } catch (e) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Could not save budgets: ' + (e.message || 'error'); }
+        if (btn) { btn.disabled = false; btn.textContent = 'Save budgets'; }
+    }
 }
 
 // ── Income buckets ───────────────────────────────────────────────────────────
