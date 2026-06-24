@@ -80,6 +80,28 @@ async function renderWealthTab() {
     }
 }
 
+// Show a small amber badge on the Wealth sidebar item when monthly figures are
+// stale, so the "needs updating" alert is visible from any tab (the sidebar is
+// always on screen). Isolated: only touches the Wealth nav item.
+function updateWealthSidebarFlag(monthsBehind) {
+    const dot = document.querySelector("[data-sidebar-health='wealth']");
+    const navItem = dot ? dot.closest('.sidebar-item') : null;
+    if (!navItem) return;
+    let badge = navItem.querySelector('.wealth-stale-badge');
+    if (monthsBehind > 0) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'wealth-stale-badge';
+            badge.style.cssText = 'margin-left:6px;min-width:18px;height:18px;border-radius:9px;font-size:10px;font-weight:700;color:#fff;background:var(--warning);text-align:center;line-height:18px;padding:0 5px';
+            navItem.appendChild(badge);
+        }
+        badge.textContent = monthsBehind + 'm';
+        badge.title = monthsBehind + ' month(s) of figures need updating';
+    } else if (badge) {
+        badge.remove();
+    }
+}
+
 function renderWealthContent(el, records) {
     const periods = computeNetWorth(records);
     if (!periods.length) {
@@ -102,6 +124,33 @@ function renderWealthContent(el, records) {
     const bal = id => { const a = accts.find(x => x.id === id); return a ? (Number(getField(a, F.accGBP)) || 0) : 0; };
     const liveCash = bal(REC.santander) + bal(REC.tntZempler);
     const snapCash = latest.byClass['Cash'] || 0;
+
+    // ── Staleness + update-method audit ──
+    // Real-time classes can be synced from connected accounts; the rest are
+    // updated once a month by hand. This drives the "needs updating" alert.
+    const REALTIME_CLASSES = ['Cash', 'Credit Cards'];
+    const MANUAL_CLASSES = ['Real Estate', 'Investments', 'Businesses', 'Loans', 'Mortgages'];
+    const now = new Date();
+    const monthsBehind = (now.getFullYear() * 12 + now.getMonth()) - (latest.year * 12 + latest.monthIdx);
+    const currentLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    const manualItemCount = MANUAL_CLASSES.reduce((s, c) => s + ((latest.items[c] || []).length), 0);
+    // Flag the sidebar so the "needs updating" alert is visible from anywhere.
+    updateWealthSidebarFlag(monthsBehind);
+
+    const auditCol = (title, colour, classes, note) => {
+        const rows = classes.map(c => {
+            const n = (latest.items[c] || []).length;
+            return `<div style="display:flex;justify-content:space-between;font-size:var(--fs-sm);padding:3px 0">
+                <span style="color:var(--text-secondary)">${escHtml(c)}</span>
+                <span style="color:var(--text-muted)">${n} item${n === 1 ? '' : 's'}</span>
+            </div>`;
+        }).join('');
+        return `<div>
+            <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:${colour};text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px">${escHtml(title)}</div>
+            ${rows}
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px;line-height:1.5">${escHtml(note)}</div>
+        </div>`;
+    };
 
     const classRow = (cls, colour) => {
         const val = latest.byClass[cls] || 0;
@@ -132,6 +181,15 @@ function renderWealthContent(el, records) {
 
     el.innerHTML = `
     <div style="max-width:960px;margin:0 auto">
+
+        ${monthsBehind > 0 ? `<!-- Staleness alert -->
+        <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-5);display:flex;gap:12px;align-items:flex-start">
+            <span style="font-size:20px;line-height:1.2">⚠️</span>
+            <div>
+                <div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">Your figures are ${monthsBehind} month${monthsBehind === 1 ? '' : 's'} out of date</div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Latest snapshot is ${escHtml(asOf)}. To bring this up to ${escHtml(currentLabel)}, ${manualItemCount} manual figures need updating: property and business valuations, loan and mortgage balances, and investments. Cash and credit cards update live. The one-tap monthly update form is the next step.</div>
+            </div>
+        </div>` : ''}
 
         <!-- Hero: net worth -->
         <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-6);margin-bottom:var(--space-5)">
@@ -169,6 +227,15 @@ function renderWealthContent(el, records) {
             </div>
             <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:8px;line-height:1.5">
                 Cash in the ${asOf} snapshot was ${fmt(snapCash)} across all accounts (Monese, Hyper Jar, ANNA and others). The live figure above covers only the two synced current accounts. Fully live net worth across every class is the next enhancement.
+            </div>
+        </div>
+
+        <!-- Update-method audit -->
+        <div class="kpi-card" style="margin-bottom:var(--space-5)">
+            <div class="kpi-card-label" style="margin-bottom:12px">How these figures update</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+                ${auditCol('Live · auto', 'var(--success)', REALTIME_CLASSES, 'Synced from your connected bank and card accounts. No monthly input needed.')}
+                ${auditCol('Monthly · you update', 'var(--warning)', MANUAL_CLASSES, 'You refresh these once a month: valuations and loan balances. The update form will make this one quick pass.')}
             </div>
         </div>
 
