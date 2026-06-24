@@ -192,7 +192,7 @@
         year:    'fld0iFQ9PwFv0jKBa',  // Year (singleSelect): 2025, 2026, …
     };
     // The six classes, split into assets vs liabilities.
-    const NW_ASSET_CLASSES = ['Cash', 'Investments & Real Estate', 'Businesses'];
+    const NW_ASSET_CLASSES = ['Cash', 'Real Estate', 'Investments', 'Businesses'];
     const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
