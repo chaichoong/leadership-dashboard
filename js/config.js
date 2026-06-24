@@ -55,6 +55,7 @@
         netWorthByMonth: 'tblvtDXCBJCHu9hnK', // Specific Net Worth Statement by Month (Wealth tab)
         incomeBuckets:   'tbldMPjXTu7ho5f0T', // Income Buckets (Wealth tab — virtual overlay)
         personalBudgets: 'tblm5ZxyoiLfaBAS4', // Personal Budgets (Wealth tab — monthly budget per personal category)
+        debtTerms:       'tblTz8ErAmQGu7rIZ', // Debt Terms (Wealth tab — loan/mortgage amortisation)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
@@ -221,6 +222,19 @@
         category: 'fldojQ6v6xlaBSyml',  // Category (singleLineText, primary)
         budget:   'fldhg2PGvzbyC3TbX',  // Monthly Budget (currency £)
         sort:     'fldPO3rLzSM8DKy8k',  // Sort Order (number)
+    };
+
+    // ── Debt Terms field IDs (Airtable: Debt Terms / tblTz8ErAmQGu7rIZ) ──
+    // Loan/mortgage terms; the Wealth tab amortises the current balance from these.
+    const DEBT = {
+        name:      'fldo9nXP30QFfb5fx',  // Name (singleLineText, primary)
+        cls:       'fldYh1OsSeCTGzrGs',  // Class (singleSelect): Loans | Mortgages
+        type:      'fldaxUmB2EQEvO74k',  // Type (singleSelect): Repayment | Interest-only
+        principal: 'fldcK7C3Lvj8AkjiE',  // Original Amount (currency £)
+        rate:      'fldW6SrsqE5t3XjL1',  // Annual Rate % (number)
+        term:      'fldf4d9blAMhn3LAi',  // Term Months (number)
+        start:     'fldO7nbTpn0RvGY04',  // Start Date (date)
+        notes:     'fldRgR0iM5KqkBHuT',  // Notes (multilineText)
     };
 
     // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──

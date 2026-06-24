@@ -457,6 +457,9 @@ function renderWealthContent(el, records) {
         <!-- Personal expenditure (from transactions) -->
         <div id="wealthExpenditure" style="margin-top:var(--space-5)"></div>
 
+        <!-- Loans & mortgages (auto-computed from terms) -->
+        <div id="wealthDebts" style="margin-top:var(--space-5)"></div>
+
         <!-- Income buckets (loaded separately) -->
         <div id="wealthBuckets" style="margin-top:var(--space-5)"></div>
 
@@ -464,8 +467,190 @@ function renderWealthContent(el, records) {
 
     // Personal expenditure reads the already-loaded transaction globals (sync).
     renderPersonalExpenditure();
-    // Load + render the income buckets section (its own Airtable fetch).
+    // Loan/mortgage auto-compute + income buckets (each fetch their own table).
+    loadDebtTerms();
     loadWealthBuckets();
+}
+
+// ── Loan & mortgage auto-compute (amortisation) ──────────────────────────────
+// Computes the current outstanding balance from each debt's terms, so loans and
+// mortgages stop being a manual monthly figure. Interest-only debts hold at the
+// principal; repayment debts amortise. Terms live in the Debt Terms table.
+const DEBT_INP = 'padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);';
+const fmt0 = n => '£' + Math.round(n).toLocaleString('en-GB');
+let _debtRecords = null;
+let _debtPromise = null;
+
+// Outstanding balance today from terms. Returns { balance, computed } where
+// computed=false means we lack the terms to amortise (fall back to principal).
+function amortisedBalance(type, principal, ratePct, termMonths, startStr, asOf) {
+    const P = Number(principal) || 0;
+    if (P <= 0) return { balance: 0, computed: false };
+    if (type === 'Interest-only') return { balance: P, computed: true };
+    // Repayment needs term + start to amortise.
+    const n = Math.round(Number(termMonths) || 0);
+    const start = startStr ? new Date(startStr) : null;
+    if (!n || !start || isNaN(start.getTime())) return { balance: P, computed: false };
+    const now = asOf || new Date();
+    let k = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+    k = Math.max(0, Math.min(k, n));
+    const i = (Number(ratePct) || 0) / 100 / 12;
+    let bal;
+    if (i === 0) {
+        bal = P * (1 - k / n);
+    } else {
+        const pow = Math.pow(1 + i, k);
+        const M = P * i / (1 - Math.pow(1 + i, -n));
+        bal = P * pow - M * (pow - 1) / i;
+    }
+    return { balance: Math.max(0, Math.round(bal * 100) / 100), computed: true };
+}
+
+async function loadDebtTerms() {
+    const el = document.getElementById('wealthDebts');
+    if (!el) return;
+    if (!_debtRecords) {
+        el.innerHTML = `<div class="kpi-card" style="color:var(--text-muted);font-size:var(--fs-sm)">Loading loans & mortgages…</div>`;
+        if (typeof PAT === 'undefined' || !PAT) { el.innerHTML = ''; return; }
+        try {
+            if (!_debtPromise) _debtPromise = airtableFetch(TABLES.debtTerms);
+            _debtRecords = await _debtPromise;
+        } catch (e) {
+            _debtPromise = null;
+            el.innerHTML = `<div class="kpi-card" style="color:var(--text-secondary);font-size:var(--fs-sm)">Could not load loan/mortgage terms.</div>`;
+            return;
+        }
+    }
+    renderDebtTerms(el);
+}
+
+function renderDebtTerms(el) {
+    const recs = (_debtRecords || []).slice();
+    const sel = (cur, opts) => opts.map(o => `<option value="${o}"${o === cur ? ' selected' : ''}>${o}</option>`).join('');
+    const rowHtml = (r) => {
+        const id = r ? r.id : '';
+        const name = r ? (getField(r, DEBT.name) || '') : '';
+        const cls = r ? (getField(r, DEBT.cls) || 'Loans') : 'Loans';
+        const type = r ? (getField(r, DEBT.type) || 'Repayment') : 'Repayment';
+        const principal = r ? (Number(getField(r, DEBT.principal)) || 0) : 0;
+        const rate = r ? (Number(getField(r, DEBT.rate)) || 0) : 0;
+        const term = r ? (Number(getField(r, DEBT.term)) || 0) : 0;
+        const start = r ? (getField(r, DEBT.start) || '') : '';
+        const calc = amortisedBalance(type, principal, rate, term, start);
+        const balText = principal > 0 ? (calc.computed ? fmt0(calc.balance) : fmt0(calc.balance) + ' *') : '–';
+        return `<tr class="debt-row" data-debt-id="${escHtml(id)}" style="border-top:1px solid var(--border-subtle)">
+            <td style="padding:5px 6px"><input type="text" class="d-name" value="${escHtml(name)}" placeholder="Name" style="${DEBT_INP}width:140px"></td>
+            <td style="padding:5px 6px"><select class="d-cls" style="${DEBT_INP}">${sel(cls, ['Loans', 'Mortgages'])}</select></td>
+            <td style="padding:5px 6px"><select class="d-type" onchange="recalcDebtRow(this)" style="${DEBT_INP}">${sel(type, ['Repayment', 'Interest-only'])}</select></td>
+            <td style="padding:5px 6px;text-align:right"><span style="color:var(--text-muted)">£</span><input type="number" class="d-principal" value="${principal || ''}" oninput="recalcDebtRow(this)" placeholder="0" style="${DEBT_INP}width:96px;text-align:right"></td>
+            <td style="padding:5px 6px;text-align:right"><input type="number" step="0.01" class="d-rate" value="${rate || ''}" oninput="recalcDebtRow(this)" placeholder="0" style="${DEBT_INP}width:60px;text-align:right">%</td>
+            <td style="padding:5px 6px;text-align:right"><input type="number" class="d-term" value="${term || ''}" oninput="recalcDebtRow(this)" placeholder="0" style="${DEBT_INP}width:60px;text-align:right"></td>
+            <td style="padding:5px 6px"><input type="date" class="d-start" value="${escHtml(start)}" onchange="recalcDebtRow(this)" style="${DEBT_INP}"></td>
+            <td class="d-balance" style="padding:5px 6px;text-align:right;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap">${balText}</td>
+            <td style="padding:5px 6px;text-align:center"><button onclick="this.closest('.debt-row').remove()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:15px">&times;</button></td>
+        </tr>`;
+    };
+    const bodyRows = recs.map(rowHtml).join('');
+
+    el.innerHTML = `<div class="kpi-card">
+        <div class="kpi-card-label" style="margin-bottom:4px">Loans &amp; mortgages — auto-computed</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Enter each debt's terms once. The balance is then computed every month: interest-only holds at the original amount; repayment amortises. A <strong>*</strong> means the balance is the original amount because repayment terms (rate, term, start) are not complete yet.</div>
+        <div id="debtSaveError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-bottom:8px"></div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
+            <thead><tr style="color:var(--text-muted);font-size:var(--fs-xs)">
+                <th style="text-align:left;padding:5px 6px">Name</th><th style="text-align:left;padding:5px 6px">Class</th><th style="text-align:left;padding:5px 6px">Type</th>
+                <th style="text-align:right;padding:5px 6px">Original</th><th style="text-align:right;padding:5px 6px">Rate</th><th style="text-align:right;padding:5px 6px">Term (mo)</th>
+                <th style="text-align:left;padding:5px 6px">Start</th><th style="text-align:right;padding:5px 6px">Balance now</th><th></th>
+            </tr></thead>
+            <tbody id="debtRows">${bodyRows}</tbody>
+        </table>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+            <button id="debtSaveBtn" onclick="saveDebtTerms()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save terms</button>
+            <button onclick="addDebtRow()" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:8px 16px;cursor:pointer;color:var(--accent)">+ Add debt</button>
+            <span style="color:var(--text-muted);font-size:var(--fs-xs);align-self:center">Computed balances flow into your net-worth update next.</span>
+        </div>
+    </div>`;
+}
+
+// Recompute one row's "Balance now" cell live as terms are edited.
+function recalcDebtRow(inp) {
+    const row = inp.closest('.debt-row');
+    if (!row) return;
+    const type = row.querySelector('.d-type').value;
+    const principal = row.querySelector('.d-principal').value;
+    const rate = row.querySelector('.d-rate').value;
+    const term = row.querySelector('.d-term').value;
+    const start = row.querySelector('.d-start').value;
+    const calc = amortisedBalance(type, principal, rate, term, start);
+    const cell = row.querySelector('.d-balance');
+    if (cell) cell.textContent = (Number(principal) > 0) ? (calc.computed ? fmt0(calc.balance) : fmt0(calc.balance) + ' *') : '–';
+}
+
+function addDebtRow() {
+    const tbody = document.getElementById('debtRows');
+    if (!tbody) return;
+    const tr = document.createElement('tr');
+    tr.className = 'debt-row';
+    tr.dataset.debtId = '';
+    tr.style.borderTop = '1px solid var(--border-subtle)';
+    tr.innerHTML = `<td style="padding:5px 6px"><input type="text" class="d-name" placeholder="Name" style="${DEBT_INP}width:140px"></td>
+        <td style="padding:5px 6px"><select class="d-cls" style="${DEBT_INP}"><option>Loans</option><option>Mortgages</option></select></td>
+        <td style="padding:5px 6px"><select class="d-type" onchange="recalcDebtRow(this)" style="${DEBT_INP}"><option>Repayment</option><option>Interest-only</option></select></td>
+        <td style="padding:5px 6px;text-align:right"><span style="color:var(--text-muted)">£</span><input type="number" class="d-principal" oninput="recalcDebtRow(this)" placeholder="0" style="${DEBT_INP}width:96px;text-align:right"></td>
+        <td style="padding:5px 6px;text-align:right"><input type="number" step="0.01" class="d-rate" oninput="recalcDebtRow(this)" placeholder="0" style="${DEBT_INP}width:60px;text-align:right">%</td>
+        <td style="padding:5px 6px;text-align:right"><input type="number" class="d-term" oninput="recalcDebtRow(this)" placeholder="0" style="${DEBT_INP}width:60px;text-align:right"></td>
+        <td style="padding:5px 6px"><input type="date" class="d-start" onchange="recalcDebtRow(this)" style="${DEBT_INP}"></td>
+        <td class="d-balance" style="padding:5px 6px;text-align:right;font-weight:var(--fw-semibold);color:var(--text-primary)">–</td>
+        <td style="padding:5px 6px;text-align:center"><button onclick="this.closest('.debt-row').remove()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:15px">&times;</button></td>`;
+    tbody.appendChild(tr);
+}
+
+async function saveDebtTerms() {
+    const btn = document.getElementById('debtSaveBtn');
+    const errEl = document.getElementById('debtSaveError');
+    const showErr = m => { if (errEl) { errEl.style.display = 'block'; errEl.textContent = m; } if (btn) { btn.disabled = false; btn.textContent = 'Save terms'; } };
+    const rows = [...document.querySelectorAll('.debt-row')];
+    const creates = [], updates = [];
+    rows.forEach(row => {
+        const name = row.querySelector('.d-name').value.trim();
+        if (!name) return;
+        const fields = {
+            [DEBT.name]: name,
+            [DEBT.cls]: row.querySelector('.d-cls').value,
+            [DEBT.type]: row.querySelector('.d-type').value,
+            [DEBT.principal]: Number(row.querySelector('.d-principal').value) || 0,
+            [DEBT.rate]: Number(row.querySelector('.d-rate').value) || 0,
+            [DEBT.term]: Number(row.querySelector('.d-term').value) || 0,
+            [DEBT.start]: row.querySelector('.d-start').value || null,
+        };
+        if (row.dataset.debtId) updates.push({ id: row.dataset.debtId, fields });
+        else creates.push({ fields });
+    });
+    if (!creates.length && !updates.length) { showErr('Nothing to save.'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        for (let i = 0; i < updates.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.debtTerms}`, {
+                method: 'PATCH', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }),
+            });
+            if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        }
+        for (let i = 0; i < creates.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.debtTerms}`, {
+                method: 'POST', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: creates.slice(i, i + 10), typecast: true }),
+            });
+            if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        }
+        _debtRecords = null;
+        _debtPromise = null;
+        await loadDebtTerms();
+    } catch (e) {
+        showErr('Could not save: ' + (e.message || 'error'));
+    }
 }
 
 // ── Personal expenditure + budgets (actual spend per category vs budget) ─────
