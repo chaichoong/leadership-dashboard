@@ -71,7 +71,13 @@ async function renderWealthTab() {
             <div style="font-size:var(--fs-sm)">Use the Refresh button, or switch tabs and back.</div></div></div>`;
         return;
     }
-    renderWealthContent(el, _wealthRecords);
+    try {
+        renderWealthContent(el, _wealthRecords);
+    } catch (e) {
+        el.innerHTML = `<div style="max-width:960px;margin:0 auto"><div class="kpi-card" style="text-align:center;color:var(--text-secondary)">
+            <div style="font-weight:var(--fw-semibold);margin-bottom:6px;color:var(--text-primary)">Could not display net worth</div>
+            <div style="font-size:var(--fs-sm)">${escHtml(e.message || 'Unexpected error')}</div></div></div>`;
+    }
 }
 
 function renderWealthContent(el, records) {
@@ -88,9 +94,12 @@ function renderWealthContent(el, records) {
     const asOf = `${latest.month} ${latest.year}`;
     const netChange = prev ? latest.net - prev.net : null;
 
-    // Live bank cash today (unambiguous: the two current accounts the dashboard uses)
+    // Live bank cash today (unambiguous: the two current accounts the dashboard uses).
+    // Null-safe: allAccounts may not be populated yet on first load — getField throws
+    // if passed undefined, so look the record up first and skip if absent.
     const accts = (typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [];
-    const bal = id => Number(getField(accts.find(a => a.id === id), F.accGBP)) || 0;
+    const accountsLoaded = accts.length > 0;
+    const bal = id => { const a = accts.find(x => x.id === id); return a ? (Number(getField(a, F.accGBP)) || 0) : 0; };
     const liveCash = bal(REC.santander) + bal(REC.tntZempler);
     const snapCash = latest.byClass['Cash'] || 0;
 
@@ -154,7 +163,7 @@ function renderWealthContent(el, records) {
         <div class="kpi-card" style="margin-bottom:var(--space-5)">
             <div class="kpi-card-label" style="margin-bottom:8px">Live bank cash today</div>
             <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
-                <span style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:var(--text-primary)">${fmt(liveCash)}</span>
+                <span style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:var(--text-primary)">${accountsLoaded ? fmt(liveCash) : '<span style=\"color:var(--text-muted);font-size:var(--fs-base)\">Syncing…</span>'}</span>
                 <span style="color:var(--text-muted);font-size:var(--fs-sm)">Santander + TNT Zempler, synced now</span>
             </div>
             <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:8px;line-height:1.5">
