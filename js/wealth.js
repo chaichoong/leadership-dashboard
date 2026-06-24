@@ -575,7 +575,7 @@ async function renderPersonalExpenditure() {
             <td style="padding:6px 8px"><span onclick="toggleExpDetail('${r.id}')" style="cursor:pointer;color:var(--accent);user-select:none"><span id="exp-chev-${r.id}" style="display:inline-block;width:12px;transition:transform .15s">▸</span> ${escHtml(r.name)}</span></td>
             ${cells}
             <td style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:${avgColour}">${fmt0(r.avg)}<span style="font-size:var(--fs-xs);font-weight:var(--fw-regular)">${flag}</span></td>
-            <td style="text-align:right;padding:6px 8px"><span style="color:var(--text-muted)">£</span><input type="number" step="1" min="0" class="pbud" data-budget-id="${escHtml(r.budgetId)}" value="${r.budget || ''}" placeholder="0" style="width:84px;padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"></td>
+            <td style="text-align:right;padding:6px 8px"><span style="color:var(--text-muted)">£</span><input type="number" step="1" min="0" class="pbud" data-budget-id="${escHtml(r.budgetId)}" data-avg="${Math.round(r.avg)}" value="${r.budget || ''}" placeholder="0" style="width:84px;padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"></td>
         </tr>
         <tr id="exp-detail-${r.id}" style="display:none"><td colspan="${colspan}" style="padding:4px 8px 12px 28px">${detail}</td></tr>`;
     }).join('');
@@ -608,7 +608,11 @@ async function renderPersonalExpenditure() {
             </tr></tfoot>
         </table>
         </div>
-        <div style="margin-top:14px"><button id="budgetSaveBtn" onclick="saveBudgets()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save budgets</button></div>
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button id="budgetSaveBtn" onclick="saveBudgets()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save budgets</button>
+            <button onclick="suggestBudgets()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:8px 16px;cursor:pointer;color:var(--text-primary)">Suggest from spend</button>
+            <span style="color:var(--text-muted);font-size:var(--fs-xs)">fills each budget from its 6-month average (rounded up), then review and Save</span>
+        </div>
     </div>`;
 }
 
@@ -620,6 +624,18 @@ function toggleExpDetail(catId) {
     const open = row.style.display !== 'none';
     row.style.display = open ? 'none' : 'table-row';
     if (chev) chev.style.transform = open ? '' : 'rotate(90deg)';
+}
+
+// Fill each budget input from its category's 6-month average, rounded UP to a
+// clean figure so it is a realistic, slightly-generous target. Does not save.
+function suggestBudgets() {
+    document.querySelectorAll('.pbud').forEach(inp => {
+        const avg = Number(inp.dataset.avg) || 0;
+        let suggestion = 0;
+        if (avg > 0) suggestion = avg < 100 ? Math.ceil(avg / 5) * 5 : Math.ceil(avg / 10) * 10;
+        inp.value = suggestion;
+        inp.style.borderColor = 'var(--accent)';
+    });
 }
 
 async function saveBudgets() {
