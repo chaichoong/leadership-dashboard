@@ -148,8 +148,9 @@ function renderWealthContent(el, records) {
             <div class="kpi-card">
                 <div class="kpi-card-label" style="margin-bottom:10px">Assets <span style="float:right;color:var(--success);font-weight:var(--fw-bold)">${fmt(latest.assets)}</span></div>
                 ${classRow('Cash', 'var(--tone-blue)')}
-                ${classRow('Investments & Real Estate', 'var(--tone-sage)')}
-                ${classRow('Businesses', 'var(--tone-olive)')}
+                ${classRow('Real Estate', 'var(--tone-sage)')}
+                ${classRow('Investments', 'var(--tone-olive)')}
+                ${classRow('Businesses', 'var(--tone-gold)')}
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="margin-bottom:10px">Liabilities <span style="float:right;color:var(--danger);font-weight:var(--fw-bold)">${fmt(latest.liabilities)}</span></div>
