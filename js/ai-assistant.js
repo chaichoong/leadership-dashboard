@@ -18,28 +18,28 @@
     const AI_ACTIONS = {
         overview: [
             { label: 'Summarise Financial Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Give me a concise summary of the current financial health based on the dashboard data. Include opening balance, income vs costs, operating cushion (revenue minus fixed costs), and any concerns.' },
-            { label: 'Cash Flow Report', model: 'claude-sonnet-4-20250514', maxTokens: 2000, prompt: 'Generate a detailed 31-day cash flow forecast report. Include the daily projections, highlight risk dates where the balance drops low, and suggest actions to maintain positive cash flow.' },
-            { label: 'Compare vs Budget', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Compare actual spending against budget targets for maintenance, wages, and CFV. Identify which are over/under budget and by how much. Suggest corrective actions.' },
-            { label: 'Weekly Briefing', model: 'claude-sonnet-4-20250514', maxTokens: 3000, prompt: 'Generate a professional weekly briefing I can share with stakeholders. Cover financial position, operational metrics, key risks, and recommended actions. Format with clear headers.' },
+            { label: 'Cash Flow Report', model: 'claude-sonnet-4-6', maxTokens: 2000, prompt: 'Generate a detailed 31-day cash flow forecast report. Include the daily projections, highlight risk dates where the balance drops low, and suggest actions to maintain positive cash flow.' },
+            { label: 'Compare vs Budget', model: 'claude-sonnet-4-6', maxTokens: 1500, prompt: 'Compare actual spending against budget targets for maintenance, wages, and CFV. Identify which are over/under budget and by how much. Suggest corrective actions.' },
+            { label: 'Weekly Briefing', model: 'claude-sonnet-4-6', maxTokens: 3000, prompt: 'Generate a professional weekly briefing I can share with stakeholders. Cover financial position, operational metrics, key risks, and recommended actions. Format with clear headers.' },
         ],
         cfv: [
-            { label: 'Analyse CFV Risk', model: 'claude-sonnet-4-20250514', maxTokens: 2000, prompt: 'Analyse all current cash flow voids. For each CFV tenancy, assess the risk level, days overdue, and recommended action. Prioritise by exposure amount.' },
-            { label: 'CFV Action Plan', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Create an action plan for resolving the current CFVs. Include chase sequence status, next steps for each, and estimated recovery timeline.' },
+            { label: 'Analyse CFV Risk', model: 'claude-sonnet-4-6', maxTokens: 2000, prompt: 'Analyse all current cash flow voids. For each CFV tenancy, assess the risk level, days overdue, and recommended action. Prioritise by exposure amount.' },
+            { label: 'CFV Action Plan', model: 'claude-sonnet-4-6', maxTokens: 1500, prompt: 'Create an action plan for resolving the current CFVs. Include chase sequence status, next steps for each, and estimated recovery timeline.' },
         ],
         invoices: [
             { label: 'Overdue Summary', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'List all overdue invoices with amounts and how long overdue. Calculate total overdue amount.' },
-            { label: 'Payment Priority', model: 'claude-sonnet-4-20250514', maxTokens: 1000, prompt: 'Prioritise the pending invoices for payment based on due date, amount, and business importance. Suggest a payment schedule.' },
+            { label: 'Payment Priority', model: 'claude-sonnet-4-6', maxTokens: 1000, prompt: 'Prioritise the pending invoices for payment based on due date, amount, and business importance. Suggest a payment schedule.' },
         ],
         airtable: [
             { label: 'Job List Overview', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the current contractor job list. How many active jobs are there? Are any overdue or stalled? What needs attention?' },
         ],
         comms: [
             { label: 'Inbox Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the current inbound communications status. How many emails need responding to? Are there any urgent items?' },
-            { label: 'Follow-up Priorities', model: 'claude-sonnet-4-20250514', maxTokens: 1000, prompt: 'Review the pending follow-ups and suggest which ones to prioritise based on urgency and importance.' },
+            { label: 'Follow-up Priorities', model: 'claude-sonnet-4-6', maxTokens: 1000, prompt: 'Review the pending follow-ups and suggest which ones to prioritise based on urgency and importance.' },
         ],
         compliance: [
             { label: 'Compliance Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the property compliance status. Are any certificates expired or expiring soon? Which properties need attention?' },
-            { label: 'Expiry Report', model: 'claude-sonnet-4-20250514', maxTokens: 1500, prompt: 'Generate a compliance expiry report. List all certificates by expiry date, flag any that are expired or expiring within 30 days, and suggest an action plan.' },
+            { label: 'Expiry Report', model: 'claude-sonnet-4-6', maxTokens: 1500, prompt: 'Generate a compliance expiry report. List all certificates by expiry date, flag any that are expired or expiring within 30 days, and suggest an action plan.' },
         ],
         sitemap: [
             { label: 'Version Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Check the version sync status across all pages and SOPs. Which SOPs are out of date and need updating?' },
@@ -321,7 +321,7 @@
 
         // Determine model
         const isComplex = text.length > 80 || /report|analyse|analyze|compare|strategy|plan|briefing|export|trend|forecast/i.test(text);
-        const model = isComplex ? 'claude-sonnet-4-20250514' : 'claude-haiku-4-5-20251001';
+        const model = isComplex ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
         const maxTokens = isComplex ? 2000 : 500;
 
         showTyping();

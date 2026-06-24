@@ -536,7 +536,7 @@ body{line-height:1.6;height:100vh;overflow:hidden;background:var(--bg-app);color
       <div>
         <label>Model</label>
         <select id="cfgModel">
-          <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet</option>
           <option value="claude-opus-4-20250514">Claude Opus</option>
           <option value="claude-haiku-4-5-20251001">Claude Haiku</option>
         </select>
@@ -700,7 +700,7 @@ function buildSystemPrompt(userName) {
 // ══════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════
-var config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-20250514', endpoint: '', userName: '' };
+var config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-6', endpoint: '', userName: '' };
 var messages = [];
 var planData = {};
 var completedSections = [];
@@ -745,7 +745,7 @@ function updateSetupFields() {
 
   modelSelect.innerHTML = '';
   if (provider === 'anthropic') {
-    addOption(modelSelect, 'claude-sonnet-4-20250514', 'Claude Sonnet');
+    addOption(modelSelect, 'claude-sonnet-4-6', 'Claude Sonnet');
     addOption(modelSelect, 'claude-opus-4-20250514', 'Claude Opus');
     addOption(modelSelect, 'claude-haiku-4-5-20251001', 'Claude Haiku');
   } else if (provider === 'openai') {
@@ -2497,7 +2497,7 @@ function hideResetModal() { document.getElementById('resetModal').classList.remo
 function doReset() {
   localStorage.removeItem('od-bplan-v4');
   messages = []; planData = {}; completedSections = []; sectionMessages = {}; lastSectionMsgIndex = 0;
-  config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-20250514', endpoint: '', userName: '' };
+  config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-6', endpoint: '', userName: '' };
   hideResetModal();
   document.getElementById('chatMessages').innerHTML = '';
   document.getElementById('app').style.display = 'none';
@@ -2532,7 +2532,7 @@ function doReset() {
     // Clear any broken state
     localStorage.removeItem('od-bplan-v4');
     messages = []; planData = {}; completedSections = []; sectionMessages = {}; lastSectionMsgIndex = 0;
-    config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-20250514', endpoint: '', userName: '' };
+    config = { provider: 'anthropic', apiKey: '', model: 'claude-sonnet-4-6', endpoint: '', userName: '' };
   }
 })();
 </script>

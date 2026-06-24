@@ -1659,7 +1659,7 @@ async function aiDescRow(btn){
         const res = await fetch('https://claude-proxy.kevinbrittain.workers.dev', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:200, messages:[{role:'user',content:prompt}] })
+            body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:200, messages:[{role:'user',content:prompt}] })
         });
         if(!res.ok) throw new Error('AI request failed');
         const data = await res.json();
@@ -2057,7 +2057,7 @@ Output the SOP text only, no additional commentary.`;
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'claude-sonnet-4-6',
                 max_tokens: 2000,
                 system: systemPrompt,
                 messages: [{ role:'user', content: taskPrompt }],
@@ -2178,7 +2178,7 @@ No other text outside the JSON object.`;
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({
-                model:'claude-sonnet-4-20250514',
+                model:'claude-sonnet-4-6',
                 max_tokens:6000,
                 system: systemPrompt,
                 messages:[{role:'user',content:prompt}],
@@ -2516,7 +2516,7 @@ Return ONLY a JSON array of objects with "name" and "description" keys. No other
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({
-                model:'claude-sonnet-4-20250514',
+                model:'claude-sonnet-4-6',
                 max_tokens:1500,
                 messages:[{role:'user',content:prompt}],
             })
@@ -2585,7 +2585,7 @@ Return ONLY a JSON array of objects with "name", "description", and "type" keys.
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({
-                model:'claude-sonnet-4-20250514',
+                model:'claude-sonnet-4-6',
                 max_tokens:1500,
                 messages:[{role:'user',content:prompt}],
             })
@@ -3072,7 +3072,7 @@ Return ONLY the JSON object, no markdown fences, no explanation.`;
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'claude-sonnet-4-6',
                 max_tokens: 1024,
                 messages: [{role:'user', content: prompt}]
             }),
@@ -3224,7 +3224,7 @@ Return ONLY the JSON object, no markdown fences, no explanation.`;
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
+                model: 'claude-sonnet-4-6',
                 max_tokens: 2048,
                 messages: [{role:'user', content: prompt}]
             }),
@@ -3415,7 +3415,7 @@ If you need to interact with external systems (Airtable, email, etc.), describe 
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({
-                model:'claude-sonnet-4-20250514',
+                model:'claude-sonnet-4-6',
                 max_tokens:4000,
                 system: systemPrompt,
                 messages:[{role:'user',content:userMessage}],
@@ -3521,7 +3521,7 @@ Return ONLY a JSON array of objects with "name" and "description" keys. No other
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-            model:'claude-sonnet-4-20250514',
+            model:'claude-sonnet-4-6',
             max_tokens:2000,
             messages:[{role:'user',content:prompt}],
         })

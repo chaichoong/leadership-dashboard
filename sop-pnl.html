@@ -146,7 +146,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="qr-item">
       <div class="qr-label">AI Model</div>
-      <div class="qr-value"><code>claude-sonnet-4-20250514</code> &middot; max 1,500 tokens</div>
+      <div class="qr-value"><code>claude-sonnet-4-6</code> &middot; max 1,500 tokens</div>
     </div>
     <div class="qr-item">
       <div class="qr-label">Auth Storage</div>
@@ -565,7 +565,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <li>Click <strong>Generate Analysis</strong> in the AI panel. The button calls <code>pnlRunAIAnalysis()</code>.</li>
         <li>The panel immediately shows three animated dots labelled <em>Analysing P&amp;L data…</em> while the request is in flight.</li>
         <li>The function builds a JSON context object (<code>pnlBuildAIContext()</code>) containing: business name, period, all six targets, grand totals, a month-by-month breakdown (revenue / COGS / OpEx / gross profit / gross margin / net profit / net margin per month), and the top 10 expense sub-categories by period total.</li>
-        <li>The request is sent via <code>POST</code> to the AI proxy endpoint (<code>AI_PROXY</code>, defined in <code>js/ai-assistant.js</code> as <code>https://claude-proxy.kevinbrittain.workers.dev</code>). Model: <code>claude-sonnet-4-20250514</code>, max tokens: 1,500.</li>
+        <li>The request is sent via <code>POST</code> to the AI proxy endpoint (<code>AI_PROXY</code>, defined in <code>js/ai-assistant.js</code> as <code>https://claude-proxy.kevinbrittain.workers.dev</code>). Model: <code>claude-sonnet-4-6</code>, max tokens: 1,500.</li>
         <li>The response is rendered using <code>renderMarkdown()</code> (defined in <code>js/ai-assistant.js</code>) so bold text, bullet lists, and headers display correctly.</li>
         <li>A <strong>&#x21BB; Refresh Analysis</strong> button appears below the output to regenerate at any time.</li>
       </ol>
