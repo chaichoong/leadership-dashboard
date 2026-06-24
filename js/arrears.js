@@ -538,6 +538,25 @@
         return n < 0 ? '-' + formatted : formatted;
     }
 
+    // Lazy detail rendering. The per-payment dropdowns (category / sub-category /
+    // tenancy / unit / property) are huge — building them for every tenancy up
+    // front created tens of thousands of DOM nodes and froze the tab (and the
+    // whole page when it deep-links to #cfv). We keep the computed statement
+    // entries here and only build a row's detail HTML the first time it opens.
+    let _rsEntriesById = {};
+
+    function rsEnsureDetail(row) {
+        const content = row && row.querySelector('.expand-content');
+        if (!content || content.getAttribute('data-built') === '1') return;
+        const tenancyId = row.id.replace('rentBreakdown_', '');
+        const entry = _rsEntriesById[tenancyId];
+        content.innerHTML = entry
+            ? renderBreakdownDetail(entry)
+            : '<div class="od-text-muted-sm" style="padding:12px 16px">No statement available.</div>';
+        content.setAttribute('data-built', '1');
+    }
+    window.rsEnsureDetail = rsEnsureDetail;
+
     function toggleRentBreakdown(rowId, parentRow) {
         const row = document.getElementById(rowId);
         if (!row) return;
@@ -553,9 +572,10 @@
             wrap.style.maxHeight = '0px';
             row.classList.remove('open');
         } else {
-            // Expand: animate up to the content's natural height. After the
-            // transition, drop the cap so later content changes (e.g. a tenancy
-            // reassignment re-render) aren't clipped.
+            // Build the detail on first open, then animate up to its natural
+            // height. After the transition, drop the cap so later content changes
+            // (e.g. a tenancy reassignment re-render) aren't clipped.
+            rsEnsureDetail(row);
             wrap.style.maxHeight = wrap.scrollHeight + 'px';
             row.classList.add('open');
             const onEnd = (e) => {
@@ -948,6 +968,11 @@
         today.setHours(0, 0, 0, 0);
         const statements = computeAllRentStatements(today);
 
+        // Keep the computed entries so a row's detail can be built lazily on first
+        // expand (see rsEnsureDetail) instead of rendering every dropdown up front.
+        _rsEntriesById = {};
+        statements.forEach(e => { _rsEntriesById[e.tenancyId] = e; });
+
         // KPI aggregations
         const inArrears = statements.filter(e => e.stmt.balance > 0);
         const totalExposure = inArrears.reduce((sum, e) => sum + e.stmt.balance, 0);
@@ -982,7 +1007,7 @@
                 <td style="padding:10px 12px;text-align:center">${s.s8Ready ? s8Badge : ''}</td>
             </tr>
             <tr class="expand-row" id="${breakdownId}">
-                <td colspan="6"><div class="rs-detail-wrap"><div class="expand-content">${renderBreakdownDetail(entry)}</div></div></td>
+                <td colspan="6"><div class="rs-detail-wrap"><div class="expand-content"></div></div></td>
             </tr>`;
         }).join('');
 
@@ -1051,6 +1076,9 @@
             const row = document.getElementById(id);
             if (!row) return;
             row.classList.add('open');
+            // Detail is built lazily, so a row that was open before the re-render
+            // needs its content rebuilt before we show it.
+            rsEnsureDetail(row);
             // Open instantly (no slide) on a background re-render: disable the
             // transition, set the height, then restore the transition so the
             // user's next manual collapse still animates.
