@@ -454,13 +454,106 @@ function renderWealthContent(el, records) {
             </div>
         </div>
 
+        <!-- Personal expenditure (from transactions) -->
+        <div id="wealthExpenditure" style="margin-top:var(--space-5)"></div>
+
         <!-- Income buckets (loaded separately) -->
         <div id="wealthBuckets" style="margin-top:var(--space-5)"></div>
 
     </div>`;
 
+    // Personal expenditure reads the already-loaded transaction globals (sync).
+    renderPersonalExpenditure();
     // Load + render the income buckets section (its own Airtable fetch).
     loadWealthBuckets();
+}
+
+// ── Personal expenditure (actual spend per category, from transactions) ──────
+// Sums transactions coded to the personal-expense sub-categories, by month, over
+// the last 6 months, so Kevin can see what he spends and set sensible budgets.
+// No Airtable fetch — uses the global allTransactions populated by the dashboard.
+function renderPersonalExpenditure() {
+    const el = document.getElementById('wealthExpenditure');
+    if (!el) return;
+    const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
+    if (!txns.length) {
+        el.innerHTML = `<div class="kpi-card" style="color:var(--text-muted);font-size:var(--fs-sm)">Personal expenditure loads once transactions have synced — open the Leadership Dashboard once, then come back.</div>`;
+        return;
+    }
+
+    const catIds = new Set(PERSONAL_EXPENSE_SUBCATS.map(c => c.id));
+
+    // Last 6 calendar months (oldest → newest)
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push({ key: d.getFullYear() + '-' + d.getMonth(), label: d.toLocaleDateString('en-GB', { month: 'short' }) });
+    }
+    const monthKeys = new Set(months.map(m => m.key));
+
+    const data = {};
+    PERSONAL_EXPENSE_SUBCATS.forEach(c => { data[c.id] = {}; });
+    txns.forEach(r => {
+        const sc = getField(r, F.txSubCategory);
+        const scIds = Array.isArray(sc) ? sc.map(x => (x && typeof x === 'object') ? x.id : x) : [];
+        const hit = scIds.find(id => catIds.has(id));
+        if (!hit) return;
+        const dateStr = getField(r, F.txDate);
+        if (!dateStr) return;
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return;
+        const key = d.getFullYear() + '-' + d.getMonth();
+        if (!monthKeys.has(key)) return;
+        const amt = Math.abs((typeof txDisplayAmount === 'function') ? txDisplayAmount(r) : (Number(getField(r, F.txReportAmount)) || 0));
+        data[hit][key] = (data[hit][key] || 0) + amt;
+    });
+
+    const rows = PERSONAL_EXPENSE_SUBCATS.map(c => {
+        const byMonth = months.map(m => data[c.id][m.key] || 0);
+        const total = byMonth.reduce((s, v) => s + v, 0);
+        return { name: c.name, byMonth, total, avg: total / months.length };
+    }).sort((a, b) => b.total - a.total);
+
+    const grandAvg = rows.reduce((s, r) => s + r.total, 0) / months.length;
+    const fmt0 = n => '£' + Math.round(n).toLocaleString('en-GB');
+
+    const headCells = months.map(m => `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(m.label)}</th>`).join('');
+    const bodyRows = rows.map(r => {
+        const cells = r.byMonth.map(v => `<td style="text-align:right;padding:6px 8px;color:${v > 0 ? 'var(--text-primary)' : 'var(--text-muted)'}">${v > 0 ? fmt0(v) : '–'}</td>`).join('');
+        return `<tr style="border-top:1px solid var(--border-subtle)">
+            <td style="padding:6px 8px;color:var(--text-primary)">${escHtml(r.name)}</td>
+            ${cells}
+            <td style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(r.avg)}</td>
+        </tr>`;
+    }).join('');
+    const totalCells = months.map((m, idx) => {
+        const t = rows.reduce((s, r) => s + (r.byMonth[idx] || 0), 0);
+        return `<td style="text-align:right;padding:8px;font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(t)}</td>`;
+    }).join('');
+
+    el.innerHTML = `<div class="kpi-card">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap">
+            <span class="kpi-card-label">Personal expenditure</span>
+            <span style="margin-left:auto;color:var(--text-secondary);font-size:var(--fs-sm)">Avg/month: <strong style="color:var(--text-primary)">${fmt0(grandAvg)}</strong></span>
+        </div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Actual spend per category, last 6 months, from your reconciled transactions. Biggest spend first. Use it to see where the money goes; budgets per category come next.</div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
+            <thead><tr>
+                <th style="text-align:left;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Category</th>
+                ${headCells}
+                <th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Avg</th>
+            </tr></thead>
+            <tbody>${bodyRows}</tbody>
+            <tfoot><tr style="border-top:2px solid var(--border-default)">
+                <td style="padding:8px;font-weight:var(--fw-semibold);color:var(--text-primary)">Total</td>
+                ${totalCells}
+                <td style="text-align:right;padding:8px;font-weight:var(--fw-bold);color:var(--text-primary)">${fmt0(grandAvg)}</td>
+            </tr></tfoot>
+        </table>
+        </div>
+    </div>`;
 }
 
 // ── Income buckets ───────────────────────────────────────────────────────────

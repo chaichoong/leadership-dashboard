@@ -196,6 +196,24 @@
     const NW_ASSET_CLASSES = ['Cash', 'Real Estate', 'Investments', 'Businesses'];
     const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
 
+    // ── Personal expenditure sub-categories (Chart of Accounts - Sub Categories) ──
+    // The 11 personal-expense sub-categories Kevin tracks. Transactions are coded to
+    // these by the reconciliation engine, so the Wealth tab sums spend per category
+    // per month. (Director Discretionary, Charity, Subsistence excluded = business.)
+    const PERSONAL_EXPENSE_SUBCATS = [
+        { id: 'recF1C2ZXBfNeYlGT', name: 'Household Essentials' },       // groceries, utilities, council tax, mobile/internet, essential clothing, insurance
+        { id: 'rec7uCvNlKGlieZMS', name: 'Discretionary Food & Drink' }, // optional extra food/drink
+        { id: 'recism4LGdEx0Nh9Q', name: 'Discretionary Lifestyle' },    // non-essential, fun, choice purchases, optional clothing
+        { id: 'rec6b96i917M64Nof', name: 'Transport' },                  // incl. parking
+        { id: 'recEvGF5Sr8R9p6tC', name: 'Travel' },                     // holidays, trips
+        { id: 'rec4fuKSWoK8ftkLJ', name: 'Health' },
+        { id: 'recS1AiGq8oDEzmZD', name: 'Tax' },
+        { id: 'recPA5FxzccOfWvQd', name: 'Banking Fees' },
+        { id: 'rec2yAlBoqSZrXtHW', name: 'Professional Fees' },
+        { id: 'rec1KfO2hixb1DA2e', name: 'Loan Capital Repayment' },
+        { id: 'recICmYNPZBQbeWWE', name: 'Loan Interest' },
+    ];
+
     // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──
     // Virtual overlay for the Wealth tab. Surplus is split by Allocation % into Balance.
     const BUCKET = {
