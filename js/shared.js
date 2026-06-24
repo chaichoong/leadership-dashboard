@@ -616,6 +616,10 @@ if (tabId === 'comms') {
         if (tabId === 'money') {
             if (typeof renderMoneyTab === 'function') renderMoneyTab();
         }
+        // Render Wealth on switch
+        if (tabId === 'wealth') {
+            if (typeof renderWealthTab === 'function') renderWealthTab();
+        }
         // Render CFV tab on switch
         if (tabId === 'cfv') {
             renderCFVTab();
