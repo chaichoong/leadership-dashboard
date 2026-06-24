@@ -405,10 +405,13 @@
         // are restored, re-render so the dismissed entries disappear.
         const potentialEntries = cfvList.filter(e => e.status === 'potential');
         if (potentialEntries.length > 0) {
-            syncDismissalsFromAirtable(potentialEntries).then(() => {
-                const anyRestored = potentialEntries.some(e =>
-                    localStorage.getItem('cfv_dismissed_' + e.tenancyId));
-                if (anyRestored) renderCFVTab();
+            // Re-render ONLY when a dismissal was NEWLY restored this run. The old
+            // check ("does any potential entry have a dismissal in localStorage")
+            // stayed true forever once any potential CFV had been dismissed, so it
+            // re-rendered on every render — an infinite loop that made the table
+            // shake and the comment buttons flicker.
+            syncDismissalsFromAirtable(potentialEntries).then((restored) => {
+                if (restored > 0) renderCFVTab();
             });
         }
 
@@ -755,7 +758,8 @@
     // dismissed CFVs would all reappear because localStorage was wiped. Now the dismissal
     // lives permanently as a comment on the tenancy record, so we can restore it.
     async function syncDismissalsFromAirtable(potentialEntries) {
-        if (!PAT || !potentialEntries.length) return;
+        if (!PAT || !potentialEntries.length) return 0;
+        let restored = 0; // count of dismissals NEWLY written to localStorage this run
         await Promise.all(potentialEntries.map(entry => limitedApiFetch(async () => {
             if (localStorage.getItem('cfv_dismissed_' + entry.tenancyId)) return; // already have it
             let comments;
@@ -785,8 +789,10 @@
             const expiryTime = nextDueDate.getTime() + CFV_TOLERANCE_DAYS * 86400000;
             if (Date.now() < expiryTime) {
                 localStorage.setItem('cfv_dismissed_' + entry.tenancyId, latest.toISOString());
+                restored++;
             }
         })));
+        return restored;
     }
 
     // Re-flag: confirm CFV Actioned back to CFV
