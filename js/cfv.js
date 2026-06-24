@@ -43,7 +43,7 @@
     // compares expected payments (cycles whose maturity window has passed)
     // against actual reconciled payments — robust to date/month boundary
     // edge cases.
-    function hasLinkedPaymentThisMonth(tenancyId, today) {
+    function hasLinkedPaymentThisMonth(tenancyId, today, txIndex) {
         const tenancy = allTenancies.find(t => t.id === tenancyId);
         if (!tenancy) return true; // unknown — don't flag
 
@@ -51,13 +51,15 @@
         // there is no payment evidence. The arrears engine returns "not in arrears"
         // for tenancies with no start date or no history, producing a false positive
         // "payment detected" that would auto-return new CFVs to In Payment.
-        const hasAnyLinkedTx = allTransactions.some(tx => {
-            if (!getField(tx, F.txReconciled)) return false;
-            const links = getField(tx, F.txTenancy);
-            if (!links) return false;
-            const arr = Array.isArray(links) ? links : [links];
-            return arr.some(item => (typeof item === 'object' ? item.id : item) === tenancyId);
-        });
+        const hasAnyLinkedTx = txIndex
+            ? (txIndex.get(tenancyId) || []).length > 0
+            : allTransactions.some(tx => {
+                if (!getField(tx, F.txReconciled)) return false;
+                const links = getField(tx, F.txTenancy);
+                if (!links) return false;
+                const arr = Array.isArray(links) ? links : [links];
+                return arr.some(item => (typeof item === 'object' ? item.id : item) === tenancyId);
+            });
         if (!hasAnyLinkedTx) return false;
 
         const tenantLookup = buildTenantLookup();
@@ -78,7 +80,7 @@
                 return txDate.getMonth() === thisMonth && txDate.getFullYear() === thisYear;
             });
         }
-        return !isCurrentlyInArrears(tenancy, tenantType, today);
+        return !isCurrentlyInArrears(tenancy, tenantType, today, txIndex);
     }
 
     // Detect CFVs using direct tenancy-linked transactions.
@@ -87,6 +89,10 @@
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tenantLookup = buildTenantLookup();
+        // Build the transaction-by-tenancy index ONCE for this whole sweep so the
+        // per-tenancy helpers below read only their own payments instead of
+        // re-scanning the full transactions array each time (was the main freeze).
+        const txIndex = (typeof buildTxByTenancyIndex === 'function') ? buildTxByTenancyIndex() : null;
         const cfvList = [];
         // Tenancies to auto-return to In Payment (processed after loop)
         const autoReturnQueue = [];
@@ -104,7 +110,7 @@
                 // "Former"; new tenancies may have an empty/null rollup and must still show.
                 if (isTenantStatusFormer(tenancy)) return;
 
-                const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today);
+                const paidDetected = hasLinkedPaymentThisMonth(tenancy.id, today, txIndex);
 
                 // Auto-return to In Payment if a linked reconciled transaction exists
                 if (paidDetected) {
@@ -113,7 +119,7 @@
                 }
 
                 const tenant = getTenantForTenancy(tenancy, tenantLookup);
-                const entry = buildCFVEntry(tenancy, tenant, statusName, today);
+                const entry = buildCFVEntry(tenancy, tenant, statusName, today, txIndex);
 
                 // Re-flag check: CFV Actioned but next due date has passed with no payment
                 if (statusName === 'cfv actioned') {
@@ -145,12 +151,12 @@
             // catches prior-cycle misses for late-due-day tenants which the
             // old daysOverdue gate missed (e.g. UC dueDay=27 on May 5 was
             // invisible until May 27 passed).
-            const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today);
+            const paidThisMonth = hasLinkedPaymentThisMonth(tenancy.id, today, txIndex);
             if (paidThisMonth) return; // Paid — not a CFV
 
             // No linked payment found — flag as potential CFV
             const tenant = getTenantForTenancy(tenancy, tenantLookup);
-            const entry = buildCFVEntry(tenancy, tenant, 'potential', today);
+            const entry = buildCFVEntry(tenancy, tenant, 'potential', today, txIndex);
             entry.autoDetected = true;
             cfvList.push(entry);
         });
@@ -211,7 +217,7 @@
         }
     }
 
-    function buildCFVEntry(tenancy, tenant, status, today) {
+    function buildCFVEntry(tenancy, tenant, status, today, txIndex) {
         const surname = String(getField(tenancy, F.tenSurname) || 'Unknown');
         const ref = String(getField(tenancy, F.tenRef) || '');
         const rent = Number(getField(tenancy, F.tenRent)) || 0;
@@ -268,13 +274,11 @@
         // in the CFV table without having to drill into Operations.
         let lastPaymentDate = null;
         let lastPaymentAmount = null;
-        for (const tx of (allTransactions || [])) {
-            if (!getField(tx, F.txReconciled)) continue;
-            const links = getField(tx, F.txTenancy);
-            if (!links) continue;
-            const arr = Array.isArray(links) ? links : [links];
-            const matches = arr.some(item => (typeof item === 'object' ? item.id : item) === tenancy.id);
-            if (!matches) continue;
+        const lpSource = txIndex
+            ? (txIndex.get(tenancy.id) || [])
+            : (allTransactions || []).filter(tx => getField(tx, F.txReconciled)
+                && (typeof txLinkedToTenancy === 'function' ? txLinkedToTenancy(tx, tenancy.id) : false));
+        for (const tx of lpSource) {
             const dStr = getField(tx, F.txDate);
             if (!dStr) continue;
             const d = new Date(dStr);
@@ -401,10 +405,13 @@
         // are restored, re-render so the dismissed entries disappear.
         const potentialEntries = cfvList.filter(e => e.status === 'potential');
         if (potentialEntries.length > 0) {
-            syncDismissalsFromAirtable(potentialEntries).then(() => {
-                const anyRestored = potentialEntries.some(e =>
-                    localStorage.getItem('cfv_dismissed_' + e.tenancyId));
-                if (anyRestored) renderCFVTab();
+            // Re-render ONLY when a dismissal was NEWLY restored this run. The old
+            // check ("does any potential entry have a dismissal in localStorage")
+            // stayed true forever once any potential CFV had been dismissed, so it
+            // re-rendered on every render — an infinite loop that made the table
+            // shake and the comment buttons flicker.
+            syncDismissalsFromAirtable(potentialEntries).then((restored) => {
+                if (restored > 0) renderCFVTab();
             });
         }
 
@@ -574,6 +581,14 @@
         })));
 
         // ── Sync Bar + Health Checks ──
+        // Compute the CFV list and tenant lookup ONCE for all passive health
+        // checks below. Previously each check called detectCFVs() itself, so the
+        // heavy tenancy×transaction sweep ran 5 extra times on every render —
+        // the main cause of the tab freezing, the page feeling glitchy, and the
+        // dashboard sub-tab buttons blanking (a frozen main thread cannot paint).
+        // detectCFVs() already ran at the top of this render (`cfvList`); reuse it.
+        const hcCfvList = cfvList;
+        const hcLookup = buildTenantLookup();
         if (typeof registerSyncBar === 'function') {
             registerSyncBar('cfv', {
                 // loadDashboard re-fetches the underlying tenancies/transactions; renderCFVTab
@@ -583,27 +598,22 @@
                 checks: [
                     {
                         name: 'CFV detection runs without error', kind: 'sync', run: () => {
-                            try {
-                                const list = detectCFVs();
-                                return { status: 'pass', detail: `${list.length} CFV entries computed (CFV + actioned + potential)` };
-                            } catch (e) {
-                                return { status: 'fail', detail: 'detectCFVs() threw: ' + e.message };
-                            }
+                            // detectCFVs() already ran for this render without throwing
+                            // (we are here because it returned), so report on that result
+                            // rather than running the heavy sweep a second time.
+                            return { status: 'pass', detail: `${hcCfvList.length} CFV entries computed (CFV + actioned + potential)` };
                         }
                     },
                     {
                         name: 'Tenancy → Tenant link resolves', kind: 'sync', run: () => {
-                            const lookup = buildTenantLookup();
-                            const cfvList = detectCFVs();
-                            const orphans = cfvList.filter(e => !lookup[(e.tenantId || '')]);
+                            const orphans = hcCfvList.filter(e => !hcLookup[(e.tenantId || '')]);
                             if (orphans.length) return { status: 'warn', detail: `${orphans.length} CFV tenancies have no resolvable tenant record` };
-                            return { status: 'pass', detail: `All ${cfvList.length} CFV entries have a linked tenant` };
+                            return { status: 'pass', detail: `All ${hcCfvList.length} CFV entries have a linked tenant` };
                         }
                     },
                     {
                         name: 'Days-overdue figure populated for each CFV', kind: 'sync', run: () => {
-                            const cfvList = detectCFVs();
-                            const cfvOnly = cfvList.filter(e => e.status === 'cfv' || e.status === 'cfv actioned');
+                            const cfvOnly = hcCfvList.filter(e => e.status === 'cfv' || e.status === 'cfv actioned');
                             const missing = cfvOnly.filter(e => e.daysOverdue == null || isNaN(e.daysOverdue));
                             if (missing.length) return { status: 'fail', detail: `${missing.length} CFV(s) missing daysOverdue value — formula on Tenancies table may be broken` };
                             return { status: 'pass', detail: `All ${cfvOnly.length} CFV entries have daysOverdue computed` };
@@ -611,8 +621,7 @@
                     },
                     {
                         name: 'CFV exposure number computed', kind: 'sync', run: () => {
-                            const cfvList = detectCFVs();
-                            const exposure = cfvList.filter(e => e.status === 'cfv' || e.status === 'cfv actioned')
+                            const exposure = hcCfvList.filter(e => e.status === 'cfv' || e.status === 'cfv actioned')
                                 .reduce((s, e) => s + (Number(e.rent) || 0), 0);
                             if (isNaN(exposure)) return { status: 'fail', detail: 'Exposure calculation produced NaN' };
                             return { status: 'pass', detail: `Total CFV exposure: ${fmt(exposure)}` };
@@ -620,8 +629,7 @@
                     },
                     {
                         name: 'Sidebar CFV badges in sync with detection', kind: 'automation', run: () => {
-                            const cfvList = detectCFVs();
-                            const visible = cfvList.filter(e => {
+                            const visible = hcCfvList.filter(e => {
                                 if (e.status === 'cfv' || e.status === 'potential') return !localStorage.getItem('cfv_dismissed_' + e.tenancyId);
                                 return true;
                             });
@@ -750,7 +758,8 @@
     // dismissed CFVs would all reappear because localStorage was wiped. Now the dismissal
     // lives permanently as a comment on the tenancy record, so we can restore it.
     async function syncDismissalsFromAirtable(potentialEntries) {
-        if (!PAT || !potentialEntries.length) return;
+        if (!PAT || !potentialEntries.length) return 0;
+        let restored = 0; // count of dismissals NEWLY written to localStorage this run
         await Promise.all(potentialEntries.map(entry => limitedApiFetch(async () => {
             if (localStorage.getItem('cfv_dismissed_' + entry.tenancyId)) return; // already have it
             let comments;
@@ -780,8 +789,10 @@
             const expiryTime = nextDueDate.getTime() + CFV_TOLERANCE_DAYS * 86400000;
             if (Date.now() < expiryTime) {
                 localStorage.setItem('cfv_dismissed_' + entry.tenancyId, latest.toISOString());
+                restored++;
             }
         })));
+        return restored;
     }
 
     // Re-flag: confirm CFV Actioned back to CFV

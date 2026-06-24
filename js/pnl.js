@@ -565,7 +565,7 @@ RULES:
             const resp = await fetch(typeof AI_PROXY !== 'undefined' ? AI_PROXY : 'https://claude-proxy.kevinbrittain.workers.dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1500, system: systemPrompt, messages: [{ role: 'user', content: userMsg }] })
+                body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: systemPrompt, messages: [{ role: 'user', content: userMsg }] })
             });
             if (!resp.ok) throw new Error(`API ${resp.status}`);
             const data = await resp.json();

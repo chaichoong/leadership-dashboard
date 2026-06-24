@@ -53,6 +53,37 @@
         return (typeof linked === 'object' ? linked.id : linked) === tenancyId;
     }
 
+    // ── Transaction index (performance) ──
+    // The arrears + CFV sweeps used to scan the ENTIRE transactions array once
+    // per tenancy (computeRentStatement, isCurrentlyInArrears, the CFV helpers),
+    // which is O(tenancies × transactions). With thousands of transactions that
+    // froze the main thread for seconds — the tab "loading" lock-up, the blanked
+    // sub-tab button, and records that wouldn't open.
+    //
+    // Build a Map of reconciled transactions keyed by linked tenancy id ONCE per
+    // render pass and pass it down, so each tenancy reads only its own payments.
+    // The sweep drops from O(tenancies × transactions) to O(transactions).
+    function buildTxByTenancyIndex() {
+        const map = new Map();
+        const list = allTransactions || [];
+        for (let i = 0; i < list.length; i++) {
+            const tx = list[i];
+            if (!getField(tx, F.txReconciled)) continue;
+            const linked = getField(tx, F.txTenancy);
+            if (!linked) continue;
+            const arr = Array.isArray(linked) ? linked : [linked];
+            for (const item of arr) {
+                const id = (typeof item === 'object' && item) ? item.id : item;
+                if (!id) continue;
+                let bucket = map.get(id);
+                if (!bucket) { bucket = []; map.set(id, bucket); }
+                bucket.push(tx);
+            }
+        }
+        return map;
+    }
+    window.buildTxByTenancyIndex = buildTxByTenancyIndex;
+
     // ── Tenancy start date ──
     function getTenancyStartDate(tenancy) {
         const raw = String(getField(tenancy, F.tenStartDate) || '');
@@ -74,7 +105,7 @@
 
     // Compute the rent statement for a single tenancy.
     // Returns a structured object with every component of the maths.
-    function computeRentStatement(tenancy, tenantType, today) {
+    function computeRentStatement(tenancy, tenantType, today, txIndex) {
         const tenStart = getTenancyStartDate(tenancy);
         if (!tenStart) {
             return { applicable: false, reason: 'No tenancy start date' };
@@ -93,12 +124,16 @@
         const daysSinceStart = Math.floor((today - effectiveStart) / 86400000);
         const totalRentOwed = dailyRent * daysSinceStart;
 
-        // Reconciled transactions linked to this tenancy since the effective start
+        // Reconciled transactions linked to this tenancy since the effective start.
+        // Read from the prebuilt index when provided (already filtered to reconciled
+        // + linked) so we only touch THIS tenancy's payments. Fall back to a full
+        // scan for standalone callers that don't pass an index.
         const payments = [];
         let totalRentPaid = 0;
-        for (const tx of allTransactions) {
-            if (!getField(tx, F.txReconciled)) continue;
-            if (!txLinkedToTenancy(tx, tenancy.id)) continue;
+        const txnSource = txIndex
+            ? (txIndex.get(tenancy.id) || [])
+            : allTransactions.filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
+        for (const tx of txnSource) {
             const dateStr = String(getField(tx, F.txDate) || '');
             const txDate = dateStr ? new Date(dateStr) : null;
             if (txDate && txDate < effectiveStart) continue;
@@ -158,6 +193,7 @@
     // Compute statements for all active tenancies. Returns sorted array.
     function computeAllRentStatements(today) {
         const tenantLookup = buildTenantLookup();
+        const txIndex = buildTxByTenancyIndex();
         const statements = [];
 
         for (const tenancy of allTenancies) {
@@ -172,7 +208,7 @@
             const propertyVal = getField(tenancy, F.tenProperty);
             const property = Array.isArray(propertyVal) ? propertyVal[0] : (propertyVal || '');
 
-            const stmt = computeRentStatement(tenancy, tenantType, today);
+            const stmt = computeRentStatement(tenancy, tenantType, today, txIndex);
             if (!stmt.applicable) continue;
 
             statements.push({
@@ -195,7 +231,7 @@
 
     // Used by hasLinkedPaymentThisMonth in cfv.js to determine if a
     // tenancy is currently in arrears. Calendar-month based check.
-    function isCurrentlyInArrears(tenancy, tenantType, today) {
+    function isCurrentlyInArrears(tenancy, tenantType, today, txIndex) {
         if (!getTenancyStartDate(tenancy)) return false;
         const tenStart = getTenancyStartDate(tenancy);
         if (tenStart && tenStart > today) return false;
@@ -203,9 +239,12 @@
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
         const tolerance = 2;
 
-        const paidIn = (y, m) => allTransactions.some(tx => {
-            if (!getField(tx, F.txReconciled)) return false;
-            if (!txLinkedToTenancy(tx, tenancy.id)) return false;
+        // Read this tenancy's reconciled payments from the index when supplied,
+        // else fall back to a full scan (keeps standalone callers correct).
+        const txnSource = txIndex
+            ? (txIndex.get(tenancy.id) || [])
+            : allTransactions.filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
+        const paidIn = (y, m) => txnSource.some(tx => {
             const txDateStr = getField(tx, F.txDate);
             if (!txDateStr) return false;
             const txDate = new Date(txDateStr);
@@ -499,13 +538,56 @@
         return n < 0 ? '-' + formatted : formatted;
     }
 
+    // Lazy detail rendering. The per-payment dropdowns (category / sub-category /
+    // tenancy / unit / property) are huge — building them for every tenancy up
+    // front created tens of thousands of DOM nodes and froze the tab (and the
+    // whole page when it deep-links to #cfv). We keep the computed statement
+    // entries here and only build a row's detail HTML the first time it opens.
+    let _rsEntriesById = {};
+
+    function rsEnsureDetail(row) {
+        const content = row && row.querySelector('.expand-content');
+        if (!content || content.getAttribute('data-built') === '1') return;
+        const tenancyId = row.id.replace('rentBreakdown_', '');
+        const entry = _rsEntriesById[tenancyId];
+        content.innerHTML = entry
+            ? renderBreakdownDetail(entry)
+            : '<div class="od-text-muted-sm" style="padding:12px 16px">No statement available.</div>';
+        content.setAttribute('data-built', '1');
+    }
+    window.rsEnsureDetail = rsEnsureDetail;
+
     function toggleRentBreakdown(rowId, parentRow) {
         const row = document.getElementById(rowId);
         if (!row) return;
-        const isHidden = row.style.display === 'none';
-        row.style.display = isHidden ? 'table-row' : 'none';
+        const wrap = row.querySelector('.rs-detail-wrap');
+        if (!wrap) return;
+        const isOpen = row.classList.contains('open');
+
+        if (isOpen) {
+            // Collapse: lock the current height, then animate to 0 next frame so
+            // the rows below glide up instead of snapping.
+            wrap.style.maxHeight = wrap.scrollHeight + 'px';
+            void wrap.offsetHeight; // force reflow so the change transitions
+            wrap.style.maxHeight = '0px';
+            row.classList.remove('open');
+        } else {
+            // Build the detail on first open, then animate up to its natural
+            // height. After the transition, drop the cap so later content changes
+            // (e.g. a tenancy reassignment re-render) aren't clipped.
+            rsEnsureDetail(row);
+            wrap.style.maxHeight = wrap.scrollHeight + 'px';
+            row.classList.add('open');
+            const onEnd = (e) => {
+                if (e.propertyName !== 'max-height') return;
+                if (row.classList.contains('open')) wrap.style.maxHeight = 'none';
+                wrap.removeEventListener('transitionend', onEnd);
+            };
+            wrap.addEventListener('transitionend', onEnd);
+        }
+
         const chevron = parentRow.querySelector('[data-chevron]');
-        if (chevron) chevron.classList.toggle('open', isHidden);
+        if (chevron) chevron.classList.toggle('open', !isOpen);
     }
     window.toggleRentBreakdown = toggleRentBreakdown;
 
@@ -716,7 +798,7 @@
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const openBreakdowns = document.querySelectorAll('[id^="rentBreakdown_"]');
         for (const row of openBreakdowns) {
-            if (row.style.display === 'none') continue;
+            if (!row.classList.contains('open')) continue;
             const tenancyId = row.id.replace('rentBreakdown_', '');
             const tenancy = allTenancies.find(t => t.id === tenancyId);
             if (!tenancy) continue;
@@ -730,8 +812,12 @@
             const stmt = computeRentStatement(tenancy, tenantType, today);
             if (!stmt.applicable) continue;
             const entry = { tenancyId, tenancy, tenantName, unit, property, stmt };
-            const td = row.querySelector('td');
-            if (td) td.innerHTML = renderBreakdownDetail(entry);
+            // Replace the detail content only, keeping the .rs-detail-wrap intact.
+            const content = row.querySelector('.expand-content');
+            if (content) content.innerHTML = renderBreakdownDetail(entry);
+            // Re-fit the open wrapper so the new content isn't clipped by a stale cap.
+            const wrap = row.querySelector('.rs-detail-wrap');
+            if (wrap) wrap.style.maxHeight = 'none';
             const parentRow = row.previousElementSibling;
             if (parentRow) {
                 const cells = parentRow.querySelectorAll('td');
@@ -882,6 +968,11 @@
         today.setHours(0, 0, 0, 0);
         const statements = computeAllRentStatements(today);
 
+        // Keep the computed entries so a row's detail can be built lazily on first
+        // expand (see rsEnsureDetail) instead of rendering every dropdown up front.
+        _rsEntriesById = {};
+        statements.forEach(e => { _rsEntriesById[e.tenancyId] = e; });
+
         // KPI aggregations
         const inArrears = statements.filter(e => e.stmt.balance > 0);
         const totalExposure = inArrears.reduce((sum, e) => sum + e.stmt.balance, 0);
@@ -904,7 +995,7 @@
             const breakdownId = `rentBreakdown_${entry.tenancyId}`;
 
             return `<tr style="border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="toggleRentBreakdown('${breakdownId}', this)">
-                <td style="padding:10px 12px">
+                <td style="padding:10px 12px;word-break:break-word">
                     <span class="expand-chevron" data-chevron>▶</span>
                     <span style="font-weight:600">${escHtml(entry.tenantName)}</span>
                     ${entry.unit ? `<div style="font-size:11px;color:var(--text-muted);margin-left:14px">${escHtml(entry.unit)}</div>` : ''}
@@ -915,8 +1006,8 @@
                 <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:${daysWeight};color:${daysColour}">${s.daysInArrears}</td>
                 <td style="padding:10px 12px;text-align:center">${s.s8Ready ? s8Badge : ''}</td>
             </tr>
-            <tr class="expand-row" id="${breakdownId}" style="display:none">
-                <td colspan="6"><div class="expand-content">${renderBreakdownDetail(entry)}</div></td>
+            <tr class="expand-row" id="${breakdownId}">
+                <td colspan="6"><div class="rs-detail-wrap"><div class="expand-content"></div></div></td>
             </tr>`;
         }).join('');
 
@@ -940,6 +1031,15 @@
             </div>
         `;
 
+        // Capture which breakdown rows the user has expanded BEFORE we rebuild the
+        // table. Open/closed state lives only in each row's inline `display`, so a
+        // background re-render (badge sync, dismissal restore, dashboard refresh)
+        // would otherwise collapse a detail the user just opened — the "opens then
+        // auto-closes a moment later" glitch. We re-open them after the rebuild.
+        const _openBreakdownIds = Array.from(container.querySelectorAll('tr.expand-row'))
+            .filter(r => r.classList.contains('open'))
+            .map(r => r.id);
+
         container.innerHTML = `
             <div class="section">
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -948,15 +1048,20 @@
                 </div>
                 ${kpiCardsHtml}
                 <div style="overflow-x:auto">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px">
+                    <!-- table-layout:fixed + explicit column widths keep the summary
+                         columns locked. With the default 'auto' layout, expanding a
+                         row inserted the wide detail panel and forced the browser to
+                         recompute every column, so all rows jolted sideways under the
+                         cursor on each expand/collapse. Fixed widths stop that. -->
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">
                         <thead>
                             <tr style="text-align:left;border-bottom:2px solid var(--border-default);background:var(--bg-surface-2)">
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant / Unit</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Monthly rent</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Balance</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Days arrears</th>
-                                <th style="padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:center">Section 8</th>
+                                <th style="width:28%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Tenant / Unit</th>
+                                <th style="width:14%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary)">Type</th>
+                                <th style="width:16%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Monthly rent</th>
+                                <th style="width:16%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Balance</th>
+                                <th style="width:13%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:right">Days arrears</th>
+                                <th style="width:13%;padding:8px 12px;font-weight:600;font-size:11px;text-transform:uppercase;color:var(--text-secondary);text-align:center">Section 8</th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
@@ -964,6 +1069,30 @@
                 </div>
             </div>
         `;
+
+        // Re-open any breakdown rows that were expanded before this re-render so a
+        // background refresh never collapses a detail the user is actively reading.
+        _openBreakdownIds.forEach(id => {
+            const row = document.getElementById(id);
+            if (!row) return;
+            row.classList.add('open');
+            // Detail is built lazily, so a row that was open before the re-render
+            // needs its content rebuilt before we show it.
+            rsEnsureDetail(row);
+            // Open instantly (no slide) on a background re-render: disable the
+            // transition, set the height, then restore the transition so the
+            // user's next manual collapse still animates.
+            const wrap = row.querySelector('.rs-detail-wrap');
+            if (wrap) {
+                wrap.style.transition = 'none';
+                wrap.style.maxHeight = 'none';
+                void wrap.offsetHeight;
+                wrap.style.transition = '';
+            }
+            const parent = row.previousElementSibling;
+            const chevron = parent && parent.querySelector('[data-chevron]');
+            if (chevron) chevron.classList.add('open');
+        });
     }
 
     // ── Debug helper ──
