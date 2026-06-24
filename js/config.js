@@ -12,6 +12,7 @@
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.100', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.27', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
+        { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
@@ -51,6 +52,7 @@
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
+        netWorthByMonth: 'tblvtDXCBJCHu9hnK', // Specific Net Worth Statement by Month (Wealth tab)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
@@ -179,6 +181,19 @@
         matchedTx:     'fldpHf5vYCIgj3Scz',
         business:      'fldzGhwp6rxwEFoxu',  // Linked → Businesses (multipleRecordLinks)
     };
+
+    // ── Net Worth field IDs (Airtable: Specific Net Worth Statement by Month / tblvtDXCBJCHu9hnK) ──
+    // One row per asset/liability item per month. Used by the Wealth tab.
+    const NW = {
+        name:    'fldswqUWxdoQj1QPC',  // Name (singleLineText) — e.g. "Real Estate Portfolio"
+        amount:  'fld4biGCBBQbknNmF',  // Amount (currency, £)
+        type:    'fld2uSD30IeWqEJYU',  // Net Worth Type (singleSelect): Cash | Investments & Real Estate | Businesses | Credit Cards | Loans | Mortgages
+        month:   'fldN3YpeJVK9MtW2d',  // Month (singleSelect): January … December
+        year:    'fld0iFQ9PwFv0jKBa',  // Year (singleSelect): 2025, 2026, …
+    };
+    // The six classes, split into assets vs liabilities.
+    const NW_ASSET_CLASSES = ['Cash', 'Investments & Real Estate', 'Businesses'];
+    const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
     const BIZ_NAME_FIELD = 'fldbbRqVxLxUdHwIR';
