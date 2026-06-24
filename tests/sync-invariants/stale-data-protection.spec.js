@@ -59,7 +59,21 @@ test.describe('Stale Data Protection', () => {
     });
 
     await page.goto('/');
-    await page.waitForTimeout(3000);
+
+    // Wait for the API traffic to settle rather than a fixed sleep. Under parallel load a flat
+    // 3s sometimes fired before the dashboard's fetches landed, so withFieldId could read 0 and
+    // the assertion flaked. Poll until the recorded request count stops growing, then confirm.
+    let last = -1, stableTicks = 0;
+    for (let i = 0; i < 40; i++) {
+      const total = requests.withFieldId + requests.without;
+      if (total === last && total > 0) {
+        if (++stableTicks >= 3) break; // count unchanged across 3 consecutive polls → settled
+      } else {
+        stableTicks = 0;
+        last = total;
+      }
+      await page.waitForTimeout(250);
+    }
 
     // The main data fetches must use returnFieldsByFieldId.
     // A small number of specialized queries (e.g. Fintable sync) may use field names.
