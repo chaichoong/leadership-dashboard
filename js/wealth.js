@@ -105,8 +105,34 @@ const WEALTH_MONTHS = ['January','February','March','April','May','June','July',
 const WEALTH_CLASS_ORDER = ['Cash','Real Estate','Investments','Businesses','Credit Cards','Loans','Mortgages'];
 const WEALTH_LIVE_CLASSES = ['Cash','Credit Cards'];
 
-// Render the monthly update form into the Wealth panel. Pre-fills cash/cards live
-// and every other line with last month's value, so it is a quick change-only pass.
+// One editable row. Existing items carry their name in data-name (label shown);
+// new items get a name text input so you can add a property/business/loan.
+function wealthRowHtml(cls, name, amount, live, isNew) {
+    const tag = (live != null) ? `<span style="color:var(--success);font-size:var(--fs-xs);margin-left:8px">live</span>` : '';
+    const nameCell = isNew
+        ? `<input type="text" class="wn" placeholder="Name (e.g. new property)" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">`
+        : `<label style="flex:1;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(name)}${tag}</label>`;
+    const dataName = isNew ? '' : ` data-name="${escHtml(name)}"`;
+    return `<div class="wealth-row" data-wealth-type="${escHtml(cls)}"${dataName} style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        ${nameCell}
+        <span style="color:var(--text-muted)">£</span>
+        <input type="number" step="0.01" class="wa" value="${amount == null ? '' : amount}"
+            style="width:140px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
+        <button onclick="this.closest('.wealth-row').remove()" title="Remove this item" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:2px 6px;line-height:1">&times;</button>
+    </div>`;
+}
+
+// Append a blank row to a class section so the user can add a new asset/liability.
+function addWealthRow(cls) {
+    const sec = document.querySelector(`.wealth-section[data-section="${(window.CSS && CSS.escape) ? CSS.escape(cls) : cls}"]`);
+    if (!sec) return;
+    sec.insertAdjacentHTML('beforeend', wealthRowHtml(cls, '', null, null, true));
+    const inp = sec.querySelector('.wealth-row:last-child .wn');
+    if (inp) inp.focus();
+}
+
+// Render the monthly update form. Existing items pre-fill (cash/cards live, the
+// rest last month's value); each class can gain new items or drop sold ones.
 function openWealthUpdate() {
     const el = document.getElementById('tab-wealth');
     if (!el || !_wealthRecords) return;
@@ -120,30 +146,24 @@ function openWealthUpdate() {
     let rowsHtml = '';
     WEALTH_CLASS_ORDER.forEach(cls => {
         const items = latest.items[cls] || [];
-        if (!items.length) return;
-        rowsHtml += `<div style="margin-top:16px;margin-bottom:4px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${escHtml(cls)}</div>`;
-        items.forEach(it => {
+        const itemRows = items.map(it => {
             const live = WEALTH_LIVE_CLASSES.includes(cls) ? wealthLiveValue(it.name) : null;
-            const val = (live != null) ? live : it.amount;
-            const tag = (live != null) ? `<span style="color:var(--success);font-size:var(--fs-xs);margin-left:8px">live</span>` : '';
-            rowsHtml += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
-                <label style="flex:1;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(it.name)}${tag}</label>
-                <span style="color:var(--text-muted)">£</span>
-                <input type="number" step="0.01" value="${val}" data-wealth-name="${escHtml(it.name)}" data-wealth-type="${escHtml(cls)}"
-                    style="width:150px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
-            </div>`;
-        });
+            return wealthRowHtml(cls, it.name, (live != null) ? live : it.amount, live, false);
+        }).join('');
+        rowsHtml += `<div style="margin-top:18px;margin-bottom:4px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${escHtml(cls)}</div>
+            <div class="wealth-section" data-section="${escHtml(cls)}">${itemRows}</div>
+            <button onclick="addWealthRow('${cls.replace(/'/g, "\\'")}')" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:5px 12px;margin-top:6px;font-size:var(--fs-xs);color:var(--accent);cursor:pointer">+ Add ${escHtml(cls)}</button>`;
     });
 
     el.innerHTML = `<div style="max-width:720px;margin:0 auto">
         <div style="margin-bottom:8px"><button onclick="renderWealthTab()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);padding:0">&larr; Back to net worth</button></div>
         <div class="kpi-card">
             <div class="kpi-card-label" style="margin-bottom:4px">Update figures for ${escHtml(curMonth)} ${escHtml(curYear)}</div>
-            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Cash and cards are pre-filled live. Everything else shows last month's value — change only what moved, then save. Dragging a statement or screenshot to auto-read figures is the next upgrade.</div>
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Cash and cards are pre-filled live. Everything else shows last month's value — change only what moved. Use "+ Add" to record a new property, business, loan or investment, and the &times; to drop anything you have sold or cleared. Dragging a statement or screenshot to auto-read figures is the next upgrade.</div>
             ${alreadySaved ? `<div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(curMonth)} ${escHtml(curYear)} already has a saved snapshot. Editing an existing month is coming next; saving now would duplicate it, so it is disabled.</div>` : ''}
             <div id="wealthUpdateError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin:8px 0"></div>
             ${rowsHtml}
-            <div style="display:flex;gap:10px;margin-top:20px">
+            <div style="display:flex;gap:10px;margin-top:22px">
                 <button id="wealthSaveBtn" ${alreadySaved ? 'disabled style="opacity:0.5;cursor:not-allowed;' : 'style="cursor:pointer;'}background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:10px 20px;font-weight:var(--fw-semibold)" onclick="saveWealthUpdate('${curMonth}','${curYear}')">Save ${escHtml(curMonth)} ${escHtml(curYear)}</button>
                 <button onclick="renderWealthTab()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:10px 20px;cursor:pointer;color:var(--text-secondary)">Cancel</button>
             </div>
@@ -162,14 +182,20 @@ async function saveWealthUpdate(curMonth, curYear) {
     const existing = computeNetWorth(_wealthRecords || []).some(p => p.month === curMonth && String(p.year) === curYear);
     if (existing) { showErr(`${curMonth} ${curYear} is already saved. Editing an existing month is coming next.`); return; }
 
-    const inputs = [...document.querySelectorAll('[data-wealth-name]')];
-    const records = inputs.map(inp => ({ fields: {
-        [NW.name]: inp.dataset.wealthName,
-        [NW.amount]: Number(inp.value) || 0,
-        [NW.type]: inp.dataset.wealthType,
-        [NW.month]: curMonth,
-        [NW.year]: curYear,
-    } }));
+    const rows = [...document.querySelectorAll('.wealth-row')];
+    const records = [];
+    rows.forEach(row => {
+        const nameInput = row.querySelector('.wn');
+        const name = (row.dataset.name != null ? row.dataset.name : (nameInput ? nameInput.value : '')).trim();
+        if (!name) return; // skip blank added rows
+        records.push({ fields: {
+            [NW.name]: name,
+            [NW.amount]: Number(row.querySelector('.wa').value) || 0,
+            [NW.type]: row.dataset.wealthType,
+            [NW.month]: curMonth,
+            [NW.year]: curYear,
+        } });
+    });
     if (!records.length) { showErr('Nothing to save.'); return; }
 
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
