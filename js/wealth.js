@@ -80,6 +80,116 @@ async function renderWealthTab() {
     }
 }
 
+// ── Monthly update form ──────────────────────────────────────────────────────
+// Pull a live balance for the handful of accounts we can map by name to a synced
+// Account record. Credit-card balances come back with inconsistent signs, so we
+// store the magnitude (snapshots hold "owed" as a positive number).
+function wealthLiveValue(name) {
+    const map = {
+        'santander': REC.santander,
+        'tnt mgt zempler': REC.tntZempler,
+        'american express': REC.americanExpress,
+        'santander credit card': REC.santanderCC,
+        'lloyds credit card': REC.lloydsCreditCard,
+    };
+    const recId = map[(name || '').trim().toLowerCase()];
+    if (!recId) return null;
+    const accts = (typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [];
+    const a = accts.find(x => x.id === recId);
+    if (!a) return null;
+    const v = Number(getField(a, F.accGBP));
+    return isNaN(v) ? null : Math.abs(v);
+}
+
+const WEALTH_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const WEALTH_CLASS_ORDER = ['Cash','Real Estate','Investments','Businesses','Credit Cards','Loans','Mortgages'];
+const WEALTH_LIVE_CLASSES = ['Cash','Credit Cards'];
+
+// Render the monthly update form into the Wealth panel. Pre-fills cash/cards live
+// and every other line with last month's value, so it is a quick change-only pass.
+function openWealthUpdate() {
+    const el = document.getElementById('tab-wealth');
+    if (!el || !_wealthRecords) return;
+    const periods = computeNetWorth(_wealthRecords);
+    const latest = periods[periods.length - 1];
+    const now = new Date();
+    const curMonth = WEALTH_MONTHS[now.getMonth()];
+    const curYear = String(now.getFullYear());
+    const alreadySaved = periods.some(p => p.month === curMonth && String(p.year) === curYear);
+
+    let rowsHtml = '';
+    WEALTH_CLASS_ORDER.forEach(cls => {
+        const items = latest.items[cls] || [];
+        if (!items.length) return;
+        rowsHtml += `<div style="margin-top:16px;margin-bottom:4px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${escHtml(cls)}</div>`;
+        items.forEach(it => {
+            const live = WEALTH_LIVE_CLASSES.includes(cls) ? wealthLiveValue(it.name) : null;
+            const val = (live != null) ? live : it.amount;
+            const tag = (live != null) ? `<span style="color:var(--success);font-size:var(--fs-xs);margin-left:8px">live</span>` : '';
+            rowsHtml += `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+                <label style="flex:1;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(it.name)}${tag}</label>
+                <span style="color:var(--text-muted)">£</span>
+                <input type="number" step="0.01" value="${val}" data-wealth-name="${escHtml(it.name)}" data-wealth-type="${escHtml(cls)}"
+                    style="width:150px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
+            </div>`;
+        });
+    });
+
+    el.innerHTML = `<div style="max-width:720px;margin:0 auto">
+        <div style="margin-bottom:8px"><button onclick="renderWealthTab()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);padding:0">&larr; Back to net worth</button></div>
+        <div class="kpi-card">
+            <div class="kpi-card-label" style="margin-bottom:4px">Update figures for ${escHtml(curMonth)} ${escHtml(curYear)}</div>
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Cash and cards are pre-filled live. Everything else shows last month's value — change only what moved, then save. Dragging a statement or screenshot to auto-read figures is the next upgrade.</div>
+            ${alreadySaved ? `<div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(curMonth)} ${escHtml(curYear)} already has a saved snapshot. Editing an existing month is coming next; saving now would duplicate it, so it is disabled.</div>` : ''}
+            <div id="wealthUpdateError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin:8px 0"></div>
+            ${rowsHtml}
+            <div style="display:flex;gap:10px;margin-top:20px">
+                <button id="wealthSaveBtn" ${alreadySaved ? 'disabled style="opacity:0.5;cursor:not-allowed;' : 'style="cursor:pointer;'}background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:10px 20px;font-weight:var(--fw-semibold)" onclick="saveWealthUpdate('${curMonth}','${curYear}')">Save ${escHtml(curMonth)} ${escHtml(curYear)}</button>
+                <button onclick="renderWealthTab()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:10px 20px;cursor:pointer;color:var(--text-secondary)">Cancel</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+// Save the form as a new dated snapshot. Creates one record per line item in the
+// net worth table. Guards against duplicating a month that already exists.
+async function saveWealthUpdate(curMonth, curYear) {
+    const btn = document.getElementById('wealthSaveBtn');
+    const errEl = document.getElementById('wealthUpdateError');
+    const showErr = m => { if (errEl) { errEl.style.display = 'block'; errEl.textContent = m; } if (btn) { btn.disabled = false; btn.textContent = `Save ${curMonth} ${curYear}`; } };
+
+    // Duplicate guard — never create a second snapshot for the same month.
+    const existing = computeNetWorth(_wealthRecords || []).some(p => p.month === curMonth && String(p.year) === curYear);
+    if (existing) { showErr(`${curMonth} ${curYear} is already saved. Editing an existing month is coming next.`); return; }
+
+    const inputs = [...document.querySelectorAll('[data-wealth-name]')];
+    const records = inputs.map(inp => ({ fields: {
+        [NW.name]: inp.dataset.wealthName,
+        [NW.amount]: Number(inp.value) || 0,
+        [NW.type]: inp.dataset.wealthType,
+        [NW.month]: curMonth,
+        [NW.year]: curYear,
+    } }));
+    if (!records.length) { showErr('Nothing to save.'); return; }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        for (let i = 0; i < records.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.netWorthByMonth}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: records.slice(i, i + 10), typecast: true }),
+            });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+        }
+        _wealthRecords = null;
+        _wealthPromise = null;
+        await renderWealthTab();
+    } catch (e) {
+        showErr('Could not save: ' + (e.message || 'error'));
+    }
+}
+
 // Show a small amber badge on the Wealth sidebar item when monthly figures are
 // stale, so the "needs updating" alert is visible from any tab (the sidebar is
 // always on screen). Isolated: only touches the Wealth nav item.
@@ -187,7 +297,8 @@ function renderWealthContent(el, records) {
             <span style="font-size:20px;line-height:1.2">⚠️</span>
             <div>
                 <div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">Your figures are ${monthsBehind} month${monthsBehind === 1 ? '' : 's'} out of date</div>
-                <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Latest snapshot is ${escHtml(asOf)}. To bring this up to ${escHtml(currentLabel)}, ${manualItemCount} manual figures need updating: property and business valuations, loan and mortgage balances, and investments. Cash and credit cards update live. The one-tap monthly update form is the next step.</div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Latest snapshot is ${escHtml(asOf)}. To bring this up to ${escHtml(currentLabel)}, ${manualItemCount} manual figures need updating: property and business valuations, loan and mortgage balances, and investments. Cash and credit cards update live.</div>
+                <button onclick="openWealthUpdate()" style="margin-top:10px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 16px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Update figures for ${escHtml(currentLabel)}</button>
             </div>
         </div>` : ''}
 
