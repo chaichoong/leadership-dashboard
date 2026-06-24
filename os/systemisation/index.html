@@ -301,6 +301,38 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .wf-card-body{display:block!important}
 .main{padding:10px}
 }
+
+/* AGENTIC extraction — script guide + readiness scorecard */
+.agentic-guide{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:12px 0;overflow:hidden}
+.agentic-guide-head{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-weight:var(--fw-semibold);font-size:var(--fs-sm);user-select:none}
+.agentic-guide-head .resources-chevron{transition:transform .2s;font-size:11px;color:var(--text-muted)}
+.agentic-guide.open .resources-chevron{transform:rotate(90deg)}
+.agentic-guide-body{display:none;padding:4px 14px 14px}
+.agentic-guide.open .agentic-guide-body{display:block}
+.agentic-guide-intro{font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 10px}
+.agentic-guide-item{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--border-subtle)}
+.agentic-guide-item>div{display:flex;flex-direction:column;gap:1px}
+.agentic-guide-item strong{font-size:var(--fs-sm)}
+.agentic-guide-item span{font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.45}
+.agentic-letter{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-bold);font-size:12px;display:flex;align-items:center;justify-content:center}
+.agentic-card{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0;padding:14px 16px}
+.agentic-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}
+.agentic-title{font-weight:var(--fw-semibold);font-size:var(--fs-sm)}
+.agentic-sub{font-size:var(--fs-xs);color:var(--text-muted)}
+.agentic-state{flex-shrink:0;padding:3px 12px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-semibold)}
+.agentic-rows{display:flex;flex-direction:column;gap:1px}
+.agentic-row{display:grid;grid-template-columns:24px 150px 74px 1fr;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border-subtle);font-size:var(--fs-sm)}
+.agentic-row .agentic-letter{width:20px;height:20px;font-size:11px}
+.agentic-name{font-weight:var(--fw-medium)}
+.agentic-pill{justify-self:start;padding:2px 9px;border-radius:var(--radius-full);font-size:11px;font-weight:var(--fw-semibold);white-space:nowrap}
+.agentic-reason{font-size:var(--fs-xs);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis}
+.agentic-questions{margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle)}
+.agentic-q-title{font-size:var(--fs-sm);font-weight:var(--fw-medium);color:var(--accent);margin-bottom:10px}
+.agentic-q{margin-bottom:10px}
+.agentic-q label{display:block;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:4px}
+.agentic-foot{margin-top:12px;display:flex;justify-content:flex-end}
+.agentic-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
+@media(max-width:760px){.agentic-row{grid-template-columns:20px 1fr;row-gap:2px}.agentic-pill,.agentic-reason{grid-column:2}}
 </style>
 </head>
 <body>
@@ -415,6 +447,18 @@ const FULFILL_STAGES = [
 ];
 
 const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'];
+
+// AGENTIC extraction script — the seven stages the owner narrates in their Loom.
+// Wording is the single source of truth (see docs/agentic-extraction-spec.md).
+const AGENTIC_STAGES = [
+    { letter:'A', name:'Aim',                     naAllowed:false, prompt:'In a sentence or two, what is this process for? And how would you know it has been done right? What would tell you someone made a mistake?' },
+    { letter:'G', name:'Go Signal',               naAllowed:false, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking?' },
+    { letter:'E', name:'Entry Points',            naAllowed:false, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
+    { letter:'N', name:'Navigate the Process',    naAllowed:false, prompt:'Walk me through exactly what you do, step by step. Most important: every time you make a choice, say out loud how you decide and why you pick what you pick.' },
+    { letter:'T', name:'Tools & Transformations', naAllowed:false, prompt:'What do you actually change, create, or send? Name every system you write into, and describe what the finished result looks like.' },
+    { letter:'I', name:'Inspections',             naAllowed:true,  prompt:'Before you call it done, what do you check? And what would you never let go out without looking at it yourself?' },
+    { letter:'C', name:'Caveats',                 naAllowed:true,  prompt:'What trips this up? The odd cases, the exceptions, and anything you must never do.' },
+];
 
 const TASKS_TBL = 'tblqB8b22hKBL4PF1';
 const TF = {
@@ -2204,6 +2248,7 @@ No other text outside the JSON object.`;
         } catch(e){ console.error('SOP save error:', e); }
         toast('SOP generated');
         await autoUploadToDrive(wfId);
+        runAgenticCheck(wfId); // auto-score readiness once the SOP exists
     } catch(e){
         toast('SOP generation error: '+e.message);
         container.innerHTML = `<div style="padding:20px;color:var(--danger)">Error generating SOP: ${esc(e.message)}</div>`;
@@ -2686,13 +2731,30 @@ function renderSteps(){
 
             const hasSopDoc = !!gf(w,WF.sopDocument);
             const hasLoom = !!loomUrl;
+            const hasReadiness = !!((getWfSopData(w.id)||{}).readiness);
             html += `<div class="steps-header">
                 <h3 style="margin:0;font-size:var(--fs-lg)">${esc(wName)}</h3>
                 <div style="display:flex;gap:8px">
                     ${steps.length && !hasSopDoc ?`<button class="btn btn-sm btn-ai" onclick="generateWorkflowSOP('${w.id}')">Generate SOP</button>`:''}
+                    ${hasSopDoc && !hasReadiness ?`<button class="btn btn-sm btn-ai" onclick="runAgenticCheck('${w.id}')">Check readiness</button>`:''}
                     ${!hasLoom && !hasSopDoc ?`<button class="btn btn-sm btn-ai" onclick="suggestSteps('${w.id}')">Suggest Steps (AI)</button>`:''}
                     ${!vtaskId && !hasSopDoc ?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="assignVideoTask('${w.id}')">Assign Video Task</button>`:''}
                     ${!vtaskId && hasSopDoc ?`<button class="btn btn-sm" style="border-color:var(--warning);color:var(--warning)" onclick="assignVideoTask('${w.id}')">Re-record Process</button>`:''}
+                </div>
+            </div>`;
+
+            // AGENTIC script guide — open by default until an SOP exists
+            html += `<div class="agentic-guide${hasSopDoc?'':' open'}" id="agenticGuide-${w.id}">
+                <div class="agentic-guide-head" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="resources-chevron">&#x25B6;</span>
+                    AGENTIC script — what to cover in your video
+                </div>
+                <div class="agentic-guide-body">
+                    <p class="agentic-guide-intro">Record one short Loom and talk through these seven, in order. The AGENTIC method turns it into an autonomous agent.</p>
+                    ${AGENTIC_STAGES.map(s=>`<div class="agentic-guide-item">
+                        <span class="agentic-letter">${s.letter}</span>
+                        <div><strong>${esc(s.name)}</strong><span>${esc(s.prompt)}</span></div>
+                    </div>`).join('')}
                 </div>
             </div>`;
 
@@ -2760,6 +2822,7 @@ function renderSteps(){
 
             html += '</tbody></table>';
 
+            html += `<div id="agentic-${w.id}"></div>`;
             html += `<div id="sopDoc-${w.id}"></div>`;
         }
     }
@@ -2783,8 +2846,190 @@ function restoreSavedSOPs(){
             const loomUrl = getWfLoomUrl(w.id);
             const steps = stepsForWorkflow(w.id);
             renderSOPDocument(w.id, wName, wDesc, dept, fulfill, loomUrl, steps, saved.sopSteps||[], container, saved.sopTitle||wName, saved.cautions||[], saved.tips||[], saved.videoTitle||'');
+            if(saved.readiness) renderAgenticScorecard(w.id, saved.readiness);
         } catch(e){ console.error('SOP restore error for '+w.id, e); }
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AGENTIC readiness check — scores the SOP against the seven stages and
+// surfaces gap questions. Stored inside the SOP document JSON (readiness key).
+// ═══════════════════════════════════════════════════════════════════════
+
+function getWfSopData(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return null;
+    const raw = gf(w, WF.sopDocument);
+    if(!raw) return null;
+    try { return JSON.parse(raw); } catch(e){ return null; }
+}
+
+function agenticSopText(wfId){
+    const sop = getWfSopData(wfId);
+    const steps = stepsForWorkflow(wfId).map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||''} — ${gf(s,ST.description)||''}`).join('\n');
+    if(!sop) return steps;
+    const body = (sop.sopSteps||[]).map(s=>`${s.name}:\n- ${(s.detail||[]).join('\n- ')}`).join('\n\n');
+    const cautions = (sop.cautions||[]).join('\n- ');
+    const tips = (sop.tips||[]).join('\n- ');
+    return `SOP TITLE: ${sop.sopTitle||''}\n\nSTEPS (raw):\n${steps}\n\nSOP BODY:\n${body}\n\nCAUTIONS:\n- ${cautions}\n\nTIPS:\n- ${tips}`;
+}
+
+async function runAgenticCheck(wfId, extraAnswers){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    if(!getWfSopData(wfId)){ toast('Generate the SOP first'); return; }
+    const container = document.getElementById('agentic-'+wfId);
+    if(container) container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>Checking your agent is ready…</span></div>`;
+
+    const wName = gf(w,WF.name)||'Untitled';
+    const stageList = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${s.naAllowed?' (N/A allowed)':''}`).join('\n');
+    let answersBlock = '';
+    if(extraAnswers && Object.keys(extraAnswers).length){
+        answersBlock = '\n\nThe owner has since answered these follow-up questions. Treat the answers as part of the process description:\n' +
+            Object.entries(extraAnswers).map(([k,v])=>`${k}: ${v}`).join('\n');
+    }
+
+    const prompt = `You are checking whether a documented business process contains enough to build a reliable autonomous AI agent. Score it against the seven AGENTIC stages.
+
+Process name: ${wName}
+
+The seven stages:
+${stageList}
+
+Pass rules:
+- "Clear": the stage is fully covered.
+- "Thin": mentioned but incomplete.
+- "Missing": not covered.
+- "NA": genuinely not applicable. Only allowed for Inspections and Caveats. Never for A, G, E, N, T.
+- Navigate must contain the DECISION REASONING (how the person decides at each choice), not just a list of clicks or steps. If it is only steps with no "how I decide", mark it Thin at best.
+- Aim must include a concrete way to tell a result is wrong, not just a vague purpose.
+
+Here is the documented process:
+${agenticSopText(wfId)}${answersBlock}
+
+Return ONLY a JSON object:
+{
+  "stages": [ { "letter": "A", "status": "Clear|Thin|Missing|NA", "reason": "one short line" }, ... seven entries for A,G,E,N,T,I,C ],
+  "questions": [ { "letter": "N", "question": "a specific question to fill the gap" } ]
+}
+Include at most 3 questions, only for Thin or Missing stages, most important first. No text outside the JSON.`;
+
+    try {
+        const res = await fetch(CLAUDE_PROXY, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1500, messages:[{role:'user',content:prompt}] })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text || '{}';
+        const m = text.match(/\{[\s\S]*\}/);
+        if(!m) throw new Error('Invalid AI response');
+        const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers);
+        await saveAgenticReadiness(wfId, readiness);
+        renderAgenticScorecard(wfId, readiness);
+        toast('Readiness check complete');
+    } catch(e){
+        toast('Readiness check error: '+e.message);
+        if(container) container.innerHTML = `<div style="padding:12px;color:var(--danger)">Could not run the readiness check: ${esc(e.message)}</div>`;
+    }
+}
+
+function normaliseReadiness(parsed, extraAnswers){
+    const byLetter = {};
+    (parsed.stages||[]).forEach(s=>{ if(s && s.letter) byLetter[s.letter] = s; });
+    const stages = AGENTIC_STAGES.map(def=>{
+        const got = byLetter[def.letter] || {};
+        let status = got.status || 'Missing';
+        if(status==='NA' && !def.naAllowed) status='Missing'; // never allow N/A where forbidden
+        if(['Clear','Thin','Missing','NA'].indexOf(status)<0) status='Missing';
+        return { letter:def.letter, name:def.name, status, reason:String(got.reason||'').slice(0,180) };
+    });
+    const blocking = stages.filter(s=>s.status==='Missing' || s.status==='Thin');
+    const state = blocking.length===0 ? 'Ready' : 'Needs input';
+    const questions = (parsed.questions||[])
+        .filter(q=>q && q.question)
+        .slice(0,3)
+        .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }));
+    return { state, stages, questions, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
+}
+
+async function saveAgenticReadiness(wfId, readiness){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId) || {};
+    sop.readiness = readiness;
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ console.error('readiness save error', e); }
+}
+
+const AGENTIC_STATUS = {
+    Clear:   { bg:'var(--success-bg)', fg:'var(--success)', label:'Clear' },
+    Thin:    { bg:'var(--warning-bg)', fg:'var(--warning)', label:'Thin' },
+    Missing: { bg:'var(--danger-bg)',  fg:'var(--danger)',  label:'Missing' },
+    NA:      { bg:'var(--bg-subtle)',  fg:'var(--text-muted)', label:'N/A' },
+};
+
+function renderAgenticScorecard(wfId, readiness){
+    const container = document.getElementById('agentic-'+wfId);
+    if(!container || !readiness) return;
+    const ready = readiness.state==='Ready';
+    const stateMeta = ready
+        ? { bg:'var(--success-bg)', fg:'var(--success)', text:'Ready', sub:'This process has everything an agent needs.' }
+        : { bg:'var(--warning-bg)', fg:'var(--warning)', text:'Needs input', sub:'Great start. A few quick answers will finish your agent.' };
+
+    const rows = (readiness.stages||[]).map(s=>{
+        const meta = AGENTIC_STATUS[s.status] || AGENTIC_STATUS.Missing;
+        return `<div class="agentic-row">
+            <span class="agentic-letter">${esc(s.letter)}</span>
+            <span class="agentic-name">${esc(s.name)}</span>
+            <span class="agentic-pill" style="background:${meta.bg};color:${meta.fg}">${esc(meta.label)}</span>
+            <span class="agentic-reason" title="${esc(s.reason||'')}">${esc(s.reason||'')}</span>
+        </div>`;
+    }).join('');
+
+    let questions = '';
+    if(readiness.questions && readiness.questions.length){
+        questions = `<div class="agentic-questions">
+            <div class="agentic-q-title">${esc(stateMeta.sub)}</div>
+            ${readiness.questions.map((q,i)=>`<div class="agentic-q">
+                <label><strong>${esc(q.letter)}</strong> &middot; ${esc(q.question)}</label>
+                <textarea class="wf-grid-input agentic-answer" rows="2" data-q="${i}" placeholder="Type your answer, or re-record this stage in a new video">${esc((readiness.answers&&readiness.answers[q.letter])||'')}</textarea>
+            </div>`).join('')}
+            <button class="btn btn-sm btn-ai" onclick="submitAgenticAnswers('${wfId}')">Submit answers &amp; re-check</button>
+        </div>`;
+    }
+
+    container.innerHTML = `<div class="agentic-card" aria-live="polite">
+        <div class="agentic-head">
+            <div>
+                <div class="agentic-title">AGENTIC readiness</div>
+                <div class="agentic-sub">How ready this process is to become an autonomous agent</div>
+            </div>
+            <span class="agentic-state" style="background:${stateMeta.bg};color:${stateMeta.fg}">${esc(stateMeta.text)}</span>
+        </div>
+        <div class="agentic-rows">${rows}</div>
+        ${questions}
+        <div class="agentic-foot">
+            <button class="btn btn-sm" onclick="runAgenticCheck('${wfId}')">Re-check</button>
+        </div>
+    </div>`;
+}
+
+function submitAgenticAnswers(wfId){
+    const container = document.getElementById('agentic-'+wfId);
+    if(!container) return;
+    const readiness = (getWfSopData(wfId)||{}).readiness || {};
+    const answers = Object.assign({}, readiness.answers||{});
+    container.querySelectorAll('.agentic-answer').forEach(el=>{
+        const i = parseInt(el.dataset.q,10);
+        const q = (readiness.questions||[])[i];
+        const v = el.value.trim();
+        if(q && v) answers[q.letter] = v;
+    });
+    if(!Object.keys(answers).length){ toast('Type an answer first'); return; }
+    runAgenticCheck(wfId, answers);
 }
 
 function selectStepsWf(id){
