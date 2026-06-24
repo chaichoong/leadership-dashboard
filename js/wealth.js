@@ -510,7 +510,8 @@ async function renderPersonalExpenditure() {
     const monthKeys = new Set(months.map(m => m.key));
 
     const data = {};
-    PERSONAL_EXPENSE_SUBCATS.forEach(c => { data[c.id] = {}; });
+    const txnsByCat = {};
+    PERSONAL_EXPENSE_SUBCATS.forEach(c => { data[c.id] = {}; txnsByCat[c.id] = []; });
     txns.forEach(r => {
         const sc = getField(r, F.txSubCategory);
         const scIds = Array.isArray(sc) ? sc.map(x => (x && typeof x === 'object') ? x.id : x) : [];
@@ -524,12 +525,19 @@ async function renderPersonalExpenditure() {
         if (!monthKeys.has(key)) return;
         const amt = Math.abs((typeof txDisplayAmount === 'function') ? txDisplayAmount(r) : (Number(getField(r, F.txReportAmount)) || 0));
         data[hit][key] = (data[hit][key] || 0) + amt;
+        // Keep the underlying transactions so each category can be drilled into.
+        txnsByCat[hit].push({
+            d,
+            desc: String(getField(r, F.txDescription) || getField(r, F.txVendor) || '(no description)'),
+            account: String(getField(r, F.txAccountAlias) || ''),
+            amt,
+        });
     });
 
     const rows = PERSONAL_EXPENSE_SUBCATS.map(c => {
         const byMonth = months.map(m => data[c.id][m.key] || 0);
         const total = byMonth.reduce((s, v) => s + v, 0);
-        return { name: c.name, byMonth, total, avg: total / months.length, budget: budgetByName[c.name] || 0, budgetId: budgetIdByName[c.name] || '' };
+        return { id: c.id, name: c.name, byMonth, total, avg: total / months.length, budget: budgetByName[c.name] || 0, budgetId: budgetIdByName[c.name] || '', txns: txnsByCat[c.id] };
     }).sort((a, b) => b.total - a.total);
 
     const grandAvg = rows.reduce((s, r) => s + r.total, 0) / months.length;
@@ -537,17 +545,33 @@ async function renderPersonalExpenditure() {
     const fmt0 = n => '£' + Math.round(n).toLocaleString('en-GB');
 
     const headCells = months.map(m => `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(m.label)}</th>`).join('');
+    const colspan = months.length + 3; // Category + months + Avg + Budget
+    const fmt2 = n => '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const bodyRows = rows.map(r => {
         const cells = r.byMonth.map(v => `<td style="text-align:right;padding:6px 8px;color:${v > 0 ? 'var(--text-primary)' : 'var(--text-muted)'}">${v > 0 ? fmt0(v) : '–'}</td>`).join('');
         // Colour the average vs budget: over = danger, within = success, no budget = neutral.
         const avgColour = r.budget > 0 ? (r.avg > r.budget ? 'var(--danger)' : 'var(--success)') : 'var(--text-primary)';
         const flag = r.budget > 0 ? (r.avg > r.budget ? ` (+${fmt0(r.avg - r.budget)})` : ` (−${fmt0(r.budget - r.avg)})`) : '';
+        // Drill-down: the transactions making up this category, biggest first.
+        const txnRows = r.txns.slice().sort((a, b) => b.amt - a.amt).map(t => `<tr style="border-top:1px solid var(--border-subtle)">
+            <td style="padding:4px 8px;color:var(--text-secondary);white-space:nowrap">${t.d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</td>
+            <td style="padding:4px 8px;color:var(--text-primary)">${escHtml(t.desc)}</td>
+            <td style="padding:4px 8px;color:var(--text-muted);white-space:nowrap">${escHtml(t.account)}</td>
+            <td style="padding:4px 8px;text-align:right;color:var(--text-primary);white-space:nowrap">${fmt2(t.amt)}</td>
+        </tr>`).join('');
+        const detail = r.txns.length
+            ? `<table style="width:100%;border-collapse:collapse;font-size:var(--fs-xs);background:var(--bg-surface-2);border-radius:var(--radius-sm)">
+                <thead><tr><th style="text-align:left;padding:4px 8px;color:var(--text-muted)">Date</th><th style="text-align:left;padding:4px 8px;color:var(--text-muted)">Description</th><th style="text-align:left;padding:4px 8px;color:var(--text-muted)">Account</th><th style="text-align:right;padding:4px 8px;color:var(--text-muted)">Amount</th></tr></thead>
+                <tbody>${txnRows}</tbody></table>
+                <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:6px">${r.txns.length} transaction${r.txns.length === 1 ? '' : 's'} over 6 months. Anything in the wrong place? Recategorise it in reconciliation and it drops out here.</div>`
+            : `<div style="color:var(--text-muted);font-size:var(--fs-xs)">No transactions in the last 6 months.</div>`;
         return `<tr style="border-top:1px solid var(--border-subtle)">
-            <td style="padding:6px 8px;color:var(--text-primary)">${escHtml(r.name)}</td>
+            <td style="padding:6px 8px"><span onclick="toggleExpDetail('${r.id}')" style="cursor:pointer;color:var(--accent);user-select:none"><span id="exp-chev-${r.id}" style="display:inline-block;width:12px;transition:transform .15s">▸</span> ${escHtml(r.name)}</span></td>
             ${cells}
             <td style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:${avgColour}">${fmt0(r.avg)}<span style="font-size:var(--fs-xs);font-weight:var(--fw-regular)">${flag}</span></td>
             <td style="text-align:right;padding:6px 8px"><span style="color:var(--text-muted)">£</span><input type="number" step="1" min="0" class="pbud" data-budget-id="${escHtml(r.budgetId)}" value="${r.budget || ''}" placeholder="0" style="width:84px;padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"></td>
-        </tr>`;
+        </tr>
+        <tr id="exp-detail-${r.id}" style="display:none"><td colspan="${colspan}" style="padding:4px 8px 12px 28px">${detail}</td></tr>`;
     }).join('');
     const totalCells = months.map((m, idx) => {
         const t = rows.reduce((s, r) => s + (r.byMonth[idx] || 0), 0);
@@ -580,6 +604,16 @@ async function renderPersonalExpenditure() {
         </div>
         <div style="margin-top:14px"><button id="budgetSaveBtn" onclick="saveBudgets()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save budgets</button></div>
     </div>`;
+}
+
+// Toggle a category's transaction drill-down row.
+function toggleExpDetail(catId) {
+    const row = document.getElementById('exp-detail-' + catId);
+    const chev = document.getElementById('exp-chev-' + catId);
+    if (!row) return;
+    const open = row.style.display !== 'none';
+    row.style.display = open ? 'none' : 'table-row';
+    if (chev) chev.style.transform = open ? '' : 'rotate(90deg)';
 }
 
 async function saveBudgets() {
