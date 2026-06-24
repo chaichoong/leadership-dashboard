@@ -454,5 +454,129 @@ function renderWealthContent(el, records) {
             </div>
         </div>
 
+        <!-- Income buckets (loaded separately) -->
+        <div id="wealthBuckets" style="margin-top:var(--space-5)"></div>
+
     </div>`;
+
+    // Load + render the income buckets section (its own Airtable fetch).
+    loadWealthBuckets();
+}
+
+// ── Income buckets ───────────────────────────────────────────────────────────
+// Virtual overlay: allocate the Money Confidence surplus across pots by %, track
+// a running balance per pot. Persisted in the Income Buckets Airtable table.
+let _bucketsRecords = null;
+let _bucketsPromise = null;
+
+async function loadWealthBuckets() {
+    const el = document.getElementById('wealthBuckets');
+    if (!el) return;
+    if (!_bucketsRecords) {
+        el.innerHTML = `<div class="kpi-card" style="color:var(--text-muted);font-size:var(--fs-sm)">Loading income buckets…</div>`;
+        try {
+            if (!_bucketsPromise) _bucketsPromise = airtableFetch(TABLES.incomeBuckets);
+            _bucketsRecords = await _bucketsPromise;
+        } catch (e) {
+            _bucketsPromise = null;
+            el.innerHTML = `<div class="kpi-card" style="color:var(--text-secondary);font-size:var(--fs-sm)">Could not load income buckets.</div>`;
+            return;
+        }
+    }
+    renderBuckets(el);
+}
+
+function renderBuckets(el) {
+    const recs = (_bucketsRecords || []).slice().sort((a, b) =>
+        (Number(getField(a, BUCKET.sort)) || 0) - (Number(getField(b, BUCKET.sort)) || 0));
+    const totalBal = recs.reduce((s, r) => s + (Number(getField(r, BUCKET.balance)) || 0), 0);
+    const totalPct = recs.reduce((s, r) => s + (Number(getField(r, BUCKET.pct)) || 0), 0);
+
+    // Prefill the allocate amount with the Money Confidence surplus when available.
+    let surplus = 0;
+    try {
+        if (typeof computeSafeToAct === 'function' && typeof allAccounts !== 'undefined' && allAccounts && allAccounts.length) {
+            surplus = computeSafeToAct().safeToActToday || 0;
+        }
+    } catch (e) { /* surplus stays 0 */ }
+
+    const rows = recs.map(r => {
+        const name = getField(r, BUCKET.name) || '(unnamed)';
+        const pct = Number(getField(r, BUCKET.pct)) || 0;
+        const bal = Number(getField(r, BUCKET.balance)) || 0;
+        return `<div class="bucket-row" data-bucket-id="${escHtml(r.id)}" style="display:flex;align-items:center;gap:10px;padding:6px 0">
+            <span style="flex:1;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(name)}</span>
+            <input type="number" step="1" min="0" class="bpct" value="${pct}" title="Allocation %"
+                style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
+            <span style="color:var(--text-muted)">£</span>
+            <input type="number" step="0.01" class="bbal" value="${bal}" title="Current balance"
+                style="width:130px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
+        </div>`;
+    }).join('');
+
+    const pctWarn = totalPct !== 100
+        ? `<span style="color:var(--warning);font-size:var(--fs-xs);margin-left:8px">allocations total ${totalPct}% (aim for 100%)</span>` : '';
+
+    el.innerHTML = `<div class="kpi-card">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
+            <span class="kpi-card-label">Income buckets</span>
+            <span style="margin-left:auto;color:var(--text-secondary);font-size:var(--fs-sm)">Total saved: <strong style="color:var(--text-primary)">${fmt(totalBal)}</strong></span>
+        </div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Split your surplus into pots by percentage. Allocate distributes an amount across the balances; edit any balance directly to record spending, then Save. ${pctWarn}</div>
+        <div id="bucketRows">${rows}</div>
+        <div id="bucketSaveError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:8px"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap;border-top:1px solid var(--border-subtle);padding-top:14px">
+            <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Allocate £</span>
+            <input type="number" step="0.01" id="bucketAllocAmt" value="${surplus > 0 ? surplus.toFixed(2) : ''}" placeholder="amount"
+                style="width:140px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)">
+            <button onclick="bucketAllocate()" style="background:var(--bg-subtle);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:8px 14px;font-size:var(--fs-sm);cursor:pointer;color:var(--text-primary)">Distribute by %</button>
+            ${surplus > 0 ? `<span style="color:var(--text-muted);font-size:var(--fs-xs)">pre-filled from your "safe to act today"</span>` : ''}
+            <button id="bucketSaveBtn" onclick="saveBuckets()" style="margin-left:auto;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save buckets</button>
+        </div>
+    </div>`;
+}
+
+// Distribute the allocate amount across the balance inputs by each row's %.
+// Does not save — the user reviews then clicks Save.
+function bucketAllocate() {
+    const amt = Number((document.getElementById('bucketAllocAmt') || {}).value) || 0;
+    if (amt <= 0) return;
+    document.querySelectorAll('.bucket-row').forEach(row => {
+        const pct = Number(row.querySelector('.bpct').value) || 0;
+        const balInput = row.querySelector('.bbal');
+        const cur = Number(balInput.value) || 0;
+        balInput.value = Math.round((cur + amt * pct / 100) * 100) / 100;
+        balInput.style.borderColor = 'var(--accent)';
+    });
+}
+
+async function saveBuckets() {
+    const btn = document.getElementById('bucketSaveBtn');
+    const errEl = document.getElementById('bucketSaveError');
+    const rows = [...document.querySelectorAll('.bucket-row')];
+    const records = rows.map(row => ({
+        id: row.dataset.bucketId,
+        fields: {
+            [BUCKET.pct]: Number(row.querySelector('.bpct').value) || 0,
+            [BUCKET.balance]: Number(row.querySelector('.bbal').value) || 0,
+        },
+    }));
+    if (!records.length) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        for (let i = 0; i < records.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.incomeBuckets}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: records.slice(i, i + 10) }),
+            });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+        }
+        _bucketsRecords = null;
+        _bucketsPromise = null;
+        await loadWealthBuckets();
+    } catch (e) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Could not save buckets: ' + (e.message || 'error'); }
+        if (btn) { btn.disabled = false; btn.textContent = 'Save buckets'; }
+    }
 }
