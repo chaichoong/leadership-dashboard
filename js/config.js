@@ -53,6 +53,7 @@
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
         netWorthByMonth: 'tblvtDXCBJCHu9hnK', // Specific Net Worth Statement by Month (Wealth tab)
+        incomeBuckets:   'tbldMPjXTu7ho5f0T', // Income Buckets (Wealth tab — virtual overlay)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
@@ -194,6 +195,16 @@
     // The six classes, split into assets vs liabilities.
     const NW_ASSET_CLASSES = ['Cash', 'Real Estate', 'Investments', 'Businesses'];
     const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
+
+    // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──
+    // Virtual overlay for the Wealth tab. Surplus is split by Allocation % into Balance.
+    const BUCKET = {
+        name:    'fld58yk6iOatTIIxJ',  // Bucket (singleLineText, primary)
+        pct:     'fldJkDpfd9p36ddbC',  // Allocation % (number, 0dp) — e.g. 20 means 20%
+        balance: 'fld50s2fcXr4vEiVy',  // Balance (currency £) — running virtual balance
+        sort:    'fldtUTeLjEpPJAcoy',  // Sort Order (number)
+        notes:   'fldQR5QoFToiHMTEn',  // Notes (multilineText)
+    };
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
     const BIZ_NAME_FIELD = 'fldbbRqVxLxUdHwIR';
