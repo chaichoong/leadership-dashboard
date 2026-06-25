@@ -3016,8 +3016,8 @@ function renderAgenticScorecard(wfId, readiness){
     const human = !!(disp && (disp.type==='recurring' || disp.type==='adhoc'));
     const ready = readiness.state==='Ready';
     const stateMeta = ready
-        ? { bg:'var(--success-bg)', fg:'var(--success)', text:'Ready', sub:'This process has everything an agent needs.' }
-        : { bg:'var(--warning-bg)', fg:'var(--warning)', text:'Needs input', sub:'Great start. A few quick answers will finish your agent.' };
+        ? { bg:'var(--success-bg)', fg:'var(--success)', text:'Ready', sub: human?'This SOP has everything a person needs to follow it.':'This process has everything an agent needs.' }
+        : { bg:'var(--warning-bg)', fg:'var(--warning)', text:'Needs input', sub: human?'Great start. A few quick answers will finish this SOP.':'Great start. A few quick answers will finish your agent.' };
 
     const rows = (readiness.stages||[]).map(s=>{
         const meta = AGENTIC_STATUS[s.status] || AGENTIC_STATUS.Missing;
