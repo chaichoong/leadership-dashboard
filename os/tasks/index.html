@@ -531,13 +531,13 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <option value="">All Projects</option>
         <option value="__none">No project</option>
       </select>
-      <select class="filter-select" id="filterStatus" onchange="renderTasks()">
+      <select class="filter-select" id="filterStatus" onchange="onStatusFilterChange()">
         <option value="">All Statuses (active)</option>
         <option value="Today">Today</option>
         <option value="Overdue">Overdue</option>
         <option value="Upcoming">Upcoming</option>
         <option value="Approval">Approval</option>
-        <option value="Completed">Completed (search history)</option>
+        <option value="Completed">Completed (history)</option>
       </select>
       <select class="filter-select" id="filterBusiness" onchange="renderTasks()">
         <option value="">All Businesses</option>
@@ -766,6 +766,14 @@ function setPersonCapacity(key,hrs){localStorage.setItem('_task_capacity_'+key,S
 // STATE
 let PAT = '';
 let allTasks = [];
+// Completed tasks are NOT loaded with the active set (they grow without bound
+// and would slow every refresh). They are lazy-fetched once, capped + sorted
+// by completion date, only when the user selects the "Completed" status filter.
+// Held in a separate array so they never inflate active counts / KPIs / kanban.
+let completedTasks = [];
+let completedLoaded = false;
+let completedLoading = false;
+const COMPLETED_FETCH_CAP = 300; // most-recent completed tasks kept in memory
 let allProjects = [];
 let BUSINESS_MAP = {}; // name -> id
 let activeTeam = 'all';
@@ -1864,7 +1872,12 @@ async function updateTaskField(taskId,fieldKey,rawValue){
     } else if(fieldKey==='dueDate'||fieldKey==='origDueDate'){
       payload[fid]=rawValue||null;task[fieldKey]=rawValue||'';
     } else if(fieldKey==='assignee'){
-      // rawValue = team key
+      // rawValue = team key, or '' / '__unassigned' to clear the assignee
+      // (e.g. a maintenance job sitting unallocated until someone is chosen).
+      if(!rawValue||rawValue==='__unassigned'){
+        payload[fid]=null;
+        task.assignee='';task.assigneeEmail='';task.assigneeId='';
+      } else {
       const member=TEAM.find(m=>m.key===rawValue);
       if(member){
         payload[fid]={email:member.email};task.assignee=member.name;task.assigneeEmail=member.email;
@@ -1892,6 +1905,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         if(isGaryEmail(member.email)&&!task.maintenance){
           payload[F.maintenance]=true;task.maintenance=true;
         }
+      }
       }
     } else {
       payload[fid]=rawValue;task[fieldKey]=rawValue;
@@ -2386,21 +2400,31 @@ function deleteTaskFromDrillModal(taskId){
 }
 
 // ===== TEAM BAR =====
+// Single source of truth for the team-bar filter, including the special
+// 'all' (no filter) and 'unassigned' (no assignee) selections. Used by every
+// view so the selected person/unassigned tab filters consistently.
+function applyTeamFilter(list){
+  if(activeTeam==='all')return list;
+  if(activeTeam==='unassigned')return list.filter(t=>!t.assigneeEmail);
+  const m=TEAM.find(x=>x.key===activeTeam);
+  return m?list.filter(t=>t.assigneeEmail===m.email):list;
+}
 function renderTeamBar(){
-  const counts={all:0};TEAM.forEach(m=>counts[m.key]=0);
+  const counts={all:0,unassigned:0};TEAM.forEach(m=>counts[m.key]=0);
   const active=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
-  active.forEach(t=>{counts.all++;const k=teamKey(t.assigneeEmail);if(counts[k]!==undefined)counts[k]++});
+  active.forEach(t=>{counts.all++;const k=teamKey(t.assigneeEmail);if(counts[k]!==undefined)counts[k]++;if(!t.assigneeEmail)counts.unassigned++});
   let h=`<button class="team-btn ${activeTeam==='all'?'active':''}" onclick="setTeam('all')">All<span class="count">${counts.all}</span></button>`;
   TEAM.forEach(m=>{const f=m.name.split(' ')[0];
     h+=`<button class="team-btn ${activeTeam===m.key?'active':''}" onclick="setTeam('${m.key}')"><span class="avatar avatar-${m.key}">${f[0]}</span> ${f}<span class="count">${counts[m.key]}</span></button>`;
   });
+  h+=`<button class="team-btn ${activeTeam==='unassigned'?'active':''}" onclick="setTeam('unassigned')" title="Tasks with no assignee — e.g. maintenance jobs awaiting allocation">Unassigned<span class="count">${counts.unassigned}</span></button>`;
   document.getElementById('teamBar').innerHTML=h;
 }
 
 // ===== KPIs =====
 function renderKPIs(){
   let tasks=allTasks.slice();
-  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  tasks=applyTeamFilter(tasks);
   const today=todayStr();
   const active=tasks.filter(t=>t.status!=='Completed'&&!t.someDay);
   const overdue=active.filter(t=>t.status==='Overdue'||isOverdue(t));
@@ -2443,7 +2467,7 @@ function openTaskDrawer(taskId){
     <div class="drawer-body">
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px">Click any field to edit. Changes auto-save.</div>
 
-      <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
+      <div class="field-row"><label>Assignee</label><div class="field-val" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><select onchange="updateTaskField('${t.id}','assignee',this.value);renderAll()" style="flex:1;min-width:140px"><option value="__unassigned" ${!t.assigneeEmail?'selected':''}>Unassigned</option>${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name}</option>`).join('')}</select><button class="btn btn-sm" onclick="resendAssigneeNotification('${t.id}')" title="Re-send the Slack DM that fires on assignment — useful if the original notification didn't land" style="font-size:11px;padding:3px 10px">📨 Resend Slack</button></div></div>
       ${t.createdByEmail?`<div class="field-row"><label>Created by</label><div class="field-val" style="font-size:var(--fs-sm);color:var(--text-secondary)"><span title="Set automatically when the task was created via the web app">${escHtml((TEAM.find(m=>m.email===t.createdByEmail)||{}).name||t.createdByEmail)}</span>${t.created?` <span style="color:var(--text-muted);margin-left:6px">on ${new Date(t.created).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>`:''}</div></div>`:''}
       <div class="field-row"><label>Maintenance</label><div class="field-val"><label style="display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:${t.maintenance?'var(--accent)':'var(--text-secondary)'};font-weight:600;cursor:pointer"><input type="checkbox" ${t.maintenance?'checked':''} onchange="updateTaskField('${t.id}','maintenance',this.checked);renderAll()" style="width:16px;height:16px;accent-color:var(--accent)">Maintenance task</label></div></div>
       ${(t.maintenance||t.contractor)
@@ -3542,7 +3566,7 @@ function getMyDayTasks(){
   // can lag behind the due-date change and cause stale appearances.
   const today=todayStr();
   let tasks=allTasks.filter(t=>t.status!=='Completed'&&!t.someDay);
-  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  tasks=applyTeamFilter(tasks);
   const todayTasks=tasks.filter(t=>t.dueDate===today);
   const overdueTasks=tasks.filter(t=>t.dueDate&&t.dueDate<today);
   const other=tasks.filter(t=>!todayTasks.includes(t)&&!overdueTasks.includes(t));
@@ -4702,14 +4726,78 @@ async function autoRescheduleOverdue(){
 // ======================================================
 // TASK LIST
 // ======================================================
-function getFilteredTasks(){
-  let tasks=allTasks.filter(t=>!t.someDay);
-  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+// Lazy-fetch completed tasks ON DEMAND, bounded so it never slows as the
+// completed pile grows. Single sorted query (most-recent completion first),
+// capped at COMPLETED_FETCH_CAP records. Kept out of allTasks so active
+// counts / KPIs / kanban are unaffected.
+async function fetchCompletedTasks(cap){
+  cap=cap||COMPLETED_FETCH_CAP;
+  let all=[],offset=null;
+  const params=new URLSearchParams({returnFieldsByFieldId:'true',pageSize:'100'});
+  params.set('filterByFormula',`AND({Status}="Completed",{Some Day}=FALSE())`);
+  // Sort newest-completed first so the cap keeps the most relevant records.
+  params.set('sort[0][field]',F.completion);
+  params.set('sort[0][direction]','desc');
+  TASK_FIELD_IDS.forEach(fid=>params.append('fields[]',fid));
+  do{
+    const url=`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}?${params}${offset?'&offset='+offset:''}`;
+    const res=await fetch(url,{headers:{Authorization:`Bearer ${PAT}`}});
+    if(!res.ok)throw new Error(`API error ${res.status}`);
+    const data=await res.json();
+    all=all.concat(data.records);
+    offset=(all.length<cap)?(data.offset||null):null; // stop once cap reached
+  }while(offset);
+  return all.slice(0,cap);
+}
+async function loadCompletedTasks(){
+  if(completedLoading)return;
+  completedLoading=true;
+  try{
+    const raw=await fetchCompletedTasks();
+    completedTasks=raw.map(parseTask);
+    // Resolve project names the same way loadAllData does for active tasks.
+    const pm={};(allProjects||[]).forEach(p=>pm[p.id]=p.name);
+    completedTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
+    completedLoaded=true;
+  }catch(e){
+    console.warn('[loadCompletedTasks] failed',e);
+    toast('Could not load completed tasks',true);
+  }finally{
+    completedLoading=false;
+  }
+}
+// Status-filter change handler: lazy-loads completed history the first time
+// the user picks "Completed", then re-renders.
+async function onStatusFilterChange(){
   const sf=document.getElementById('filterStatus').value;
-  if(sf){
+  currentPage=1;
+  if(sf==='Completed'&&!completedLoaded){
+    const body=document.getElementById('taskBody');
+    if(body)body.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-secondary)">Loading completed tasks…</td></tr>`;
+    await loadCompletedTasks();
+  }
+  renderTasks();
+}
+window.onStatusFilterChange=onStatusFilterChange;
+
+function getFilteredTasks(){
+  const sf=document.getElementById('filterStatus').value;
+  let tasks;
+  if(sf==='Completed'){
+    // Completed view: lazy-loaded history (separate array) PLUS any tasks
+    // completed in this session (still in allTasks), deduped by id. This keeps
+    // the bounded history fetch fast while showing just-completed work instantly.
+    const sessionDone=allTasks.filter(t=>t.status==='Completed'&&!t.someDay);
+    const seen=new Set(sessionDone.map(t=>t.id));
+    tasks=sessionDone.concat(completedTasks.filter(t=>!seen.has(t.id)));
+  } else {
+    tasks=allTasks.filter(t=>!t.someDay);
+  }
+  tasks=applyTeamFilter(tasks);
+  if(sf&&sf!=='Completed'){
     if(sf==='Overdue')tasks=tasks.filter(t=>t.status==='Overdue'||isOverdue(t));
     else tasks=tasks.filter(t=>t.status===sf);
-  } else {
+  } else if(!sf){
     // Default: hide Completed tasks from the active list
     tasks=tasks.filter(t=>t.status!=='Completed');
   }
@@ -4730,6 +4818,14 @@ function getFilteredTasks(){
   else if(tef==='any')tasks=tasks.filter(t=>!!t.timeEst&&t.minutes>0);
   const q=document.getElementById('searchBox').value.toLowerCase().trim();
   if(q)tasks=tasks.filter(t=>t.name.toLowerCase().includes(q)||(t.assignee||'').toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q)||(t.business||'').toLowerCase().includes(q));
+  // Completed view: most-recently completed first (fall back to due date).
+  if(sf==='Completed'){
+    tasks.sort((a,b)=>{
+      const ca=a.completion||a.dueDate||'',cb=b.completion||b.dueDate||'';
+      return cb.localeCompare(ca);
+    });
+    return tasks;
+  }
   // Sort: due date (ascending; blanks last), then priority group
   tasks.sort((a,b)=>{
     if(a.dueDate&&b.dueDate){
@@ -4792,7 +4888,7 @@ function renderTasks(){
       <td class="cb-cell" onclick="event.stopPropagation()"><input type="checkbox" ${checked?'checked':''} onchange="toggleTaskSelect('${t.id}',this.checked)"></td>
       <td style="color:var(--text-secondary)">${idx}</td>
       <td class="task-name-cell"><div class="task-name" contenteditable="true" spellcheck="false" title="Click to edit · Enter to save · Shift+Enter to open full details" onblur="drwSaveText('${t.id}','name',this.innerText.trim(),true)" onkeydown="taskNameKeydown(event,'${t.id}')" onclick="event.stopPropagation()">${escHtml(t.name)}</div>${t.hardDeadline?'<span class="hard-deadline-flag" title="Hard deadline">!</span>':''}${commentBadgeHtml(t.id)}${t.description?`<div class="task-desc">${escHtml(t.description)}</div>`:'<div class="task-open-link" style="font-size:10px;color:var(--text-muted);margin-top:2px">Click row to open details ›</div>'}</td>
-      <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value).then(()=>{renderTeamBar();renderKPIs();renderTasks()})">${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
+      <td onclick="event.stopPropagation()"><div class="assignee-inline">${t.assignee?`<span class="avatar avatar-${k}">${initials}</span>`:''}<select class="inline-select" style="width:auto;min-width:70px;border:none;background:transparent;padding:2px 4px" onchange="updateTaskField('${t.id}','assignee',this.value).then(()=>{renderTeamBar();renderKPIs();renderTasks()})"><option value="__unassigned" ${!t.assigneeEmail?'selected':''}>Unassigned</option>${TEAM.map(m=>`<option value="${m.key}" ${t.assigneeEmail===m.email?'selected':''}>${m.name.split(' ')[0]}</option>`).join('')}</select></div></td>
       <td class="${dueCls}" onclick="event.stopPropagation()" style="white-space:nowrap"><input type="date" class="inline-input" style="width:130px;background:transparent;border-color:transparent;color:inherit;font-weight:inherit" value="${t.dueDate||''}" onchange="updateTaskField('${t.id}','dueDate',this.value)"></td>
       <td class="hard-cell" onclick="event.stopPropagation()"><input type="checkbox" title="Hard deadline — never auto-rescheduled" ${t.hardDeadline?'checked':''} onchange="updateTaskField('${t.id}','hardDeadline',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
       <td onclick="event.stopPropagation()">${inlineSelectCell(t.id,'timeEst',t.timeEst,['',...TIME_OPTIONS])}</td>
@@ -5028,7 +5124,7 @@ function getWeeksOfMonth(year,month){
 
 function getKanbanTasks(){
   let tasks=allTasks.filter(t=>t.priority==='Project'&&t.status!=='Completed'&&!t.someDay);
-  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)tasks=tasks.filter(t=>t.assigneeEmail===m.email)}
+  tasks=applyTeamFilter(tasks);
   if(kanbanProjectFilter)tasks=tasks.filter(t=>t.projectIds.includes(kanbanProjectFilter)||t.projectNames.some(n=>n===kanbanProjectFilter));
   return tasks;
 }
@@ -6282,8 +6378,9 @@ async function createSimpleTask(opts){
   const fields={};
   fields[F.name]=opts.name;
   if(opts.description)fields[F.description]=opts.description;
-  // Assignee defaults to logged-in user
-  const assigneeEmail=opts.assigneeEmail||(currentUser&&currentUser.email);
+  // Assignee defaults to logged-in user, unless the caller explicitly wants
+  // the task left unassigned (e.g. a maintenance job awaiting allocation).
+  const assigneeEmail=opts.unassigned?'':(opts.assigneeEmail||(currentUser&&currentUser.email));
   if(assigneeEmail)fields[F.assignee]={email:assigneeEmail};
   // Priority defaults to Not Urgent
   fields[F.priority]=opts.priority||'Not Urgent';
@@ -7272,7 +7369,7 @@ function renderRecurring(){
     const r=t.recurring||t.recurFlag;
     return !!r;
   });
-  if(activeTeam!=='all'){const m=TEAM.find(x=>x.key===activeTeam);if(m)recurring=recurring.filter(t=>t.assigneeEmail===m.email)}
+  recurring=applyTeamFilter(recurring);
 
   const active=recurring.filter(t=>t.status!=='Completed');
   const totalMins=active.reduce((s,t)=>s+t.minutes,0);
@@ -8174,6 +8271,13 @@ async function loadAllData(){
 
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
     allTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
+
+    // Invalidate the completed-tasks cache so it lazy-reloads fresh next time
+    // the Completed filter is opened. If that filter is already active, reload
+    // now so the view reflects the refresh.
+    completedLoaded=false;completedTasks=[];
+    const _sf=document.getElementById('filterStatus');
+    if(_sf&&_sf.value==='Completed')await loadCompletedTasks();
 
     // Cache the Task Completions log so KPI compute functions can reference it.
     // Best-effort; failure doesn't block the main UI.
