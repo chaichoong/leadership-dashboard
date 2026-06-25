@@ -1152,6 +1152,28 @@
         return m ? parseInt(m[1], 10) : 0;
     }
 
+    // The vendor "fingerprint" used by the knowledge base — first 1-3 words, normalised.
+    function autoVendorKey(vendor) {
+        return (vendor || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+    }
+
+    // Suppression list — the checking mechanism. When Kevin undoes an auto-reconciliation,
+    // that vendor goes here, and the agent NEVER auto-approves it again (it still appears
+    // in the manual flow). So any mistake, once corrected, can never silently recur.
+    function getAutoSuppress() { try { return JSON.parse(localStorage.getItem('recon_auto_suppress') || '[]'); } catch { return []; } }
+    function addAutoSuppress(vendorKey) {
+        if (!vendorKey) return;
+        const s = getAutoSuppress();
+        if (!s.includes(vendorKey)) { s.push(vendorKey); localStorage.setItem('recon_auto_suppress', JSON.stringify(s)); }
+    }
+    window.getAutoSuppress = getAutoSuppress;
+
+    // Opt-in auto-run on dashboard load.
+    function isAutoOnLoadEnabled() { return localStorage.getItem('recon_auto_onload') === '1'; }
+    function setAutoOnLoad(on) { localStorage.setItem('recon_auto_onload', on ? '1' : '0'); }
+    window.isAutoOnLoadEnabled = isAutoOnLoadEnabled;
+    window.setAutoOnLoad = setAutoOnLoad;
+
     // The single safety gate. A transaction is only auto-approvable when ALL hold.
     function isAutoApprovable(r) {
         if (!r || r.status !== 'suggestion') return false;
@@ -1159,10 +1181,20 @@
         if (r.tenancyId) return false;            // never anything linked to a tenancy
         if (!r.categoryId || !r.subCatId) return false; // complete categorisation required
         if ((r.score || 0) < AUTO_MIN_SCORE) return false;
+        if (getAutoSuppress().includes(autoVendorKey(r.txVendor))) return false; // Kevin undid this before — never auto again
         const isKB = r.matchType === 'Knowledge Base';
         const isStrongComposite = /^Composite/.test(r.matchType || '') && autoMatchCount(r.matchType) >= AUTO_MIN_COMPOSITE_COUNT;
         return isKB || isStrongComposite;
     }
+
+    // Auto-run on load — opt-in, once per page load, and only ever does the safe tier.
+    function maybeAutoReconcileOnLoad() {
+        if (!isAutoOnLoadEnabled()) return;
+        if (window._autoReconRanThisSession) return;
+        window._autoReconRanThisSession = true;
+        runAutoReconcile();
+    }
+    window.maybeAutoReconcileOnLoad = maybeAutoReconcileOnLoad;
 
     function getAutoLog() { try { return JSON.parse(localStorage.getItem('recon_auto_log') || '[]'); } catch { return []; } }
     function setAutoLog(list) { localStorage.setItem('recon_auto_log', JSON.stringify(list.slice(-100))); }
@@ -1285,9 +1317,11 @@
                 if (entry.setFields.cost) localTx.fields[F.txCost] = [];
             }
         }
+        // Teach the agent: never auto-approve this vendor again (still available manually)
+        addAutoSuppress(autoVendorKey(entry ? entry.vendor : ''));
         setAutoLog(log.filter(e => e.txId !== txId));
         if (typeof clearDashCache === 'function') clearDashCache();
-        if (typeof showToast === 'function') showToast('Undone — back to unreconciled');
+        if (typeof showToast === 'function') showToast('Undone — and the AI won\'t auto-do this one again');
         if (typeof loadDashboard === 'function') setTimeout(loadDashboard, 500);
     }
     window.undoAutoReconcile = undoAutoReconcile;
