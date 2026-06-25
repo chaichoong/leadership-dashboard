@@ -539,6 +539,15 @@ body.app-busy,body.app-busy *{cursor:progress!important}
         <option value="Approval">Approval</option>
         <option value="Completed">Completed (history)</option>
       </select>
+      <!-- Date-range search for completed tasks older than the recent-300 window.
+           Shown only when the Completed status filter is active. -->
+      <span id="completedRangeWrap" style="display:none;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--text-secondary);white-space:nowrap">Completed between</span>
+        <input type="date" class="filter-select" id="completedFrom" style="width:140px" title="Search completed tasks from this date" onchange="applyCompletedRange()">
+        <span style="font-size:11px;color:var(--text-secondary)">and</span>
+        <input type="date" class="filter-select" id="completedTo" style="width:140px" title="Search completed tasks up to this date" onchange="applyCompletedRange()">
+        <button class="btn btn-sm" onclick="clearCompletedRange()" title="Back to the 300 most-recent completed tasks">Recent</button>
+      </span>
       <select class="filter-select" id="filterBusiness" onchange="renderTasks()">
         <option value="">All Businesses</option>
         <option value="Real Estate">Real Estate</option>
@@ -774,6 +783,18 @@ let completedTasks = [];
 let completedLoaded = false;
 let completedLoading = false;
 const COMPLETED_FETCH_CAP = 300; // most-recent completed tasks kept in memory
+// Date-range search for completed tasks OLDER than the recent-300 window.
+// When a range is active the Completed view is sourced from a direct,
+// server-side filtered query (bounded by the date window) instead of the
+// recent cache — so any historical completed task is reachable without
+// loading the entire pile.
+let completedRangeActive = false;
+let completedRangeTasks = [];
+let completedRangeKey = '';   // 'from|to' of the loaded range (cache guard)
+let completedRangeFrom = '';
+let completedRangeTo = '';
+let completedRangeLoading = false;
+const COMPLETED_RANGE_CAP = 1000; // safety bound on a single range query
 let allProjects = [];
 let BUSINESS_MAP = {}; // name -> id
 let activeTeam = 'all';
@@ -4730,11 +4751,13 @@ async function autoRescheduleOverdue(){
 // completed pile grows. Single sorted query (most-recent completion first),
 // capped at COMPLETED_FETCH_CAP records. Kept out of allTasks so active
 // counts / KPIs / kanban are unaffected.
-async function fetchCompletedTasks(cap){
-  cap=cap||COMPLETED_FETCH_CAP;
+async function fetchCompletedTasks(opts){
+  opts=opts||{};
+  const cap=opts.cap||COMPLETED_FETCH_CAP;
+  const formula=opts.formula||`AND({Status}="Completed",{Some Day}=FALSE())`;
   let all=[],offset=null;
   const params=new URLSearchParams({returnFieldsByFieldId:'true',pageSize:'100'});
-  params.set('filterByFormula',`AND({Status}="Completed",{Some Day}=FALSE())`);
+  params.set('filterByFormula',formula);
   // Sort newest-completed first so the cap keeps the most relevant records.
   params.set('sort[0][field]',F.completion);
   params.set('sort[0][direction]','desc');
@@ -4749,6 +4772,58 @@ async function fetchCompletedTasks(cap){
   }while(offset);
   return all.slice(0,cap);
 }
+// Shift a YYYY-MM-DD date string by n days (used to make the range bounds
+// inclusive of the whole from/to day).
+function shiftDay(dateStr,n){
+  const d=new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const dd=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+// Build an Airtable filterByFormula for completed tasks whose Completion Date
+// falls within [from, to] inclusive. Bounds widened by one day on each side so
+// the from/to days are fully included regardless of time-of-day.
+function completedRangeFormula(from,to){
+  const fromBefore=shiftDay(from,-1),toAfter=shiftDay(to,1);
+  return `AND({Status}="Completed",{Some Day}=FALSE(),IS_AFTER({Completion Date},DATETIME_PARSE("${fromBefore}","YYYY-MM-DD")),IS_BEFORE({Completion Date},DATETIME_PARSE("${toAfter}","YYYY-MM-DD")))`;
+}
+// Run the date-range search. Called when either date input changes. Both dates
+// required; clearing them reverts to the recent-300 view.
+async function applyCompletedRange(){
+  const from=(document.getElementById('completedFrom')||{}).value||'';
+  const to=(document.getElementById('completedTo')||{}).value||'';
+  if(!from||!to){ if(!from&&!to)clearCompletedRange(); return; }
+  if(from>to){toast('"From" date must be on or before "To" date',true);return;}
+  const key=from+'|'+to;
+  completedRangeFrom=from;completedRangeTo=to;
+  if(completedRangeActive&&completedRangeKey===key){currentPage=1;renderTasks();return;}
+  const body=document.getElementById('taskBody');
+  if(body)body.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-secondary)">Searching completed tasks ${escHtml(from)} → ${escHtml(to)}…</td></tr>`;
+  completedRangeLoading=true;
+  try{
+    const raw=await fetchCompletedTasks({formula:completedRangeFormula(from,to),cap:COMPLETED_RANGE_CAP});
+    completedRangeTasks=raw.map(parseTask);
+    const pm={};(allProjects||[]).forEach(p=>pm[p.id]=p.name);
+    completedRangeTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
+    completedRangeActive=true;completedRangeKey=key;
+    if(raw.length>=COMPLETED_RANGE_CAP)toast(`Showing the first ${COMPLETED_RANGE_CAP} matches — narrow the range to see more`,true);
+  }catch(e){
+    console.warn('[applyCompletedRange] failed',e);
+    toast('Completed-task search failed',true);
+  }finally{completedRangeLoading=false;}
+  currentPage=1;
+  renderTasks();
+}
+window.applyCompletedRange=applyCompletedRange;
+// Revert from a date-range search back to the recent-300 completed view.
+function clearCompletedRange(){
+  completedRangeActive=false;completedRangeKey='';completedRangeTasks=[];completedRangeFrom='';completedRangeTo='';
+  const f=document.getElementById('completedFrom');if(f)f.value='';
+  const t=document.getElementById('completedTo');if(t)t.value='';
+  currentPage=1;
+  renderTasks();
+}
+window.clearCompletedRange=clearCompletedRange;
 async function loadCompletedTasks(){
   if(completedLoading)return;
   completedLoading=true;
@@ -4771,10 +4846,16 @@ async function loadCompletedTasks(){
 async function onStatusFilterChange(){
   const sf=document.getElementById('filterStatus').value;
   currentPage=1;
-  if(sf==='Completed'&&!completedLoaded){
-    const body=document.getElementById('taskBody');
-    if(body)body.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-secondary)">Loading completed tasks…</td></tr>`;
-    await loadCompletedTasks();
+  // Show the date-range search only on the Completed view.
+  const wrap=document.getElementById('completedRangeWrap');
+  if(wrap)wrap.style.display=(sf==='Completed')?'inline-flex':'none';
+  if(sf==='Completed'){
+    if(completedRangeActive){ renderTasks(); return; } // already showing a range
+    if(!completedLoaded){
+      const body=document.getElementById('taskBody');
+      if(body)body.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-secondary)">Loading completed tasks…</td></tr>`;
+      await loadCompletedTasks();
+    }
   }
   renderTasks();
 }
@@ -4784,12 +4865,18 @@ function getFilteredTasks(){
   const sf=document.getElementById('filterStatus').value;
   let tasks;
   if(sf==='Completed'){
-    // Completed view: lazy-loaded history (separate array) PLUS any tasks
-    // completed in this session (still in allTasks), deduped by id. This keeps
-    // the bounded history fetch fast while showing just-completed work instantly.
-    const sessionDone=allTasks.filter(t=>t.status==='Completed'&&!t.someDay);
+    // Completed view: history (recent-300 cache, OR a date-range query when
+    // active) PLUS any tasks completed in this session (still in allTasks),
+    // deduped by id. Keeps the bounded history fetch fast while showing
+    // just-completed work instantly. In range mode, only session tasks whose
+    // completion falls inside the window are merged in.
+    const source=completedRangeActive?completedRangeTasks:completedTasks;
+    let sessionDone=allTasks.filter(t=>t.status==='Completed'&&!t.someDay);
+    if(completedRangeActive){
+      sessionDone=sessionDone.filter(t=>{const d=(t.completion||'').slice(0,10);return d&&d>=completedRangeFrom&&d<=completedRangeTo;});
+    }
     const seen=new Set(sessionDone.map(t=>t.id));
-    tasks=sessionDone.concat(completedTasks.filter(t=>!seen.has(t.id)));
+    tasks=sessionDone.concat(source.filter(t=>!seen.has(t.id)));
   } else {
     tasks=allTasks.filter(t=>!t.someDay);
   }
@@ -4915,6 +5002,11 @@ function clearAllFilters(){
   const ids=['filterStatus','filterPriority','filterBusiness','filterProject','filterRecurring','filterHard','filterTimeEst'];
   ids.forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
   const sb=document.getElementById('searchBox');if(sb)sb.value='';
+  // Reset the completed date-range search and hide its inputs (status is now blank).
+  completedRangeActive=false;completedRangeKey='';completedRangeTasks=[];completedRangeFrom='';completedRangeTo='';
+  const cf=document.getElementById('completedFrom');if(cf)cf.value='';
+  const ct=document.getElementById('completedTo');if(ct)ct.value='';
+  const crw=document.getElementById('completedRangeWrap');if(crw)crw.style.display='none';
   currentPage=1;
   renderTasks();
 }
@@ -8272,12 +8364,16 @@ async function loadAllData(){
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
     allTasks.forEach(t=>{if(t.projectIds.length&&t.projectNames.length===0)t.projectNames=t.projectIds.map(id=>pm[id]||'').filter(Boolean)});
 
-    // Invalidate the completed-tasks cache so it lazy-reloads fresh next time
-    // the Completed filter is opened. If that filter is already active, reload
-    // now so the view reflects the refresh.
+    // Invalidate the completed-tasks caches so they reload fresh next time the
+    // Completed filter is opened. If that filter is already active, reload now
+    // (range search if one is applied, otherwise the recent-300 view).
     completedLoaded=false;completedTasks=[];
+    completedRangeTasks=[];completedRangeKey='';
     const _sf=document.getElementById('filterStatus');
-    if(_sf&&_sf.value==='Completed')await loadCompletedTasks();
+    if(_sf&&_sf.value==='Completed'){
+      if(completedRangeActive)await applyCompletedRange();
+      else await loadCompletedTasks();
+    }
 
     // Cache the Task Completions log so KPI compute functions can reference it.
     // Best-effort; failure doesn't block the main UI.
