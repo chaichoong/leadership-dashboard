@@ -2905,7 +2905,7 @@ async function runAgenticCheck(wfId, extraAnswers){
     const container = document.getElementById('agentic-'+wfId);
     const disp = getWfDisposition(wfId);
     const human = !!(disp && (disp.type==='recurring' || disp.type==='adhoc'));
-    if(container){ container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>${human?'Checking this SOP is ready to follow…':'Checking your agent is ready…'}</span></div>`; container.scrollIntoView({behavior:'smooth', block:'center'}); }
+    if(container){ container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>${human?'Checking this SOP is ready to follow…':'Checking your agent is ready…'}</span></div>`; container.scrollIntoView({block:'center'}); }
 
     const wName = gf(w,WF.name)||'Untitled';
     const stageList = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${s.naAllowed?' (N/A allowed)':''}`).join('\n');
@@ -2965,6 +2965,8 @@ Include at most 3 questions, only for Thin or Missing stages, most important fir
         const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers);
         await saveAgenticReadiness(wfId, readiness);
         renderAgenticScorecard(wfId, readiness);
+        const _ac = document.getElementById('agentic-'+wfId);
+        if(_ac) _ac.scrollIntoView({block:'start'}); // bring the finished scorecard into view
         toast('Readiness check complete');
     } catch(e){
         toast('Readiness check error: '+e.message);
