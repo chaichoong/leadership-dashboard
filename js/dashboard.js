@@ -973,7 +973,8 @@
         const _autoToday = _autoLog.filter(e => (e.at || 0) >= _todayStart.getTime());
         const autoPanelHtml = _autoToday.length === 0 ? '' : `
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default)">
-                <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Auto-reconciled today (${_autoToday.length}) — AI did these, undo any</div>
+                <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:2px">Auto-reconciled today (${_autoToday.length}) — AI did these, review and undo any</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">Undo also stops the AI auto-doing that one again.</div>
                 ${_autoToday.map(e => `<div class="detail-item" style="align-items:center">
                     <span class="detail-item-name">${escHtml(e.date || '')} — ${escHtml(e.vendor || '')} <span style="color:var(--text-muted)">&rarr; ${escHtml(e.subCatName || e.categoryName || '')}</span></span>
                     <span style="display:flex;align-items:center;gap:8px">
@@ -990,12 +991,17 @@
                 + `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                     <button onclick="event.stopPropagation(); triggerReconciliation(this)" class="od-btn od-btn-primary" style="background:var(--info)">Run Reconciliation</button>
                     <button onclick="event.stopPropagation(); runAutoReconcile()" class="od-btn od-btn-primary" title="Auto-approve only the near-certain recurring outgoing matches — never rent">Auto-reconcile safe matches</button>
+                    <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-secondary);cursor:pointer" title="When on, the safe matches are auto-approved each time the dashboard loads. Review them in the panel below and undo any." onclick="event.stopPropagation()">
+                        <input type="checkbox" ${(typeof isAutoOnLoadEnabled === 'function' && isAutoOnLoadEnabled()) ? 'checked' : ''} onclick="setAutoOnLoad(this.checked)"> Auto-reconcile on load
+                    </label>
                     <span style="font-size:11px;color:var(--text-muted)" id="reconStatus"></span>
                 </div>`
                 + autoPanelHtml
             )}
             <div id="accuracyKpiCard">${accCard}</div>
         `;
+        // Auto-reconcile agent: optional auto-run on load (opt-in, once per load, safe tier only)
+        if (typeof maybeAutoReconcileOnLoad === 'function') maybeAutoReconcileOnLoad();
         // Background: migrate legacy localStorage log → Airtable (one-shot, no-op after first run),
         // then refresh from Airtable and swap in the up-to-date card.
         (async () => {
