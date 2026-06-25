@@ -11,6 +11,8 @@
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.14', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
         { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.102', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.27', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
+        { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
+        { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
         { id: 'income',     name: 'Accounts Receivable Fixed',     icon: '💷', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#income' },
         { id: 'ar-variable', name: 'Accounts Receivable Variable', icon: '📤', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#ar-variable' },
         { id: 'costs',      name: 'Accounts Payable Fixed',        icon: '📋', pageVer: '1.7', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#costs' },
@@ -50,6 +52,11 @@
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
+        netWorthByMonth: 'tblvtDXCBJCHu9hnK', // Specific Net Worth Statement by Month (Wealth tab)
+        incomeBuckets:   'tbldMPjXTu7ho5f0T', // Income Buckets (Wealth tab — virtual overlay)
+        personalBudgets: 'tblm5ZxyoiLfaBAS4', // Personal Budgets (Wealth tab — monthly budget per personal category)
+        debtTerms:       'tblTz8ErAmQGu7rIZ', // Debt Terms (Wealth tab — loan/mortgage amortisation)
+        valuations:      'tblZYsa0u1M17N7ZE', // Property Valuations (Wealth tab — per-property value, latest Approved)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
@@ -177,6 +184,82 @@
         notes:         'fldV2xsw9en67ts0o',
         matchedTx:     'fldpHf5vYCIgj3Scz',
         business:      'fldzGhwp6rxwEFoxu',  // Linked → Businesses (multipleRecordLinks)
+    };
+
+    // ── Net Worth field IDs (Airtable: Specific Net Worth Statement by Month / tblvtDXCBJCHu9hnK) ──
+    // One row per asset/liability item per month. Used by the Wealth tab.
+    const NW = {
+        name:    'fldswqUWxdoQj1QPC',  // Name (singleLineText) — e.g. "Real Estate Portfolio"
+        amount:  'fld4biGCBBQbknNmF',  // Amount (currency, £)
+        type:    'fld2uSD30IeWqEJYU',  // Net Worth Type (singleSelect): Cash | Investments & Real Estate | Businesses | Credit Cards | Loans | Mortgages
+        month:   'fldN3YpeJVK9MtW2d',  // Month (singleSelect): January … December
+        year:    'fld0iFQ9PwFv0jKBa',  // Year (singleSelect): 2025, 2026, …
+    };
+    // The six classes, split into assets vs liabilities.
+    const NW_ASSET_CLASSES = ['Cash', 'Real Estate', 'Investments', 'Businesses'];
+    const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
+
+    // ── Personal expenditure sub-categories (Chart of Accounts - Sub Categories) ──
+    // The 11 personal-expense sub-categories Kevin tracks. Transactions are coded to
+    // these by the reconciliation engine, so the Wealth tab sums spend per category
+    // per month. (Director Discretionary, Charity, Subsistence excluded = business.)
+    const PERSONAL_EXPENSE_SUBCATS = [
+        { id: 'recF1C2ZXBfNeYlGT', name: 'Household Essentials' },       // groceries, utilities, council tax, mobile/internet, essential clothing, insurance
+        { id: 'rec7uCvNlKGlieZMS', name: 'Discretionary Food & Drink' }, // optional extra food/drink
+        { id: 'recism4LGdEx0Nh9Q', name: 'Discretionary Lifestyle' },    // non-essential, fun, choice purchases, optional clothing
+        { id: 'rec6b96i917M64Nof', name: 'Transport' },                  // incl. parking
+        { id: 'recEvGF5Sr8R9p6tC', name: 'Travel' },                     // holidays, trips
+        { id: 'rec4fuKSWoK8ftkLJ', name: 'Health' },
+        { id: 'recS1AiGq8oDEzmZD', name: 'Tax' },
+        { id: 'recPA5FxzccOfWvQd', name: 'Banking Fees' },
+        { id: 'rec2yAlBoqSZrXtHW', name: 'Professional Fees' },
+        { id: 'rec1KfO2hixb1DA2e', name: 'Loan Capital Repayment' },
+        { id: 'recICmYNPZBQbeWWE', name: 'Loan Interest' },
+    ];
+
+    // ── Personal Budgets field IDs (Airtable: Personal Budgets / tblm5ZxyoiLfaBAS4) ──
+    // Monthly budget per personal-expense category, matched to PERSONAL_EXPENSE_SUBCATS by name.
+    const PBUDGET = {
+        category: 'fldojQ6v6xlaBSyml',  // Category (singleLineText, primary)
+        budget:   'fldhg2PGvzbyC3TbX',  // Monthly Budget (currency £)
+        sort:     'fldPO3rLzSM8DKy8k',  // Sort Order (number)
+    };
+
+    // ── Debt Terms field IDs (Airtable: Debt Terms / tblTz8ErAmQGu7rIZ) ──
+    // Loan/mortgage terms; the Wealth tab amortises the current balance from these.
+    const DEBT = {
+        name:      'fldo9nXP30QFfb5fx',  // Name (singleLineText, primary)
+        cls:       'fldYh1OsSeCTGzrGs',  // Class (singleSelect): Loans | Mortgages
+        type:      'fldaxUmB2EQEvO74k',  // Type (singleSelect): Repayment | Interest-only
+        principal: 'fldcK7C3Lvj8AkjiE',  // Original Amount (currency £)
+        rate:      'fldW6SrsqE5t3XjL1',  // Annual Rate % (number)
+        term:      'fldf4d9blAMhn3LAi',  // Term Months (number)
+        start:     'fldO7nbTpn0RvGY04',  // Start Date (date)
+        notes:     'fldRgR0iM5KqkBHuT',  // Notes (multilineText)
+    };
+
+    // ── Property Valuations field IDs (Airtable: Property Valuations / tblZYsa0u1M17N7ZE) ──
+    // Per-property value snapshots (manual + AI). Wealth tab reads the latest Approved
+    // valuation per property and joins it to the matching Debt Terms mortgage balance.
+    const VAL = {
+        title:      'fldRBIx2kRFAVmH0k',  // Title (singleLineText, primary) — "<property> · <month>"
+        property:   'fldEEmN3R9fSsX9mr',  // Property (multipleRecordLinks) — array of Properties rec IDs
+        date:       'fldjuVUTvN7poUAgD',  // Date (date)
+        value:      'fldMecW8pkzlyY7Gp',  // Estimated Value (currency £)
+        source:     'fldu2CSv2DsCYDXmh',  // Source (singleSelect): AI Estimate | Manual | Surveyor | ...
+        status:     'fldQtbOpIQ2BR0yYz',  // Status (singleSelect): Pending Review | Approved | Rejected | Superseded
+        confidence: 'fldgFb0ICksUdb29u',  // Confidence (singleSelect): High | Medium | Low
+        comparables:'fldnldTHRVLBVrvOe',  // Comparables (multilineText)
+    };
+
+    // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──
+    // Virtual overlay for the Wealth tab. Surplus is split by Allocation % into Balance.
+    const BUCKET = {
+        name:    'fld58yk6iOatTIIxJ',  // Bucket (singleLineText, primary)
+        pct:     'fldJkDpfd9p36ddbC',  // Allocation % (number, 0dp) — e.g. 20 means 20%
+        balance: 'fld50s2fcXr4vEiVy',  // Balance (currency £) — running virtual balance
+        sort:    'fldtUTeLjEpPJAcoy',  // Sort Order (number)
+        notes:   'fldQR5QoFToiHMTEn',  // Notes (multilineText)
     };
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
