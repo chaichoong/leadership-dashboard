@@ -20,7 +20,10 @@
  *        - Execute as: Me
  *        - Who has access: Anyone
  *   5. Triggers (clock icon) → Add Trigger → choose function `syncMeetings`
- *        - Event source: Time-driven → Minutes timer → Every 5 minutes
+ *        - Event source: Time-driven → Minutes timer → Every 15 minutes
+ *        (15 min is plenty for meeting summaries and keeps well under Gmail's
+ *         daily read quota. Every-5-min can trip "Service invoked too many
+ *         times for one day: gmail" when a backlog of threads carries the label.)
  *
  * ACTIONS (via query string on the web-app URL):
  *   ?action=sync   → run the intake now and return a JSON summary
@@ -248,7 +251,13 @@ function syncMeetings() {
     found++;
     var msgId = msg.getId();
 
-    if (existingUuids[msgId]) { skipped++; continue; }   // already processed
+    if (existingUuids[msgId]) {
+      // Already in Airtable. Strip the label so this thread stops coming back
+      // every run — otherwise old, done summaries get re-read 288x/day and
+      // blow the Gmail daily quota. Dedupe on UUID is still the real safeguard.
+      try { threads[t].removeLabel(label); } catch (ux) { /* permission — ignore */ }
+      skipped++; continue;
+    }
 
     {
       var parsed = parseMeeting(msg);
