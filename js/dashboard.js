@@ -967,6 +967,21 @@
         // cached values for an instant paint; the async refresh below rehydrates from Airtable and
         // swaps in fresh HTML without disturbing the Unreconciled card next to it.
         const accCard = buildAccuracyKPIHtml(getReconAccuracyStats());
+        // Auto-reconcile agent — the visible log of what AI auto-approved today, each with one-click undo
+        const _autoLog = (typeof getAutoLog === 'function' ? getAutoLog() : []);
+        const _todayStart = new Date(); _todayStart.setHours(0, 0, 0, 0);
+        const _autoToday = _autoLog.filter(e => (e.at || 0) >= _todayStart.getTime());
+        const autoPanelHtml = _autoToday.length === 0 ? '' : `
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default)">
+                <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Auto-reconciled today (${_autoToday.length}) — AI did these, undo any</div>
+                ${_autoToday.map(e => `<div class="detail-item" style="align-items:center">
+                    <span class="detail-item-name">${escHtml(e.date || '')} — ${escHtml(e.vendor || '')} <span style="color:var(--text-muted)">&rarr; ${escHtml(e.subCatName || e.categoryName || '')}</span></span>
+                    <span style="display:flex;align-items:center;gap:8px">
+                        <span class="detail-item-value">${fmt(Number(e.amount) || 0)}</span>
+                        <button onclick="event.stopPropagation(); undoAutoReconcile('${escHtml(e.txId)}')" class="od-btn" style="padding:2px 8px;font-size:11px">Undo</button>
+                    </span>
+                </div>`).join('')}
+            </div>`;
         document.getElementById('reconBar').innerHTML = `
             ${expandableCard('Unreconciled Transactions', unreconciledTx.length, `Santander + TNT Mgt Zempler`,
                 (unreconciledTx.length === 0
@@ -974,8 +989,10 @@
                     : unreconciledTx.map(r => `<div class="detail-item"><span class="detail-item-name">${escHtml(getField(r, F.txDate) || '')} — ${escHtml(txLabel(r))}</span><span class="detail-item-value">${fmt(Number(getField(r, F.txReportAmount)) || 0)}</span></div>`).join(''))
                 + `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                     <button onclick="event.stopPropagation(); triggerReconciliation(this)" class="od-btn od-btn-primary" style="background:var(--info)">Run Reconciliation</button>
+                    <button onclick="event.stopPropagation(); runAutoReconcile()" class="od-btn od-btn-primary" title="Auto-approve only the near-certain recurring outgoing matches — never rent">Auto-reconcile safe matches</button>
                     <span style="font-size:11px;color:var(--text-muted)" id="reconStatus"></span>
                 </div>`
+                + autoPanelHtml
             )}
             <div id="accuracyKpiCard">${accCard}</div>
         `;

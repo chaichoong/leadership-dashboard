@@ -1135,6 +1135,163 @@
         if (typeof clearDashCache === 'function') clearDashCache();
     }
 
+    // ══════════════════════════════════════════
+    // AUTO-RECONCILE AGENT (runtime, Phase A — browser-assisted)
+    // Auto-approves ONLY the near-certain tier: Knowledge Base rules or
+    // frequently-seen composite matches, with complete categorisation, high
+    // confidence, OUTGOING only — never income/rent (anything with a tenancy
+    // or a positive amount is excluded). Everything it touches is logged with
+    // one-click undo. This is the first agent on the runtime; it deliberately
+    // leaves every judgement call in the manual "Run Reconciliation" flow.
+    // ══════════════════════════════════════════
+    const AUTO_MIN_SCORE = 8;
+    const AUTO_MIN_COMPOSITE_COUNT = 3;
+
+    function autoMatchCount(matchType) {
+        const m = /\((\d+)x\)/.exec(matchType || '');
+        return m ? parseInt(m[1], 10) : 0;
+    }
+
+    // The single safety gate. A transaction is only auto-approvable when ALL hold.
+    function isAutoApprovable(r) {
+        if (!r || r.status !== 'suggestion') return false;
+        if (r.txAmount >= 0) return false;        // outgoing only — never incoming/rent
+        if (r.tenancyId) return false;            // never anything linked to a tenancy
+        if (!r.categoryId || !r.subCatId) return false; // complete categorisation required
+        if ((r.score || 0) < AUTO_MIN_SCORE) return false;
+        const isKB = r.matchType === 'Knowledge Base';
+        const isStrongComposite = /^Composite/.test(r.matchType || '') && autoMatchCount(r.matchType) >= AUTO_MIN_COMPOSITE_COUNT;
+        return isKB || isStrongComposite;
+    }
+
+    function getAutoLog() { try { return JSON.parse(localStorage.getItem('recon_auto_log') || '[]'); } catch { return []; } }
+    function setAutoLog(list) { localStorage.setItem('recon_auto_log', JSON.stringify(list.slice(-100))); }
+    window.getAutoLog = getAutoLog;
+
+    // Headless approve straight from the match result (no modal/DOM needed).
+    async function autoApproveRow(r) {
+        const fields = { [F.txReconciled]: true };
+        if (r.categoryId) fields[F.txCategory] = [r.categoryId];
+        if (r.subCatId) fields[F.txSubCategory] = [r.subCatId];
+        if (r.businessId) fields[F.txBusiness] = [r.businessId];
+        if (r.costId) fields[F.txCost] = [r.costId];
+
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${r.txId}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || resp.status); }
+
+        const localTx = allTransactions.find(t => t.id === r.txId);
+        if (localTx) {
+            if (!localTx.fields) localTx.fields = {};
+            localTx.fields[F.txReconciled] = true;
+            if (r.categoryId) localTx.fields[F.txCategory] = [r.categoryId];
+            if (r.subCatId) localTx.fields[F.txSubCategory] = [r.subCatId];
+            if (r.businessId) localTx.fields[F.txBusiness] = [r.businessId];
+            if (r.costId) localTx.fields[F.txCost] = [r.costId];
+        }
+        // Cost "Last Reconciled *" sync, same as the manual path
+        if (r.costId && localTx) {
+            try {
+                const txDate = getField(localTx, F.txDate);
+                const txAmount = Number(getField(localTx, F.txReportAmount)) || 0;
+                const txAccountIds = (getField(localTx, F.txAccountLink) || []).map(v => v.id || v).filter(Boolean);
+                await syncCostFromReconciledTx(r.costId, txDate, txAmount, txAccountIds, r.subCatId ? [r.subCatId] : []);
+                if (typeof syncDerivedCostFields === 'function') syncDerivedCostFields().catch(() => {});
+            } catch (e) { console.warn('Auto cost sync failed (non-fatal):', e); }
+        }
+        // Reinforce the knowledge-base rule for this vendor
+        const vendorKey = (r.txVendor || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join(' ');
+        if (vendorKey.length >= 3) {
+            saveReconRule(vendorKey, {
+                subCatId: r.subCatId, subCatName: r.subCatName,
+                categoryId: r.categoryId, categoryName: r.categoryName,
+                businessId: r.businessId, businessName: r.businessName,
+                costLabel: r.costLabel, costId: r.costId,
+            });
+        }
+        return {
+            txId: r.txId, vendor: r.txVendor, account: r.txAccount, amount: r.txAmount, date: r.txDate,
+            categoryName: r.categoryName, subCatName: r.subCatName, businessName: r.businessName, costLabel: r.costLabel,
+            matchType: r.matchType, score: r.score,
+            setFields: { cat: r.categoryId, sub: r.subCatId, biz: r.businessId, cost: r.costId },
+        };
+    }
+
+    // Preview only — what WOULD be auto-approved. No writes. (Used for safe verification.)
+    async function previewAutoReconcile() {
+        const results = await runReconciliationMatching();
+        return (results || []).filter(isAutoApprovable);
+    }
+    window.previewAutoReconcile = previewAutoReconcile;
+
+    // The agent run: match, pick the near-certain tier, approve them, log for undo.
+    async function runAutoReconcile() {
+        let results;
+        try { results = await runReconciliationMatching(); }
+        catch (e) { if (typeof showToast === 'function') showToast('Auto-reconcile: matcher error'); return; }
+        const eligible = (results || []).filter(isAutoApprovable);
+        if (!eligible.length) {
+            if (typeof showToast === 'function') showToast('No safe matches to auto-reconcile right now');
+            return;
+        }
+        const log = getAutoLog();
+        let done = 0;
+        for (const r of eligible) {
+            let ok = false, attempts = 0;
+            while (!ok && attempts < 3) {
+                attempts++;
+                try { const entry = await autoApproveRow(r); entry.at = Date.now(); log.push(entry); done++; ok = true; }
+                catch (e) { if (attempts >= 3) console.error('Auto-approve failed', r.txId, e.message); else await new Promise(res => setTimeout(res, attempts * 1500)); }
+            }
+            await new Promise(res => setTimeout(res, 500)); // respect Airtable rate limits
+        }
+        setAutoLog(log);
+        if (typeof clearDashCache === 'function') clearDashCache();
+        if (typeof showToast === 'function') showToast(`Auto-reconciled ${done} safe transaction${done === 1 ? '' : 's'}`);
+        if (typeof loadDashboard === 'function') setTimeout(loadDashboard, 700);
+    }
+    window.runAutoReconcile = runAutoReconcile;
+
+    // Undo a single auto-reconciliation: flip back to unreconciled and clear what we set.
+    async function undoAutoReconcile(txId) {
+        const log = getAutoLog();
+        const entry = log.find(e => e.txId === txId);
+        const fields = { [F.txReconciled]: false };
+        if (entry && entry.setFields) {
+            if (entry.setFields.cat) fields[F.txCategory] = [];
+            if (entry.setFields.sub) fields[F.txSubCategory] = [];
+            if (entry.setFields.biz) fields[F.txBusiness] = [];
+            if (entry.setFields.cost) fields[F.txCost] = [];
+        }
+        try {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}/${txId}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields })
+            });
+            if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || resp.status); }
+        } catch (e) { if (typeof showToast === 'function') showToast('Undo failed: ' + e.message); return; }
+
+        const localTx = allTransactions.find(t => t.id === txId);
+        if (localTx && localTx.fields) {
+            localTx.fields[F.txReconciled] = false;
+            if (entry && entry.setFields) {
+                if (entry.setFields.cat) localTx.fields[F.txCategory] = [];
+                if (entry.setFields.sub) localTx.fields[F.txSubCategory] = [];
+                if (entry.setFields.biz) localTx.fields[F.txBusiness] = [];
+                if (entry.setFields.cost) localTx.fields[F.txCost] = [];
+            }
+        }
+        setAutoLog(log.filter(e => e.txId !== txId));
+        if (typeof clearDashCache === 'function') clearDashCache();
+        if (typeof showToast === 'function') showToast('Undone — back to unreconciled');
+        if (typeof loadDashboard === 'function') setTimeout(loadDashboard, 500);
+    }
+    window.undoAutoReconcile = undoAutoReconcile;
+
     async function approveAllRecon() {
         const results = window._reconResults || [];
 
