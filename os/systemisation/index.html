@@ -2905,7 +2905,7 @@ async function runAgenticCheck(wfId, extraAnswers){
     const container = document.getElementById('agentic-'+wfId);
     const disp = getWfDisposition(wfId);
     const human = !!(disp && (disp.type==='recurring' || disp.type==='adhoc'));
-    if(container) container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>${human?'Checking this SOP is ready to follow…':'Checking your agent is ready…'}</span></div>`;
+    if(container){ container.innerHTML = `<div class="agentic-loading"><div class="sop-spinner"></div><span>${human?'Checking this SOP is ready to follow…':'Checking your agent is ready…'}</span></div>`; container.scrollIntoView({behavior:'smooth', block:'center'}); }
 
     const wName = gf(w,WF.name)||'Untitled';
     const stageList = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${s.naAllowed?' (N/A allowed)':''}`).join('\n');
