@@ -71,6 +71,15 @@ async function renderWealthTab() {
             <div style="font-size:var(--fs-sm)">Use the Refresh button, or switch tabs and back.</div></div></div>`;
         return;
     }
+    // Optional: per-property valuations + debt terms so the hero's Real Estate and
+    // Mortgages lines reconcile with the per-property breakdown below. Non-fatal —
+    // if these fail, the hero falls back to the monthly snapshot's lumped figures.
+    try {
+        if (!_valPromise) _valPromise = airtableFetch(TABLES.valuations);
+        if (!_debtPromise) _debtPromise = airtableFetch(TABLES.debtTerms);
+        const [vals, debts] = await Promise.all([_valPromise, _debtPromise]);
+        _valRecords = vals; _debtRecords = debts;
+    } catch (e) { /* hero falls back to snapshot real-estate/mortgage lines */ }
     try {
         renderWealthContent(el, _wealthRecords);
     } catch (e) {
@@ -307,7 +316,10 @@ function updateWealthSidebarFlag(monthsBehind) {
     }
 }
 
-function renderWealthContent(el, records) {
+function renderWealthContent(el, records, valRecs, debtRecs) {
+    // Live per-property data: explicit args win (used by tests), else the module cache.
+    valRecs = valRecs || _valRecords;
+    debtRecs = debtRecs || _debtRecords;
     const periods = computeNetWorth(records);
     if (!periods.length) {
         el.innerHTML = `<div style="max-width:960px;margin:0 auto"><div class="kpi-card" style="text-align:center;color:var(--text-secondary)">
@@ -319,7 +331,29 @@ function renderWealthContent(el, records) {
     const latest = periods[periods.length - 1];
     const prev = periods.length > 1 ? periods[periods.length - 2] : null;
     const asOf = `${latest.month} ${latest.year}`;
-    const netChange = prev ? latest.net - prev.net : null;
+
+    // Reconcile Real Estate + Mortgages to the live per-property data when it loaded,
+    // so the hero, the class rows and the per-property breakdown all agree. Other
+    // classes still come from the monthly snapshot. `view` is a shallow copy so the
+    // trend (built from the raw snapshots) stays untouched.
+    const view = { byClass: { ...latest.byClass }, assets: latest.assets, liabilities: latest.liabilities, net: latest.net };
+    let livePortfolio = null;
+    if (valRecs && debtRecs) {
+        try {
+            const pf = buildPortfolio(valRecs, debtRecs);
+            if (pf.rows.length) {
+                view.byClass['Real Estate'] = pf.totalValue;
+                view.byClass['Mortgages'] = pf.totalMortAll;
+                view.assets = NW_ASSET_CLASSES.reduce((s, c) => s + (view.byClass[c] || 0), 0);
+                view.liabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (view.byClass[c] || 0), 0);
+                view.net = view.assets - view.liabilities;
+                livePortfolio = pf;
+            }
+        } catch (e) { /* fall back to snapshot figures */ }
+    }
+    // Only show a month-on-month delta when NOT overriding with live data — comparing
+    // a live latest against a snapshot prev would be misleading.
+    const netChange = (prev && !livePortfolio) ? view.net - prev.net : null;
 
     // Live bank cash today (unambiguous: the two current accounts the dashboard uses).
     // Null-safe: allAccounts may not be populated yet on first load — getField throws
@@ -358,7 +392,7 @@ function renderWealthContent(el, records) {
     };
 
     const classRow = (cls, colour) => {
-        const val = latest.byClass[cls] || 0;
+        const val = view.byClass[cls] || 0;
         return `<div class="detail-item">
             <span class="detail-item-name"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colour};margin-right:8px"></span>${escHtml(cls)}</span>
             <span class="detail-item-value">${fmt(val)}</span>
@@ -383,6 +417,9 @@ function renderWealthContent(el, records) {
     const changeHtml = netChange === null ? '' :
         `<span style="color:${netChange >= 0 ? 'var(--success)' : 'var(--danger)'};font-size:var(--fs-sm);font-weight:var(--fw-semibold)">
             ${netChange >= 0 ? '▲' : '▼'} ${fmt(netChange)} vs ${prev.month}</span>`;
+    const heroNote = livePortfolio
+        ? `<span style="color:var(--text-muted);font-size:var(--fs-xs)">Real estate &amp; mortgages are live from your per-property valuations; other classes from the ${escHtml(asOf)} snapshot.</span>`
+        : changeHtml;
 
     el.innerHTML = `
     <div style="max-width:960px;margin:0 auto">
@@ -403,21 +440,21 @@ function renderWealthContent(el, records) {
                 <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Net worth</span>
                 <span style="margin-left:auto;color:var(--text-muted);font-size:var(--fs-xs)">As of ${escHtml(asOf)}</span>
             </div>
-            <div style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:var(--text-primary);line-height:1.1">${fmt(latest.net)}</div>
-            <div style="margin-top:8px">${changeHtml}</div>
+            <div style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:var(--text-primary);line-height:1.1">${fmt(view.net)}</div>
+            <div style="margin-top:8px">${heroNote}</div>
         </div>
 
         <!-- Assets + Liabilities -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5);margin-bottom:var(--space-5)">
             <div class="kpi-card">
-                <div class="kpi-card-label" style="margin-bottom:10px">Assets <span style="float:right;color:var(--success);font-weight:var(--fw-bold)">${fmt(latest.assets)}</span></div>
+                <div class="kpi-card-label" style="margin-bottom:10px">Assets <span style="float:right;color:var(--success);font-weight:var(--fw-bold)">${fmt(view.assets)}</span></div>
                 ${classRow('Cash', 'var(--tone-blue)')}
                 ${classRow('Real Estate', 'var(--tone-sage)')}
                 ${classRow('Investments', 'var(--tone-olive)')}
                 ${classRow('Businesses', 'var(--tone-gold)')}
             </div>
             <div class="kpi-card">
-                <div class="kpi-card-label" style="margin-bottom:10px">Liabilities <span style="float:right;color:var(--danger);font-weight:var(--fw-bold)">${fmt(latest.liabilities)}</span></div>
+                <div class="kpi-card-label" style="margin-bottom:10px">Liabilities <span style="float:right;color:var(--danger);font-weight:var(--fw-bold)">${fmt(view.liabilities)}</span></div>
                 ${classRow('Credit Cards', 'var(--tone-gold)')}
                 ${classRow('Loans', 'var(--tone-plum)')}
                 ${classRow('Mortgages', 'var(--danger)')}
@@ -514,7 +551,11 @@ async function loadWealthProperties() {
     }
 }
 
-function renderWealthProperties(el, valRecs, debtRecs) {
+// Build the per-property portfolio: latest Approved valuation per property joined
+// to its mortgage balance (Debt Terms, Class=Mortgages). Returns the rows plus
+// reconciled totals. Shared by the per-property card and the hero reconciliation
+// so both always show the same real-estate and mortgage figures.
+function buildPortfolio(valRecs, debtRecs) {
     // Latest Approved valuation per property (key from the title).
     const latestByProp = {};
     (valRecs || []).forEach(r => {
@@ -547,14 +588,8 @@ function renderWealthProperties(el, valRecs, debtRecs) {
         mortByProp[key] = (mortByProp[key] || 0) + bal;
     });
 
-    const props = Object.values(latestByProp);
-    if (!props.length) {
-        el.innerHTML = `<div class="kpi-card" style="color:var(--text-secondary);font-size:var(--fs-sm)">No approved property valuations yet.</div>`;
-        return;
-    }
-
-    // Build rows; match each valuation to a mortgage by key. Exact first, then a
-    // prefix match either way so "282 Stanley Park Ave" lines up with the valuation
+    // Match each valuation to a mortgage by key. Exact first, then a prefix match
+    // either way so "282 Stanley Park Ave" lines up with the valuation
     // "282 Stanley Park Avenue South" and "1406 Oldham Road, Manchester" with
     // "1406 Oldham Road". Each mortgage is claimed once. Track matches so any
     // unmatched mortgage is flagged rather than silently dropped.
@@ -569,7 +604,7 @@ function renderWealthProperties(el, valRecs, debtRecs) {
         });
         return best;
     };
-    const rows = props.map(p => {
+    const rows = Object.values(latestByProp).map(p => {
         const mk = matchMort(p.key);
         const mort = mk ? mortByProp[mk] : 0;
         if (mk) matchedMortKeys.add(mk);
@@ -577,13 +612,30 @@ function renderWealthProperties(el, valRecs, debtRecs) {
     }).sort((a, b) => b.value - a.value);
 
     const totalValue = rows.reduce((s, r) => s + r.value, 0);
-    const totalMort = rows.reduce((s, r) => s + r.mort, 0);
-    const totalEquity = totalValue - totalMort;
-
-    // Any mortgage not matched to a valuation (e.g. a naming mismatch) — surface it
-    // so the totals can't silently miss debt.
-    const orphanMorts = Object.keys(mortByProp).filter(k => !matchedMortKeys.has(k));
+    const totalMortMatched = rows.reduce((s, r) => s + r.mort, 0);
+    // Any mortgage not matched to a valuation (naming mismatch). It still counts as
+    // debt in the all-up mortgage total, but is shown separately in the card so the
+    // visible rows always sum to the card footer.
+    const orphanMorts = mortKeys.filter(k => !matchedMortKeys.has(k));
     const orphanTotal = orphanMorts.reduce((s, k) => s + mortByProp[k], 0);
+    return {
+        rows, totalValue, totalMortMatched, orphanMorts, orphanTotal,
+        totalMortAll: totalMortMatched + orphanTotal,
+    };
+}
+
+function renderWealthProperties(el, valRecs, debtRecs) {
+    const pf = buildPortfolio(valRecs, debtRecs);
+    if (!pf.rows.length) {
+        el.innerHTML = `<div class="kpi-card" style="color:var(--text-secondary);font-size:var(--fs-sm)">No approved property valuations yet.</div>`;
+        return;
+    }
+    const rows = pf.rows;
+    const totalValue = pf.totalValue;
+    const totalMort = pf.totalMortMatched;
+    const totalEquity = totalValue - totalMort;
+    const orphanMorts = pf.orphanMorts;
+    const orphanTotal = pf.orphanTotal;
 
     const confDot = c => {
         const col = c === 'High' ? 'var(--success)' : c === 'Low' ? 'var(--danger)' : 'var(--warning)';
