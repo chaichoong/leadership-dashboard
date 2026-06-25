@@ -56,6 +56,7 @@
         incomeBuckets:   'tbldMPjXTu7ho5f0T', // Income Buckets (Wealth tab — virtual overlay)
         personalBudgets: 'tblm5ZxyoiLfaBAS4', // Personal Budgets (Wealth tab — monthly budget per personal category)
         debtTerms:       'tblTz8ErAmQGu7rIZ', // Debt Terms (Wealth tab — loan/mortgage amortisation)
+        valuations:      'tblZYsa0u1M17N7ZE', // Property Valuations (Wealth tab — per-property value, latest Approved)
         arVariable:    'tblmKRKZMJvUxN4h1', // Outbound Invoices (Accounts Receivable Variable)
         objStrat:      'tblEBvFw8DonwxzGh', // Objective and Strategy (one row per business per quarter)
         mainMethods:   'tbl065D58MBEJhjlp', // Main Methods (reusable steps linked from Objective)
@@ -235,6 +236,20 @@
         term:      'fldf4d9blAMhn3LAi',  // Term Months (number)
         start:     'fldO7nbTpn0RvGY04',  // Start Date (date)
         notes:     'fldRgR0iM5KqkBHuT',  // Notes (multilineText)
+    };
+
+    // ── Property Valuations field IDs (Airtable: Property Valuations / tblZYsa0u1M17N7ZE) ──
+    // Per-property value snapshots (manual + AI). Wealth tab reads the latest Approved
+    // valuation per property and joins it to the matching Debt Terms mortgage balance.
+    const VAL = {
+        title:      'fldRBIx2kRFAVmH0k',  // Title (singleLineText, primary) — "<property> · <month>"
+        property:   'fldEEmN3R9fSsX9mr',  // Property (multipleRecordLinks) — array of Properties rec IDs
+        date:       'fldjuVUTvN7poUAgD',  // Date (date)
+        value:      'fldMecW8pkzlyY7Gp',  // Estimated Value (currency £)
+        source:     'fldu2CSv2DsCYDXmh',  // Source (singleSelect): AI Estimate | Manual | Surveyor | ...
+        status:     'fldQtbOpIQ2BR0yYz',  // Status (singleSelect): Pending Review | Approved | Rejected | Superseded
+        confidence: 'fldgFb0ICksUdb29u',  // Confidence (singleSelect): High | Medium | Low
+        comparables:'fldnldTHRVLBVrvOe',  // Comparables (multilineText)
     };
 
     // ── Income Buckets field IDs (Airtable: Income Buckets / tbldMPjXTu7ho5f0T) ──

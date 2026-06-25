@@ -424,6 +424,9 @@ function renderWealthContent(el, records) {
             </div>
         </div>
 
+        <!-- Property portfolio — per property (value − mortgage = equity) -->
+        <div id="wealthProperties" style="margin-bottom:var(--space-5)"></div>
+
         <!-- Live cash comparison -->
         <div class="kpi-card" style="margin-bottom:var(--space-5)">
             <div class="kpi-card-label" style="margin-bottom:8px">Live bank cash today</div>
@@ -467,9 +470,155 @@ function renderWealthContent(el, records) {
 
     // Personal expenditure reads the already-loaded transaction globals (sync).
     renderPersonalExpenditure();
-    // Loan/mortgage auto-compute + income buckets (each fetch their own table).
+    // Per-property portfolio breakdown (valuations × mortgages), then loan/mortgage
+    // auto-compute + income buckets (each fetch their own table).
+    loadWealthProperties();
     loadDebtTerms();
     loadWealthBuckets();
+}
+
+// ── Property portfolio — per property ─────────────────────────────────────────
+// Joins each property's latest Approved valuation (Property Valuations table) to
+// its mortgage balance (Debt Terms, Class=Mortgages) to show value, mortgage and
+// equity per property, plus reconciled real-estate / mortgage / equity totals.
+// This itemises what the monthly snapshot holds as single lumped lines.
+let _valRecords = null;
+let _valPromise = null;
+
+// Normalise a property name for matching valuation titles to mortgage notes.
+// Strips a trailing " · ..." suffix, any "(…)" parenthetical, punctuation and case.
+function wealthPropKey(s) {
+    return String(s || '')
+        .split('·')[0]
+        .replace(/\(.*?\)/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+async function loadWealthProperties() {
+    const el = document.getElementById('wealthProperties');
+    if (!el) return;
+    if (typeof PAT === 'undefined' || !PAT) { el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="kpi-card" style="color:var(--text-muted);font-size:var(--fs-sm)">Loading property portfolio…</div>`;
+    try {
+        if (!_valPromise) _valPromise = airtableFetch(TABLES.valuations);
+        if (!_debtPromise) _debtPromise = airtableFetch(TABLES.debtTerms);
+        const [vals, debts] = await Promise.all([_valPromise, _debtPromise]);
+        _valRecords = vals;
+        _debtRecords = debts; // share the cache with loadDebtTerms
+        renderWealthProperties(el, vals, debts);
+    } catch (e) {
+        _valPromise = null;
+        el.innerHTML = `<div class="kpi-card" style="color:var(--text-secondary);font-size:var(--fs-sm)">Could not load the property portfolio.</div>`;
+    }
+}
+
+function renderWealthProperties(el, valRecs, debtRecs) {
+    // Latest Approved valuation per property (key from the title).
+    const latestByProp = {};
+    (valRecs || []).forEach(r => {
+        if (getField(r, VAL.status) !== 'Approved') return;
+        const title = getField(r, VAL.title) || '';
+        const key = wealthPropKey(title);
+        if (!key) return;
+        const value = Number(getField(r, VAL.value)) || 0;
+        const date = getField(r, VAL.date) || '';
+        const conf = getField(r, VAL.confidence) || '';
+        const cur = latestByProp[key];
+        if (!cur || date > cur.date) latestByProp[key] = { key, name: title.split('·')[0].trim(), value, date, conf };
+    });
+
+    // Mortgage balance per property (Debt Terms, Class=Mortgages). Notes start with
+    // the property name ("55 Elmdon Place · …"); fall back to the record Name.
+    const mortByProp = {};
+    (debtRecs || []).forEach(r => {
+        if (getField(r, DEBT.cls) !== 'Mortgages') return;
+        const principal = Number(getField(r, DEBT.principal)) || 0;
+        if (principal <= 0) return;
+        const type = getField(r, DEBT.type) || 'Interest-only';
+        const rate = Number(getField(r, DEBT.rate)) || 0;
+        const term = Number(getField(r, DEBT.term)) || 0;
+        const start = getField(r, DEBT.start) || '';
+        const bal = amortisedBalance(type, principal, rate, term, start).balance;
+        const note = getField(r, DEBT.notes) || '';
+        const key = wealthPropKey(note) || wealthPropKey(getField(r, DEBT.name));
+        if (!key) return;
+        mortByProp[key] = (mortByProp[key] || 0) + bal;
+    });
+
+    const props = Object.values(latestByProp);
+    if (!props.length) {
+        el.innerHTML = `<div class="kpi-card" style="color:var(--text-secondary);font-size:var(--fs-sm)">No approved property valuations yet.</div>`;
+        return;
+    }
+
+    // Build rows; match each valuation to a mortgage by key. Exact first, then a
+    // prefix match either way so "282 Stanley Park Ave" lines up with the valuation
+    // "282 Stanley Park Avenue South" and "1406 Oldham Road, Manchester" with
+    // "1406 Oldham Road". Each mortgage is claimed once. Track matches so any
+    // unmatched mortgage is flagged rather than silently dropped.
+    const mortKeys = Object.keys(mortByProp);
+    const matchedMortKeys = new Set();
+    const matchMort = (pk) => {
+        if (mortByProp[pk] != null && !matchedMortKeys.has(pk)) return pk;
+        let best = null;
+        mortKeys.forEach(m => {
+            if (matchedMortKeys.has(m)) return;
+            if (pk.startsWith(m) || m.startsWith(pk)) { if (!best || m.length > best.length) best = m; }
+        });
+        return best;
+    };
+    const rows = props.map(p => {
+        const mk = matchMort(p.key);
+        const mort = mk ? mortByProp[mk] : 0;
+        if (mk) matchedMortKeys.add(mk);
+        return { ...p, mort, equity: p.value - mort };
+    }).sort((a, b) => b.value - a.value);
+
+    const totalValue = rows.reduce((s, r) => s + r.value, 0);
+    const totalMort = rows.reduce((s, r) => s + r.mort, 0);
+    const totalEquity = totalValue - totalMort;
+
+    // Any mortgage not matched to a valuation (e.g. a naming mismatch) — surface it
+    // so the totals can't silently miss debt.
+    const orphanMorts = Object.keys(mortByProp).filter(k => !matchedMortKeys.has(k));
+    const orphanTotal = orphanMorts.reduce((s, k) => s + mortByProp[k], 0);
+
+    const confDot = c => {
+        const col = c === 'High' ? 'var(--success)' : c === 'Low' ? 'var(--danger)' : 'var(--warning)';
+        return c ? `<span title="${escHtml(c)} confidence" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-left:6px;vertical-align:middle"></span>` : '';
+    };
+
+    const bodyRows = rows.map(r => `<tr style="border-top:1px solid var(--border-subtle)">
+        <td style="padding:6px 8px;color:var(--text-primary)">${escHtml(r.name)}${confDot(r.conf)}</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--text-primary)">${fmt0(r.value)}</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--text-secondary)">${r.mort > 0 ? fmt0(r.mort) : '<span style=\"color:var(--text-muted)\">none</span>'}</td>
+        <td style="padding:6px 8px;text-align:right;font-weight:var(--fw-semibold);color:${r.equity >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmt0(r.equity)}</td>
+    </tr>`).join('');
+
+    el.innerHTML = `<div class="kpi-card">
+        <div class="kpi-card-label" style="margin-bottom:4px">Property portfolio — per property</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Latest approved valuation for each property, net of its mortgage. Values are desktop web-search estimates; the dot shows confidence (<span style="color:var(--success)">green</span> high, <span style="color:var(--warning)">amber</span> medium, <span style="color:var(--danger)">red</span> low). Edit a valuation in the Operations → Properties tab.</div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
+            <thead><tr style="color:var(--text-muted);font-size:var(--fs-xs)">
+                <th style="text-align:left;padding:6px 8px">Property (${rows.length})</th>
+                <th style="text-align:right;padding:6px 8px">Value</th>
+                <th style="text-align:right;padding:6px 8px">Mortgage</th>
+                <th style="text-align:right;padding:6px 8px">Equity</th>
+            </tr></thead>
+            <tbody>${bodyRows}</tbody>
+            <tfoot><tr style="border-top:2px solid var(--border-default);font-weight:var(--fw-bold)">
+                <td style="padding:8px;color:var(--text-primary)">Total real estate</td>
+                <td style="padding:8px;text-align:right;color:var(--text-primary)">${fmt0(totalValue)}</td>
+                <td style="padding:8px;text-align:right;color:var(--danger)">${fmt0(totalMort)}</td>
+                <td style="padding:8px;text-align:right;color:var(--success)">${fmt0(totalEquity)}</td>
+            </tr></tfoot>
+        </table>
+        </div>
+        ${orphanTotal > 0 ? `<div style="margin-top:10px;color:var(--warning);font-size:var(--fs-xs);line-height:1.5">⚠️ ${fmt0(orphanTotal)} of mortgage debt across ${orphanMorts.length} record${orphanMorts.length === 1 ? '' : 's'} could not be matched to a valued property and is excluded above. Check the Debt Terms names.</div>` : ''}
+    </div>`;
 }
 
 // ── Loan & mortgage auto-compute (amortisation) ──────────────────────────────
