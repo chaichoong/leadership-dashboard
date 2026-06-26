@@ -435,6 +435,10 @@ function repairStuckMeetings() {
 
     var close = mkStatus('Done');
     if (taskIds.length) close[MF.tasks] = taskIds;
+    // Backfill metadata the original buggy parse got wrong: a fuller summary and
+    // a descriptive name (only when the current one is a generic placeholder).
+    if (parsed.aiSummary) close[MF.aiSummary] = parsed.aiSummary;
+    if (parsed.meetingName && isReplaceableName(parsed.currentName)) close[MF.name] = parsed.meetingName;
     updateRecord(config, T.meetings, rec.id, close);
 
     repaired++;
@@ -495,12 +499,28 @@ function parseMeetingFromRecord(rec) {
   var f = rec.fields || {};
   var body      = f[MF.transcript] || '';
   var name      = f[MF.name] || '';
-  var aiSummary = f[MF.aiSummary] || '';
   var nextSteps = extractSection(body, ['next steps', 'action items', 'action points', 'tasks', 'follow-ups', 'follow ups']);
+  var summarySec = extractSection(body, ['quick recap', 'summary', 'overview', 'recap']);
+  var aiSummary = cleanSummaryText(summarySec || firstChars(body, 1500));   // re-derived, not the stored (possibly truncated) value
   var isWeeklyCheckin = /weekly check[\s-]?in|weekly check\b|weekly catch[\s-]?up/.test((name + ' ' + body).toLowerCase());
   var attendees = extractAttendees(body, nextSteps);
   var tasks     = extractGroupedActionItems(nextSteps, isWeeklyCheckin);
-  return { tasks: tasks, isWeeklyCheckin: isWeeklyCheckin, attendees: attendees, aiSummary: aiSummary };
+  return {
+    tasks: tasks, isWeeklyCheckin: isWeeklyCheckin, attendees: attendees,
+    aiSummary: aiSummary,
+    currentName: name,
+    meetingName: deriveMeetingName('', body),   // body-only; no original subject on the record
+  };
+}
+
+// A name that carries no real information — empty, a generic provider phrase, or
+// one of the canned fallbacks. Safe to overwrite with a body-derived title;
+// a human-set or already-descriptive name is left alone.
+function isReplaceableName(s) {
+  s = String(s || '').trim();
+  if (!s) return true;
+  if (isGenericMeetingName(s)) return true;
+  return /^(project meeting|meeting summary|weekly check-?in)$/i.test(s);
 }
 
 function mkStatus(s) { var o = {}; o[MF.status] = s; return o; }
@@ -904,9 +924,16 @@ function isGenericMeetingName(s) {
 // Next steps Erica" → "…before launch.").
 function cleanSummaryText(s) {
   s = String(s || '').replace(/\s+/g, ' ').trim();
-  var cut = s.search(/\b(next steps|action items|action points|follow[\s-]?ups)\b/i);
-  if (cut > 40) s = s.slice(0, cut).trim();
-  return s;
+  // Drop a trailing section heading that bled in ("…before launch. Next steps
+  // Erica"). Only cut when the heading word BEGINS a new clause — it follows
+  // sentence-ending punctuation, or is immediately followed by a capitalised
+  // person name. This avoids truncating legitimate prose that merely contains
+  // the phrase, e.g. "reviewing the progress and next steps for launching".
+  var heads = '(?:next steps|action items|action points|follow[\\s-]?ups)';
+  var m = s.match(new RegExp('[.!?]\\s+' + heads + '\\b', 'i'));        // ". Next steps"
+  if (!m) m = s.match(new RegExp('\\b' + heads + '\\s+[A-Z][a-z]+', '')); // "Next steps Erica"
+  if (m && m.index > 40) s = s.slice(0, m.index + (m[0].match(/^[.!?]/) ? 1 : 0)).trim();
+  return s.replace(/[\s;,]+$/, '').trim();
 }
 
 function topicHeadingFromBody(body) {
