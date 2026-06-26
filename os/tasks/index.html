@@ -7791,7 +7791,7 @@ async function repairStuckMeetings(){
   renderMeetings();                       // reflect the "Fixing…" / disabled state
   try{
     fetch(MEETINGS_SCRIPT_URL+'?action=repair',{mode:'no-cors',redirect:'follow'});
-    toast('Fixing stuck meetings… this can take up to a minute.');
+    toast('Fixing incomplete meetings… this can take up to a minute.');
     await new Promise(r=>setTimeout(r,15000));   // give it time to create tasks
     await loadMeetings(true);
   }catch(e){
@@ -7842,10 +7842,14 @@ async function renderMeetings(){
   }
   const teamMap={};(allTeamMembers||[]).forEach(m=>{teamMap[m.id]=m.name});
 
-  // A meeting "stuck" at Summarised (or legacy Tasks Created) means its tasks
-  // were never created — surface a one-click Fix button only when there are any.
-  const stuckCount=allMeetings.filter(m=>m.status==='Summarised'||m.status==='Tasks Created').length;
-  const fixBtn=stuckCount?`<button class="btn btn-sm" style="background:var(--accent-gold);border-color:var(--accent-gold);color:#fff${_meetingsRepairing?';opacity:.6;cursor:default':''}" ${_meetingsRepairing?'disabled':''} onclick="repairStuckMeetings()" title="Finish ${stuckCount} meeting${stuckCount===1?'':'s'} stuck at Summarised: create &amp; link their missing tasks and set them to Done">${_meetingsRepairing?'Fixing…':'⚠ Fix '+stuckCount+' stuck'}</button>`:'';
+  // An "incomplete" meeting has no linked tasks even though its email had action
+  // items — either stuck at Summarised/Tasks Created, or wrongly closed to Done
+  // with 0 tasks (the pre-parser-fix records). Surface a one-click Fix button.
+  const isIncomplete=m=>m.taskIds.length===0&&(
+    m.status==='Summarised'||m.status==='Tasks Created'||
+    (m.status==='Done'&&(String(m.actionPoints||'').trim()||String(m.summary||'').trim())));
+  const stuckCount=allMeetings.filter(isIncomplete).length;
+  const fixBtn=stuckCount?`<button class="btn btn-sm" style="background:var(--accent-gold);border-color:var(--accent-gold);color:#fff${_meetingsRepairing?';opacity:.6;cursor:default':''}" ${_meetingsRepairing?'disabled':''} onclick="repairStuckMeetings()" title="Finish ${stuckCount} incomplete meeting${stuckCount===1?'':'s'}: create &amp; link their missing tasks and set them to Done">${_meetingsRepairing?'Fixing…':'⚠ Fix '+stuckCount+' incomplete'}</button>`:'';
 
   const header=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
       <div>

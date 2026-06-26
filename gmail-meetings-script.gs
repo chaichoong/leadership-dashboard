@@ -330,7 +330,8 @@ function syncMeetings() {
 // fields), DM each non-Kevin assignee, and return the new task ids so the caller
 // can link them into the meeting. Shared by the live sync and the repair action
 // so both paths build tasks identically.
-function createTasksForMeeting(config, parsed, projectMap, todayStr) {
+function createTasksForMeeting(config, parsed, projectMap, todayStr, opts) {
+  var notify = !(opts && opts.notify === false);   // repair back-fills silently
   var taskIds = [];
   var isWeekly = parsed.isWeeklyCheckin;
   // Collaborators = the team members who were present at this meeting.
@@ -370,7 +371,7 @@ function createTasksForMeeting(config, parsed, projectMap, todayStr) {
     taskIds.push(taskId);
 
     // Slack DM the assignee (except Kevin) via the always-on worker.
-    if (email !== KEVIN_EMAIL) {
+    if (notify && email !== KEVIN_EMAIL) {
       notifySlack(config, slackEmailFor(email), item.text, taskId, todayStr,
                   TASK_DEFAULT_TIME);
     }
@@ -430,7 +431,7 @@ function repairStuckMeetings() {
     }
 
     var parsed  = parseMeetingFromRecord(rec);
-    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr);
+    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr, { notify: false });
 
     var close = mkStatus('Done');
     if (taskIds.length) close[MF.tasks] = taskIds;
@@ -470,8 +471,17 @@ function getStuckMeetings(config) {
     if (resp.getResponseCode() !== 200) { Logger.log('stuck list: ' + resp.getContentText()); break; }
     var data = JSON.parse(resp.getContentText());
     (data.records || []).forEach(function (r) {
-      var st = r.fields[MF.status];
-      if (st === 'Summarised' || st === 'Tasks Created') out.push(r);
+      var st    = r.fields[MF.status];
+      var nLinks = (r.fields[MF.tasks] || []).length;
+      if (st === 'Summarised' || st === 'Tasks Created') { out.push(r); return; }
+      // Also recover records wrongly closed to "Done" with no tasks even though
+      // their transcript clearly listed action items (the cause of the 0-task
+      // records from before the parser fix). Records genuinely without action
+      // items have no such marker, so they're left alone.
+      if (st === 'Done' && nLinks === 0 &&
+          /next steps|action items|action points|follow[\s-]?ups/i.test(String(r.fields[MF.transcript] || ''))) {
+        out.push(r);
+      }
     });
     offset = data.offset || null;
   } while (offset);
