@@ -750,6 +750,17 @@ function isUrlLine(line) {
   return /^<?https?:\/\//.test(String(line || '').trim());
 }
 
+// Does this text end mid-phrase (so the next line is its wrapped continuation)?
+// True when it ends on a connecting word — preposition / article / conjunction /
+// possessive — and not on sentence-ending punctuation. Used to tell a bullet's
+// wrapped tail ("…report to" / "Erica") from a genuine person heading.
+function endsMidPhrase(text) {
+  var t = String(text || '').replace(/\s+$/, '');
+  if (/[.!?:]$/.test(t)) return false;
+  var last = (t.split(/\s+/).pop() || '').toLowerCase().replace(/[^a-z]/g, '');
+  return /^(to|with|for|and|of|the|a|an|from|on|in|by|at|or|nor|but|into|onto|via|per|as|that|their|its|his|her|your|our|amp)$/.test(last);
+}
+
 // A line that marks the end of the meaningful summary content (email footer,
 // sign-off, share link, address, rating prompt).
 function isSectionBoundary(line) {
@@ -805,7 +816,16 @@ function extractGroupedActionItems(section, isWeekly) {
     if (isUrlLine(trimmed)) continue;
     var bm = trimmed.match(/^[•\*\-–—·]\s+(.+)$/);
     if (bm) { units.push({ kind: 'bullet', text: bm[1].trim() }); continue; }
-    if (isPersonHeading(trimmed)) { units.push({ kind: 'line', text: trimmed }); continue; }
+    if (isPersonHeading(trimmed)) {
+      // A lone capitalised name directly after a bullet that ends mid-phrase
+      // ("…send the report to" / "Erica") is that bullet's wrapped continuation,
+      // not a new person heading — append it rather than switching owners.
+      var prevU = units.length ? units[units.length - 1] : null;
+      if (hasBullets && prevU && prevU.kind === 'bullet' && endsMidPhrase(prevU.text)) {
+        prevU.text += ' ' + trimmed; continue;
+      }
+      units.push({ kind: 'line', text: trimmed }); continue;
+    }
     if (!hasBullets) { units.push({ kind: 'line', text: trimmed }); continue; }
     if (parseActionLine(trimmed)) { units.push({ kind: 'line', text: trimmed }); continue; }
     // Bullet mode, not a bullet/heading/inline-owner: a wrapped continuation of
