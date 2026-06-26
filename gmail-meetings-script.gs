@@ -20,7 +20,10 @@
  *        - Execute as: Me
  *        - Who has access: Anyone
  *   5. Triggers (clock icon) → Add Trigger → choose function `syncMeetings`
- *        - Event source: Time-driven → Minutes timer → Every 5 minutes
+ *        - Event source: Time-driven → Minutes timer → Every 15 minutes
+ *        (15 min is plenty for meeting summaries and keeps well under Gmail's
+ *         daily read quota. Every-5-min can trip "Service invoked too many
+ *         times for one day: gmail" when a backlog of threads carries the label.)
  *
  * ACTIONS (via query string on the web-app URL):
  *   ?action=sync   → run the intake now and return a JSON summary
@@ -248,7 +251,13 @@ function syncMeetings() {
     found++;
     var msgId = msg.getId();
 
-    if (existingUuids[msgId]) { skipped++; continue; }   // already processed
+    if (existingUuids[msgId]) {
+      // Already in Airtable. Strip the label so this thread stops coming back
+      // every run — otherwise old, done summaries get re-read 288x/day and
+      // blow the Gmail daily quota. Dedupe on UUID is still the real safeguard.
+      try { threads[t].removeLabel(label); } catch (ux) { /* permission — ignore */ }
+      skipped++; continue;
+    }
 
     {
       var parsed = parseMeeting(msg);
@@ -321,7 +330,8 @@ function syncMeetings() {
 // fields), DM each non-Kevin assignee, and return the new task ids so the caller
 // can link them into the meeting. Shared by the live sync and the repair action
 // so both paths build tasks identically.
-function createTasksForMeeting(config, parsed, projectMap, todayStr) {
+function createTasksForMeeting(config, parsed, projectMap, todayStr, opts) {
+  var notify = !(opts && opts.notify === false);   // repair back-fills silently
   var taskIds = [];
   var isWeekly = parsed.isWeeklyCheckin;
   // Collaborators = the team members who were present at this meeting.
@@ -361,7 +371,7 @@ function createTasksForMeeting(config, parsed, projectMap, todayStr) {
     taskIds.push(taskId);
 
     // Slack DM the assignee (except Kevin) via the always-on worker.
-    if (email !== KEVIN_EMAIL) {
+    if (notify && email !== KEVIN_EMAIL) {
       notifySlack(config, slackEmailFor(email), item.text, taskId, todayStr,
                   TASK_DEFAULT_TIME);
     }
@@ -421,10 +431,14 @@ function repairStuckMeetings() {
     }
 
     var parsed  = parseMeetingFromRecord(rec);
-    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr);
+    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr, { notify: false });
 
     var close = mkStatus('Done');
     if (taskIds.length) close[MF.tasks] = taskIds;
+    // Backfill metadata the original buggy parse got wrong: a fuller summary and
+    // a descriptive name (only when the current one is a generic placeholder).
+    if (parsed.aiSummary) close[MF.aiSummary] = parsed.aiSummary;
+    if (parsed.meetingName && isReplaceableName(parsed.currentName)) close[MF.name] = parsed.meetingName;
     updateRecord(config, T.meetings, rec.id, close);
 
     repaired++;
@@ -461,8 +475,17 @@ function getStuckMeetings(config) {
     if (resp.getResponseCode() !== 200) { Logger.log('stuck list: ' + resp.getContentText()); break; }
     var data = JSON.parse(resp.getContentText());
     (data.records || []).forEach(function (r) {
-      var st = r.fields[MF.status];
-      if (st === 'Summarised' || st === 'Tasks Created') out.push(r);
+      var st    = r.fields[MF.status];
+      var nLinks = (r.fields[MF.tasks] || []).length;
+      if (st === 'Summarised' || st === 'Tasks Created') { out.push(r); return; }
+      // Also recover records wrongly closed to "Done" with no tasks even though
+      // their transcript clearly listed action items (the cause of the 0-task
+      // records from before the parser fix). Records genuinely without action
+      // items have no such marker, so they're left alone.
+      if (st === 'Done' && nLinks === 0 &&
+          /next steps|action items|action points|follow[\s-]?ups/i.test(String(r.fields[MF.transcript] || ''))) {
+        out.push(r);
+      }
     });
     offset = data.offset || null;
   } while (offset);
@@ -476,12 +499,28 @@ function parseMeetingFromRecord(rec) {
   var f = rec.fields || {};
   var body      = f[MF.transcript] || '';
   var name      = f[MF.name] || '';
-  var aiSummary = f[MF.aiSummary] || '';
   var nextSteps = extractSection(body, ['next steps', 'action items', 'action points', 'tasks', 'follow-ups', 'follow ups']);
+  var summarySec = extractSection(body, ['quick recap', 'summary', 'overview', 'recap']);
+  var aiSummary = cleanSummaryText(summarySec || firstChars(body, 1500));   // re-derived, not the stored (possibly truncated) value
   var isWeeklyCheckin = /weekly check[\s-]?in|weekly check\b|weekly catch[\s-]?up/.test((name + ' ' + body).toLowerCase());
   var attendees = extractAttendees(body, nextSteps);
   var tasks     = extractGroupedActionItems(nextSteps, isWeeklyCheckin);
-  return { tasks: tasks, isWeeklyCheckin: isWeeklyCheckin, attendees: attendees, aiSummary: aiSummary };
+  return {
+    tasks: tasks, isWeeklyCheckin: isWeeklyCheckin, attendees: attendees,
+    aiSummary: aiSummary,
+    currentName: name,
+    meetingName: deriveMeetingName('', body),   // body-only; no original subject on the record
+  };
+}
+
+// A name that carries no real information — empty, a generic provider phrase, or
+// one of the canned fallbacks. Safe to overwrite with a body-derived title;
+// a human-set or already-descriptive name is left alone.
+function isReplaceableName(s) {
+  s = String(s || '').trim();
+  if (!s) return true;
+  if (isGenericMeetingName(s)) return true;
+  return /^(project meeting|meeting summary|weekly check-?in)$/i.test(s);
 }
 
 function mkStatus(s) { var o = {}; o[MF.status] = s; return o; }
@@ -651,18 +690,31 @@ function extractSection(body, headings) {
   for (var h = 0; h < headings.length; h++) {
     var head = headings[h];
     for (var i = 0; i < lines.length; i++) {
-      var l = lines[i].trim().toLowerCase().replace(/[:\-\s]+$/, '');
-      if (l === head || l === head + ':' || l.indexOf(head) === 0 && l.length <= head.length + 2) {
-        var out = [];
-        for (var j = i + 1; j < lines.length; j++) {
-          var raw = lines[j].trim();
-          if (!raw) continue;                  // skip blanks — don't end the section
-          if (isHeading(raw)) break;           // next known section ends this one
-          if (isSectionBoundary(raw)) break;   // footer / sign-off / bare URL ends it
-          out.push(raw);
-        }
-        if (out.length) return out.join('\n');
+      var rawLine = lines[i].trim();
+      var l = rawLine.toLowerCase().replace(/[:\-\s]+$/, '');
+      var startsWith = l.indexOf(head) === 0;
+      var exact = (l === head || l === head + ':' || (startsWith && l.length <= head.length + 2));
+      // Real Zoom emails merge the section heading and the FIRST person name onto
+      // one line — "Next steps Erica May". Treat that as the heading and keep the
+      // trailing remainder ("Erica May") as the section's first content line so
+      // its tasks aren't lost.
+      var inlineRemainder = '';
+      if (!exact && startsWith) {
+        var rem = rawLine.slice(head.length).replace(/^[:\-–—\s]+/, '').trim();
+        if (rem && isPersonHeading(rem)) inlineRemainder = rem;
       }
+      if (!exact && !inlineRemainder) continue;
+      var out = [];
+      if (inlineRemainder) out.push(inlineRemainder);
+      for (var j = i + 1; j < lines.length; j++) {
+        var raw = lines[j].trim();
+        if (!raw) continue;                  // skip blanks — don't end the section
+        if (isHeading(raw)) break;           // next known section ends this one
+        if (isHeadingStart(raw)) break;      // "Summary <Topic>" / next "Next steps …" ends it
+        if (isSectionBoundary(raw)) break;   // footer / sign-off / bare URL ends it
+        out.push(raw);
+      }
+      if (out.length) return out.join('\n');
     }
   }
   return '';
@@ -674,6 +726,39 @@ function isHeading(line) {
                'action items', 'action points', 'tasks', 'follow-ups', 'follow ups',
                'attendees', 'participants', 'details'];
   return heads.indexOf(l) !== -1;
+}
+
+// A line that STARTS a major section, even when a title follows on the same line
+// ("Summary AI Project Modules…", a second "Next steps …"). Used to end the
+// previous section. Excludes bullets so an action item is never mistaken for one.
+function isHeadingStart(line) {
+  var t = String(line || '').trim();
+  if (/^[•\*\-–—·]/.test(t)) return false;       // a bullet, not a heading
+  var low = t.toLowerCase();
+  var heads = ['summary', 'next steps', 'action items', 'action points',
+               'quick recap', 'overview', 'follow-ups', 'follow ups',
+               'attendees', 'participants'];
+  for (var i = 0; i < heads.length; i++) {
+    if (low.indexOf(heads[i]) === 0) return true;
+  }
+  return false;
+}
+
+// A line that is just a URL (Zoom appends a "<https://tasks.zoom.us…>" link after
+// every action item) — carries no task text, so it's dropped during parsing.
+function isUrlLine(line) {
+  return /^<?https?:\/\//.test(String(line || '').trim());
+}
+
+// Does this text end mid-phrase (so the next line is its wrapped continuation)?
+// True when it ends on a connecting word — preposition / article / conjunction /
+// possessive — and not on sentence-ending punctuation. Used to tell a bullet's
+// wrapped tail ("…report to" / "Erica") from a genuine person heading.
+function endsMidPhrase(text) {
+  var t = String(text || '').replace(/\s+$/, '');
+  if (/[.!?:]$/.test(t)) return false;
+  var last = (t.split(/\s+/).pop() || '').toLowerCase().replace(/[^a-z]/g, '');
+  return /^(to|with|for|and|of|the|a|an|from|on|in|by|at|or|nor|but|into|onto|via|per|as|that|their|its|his|her|your|our|amp)$/.test(last);
 }
 
 // A line that marks the end of the meaningful summary content (email footer,
@@ -716,33 +801,66 @@ function isPersonHeading(line) {
 // heading for owner-less imperative bullets. Inline "Name will/Name:" forms and
 // "Name and Name:" shared lines are also recognised.
 function extractGroupedActionItems(section, isWeekly) {
-  var lines = sectionLines(section);
-  var items = [], currentOwner = null;
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i];
+  var raw = String(section || '').split('\n');
+  // Bullet mode = the section uses "- " bullets (real Zoom plain-text emails).
+  // In that mode a long action item wraps across several un-bulleted lines and
+  // each item is followed by a "<url>" line, so we join wraps and drop URLs.
+  // Line mode = no bullet markers (htmlToText output): every line is its own item.
+  var hasBullets = raw.some(function (l) { return /^\s*[•\*\-–—·]\s+/.test(l); });
 
-    // Inline owner form always wins ("Mica will…", "Mica: …").
-    var inline = parseActionLine(line);
+  // Pass 1 — collapse raw lines into logical units (bullets / heading-or-inline lines).
+  var units = [];
+  for (var i = 0; i < raw.length; i++) {
+    var trimmed = raw[i].trim();
+    if (!trimmed) continue;
+    if (isUrlLine(trimmed)) continue;
+    var bm = trimmed.match(/^[•\*\-–—·]\s+(.+)$/);
+    if (bm) { units.push({ kind: 'bullet', text: bm[1].trim() }); continue; }
+    if (isPersonHeading(trimmed)) {
+      // A lone capitalised name directly after a bullet that ends mid-phrase
+      // ("…send the report to" / "Erica") is that bullet's wrapped continuation,
+      // not a new person heading — append it rather than switching owners.
+      var prevU = units.length ? units[units.length - 1] : null;
+      if (hasBullets && prevU && prevU.kind === 'bullet' && endsMidPhrase(prevU.text)) {
+        prevU.text += ' ' + trimmed; continue;
+      }
+      units.push({ kind: 'line', text: trimmed }); continue;
+    }
+    if (!hasBullets) { units.push({ kind: 'line', text: trimmed }); continue; }
+    if (parseActionLine(trimmed)) { units.push({ kind: 'line', text: trimmed }); continue; }
+    // Bullet mode, not a bullet/heading/inline-owner: a wrapped continuation of
+    // the previous bullet. Append; if nothing to append to, keep it standalone.
+    if (units.length && units[units.length - 1].kind === 'bullet') {
+      units[units.length - 1].text += ' ' + trimmed;
+    } else {
+      units.push({ kind: 'line', text: trimmed });
+    }
+  }
+
+  // Pass 2 — assign owners, inheriting the current person/group heading.
+  var items = [], currentOwner = null;
+  for (var u = 0; u < units.length; u++) {
+    var text = units[u].text.replace(/\s+/g, ' ').trim();
+    var inline = parseActionLine(text);
     if (inline) { items.push(inline); currentOwner = inline.owner; continue; }
 
-    // Bare name / group heading switches the owner context.
-    var ht = isPersonHeading(line);
-    if (ht === 'PERSON') { currentOwner = line.replace(/[:\-–—\s]+$/, '').trim(); continue; }
-    if (ht === 'GROUP')  { currentOwner = null; continue; }
+    if (units[u].kind === 'line') {
+      var ht = isPersonHeading(text);
+      if (ht === 'PERSON') { currentOwner = text.replace(/[:\-–—\s]+$/, '').trim(); continue; }
+      if (ht === 'GROUP')  { currentOwner = null; continue; }
+    }
+    if (text.length < 6) continue;
 
-    if (line.length < 6) continue;
-
-    // Imperative bullet — assign to the person heading it sits under.
     if (currentOwner) {
-      items.push({ owner: currentOwner, text: capitalise(line), cadence: detectCadence(line) });
+      items.push({ owner: currentOwner, text: capitalise(text), cadence: detectCadence(text) });
       continue;
     }
-    // No current owner: catch a "Name and Name: do X" shared line, else (weekly only) keep it.
-    var lead = line.match(/^([A-Z][a-zA-Z]+)\s+(?:and|&)\s+[A-Z][a-zA-Z]+\s*[:\-]\s*(.+)$/);
+    // No owner context: a "Name and Name: do X" shared line, else (weekly) keep.
+    var lead = text.match(/^([A-Z][a-zA-Z]+)\s+(?:and|&)\s+[A-Z][a-zA-Z]+\s*[:\-]\s*(.+)$/);
     if (lead) {
-      items.push({ owner: lead[1], text: capitalise(lead[2]), cadence: detectCadence(line) });
+      items.push({ owner: lead[1], text: capitalise(lead[2]), cadence: detectCadence(text) });
     } else if (isWeekly) {
-      var imp = parseImperativeLine(line);
+      var imp = parseImperativeLine(text);
       if (imp) items.push(imp);
     }
   }
@@ -826,20 +944,39 @@ function isGenericMeetingName(s) {
 // Next steps Erica" → "…before launch.").
 function cleanSummaryText(s) {
   s = String(s || '').replace(/\s+/g, ' ').trim();
-  var cut = s.search(/\b(next steps|action items|action points|follow[\s-]?ups)\b/i);
-  if (cut > 40) s = s.slice(0, cut).trim();
-  return s;
+  // Drop a trailing section heading that bled in ("…before launch. Next steps
+  // Erica"). Only cut when the heading word BEGINS a new clause — it follows
+  // sentence-ending punctuation, or is immediately followed by a capitalised
+  // person name. This avoids truncating legitimate prose that merely contains
+  // the phrase, e.g. "reviewing the progress and next steps for launching".
+  var heads = '(?:next steps|action items|action points|follow[\\s-]?ups)';
+  var m = s.match(new RegExp('[.!?]\\s+' + heads + '\\b', 'i'));        // ". Next steps"
+  if (!m) m = s.match(new RegExp('\\b' + heads + '\\s+[A-Z][a-z]+', '')); // "Next steps Erica"
+  if (m && m.index > 40) s = s.slice(0, m.index + (m[0].match(/^[.!?]/) ? 1 : 0)).trim();
+  return s.replace(/[\s;,]+$/, '').trim();
 }
 
 function topicHeadingFromBody(body) {
+  // Zoom titles each detailed summary block "Summary <Topic>" — prefer that
+  // explicit title (e.g. "Summary AI Project Modules Progress Review").
+  var lines = String(body || '').split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    var m = lines[i].trim().match(/^summary\s+(.+)$/i);
+    if (m) {
+      var t = m[1].replace(/[:\s]+$/, '').trim();
+      if (isCleanTitle(t)) return capitalise(t);
+    }
+  }
   var sec = extractSection(body, ['summary', 'overview', 'quick recap', 'recap']);
   if (!sec) return '';
   var first = (sectionLines(sec)[0] || '').replace(/[:\s]+$/, '').trim();
-  if (first.length >= 6 && first.length <= 60 &&
-      first.split(/\s+/).length <= 9 && !/[.!?]$/.test(first)) {
-    return capitalise(first);
-  }
+  if (isCleanTitle(first)) return capitalise(first);
   return '';
+}
+
+function isCleanTitle(s) {
+  s = String(s || '').trim();
+  return s.length >= 6 && s.length <= 60 && s.split(/\s+/).length <= 9 && !/[.!?]$/.test(s);
 }
 
 function extractLink(body, isLoom) {
