@@ -42,6 +42,10 @@ function waitForWealthData(timeoutMs) {
     });
 }
 
+// Net-worth items to exclude from the Wealth view (accounts not linked to the
+// system). Filtered out of totals and itemisation; the Airtable data is untouched.
+const WEALTH_EXCLUDE_ITEMS = ['Hyper Jar', 'Operations Director - ANNA'];
+
 // ── Engine ───────────────────────────────────────────────────────────────────
 // Group rows by month, sum by class, derive assets / liabilities / net worth.
 function computeNetWorth(records) {
@@ -49,6 +53,7 @@ function computeNetWorth(records) {
     (records || []).forEach(r => {
         const type = getField(r, NW.type);
         if (!type) return;
+        if (WEALTH_EXCLUDE_ITEMS.includes(getField(r, NW.name))) return;
         const month = getField(r, NW.month);
         const year = getField(r, NW.year);
         if (!month || !year) return;
@@ -503,8 +508,32 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         'Class totals over 12 months (blank where there is no monthly snapshot yet). Click a class to expand its current breakdown. Real estate and mortgages use your live per-property figures; other classes come from the latest monthly snapshot. Arrows = change vs the previous month; 12-mo = change across the period.',
         alMonths, alSections);
 
+    // ── KPI summary strip (headline figures + 12-month change) ──
+    const kpiCfNet = buildMonthlyCashflow(alKeys).map(m => m.net);
+    const pctChg = series => { const nn = series.filter(v => v != null); return (nn.length < 2 || !nn[0]) ? null : (nn[nn.length - 1] - nn[0]) / Math.abs(nn[0]) * 100; };
+    const chgBadge = (series, goodUp) => {
+        const p = pctChg(series);
+        if (p == null || Math.round(p) === 0) return '<span style="color:var(--text-muted);font-size:var(--fs-xs)">– / 12mo</span>';
+        const up = p > 0, good = goodUp ? up : !up;
+        return `<span style="color:${good ? 'var(--success)' : 'var(--danger)'};font-size:var(--fs-xs);font-weight:var(--fw-semibold)">${up ? '▲' : '▼'} ${Math.abs(Math.round(p))}% / 12mo</span>`;
+    };
+    const kpiCard = (label, value, valueColour, series, goodUp) => `<div class="kpi-card" style="margin-bottom:0">
+        <div class="kpi-card-label" style="margin-bottom:6px">${escHtml(label)}</div>
+        <div style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:${valueColour};line-height:1.1">${fmt(value)}</div>
+        <div style="margin-top:4px">${chgBadge(series, goodUp)}</div>
+    </div>`;
+    const cfNetNow = kpiCfNet[kpiCfNet.length - 1] || 0;
+    const kpiStrip = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)">
+        ${kpiCard('Net worth', view.net, view.net >= 0 ? 'var(--text-primary)' : 'var(--danger)', totalVals(p => p.net), true)}
+        ${kpiCard('Net cash flow (this month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfNet, true)}
+        ${kpiCard('Total assets', view.assets, 'var(--text-primary)', totalVals(p => p.assets), true)}
+        ${kpiCard('Total liabilities', view.liabilities, 'var(--text-primary)', totalVals(p => p.liabilities), false)}
+    </div>`;
+
     el.innerHTML = `
     <div style="width:100%">
+
+        ${kpiStrip}
 
         ${monthsBehind > 0 ? `<!-- Staleness alert -->
         <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-5);display:flex;gap:12px;align-items:flex-start">
@@ -1281,9 +1310,9 @@ function renderBucketEditor(el) {
     const recs = (_bucketsRecords || []).slice().sort((a, b) =>
         (Number(getField(a, BUCKET.sort)) || 0) - (Number(getField(b, BUCKET.sort)) || 0));
     const rowHtml = (id, name, pct) => `<div class="be-row" data-id="${escHtml(id || '')}" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-        <input class="be-name" value="${escHtml(name || '')}" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
-        <input class="be-pct" type="number" min="0" value="${pct === '' ? '' : pct}" oninput="bucketEditorTotal()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
-        <button onclick="this.closest('.be-row').remove();bucketEditorTotal()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
+        <input class="be-name" value="${escHtml(name || '')}" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+        <input class="be-pct" type="number" min="0" value="${pct === '' ? '' : pct}" oninput="bucketsLiveUpdate()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
+        <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
     </div>`;
     el.innerHTML = `<div class="kpi-card">
         <div class="kpi-card-label" style="margin-bottom:6px">Manage income buckets</div>
@@ -1305,10 +1334,23 @@ function addBucketRow() {
     d.className = 'be-row';
     d.dataset.id = '';
     d.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px';
-    d.innerHTML = `<input class="be-name" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
-        <input class="be-pct" type="number" min="0" oninput="bucketEditorTotal()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
-        <button onclick="this.closest('.be-row').remove();bucketEditorTotal()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>`;
+    d.innerHTML = `<input class="be-name" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+        <input class="be-pct" type="number" min="0" oninput="bucketsLiveUpdate()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
+        <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>`;
     c.appendChild(d);
+    bucketsLiveUpdate();
+}
+
+// Live: redraw the 12-month buckets grid from the current editor inputs as the user
+// types percentages/names or adds/removes rows, before saving.
+function bucketsLiveUpdate() {
+    bucketEditorTotal();
+    const list = [...document.querySelectorAll('.be-row')].map(r => ({
+        name: r.querySelector('.be-name').value.trim(),
+        pct: Number(r.querySelector('.be-pct').value) || 0,
+    })).filter(b => b.name);
+    const el = document.getElementById('wealthBuckets');
+    if (el) renderBuckets(el, list);
 }
 
 function bucketEditorTotal() {
@@ -1357,23 +1399,24 @@ async function saveBucketEditor() {
     }
 }
 
-function renderBuckets(el) {
+function renderBuckets(el, override) {
     if (!el) return;
-    const recs = (_bucketsRecords || []).slice().sort((a, b) =>
-        (Number(getField(a, BUCKET.sort)) || 0) - (Number(getField(b, BUCKET.sort)) || 0));
+    // `override` (live editor values) wins; otherwise read the saved bucket records.
+    const list = override || (_bucketsRecords || []).slice()
+        .sort((a, b) => (Number(getField(a, BUCKET.sort)) || 0) - (Number(getField(b, BUCKET.sort)) || 0))
+        .map(r => ({ name: getField(r, BUCKET.name) || '(unnamed)', pct: Number(getField(r, BUCKET.pct)) || 0 }));
+    const buckets = list.filter(b => b.name);
     const months = wealthMonths12();
-    const cf = buildMonthlyCashflow(months.map(m => m.key));
-    const net = cf.map(m => m.net);
-    const totalPct = recs.reduce((s, r) => s + (Number(getField(r, BUCKET.pct)) || 0), 0);
+    const net = buildMonthlyCashflow(months.map(m => m.key)).map(m => m.net);
+    const totalPct = buckets.reduce((s, b) => s + (Number(b.pct) || 0), 0);
 
-    const rows = recs.map(r => {
-        const name = getField(r, BUCKET.name) || '(unnamed)';
-        const pct = Number(getField(r, BUCKET.pct)) || 0;
-        return { label: `${name} (${pct}%)`, goodUp: true, values: net.map(n => Math.round(n * pct / 100)) };
+    const rows = buckets.map(b => {
+        const pct = Number(b.pct) || 0;
+        return { label: `${b.name} (${pct}%)`, goodUp: true, values: net.map(n => Math.round(n * pct / 100)) };
     });
     rows.push({ label: 'Total allocated', goodUp: true, bold: true, border: '1px solid var(--border-default)', values: net.map(n => Math.round(n * totalPct / 100)) });
 
-    const note = `Each bucket is its % of that month's net cash flow. Set the percentages in the Income Buckets table${totalPct !== 100 ? ` — they currently total ${totalPct}% (aim for 100%)` : ''}. A negative month means there is nothing to allocate.`;
+    const note = `Each bucket is its % of that month's net cash flow${totalPct !== 100 ? ` — percentages total ${totalPct}% (aim for 100%)` : ''}. A negative month means there is nothing to allocate.`;
     el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }]);
 }
 
