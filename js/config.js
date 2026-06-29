@@ -217,6 +217,25 @@
         { id: 'recICmYNPZBQbeWWE', name: 'Loan Interest' },
     ];
 
+    // ── Wealth monthly cash-flow classification (by sub-category NAME) ──
+    // Mirrors the P&L sections so the Wealth cash-flow agrees with the P&L tab.
+    // Money in  = business revenue + genuine personal income.
+    // Money out = business costs (COGS + Operating Expenses).
+    // "Personal Income Drawings" is deliberately EXCLUDED (internal transfers from the
+    // business that would double-count rental income). Personal-expenditure subcats
+    // are NOT money-out here — they are draws, tracked separately lower on the page.
+    const CASHFLOW_INCOME_SUBCATS = ['Fixed Income', 'Variable Income', 'Rental Income'];
+    const CASHFLOW_PERSONAL_INCOME_SUBCATS = ['Personal Income Other'];
+    const CASHFLOW_COST_SUBCATS = [
+        'COGS Labour', 'COGS Sales Fees', 'COGS Product Costs', 'COGS Delivery Costs',
+        'COGS Commission', 'COGS Property Council Tax', 'COGS Property Utilities',
+        'COGS Property Reactive Maintenance', 'COGS Property Compliance',
+        'Opex Labour', 'Marketing', 'Premises / Overheads', 'Insurance',
+        'Software & Subscriptions', 'Professional Fees', 'Travel & Training',
+        'Operational Supplies', 'Subsistence', 'Director Discretionary Expenses',
+        'Charity', 'Mortgage Interest', 'Loan Interest', 'Bank Transaction Fees', 'Tax',
+    ];
+
     // ── Personal Budgets field IDs (Airtable: Personal Budgets / tblm5ZxyoiLfaBAS4) ──
     // Monthly budget per personal-expense category, matched to PERSONAL_EXPENSE_SUBCATS by name.
     const PBUDGET = {
