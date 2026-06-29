@@ -32,6 +32,7 @@
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.16', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.3', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
+        { id: 'blueprint',  name: 'Platform Blueprint',           icon: '📐', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'blueprint.html' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app
