@@ -235,6 +235,14 @@
         'Operational Supplies', 'Subsistence', 'Director Discretionary Expenses',
         'Charity', 'Mortgage Interest', 'Loan Interest', 'Bank Transaction Fees', 'Tax',
     ];
+    // Personal expenditure sub-categories (full Airtable names) — itemised and
+    // deducted on the Wealth cash-flow as your personal costs.
+    const CASHFLOW_PERSONAL_EXPENSE_SUBCATS = [
+        'Personal Household Essentials', 'Personal Discretionary Food & Drink',
+        'Personal Discretionary Lifestyle', 'Personal Transport', 'Personal Travel',
+        'Personal Health', 'Personal Tax', 'Personal Banking Fees',
+        'Personal Professional Fees', 'Personal Loan Capital Repayment', 'Personal Loan Interest',
+    ];
 
     // ── Personal Budgets field IDs (Airtable: Personal Budgets / tblm5ZxyoiLfaBAS4) ──
     // Monthly budget per personal-expense category, matched to PERSONAL_EXPENSE_SUBCATS by name.
