@@ -389,6 +389,14 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const liveCash = bal(REC.santander) + bal(REC.tntZempler);
     const snapCash = latest.byClass['Cash'] || 0;
 
+    // Itemised asset/liability lines per class. Most classes come from the monthly
+    // snapshot items; Real Estate + Mortgages use the live per-property data so they
+    // match the reconciled totals.
+    const snapItems = cls => (latest.items[cls] || []).map(it => ({ name: it.name, amount: it.amount }));
+    const pfRows = livePortfolio ? livePortfolio.rows : [];
+    const reItems = pfRows.length ? pfRows.map(p => ({ name: p.name, amount: p.value })) : snapItems('Real Estate');
+    const mortItems = pfRows.length ? pfRows.filter(p => p.mort > 0).map(p => ({ name: p.name, amount: p.mort })) : snapItems('Mortgages');
+
     // ── Staleness + update-method audit ──
     // Real-time classes can be synced from connected accounts; the rest are
     // updated once a month by hand. This drives the "needs updating" alert.
@@ -416,11 +424,20 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         </div>`;
     };
 
-    const classRow = (cls, colour) => {
-        const val = view.byClass[cls] || 0;
-        return `<div class="detail-item">
-            <span class="detail-item-name"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colour};margin-right:8px"></span>${escHtml(cls)}</span>
-            <span class="detail-item-value">${fmt(val)}</span>
+    // An itemised class block: coloured header with the class total, then each item.
+    const itemSection = (title, colour, items, total) => {
+        const lines = items.length
+            ? items.slice().sort((a, b) => b.amount - a.amount).map(it => `<div class="detail-item" style="padding-left:16px">
+                <span class="detail-item-name" style="color:var(--text-secondary)">${escHtml(it.name)}</span>
+                <span class="detail-item-value">${fmt0(it.amount)}</span>
+            </div>`).join('')
+            : `<div style="padding:4px 0 4px 16px;color:var(--text-muted);font-size:var(--fs-sm)">No items yet</div>`;
+        return `<div style="margin-bottom:12px">
+            <div class="detail-item" style="border-bottom:1px solid var(--border-subtle);padding-bottom:4px">
+                <span class="detail-item-name" style="font-weight:var(--fw-semibold);color:var(--text-primary)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colour};margin-right:8px"></span>${escHtml(title)}</span>
+                <span class="detail-item-value" style="font-weight:var(--fw-bold);color:var(--text-primary)">${fmt(total)}</span>
+            </div>
+            ${lines}
         </div>`;
     };
 
@@ -465,8 +482,25 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         <!-- 4–5 · Income buckets — allocate the net cash flow (incl. Debt Clearance) -->
         <div id="wealthBuckets" style="margin-bottom:var(--space-5)"></div>
 
-        <!-- 6 · Net worth — assets & liabilities (foundation, below the monthly flow) -->
-        <!-- Hero: net worth -->
+        <!-- 6 · Assets & liabilities (itemised), then the net worth total below them -->
+        <!-- Assets & liabilities — itemised, in order -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5);margin-bottom:var(--space-5)">
+            <div class="kpi-card">
+                <div class="kpi-card-label" style="margin-bottom:12px">Assets <span style="float:right;color:var(--success);font-weight:var(--fw-bold)">${fmt(view.assets)}</span></div>
+                ${itemSection('Cash', 'var(--tone-blue)', snapItems('Cash'), view.byClass['Cash'] || 0)}
+                ${itemSection('Real Estate', 'var(--tone-sage)', reItems, view.byClass['Real Estate'] || 0)}
+                ${itemSection('Investments', 'var(--tone-olive)', snapItems('Investments'), view.byClass['Investments'] || 0)}
+                ${itemSection('Businesses', 'var(--tone-gold)', snapItems('Businesses'), view.byClass['Businesses'] || 0)}
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label" style="margin-bottom:12px">Liabilities <span style="float:right;color:var(--danger);font-weight:var(--fw-bold)">${fmt(view.liabilities)}</span></div>
+                ${itemSection('Credit Cards', 'var(--tone-gold)', snapItems('Credit Cards'), view.byClass['Credit Cards'] || 0)}
+                ${itemSection('Loans', 'var(--tone-plum)', snapItems('Loans'), view.byClass['Loans'] || 0)}
+                ${itemSection('Mortgages', 'var(--danger)', mortItems, view.byClass['Mortgages'] || 0)}
+            </div>
+        </div>
+
+        <!-- Net worth total — below assets & liabilities -->
         <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-6);margin-bottom:var(--space-5)">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
                 <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Net worth</span>
@@ -474,23 +508,6 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             </div>
             <div style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:var(--text-primary);line-height:1.1">${fmt(view.net)}</div>
             <div style="margin-top:8px">${heroNote}</div>
-        </div>
-
-        <!-- Assets + Liabilities -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5);margin-bottom:var(--space-5)">
-            <div class="kpi-card">
-                <div class="kpi-card-label" style="margin-bottom:10px">Assets <span style="float:right;color:var(--success);font-weight:var(--fw-bold)">${fmt(view.assets)}</span></div>
-                ${classRow('Cash', 'var(--tone-blue)')}
-                ${classRow('Real Estate', 'var(--tone-sage)')}
-                ${classRow('Investments', 'var(--tone-olive)')}
-                ${classRow('Businesses', 'var(--tone-gold)')}
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-card-label" style="margin-bottom:10px">Liabilities <span style="float:right;color:var(--danger);font-weight:var(--fw-bold)">${fmt(view.liabilities)}</span></div>
-                ${classRow('Credit Cards', 'var(--tone-gold)')}
-                ${classRow('Loans', 'var(--tone-plum)')}
-                ${classRow('Mortgages', 'var(--danger)')}
-            </div>
         </div>
 
         <!-- Property portfolio — per property (value − mortgage = equity) -->
@@ -613,76 +630,86 @@ function wealthCfLabel(name) {
     return String(name).replace(/^COGS /, '').replace(/^Opex /, '').replace(/^Personal /, '');
 }
 
+// Month-on-month % change for a series (latest vs previous), coloured by whether
+// "up is good" (income/net) or "up is bad" (expenditure).
+function wealthMoMCell(series, upGood) {
+    if (series.length < 2) return '';
+    const cur = series[series.length - 1], prev = series[series.length - 2];
+    if (!prev) return '<span style="color:var(--text-muted)">–</span>';
+    const pct = (cur - prev) / Math.abs(prev) * 100;
+    if (!isFinite(pct) || Math.round(pct) === 0) return '<span style="color:var(--text-muted)">0%</span>';
+    const up = pct > 0;
+    const good = upGood ? up : !up;
+    return `<span style="color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'}${Math.abs(Math.round(pct))}%</span>`;
+}
+
 function renderWealthCashflow() {
     const el = document.getElementById('wealthCashflow');
     if (!el) return;
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
     if (!txns.length) { el.innerHTML = ''; return; }
 
-    const months = buildMonthlyCashflow(wealthMonthKeys(3, 1)); // last 3 complete months
+    const months = buildMonthlyCashflow(wealthMonthKeys(12, 1)); // last 12 complete months
     if (!months.length) { el.innerHTML = ''; return; }
     const latest = months[months.length - 1];
-    const avgNet = Math.round(months.reduce((s, m) => s + m.net, 0) / months.length);
     const netColour = latest.net >= 0 ? 'var(--success)' : 'var(--danger)';
 
-    // A statement row. opts: indent, bold, colour, sign, border (top border for subtotals).
-    const r = (label, val, o = {}) => `<div style="display:flex;justify-content:space-between;padding:4px 0;${o.border ? 'border-top:' + o.border + ';' : ''}">
-        <span style="color:${o.labelColour || 'var(--text-secondary)'};${o.indent ? 'padding-left:14px;' : ''}font-weight:${o.bold ? 'var(--fw-bold)' : 'var(--fw-regular)'}">${escHtml(label)}</span>
-        <span style="color:${o.colour || 'var(--text-primary)'};font-weight:${o.bold ? 'var(--fw-bold)' : 'var(--fw-semibold)'};white-space:nowrap">${o.sign || ''}${fmt(val)}</span>
-    </div>`;
-    const head = t => `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin:16px 0 2px">${escHtml(t)}</div>`;
-    const ordered = (items, order) => order.filter(n => items[n]).map(n => ({ name: n, amt: items[n] }));
-    const itemLines = (items, order) => {
-        const rows = ordered(items, order);
-        if (!rows.length) return `<div style="padding:4px 0 4px 14px;color:var(--text-muted);font-size:var(--fs-sm)">No transactions this month</div>`;
-        return rows.map(it => r(wealthCfLabel(it.name), it.amt, { indent: true, sign: '− ', colour: 'var(--danger)' })).join('');
-    };
+    // Only itemise sub-categories that appear in at least one of the 12 months.
+    const activeNames = (order, pick) => order.filter(n => months.some(m => pick(m)[n]));
+    const bizNames = activeNames(CASHFLOW_COST_SUBCATS, m => m.bizItems);
+    const perNames = activeNames(CASHFLOW_PERSONAL_EXPENSE_SUBCATS, m => m.perItems);
 
-    // Mini 3-month net trend.
-    const maxAbs = Math.max(...months.map(m => Math.abs(m.net)), 1);
-    const trend = months.map(m => {
-        const pct = Math.round((Math.abs(m.net) / maxAbs) * 100);
-        const c = m.net >= 0 ? 'var(--tone-sage)' : 'var(--danger)';
-        return `<div style="flex:1;text-align:center">
-            <div style="height:46px;display:flex;align-items:flex-end;justify-content:center">
-                <div style="width:60%;height:${Math.max(pct, 3)}%;background:${c};border-radius:var(--radius-sm) var(--radius-sm) 0 0"></div>
-            </div>
-            <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">${escHtml(wealthMonthLabel(m.key).split(' ')[0].slice(0, 3))}</div>
-            <div style="font-size:var(--fs-xs);color:${m.net >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmt0(m.net)}</div>
-        </div>`;
-    }).join('');
+    const stick = 'position:sticky;left:0;background:var(--bg-surface)';
+    // A data row: sticky label + 12 month cells + MoM cell.
+    const dataRow = (label, valueOf, o = {}) => {
+        const series = months.map(valueOf);
+        const cells = series.map(v => `<td style="text-align:right;padding:5px 8px;white-space:nowrap;color:${o.colour || 'var(--text-primary)'};font-weight:${o.bold ? 'var(--fw-semibold)' : 'var(--fw-regular)'}">${v ? fmt0(v) : '<span style=\"color:var(--text-muted)\">–</span>'}</td>`).join('');
+        return `<tr style="${o.border ? 'border-top:' + o.border + ';' : ''}">
+            <td style="text-align:left;padding:5px 8px;${o.indent ? 'padding-left:18px;' : ''}font-weight:${o.bold ? 'var(--fw-bold)' : 'var(--fw-regular)'};color:${o.labelColour || (o.indent ? 'var(--text-secondary)' : 'var(--text-primary)')};${stick};z-index:1">${escHtml(label)}</td>
+            ${cells}
+            <td style="text-align:right;padding:5px 8px;font-size:var(--fs-xs);white-space:nowrap">${wealthMoMCell(series, o.upGood !== false)}</td>
+        </tr>`;
+    };
+    const sectionRow = label => `<tr><td colspan="${months.length + 2}" style="padding:12px 8px 2px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;${stick}">${escHtml(label)}</td></tr>`;
+
+    const head = months.map(m => `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-regular);color:var(--text-muted);white-space:nowrap">${escHtml(wealthMonthLabel(m.key).split(' ')[0].slice(0, 3))} ${m.key.slice(2, 4)}</th>`).join('');
+
+    const body = [
+        sectionRow('Money in'),
+        dataRow('Real estate / portfolio revenue', m => m.reRevenue, { upGood: true }),
+        dataRow('Personal income', m => m.personalIncome, { upGood: true }),
+        dataRow('Total income', m => m.totalIncome, { bold: true, upGood: true, border: '1px solid var(--border-default)' }),
+        sectionRow('Less business expenditure'),
+        ...bizNames.map(n => dataRow(wealthCfLabel(n), m => m.bizItems[n] || 0, { indent: true, upGood: false, colour: 'var(--text-secondary)' })),
+        dataRow('Total business expenditure', m => m.bizTotal, { bold: true, upGood: false, colour: 'var(--danger)', border: '1px solid var(--border-default)' }),
+        sectionRow('Less personal expenditure'),
+        ...perNames.map(n => dataRow(wealthCfLabel(n), m => m.perItems[n] || 0, { indent: true, upGood: false, colour: 'var(--text-secondary)' })),
+        dataRow('Total personal expenditure', m => m.perTotal, { bold: true, upGood: false, colour: 'var(--danger)', border: '1px solid var(--border-default)' }),
+        dataRow('Net cash flow', m => m.net, { bold: true, upGood: true, border: '2px solid var(--border-default)' }),
+    ].join('');
 
     el.innerHTML = `
     <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-6)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-            <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Net monthly cash flow</span>
-            <span style="margin-left:auto;color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(wealthMonthLabel(latest.key))}</span>
+            <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Monthly cash flow — last 12 months</span>
+            <span style="margin-left:auto;color:var(--text-muted);font-size:var(--fs-xs)">to ${escHtml(wealthMonthLabel(latest.key))}</span>
         </div>
-        <div style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:${netColour};line-height:1.1">${fmt(latest.net)}</div>
-        <div style="margin-top:4px;color:var(--text-muted);font-size:var(--fs-xs)">3-month average ${fmt(avgNet)}/mo</div>
-
-        ${head('Money in')}
-        ${r('Real estate / portfolio revenue', latest.reRevenue, { colour: 'var(--success)', sign: '+ ' })}
-        ${r('Personal income', latest.personalIncome, { colour: 'var(--success)', sign: '+ ' })}
-        ${r('Total income', latest.totalIncome, { bold: true, border: '1px solid var(--border-default)', labelColour: 'var(--text-primary)' })}
-
-        ${head('Less business expenditure')}
-        ${itemLines(latest.bizItems, CASHFLOW_COST_SUBCATS)}
-        ${r('Total business expenditure', latest.bizTotal, { bold: true, sign: '− ', colour: 'var(--danger)', border: '1px solid var(--border-default)', labelColour: 'var(--text-primary)' })}
-
-        ${head('Less personal expenditure')}
-        ${itemLines(latest.perItems, CASHFLOW_PERSONAL_EXPENSE_SUBCATS)}
-        ${r('Total personal expenditure', latest.perTotal, { bold: true, sign: '− ', colour: 'var(--danger)', border: '1px solid var(--border-default)', labelColour: 'var(--text-primary)' })}
-
-        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid var(--border-default);margin-top:4px">
-            <span style="color:var(--text-primary);font-weight:var(--fw-bold);font-size:var(--fs-lg)">Net cash flow</span>
-            <span style="color:${netColour};font-weight:var(--fw-bold);font-size:var(--fs-lg)">${fmt(latest.net)}</span>
+        <div style="display:flex;align-items:baseline;gap:10px">
+            <span style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:${netColour};line-height:1.1">${fmt(latest.net)}</span>
+            <span style="color:var(--text-muted);font-size:var(--fs-sm)">net cash flow, ${escHtml(wealthMonthLabel(latest.key))}</span>
         </div>
-
-        <div style="display:flex;gap:6px;margin-top:8px;align-items:flex-end">${trend}</div>
-
+        <div style="overflow-x:auto;margin-top:14px">
+            <table style="border-collapse:collapse;font-size:var(--fs-sm);min-width:100%">
+                <thead><tr>
+                    <th style="${stick};z-index:1"></th>
+                    ${head}
+                    <th style="text-align:right;padding:6px 8px;font-weight:var(--fw-regular);color:var(--text-muted)">MoM</th>
+                </tr></thead>
+                <tbody>${body}</tbody>
+            </table>
+        </div>
         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:14px;line-height:1.5">
-            Real estate / portfolio revenue = Fixed, Variable and Rental Income. Personal income = your booked personal income (internal drawings excluded so rent isn't double-counted). Business and personal expenditure are itemised by sub-category. Net cash flow = total income − all expenditure, which then feeds your buckets below. Business expenditure here is operating costs (matching the P&L); capital loan/mortgage repayments are not yet included — flag if you want them.
+            Money in = real estate / portfolio revenue (Fixed, Variable, Rental Income) + personal income (internal drawings excluded so rent isn't double-counted). Business and personal expenditure itemised by sub-category. Net = total income − all expenditure, feeding your buckets below. MoM = change vs the previous month (green favourable, red unfavourable). Business expenditure is operating costs (matching the P&L); capital loan/mortgage repayments not yet included.
         </div>
     </div>`;
 }
