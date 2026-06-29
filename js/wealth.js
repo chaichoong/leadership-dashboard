@@ -23,6 +23,25 @@ const WEALTH_MONTH_INDEX = {
 let _wealthRecords = null;
 let _wealthPromise = null;
 
+// Readiness gate (mirrors money.js). allAccounts is the LAST global the dashboard
+// sets, so its presence means a full dashboard load completed and allTransactions /
+// allSubCategories are populated too. We deliberately do NOT call loadDashboard()
+// here — init and the switchTab tail already do. A second concurrent call doubles
+// the Airtable request burst and trips the 5/sec rate limit.
+function wealthDataReady() {
+    return typeof allAccounts !== 'undefined' && allAccounts && allAccounts.length > 0;
+}
+function waitForWealthData(timeoutMs) {
+    return new Promise(resolve => {
+        if (wealthDataReady()) { resolve(true); return; }
+        const started = Date.now();
+        const timer = setInterval(() => {
+            if (wealthDataReady()) { clearInterval(timer); resolve(true); return; }
+            if (Date.now() - started >= timeoutMs) { clearInterval(timer); resolve(false); }
+        }, 400);
+    });
+}
+
 // ── Engine ───────────────────────────────────────────────────────────────────
 // Group rows by month, sum by class, derive assets / liabilities / net worth.
 function computeNetWorth(records) {
@@ -60,6 +79,12 @@ async function renderWealthTab() {
         <div style="text-align:center"><div class="spinner" style="margin:0 auto 12px"></div><div>Loading wealth data…</div></div></div>`;
 
     if (typeof PAT === 'undefined' || !PAT) return; // auth screen is showing; nothing to do yet
+
+    // Wait for the dashboard load to populate the shared globals before firing our
+    // own Airtable requests. On a deep-link straight to #wealth, these fetches would
+    // otherwise race loadDashboard's burst, trip the 5/sec rate limit and wedge the
+    // spinner. We also need allTransactions for the cash-flow + expenditure sections.
+    await waitForWealthData(90000);
 
     try {
         if (!_wealthPromise) _wealthPromise = airtableFetch(TABLES.netWorthByMonth);
