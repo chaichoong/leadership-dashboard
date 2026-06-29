@@ -392,7 +392,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     // Itemised asset/liability lines per class. Most classes come from the monthly
     // snapshot items; Real Estate + Mortgages use the live per-property data so they
     // match the reconciled totals.
-    const snapItems = cls => (latest.items[cls] || []).map(it => ({ name: it.name, amount: it.amount }));
+    const snapItems = cls => (latest.items[cls] || []).filter(it => it.name && it.name !== '(unnamed)').map(it => ({ name: it.name, amount: it.amount }));
     const pfRows = livePortfolio ? livePortfolio.rows : [];
     const reItems = pfRows.length ? pfRows.map(p => ({ name: p.name, amount: p.value })) : snapItems('Real Estate');
     const mortItems = pfRows.length ? pfRows.filter(p => p.mort > 0).map(p => ({ name: p.name, amount: p.mort })) : snapItems('Mortgages');
@@ -519,23 +519,12 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         <!-- Monthly cash flow (rolling 12 months) -->
         <div id="wealthCashflow" style="margin-bottom:var(--space-5)"></div>
 
-        <!-- Income buckets (rolling 12 months) -->
+        <!-- Income buckets — manage (add/remove/%) then the 12-month grid -->
+        <div id="wealthBucketEditor" style="margin-bottom:var(--space-3)"></div>
         <div id="wealthBuckets" style="margin-bottom:var(--space-5)"></div>
 
         <!-- Assets, liabilities & net worth (rolling 12 months) -->
         ${assetsHtml}
-
-        <!-- Live bank cash today -->
-        <div class="kpi-card">
-            <div class="kpi-card-label" style="margin-bottom:8px">Live bank cash today</div>
-            <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
-                <span style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:var(--text-primary)">${accountsLoaded ? fmt(liveCash) : '<span style=\"color:var(--text-muted);font-size:var(--fs-base)\">Syncing…</span>'}</span>
-                <span style="color:var(--text-muted);font-size:var(--fs-sm)">Santander + TNT Zempler, synced now</span>
-            </div>
-            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:8px;line-height:1.5">
-                Cash in the ${asOf} snapshot was ${fmt(snapCash)} across all accounts (Monese, Hyper Jar, ANNA and others). The live figure above covers only the two synced current accounts.
-            </div>
-        </div>
 
     </div>`;
 
@@ -631,10 +620,12 @@ function wealthToggleRows(rid, td) {
 function wealthMatrixCard(title, note, months, sections) {
     const stick = 'position:sticky;left:0;background:var(--bg-surface);z-index:1';
     const colCount = months.length + 2;
-    const monthHead = months.map(m => `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-regular);color:var(--text-muted);white-space:nowrap">${escHtml(m.label)}</th>`).join('');
+    const lastCol = months.length - 1;
+    const monthHead = months.map((m, i) => `<th style="text-align:right;padding:6px 8px;font-weight:${i === lastCol ? 'var(--fw-semibold)' : 'var(--fw-regular)'};color:${i === lastCol ? 'var(--text-primary)' : 'var(--text-muted)'};white-space:nowrap;${i === lastCol ? 'background:var(--accent-soft);' : ''}">${escHtml(m.label)}</th>`).join('');
 
-    const valCell = (v, prev, goodUp) => {
-        if (v == null) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted)">–</td>`;
+    const valCell = (v, prev, goodUp, isCurrent) => {
+        const cur = isCurrent ? 'background:var(--accent-soft);' : '';
+        if (v == null) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);${cur}">–</td>`;
         let arrow = '';
         if (prev != null && prev !== 0) {
             const pct = (v - prev) / Math.abs(prev) * 100;
@@ -643,7 +634,7 @@ function wealthMatrixCard(title, note, months, sections) {
                 arrow = ` <span style="font-size:9px;color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'}</span>`;
             }
         }
-        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}${arrow}</td>`;
+        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${cur}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}${arrow}</td>`;
     };
     const changeCell = (values, goodUp) => {
         const nn = values.filter(v => v != null);
@@ -656,12 +647,13 @@ function wealthMatrixCard(title, note, months, sections) {
     const renderRow = (row, isChild, parentRid) => {
         const goodUp = row.goodUp !== false;
         const vals = row.values;
-        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp)).join('');
+        const rowBg = isChild ? 'var(--bg-surface-2)' : (row.bold ? 'var(--bg-subtle)' : 'var(--bg-surface)');
+        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i === lastCol)).join('');
         const hasItems = row.items && row.items.length;
         const rid = hasItems ? ('r' + (++_wealthRowSeq)) : '';
         const caret = hasItems ? '<span class="wm-caret" style="display:inline-block;width:12px;color:var(--text-muted)">▸</span>' : (isChild ? '' : '<span style="display:inline-block;width:12px"></span>');
-        const trAttr = isChild ? `class="wm-child-${parentRid}" style="display:none;background:var(--bg-surface-2)"` : (row.border ? `style="border-top:${row.border}"` : '');
-        const labelStyle = `text-align:left;padding:5px 8px;${isChild ? 'padding-left:26px;' : ''}font-weight:${row.bold ? 'var(--fw-bold)' : 'var(--fw-regular)'};color:${isChild ? 'var(--text-secondary)' : 'var(--text-primary)'};${stick}${hasItems ? ';cursor:pointer' : ''}`;
+        const trAttr = isChild ? `class="wm-child-${parentRid}" style="display:none;background:${rowBg}"` : `style="background:${rowBg}${row.border ? ';border-top:' + row.border : ''}"`;
+        const labelStyle = `text-align:left;padding:5px 8px;${isChild ? 'padding-left:26px;' : ''}font-weight:${row.bold ? 'var(--fw-bold)' : 'var(--fw-regular)'};color:${isChild ? 'var(--text-secondary)' : 'var(--text-primary)'};position:sticky;left:0;background:${rowBg};z-index:1${hasItems ? ';cursor:pointer' : ''}`;
         const onclick = hasItems ? ` onclick="wealthToggleRows('${rid}',this)"` : '';
         let html = `<tr ${trAttr}><td${onclick} style="${labelStyle}">${caret}${escHtml(row.label)}</td>${cells}${changeCell(vals, goodUp)}</tr>`;
         if (hasItems) html += row.items.map(it => renderRow(it, true, rid)).join('');
@@ -1279,7 +1271,90 @@ async function loadWealthBuckets() {
             return;
         }
     }
+    renderBucketEditor(document.getElementById('wealthBucketEditor'));
     renderBuckets(el);
+}
+
+// Compact editor: add/remove buckets and set each one's % of net cash flow.
+function renderBucketEditor(el) {
+    if (!el) return;
+    const recs = (_bucketsRecords || []).slice().sort((a, b) =>
+        (Number(getField(a, BUCKET.sort)) || 0) - (Number(getField(b, BUCKET.sort)) || 0));
+    const rowHtml = (id, name, pct) => `<div class="be-row" data-id="${escHtml(id || '')}" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <input class="be-name" value="${escHtml(name || '')}" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+        <input class="be-pct" type="number" min="0" value="${pct === '' ? '' : pct}" oninput="bucketEditorTotal()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
+        <button onclick="this.closest('.be-row').remove();bucketEditorTotal()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
+    </div>`;
+    el.innerHTML = `<div class="kpi-card">
+        <div class="kpi-card-label" style="margin-bottom:6px">Manage income buckets</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px">Add or remove buckets and set each one's % of net cash flow. <span id="beTotal"></span></div>
+        <div id="beRows">${recs.map(r => rowHtml(r.id, getField(r, BUCKET.name), Number(getField(r, BUCKET.pct)) || 0)).join('')}</div>
+        <div id="beError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:6px"></div>
+        <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+            <button onclick="addBucketRow()" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:7px 14px;cursor:pointer;color:var(--accent);font-size:var(--fs-sm)">+ Add bucket</button>
+            <button id="beSave" onclick="saveBucketEditor()" style="margin-left:auto;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save buckets</button>
+        </div>
+    </div>`;
+    bucketEditorTotal();
+}
+
+function addBucketRow() {
+    const c = document.getElementById('beRows');
+    if (!c) return;
+    const d = document.createElement('div');
+    d.className = 'be-row';
+    d.dataset.id = '';
+    d.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px';
+    d.innerHTML = `<input class="be-name" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+        <input class="be-pct" type="number" min="0" oninput="bucketEditorTotal()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
+        <button onclick="this.closest('.be-row').remove();bucketEditorTotal()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>`;
+    c.appendChild(d);
+}
+
+function bucketEditorTotal() {
+    const t = [...document.querySelectorAll('.be-pct')].reduce((s, i) => s + (Number(i.value) || 0), 0);
+    const el = document.getElementById('beTotal');
+    if (el) el.innerHTML = `Total <strong style="color:var(--text-primary)">${t}%</strong>${t === 100 ? ' ✓' : ` <span style="color:var(--warning)">(aim for 100%)</span>`}`;
+}
+
+async function saveBucketEditor() {
+    const btn = document.getElementById('beSave');
+    const errEl = document.getElementById('beError');
+    const fail = m => { if (errEl) { errEl.style.display = 'block'; errEl.textContent = m; } if (btn) { btn.disabled = false; btn.textContent = 'Save buckets'; } };
+    const rows = [...document.querySelectorAll('.be-row')];
+    const present = new Set();
+    const creates = [], updates = [];
+    rows.forEach((r, i) => {
+        const name = r.querySelector('.be-name').value.trim();
+        if (!name) return;
+        const pct = Number(r.querySelector('.be-pct').value) || 0;
+        const fields = { [BUCKET.name]: name, [BUCKET.pct]: pct, [BUCKET.sort]: i + 1 };
+        const id = r.dataset.id;
+        if (id) { present.add(id); updates.push({ id, fields }); } else { creates.push({ fields }); }
+    });
+    const deletes = (_bucketsRecords || []).map(r => r.id).filter(id => !present.has(id));
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.incomeBuckets}`;
+    try {
+        for (let i = 0; i < updates.length; i += 10) {
+            const resp = await fetch(url, { method: 'PATCH', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }) });
+            if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        }
+        for (let i = 0; i < creates.length; i += 10) {
+            const resp = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ records: creates.slice(i, i + 10), typecast: true }) });
+            if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        }
+        if (deletes.length) {
+            const qs = deletes.map(id => 'records[]=' + id).join('&');
+            const resp = await fetch(url + '?' + qs, { method: 'DELETE', headers: { 'Authorization': `Bearer ${PAT}` } });
+            if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        }
+        _bucketsRecords = null;
+        _bucketsPromise = null;
+        await loadWealthBuckets();
+    } catch (e) {
+        fail('Could not save: ' + (e.message || 'error'));
+    }
 }
 
 function renderBuckets(el) {
