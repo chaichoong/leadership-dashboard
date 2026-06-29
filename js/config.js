@@ -238,7 +238,7 @@
     // Personal expenditure sub-categories (full Airtable names) — itemised and
     // deducted on the Wealth cash-flow as your personal costs.
     const CASHFLOW_PERSONAL_EXPENSE_SUBCATS = [
-        'Personal Household Essentials', 'Personal Discretionary Food & Drink',
+        'Personal Household Essentials', 'Personal Maintenance', 'Personal Discretionary Food & Drink',
         'Personal Discretionary Lifestyle', 'Personal Transport', 'Personal Travel',
         'Personal Health', 'Personal Tax', 'Personal Banking Fees',
         'Personal Professional Fees', 'Personal Loan Capital Repayment', 'Personal Loan Interest',

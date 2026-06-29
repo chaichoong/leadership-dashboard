@@ -508,32 +508,49 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         'Class totals over 12 months (blank where there is no monthly snapshot yet). Click a class to expand its current breakdown. Real estate and mortgages use your live per-property figures; other classes come from the latest monthly snapshot. Arrows = change vs the previous month; 12-mo = change across the period.',
         alMonths, alSections);
 
-    // ── KPI summary strip (headline figures + 12-month change) ──
-    const kpiCfNet = buildMonthlyCashflow(alKeys).map(m => m.net);
-    const pctChg = series => { const nn = series.filter(v => v != null); return (nn.length < 2 || !nn[0]) ? null : (nn[nn.length - 1] - nn[0]) / Math.abs(nn[0]) * 100; };
-    const chgBadge = (series, goodUp) => {
-        const p = pctChg(series);
-        if (p == null || Math.round(p) === 0) return '<span style="color:var(--text-muted);font-size:var(--fs-xs)">– / 12mo</span>';
-        const up = p > 0, good = goodUp ? up : !up;
-        return `<span style="color:${good ? 'var(--success)' : 'var(--danger)'};font-size:var(--fs-xs);font-weight:var(--fw-semibold)">${up ? '▲' : '▼'} ${Math.abs(Math.round(p))}% / 12mo</span>`;
+    // ── KPI summary strip (headline figures + 1/3/6/9/12-month changes) ──
+    // 13-month series (current + 12 prior) so every period change is computable.
+    const kpiKeys = wealthMonthKeys(13, 0);
+    const kpiSnap = pick => kpiKeys.map((k, i) => i === kpiKeys.length - 1 ? pick(view) : (periodByKey[k] ? pick(periodByKey[k]) : null));
+    const kpiCfSeries = buildMonthlyCashflow(kpiKeys).map(m => m.net);
+    const KPI_PERIODS = [1, 3, 6, 9, 12];
+    const periodChanges = (series, goodUp) => {
+        const cur = series[series.length - 1];
+        return KPI_PERIODS.map(n => {
+            const prev = series[series.length - 1 - n];
+            if (cur == null || prev == null || prev === 0) return `<span style="color:var(--text-muted)">${n}m&nbsp;–</span>`;
+            const p = (cur - prev) / Math.abs(prev) * 100;
+            if (Math.round(p) === 0) return `<span style="color:var(--text-muted)">${n}m&nbsp;0%</span>`;
+            const up = p > 0, good = goodUp ? up : !up;
+            return `<span style="color:${good ? 'var(--success)' : 'var(--danger)'}">${n}m&nbsp;${up ? '▲' : '▼'}${Math.abs(Math.round(p))}%</span>`;
+        }).join('<span style="color:var(--border-default)">&nbsp;·&nbsp;</span>');
     };
     const kpiCard = (label, value, valueColour, series, goodUp) => `<div class="kpi-card" style="margin-bottom:0">
         <div class="kpi-card-label" style="margin-bottom:6px">${escHtml(label)}</div>
         <div style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:${valueColour};line-height:1.1">${fmt(value)}</div>
-        <div style="margin-top:4px">${chgBadge(series, goodUp)}</div>
+        <div style="margin-top:8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);line-height:1.7">${periodChanges(series, goodUp)}</div>
     </div>`;
-    const cfNetNow = kpiCfNet[kpiCfNet.length - 1] || 0;
-    const kpiStrip = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)">
-        ${kpiCard('Net worth', view.net, view.net >= 0 ? 'var(--text-primary)' : 'var(--danger)', totalVals(p => p.net), true)}
-        ${kpiCard('Net cash flow (this month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfNet, true)}
-        ${kpiCard('Total assets', view.assets, 'var(--text-primary)', totalVals(p => p.assets), true)}
-        ${kpiCard('Total liabilities', view.liabilities, 'var(--text-primary)', totalVals(p => p.liabilities), false)}
+    const cfNetNow = kpiCfSeries[kpiCfSeries.length - 1] || 0;
+    const kpiStrip = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)">
+        ${kpiCard('Net worth', view.net, view.net >= 0 ? 'var(--text-primary)' : 'var(--danger)', kpiSnap(p => p.net), true)}
+        ${kpiCard('Net cash flow (this month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfSeries, true)}
+        ${kpiCard('Total assets', view.assets, 'var(--text-primary)', kpiSnap(p => p.assets), true)}
+        ${kpiCard('Total liabilities', view.liabilities, 'var(--text-primary)', kpiSnap(p => p.liabilities), false)}
+    </div>`;
+
+    // Trend-column period selector (drives the Δ column on every matrix below).
+    const periodBtn = n => `<button onclick="setWealthChangePeriod(${n})" style="padding:5px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);background:${_wealthChangeMonths === n ? 'var(--accent)' : 'var(--bg-surface)'};color:${_wealthChangeMonths === n ? '#fff' : 'var(--text-secondary)'};font-weight:${_wealthChangeMonths === n ? 'var(--fw-semibold)' : 'var(--fw-regular)'}">${n}M</button>`;
+    const changeSelector = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:var(--space-5);flex-wrap:wrap">
+        <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Trend column (Δ):</span>
+        ${[1, 3, 6, 9, 12].map(periodBtn).join('')}
     </div>`;
 
     el.innerHTML = `
     <div style="width:100%">
 
         ${kpiStrip}
+
+        ${changeSelector}
 
         ${monthsBehind > 0 ? `<!-- Staleness alert -->
         <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-5);display:flex;gap:12px;align-items:flex-start">
@@ -640,6 +657,8 @@ function wealthCfLabel(name) {
 //   months   = [{ key, label }]
 //   sections = [{ header, rows }];  row = { label, values:[12|null], items?, bold, goodUp(=true), border }
 let _wealthRowSeq = 0;
+// Period (months) for the matrices' trend/change column. Changed via the selector.
+let _wealthChangeMonths = 12;
 function wealthToggleRows(rid, td) {
     const rows = document.querySelectorAll('tr.wm-child-' + rid);
     let shown = false;
@@ -666,9 +685,11 @@ function wealthMatrixCard(title, note, months, sections) {
         return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${cur}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}${arrow}</td>`;
     };
     const changeCell = (values, goodUp) => {
-        const nn = values.filter(v => v != null);
-        if (nn.length < 2 || !nn[0]) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted)">–</td>`;
-        const pct = (nn[nn.length - 1] - nn[0]) / Math.abs(nn[0]) * 100;
+        const cur = values[values.length - 1];
+        let prev = values[values.length - 1 - _wealthChangeMonths];
+        if (prev == null) { const nn = values.filter(v => v != null); prev = nn.length ? nn[0] : null; } // fall back to the earliest available
+        if (cur == null || prev == null || prev === 0) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted)">–</td>`;
+        const pct = (cur - prev) / Math.abs(prev) * 100;
         if (Math.round(pct) === 0) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);white-space:nowrap">0%</td>`;
         const up = pct > 0, good = goodUp ? up : !up;
         return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;font-weight:var(--fw-semibold);color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'} ${Math.abs(Math.round(pct))}%</td>`;
@@ -698,7 +719,7 @@ function wealthMatrixCard(title, note, months, sections) {
         ${note ? `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">${note}</div>` : ''}
         <div style="overflow-x:auto">
             <table style="border-collapse:collapse;font-size:var(--fs-sm);width:100%">
-                <thead><tr><th style="${stick}"></th>${monthHead}<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-regular);color:var(--text-muted);white-space:nowrap">12-mo</th></tr></thead>
+                <thead><tr><th style="${stick}"></th>${monthHead}<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap">${_wealthChangeMonths}-mo Δ</th></tr></thead>
                 <tbody>${body}</tbody>
             </table>
         </div>
@@ -708,6 +729,13 @@ function wealthMatrixCard(title, note, months, sections) {
 // Rolling 12-month list (oldest → current month) with short labels (e.g. "Jul 25").
 function wealthMonths12() {
     return wealthMonthKeys(12, 0).map(k => ({ key: k, label: wealthMonthLabel(k).split(' ')[0].slice(0, 3) + ' ' + k.slice(2, 4) }));
+}
+
+// Selector handler: set the Δ-column period and re-render the tab from cached data.
+function setWealthChangePeriod(n) {
+    _wealthChangeMonths = n;
+    const el = document.getElementById('tab-wealth');
+    if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
 }
 
 function renderWealthCashflow() {
