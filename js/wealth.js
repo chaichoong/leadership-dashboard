@@ -568,12 +568,15 @@ function buildMonthlyCashflow(monthKeys) {
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
         const n = getField(r, 'fldO4BTJhFv5EsN6i'); if (n) subNames[r.id] = String(n);
     });
-    const incomeSet = new Set([...CASHFLOW_INCOME_SUBCATS, ...CASHFLOW_PERSONAL_INCOME_SUBCATS]);
-    const costSet = new Set(CASHFLOW_COST_SUBCATS);
+    const reSet = new Set(CASHFLOW_INCOME_SUBCATS);            // real estate / portfolio revenue
+    const piSet = new Set(CASHFLOW_PERSONAL_INCOME_SUBCATS);   // personal income
+    const bizSet = new Set(CASHFLOW_COST_SUBCATS);             // business expenditure (itemised)
+    const perSet = new Set(CASHFLOW_PERSONAL_EXPENSE_SUBCATS); // personal expenditure (itemised)
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
     const set = new Set(monthKeys);
+    const blank = () => ({ reRevenue: 0, personalIncome: 0, bizItems: {}, perItems: {} });
     const byMonth = {};
-    monthKeys.forEach(k => byMonth[k] = { income: 0, cost: 0 });
+    monthKeys.forEach(k => byMonth[k] = blank());
     txns.forEach(tx => {
         const dateStr = getField(tx, F.txDate); if (!dateStr) return;
         const d = new Date(dateStr); if (isNaN(d)) return;
@@ -581,15 +584,33 @@ function buildMonthlyCashflow(monthKeys) {
         if (!set.has(key)) return;
         const sub = subNames[linkId(getField(tx, F.txSubCategory))] || '';
         const amt = Number(getField(tx, F.txReportAmount)) || 0; // inflow +, outflow −
-        if (incomeSet.has(sub)) byMonth[key].income += amt;
-        else if (costSet.has(sub)) byMonth[key].cost += -amt; // store cost as a positive magnitude
+        const m = byMonth[key];
+        if (reSet.has(sub)) m.reRevenue += amt;
+        else if (piSet.has(sub)) m.personalIncome += amt;
+        else if (bizSet.has(sub)) m.bizItems[sub] = (m.bizItems[sub] || 0) + (-amt); // positive magnitude
+        else if (perSet.has(sub)) m.perItems[sub] = (m.perItems[sub] || 0) + (-amt);
     });
-    return monthKeys.map(k => ({ key: k, income: byMonth[k].income, cost: byMonth[k].cost, net: byMonth[k].income - byMonth[k].cost }));
+    return monthKeys.map(k => {
+        const m = byMonth[k];
+        const bizTotal = Object.values(m.bizItems).reduce((s, v) => s + v, 0);
+        const perTotal = Object.values(m.perItems).reduce((s, v) => s + v, 0);
+        const totalIncome = m.reRevenue + m.personalIncome;
+        return {
+            key, reRevenue: m.reRevenue, personalIncome: m.personalIncome, totalIncome,
+            bizItems: m.bizItems, bizTotal, perItems: m.perItems, perTotal,
+            net: totalIncome - bizTotal - perTotal,
+        };
+    });
 }
 
 function wealthMonthLabel(key) {
     const [y, m] = key.split('-').map(Number);
     return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+// Strip the accounting prefixes so itemised lines read cleanly.
+function wealthCfLabel(name) {
+    return String(name).replace(/^COGS /, '').replace(/^Opex /, '').replace(/^Personal /, '');
 }
 
 function renderWealthCashflow() {
@@ -604,10 +625,18 @@ function renderWealthCashflow() {
     const avgNet = Math.round(months.reduce((s, m) => s + m.net, 0) / months.length);
     const netColour = latest.net >= 0 ? 'var(--success)' : 'var(--danger)';
 
-    const line = (label, val, colour, sign) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border-subtle)">
-        <span style="color:var(--text-secondary)">${escHtml(label)}</span>
-        <span style="font-weight:var(--fw-semibold);color:${colour || 'var(--text-primary)'}">${sign || ''}${fmt(val)}</span>
+    // A statement row. opts: indent, bold, colour, sign, border (top border for subtotals).
+    const r = (label, val, o = {}) => `<div style="display:flex;justify-content:space-between;padding:4px 0;${o.border ? 'border-top:' + o.border + ';' : ''}">
+        <span style="color:${o.labelColour || 'var(--text-secondary)'};${o.indent ? 'padding-left:14px;' : ''}font-weight:${o.bold ? 'var(--fw-bold)' : 'var(--fw-regular)'}">${escHtml(label)}</span>
+        <span style="color:${o.colour || 'var(--text-primary)'};font-weight:${o.bold ? 'var(--fw-bold)' : 'var(--fw-semibold)'};white-space:nowrap">${o.sign || ''}${fmt(val)}</span>
     </div>`;
+    const head = t => `<div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin:16px 0 2px">${escHtml(t)}</div>`;
+    const ordered = (items, order) => order.filter(n => items[n]).map(n => ({ name: n, amt: items[n] }));
+    const itemLines = (items, order) => {
+        const rows = ordered(items, order);
+        if (!rows.length) return `<div style="padding:4px 0 4px 14px;color:var(--text-muted);font-size:var(--fs-sm)">No transactions this month</div>`;
+        return rows.map(it => r(wealthCfLabel(it.name), it.amt, { indent: true, sign: '− ', colour: 'var(--danger)' })).join('');
+    };
 
     // Mini 3-month net trend.
     const maxAbs = Math.max(...months.map(m => Math.abs(m.net)), 1);
@@ -632,19 +661,28 @@ function renderWealthCashflow() {
         <div style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:${netColour};line-height:1.1">${fmt(latest.net)}</div>
         <div style="margin-top:4px;color:var(--text-muted);font-size:var(--fs-xs)">3-month average ${fmt(avgNet)}/mo</div>
 
-        <div style="margin-top:16px">
-            ${line('Money in (business revenue + personal income)', latest.income, 'var(--success)', '+ ')}
-            ${line('Money out (business costs)', latest.cost, 'var(--danger)', '− ')}
-            <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid var(--border-default);font-weight:var(--fw-bold)">
-                <span style="color:var(--text-primary)">Net cash flow</span>
-                <span style="color:${netColour}">${fmt(latest.net)}</span>
-            </div>
+        ${head('Money in')}
+        ${r('Real estate / portfolio revenue', latest.reRevenue, { colour: 'var(--success)', sign: '+ ' })}
+        ${r('Personal income', latest.personalIncome, { colour: 'var(--success)', sign: '+ ' })}
+        ${r('Total income', latest.totalIncome, { bold: true, border: '1px solid var(--border-default)', labelColour: 'var(--text-primary)' })}
+
+        ${head('Less business expenditure')}
+        ${itemLines(latest.bizItems, CASHFLOW_COST_SUBCATS)}
+        ${r('Total business expenditure', latest.bizTotal, { bold: true, sign: '− ', colour: 'var(--danger)', border: '1px solid var(--border-default)', labelColour: 'var(--text-primary)' })}
+
+        ${head('Less personal expenditure')}
+        ${itemLines(latest.perItems, CASHFLOW_PERSONAL_EXPENSE_SUBCATS)}
+        ${r('Total personal expenditure', latest.perTotal, { bold: true, sign: '− ', colour: 'var(--danger)', border: '1px solid var(--border-default)', labelColour: 'var(--text-primary)' })}
+
+        <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid var(--border-default);margin-top:4px">
+            <span style="color:var(--text-primary);font-weight:var(--fw-bold);font-size:var(--fs-lg)">Net cash flow</span>
+            <span style="color:${netColour};font-weight:var(--fw-bold);font-size:var(--fs-lg)">${fmt(latest.net)}</span>
         </div>
 
-        <div style="display:flex;gap:6px;margin-top:16px;align-items:flex-end">${trend}</div>
+        <div style="display:flex;gap:6px;margin-top:8px;align-items:flex-end">${trend}</div>
 
         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:14px;line-height:1.5">
-            Money in = Fixed, Variable and Rental Income plus your personal income. Money out = business costs (COGS + operating expenses). The net is what the business throws off for you to allocate to your buckets below. Your personal spending is tracked further down as draws, not double-counted here.
+            Real estate / portfolio revenue = Fixed, Variable and Rental Income. Personal income = your booked personal income (internal drawings excluded so rent isn't double-counted). Business and personal expenditure are itemised by sub-category. Net cash flow = total income − all expenditure, which then feeds your buckets below. Business expenditure here is operating costs (matching the P&L); capital loan/mortgage repayments are not yet included — flag if you want them.
         </div>
     </div>`;
 }
