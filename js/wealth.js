@@ -596,7 +596,7 @@ function buildMonthlyCashflow(monthKeys) {
         const perTotal = Object.values(m.perItems).reduce((s, v) => s + v, 0);
         const totalIncome = m.reRevenue + m.personalIncome;
         return {
-            key, reRevenue: m.reRevenue, personalIncome: m.personalIncome, totalIncome,
+            key: k, reRevenue: m.reRevenue, personalIncome: m.personalIncome, totalIncome,
             bizItems: m.bizItems, bizTotal, perItems: m.perItems, perTotal,
             net: totalIncome - bizTotal - perTotal,
         };
