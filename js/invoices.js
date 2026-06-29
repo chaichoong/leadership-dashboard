@@ -735,6 +735,74 @@
         if (failed > 0) alert(`Updated ${succeeded} of ${ids.length}. ${failed} failed — see console.`);
     }
 
+    // ── Bulk mark selected invoices as Paid: batch Airtable status + per-thread Gmail label move ──
+    async function applyBulkMarkPaid() {
+        const btn = document.getElementById('invBulkMarkPaidBtn');
+        // Only act on selected invoices that are still in the (unpaid) list and not already Paid
+        const targets = Array.from(invSelectedIds)
+            .map(id => airtableInvoices.find(i => i.recordId === id))
+            .filter(inv => inv && inv.status !== 'Paid');
+        if (targets.length === 0) return;
+
+        const total = targets.reduce((sum, inv) => sum + (Number(inv.amount) || 0), 0);
+        const totalLabel = (typeof fmt === 'function') ? fmt(total) : '£' + total.toFixed(2);
+        if (!confirm(`Mark ${targets.length} invoice${targets.length > 1 ? 's' : ''} as Paid?\n\nTotal: ${totalLabel}\n\nThis updates Airtable and moves each Gmail label from "3. to pay" to "4: paid".`)) return;
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
+        const today = new Date().toISOString().slice(0, 10);
+        let succeeded = 0, failed = 0;
+        const paidIds = [];
+
+        // 1. Airtable status update — chunk to 10 records per PATCH (API limit)
+        for (let i = 0; i < targets.length; i += 10) {
+            const chunk = targets.slice(i, i + 10);
+            const records = chunk.map(inv => ({
+                id: inv.recordId,
+                fields: { [INV.status]: 'Paid', [INV.paidDate]: today }
+            }));
+            try {
+                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}?returnFieldsByFieldId=true`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records })
+                });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                chunk.forEach(inv => paidIds.push(inv.recordId));
+                succeeded += chunk.length;
+            } catch (e) {
+                console.error('Bulk mark-paid chunk failed:', e);
+                failed += chunk.length;
+            }
+        }
+
+        // 2. Move Gmail label "3. to pay" → "4: paid" for each successfully paid invoice (fire-and-forget)
+        if (GMAIL_SCRIPT_URL) {
+            for (const recordId of paidIds) {
+                const inv = airtableInvoices.find(i => i.recordId === recordId);
+                const threadId = inv && (inv.threadId || inv.id);
+                if (!threadId) continue;
+                try {
+                    const url = GMAIL_SCRIPT_URL + '?action=markPaid&threadId=' + encodeURIComponent(threadId);
+                    await fetch(url, { redirect: 'follow', mode: 'no-cors' });
+                } catch (fetchErr) {
+                    console.warn('Gmail bulk mark-paid failed (will retry on next sync):', fetchErr.message);
+                }
+            }
+        }
+
+        // 3. Remove paid invoices from local state, clear selection, re-render
+        airtableInvoices = airtableInvoices.filter(i => !paidIds.includes(i.recordId));
+        invSelectedIds.clear();
+        updateInvoicesSidebarBadge();
+        lastApprovalAttempt = { ok: failed === 0, when: new Date(), error: failed ? `${failed} failed` : null, action: 'markPaid' };
+        invoiceTabRendered = false;
+        renderInvoiceTab();
+        setTimeout(() => { if (typeof fetchGmailLabelCount === 'function') fetchGmailLabelCount(); }, 3500);
+
+        if (btn) { btn.disabled = false; btn.textContent = 'Mark as Paid'; }
+        if (failed > 0) alert(`Marked ${succeeded} of ${targets.length} as Paid. ${failed} failed — see console.`);
+    }
+
     // ── Click-to-edit any invoice field — saves to Airtable ──
     function editInvField(el, recordId, fieldId, inputType) {
         const input = document.createElement('input');
