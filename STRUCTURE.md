@@ -10,7 +10,7 @@ Single source of truth for file locations across the Operations Director Platfor
 
 | Location | Purpose | New files go here when… |
 |---|---|---|
-| `/` (root) | Live HTML pages served by GitHub Pages (`index.html`, `follow-up.html`, `compliance.html`, `sop*.html`, `architecture.html`, `how-it-works.html`) plus repo config (`CLAUDE.md`, `STRUCTURE.md`, `CONTRIBUTING.md`, `sitemap.xml`, `robots.txt`, `package.json`) | The file is a new public page. Nothing else goes at root |
+| `/` (root) | Live HTML pages served by GitHub Pages (`index.html`, `follow-up.html`, `compliance.html`, `sop*.html`, `architecture.html`, `how-it-works.html`, `blueprint.html`) plus repo config (`CLAUDE.md`, `STRUCTURE.md`, `CONTRIBUTING.md`, `sitemap.xml`, `robots.txt`, `package.json`) | The file is a new public page. Nothing else goes at root |
 | `js/` | One file per feature tab (see CLAUDE.md table). `config.js` = constants, `shared.js` = helpers | New feature tab logic |
 | `js/prompts/` | AI prompt sources (`boardroom-mentor.js`) | New AI prompt used by the app |
 | `css/` | `tokens.css` (design tokens, single source of truth) + `styles.css` | Never add per-feature stylesheets without checking tokens first |
@@ -32,7 +32,7 @@ Single source of truth for file locations across the Operations Director Platfor
 4. **Memory** (`~/.claude/projects/-Users-kevinbrittain-Projects-leadership-dashboard/memory/`) — durable facts, preferences, project state. Indexed by `MEMORY.md`.
 5. **Skills** — three tiers, by design:
    - Project skills: `.claude/skills/` in this repo (workflow pipeline)
-   - Personal skills: `~/.claude/skills/` (`build-prompt`, `challenge`)
+   - Personal skills: `~/.claude/skills/` (`build-prompt`, `challenge`, `transcript-to-brain`, `compound-brain`, `feed-brain`)
    - Cowork plugin skills: managed by the Claude desktop app (Airtable automations, document tools)
 
 Do not move skills between tiers without reason: project skills travel with the repo, personal skills apply everywhere, plugin skills are managed by the app.

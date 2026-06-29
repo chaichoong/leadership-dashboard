@@ -40,6 +40,7 @@ FILE_TO_PAGE = {
     'os/systemisation/index.html': 'systemisation',
     'os/team/index.html':          'os-team',
     'how-it-works.html':           'how-it-works',
+    'blueprint.html':              'blueprint',
 }
 
 CONFIG_FILE = 'js/config.js'

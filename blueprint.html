@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations Director — Interactive Blueprint</title>
+<meta name="description" content="A simple, layered guide to how every page of Operations Director works, links together, and uses AI and automation.">
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-family-base);background:var(--bg-app);color:var(--text-primary);line-height:1.6;overflow-x:hidden}
+.wrap{max-width:1080px;margin:0 auto;padding:24px 20px 96px}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ── Top bar ── */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.topbar .home-link{font-size:var(--fs-sm);color:var(--text-muted);display:inline-flex;align-items:center;gap:6px}
+.dev-link{font-size:var(--fs-xs);color:var(--text-muted);border:1px dashed var(--border-default);border-radius:var(--radius-full);padding:4px 12px}
+.dev-link:hover{color:var(--accent);border-color:var(--accent);text-decoration:none}
+
+/* ── Hero ── */
+.hero{text-align:center;padding:32px 0 24px}
+.hero h1{font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:var(--accent);margin-bottom:8px}
+.hero p{font-size:var(--fs-lg);color:var(--text-secondary);max-width:600px;margin:0 auto}
+.howto{background:var(--accent-soft);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:14px 18px;margin:18px auto 0;max-width:640px;font-size:var(--fs-sm);color:var(--text-secondary)}
+.howto strong{color:var(--text-primary)}
+
+/* ── 5-phase flow ── */
+.flow{display:flex;align-items:stretch;justify-content:center;gap:0;margin:40px auto 8px;flex-wrap:wrap;max-width:1000px}
+.flow-step{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:18px 14px;text-align:center;flex:1;min-width:150px;transition:transform .2s,box-shadow .2s}
+.flow-step:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.flow-icon{font-size:30px;margin-bottom:6px}
+.flow-step h3{font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:4px}
+.flow-step p{font-size:var(--fs-xs);color:var(--text-secondary)}
+.flow-arrow{display:flex;align-items:center;font-size:22px;color:var(--accent);padding:0 4px;flex-shrink:0}
+@media(max-width:720px){.flow{flex-direction:column;gap:8px}.flow-arrow{transform:rotate(90deg);justify-content:center;padding:2px 0}}
+.flow-note{text-align:center;font-size:var(--fs-sm);color:var(--text-muted);margin:14px auto 0;max-width:560px}
+
+/* ── Section + page grid ── */
+.section-title{font-size:var(--fs-xl);font-weight:var(--fw-bold);margin:44px 0 4px;display:flex;align-items:center;gap:10px}
+.section-title .em{font-size:24px}
+.section-sub{font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:18px}
+.page-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.page-card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:16px;text-align:left;cursor:pointer;transition:border-color .2s,transform .2s,box-shadow .2s;font:inherit;color:inherit;width:100%}
+.page-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.page-card .pc-top{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.page-card .pc-icon{font-size:24px}
+.page-card .pc-name{font-size:var(--fs-base);font-weight:var(--fw-semibold)}
+.page-card .pc-desc{font-size:var(--fs-sm);color:var(--text-secondary)}
+.page-card .pc-foot{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);padding:2px 9px;border-radius:var(--radius-full);line-height:1.6}
+.badge .dot{width:7px;height:7px;border-radius:50%}
+.badge.ok{background:var(--success-bg);color:var(--success)}
+.badge.ok .dot{background:var(--success)}
+.badge.review{background:var(--warning-bg);color:var(--warning)}
+.badge.review .dot{background:var(--warning)}
+.badge.outline{background:var(--bg-subtle);color:var(--text-muted)}
+.badge.outline .dot{background:var(--text-muted)}
+.badge.full{background:var(--accent-soft);color:var(--accent)}
+.badge.full .dot{background:var(--accent)}
+.ver{font-size:var(--fs-xs);color:var(--text-muted)}
+
+/* ── Page (detail) view ── */
+.detail{display:none}
+.crumb{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-muted);background:none;border:none;cursor:pointer;font:inherit;padding:6px 0;margin-bottom:8px}
+.crumb:hover{color:var(--accent)}
+.detail-head{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:22px 24px;margin-bottom:22px}
+.detail-head .dh-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.detail-head .dh-icon{font-size:38px}
+.detail-head h2{font-size:var(--fs-2xl);font-weight:var(--fw-bold)}
+.detail-head .dh-purpose{font-size:var(--fs-base);color:var(--text-secondary);margin-top:10px;max-width:760px}
+.review-note{margin-top:14px;font-size:var(--fs-sm);background:var(--warning-bg);color:var(--warning);border-radius:var(--radius-md);padding:8px 12px}
+
+/* ── Connection chips ── */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);font-weight:var(--fw-medium);background:var(--bg-subtle);color:var(--text-secondary);border-radius:var(--radius-full);padding:5px 12px}
+.chip .ci{font-size:14px}
+
+/* ── Layer blocks (boxes) ── */
+.layer-title{font-size:var(--fs-lg);font-weight:var(--fw-semibold);margin:26px 0 4px;display:flex;align-items:center;gap:8px}
+.layer-title .lt-em{font-size:20px}
+.layer-sub{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:14px}
+.boxes{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+details.box{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);overflow:hidden}
+details.box>summary{list-style:none;cursor:pointer;padding:14px 16px;display:flex;align-items:flex-start;gap:10px;user-select:none}
+details.box>summary::-webkit-details-marker{display:none}
+details.box>summary .bx-em{font-size:20px;line-height:1.3}
+details.box>summary .bx-name{font-size:var(--fs-base);font-weight:var(--fw-semibold);flex:1}
+details.box>summary .bx-name span{display:block;font-size:var(--fs-xs);font-weight:var(--fw-regular);color:var(--text-secondary);margin-top:2px}
+details.box>summary .bx-chev{color:var(--text-muted);transition:transform .2s;font-size:13px;margin-top:3px}
+details.box[open]>summary .bx-chev{transform:rotate(90deg)}
+details.box>summary:hover{background:var(--bg-surface-2)}
+.box-body{padding:0 16px 16px 46px;border-top:1px solid var(--border-subtle);margin-top:2px;padding-top:12px}
+.box-body ul{list-style:none;display:flex;flex-direction:column;gap:7px}
+.box-body li{position:relative;padding-left:18px;font-size:var(--fs-sm);color:var(--text-secondary)}
+.box-body li::before{content:"";position:absolute;left:0;top:8px;width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.box-body li.robot::before{background:var(--accent-gold)}
+.box-body li.ai::before{background:var(--tone-plum)}
+
+/* link-to-page pills */
+.links-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.link-pill{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-full);padding:6px 14px;font-size:var(--fs-sm);cursor:pointer;font:inherit;color:var(--text-secondary)}
+.link-pill:hover{border-color:var(--accent);color:var(--accent)}
+
+/* outline-only placeholder */
+.placeholder{background:var(--bg-surface);border:1px dashed var(--border-default);border-radius:var(--radius-lg);padding:28px 24px;text-align:center;color:var(--text-secondary);font-size:var(--fs-sm)}
+.placeholder h4{font-size:var(--fs-base);color:var(--text-primary);margin-bottom:6px}
+
+/* legend */
+.legend{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:14px 18px;margin:36px 0 0;font-size:var(--fs-sm);color:var(--text-secondary)}
+.legend h4{font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:8px}
+.legend .leg-row{display:flex;flex-wrap:wrap;gap:14px}
+.legend .leg-item{display:inline-flex;align-items:center;gap:6px}
+.legend .leg-dot{width:9px;height:9px;border-radius:50%}
+
+footer{text-align:center;margin-top:48px;font-size:var(--fs-xs);color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="home-link" href="index.html">&#x2190; Back to the app</a>
+    <a class="dev-link" href="architecture.html" title="Internal technical map for the build team">&#x1F527; Developer view</a>
+  </div>
+
+  <!-- ════════ OVERVIEW (LAYER 0) ════════ -->
+  <div id="overview-view">
+    <div class="hero">
+      <h1>The Operations Director Blueprint</h1>
+      <p>A simple map of how the whole system works. Click any page to see what it does, how it talks to your email, calendar, bank and team, and where the AI helps.</p>
+      <div class="howto"><strong>How to read this:</strong> start with the five steps below. Then click any page card to open its own map. Inside, click a box to expand it and see exactly what happens. A green tick means the map matches the live page; an amber flag means the page changed and the map needs a quick check.</div>
+    </div>
+
+    <div class="flow" id="flow"></div>
+    <p class="flow-note">Across all five steps, quiet <strong>robots</strong> (automations) and the <strong>AI helper</strong> do the repeat work for you, so you make the decisions and the system does the typing.</p>
+
+    <div id="sections"></div>
+
+    <div class="legend">
+      <h4>What the colours and chips mean</h4>
+      <div class="leg-row" style="margin-bottom:10px">
+        <span class="leg-item"><span class="badge ok"><span class="dot"></span>Up to date</span> map matches the live page</span>
+        <span class="leg-item"><span class="badge review"><span class="dot"></span>Needs review</span> page changed since last check</span>
+        <span class="leg-item"><span class="badge full"><span class="dot"></span>Full map</span> detailed page</span>
+        <span class="leg-item"><span class="badge outline"><span class="dot"></span>Outline</span> detail coming soon</span>
+      </div>
+      <div class="leg-row">
+        <span class="leg-item"><span class="leg-dot" style="background:var(--accent)"></span>a step you or the team do</span>
+        <span class="leg-item"><span class="leg-dot" style="background:var(--accent-gold)"></span>a robot doing it for you</span>
+        <span class="leg-item"><span class="leg-dot" style="background:var(--tone-plum)"></span>the AI helper</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ PAGE DETAIL (LAYER 1+) ════════ -->
+  <div id="detail-view" class="detail"></div>
+
+  <footer>Operations Director &middot; live blueprint &middot; versions read straight from the app, so this guide stays honest.</footer>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  CONNECTION TYPES (the things every page can plug into)
+// ══════════════════════════════════════════════════════════════
+const CONN = {
+  db:       { icon:'\u{1F5C4}️', label:'Database',  note:'where all your records live' },
+  gmail:    { icon:'\u{1F4E7}',       label:'Gmail',     note:'your email' },
+  ai:       { icon:'\u{1F916}',       label:'AI helper', note:'the smart assistant (Claude)' },
+  slack:    { icon:'\u{1F4AC}',       label:'Slack',     note:'team chat alerts' },
+  calendar: { icon:'\u{1F4C5}',       label:'Calendar',  note:'Google Calendar' },
+  robot:    { icon:'⚙️',    label:'Auto robots', note:'background workers' },
+  sms:      { icon:'\u{1F4F1}',       label:'Texts',     note:'SMS in and out' },
+  bank:     { icon:'\u{1F3E6}',       label:'Bank feed', note:'live bank sync' },
+};
+
+// ══════════════════════════════════════════════════════════════
+//  THE 5-STEP STORY (Layer 0)
+// ══════════════════════════════════════════════════════════════
+const FLOW = [
+  { icon:'\u{1F3AF}', title:'1. Plan',        desc:'Set your goals and your quarter targets.' },
+  { icon:'✅',    title:'2. Do the work', desc:'Handle messages, jobs and your team.' },
+  { icon:'\u{1F4B7}', title:'3. Watch money', desc:'Track every pound in and out.' },
+  { icon:'\u{1F465}', title:'4. Look after people', desc:'Your team and your tenants.' },
+  { icon:'\u{1F4C8}', title:'5. Grow & guide', desc:'Get the word out and learn the system.' },
+];
+
+// ══════════════════════════════════════════════════════════════
+//  THE PAGES (Layer 1). Grouped to mirror the real sidebar.
+//  detail:true pages have a full map; others show an outline.
+//  verifiedAtVer = the live pageVer this map was last checked against.
+// ══════════════════════════════════════════════════════════════
+const SECTIONS = [
+  { key:'leadership', name:'Leadership', em:'\u{1F9ED}', sub:'Where you set direction and see the whole business at a glance.',
+    pages:['overview','cfv','os-strategy','os-bplan'] },
+  { key:'operations', name:'Operations', em:'⚙️', sub:'The daily engine: messages in, tasks out, jobs done.',
+    pages:['comms','tasks','operations','systemisation','compliance','skills'] },
+  { key:'finance', name:'Finance', em:'\u{1F4B0}', sub:'Every pound tracked, from daily decisions to year-end profit.',
+    pages:['money','wealth','income','ar-variable','costs','invoices','pnl','transactions','fintable'] },
+  { key:'team', name:'HR / Admin', em:'\u{1F465}', sub:'Your people.',
+    pages:['os-team'] },
+  { key:'marketing', name:'Marketing', em:'\u{1F4E3}', sub:'Getting the word out.',
+    pages:['content-machine'] },
+  { key:'system', name:'System & Guides', em:'\u{1F517}', sub:'How to find your way around and keep things current.',
+    pages:['sitemap','how-it-works'] },
+];
+
+const PAGES = {
+  // ──────────────── PILOTED: FULL MAPS ────────────────
+  overview: {
+    icon:'\u{1F4CA}', name:'Leadership Dashboard', detail:true, verifiedAtVer:'2.36',
+    short:'Your business control room on one screen.',
+    purpose:'Your control room. One screen shows the money coming in and going out, how your properties and tenants are doing, and what is likely to happen to your cash over the next month. The AI writes a plain-English summary and a robot pre-ticks the safe items.',
+    conns:['db','ai','gmail','slack','bank','robot'],
+    layers:[
+      { title:'What you see on the page', em:'\u{1F441}️', sub:'Each box is a card on the dashboard. Click to open.', boxes:[
+        { em:'\u{1F4B7}', name:'Money at a glance', bul:['Your opening balance (your safest bank figure).','Net income for the last 31 days (rent in, fixed costs out).','Your operating cushion: spare cash you can safely use.',{ai:'A log of transactions the AI already ticked off, each with one-click undo.'}] },
+        { em:'\u{1F3AF}', name:'Strategic goals', sub:'your quarter targets', bul:['Each goal shows progress against its target.','A traffic light says on-target, on-track, off-track or not started.','Filter by which business you are looking at.'] },
+        { em:'\u{1F3E0}', name:'Property overview', bul:['How many properties and units you own, and their value.','How full they are (occupancy rate).','Average value per unit.'] },
+        { em:'\u{1F511}', name:'Tenant rent status', bul:['How many tenancies are active and the monthly rent they bring.','How many tenants missed rent on the due date (a "CFV").','What that missed rent is costing you.'] },
+        { em:'\u{1F4C5}', name:'Last 30 days', bul:['Rent received, maintenance spend, wages and void cost.','Each one shown against a budget with a progress bar.'] },
+        { em:'\u{1F4C8}', name:'Next 31 days cash forecast', bul:['A line showing your expected cash for each day ahead.','It marks the lowest point and any day cash dips too low.'] },
+        { em:'\u{1F916}', name:'AI written summary', bul:[{ai:'Plain-English notes on your money health.'},{ai:'How efficiently you are running and how many days of runway you have.'},{ai:'A short risk summary (missed rent, overdue bills, overspend).'}] },
+        { em:'\u{1F7E2}', name:'Health bar', sub:'bottom of the page', bul:['Green, amber or red dots show every data feed is fresh.','Tells you each robot is running as it should.'] },
+      ]},
+      { title:'The robots working behind the page', em:'⚙️', sub:'These run on their own so the screen is always current.', boxes:[
+        { em:'\u{1F504}', name:'Auto-refresh', bul:[{robot:'Quietly updates everything every 15 minutes.'},{robot:'Waits politely if you are clicking or typing.'}] },
+        { em:'\u{1F4E5}', name:'On open it gathers everything', bul:[{robot:'Pulls all your data in one go.'},{robot:'Runs your goal calculations against live transactions.'},{robot:'Checks for missed rent and opens a chase record.'},{robot:'Fetches new invoices from Gmail and checks the bank feed is fresh.'}] },
+        { em:'✅', name:'AI auto-tick (safe items)', bul:[{ai:'A robot pre-approves transactions it is over 99% sure about.'},{robot:'Everything it ticks has a one-click undo, so you stay in control.'}] },
+      ]},
+      { title:'The smart helper', em:'\u{1F916}', sub:'', boxes:[
+        { em:'✨', name:'Ask the AI anything (Cmd+K)', bul:[{ai:'A chat helper that already knows what is on your screen.'},{ai:'Quick buttons like "summarise my financial health" or "cash flow report".'},{ai:'Uses a fast model for quick notes and a deeper model for full reports.'}] },
+      ]},
+    ],
+    links:['cfv','invoices','pnl','transactions','money'],
+  },
+
+  invoices: {
+    icon:'\u{1F9FE}', name:'Accounts Payable Variable (Invoices)', detail:true, verifiedAtVer:'2.16',
+    short:'Your "bills to pay" desk, fed straight from email.',
+    purpose:'Your bills-to-pay desk. It pulls bills out of your email by itself, lines them up, and helps you match each bill to the matching bank payment and mark it paid. The matching here is smart rules, not AI guessing, so it is predictable.',
+    conns:['gmail','robot','db'],
+    layers:[
+      { title:'What you see on the page', em:'\u{1F441}️', sub:'Click any box to open it.', boxes:[
+        { em:'\u{1F522}', name:'Top numbers', bul:['How many bills are unpaid.','Total amount you know you owe.','How many bills still need an amount typed in.','How many are overdue.'] },
+        { em:'\u{1F50D}', name:'Search and sort', bul:['Find a bill by payee, note or reference.','Order bills by date, amount or payee name.'] },
+        { em:'\u{1F4CB}', name:'The bill list', bul:['One row per bill.','Edit the payee, amount, reference or business right in the row.','Every edit saves on its own.'] },
+        { em:'\u{1F517}', name:'Robot match suggestion', sub:'a blue row under a bill', bul:[{robot:'When a bank payment looks like the bill, it suggests a match.'},'You press Approve to link them, or Reject to dismiss it.'] },
+        { em:'☑️', name:'Bulk actions', bul:['Tick several bills at once.','Set their business, or mark them all paid in one go.'] },
+        { em:'\u{1F7E2}', name:'Sync health', bul:['Checks the dashboard count matches the Gmail "to pay" folder.','Shows when it last refreshed, with a manual refresh link.'] },
+      ]},
+      { title:'The robots working behind the page', em:'⚙️', sub:'', boxes:[
+        { em:'\u{1F4E7}', name:'Gmail bill-catcher', sub:'every 30 minutes', bul:[{robot:'Reads the "3. to pay" email label.'},{robot:'Pulls out the sender, amount and date (even reading PDFs when needed).'},{robot:'Creates a bill record, skipping any it already added.'}] },
+        { em:'\u{1F50E}', name:'Matching robot', bul:[{robot:'Compares each bill to bank payments by amount (within 2p), date and keywords.'},'Suggests the best match for you to approve.'] },
+        { em:'\u{1F4B8}', name:'Mark paid', bul:[{robot:'Updates the bill, moves the email to the "paid" label.'},{robot:'Attaches the email link to the matching bank payment.'}] },
+        { em:'\u{1F501}', name:'Reconcile with Gmail', bul:['Realigns paid and unpaid using your Gmail folder as the truth.','You confirm before it runs.'] },
+      ]},
+    ],
+    links:['transactions','pnl','overview'],
+  },
+
+  comms: {
+    icon:'\u{1F4E8}', name:'Inbound Comms', detail:true, verifiedAtVer:'2.51',
+    short:'Your smart inbox that turns messages into tasks.',
+    purpose:'Your smart inbox. Every message that comes in (emails and texts) gets sorted, and the important ones turn into tasks for the right person on their own. The AI suggests where each message goes, drafts replies, and learns from your corrections.',
+    conns:['gmail','ai','slack','db','sms'],
+    layers:[
+      { title:'The trays (what you see)', em:'\u{1F441}️', sub:'Each tray is a Gmail label view. Click to open.', boxes:[
+        { em:'\u{1F4E5}', name:'Inbox', bul:['Messages not sorted yet.',{ai:'The AI suggests the right tray for each one.'}] },
+        { em:'✍️', name:'To Respond / Follow Up', bul:['Needs a reply, or waiting on a reply.',{robot:'When they reply, the follow-up flag clears itself.'}] },
+        { em:'\u{1F4B7}', name:'To Pay', bul:['Bills and payment requests.','Feeds straight into the Invoices page.'] },
+        { em:'✅', name:'Task Created / Completed', bul:['Messages turned into tasks.',{robot:'These clear themselves when the task is done.'}] },
+        { em:'\u{1F4DD}', name:'Compliance', bul:['Signed tenancy documents.',{robot:'Auto-linked to the right tenant.'}] },
+        { em:'\u{1F527}', name:'Maintenance', bul:['Repair requests.',{robot:'Routed to the maintenance team.'}] },
+        { em:'\u{1F50D}', name:'Search and Stats', bul:['Find any message across every tray.',{ai:'See how accurate the AI sorting has been.'}] },
+      ]},
+      { title:'The robots working behind the page', em:'⚙️', sub:'', boxes:[
+        { em:'\u{1F9E0}', name:'Sorting robot', bul:[{ai:'Suggests the right tray for each message.'},{ai:'Learns from every correction you make.'}] },
+        { em:'\u{1F4CC}', name:'Make-a-task robot', bul:[{ai:'Writes a clear task title and description.'},{robot:'Assigns the right person and saves the task.'}] },
+        { em:'\u{1F4AC}', name:'Slack alert', bul:[{robot:'Sends a direct message to whoever the task is for.'}] },
+        { em:'\u{1F3E0}', name:'Tenancy document linker', bul:[{ai:'Matches a signed agreement to the right tenant.'},{robot:'Asks a human to check when it is not sure.'}] },
+        { em:'\u{1F4F1}', name:'Text bridge', sub:'every minute', bul:[{robot:'Pulls new texts in and turns them into emails, so everything lands in one inbox.'},{robot:'Sends your replies back out as texts.'}] },
+      ]},
+      { title:'The smart helper', em:'\u{1F916}', sub:'', boxes:[
+        { em:'✨', name:'Draft and polish replies', bul:[{ai:'Drafts a professional reply for you.'},{ai:'A "Polish" button rewrites it with a stronger model for important messages.'},{ai:'Learns your tone from the tweaks you make.'}] },
+      ]},
+    ],
+    links:['tasks','invoices','compliance','overview'],
+  },
+
+  // ──────────────── OUTLINE-ONLY (rollout next) ────────────────
+  cfv:        { icon:'\u{1F6A8}', name:'Cash Flow Voids', short:'Spots rent that did not land on time and runs the chase.' },
+  'os-strategy':{ icon:'\u{1F3AF}', name:'Objective & Strategy', short:'Your quarter plan: objectives, methods and targets per business.' },
+  'os-bplan': { icon:'\u{1F4CB}', name:'Plan Builder', short:'Builds a launch plan for a new business or project.' },
+  tasks:      { icon:'✅', name:'Tasks & Projects', short:'The team task board where work gets assigned and tracked.' },
+  operations: { icon:'\u{1F3E2}', name:'Operations', short:'The hub for your departments and how they run.' },
+  systemisation:{ icon:'⚙️', name:'Systemisation', short:'Turns the way you work into repeatable, written workflows.' },
+  compliance: { icon:'✅', name:'Property Compliance', short:'Tracks certificates and safety dates so nothing expires.' },
+  skills:     { icon:'\u{1F9E0}', name:'Skills Library', short:'The AI skills and prompts the system can run for you.' },
+  money:      { icon:'\u{1F9ED}', name:'Money Confidence', short:'A daily "safe to act" figure for everyday money decisions.' },
+  wealth:     { icon:'\u{1F4C8}', name:'Wealth', short:'Your personal net worth and property values in one view.' },
+  income:     { icon:'\u{1F4B7}', name:'Accounts Receivable Fixed', short:'Money you expect in on a regular basis, like rent.' },
+  'ar-variable':{ icon:'\u{1F4E4}', name:'Accounts Receivable Variable', short:'One-off money owed to you on outbound invoices.' },
+  costs:      { icon:'\u{1F4CB}', name:'Accounts Payable Fixed', short:'Your regular bills, like mortgages and subscriptions.' },
+  pnl:        { icon:'\u{1F4B0}', name:'Profit & Loss', short:'Your profit, by business, with category breakdowns.' },
+  transactions:{ icon:'\u{1F50D}', name:'Transactions', short:'Every bank transaction, with reconciliation.' },
+  fintable:   { icon:'\u{1F3E6}', name:'Accounts (Bank)', short:'Your bank account feeds and their sync health.' },
+  'os-team':  { icon:'\u{1F465}', name:'Team Members', short:'Your people, roles and contact details.' },
+  'content-machine':{ icon:'\u{1F3AC}', name:'Content Machine', short:'Plans and produces your marketing content.' },
+  sitemap:    { icon:'\u{1F517}', name:'Site Map & Guides', short:'A list of every page, its version and its how-to guide.' },
+  'how-it-works':{ icon:'\u{1F5FA}️', name:'How It Works', short:'A short story-style intro to the platform.' },
+};
+
+// ══════════════════════════════════════════════════════════════
+//  LIVE VERSIONS — parsed from js/config.js so badges stay honest.
+//  Fallback snapshot used if the file cannot be read.
+// ══════════════════════════════════════════════════════════════
+const VER_FALLBACK = {
+  overview:'2.36','os-strategy':'1.14',tasks:'1.103',cfv:'1.27',money:'1.0',wealth:'1.0',
+  income:'1.1','ar-variable':'1.0',costs:'1.7',invoices:'2.16',pnl:'2.22',transactions:'1.0',
+  comms:'2.51',compliance:'1.11',operations:'1.40','os-bplan':'1.12',fintable:'1.7',
+  systemisation:'1.3','os-team':'1.0','content-machine':'1.0',sitemap:'1.16',skills:'1.3','how-it-works':'1.0',
+};
+let LIVE = Object.assign({}, VER_FALLBACK);
+
+async function loadLiveVersions(){
+  try{
+    const res = await fetch('js/config.js?ts=' + Date.now());
+    if(!res.ok) return;
+    const txt = await res.text();
+    const re = /id:\s*'([^']+)'[^}]*?pageVer:\s*'([^']+)'/g;
+    let m, found = {};
+    while((m = re.exec(txt)) !== null){ found[m[1]] = m[2]; }
+    if(Object.keys(found).length) LIVE = Object.assign({}, VER_FALLBACK, found);
+  }catch(e){ /* offline or file:// — keep fallback, badges still render */ }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  RENDER HELPERS
+// ══════════════════════════════════════════════════════════════
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function badgeFor(id){
+  const p = PAGES[id]; const live = LIVE[id] || '?';
+  if(p.detail){
+    if(p.verifiedAtVer === live){
+      return `<span class="badge ok"><span class="dot"></span>Up to date</span>`;
+    }
+    return `<span class="badge review" title="Live page is v${esc(live)}; this map was checked at v${esc(p.verifiedAtVer)}"><span class="dot"></span>Needs review</span>`;
+  }
+  return `<span class="badge outline"><span class="dot"></span>Outline</span>`;
+}
+
+function renderFlow(){
+  const el = document.getElementById('flow');
+  el.innerHTML = FLOW.map((s,i) =>
+    `<div class="flow-step"><div class="flow-icon">${s.icon}</div><h3>${esc(s.title)}</h3><p>${esc(s.desc)}</p></div>` +
+    (i < FLOW.length-1 ? `<div class="flow-arrow">&#x2192;</div>` : '')
+  ).join('');
+}
+
+function renderSections(){
+  const host = document.getElementById('sections');
+  host.innerHTML = SECTIONS.map(sec => {
+    const cards = sec.pages.filter(id => PAGES[id]).map(id => {
+      const p = PAGES[id];
+      const full = p.detail ? `<span class="badge full"><span class="dot"></span>Full map</span>` : '';
+      return `<button class="page-card" onclick="openPage('${id}')">
+        <div class="pc-top"><span class="pc-icon">${p.icon}</span><span class="pc-name">${esc(p.name)}</span></div>
+        <div class="pc-desc">${esc(p.short || '')}</div>
+        <div class="pc-foot">${badgeFor(id)}${full}<span class="ver">v${esc(LIVE[id]||'?')}</span></div>
+      </button>`;
+    }).join('');
+    return `<h2 class="section-title"><span class="em">${sec.em}</span>${esc(sec.name)}</h2>
+      <p class="section-sub">${esc(sec.sub)}</p>
+      <div class="page-grid">${cards}</div>`;
+  }).join('');
+}
+
+function chipHtml(key){
+  const c = CONN[key]; if(!c) return '';
+  return `<span class="chip" title="${esc(c.note)}"><span class="ci">${c.icon}</span>${esc(c.label)}</span>`;
+}
+
+function bulletHtml(b){
+  if(typeof b === 'string') return `<li>${esc(b)}</li>`;
+  if(b.robot) return `<li class="robot">${esc(b.robot)}</li>`;
+  if(b.ai)    return `<li class="ai">${esc(b.ai)}</li>`;
+  return `<li>${esc(String(b))}</li>`;
+}
+
+function renderDetail(id){
+  const p = PAGES[id];
+  const dv = document.getElementById('detail-view');
+  const reviewNote = (p.detail && p.verifiedAtVer !== (LIVE[id]||'')) ?
+    `<div class="review-note">&#x26A0;&#xFE0F; This page is now v${esc(LIVE[id]||'?')} but this map was last checked at v${esc(p.verifiedAtVer)}. Some detail below may have changed.</div>` : '';
+
+  let body;
+  if(p.detail){
+    const chips = `<div class="chips">${(p.conns||[]).map(chipHtml).join('')}</div>`;
+    const layers = (p.layers||[]).map(layer => {
+      const boxes = layer.boxes.map(bx => `
+        <details class="box">
+          <summary><span class="bx-em">${bx.em}</span><span class="bx-name">${esc(bx.name)}${bx.sub?`<span>${esc(bx.sub)}</span>`:''}</span><span class="bx-chev">&#x25B6;</span></summary>
+          <div class="box-body"><ul>${bx.bul.map(bulletHtml).join('')}</ul></div>
+        </details>`).join('');
+      return `<h3 class="layer-title"><span class="lt-em">${layer.em}</span>${esc(layer.title)}</h3>
+        ${layer.sub?`<p class="layer-sub">${esc(layer.sub)}</p>`:''}
+        <div class="boxes">${boxes}</div>`;
+    }).join('');
+    const links = (p.links||[]).filter(l=>PAGES[l]).map(l =>
+      `<button class="link-pill" onclick="openPage('${l}')">${PAGES[l].icon} ${esc(PAGES[l].name)} &#x2192;</button>`).join('');
+    const linksRow = links ? `<h3 class="layer-title"><span class="lt-em">\u{1F517}</span>Where this page connects</h3>
+      <p class="layer-sub">Click to jump, just like clicking around the real app.</p>
+      <div class="links-row">${links}</div>` : '';
+    body = chips + layers + linksRow;
+  } else {
+    body = `<div class="placeholder"><h4>Full map coming soon</h4>
+      We are rolling out the detailed, click-to-expand map to every page. The three pilot pages (Leadership Dashboard, Invoices, Inbound Comms) show the finished style this page will follow.</div>`;
+  }
+
+  dv.innerHTML = `
+    <button class="crumb" onclick="goHome()">&#x2190; All pages</button>
+    <div class="detail-head">
+      <div class="dh-top"><span class="dh-icon">${p.icon}</span><h2>${esc(p.name)}</h2>${badgeFor(id)}<span class="ver">live v${esc(LIVE[id]||'?')}</span></div>
+      <p class="dh-purpose">${esc(p.purpose || p.short || '')}</p>
+      ${reviewNote}
+    </div>
+    ${body}`;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  NAVIGATION (hash routing, so links are shareable)
+// ══════════════════════════════════════════════════════════════
+function openPage(id){ location.hash = 'page=' + id; }
+function goHome(){ location.hash = ''; }
+
+function route(){
+  const m = location.hash.match(/page=([^&]+)/);
+  const ov = document.getElementById('overview-view');
+  const dv = document.getElementById('detail-view');
+  if(m && PAGES[m[1]]){
+    renderDetail(m[1]);
+    ov.style.display = 'none';
+    dv.style.display = 'block';
+  } else {
+    ov.style.display = 'block';
+    dv.style.display = 'none';
+  }
+  window.scrollTo(0,0);
+}
+
+window.addEventListener('hashchange', route);
+
+(async function init(){
+  await loadLiveVersions();
+  renderFlow();
+  renderSections();
+  route();
+})();
+</script>
+</body>
+</html>
