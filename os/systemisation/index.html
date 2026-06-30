@@ -3110,7 +3110,11 @@ async function setWfDisposition(wfId, type){
     // route based on the choice
     if(type==='recurring'){ assignRecurringTask(wfId); }
     else if(type==='adhoc'){ toast('Marked ad-hoc. Staff follow the SOP when needed.'); }
-    else { toast('Marked to run as an AI agent.'); }
+    else {
+        // Autonomous agent → create the Skills Library entry (if not already there) so it is logged and runnable
+        if(gf(w, WF.skillDefinition)){ toast('Marked to run as an AI agent.'); }
+        else { toast('Marked as an AI agent — adding it to the Skills Library…'); doConvertWorkflowToSkill(wfId); }
+    }
     renderSteps();
     // re-score readiness against the new bar (human vs agent) if a check already exists
     if(sop.readiness) runAgenticCheck(wfId);
