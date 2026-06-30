@@ -36,7 +36,7 @@
         // Launch Plan, etc.) — a dashboard reload blows through the loading
         // overlay and drops any in-flight wizard/form state.
         const activeTab = (window.location.hash || '#overview').slice(1);
-        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'operations', 'systemisation', 'os-team'];
+        const iframeTabs = ['os-strategy', 'os-bplan', 'tasks', 'comms', 'operations', 'systemisation', 'os-team', 'ai-brain'];
         if (iframeTabs.includes(activeTab)) {
             refreshPending = true;
             scheduleIdleRefresh();
@@ -683,6 +683,14 @@ if (tabId === 'comms') {
         if (tabId === 'content-machine') {
             const frame = document.getElementById('contentMachineFrame');
             if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('content-machine')) {
+                frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+            }
+        }
+        // AI Brain (Operations) lazy-load — standalone module page via iframe,
+        // cache-busted so Pages deploys are picked up without a hard refresh.
+        if (tabId === 'ai-brain') {
+            const frame = document.getElementById('aiBrainFrame');
+            if (!frame.getAttribute('src') || !frame.getAttribute('src').includes('ai-brain')) {
                 frame.src = frame.dataset.src + (frame.dataset.src.includes('?') ? '&' : '?') + 'cb=' + Date.now();
             }
         }
