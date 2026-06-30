@@ -4293,30 +4293,37 @@ function dropOnSidePanel(e){
   // the same daily-cap logic as the auto-scheduler so you don't end up
   // overloading tomorrow if it's already full.
   const nextDay=findNextAvailableDay(task);
-  task.dueDate=nextDay;
-  // Status will be derived from the new due date by parseTask on next read,
-  // but also write it explicitly so Airtable + grid match immediately.
-  Promise.all([
-    updateTaskField(task.id,'dueDate',nextDay),
-  ]).catch(err=>{console.warn('drop reschedule failed',err)});
+  // Don't pre-set task.dueDate — updateTaskField sets it optimistically and
+  // reverts on failure. Pre-setting hid the task while Airtable disagreed, so
+  // a refresh snapped it back. Re-render after the write settles for truth.
+  const p=updateTaskField(task.id,'dueDate',nextDay);
   toast(`Moved off today — rescheduled to ${nextDay}`);
   window._tlDragging=false;
   renderMyDay();
+  p.then(()=>renderMyDay()).catch(err=>{console.warn('drop reschedule failed',err);renderMyDay()});
 }
 
 // Push a deferred ("won't fit today") task forward to the next work day
 // with spare capacity — same auto-scheduler logic as dropping off the
 // timeline. Changing the due date cascades the status update inside
 // updateTaskField, and renderMyDay removes it from the deferred box.
-function pushTaskToNextDay(taskId,ev){
+async function pushTaskToNextDay(taskId,ev){
   if(ev)ev.stopPropagation();
   const task=allTasks.find(t=>t.id===taskId);if(!task)return;
   task._startMin=null;
   saveStartTime(todayStr(),task.id,null);
   const nextDay=findNextAvailableDay(task);
-  task.dueDate=nextDay;
-  updateTaskField(task.id,'dueDate',nextDay).catch(err=>console.warn('push to next day failed',err));
+  // Do NOT pre-set task.dueDate. updateTaskField applies it optimistically
+  // (synchronously, before its first await) AND reverts it on a failed write.
+  // Pre-setting defeated that revert, so a failed push hid the card while
+  // Airtable still had the task dated today — then the next refresh snapped
+  // every un-persisted task back onto today. Render once for the instant
+  // optimistic removal, then again after the write settles so the box always
+  // matches Airtable (the card returns here if the write failed).
+  const p=updateTaskField(task.id,'dueDate',nextDay);
   toast(`Pushed to ${nextDay}`);
+  renderMyDay();
+  try{await p}catch(err){console.warn('push to next day failed',err)}
   renderMyDay();
 }
 
