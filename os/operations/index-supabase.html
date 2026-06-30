@@ -2956,7 +2956,11 @@ function closeSchemaInspector(){
 // ═══════════════════════════════════════════════════════════════════════
 // IndexedDB cache for transactions (reuses dashboard's DB, separate key)
 // ═══════════════════════════════════════════════════════════════════════
-const OPS_IDB_NAME  = '_dlr_cache';
+// NOTE: separate DB name from the live Airtable site — same-origin IndexedDB is
+// shared, so reusing '_dlr_cache' would leak the live site's cached Airtable
+// transactions into this Supabase clone. Transactions are deferred to Module 3,
+// so on a cache miss the shim returns empty and rows show "no transactions".
+const OPS_IDB_NAME  = '_dlr_cache_sb';
 const OPS_IDB_STORE = 'kv';
 const OPS_TX_CACHE_KEY = 'ops_transactions';
 const OPS_TX_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
