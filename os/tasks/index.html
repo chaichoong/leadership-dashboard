@@ -3845,8 +3845,18 @@ function renderMyDay(){
   html+=`<div class="side-panel" id="sidePanel"
       ondragover="event.preventDefault();document.getElementById('sidePanel').classList.add('drop-target')"
       ondragleave="document.getElementById('sidePanel').classList.remove('drop-target')"
-      ondrop="dropOnSidePanel(event)">
-    <h3>Other Tasks Available (${other.length})</h3>
+      ondrop="dropOnSidePanel(event)">`;
+  // Deferred = due today/overdue but no free slot left in the working day.
+  // These must stay visible here so the My Day view accounts for EVERY task
+  // due today; otherwise overflow tasks silently vanish from the timeline.
+  if(plan.deferred.length){
+    html+=`<div style="margin-bottom:14px;padding:10px;border:1px solid var(--warning);border-radius:var(--radius-md);background:var(--warning-bg)">
+      <h3 style="margin:0 0 4px;color:var(--warning)">Won't fit today (${plan.deferred.length})</h3>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Due today or overdue, but your working day is already full. Drag one onto the timeline to schedule it, or extend your working hours in Configure Routine.</div>
+      <div id="deferredList">${plan.deferred.map(t=>renderDedlineSideCard(t)).join('')}</div>
+    </div>`;
+  }
+  html+=`<h3>Other Tasks Available (${other.length})</h3>
     <input type="text" class="search-box" placeholder="Search..." style="width:100%;margin-bottom:8px" oninput="filterSidePanel(this.value)">
     <div id="sidePanelList">`;
   other.sort((a,b)=>{
