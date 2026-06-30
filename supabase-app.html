@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operations Director — Supabase</title>
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: var(--font-family-base, Inter, system-ui, sans-serif); }
+    #app { display: none; height: 100vh; }
+    .layout { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+    /* Sidebar */
+    .sidebar { background: var(--bg-sidebar, #263330); color: #E8ECE6; overflow-y: auto; display: flex; flex-direction: column; }
+    .brand { padding: 18px 20px 14px; }
+    .brand .title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .brand .sub { font-size: 12px; color: var(--accent-gold, #C6A15B); margin-top: 4px; }
+    .brand .sub a { color: #cdd5cf; text-decoration: underline; cursor: pointer; margin-left: 6px; }
+    .section { padding: 16px 20px 4px; font-size: 11px; letter-spacing: .08em; color: #8A938C; font-weight: 700; }
+    .navitem { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; font-size: 15px; color: #DfE5E0; border-left: 3px solid transparent; }
+    .navitem .ico { width: 22px; text-align: center; }
+    .navitem:hover { background: rgba(255,255,255,.04); }
+    .navitem.active { background: rgba(44,110,73,.28); border-left-color: var(--accent, #2C6E49); font-weight: 600; color: #fff; }
+    .navitem.disabled { color: #6c766f; cursor: default; }
+    .navitem.disabled:hover { background: none; }
+    .navitem .soon { margin-left: auto; font-size: 10px; color: #6c766f; border: 1px solid #3a463f; border-radius: 10px; padding: 1px 7px; }
+    .dot { margin-left: auto; width: 9px; height: 9px; border-radius: 50%; background: #4b574f; }
+    .navitem.active .dot { background: var(--success, #4CAF50); }
+    /* Main */
+    .main { position: relative; background: var(--bg-app, #F1F3EF); }
+    iframe { width: 100%; height: 100%; border: 0; display: block; }
+    /* Login */
+    #login { position: fixed; inset: 0; z-index: 50; background: var(--bg-app, #F1F3EF); display: flex; align-items: center; justify-content: center; }
+    .card { background: #fff; border: 1px solid var(--border-default, #DDE1D9); border-radius: 14px; padding: 30px; width: 360px; box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+    .card h1 { font-size: 20px; margin: 0 0 2px; display: flex; gap: 8px; align-items: center; }
+    .card p { font-size: 13px; color: var(--text-secondary, #5A6660); margin: 0 0 18px; }
+    .card label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+    .card input { width: 100%; padding: 11px 12px; border: 1px solid var(--border-default, #DDE1D9); border-radius: 9px; font-size: 14px; }
+    .card button { width: 100%; margin-top: 16px; background: var(--accent, #2C6E49); color: #fff; border: 0; padding: 11px; border-radius: 9px; font-weight: 600; font-size: 15px; cursor: pointer; }
+    .card button:hover { background: var(--accent-hover, #1B4A30); }
+    .card .err { color: var(--danger, #B42318); font-size: 12px; margin-top: 10px; display: none; }
+  </style>
+</head>
+<body>
+  <!-- Login (shown until a Supabase session exists; shared with both inner pages) -->
+  <div id="login">
+    <div class="card">
+      <h1>⚙️ Operations Director</h1>
+      <p>Sign in once — Tasks and Operations load from Supabase.</p>
+      <label>Email</label>
+      <input id="email" type="email" value="kevin@operationsdirector.co.uk" autocomplete="username">
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <button id="go">Sign in</button>
+      <div class="err" id="err"></div>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="title">⚙️ Operations Director</div>
+          <div class="sub">Kevin Brittain • Founder <a id="logout">Logout</a></div>
+        </div>
+
+        <div class="section">Leadership</div>
+        <div class="navitem disabled"><span class="ico">📊</span> Leadership Dashboard <span class="soon">soon</span></div>
+        <div class="navitem disabled"><span class="ico">🎯</span> Objective &amp; Strategy <span class="soon">soon</span></div>
+        <div class="navitem disabled"><span class="ico">📋</span> Plan Builder <span class="soon">soon</span></div>
+
+        <div class="section">Operations</div>
+        <div class="navitem" data-page="tasks"><span class="ico">✅</span> Tasks &amp; Projects <span class="dot"></span></div>
+        <div class="navitem" data-page="operations"><span class="ico">🏢</span> Operations <span class="dot"></span></div>
+        <div class="navitem disabled"><span class="ico">📨</span> Inbound Comms <span class="soon">soon</span></div>
+        <div class="navitem disabled"><span class="ico">⚙️</span> Systemisation <span class="soon">soon</span></div>
+      </aside>
+      <main class="main">
+        <iframe id="frame" title="page"></iframe>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
+    // Shared storageKey so the iframes (same shim key) reuse this one login.
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+
+    const PAGES = {
+      tasks: 'os/tasks/index-supabase.html',
+      operations: 'os/operations/index-supabase.html',
+    };
+    const frame = document.getElementById('frame');
+    function navTo(page) {
+      document.querySelectorAll('.navitem[data-page]').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+      frame.src = PAGES[page];
+      location.hash = page;
+    }
+    document.querySelectorAll('.navitem[data-page]').forEach(n => n.addEventListener('click', () => navTo(n.dataset.page)));
+
+    function showApp() {
+      document.getElementById('login').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      const page = (location.hash || '#tasks').slice(1);
+      navTo(PAGES[page] ? page : 'tasks');
+    }
+
+    document.getElementById('go').addEventListener('click', signIn);
+    document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+    async function signIn() {
+      const err = document.getElementById('err'); err.style.display = 'none';
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { err.textContent = error.message; err.style.display = 'block'; return; }
+      showApp();
+    }
+    document.getElementById('logout').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+
+    // Auto-enter if already signed in.
+    sb.auth.getSession().then(({ data }) => { if (data.session) showApp(); });
+  </script>
+</body>
+</html>
