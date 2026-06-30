@@ -273,6 +273,10 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 .side-panel h3{font-size:var(--fs-base);margin-bottom:8px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px}
 .side-card{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:var(--fs-sm);cursor:grab}
 .side-card:hover{border-color:var(--accent)}
+.deferred-item{margin-bottom:6px}
+.deferred-item .side-card{margin-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom:none}
+.btn-push-next{display:block;width:100%;text-align:center;padding:5px 8px;font-size:11px;font-weight:var(--fw-semibold);color:var(--accent);background:var(--bg-surface);border:1px solid var(--border-default);border-top:none;border-bottom-left-radius:6px;border-bottom-right-radius:6px;cursor:pointer}
+.btn-push-next:hover{background:var(--accent-soft);border-color:var(--accent)}
 .side-card h4{font-size:var(--fs-sm);font-weight:var(--fw-semibold);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-card .sc-meta{display:flex;gap:6px;align-items:center;color:var(--text-secondary);font-size:10px;flex-wrap:wrap}
 
@@ -3852,8 +3856,8 @@ function renderMyDay(){
   if(plan.deferred.length){
     html+=`<div style="margin-bottom:14px;padding:10px;border:1px solid var(--warning);border-radius:var(--radius-md);background:var(--warning-bg)">
       <h3 style="margin:0 0 4px;color:var(--warning)">Won't fit today (${plan.deferred.length})</h3>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Due today or overdue, but your working day is already full. Drag one onto the timeline to schedule it, or extend your working hours in Configure Routine.</div>
-      <div id="deferredList">${plan.deferred.map(t=>renderDedlineSideCard(t)).join('')}</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Due today or overdue, but your working day is already full. Drag one onto the timeline to do it today, or push it to the next free day.</div>
+      <div id="deferredList">${plan.deferred.map(t=>`<div class="deferred-item">${renderDedlineSideCard(t)}<button class="btn-push-next" title="Move to the next work day with spare capacity (auto-scheduled)" onclick="pushTaskToNextDay('${t.id}',event)">Push to next free day &rarr;</button></div>`).join('')}</div>
     </div>`;
   }
   html+=`<h3>Other Tasks Available (${other.length})</h3>
@@ -4297,6 +4301,22 @@ function dropOnSidePanel(e){
   ]).catch(err=>{console.warn('drop reschedule failed',err)});
   toast(`Moved off today — rescheduled to ${nextDay}`);
   window._tlDragging=false;
+  renderMyDay();
+}
+
+// Push a deferred ("won't fit today") task forward to the next work day
+// with spare capacity — same auto-scheduler logic as dropping off the
+// timeline. Changing the due date cascades the status update inside
+// updateTaskField, and renderMyDay removes it from the deferred box.
+function pushTaskToNextDay(taskId,ev){
+  if(ev)ev.stopPropagation();
+  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  task._startMin=null;
+  saveStartTime(todayStr(),task.id,null);
+  const nextDay=findNextAvailableDay(task);
+  task.dueDate=nextDay;
+  updateTaskField(task.id,'dueDate',nextDay).catch(err=>console.warn('push to next day failed',err));
+  toast(`Pushed to ${nextDay}`);
   renderMyDay();
 }
 
