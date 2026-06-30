@@ -403,12 +403,6 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const pfRows = livePortfolio ? livePortfolio.rows : [];
     const reItems = pfRows.length ? pfRows.map(p => ({ name: p.name, amount: p.value })) : snapItems('Real Estate');
     const mortItems = pfRows.length ? pfRows.filter(p => p.mort > 0).map(p => ({ name: p.name, amount: p.mort })) : snapItems('Mortgages');
-    // Stash the current per-class items for the "Save this month" snapshot capture.
-    _wealthSnapshotData = {
-        'Cash': snapItems('Cash'), 'Real Estate': reItems, 'Investments': snapItems('Investments'),
-        'Businesses': snapItems('Businesses'), 'Credit Cards': snapItems('Credit Cards'),
-        'Loans': snapItems('Loans'), 'Mortgages': mortItems,
-    };
 
     // ── Staleness + update-method audit ──
     // Real-time classes can be synced from connected accounts; the rest are
@@ -553,7 +547,6 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const changeSelector = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:var(--space-5);flex-wrap:wrap">
         <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Trend column (Δ):</span>
         ${[1, 3, 6, 9, 12].map(periodBtn).join('')}
-        <button id="saveMonthBtn" onclick="saveWealthMonthSnapshot()" title="Record this month's figures so the trends build up" style="margin-left:auto;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 16px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">📸 Save this month (${escHtml(currentLabel)})</button>
     </div>`;
 
     el.innerHTML = `
@@ -751,47 +744,6 @@ function setWealthChangePeriod(n) {
     if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
 }
 
-// One-tap monthly snapshot: write the current per-class figures to the net-worth
-// table for this month (replacing any existing snapshot for it), so the rolling
-// 12-month trends build up over time.
-async function saveWealthMonthSnapshot() {
-    if (!_wealthSnapshotData) return;
-    const now = new Date();
-    const monthName = now.toLocaleDateString('en-GB', { month: 'long' });
-    const yearStr = String(now.getFullYear());
-    if (!confirm(`Save a net-worth snapshot for ${monthName} ${yearStr}? This records the current figures and replaces any existing ${monthName} ${yearStr} snapshot.`)) return;
-    const btn = document.getElementById('saveMonthBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-    const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.netWorthByMonth}`;
-    try {
-        // Replace cleanly: delete any existing rows for this month/year first.
-        const existing = (_wealthRecords || [])
-            .filter(r => getField(r, NW.month) === monthName && String(getField(r, NW.year)) === yearStr)
-            .map(r => r.id);
-        for (let i = 0; i < existing.length; i += 10) {
-            const qs = existing.slice(i, i + 10).map(id => 'records[]=' + id).join('&');
-            const resp = await fetch(url + '?' + qs, { method: 'DELETE', headers: { 'Authorization': `Bearer ${PAT}` } });
-            if (!resp.ok) throw new Error('Airtable ' + resp.status);
-        }
-        // Write the current figures (one row per item per class).
-        const recs = [];
-        Object.keys(_wealthSnapshotData).forEach(cls => {
-            (_wealthSnapshotData[cls] || []).forEach(it => {
-                if (!it.name) return;
-                recs.push({ fields: { [NW.name]: it.name, [NW.amount]: Number(it.amount) || 0, [NW.type]: cls, [NW.month]: monthName, [NW.year]: yearStr } });
-            });
-        });
-        for (let i = 0; i < recs.length; i += 10) {
-            const resp = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ records: recs.slice(i, i + 10), typecast: true }) });
-            if (!resp.ok) throw new Error('Airtable ' + resp.status);
-        }
-        _wealthRecords = null; _wealthPromise = null;
-        renderWealthTab();
-    } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = '📸 Save this month'; }
-        alert('Could not save snapshot: ' + (e.message || 'error'));
-    }
-}
 
 function renderWealthCashflow() {
     const el = document.getElementById('wealthCashflow');
