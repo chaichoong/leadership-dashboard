@@ -1341,13 +1341,32 @@ async function loadWealthBuckets() {
 
 // Compact editor: add/remove buckets and set each one's % of net cash flow.
 // <option> list of all sub-categories (A→Z), with the given ids pre-selected.
-function wealthSubcatOptions(selectedIds) {
-    const sel = new Set(selectedIds || []);
-    return ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
+// A clear dropdown checklist of the chart-of-account sub-categories, with the
+// given ids ticked. Friendlier than a native multi-select for new users.
+function bucketSubsDropdown(linkedIds) {
+    const sel = new Set(linkedIds || []);
+    const subs = ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
         .map(r => ({ id: r.id, name: getField(r, 'fldO4BTJhFv5EsN6i') || '' }))
-        .filter(s => s.name)
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(s => `<option value="${escHtml(s.id)}"${sel.has(s.id) ? ' selected' : ''}>${escHtml(s.name)}</option>`).join('');
+        .filter(s => s.name).sort((a, b) => a.name.localeCompare(b.name));
+    const checks = subs.map(s => `<label style="display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:var(--fs-sm);cursor:pointer;white-space:nowrap;border-radius:var(--radius-sm);color:var(--text-primary)"><input type="checkbox" class="be-sub-cb" value="${escHtml(s.id)}"${sel.has(s.id) ? ' checked' : ''} onchange="bucketsLiveUpdate();bucketSubsCount(this)">${escHtml(s.name)}</label>`).join('');
+    return `<div class="be-subs-wrap" style="position:relative;flex:1;min-width:210px">
+        <button type="button" onclick="bucketSubsToggle(this)" style="width:100%;text-align:left;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);cursor:pointer;color:var(--text-secondary)"><span class="be-subs-count">${sel.size}</span> accounting categor${sel.size === 1 ? 'y' : 'ies'} ▾</button>
+        <div class="be-subs-panel" style="display:none;position:absolute;z-index:20;top:calc(100% + 4px);left:0;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:var(--shadow-md);max-height:240px;overflow:auto;min-width:250px;padding:6px">
+            <div style="font-size:var(--fs-xs);color:var(--text-muted);padding:2px 8px 6px;line-height:1.5">Tick the chart-of-account sub-categories whose spending draws money out of this bucket.</div>
+            ${checks || '<div style="padding:6px 8px;color:var(--text-muted);font-size:var(--fs-sm)">No sub-categories loaded</div>'}
+        </div>
+    </div>`;
+}
+function bucketSubsToggle(btn) {
+    const p = btn.nextElementSibling;
+    if (p) p.style.display = p.style.display === 'block' ? 'none' : 'block';
+}
+function bucketSubsCount(cb) {
+    const wrap = cb.closest('.be-subs-wrap');
+    if (!wrap) return;
+    const n = wrap.querySelectorAll('.be-sub-cb:checked').length;
+    const btn = wrap.querySelector('button');
+    if (btn) btn.innerHTML = `<span class="be-subs-count">${n}</span> accounting categor${n === 1 ? 'y' : 'ies'} ▾`;
 }
 
 function renderBucketEditor(el) {
@@ -1357,12 +1376,13 @@ function renderBucketEditor(el) {
     const rowHtml = (id, name, pct, linkedIds) => `<div class="be-row" data-id="${escHtml(id || '')}" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap">
         <input class="be-name" value="${escHtml(name || '')}" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
         <span style="display:flex;align-items:center;gap:2px"><input class="be-pct" type="number" min="0" value="${pct === '' ? '' : pct}" oninput="bucketsLiveUpdate()" style="width:60px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span></span>
-        <select class="be-subs" multiple size="3" title="Sub-categories whose spend draws down this bucket (Cmd/Ctrl-click to select several)" style="flex:2;min-width:220px;padding:4px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-xs);background:var(--bg-surface)">${wealthSubcatOptions(linkedIds)}</select>
+        ${bucketSubsDropdown(linkedIds)}
         <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;padding-top:6px">&times;</button>
     </div>`;
     el.innerHTML = `<div class="kpi-card">
         <div class="kpi-card-label" style="margin-bottom:6px">Manage income buckets</div>
-        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px">Set each bucket's % of net cash flow and pick the sub-categories whose spend draws it down (that's what feeds the cumulative balances below). <span id="beTotal"></span></div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:4px">For each bucket, set its <strong>% of net cash flow</strong> and tick the <strong>accounting categories</strong> (your chart-of-account sub-categories) whose spending draws money out of it. Changes update the figures below instantly.</div>
+        <div style="display:flex;gap:12px;font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:10px"><span style="flex:1;min-width:120px">Bucket name</span><span style="width:80px">Allocation</span><span style="flex:1;min-width:210px">Accounting categories that draw it down</span><span style="width:14px"></span><span id="beTotal"></span></div>
         <div id="beRows">${recs.map(r => rowHtml(r.id, getField(r, BUCKET.name), Number(getField(r, BUCKET.pct)) || 0, (getField(r, BUCKET.spendSubs) || []).map(l => (l && typeof l === 'object') ? l.id : l))).join('')}</div>
         <div id="beError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:6px"></div>
         <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
@@ -1382,7 +1402,7 @@ function addBucketRow() {
     d.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap';
     d.innerHTML = `<input class="be-name" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
         <span style="display:flex;align-items:center;gap:2px"><input class="be-pct" type="number" min="0" oninput="bucketsLiveUpdate()" style="width:60px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span></span>
-        <select class="be-subs" multiple size="3" title="Sub-categories whose spend draws down this bucket (Cmd/Ctrl-click to select several)" style="flex:2;min-width:220px;padding:4px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-xs);background:var(--bg-surface)">${wealthSubcatOptions([])}</select>
+        ${bucketSubsDropdown([])}
         <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;padding-top:6px">&times;</button>`;
     c.appendChild(d);
     bucketsLiveUpdate();
@@ -1395,6 +1415,7 @@ function bucketsLiveUpdate() {
     const list = [...document.querySelectorAll('.be-row')].map(r => ({
         name: r.querySelector('.be-name').value.trim(),
         pct: Number(r.querySelector('.be-pct').value) || 0,
+        subs: [...r.querySelectorAll('.be-sub-cb:checked')].map(cb => cb.value),
     })).filter(b => b.name);
     const el = document.getElementById('wealthBuckets');
     if (el) renderBuckets(el, list);
@@ -1417,8 +1438,7 @@ async function saveBucketEditor() {
         const name = r.querySelector('.be-name').value.trim();
         if (!name) return;
         const pct = Number(r.querySelector('.be-pct').value) || 0;
-        const subSel = r.querySelector('.be-subs');
-        const subs = subSel ? [...subSel.selectedOptions].map(o => o.value) : [];
+        const subs = [...r.querySelectorAll('.be-sub-cb:checked')].map(cb => cb.value);
         const fields = { [BUCKET.name]: name, [BUCKET.pct]: pct, [BUCKET.sort]: i + 1, [BUCKET.spendSubs]: subs };
         const id = r.dataset.id;
         if (id) { present.add(id); updates.push({ id, fields }); } else { creates.push({ fields }); }
@@ -1471,7 +1491,7 @@ function renderBuckets(el, override) {
     // Cumulative balances: running (apportioned − spent); spend from reconciled sub-cats.
     const bal = buildBucketBalances(buckets, months);
     const balRows = bal.map(b => ({
-        label: b.name + (BUCKET_SPEND_SUBCATS[b.name] ? '' : ' *'),
+        label: b.name,
         goodUp: true,
         values: b.balance,
         items: [
@@ -1479,7 +1499,7 @@ function renderBuckets(el, override) {
             { label: 'Spent', goodUp: false, values: b.spent },
         ],
     }));
-    const balNote = `Running balance over the months shown = cumulative apportioned − cumulative spent. Spend is detected from transactions reconciled to each bucket's sub-categories; click a bucket to see apportioned vs spent. Buckets marked * have no sub-category spend rule yet — Investment (transfers to Interactive Investor) and credit-card payments for Debt Clearance are transfer-based and come next.`;
+    const balNote = `Running balance = what you've apportioned in, less what you've spent from each bucket's accounting categories. It never goes below £0 — overspend just empties the bucket (the shortfall shows in your expenditure budgets). Click a bucket to see apportioned in vs spent.`;
     const balCard = wealthMatrixCard('Income bucket balances — cumulative', balNote, months, [{ header: '', rows: balRows }]);
 
     el.innerHTML = allocCard + balCard;
@@ -1491,15 +1511,20 @@ function renderBuckets(el, override) {
 function buildBucketBalances(buckets, months) {
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => { const n = getField(r, 'fldO4BTJhFv5EsN6i'); if (n) subNames[r.id] = String(n); });
-    // Map sub-category name → bucket, from each bucket's saved Spend Sub-Categories
-    // links (set on the page). Fall back to the built-in defaults for any unlinked.
+    // Map sub-category name → bucket. The live editor passes explicit `subs` ids per
+    // bucket (so unticking a category updates instantly); otherwise read the saved
+    // Spend Sub-Categories links, falling back to the built-in defaults.
     const subToBucket = {};
-    (_bucketsRecords || []).forEach(r => {
-        const bname = getField(r, BUCKET.name);
-        const links = getField(r, BUCKET.spendSubs) || [];
-        (Array.isArray(links) ? links : []).forEach(l => { const sid = (l && typeof l === 'object') ? l.id : l; const nm = subNames[sid]; if (nm && bname) subToBucket[nm] = bname; });
-    });
-    Object.keys(BUCKET_SPEND_SUBCATS).forEach(b => BUCKET_SPEND_SUBCATS[b].forEach(s => { if (!subToBucket[s]) subToBucket[s] = b; }));
+    if (buckets.some(b => b.subs)) {
+        buckets.forEach(b => (b.subs || []).forEach(id => { const nm = subNames[id]; if (nm && b.name) subToBucket[nm] = b.name; }));
+    } else {
+        (_bucketsRecords || []).forEach(r => {
+            const bname = getField(r, BUCKET.name);
+            const links = getField(r, BUCKET.spendSubs) || [];
+            (Array.isArray(links) ? links : []).forEach(l => { const sid = (l && typeof l === 'object') ? l.id : l; const nm = subNames[sid]; if (nm && bname) subToBucket[nm] = bname; });
+        });
+        Object.keys(BUCKET_SPEND_SUBCATS).forEach(b => BUCKET_SPEND_SUBCATS[b].forEach(s => { if (!subToBucket[s]) subToBucket[s] = b; }));
+    }
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
     const keys = months.map(m => m.key);
     const keyIdx = {}; keys.forEach((k, i) => keyIdx[k] = i);
@@ -1520,8 +1545,10 @@ function buildBucketBalances(buckets, months) {
         const pct = Number(b.pct) || 0;
         const appor = net.map(n => Math.round(n * pct / 100));
         const sp = (spent[b.name] || keys.map(() => 0)).map(v => Math.round(v));
+        // Cumulative balance is floored at 0: a bucket can't go negative — overspend
+        // just empties it (the shortfall is picked up in the expenditure budgets).
         let run = 0;
-        const balance = appor.map((a, i) => { run += a - sp[i]; return run; });
+        const balance = appor.map((a, i) => { run = Math.max(0, run + a - sp[i]); return run; });
         return { name: b.name, appor, spent: sp, balance };
     });
 }
