@@ -244,6 +244,19 @@
         'Personal Professional Fees', 'Personal Loan Capital Repayment', 'Personal Loan Interest',
     ];
 
+    // Bucket spend mapping: which personal sub-categories draw down each bucket.
+    // A transaction coded to one of these (an outflow) decrements that bucket's
+    // running balance. Investment (transfers to Interactive Investor) and the
+    // credit-card part of Debt Clearance are transfer-based, not sub-category coded,
+    // so they're handled separately/added later — flagged in the UI.
+    const BUCKET_SPEND_SUBCATS = {
+        'Maintenance': ['Personal Maintenance'],
+        'Travel': ['Personal Travel'],
+        'Fun': ['Personal Discretionary Lifestyle', 'Personal Discretionary Food & Drink'],
+        'Tax': ['Personal Tax'],
+        'Debt Clearance': ['Personal Loan Capital Repayment', 'Personal Loan Interest'],
+    };
+
     // ── Personal Budgets field IDs (Airtable: Personal Budgets / tblm5ZxyoiLfaBAS4) ──
     // Monthly budget per personal-expense category, matched to PERSONAL_EXPENSE_SUBCATS by name.
     const PBUDGET = {
