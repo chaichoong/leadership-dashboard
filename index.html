@@ -67,7 +67,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="operations" data-tabs="tasks,comms,operations,systemisation,skills">
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,comms,operations,systemisation,skills,ai-brain">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Operations</span>
@@ -79,6 +79,7 @@
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('skills')}"><span class="sidebar-icon">&#x1F9E0;</span><span class="sidebar-label">Skills Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="skills" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ai-brain')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ai-brain')}"><span class="sidebar-icon">&#x1F4AD;</span><span class="sidebar-label">AI Brain</span><span class="sidebar-health-dot unknown" data-sidebar-health="ai-brain" title="No checks run yet"></span></div>
                 </div>
             </div>
 
@@ -676,6 +677,11 @@
         <!-- Marketing: Content Machine (standalone app at chaichoong.github.io/content-machine — same origin on Pages, so its localStorage keys are shared) -->
         <div class="tab-panel" id="tab-content-machine">
             <iframe class="tab-panel-iframe" id="contentMachineFrame" src="" data-src="https://chaichoong.github.io/content-machine/" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Operations: AI Brain (standalone module page loaded via iframe) -->
+        <div class="tab-panel" id="tab-ai-brain">
+            <iframe class="tab-panel-iframe" id="aiBrainFrame" src="" data-src="ai-brain.html" loading="lazy" allowfullscreen style="border:none"></iframe>
         </div>
 
         <!-- Tab 7: Site Map -->
