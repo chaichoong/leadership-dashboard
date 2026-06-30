@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ops-director",
+      "name": "ops-director-wealth",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8811"],
-      "port": 8811,
+      "runtimeArgs": ["-m", "http.server", "8951"],
+      "port": 8951,
       "cwd": "."
     }
   ]
