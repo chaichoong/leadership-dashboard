@@ -514,14 +514,16 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
 
     // ── KPI summary strip (headline figures + 1/3/6/9/12-month changes) ──
     // 13-month series (current + 12 prior) so every period change is computable.
-    const kpiKeys = wealthMonthKeys(13, 1); // 13 completed months
-    const kpiSnap = pick => kpiKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === kpiKeys.length - 1 ? pick(view) : null; });
+    const kpiKeys = wealthMonthKeys(13, 0); // current month + 12 prior
+    const kpiRef = wealthCompletedIdx(kpiKeys); // last completed month (flow anchor)
+    const kpiLast = kpiKeys.length - 1; // current month (stock/balance anchor)
+    const kpiSnap = pick => kpiKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === kpiLast ? pick(view) : null; });
     const kpiCfSeries = buildMonthlyCashflow(kpiKeys).map(m => m.net);
     const KPI_PERIODS = [1, 3, 6, 9, 12];
-    const periodChanges = (series, goodUp) => {
-        const cur = series[series.length - 1];
+    const periodChanges = (series, goodUp, anchorIdx) => {
+        const cur = series[anchorIdx];
         return KPI_PERIODS.map(n => {
-            const prev = series[series.length - 1 - n];
+            const prev = series[anchorIdx - n];
             if (cur == null || prev == null || prev === 0) return `<span style="color:var(--text-muted)">${n}m&nbsp;–</span>`;
             const p = (cur - prev) / Math.abs(prev) * 100;
             if (Math.round(p) === 0) return `<span style="color:var(--text-muted)">${n}m&nbsp;0%</span>`;
@@ -529,17 +531,20 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             return `<span style="color:${good ? 'var(--success)' : 'var(--danger)'}">${n}m&nbsp;${up ? '▲' : '▼'}${Math.abs(Math.round(p))}%</span>`;
         }).join('<span style="color:var(--border-default)">&nbsp;·&nbsp;</span>');
     };
-    const kpiCard = (label, value, valueColour, series, goodUp) => `<div class="kpi-card" style="margin-bottom:0">
+    const kpiCard = (label, value, valueColour, series, goodUp, anchorIdx) => `<div class="kpi-card" style="margin-bottom:0">
         <div class="kpi-card-label" style="margin-bottom:6px">${escHtml(label)}</div>
         <div style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:${valueColour};line-height:1.1">${fmt(value)}</div>
-        <div style="margin-top:8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);line-height:1.7">${periodChanges(series, goodUp)}</div>
+        <div style="margin-top:8px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);line-height:1.7">${periodChanges(series, goodUp, anchorIdx)}</div>
     </div>`;
-    const cfNetNow = kpiCfSeries[kpiCfSeries.length - 1] || 0;
+    // Net worth / assets / liabilities are point-in-time balances → anchor on the
+    // current month (kpiLast). Cash flow is a monthly flow distorted by the partial
+    // current month → anchor on the last completed month (kpiRef).
+    const cfNetNow = kpiCfSeries[kpiRef] || 0;
     const kpiStrip = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)">
-        ${kpiCard('Net worth', view.net, view.net >= 0 ? 'var(--text-primary)' : 'var(--danger)', kpiSnap(p => p.net), true)}
-        ${kpiCard('Net cash flow (last month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfSeries, true)}
-        ${kpiCard('Total assets', view.assets, 'var(--text-primary)', kpiSnap(p => p.assets), true)}
-        ${kpiCard('Total liabilities', view.liabilities, 'var(--text-primary)', kpiSnap(p => p.liabilities), false)}
+        ${kpiCard('Net worth', view.net, view.net >= 0 ? 'var(--text-primary)' : 'var(--danger)', kpiSnap(p => p.net), true, kpiLast)}
+        ${kpiCard('Net cash flow (last complete month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfSeries, true, kpiRef)}
+        ${kpiCard('Total assets', view.assets, 'var(--text-primary)', kpiSnap(p => p.assets), true, kpiLast)}
+        ${kpiCard('Total liabilities', view.liabilities, 'var(--text-primary)', kpiSnap(p => p.liabilities), false, kpiLast)}
     </div>`;
 
     // Trend-column period selector (drives the Δ column on every matrix below).
@@ -600,6 +605,21 @@ function wealthMonthKeys(n, endOffset) {
         out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
     }
     return out;
+}
+
+// Key for the current (partial) calendar month, e.g. "2026-06".
+function wealthCurrentMonthKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Index of the last COMPLETED month in a chronological key list. The current
+// calendar month is partial, so flow trends (cash flow, buckets) anchor on the
+// month before it. Returns the last index if the current month is not in the list.
+function wealthCompletedIdx(keys) {
+    const cm = wealthCurrentMonthKey();
+    for (let i = keys.length - 1; i >= 0; i--) if (keys[i] !== cm) return i;
+    return Math.max(0, keys.length - 1);
 }
 
 function buildMonthlyCashflow(monthKeys) {
@@ -669,15 +689,29 @@ function wealthToggleRows(rid, td) {
     rows.forEach(r => { const hidden = r.style.display === 'none'; r.style.display = hidden ? '' : 'none'; shown = hidden; });
     const caret = td.querySelector('.wm-caret'); if (caret) caret.textContent = shown ? '▾' : '▸';
 }
-function wealthMatrixCard(title, note, months, sections) {
+// opts.leadHeader (string) adds a highlighted column right after the labels, fed by
+// each row's `lead` value (e.g. "In the pot" for buckets). opts.anchor controls the
+// % trends: 'completed' anchors on the last completed month (for flow data distorted
+// by the partial current month); otherwise the latest/current column is used.
+function wealthMatrixCard(title, note, months, sections, opts) {
+    opts = opts || {};
+    const leadHeader = opts.leadHeader || null;
     const stick = 'position:sticky;left:0;background:var(--bg-surface);z-index:1';
-    const colCount = months.length + 2;
+    const colCount = months.length + 2 + (leadHeader ? 1 : 0);
     const lastCol = months.length - 1;
-    const monthHead = months.map((m, i) => `<th style="text-align:right;padding:6px 8px;font-weight:${i === lastCol ? 'var(--fw-semibold)' : 'var(--fw-regular)'};color:${i === lastCol ? 'var(--text-primary)' : 'var(--text-muted)'};white-space:nowrap;${i === lastCol ? 'background:var(--accent-soft);' : ''}">${escHtml(m.label)}</th>`).join('');
+    const refIdx = wealthCompletedIdx(months.map(m => m.key));
+    const anchorIdx = opts.anchor === 'completed' ? refIdx : lastCol;
+    const runningIdx = anchorIdx !== lastCol ? lastCol : -1; // current partial month, shown but not the % anchor
+    const colStyle = i => i === anchorIdx ? 'background:var(--accent-soft);' : (i === runningIdx ? 'background:var(--bg-subtle);' : '');
+    const monthHead = months.map((m, i) => {
+        const isAnchor = i === anchorIdx;
+        return `<th style="text-align:right;padding:6px 8px;font-weight:${isAnchor ? 'var(--fw-semibold)' : 'var(--fw-regular)'};color:${isAnchor ? 'var(--text-primary)' : 'var(--text-muted)'};white-space:nowrap;${colStyle(i)}">${escHtml(m.label)}${i === runningIdx ? ' <span style="font-size:8px;color:var(--text-muted)" title="Current month, still in progress">●</span>' : ''}</th>`;
+    }).join('');
+    const leadHead = leadHeader ? `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap;background:var(--accent-soft)">${escHtml(leadHeader)}</th>` : '';
 
-    const valCell = (v, prev, goodUp, isCurrent) => {
-        const cur = isCurrent ? 'background:var(--accent-soft);' : '';
-        if (v == null) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);${cur}">–</td>`;
+    const valCell = (v, prev, goodUp, i) => {
+        const bg = colStyle(i);
+        if (v == null) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);${bg}">–</td>`;
         let arrow = '';
         if (prev != null && prev !== 0) {
             const pct = (v - prev) / Math.abs(prev) * 100;
@@ -686,30 +720,36 @@ function wealthMatrixCard(title, note, months, sections) {
                 arrow = ` <span style="font-size:9px;color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'}</span>`;
             }
         }
-        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${cur}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}${arrow}</td>`;
+        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${bg}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}${arrow}</td>`;
     };
     const changeCell = (values, goodUp) => {
-        const cur = values[values.length - 1];
-        let prev = values[values.length - 1 - _wealthChangeMonths];
-        if (prev == null) { const nn = values.filter(v => v != null); prev = nn.length ? nn[0] : null; } // fall back to the earliest available
+        let cur = values[anchorIdx];
+        if (cur == null && opts.anchor !== 'completed') { const nn = values.filter(v => v != null); cur = nn.length ? nn[nn.length - 1] : null; }
+        let prev = values[anchorIdx - _wealthChangeMonths];
+        if (prev == null) { const nn = values.slice(0, anchorIdx + 1).filter(v => v != null); prev = nn.length ? nn[0] : null; } // fall back to the earliest available
         if (cur == null || prev == null || prev === 0) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted)">–</td>`;
         const pct = (cur - prev) / Math.abs(prev) * 100;
         if (Math.round(pct) === 0) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);white-space:nowrap">0%</td>`;
         const up = pct > 0, good = goodUp ? up : !up;
         return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;font-weight:var(--fw-semibold);color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'} ${Math.abs(Math.round(pct))}%</td>`;
     };
+    const leadCell = (row, isChild) => {
+        if (!leadHeader) return '';
+        if (isChild || row.lead == null) return `<td style="background:var(--accent-soft)"></td>`;
+        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;background:var(--accent-soft);font-weight:var(--fw-semibold);color:${row.lead < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(row.lead)}</td>`;
+    };
     const renderRow = (row, isChild, parentRid) => {
         const goodUp = row.goodUp !== false;
         const vals = row.values;
         const rowBg = isChild ? 'var(--bg-surface-2)' : (row.bold ? 'var(--bg-subtle)' : 'var(--bg-surface)');
-        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i === lastCol)).join('');
+        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i)).join('');
         const hasItems = row.items && row.items.length;
         const rid = hasItems ? ('r' + (++_wealthRowSeq)) : '';
         const caret = hasItems ? '<span class="wm-caret" style="display:inline-block;width:12px;color:var(--text-muted)">▸</span>' : (isChild ? '' : '<span style="display:inline-block;width:12px"></span>');
         const trAttr = isChild ? `class="wm-child-${parentRid}" style="display:none;background:${rowBg}"` : `style="background:${rowBg}${row.border ? ';border-top:' + row.border : ''}"`;
         const labelStyle = `text-align:left;padding:5px 8px;${isChild ? 'padding-left:26px;' : ''}font-weight:${row.bold ? 'var(--fw-bold)' : 'var(--fw-regular)'};color:${isChild ? 'var(--text-secondary)' : 'var(--text-primary)'};position:sticky;left:0;background:${rowBg};z-index:1${hasItems ? ';cursor:pointer' : ''}`;
         const onclick = hasItems ? ` onclick="wealthToggleRows('${rid}',this)"` : '';
-        let html = `<tr ${trAttr}><td${onclick} style="${labelStyle}">${caret}${escHtml(row.label)}</td>${cells}${changeCell(vals, goodUp)}</tr>`;
+        let html = `<tr ${trAttr}><td${onclick} style="${labelStyle}">${caret}${escHtml(row.label)}</td>${leadCell(row, isChild)}${cells}${changeCell(vals, goodUp)}</tr>`;
         if (hasItems) html += row.items.map(it => renderRow(it, true, rid)).join('');
         return html;
     };
@@ -723,18 +763,18 @@ function wealthMatrixCard(title, note, months, sections) {
         ${note ? `<div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">${note}</div>` : ''}
         <div style="overflow-x:auto">
             <table style="border-collapse:collapse;font-size:var(--fs-sm);width:100%">
-                <thead><tr><th style="${stick}"></th>${monthHead}<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap">${_wealthChangeMonths}-mo Δ</th></tr></thead>
+                <thead><tr><th style="${stick}"></th>${leadHead}${monthHead}<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap">${_wealthChangeMonths}-mo Δ</th></tr></thead>
                 <tbody>${body}</tbody>
             </table>
         </div>
     </div>`;
 }
 
-// Rolling 12-month list of COMPLETED months (oldest → last completed month) with
-// short labels (e.g. "Jul 25"). The current partial month is excluded so every
-// % change is computed between full months; it rolls in once the month ends.
+// Rolling 12-month list ending at the CURRENT (partial) month, with short labels
+// (e.g. "Jul 25"). The current month is shown so today's figures are visible, but
+// the matrices anchor their % trends on the last completed month (wealthCompletedIdx).
 function wealthMonths12() {
-    return wealthMonthKeys(12, 1).map(k => ({ key: k, label: wealthMonthLabel(k).split(' ')[0].slice(0, 3) + ' ' + k.slice(2, 4) }));
+    return wealthMonthKeys(12, 0).map(k => ({ key: k, label: wealthMonthLabel(k).split(' ')[0].slice(0, 3) + ' ' + k.slice(2, 4) }));
 }
 
 // Selector handler: set the Δ-column period and re-render the tab from cached data.
@@ -775,8 +815,8 @@ function renderWealthCashflow() {
     ];
     el.innerHTML = wealthMatrixCard(
         'Monthly cash flow — rolling 12 months',
-        'Money in (real estate / portfolio revenue + personal income, internal drawings excluded) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Click Business or Personal expenditure to expand the detail. Arrows = change vs the previous month (green favourable); the 12-mo column is the change across the period. Business expenditure is operating costs (matching the P&L); capital repayments not yet included.',
-        months, sections);
+        'Money in (real estate / portfolio revenue + personal income, internal drawings excluded) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Click Business or Personal expenditure to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month. Business expenditure is operating costs (matching the P&L); capital repayments not yet included.',
+        months, sections, { anchor: 'completed' });
 }
 
 // ── Property portfolio — per property ─────────────────────────────────────────
@@ -1476,33 +1516,33 @@ function renderBuckets(el, override) {
         .map(r => ({ name: getField(r, BUCKET.name) || '(unnamed)', pct: Number(getField(r, BUCKET.pct)) || 0 }));
     const buckets = list.filter(b => b.name);
     const months = wealthMonths12();
-    const net = buildMonthlyCashflow(months.map(m => m.key)).map(m => m.net);
+    const last = months.length - 1;
     const totalPct = buckets.reduce((s, b) => s + (Number(b.pct) || 0), 0);
 
+    // One consolidated table: per-bucket monthly amount in (floored at £0), with the
+    // current cumulative balance ("In the pot") highlighted right after the name.
+    const bal = buildBucketBalances(buckets, months);
+    const byName = {}; bal.forEach(b => byName[b.name] = b);
     const rows = buckets.map(b => {
         const pct = Number(b.pct) || 0;
-        return { label: `${b.name} (${pct}%)`, goodUp: true, values: net.map(n => Math.round(n * pct / 100)) };
+        const bb = byName[b.name] || { appor: months.map(() => 0), spent: months.map(() => 0), balance: months.map(() => 0) };
+        return {
+            label: `${b.name} (${pct}%)`,
+            goodUp: true,
+            lead: bb.balance[last],
+            values: bb.appor,
+            items: [
+                { label: 'Spent', goodUp: false, values: bb.spent },
+                { label: 'Running balance', goodUp: true, values: bb.balance },
+            ],
+        };
     });
-    rows.push({ label: 'Total allocated', goodUp: true, bold: true, border: '1px solid var(--border-default)', values: net.map(n => Math.round(n * totalPct / 100)) });
+    const totApr = months.map((_, i) => bal.reduce((s, b) => s + (b.appor[i] || 0), 0));
+    const totPot = bal.reduce((s, b) => s + (b.balance[last] || 0), 0);
+    rows.push({ label: 'Total allocated', goodUp: true, bold: true, border: '1px solid var(--border-default)', lead: totPot, values: totApr });
 
-    const note = `Each bucket is its % of that month's net cash flow${totalPct !== 100 ? ` — percentages total ${totalPct}% (aim for 100%)` : ''}. A negative month means there is nothing to allocate.`;
-    const allocCard = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }]);
-
-    // Cumulative balances: running (apportioned − spent); spend from reconciled sub-cats.
-    const bal = buildBucketBalances(buckets, months);
-    const balRows = bal.map(b => ({
-        label: b.name,
-        goodUp: true,
-        values: b.balance,
-        items: [
-            { label: 'Apportioned in', goodUp: true, values: b.appor },
-            { label: 'Spent', goodUp: false, values: b.spent },
-        ],
-    }));
-    const balNote = `Running balance = what you've apportioned in, less what you've spent from each bucket's accounting categories. It never goes below £0 — overspend just empties the bucket (the shortfall shows in your expenditure budgets). Click a bucket to see apportioned in vs spent.`;
-    const balCard = wealthMatrixCard('Income bucket balances — cumulative', balNote, months, [{ header: '', rows: balRows }]);
-
-    el.innerHTML = allocCard + balCard;
+    const note = `Each row is a bucket and its share (%) of net cash flow. The highlighted "In the pot" column is what's in each bucket right now — apportioned in, less spent, never below £0. The monthly columns show what went in that month (£0 in any month with no surplus). The current month (●) is still in progress; the Δ trend uses the last completed month. Click a bucket to see what's been spent and its running balance.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
+    el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot', anchor: 'completed' });
 }
 
 // Per-bucket cumulative balance: running (apportioned − spent). Apportioned = % of
@@ -1543,7 +1583,9 @@ function buildBucketBalances(buckets, months) {
     const net = buildMonthlyCashflow(keys).map(m => m.net);
     return buckets.map(b => {
         const pct = Number(b.pct) || 0;
-        const appor = net.map(n => Math.round(n * pct / 100));
+        // Monthly amount in is floored at £0: a negative-cash-flow month puts nothing
+        // in (it never draws a bucket down), so the figure shows £0, never a negative.
+        const appor = net.map(n => Math.max(0, Math.round(n * pct / 100)));
         const sp = (spent[b.name] || keys.map(() => 0)).map(v => Math.round(v));
         // Cumulative balance is floored at 0: a bucket can't go negative — overspend
         // just empties it (the shortfall is picked up in the expenditure budgets).
