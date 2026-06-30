@@ -17,7 +17,7 @@
   const TENANTS='tblX4elTuu01gwBYh', TENANCIES='tblN51a88qTDB6iMH', UNITS='tblM3mZCR5kiEdWMj',
         PROPS='tbl6f0OkAmTC2jbuG', VALS='tblZYsa0u1M17N7ZE', CATS='tbleWb8ioptnEwPR8',
         COSTS='tblx5kvhzNEI5TFlS', TX='tbln0gzhCAorFc3zB';
-  const DEFER = new Set([COSTS, TX]);   // Module 3 — return empty
+  const DEFER = new Set();   // Module 3 migrated — Costs + Transactions now live
 
   // table id → { source (read), write (base table), map: {airtableFieldId:[col,kind]} }
   // kinds: scalar | num | bool | date | link | arr
@@ -60,6 +60,16 @@
     fld8X5yIdz6oPG2jj:['approved_by','scalar'], fldxUhWDTrpWEFGCK:['approved_on','date'],
   }};
   M[CATS] = { source:'coa_categories', write:'coa_categories', map:{ fldii4oUzSfmplihO:['name','scalar'] }};
+  M[COSTS] = { source:'costs', write:'costs', map:{
+    fldS6FYfpkhu6tJG0:['name','scalar'], fld9JibXkMpTeMcxw:['expected','num'],
+    fldQJPGLFMbwVelsW:['inactive','bool'],
+  }};
+  M[TX] = { source:'transactions', write:'transactions', map:{
+    fldoyQ6Rr9cHp3bgQ:['date','date'], fldN01r1hp7UQjgtm:['amount','num'],
+    fldsbuAJCTsXHug4C:['name','scalar'], fldFPmNixqHPQy4D6:['category_id','link'],
+    fldxKX1IbIFcAOnn5:['reconciled','bool'], fldPmAMmxwqs4SdPa:['tenancy_id','link'],
+    fldJGIhSbgXNIEW4a:['unit_id','link'], fldvp44VfF8uTTthp:['property_id','link'],
+  }};
 
   function rowToRecord(row, cfg) {
     const fields = {};
@@ -95,13 +105,22 @@
 
   const json = (o, s=200) => new Response(JSON.stringify(o), { status:s, headers:{'Content-Type':'application/json'} });
 
-  async function readList(tableId) {
+  async function readList(tableId, url) {
     if (DEFER.has(tableId)) return { records: [] };
     const cfg = M[tableId];
     if (!cfg) return null;
+    // Transactions: honour the page's 24-month IS_AFTER({Date},'YYYY-MM-DD') filter
+    // so we don't pull the entire ledger (thousands of rows) on every load.
+    let dateGte = null;
+    if (tableId === TX && url) {
+      const m = /IS_AFTER\([^,]*,\s*'(\d{4}-\d{2}-\d{2})'/.exec(url.searchParams.get('filterByFormula') || '');
+      if (m) dateGte = m[1];
+    }
     const rows = []; const page = 1000; let from = 0;
     for (;;) {
-      const { data, error } = await sb.from(cfg.source).select('*').range(from, from+page-1);
+      let q = sb.from(cfg.source).select('*').range(from, from+page-1);
+      if (dateGte) q = q.gte('date', dateGte);
+      const { data, error } = await q;
       if (error) throw new Error(error.message);
       rows.push(...data);
       if (data.length < page) break;
@@ -139,7 +158,7 @@
         const method = (init.method || 'GET').toUpperCase();
         if (DEFER.has(tableId)) return json({ records: [] });
         if (!M[tableId]) return _realFetch(input, init);
-        if (method === 'GET') return json(recId ? await readOne(tableId, recId) : await readList(tableId));
+        if (method === 'GET') return json(recId ? await readOne(tableId, recId) : await readList(tableId, new URL(urlStr)));
         if (method === 'POST') {
           const b = JSON.parse(init.body || '{}');
           const { data, error } = await sb.from(M[tableId].write).insert(fieldsToColumns(tableId, b.fields||{})).select().single();
