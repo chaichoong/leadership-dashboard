@@ -482,17 +482,19 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const alMonths = wealthMonths12();
     const alKeys = alMonths.map(m => m.key);
     const alLast = alKeys.length - 1;
-    // Current month uses the reconciled live figure; prior months come from snapshots
-    // (null where there's no snapshot, shown as blank).
+    // A month's snapshot wins; the latest column falls back to the reconciled live
+    // figure when that month has no saved snapshot yet. Other gaps stay blank.
     const classVals = cls => alKeys.map((k, i) => {
+        const p = periodByKey[k];
+        if (p) { const v = p.byClass[cls]; return v == null ? null : v; }
         if (i === alLast) { const v = view.byClass[cls]; return v == null ? null : v; }
-        const p = periodByKey[k]; if (!p) return null; const v = p.byClass[cls]; return v == null ? null : v;
+        return null;
     });
     const itemRows = (items, goodUp) => (items && items.length)
         ? items.slice().sort((a, b) => b.amount - a.amount).map(it => ({ label: it.name, goodUp, values: alKeys.map((k, i) => i === alLast ? it.amount : null) }))
         : undefined;
     const alRow = (label, cls, items, goodUp) => ({ label, goodUp, values: classVals(cls), items: itemRows(items, goodUp) });
-    const totalVals = pick => alKeys.map((k, i) => i === alLast ? pick(view) : (periodByKey[k] ? pick(periodByKey[k]) : null));
+    const totalVals = pick => alKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === alLast ? pick(view) : null; });
     const alSections = [
         { header: 'Assets', rows: [
             alRow('Cash', 'Cash', snapItems('Cash'), true),
@@ -518,8 +520,8 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
 
     // ── KPI summary strip (headline figures + 1/3/6/9/12-month changes) ──
     // 13-month series (current + 12 prior) so every period change is computable.
-    const kpiKeys = wealthMonthKeys(13, 0);
-    const kpiSnap = pick => kpiKeys.map((k, i) => i === kpiKeys.length - 1 ? pick(view) : (periodByKey[k] ? pick(periodByKey[k]) : null));
+    const kpiKeys = wealthMonthKeys(13, 1); // 13 completed months
+    const kpiSnap = pick => kpiKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === kpiKeys.length - 1 ? pick(view) : null; });
     const kpiCfSeries = buildMonthlyCashflow(kpiKeys).map(m => m.net);
     const KPI_PERIODS = [1, 3, 6, 9, 12];
     const periodChanges = (series, goodUp) => {
@@ -541,7 +543,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const cfNetNow = kpiCfSeries[kpiCfSeries.length - 1] || 0;
     const kpiStrip = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-4);margin-bottom:var(--space-5)">
         ${kpiCard('Net worth', view.net, view.net >= 0 ? 'var(--text-primary)' : 'var(--danger)', kpiSnap(p => p.net), true)}
-        ${kpiCard('Net cash flow (this month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfSeries, true)}
+        ${kpiCard('Net cash flow (last month)', cfNetNow, cfNetNow >= 0 ? 'var(--success)' : 'var(--danger)', kpiCfSeries, true)}
         ${kpiCard('Total assets', view.assets, 'var(--text-primary)', kpiSnap(p => p.assets), true)}
         ${kpiCard('Total liabilities', view.liabilities, 'var(--text-primary)', kpiSnap(p => p.liabilities), false)}
     </div>`;
@@ -735,9 +737,11 @@ function wealthMatrixCard(title, note, months, sections) {
     </div>`;
 }
 
-// Rolling 12-month list (oldest → current month) with short labels (e.g. "Jul 25").
+// Rolling 12-month list of COMPLETED months (oldest → last completed month) with
+// short labels (e.g. "Jul 25"). The current partial month is excluded so every
+// % change is computed between full months; it rolls in once the month ends.
 function wealthMonths12() {
-    return wealthMonthKeys(12, 0).map(k => ({ key: k, label: wealthMonthLabel(k).split(' ')[0].slice(0, 3) + ' ' + k.slice(2, 4) }));
+    return wealthMonthKeys(12, 1).map(k => ({ key: k, label: wealthMonthLabel(k).split(' ')[0].slice(0, 3) + ' ' + k.slice(2, 4) }));
 }
 
 // Selector handler: set the Δ-column period and re-render the tab from cached data.
@@ -1384,19 +1388,30 @@ async function loadWealthBuckets() {
 }
 
 // Compact editor: add/remove buckets and set each one's % of net cash flow.
+// <option> list of all sub-categories (A→Z), with the given ids pre-selected.
+function wealthSubcatOptions(selectedIds) {
+    const sel = new Set(selectedIds || []);
+    return ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
+        .map(r => ({ id: r.id, name: getField(r, 'fldO4BTJhFv5EsN6i') || '' }))
+        .filter(s => s.name)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(s => `<option value="${escHtml(s.id)}"${sel.has(s.id) ? ' selected' : ''}>${escHtml(s.name)}</option>`).join('');
+}
+
 function renderBucketEditor(el) {
     if (!el) return;
     const recs = (_bucketsRecords || []).slice().sort((a, b) =>
         (Number(getField(a, BUCKET.sort)) || 0) - (Number(getField(b, BUCKET.sort)) || 0));
-    const rowHtml = (id, name, pct) => `<div class="be-row" data-id="${escHtml(id || '')}" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-        <input class="be-name" value="${escHtml(name || '')}" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
-        <input class="be-pct" type="number" min="0" value="${pct === '' ? '' : pct}" oninput="bucketsLiveUpdate()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
-        <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>
+    const rowHtml = (id, name, pct, linkedIds) => `<div class="be-row" data-id="${escHtml(id || '')}" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap">
+        <input class="be-name" value="${escHtml(name || '')}" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+        <span style="display:flex;align-items:center;gap:2px"><input class="be-pct" type="number" min="0" value="${pct === '' ? '' : pct}" oninput="bucketsLiveUpdate()" style="width:60px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span></span>
+        <select class="be-subs" multiple size="3" title="Sub-categories whose spend draws down this bucket (Cmd/Ctrl-click to select several)" style="flex:2;min-width:220px;padding:4px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-xs);background:var(--bg-surface)">${wealthSubcatOptions(linkedIds)}</select>
+        <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;padding-top:6px">&times;</button>
     </div>`;
     el.innerHTML = `<div class="kpi-card">
         <div class="kpi-card-label" style="margin-bottom:6px">Manage income buckets</div>
-        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px">Add or remove buckets and set each one's % of net cash flow. <span id="beTotal"></span></div>
-        <div id="beRows">${recs.map(r => rowHtml(r.id, getField(r, BUCKET.name), Number(getField(r, BUCKET.pct)) || 0)).join('')}</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px">Set each bucket's % of net cash flow and pick the sub-categories whose spend draws it down (that's what feeds the cumulative balances below). <span id="beTotal"></span></div>
+        <div id="beRows">${recs.map(r => rowHtml(r.id, getField(r, BUCKET.name), Number(getField(r, BUCKET.pct)) || 0, (getField(r, BUCKET.spendSubs) || []).map(l => (l && typeof l === 'object') ? l.id : l))).join('')}</div>
         <div id="beError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:6px"></div>
         <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
             <button onclick="addBucketRow()" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:7px 14px;cursor:pointer;color:var(--accent);font-size:var(--fs-sm)">+ Add bucket</button>
@@ -1412,10 +1427,11 @@ function addBucketRow() {
     const d = document.createElement('div');
     d.className = 'be-row';
     d.dataset.id = '';
-    d.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px';
-    d.innerHTML = `<input class="be-name" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
-        <input class="be-pct" type="number" min="0" oninput="bucketsLiveUpdate()" style="width:64px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span>
-        <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px">&times;</button>`;
+    d.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap';
+    d.innerHTML = `<input class="be-name" oninput="bucketsLiveUpdate()" placeholder="Bucket name" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+        <span style="display:flex;align-items:center;gap:2px"><input class="be-pct" type="number" min="0" oninput="bucketsLiveUpdate()" style="width:60px;padding:6px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"><span style="color:var(--text-muted);font-size:var(--fs-sm)">%</span></span>
+        <select class="be-subs" multiple size="3" title="Sub-categories whose spend draws down this bucket (Cmd/Ctrl-click to select several)" style="flex:2;min-width:220px;padding:4px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-xs);background:var(--bg-surface)">${wealthSubcatOptions([])}</select>
+        <button onclick="this.closest('.be-row').remove();bucketsLiveUpdate()" title="Remove" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;padding-top:6px">&times;</button>`;
     c.appendChild(d);
     bucketsLiveUpdate();
 }
@@ -1449,7 +1465,9 @@ async function saveBucketEditor() {
         const name = r.querySelector('.be-name').value.trim();
         if (!name) return;
         const pct = Number(r.querySelector('.be-pct').value) || 0;
-        const fields = { [BUCKET.name]: name, [BUCKET.pct]: pct, [BUCKET.sort]: i + 1 };
+        const subSel = r.querySelector('.be-subs');
+        const subs = subSel ? [...subSel.selectedOptions].map(o => o.value) : [];
+        const fields = { [BUCKET.name]: name, [BUCKET.pct]: pct, [BUCKET.sort]: i + 1, [BUCKET.spendSubs]: subs };
         const id = r.dataset.id;
         if (id) { present.add(id); updates.push({ id, fields }); } else { creates.push({ fields }); }
     });
@@ -1521,8 +1539,15 @@ function renderBuckets(el, override) {
 function buildBucketBalances(buckets, months) {
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => { const n = getField(r, 'fldO4BTJhFv5EsN6i'); if (n) subNames[r.id] = String(n); });
+    // Map sub-category name → bucket, from each bucket's saved Spend Sub-Categories
+    // links (set on the page). Fall back to the built-in defaults for any unlinked.
     const subToBucket = {};
-    Object.keys(BUCKET_SPEND_SUBCATS).forEach(b => BUCKET_SPEND_SUBCATS[b].forEach(s => { subToBucket[s] = b; }));
+    (_bucketsRecords || []).forEach(r => {
+        const bname = getField(r, BUCKET.name);
+        const links = getField(r, BUCKET.spendSubs) || [];
+        (Array.isArray(links) ? links : []).forEach(l => { const sid = (l && typeof l === 'object') ? l.id : l; const nm = subNames[sid]; if (nm && bname) subToBucket[nm] = bname; });
+    });
+    Object.keys(BUCKET_SPEND_SUBCATS).forEach(b => BUCKET_SPEND_SUBCATS[b].forEach(s => { if (!subToBucket[s]) subToBucket[s] = b; }));
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
     const keys = months.map(m => m.key);
     const keyIdx = {}; keys.forEach((k, i) => keyIdx[k] = i);

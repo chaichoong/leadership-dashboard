@@ -300,6 +300,7 @@
         balance: 'fld50s2fcXr4vEiVy',  // Balance (currency £) — running virtual balance
         sort:    'fldtUTeLjEpPJAcoy',  // Sort Order (number)
         notes:   'fldQR5QoFToiHMTEn',  // Notes (multilineText)
+        spendSubs: 'fld6yClkQoMlOkiU4', // Spend Sub-Categories (multipleRecordLinks → subCategories): drives bucket draw-down
     };
 
     // Business name field on the Businesses table — used by the Invoices tab dropdown
