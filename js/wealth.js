@@ -557,6 +557,9 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     el.innerHTML = `
     <div style="width:100%">
 
+        <!-- Refresh + sync status + health checks (same bar every other tab has) -->
+        <div data-sync-bar="wealth"></div>
+
         ${kpiStrip}
 
         ${changeSelector}
@@ -586,6 +589,70 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     // Cash flow reads the already-loaded transactions (sync). Buckets fetch their table.
     renderWealthCashflow();
     loadWealthBuckets();
+
+    // Refresh + sync status + health checks — the standard bar every other tab has.
+    registerWealthSyncBar(view, monthsBehind, asOf, currentLabel);
+}
+
+// Wire the shared sync bar for the Wealth tab: a Refresh button (reloads the
+// underlying data and re-renders), a freshness stamp, and health checks that
+// confirm the data behind net worth, cash flow and buckets actually loaded and
+// is current. Snapshot figures (view, monthsBehind) are captured at render time;
+// the bar re-registers on every render, and Refresh re-runs the whole load.
+function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
+    if (typeof registerSyncBar !== 'function') return;
+    const num = a => (a && a.length) || 0;
+    registerSyncBar('wealth', {
+        refreshFn: async () => {
+            // Refresh the shared dashboard data (transactions, accounts) then the
+            // Wealth-specific tables, then re-render from scratch.
+            if (typeof loadDashboard === 'function') { try { await loadDashboard(); } catch (_) {} }
+            _wealthRecords = null; _wealthPromise = null;
+            _valRecords = null; _valPromise = null;
+            _debtRecords = null; _debtPromise = null;
+            _bucketsRecords = null; _bucketsPromise = null;
+            await renderWealthTab();
+        },
+        checks: [
+            { name: 'Net worth snapshots loaded', kind: 'sync', run: () => {
+                const n = num(_wealthRecords);
+                if (n === 0) return { status: 'fail', detail: 'No net worth snapshot records loaded' };
+                return { status: 'pass', detail: `${n} snapshot rows loaded (latest ${asOf})` };
+            }},
+            { name: 'Figures up to date', kind: 'sync', run: () => {
+                if (monthsBehind <= 0) return { status: 'pass', detail: `Current to ${currentLabel}` };
+                return { status: 'warn', detail: `${monthsBehind} month${monthsBehind === 1 ? '' : 's'} out of date — click "Update figures for ${currentLabel}"` };
+            }},
+            { name: 'Transactions loaded (cash flow + buckets)', kind: 'sync', run: () => {
+                const n = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions.length : 0;
+                if (n === 0) return { status: 'warn', detail: 'No transactions cached — open the Leadership Dashboard once so cash flow and buckets can populate' };
+                return { status: 'pass', detail: `${n} transactions available` };
+            }},
+            { name: 'Property valuations loaded', kind: 'sync', run: () => {
+                const n = num(_valRecords);
+                if (n === 0) return { status: 'warn', detail: 'No per-property valuations — real estate falls back to the monthly snapshot' };
+                return { status: 'pass', detail: `${n} property valuation records loaded` };
+            }},
+            { name: 'Income buckets loaded', kind: 'sync', run: () => {
+                const n = num(_bucketsRecords);
+                if (n === 0) return { status: 'warn', detail: 'No income buckets configured yet' };
+                return { status: 'pass', detail: `${n} buckets loaded` };
+            }},
+            { name: 'Bucket allocations total 100%', kind: 'sync', run: () => {
+                const recs = _bucketsRecords || [];
+                if (!recs.length) return { status: 'warn', detail: 'No buckets to total' };
+                const total = recs.reduce((s, r) => s + (Number(getField(r, BUCKET.pct)) || 0), 0);
+                if (total === 100) return { status: 'pass', detail: 'Allocations total 100%' };
+                return { status: 'warn', detail: `Allocations total ${total}% (aim for 100%)` };
+            }},
+            { name: 'Net worth reconciles', kind: 'sync', run: () => {
+                const diff = Math.round((view.assets - view.liabilities) - view.net);
+                if (Math.abs(diff) > 1) return { status: 'fail', detail: `Assets − liabilities (${fmt(view.assets - view.liabilities)}) ≠ net worth (${fmt(view.net)})` };
+                return { status: 'pass', detail: `Assets ${fmt(view.assets)} − liabilities ${fmt(view.liabilities)} = ${fmt(view.net)}` };
+            }},
+        ],
+    });
+    if (typeof markTabSynced === 'function') markTabSynced('wealth');
 }
 
 // ── Monthly cash flow (money in − money out = net) ───────────────────────────
