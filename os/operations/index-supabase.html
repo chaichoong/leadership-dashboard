@@ -1,0 +1,3351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations — Tenants, Tenancies, Units, Properties, Customers</title>
+<link rel="stylesheet" href="../../css/tokens.css?v=1">
+<link rel="stylesheet" href="../../css/sync-bar.css?v=2">
+<link rel="stylesheet" href="../../css/quick-task.css?v=2">
+<script defer src="../../js/quick-task.js?v=3"></script>
+<!-- Chart.js — used for the Valuation History trend chart -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{line-height:1.5;min-height:100vh;background:var(--bg-app);color:var(--text-primary)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+
+/* Auth bar */
+.auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:14px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:var(--fs-base);width:340px}
+.auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold)}
+.auth-bar button:hover{background:var(--accent-hover)}
+
+/* Topbar */
+.topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
+.topbar h1{font-size:20px;font-weight:var(--fw-bold);display:flex;align-items:center;gap:8px}
+.topbar .subtitle{font-size:var(--fs-sm);color:var(--text-secondary)}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-hover);color:#fff}
+.btn-sm{padding:4px 10px;font-size:var(--fs-xs)}
+
+/* Sub-tabs */
+.view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-default);overflow-x:auto;background:var(--bg-app);padding:8px 24px 0}
+.view-tab{padding:10px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.view-tab:hover{color:var(--text-primary)}
+.view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.view-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
+.view-tab.active .count{background:var(--accent-soft);color:var(--accent)}
+
+/* Main */
+.main{padding:20px 24px;max-width:1600px;margin:0 auto}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* Controls */
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.search-box{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 12px;border-radius:6px;font-size:var(--fs-base);width:280px}
+.search-box:focus{outline:none;border-color:var(--accent)}
+.filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 10px;border-radius:6px;font-size:var(--fs-base);cursor:pointer}
+.filter-select:focus{outline:none;border-color:var(--accent)}
+.controls .meta{margin-left:auto;font-size:var(--fs-xs);color:var(--text-muted)}
+
+/* KPI grid (Properties portfolio overview) */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px 16px}
+.kpi .label{font-size:var(--fs-xs);color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;font-weight:var(--fw-semibold)}
+.kpi .value{font-size:var(--fs-2xl);font-weight:var(--fw-bold);margin-top:4px;color:var(--text-primary)}
+.kpi .sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:2px}
+
+/* Data table */
+.table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
+.dt{width:100%;border-collapse:collapse;font-size:var(--fs-sm);table-layout:fixed}
+/* Headers — flex layout pins the sort arrow at the right edge no matter how
+   the label wraps. word-break:normal + overflow-wrap:normal stop mid-word
+   breaks; per-column widths give every label enough room for two lines. */
+.dt th{background:var(--bg-surface-2);padding:0;text-align:left;font-weight:var(--fw-bold);color:var(--text-secondary);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;vertical-align:middle;height:48px;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle);cursor:pointer;user-select:none}
+.dt th:last-child{border-right:none}
+.dt th:hover{background:var(--bg-subtle)}
+.dt th .th-inner{display:flex;align-items:center;gap:4px;height:100%;padding:5px 8px}
+.dt th .th-label{flex:1;min-width:0;white-space:normal;word-break:normal;overflow-wrap:normal;hyphens:none;line-height:1.25}
+.dt th .th-sort{flex-shrink:0;font-size:9px;color:var(--text-muted);font-weight:var(--fw-regular)}
+.dt th.sorted .th-sort{color:var(--accent)}
+.dt th.money .th-inner{justify-content:space-between}
+.dt th.money .th-label{text-align:right}
+/* Center small integer columns (Beds, Unit #, Due Day) so single digits don't sit against the column border */
+.dt th.num-center .th-label{text-align:center}
+.dt td.num-center{text-align:center}
+.dt td{padding:6px 8px;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dt td:last-child{border-right:none}
+/* Cells with stacked content (chips, multi-line) opt out of single-line ellipsis,
+   but still clip horizontally — chips inside size themselves to fit the cell. */
+.dt td.wrap-cell{white-space:normal;text-overflow:clip}
+.dt td:has(.chips-cell),.dt td:has(.badge){white-space:normal;text-overflow:clip}
+.dt tbody tr:nth-child(even) td{background:var(--bg-surface-2)}
+.dt tbody tr:hover td{background:var(--accent-soft)}
+.dt tbody tr.row-flash td{animation:flash 1.6s ease-out}
+@keyframes flash{0%{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}100%{background:transparent;box-shadow:none}}
+
+/* Editable cells */
+.editable{cursor:text;padding:3px 6px;border-radius:4px;display:inline-block;min-width:60px;min-height:20px}
+.dt td .editable{max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}
+.dt td .expand-chevron{vertical-align:middle}
+.editable:hover{background:var(--bg-surface);outline:1px solid var(--border-default)}
+.editable[contenteditable=true]:focus{background:var(--bg-surface);outline:2px solid var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inline-input,.inline-select{background:var(--bg-surface);border:1px solid var(--accent);color:var(--text-primary);padding:3px 6px;border-radius:4px;font-size:var(--fs-base);font-family:inherit}
+.inline-select{cursor:pointer}
+.cell-saving{opacity:.55}
+.cell-error{outline:2px solid var(--danger)!important;background:var(--danger-bg)!important}
+
+/* Linked record chip — must fit within its cell, never overflow into the next column. */
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);cursor:pointer;border:1px solid transparent;max-width:100%;box-sizing:border-box;min-width:0}
+.chip:hover{border-color:var(--accent);background:var(--bg-surface)}
+.chip-readonly{cursor:default;background:var(--bg-subtle);color:var(--text-secondary)}
+.chip-readonly:hover{border-color:transparent;background:var(--bg-subtle)}
+.chip-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips-cell{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;min-width:0}
+
+/* Status badges */
+.badge{display:inline-block;padding:3px 9px;border-radius:11px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);white-space:nowrap}
+.badge-active,.badge-occupied,.badge-current,.badge-in-payment{background:var(--success-bg);color:var(--success)}
+/* Void / vacant — red so they jump out from the green Occupied rows */
+.badge-void,.badge-vacant{background:var(--danger-bg);color:var(--danger)}
+/* Former / inactive — grey, historical state, not actionable */
+.badge-former,.badge-inactive,.badge-ended{background:var(--bg-subtle);color:var(--text-secondary)}
+.badge-overdue,.badge-cfv{background:var(--danger-bg);color:var(--danger)}
+.badge-warning{background:var(--warning-bg);color:var(--warning)}
+.badge-info{background:var(--info-bg);color:var(--info)}
+/* Customer stage badges — tonal palette */
+.badge-lead{background:var(--info-bg);color:var(--tone-blue)}
+.badge-onboarding{background:var(--warning-bg);color:var(--tone-gold)}
+.badge-churned{background:var(--bg-subtle);color:var(--text-secondary)}
+
+/* Customer demo banner */
+.demo-banner{background:var(--warning-bg);color:var(--warning);padding:8px 16px;border-radius:8px;font-size:var(--fs-sm);font-weight:var(--fw-medium);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+
+/* Expandable row */
+.dt tbody tr.expandable{cursor:pointer}
+.dt tbody tr.expandable:hover td:first-child::before{color:var(--accent)}
+.expand-chevron{display:inline-block;font-size:9px;color:var(--text-muted);margin-right:6px;transition:transform .15s ease;width:10px;text-align:center}
+.expand-chevron.open{transform:rotate(90deg);color:var(--accent)}
+tr.expand-row td{padding:0!important;border-top:none!important;background:var(--bg-surface-2)!important}
+tr.expand-row:hover td{background:var(--bg-surface-2)!important}
+.expand-content{padding:12px 16px 16px;border-top:1px dashed var(--border-default)}
+.expand-summary{display:flex;gap:16px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-secondary)}
+.expand-summary strong{color:var(--text-primary)}
+.tx-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);table-layout:fixed}
+.tx-table th{text-align:left;padding:5px 8px;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:var(--fw-bold);letter-spacing:.4px}
+.tx-table th.money{text-align:right}
+.tx-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.tx-table td:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0}
+.tx-table td.money{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;padding-right:12px}
+.tx-table td:nth-child(4){padding-left:12px}
+.tx-table .badge{padding:2px 7px;font-size:10px;border-radius:8px}
+.tx-table tbody tr:nth-child(even) td{background:var(--bg-surface)}
+.tx-show-all{background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);padding:6px 0;margin-top:4px}
+.tx-show-all:hover{text-decoration:underline}
+.expand-empty{padding:16px;text-align:center;color:var(--text-muted);font-size:var(--fs-sm)}
+
+/* Drawer */
+.drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
+.drawer{background:var(--bg-surface);width:640px;max-width:95vw;height:100vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.drawer-header{position:sticky;top:0;background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:16px 24px;z-index:2;display:flex;align-items:flex-start;gap:10px}
+.drawer-header .hdr-main{flex:1;min-width:0}
+.drawer-header h2{font-size:var(--fs-xl);margin:0;word-break:break-word}
+.drawer-header .hdr-sub{font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px}
+.drawer-body{flex:1;overflow-y:auto;padding:20px 24px}
+.drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-2xl);line-height:1;padding:0 4px}
+.drawer-section{margin-bottom:24px}
+.drawer-section h3{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:10px;font-weight:var(--fw-bold)}
+.field-row{display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-base);align-items:center}
+.field-row:last-child{border-bottom:none}
+.field-label{color:var(--text-secondary);font-weight:var(--fw-medium);font-size:var(--fs-sm)}
+.field-value{color:var(--text-primary);word-break:break-word;min-width:0}
+/* Editable cells use a hover-box (padding + bg on focus) but a negative
+   margin-left so the text itself starts on the same x as non-editable
+   values — they all line up regardless of whether you can edit them. */
+.field-value .editable{display:inline-block;min-height:28px;padding:6px 10px;margin-left:-10px;border-radius:4px;vertical-align:middle}
+.field-value .badge,
+.field-value .cell-drilldown,
+.field-value .chips-cell{vertical-align:middle}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-sidebar);color:#fff;padding:12px 20px;border-radius:8px;font-size:var(--fs-base);font-weight:var(--fw-medium);z-index:10000;box-shadow:var(--shadow-lg);max-width:340px;animation:slideUp .3s ease-out}
+.toast.error{background:var(--danger)}
+.toast.success{background:var(--success)}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Empty state */
+.empty{text-align:center;padding:60px 20px;color:var(--text-muted)}
+.empty .icon{font-size:48px;margin-bottom:12px;opacity:.4}
+.empty .msg{font-size:var(--fs-md)}
+
+/* Loading */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;color:var(--text-muted)}
+.spinner{width:36px;height:36px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Checkbox cell */
+.cb-cell{text-align:center}
+.cb-cell input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
+
+/* Money cell */
+.money{font-variant-numeric:tabular-nums;text-align:right}
+.dt th.money,.dt td.money{text-align:right}
+
+/* Detail link button */
+.row-open{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:var(--fs-md);padding:2px 6px;border-radius:4px}
+.row-open:hover{background:var(--bg-surface);color:var(--accent)}
+
+/* Drilldown cell — value is calculated, click opens drawer to see how */
+.cell-drilldown{cursor:pointer;border-bottom:1px dotted var(--text-muted);padding-bottom:1px}
+.cell-drilldown:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Breakdown table — used inside drawer for mortgage / rent breakdowns */
+.breakdown-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-top:4px}
+.breakdown-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:var(--fw-bold);letter-spacing:.5px}
+.breakdown-table td{padding:6px 8px;border-bottom:1px solid var(--border-subtle)}
+.breakdown-table td.money{text-align:right;font-variant-numeric:tabular-nums}
+.breakdown-table tr.total td{border-top:2px solid var(--border-default);border-bottom:none;font-weight:var(--fw-bold);background:var(--bg-surface-2)}
+
+/* Schema inspector modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.5);z-index:9997;display:flex;align-items:center;justify-content:center;padding:24px}
+.modal-card{background:var(--bg-surface);border-radius:12px;max-width:1100px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.modal-header{padding:18px 24px;border-bottom:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between}
+.modal-header h2{font-size:17px}
+.modal-body{flex:1;overflow-y:auto;padding:18px 24px}
+.modal-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-2xl);line-height:1;padding:0 4px}
+.schema-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-bottom:24px}
+.schema-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:var(--fw-bold);letter-spacing:.5px}
+.schema-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.schema-table tr.unmapped td{background:var(--warning-bg)}
+.schema-table tr.unused td{color:var(--text-muted)}
+.schema-table .col-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-xs)}
+.schema-table .col-type{color:var(--text-muted);font-size:var(--fs-xs)}
+.schema-section h3{font-size:var(--fs-base);margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.schema-section h3 .pill{font-size:10px;padding:1px 7px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-bold)}
+.schema-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-secondary);font-weight:var(--fw-semibold)}
+.schema-tag.warn{background:var(--warning-bg);color:var(--warning)}
+.schema-tag.ok{background:var(--success-bg);color:var(--success)}
+
+/* Valuation history (in property drawer) */
+.valuation-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px}
+.val-tile{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px}
+.val-tile .lbl{font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;font-weight:var(--fw-bold)}
+.val-tile .val{font-size:var(--fs-lg);font-weight:var(--fw-bold);margin-top:2px;color:var(--text-primary);font-variant-numeric:tabular-nums}
+.val-tile .sub{font-size:10px;color:var(--text-muted);margin-top:2px}
+.val-chart-wrap{height:180px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:8px;margin-bottom:12px;position:relative}
+.val-chart-wrap canvas{display:block}
+.val-empty{padding:20px;text-align:center;color:var(--text-muted);font-size:var(--fs-sm);background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;margin-bottom:12px}
+.val-actions{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.btn-ai{background:linear-gradient(135deg,var(--accent),var(--accent-hover));color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);display:inline-flex;align-items:center;gap:6px}
+.btn-ai:hover{filter:brightness(1.06)}
+.btn-ai:disabled{opacity:.5;cursor:not-allowed}
+.btn-secondary{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);padding:7px 14px;border-radius:6px;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+
+/* AI valuation modal */
+.ai-status{display:flex;align-items:center;gap:10px;padding:14px;background:var(--bg-surface-2);border-radius:8px;font-size:var(--fs-base);color:var(--text-secondary);margin-bottom:14px}
+.ai-status .spin{width:18px;height:18px;border:2px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+.ai-error{background:var(--danger-bg);color:var(--danger);padding:12px 14px;border-radius:8px;font-size:var(--fs-sm);margin-bottom:14px;line-height:1.5}
+.ai-headline{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
+.ai-headline .val-tile{background:var(--bg-surface);border-color:var(--accent-soft)}
+.ai-headline .val-tile.primary{background:var(--accent-soft);border-color:var(--accent)}
+.ai-comp-link{color:var(--accent);font-size:var(--fs-xs);text-decoration:none}
+.ai-comp-link:hover{text-decoration:underline}
+.ai-methodology{padding:12px;background:var(--bg-surface-2);border-radius:8px;font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5;margin-top:14px;white-space:pre-wrap}
+.ai-key-prompt{display:flex;flex-direction:column;gap:8px}
+.ai-key-prompt input{padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base);background:var(--bg-surface)}
+.ai-key-prompt input:focus{outline:none;border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- Auth bar (only if no PAT yet) -->
+<div class="auth-bar" id="authBar" style="display:none">
+  <span style="font-size:var(--fs-base);color:var(--text-secondary)">Airtable PAT:</span>
+  <input id="patInput" type="password" placeholder="pat_xxxxxxxxxx..." autocomplete="off">
+  <button onclick="saveAuth()">Connect</button>
+  <span id="authError" style="font-size:var(--fs-sm);color:var(--danger);display:none">Invalid token — please check and try again.</span>
+</div>
+
+<!-- Topbar -->
+<div class="topbar" id="topbar" style="display:none">
+  <div>
+    <h1>🏢 Operations</h1>
+    <div class="subtitle">Tenants · Tenancies · Rental Units · Properties · Customers — synced live with Airtable</div>
+  </div>
+  <div class="topbar-right">
+    <span id="syncStatus" style="font-size:11px;color:var(--text-muted)"></span>
+    <button class="btn btn-sm" onclick="openSchemaInspector()" title="Show every field across the four tables and what's mapped">🔍 Schema</button>
+    <button class="btn btn-sm" onclick="refreshAll()">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- Sub-tabs -->
+<div class="view-tabs" id="viewTabs" style="display:none">
+  <button class="view-tab active" data-tab="tenants" onclick="switchSubTab('tenants')">👤 Tenants <span class="count" id="cntTenants">·</span></button>
+  <button class="view-tab" data-tab="tenancies" onclick="switchSubTab('tenancies')">📄 Tenancies <span class="count" id="cntTenancies">·</span></button>
+  <button class="view-tab" data-tab="units" onclick="switchSubTab('units')">🚪 Rental Units <span class="count" id="cntUnits">·</span></button>
+  <button class="view-tab" data-tab="properties" onclick="switchSubTab('properties')">🏠 Properties <span class="count" id="cntProperties">·</span></button>
+  <button class="view-tab" data-tab="customers" onclick="switchSubTab('customers')">💼 Customers <span class="count" id="cntCustomers">0</span></button>
+  <button class="view-tab" data-tab="compliance" onclick="switchSubTab('compliance')">✅ Compliance</button>
+</div>
+
+<!-- Main -->
+<div class="main" id="main" style="display:none">
+
+  <div data-sync-bar="operations" style="margin:12px 0"></div>
+
+  <!-- Tenants -->
+  <div class="tab-pane active" id="pane-tenants">
+    <div class="controls">
+      <input class="search-box" id="searchTenants" placeholder="Search tenants..." oninput="renderTenants()">
+      <select class="filter-select" id="filterTenantStatus" onchange="renderTenants()">
+        <option value="">All statuses</option>
+      </select>
+      <span class="meta" id="metaTenants"></span>
+    </div>
+    <div id="contentTenants"><div class="loading"><div class="spinner"></div><div>Loading tenants...</div></div></div>
+  </div>
+
+  <!-- Tenancies -->
+  <div class="tab-pane" id="pane-tenancies">
+    <div class="controls">
+      <input class="search-box" id="searchTenancies" placeholder="Search tenancies..." oninput="renderTenancies()">
+      <select class="filter-select" id="filterTenancyPayStatus" onchange="renderTenancies()">
+        <option value="">All payment statuses</option>
+      </select>
+      <select class="filter-select" id="filterTenancyActive" onchange="renderTenancies()">
+        <option value="active">Active only</option>
+        <option value="">Show all</option>
+      </select>
+      <span class="meta" id="metaTenancies"></span>
+    </div>
+    <div id="contentTenancies"><div class="loading"><div class="spinner"></div><div>Loading tenancies...</div></div></div>
+  </div>
+
+  <!-- Rental Units -->
+  <div class="tab-pane" id="pane-units">
+    <div class="controls">
+      <input class="search-box" id="searchUnits" placeholder="Search rental units..." oninput="renderUnits()">
+      <select class="filter-select" id="filterUnitStatus" onchange="renderUnits()">
+        <option value="">All statuses</option>
+      </select>
+      <select class="filter-select" id="filterUnitProperty" onchange="renderUnits()">
+        <option value="">All properties</option>
+      </select>
+      <span class="meta" id="metaUnits"></span>
+    </div>
+    <div id="contentUnits"><div class="loading"><div class="spinner"></div><div>Loading rental units...</div></div></div>
+  </div>
+
+  <!-- Properties -->
+  <div class="tab-pane" id="pane-properties">
+    <div id="propertyKpis" class="kpi-grid"></div>
+    <div class="controls">
+      <input class="search-box" id="searchProperties" placeholder="Search properties..." oninput="renderProperties()">
+      <select class="filter-select" id="filterPropertyType" onchange="renderProperties()">
+        <option value="">All property types</option>
+      </select>
+      <select class="filter-select" id="filterPropertyOwnership" onchange="renderProperties()">
+        <option value="">All ownerships</option>
+      </select>
+      <span class="meta" id="metaProperties"></span>
+    </div>
+    <div id="contentProperties"><div class="loading"><div class="spinner"></div><div>Loading properties...</div></div></div>
+  </div>
+
+  <!-- Customers (SaaS CRM) -->
+  <div class="tab-pane" id="pane-customers">
+    <div id="customerKpis" class="kpi-grid"></div>
+    <div class="controls">
+      <input class="search-box" id="searchCustomers" placeholder="Search customers..." oninput="renderCustomers()">
+      <select class="filter-select" id="filterCustomerStage" onchange="renderCustomers()">
+        <option value="">All stages</option>
+        <option value="Lead">Lead</option>
+        <option value="Onboarding">Onboarding</option>
+        <option value="Active">Active</option>
+        <option value="Churned">Churned</option>
+      </select>
+      <span class="meta" id="metaCustomers"></span>
+    </div>
+    <div id="contentCustomers"><div class="empty"><div class="icon">💼</div><div class="msg">No customers yet. Your first subscriber will appear here.</div></div></div>
+  </div>
+
+  <!-- Compliance -->
+  <div class="tab-pane" id="pane-compliance">
+    <iframe src="../../compliance.html" style="width:100%;height:calc(100vh - 140px);border:none" loading="lazy" allowfullscreen></iframe>
+  </div>
+
+</div>
+
+<!-- Drawer -->
+<div id="drawerOverlay"></div>
+
+<!-- Toast -->
+<div id="toastContainer"></div>
+
+<script src="../../js/sync-bar.js?v=4"></script>
+<!-- ── Supabase clone: supabase-js + network shim + login gate, before the app script ── -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-shim.js?v=2"></script>
+<script src="supabase-boot.js?v=1"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// CONFIG — Airtable IDs (mirrors js/config.js — hardcoded since iframe can't
+// reliably reach parent globals across navigation/reloads)
+// ═══════════════════════════════════════════════════════════════════════
+const BASE_ID = 'appnqjDpqDniH3IRl';
+const TABLE = {
+  tenants:      'tblX4elTuu01gwBYh',
+  tenancies:    'tblN51a88qTDB6iMH',
+  rentalUnits:  'tblM3mZCR5kiEdWMj',
+  properties:   'tbl6f0OkAmTC2jbuG',
+  costs:        'tblx5kvhzNEI5TFlS',
+  valuations:   'tblZYsa0u1M17N7ZE',
+  transactions: 'tbln0gzhCAorFc3zB',
+  categories:   'tbleWb8ioptnEwPR8',
+};
+
+const TX = {
+  date:        'fldoyQ6Rr9cHp3bgQ',
+  amount:      'fldN01r1hp7UQjgtm',
+  description: 'fldsbuAJCTsXHug4C',
+  category:    'fldFPmNixqHPQy4D6',
+  reconciled:  'fldxKX1IbIFcAOnn5',
+  tenancy:     'fldPmAMmxwqs4SdPa',
+  unit:        'fldJGIhSbgXNIEW4a',
+  property:    'fldvp44VfF8uTTthp',
+};
+const CAT_NAME = 'fldii4oUzSfmplihO';
+
+// Curated field RESOLVERS per entity. Field IDs are resolved at load time
+// via the Airtable metadata API. Each field provides MULTIPLE name candidates
+// + optional keyword matchers so common naming variations work without
+// hand-editing this file.
+//
+// Resolution order: `primary:true` → use Airtable's primaryFieldId
+//                   `exact:[...]`  → first case-insensitive match wins
+//                   `keywords:[]`  → first field whose name contains ALL keywords
+//
+// `key`     — internal id used in render code
+// `label`   — column header
+// `type`    — display hint: text|long|number|money|percent|date|select|check|link
+// `edit`    — true if cell is editable (auto-disabled if Airtable says read-only)
+// `link`    — for `type:link`, target table key (eg 'tenancies')
+// `width`   — optional CSS width
+const SCHEMA = {
+  tenants: {
+    label: 'Tenants', singular: 'Tenant',
+    fields: [
+      { key:'name',    label:'Name',         primary:true,                                                                      type:'text',   edit:true,  width:'160px' },
+      { key:'status',  label:'Status',       exact:['Tenant Status','Status'],                                                  type:'select', edit:true,  width:'85px' },
+      { key:'unit',    label:'Unit',         exact:['Rental Unit','Current Unit','Unit','Rental Units'],                        type:'link',   edit:true,  link:'units',     width:'130px' },
+      { key:'phone',   label:'Phone',        exact:['Contact Number','Phone Number','Phone','Mobile','Mobile Number'],          type:'text',   edit:true,  width:'120px' },
+      { key:'email',   label:'Email',        exact:['Email Address','Email','Email Address (Tenant)'],                          type:'text',   edit:true,  width:'180px' },
+      { key:'dob',     label:'DOB',          exact:['Date of Birth','DOB'],                                                     type:'date',   edit:true,  width:'90px' },
+      { key:'payType', label:'Pay Type',     exact:['Rent Payment Type','Payment Type'], keywords:['payment','type'],           type:'select', edit:true,  width:'90px' },
+      { key:'tenancy', label:'Tenancy',      exact:['Tenancies','Tenancy','Linked Tenancy'],                                    type:'link',   edit:true,  link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies'), width:'130px' },
+    ],
+  },
+  tenancies: {
+    label: 'Tenancies', singular: 'Tenancy',
+    fields: [
+      { key:'ref',         label:'Reference',      primary:true,                                                                                                          type:'text',   edit:false, width:'150px' },
+      { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                                                type:'link',   edit:true,  link:'tenants',    width:'130px' },
+      { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                                                           type:'link',   edit:true,  link:'units',      width:'120px' },
+      { key:'property',    label:'Property',       exact:['Property','Properties'],                                                                                       type:'link',   edit:false, link:'properties', width:'140px' },
+      { key:'status',      label:'Status',         exact:['Status','Tenant Status'],                                                                                      type:'select', edit:false, width:'85px' },
+      { key:'payStatus',   label:'Pay Status',     exact:['Payment Status (Unified)','Payment Status Unified','Payment Status'], keywords:['payment','status'],          type:'select', edit:true,  width:'100px' },
+      { key:'startDate',   label:'Start',          exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                                                  type:'date',   edit:true,  width:'90px' },
+      { key:'rent',        label:'Rent/mo',        exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],                                    type:'money',  edit:true,  width:'90px' },
+      { key:'dueDay',      label:'Due',            exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],                                   type:'number', edit:true,  width:'50px' },
+      { key:'payFreq',     label:'Freq',           exact:['Payment Frequency','Pay Frequency'], keywords:['payment','frequency'],                                         type:'select', edit:true,  width:'80px' },
+    ],
+  },
+  units: {
+    label: 'Rental Units', singular: 'Rental Unit',
+    fields: [
+      { key:'name',     label:'Unit',            primary:true,                                                                              type:'text',   edit:false, width:'170px' },
+      { key:'unitType', label:'Type',            exact:['Unit Type'], keywords:['unit','type'],                                             type:'select', edit:true,  width:'90px' },
+      { key:'unitNum',  label:'#',               exact:['Unit Number'], keywords:['unit','number'],                                         type:'number', edit:true,  width:'45px' },
+      { key:'property', label:'Property',        exact:['Property','Properties'],                                                           type:'link',   edit:false, link:'properties', width:'150px' },
+      { key:'status',   label:'Status',          exact:['Status','Unit Status','Occupancy Status'], keywords:['status'],                    type:'select', edit:true,  width:'85px' },
+      // Filter linked tenants/tenancies to the ACTIVE one — the raw link includes
+      // historical (Former) records too, which we don't want under "Current".
+      { key:'tenant',   label:'Tenant',          exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants',   linkFilter:(rec)=>isActiveStatus(rec,'tenants'),     width:'130px' },
+      { key:'tenancy',  label:'Tenancy',         exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies'),   width:'130px' },
+      // Virtual: sum expected monthly rent from active tenancies linked to this unit.
+      // Switching from a direct field match to derived means we always show the
+      // contractual rent regardless of how the unit table is set up.
+      { key:'rent',     label:'Rent/mo',         virtual:true, compute:r=>deriveUnitRent(r), tooltip:'Sum of expected monthly rent from active tenancies linked to this unit', type:'money', edit:false, width:'90px' },
+    ],
+  },
+  properties: {
+    label: 'Properties', singular: 'Property',
+    fields: [
+      { key:'name',         label:'Property',     primary:true, fixedId:'fldy2t735TV5e1DIL',                                                                                                        type:'text',    edit:true,  width:'170px' },
+      { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true,  width:'85px' },
+      { key:'beds',         label:'Beds',         exact:['No. of Bedrooms','Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds','# of Beds'], keywords:['beds','bedrooms'],          type:'number',  edit:true,  width:'42px' },
+      { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units', width:'120px' },
+      { key:'marketValue',  label:'Value',        exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'moneyBig',edit:true,  width:'80px' },
+      { key:'mortgageBal',  label:'Bal',          exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'moneyBig',edit:true,  width:'80px' },
+      { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'moneyBig',edit:false, width:'72px' },
+      { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false, width:'50px' },
+      { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false, width:'50px' },
+      { key:'grossRent',    label:'Rent/mo',      virtual:true, clickToDrawer:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies. Click for breakdown.', type:'money', edit:false, width:'74px' },
+      { key:'mortgagePay',  label:'Costs/mo',     virtual:true, clickToDrawer:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked monthly costs (mortgage, council tax, insurance, etc.). Click to see which records.', type:'money', edit:false, width:'74px' },
+      { key:'netRent',      label:'Net/mo',       virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false, width:'74px' },
+      { key:'grossYield',   label:'Yield',        virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false, width:'50px' },
+      { key:'cashOnCash',   label:'Cash %',       virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false, width:'52px' },
+    ],
+    // Drawer-only fields. The mortgage-cost link drives the Fixed Costs / mo column;
+    // purchase price/date drive the capital-growth metrics in the drawer.
+    drawerExtras: [
+      { key:'_address',     label:'Address',                 exact:['Address','Full Address','Property Address'],                                  type:'long',  edit:true },
+      { key:'_postcode',    label:'Postcode',                exact:['Postcode','Post Code','Zip','Zip Code'],                                      type:'text',  edit:true },
+      { key:'_ownership',   label:'Ownership',               exact:['Ownership','Owner','Owned/Managed','Ownership Type'],                         type:'select',edit:true },
+      { key:'_agent',       label:'Agent / Landlord',        exact:['Agent / Landlord','Agent','Landlord','Managing Agent','Owner / Landlord'], keywords:['agent'], type:'text', edit:true },
+      { key:'_purchDate',   label:'Purchase Date',           exact:['Purchase Date','Date Purchased','Acquisition Date'],                          type:'date',  edit:true },
+      { key:'_purchPrice',  label:'Purchase Price',          exact:['Purchase Price','Acquisition Price','Bought For'],                            type:'money', edit:true },
+      { key:'_mortProv',    label:'Mortgage Provider',       exact:['Mortgage Provider','Lender','Mortgage Lender'],                               type:'text',  edit:true },
+      { key:'_mortAcct',    label:'Mortgage Account Number', exact:['Mortgage Account Number','Account Number','Mortgage Reference'],              type:'text',  edit:true },
+      { key:'_mortStart',   label:'Mortgage Start Date',     exact:['Mortgage Start Date'],                                                        type:'date',  edit:true },
+      { key:'_mortEnd',     label:'Mortgage End Date',       exact:['Mortgage End Date','Mortgage Expiry'],                                        type:'date',  edit:true },
+      // Hidden/internal: the link to the mortgage cost record. Resolved as a link field; only shown if matched.
+      { key:'_mortCostLink',label:'Linked Costs (monthly)',  exact:['Mortgage Cost','Mortgage Costs','Monthly Mortgage Payment','Mortgage Payment','Costs'], keywords:['mortgage','cost'], type:'link', edit:false, link:'costs' },
+      { key:'_notes',       label:'Notes',                   exact:['Notes','Property Notes','Comments'],                                          type:'long',  edit:true },
+    ],
+  },
+  // Resolved silently — no tab. Used to look up monthly mortgage amounts.
+  costs: {
+    label: 'Costs', singular: 'Cost', hidden: true,
+    fields: [
+      { key:'name',     primary:true,                                                                                  type:'text' },
+      { key:'expected', exact:['Expected Cost','Expected Amount','Monthly Cost','Amount'], keywords:['expected'],      type:'money' },
+      // Used to filter out historic mortgages when summing
+      { key:'inactive', exact:['Inactive','Inactive?','Archived','Is Inactive'],                                       type:'check' },
+    ],
+  },
+  // Property Valuations — historical snapshots (manual + AI). Resolved silently;
+  // surfaced through the property drawer's Valuation History section.
+  valuations: {
+    label: 'Property Valuations', singular: 'Valuation', hidden: true,
+    fields: [
+      { key:'title',        primary:true,                                                                              type:'text' },
+      { key:'property',     exact:['Property','Properties'],                                                           type:'link', link:'properties' },
+      { key:'date',         exact:['Date','Valuation Date'],                                                           type:'date' },
+      { key:'value',        exact:['Estimated Value','Value','Market Value'],                                          type:'moneyBig' },
+      { key:'source',       exact:['Source'],                                                                          type:'select' },
+      { key:'status',       exact:['Status'],                                                                          type:'select' },
+      { key:'confidence',   exact:['Confidence'],                                                                      type:'select' },
+      { key:'comparables',  exact:['Comparables'],                                                                     type:'long' },
+      { key:'methodology',  exact:['Methodology','Notes'],                                                             type:'long' },
+      { key:'previousValue',exact:['Previous Value'],                                                                  type:'moneyBig' },
+      { key:'approvedBy',   exact:['Approved By'],                                                                     type:'text' },
+      { key:'approvedOn',   exact:['Approved On','Approved Date'],                                                     type:'date' },
+    ],
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════
+let PAT = '';
+let SCHEMA_RESOLVED = null;
+let DATA  = { tenants:[], tenancies:[], units:[], properties:[], costs:[], valuations:[] };
+let INDEX = { tenants:{}, tenancies:{}, units:{}, properties:{}, costs:{}, valuations:{} };
+let activeTab = 'tenants';
+let sortState = { tenants:null, tenancies:null, units:null, properties:null };
+
+// ═══════════════════════════════════════════════════════════════════════
+// Derived metrics — compute helpers used by virtual fields on Properties.
+// All computes return JS numbers (or null when prerequisites are missing).
+// Percent-typed virtuals return DECIMALS (0.05 = 5%) to match Airtable's
+// percent convention so fmtPercent renders consistently.
+// ═══════════════════════════════════════════════════════════════════════
+function fid(entityKey, fieldKey){
+  return SCHEMA_RESOLVED?.[entityKey]?.byKey?.[fieldKey]?.id || null;
+}
+function numField(record, entityKey, fieldKey){
+  const id = fid(entityKey, fieldKey);
+  if (!id) return null;
+  const v = record.fields[id];
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+function deriveMortgagePay(propRec){
+  const linkId = fid('properties','_mortCostLink');
+  if (!linkId) return null;
+  const linked = propRec.fields[linkId];
+  if (!Array.isArray(linked) || !linked.length) return null;
+  const expFid      = fid('costs','expected');
+  const inactiveFid = fid('costs','inactive');
+  if (!expFid) return null;
+  // Sum every linked cost (skip ones flagged Inactive). When properties have
+  // multiple linked mortgage costs (eg. main + product fee, or refinanced
+  // loans where the old cost was kept linked), summing gives the right total.
+  let total = 0; let found = false;
+  for (const id of linked) {
+    const cost = INDEX.costs[id]; if (!cost) continue;
+    if (inactiveFid && cost.fields[inactiveFid]) continue;
+    const v = parseFloat(cost.fields[expFid]);
+    if (!isNaN(v)) { total += v; found = true; }
+  }
+  return found ? total : null;
+}
+
+// Sum expected monthly rent across all ACTIVE tenancies whose Rental-Unit
+// link includes this unit. Returns null if no active tenancies exist —
+// that way an unoccupied unit shows "—" rather than £0.
+function deriveUnitRent(unitRec){
+  const sch = SCHEMA_RESOLVED?.tenancies; if (!sch) return null;
+  const unitFid = sch.byKey.unit?.id;
+  const rentFid = sch.byKey.rent?.id;
+  if (!unitFid || !rentFid) return null;
+  let total = 0; let found = false;
+  for (const t of DATA.tenancies) {
+    const linked = t.fields[unitFid];
+    if (!Array.isArray(linked) || !linked.includes(unitRec.id)) continue;
+    if (!isActiveStatus(t,'tenancies')) continue;
+    const v = parseFloat(t.fields[rentFid]);
+    if (!isNaN(v)) { total += v; found = true; }
+  }
+  return found ? total : null;
+}
+
+// Property-level gross rent = sum of unit-level expected rent across every
+// rental unit linked to this property. Going via units keeps us consistent
+// with whatever Rental Unit rent shows.
+function derivePropertyGrossRent(propRec){
+  const unitSch = SCHEMA_RESOLVED?.units; if (!unitSch) return null;
+  const propFid = unitSch.byKey.property?.id;
+  if (!propFid) return null;
+  let total = 0; let found = false;
+  for (const u of DATA.units) {
+    const v = u.fields[propFid];
+    if (!Array.isArray(v) || !v.includes(propRec.id)) continue;
+    const r = deriveUnitRent(u);
+    if (r != null) { total += r; found = true; }
+  }
+  return found ? total : null;
+}
+function deriveEquity(p){
+  const v = numField(p,'properties','marketValue'); const m = numField(p,'properties','mortgageBal');
+  if (v == null) return null; return v - (m||0);
+}
+function deriveLTV(p){
+  const v = numField(p,'properties','marketValue'); const m = numField(p,'properties','mortgageBal');
+  if (!v || !m) return null; return m / v; // decimal
+}
+function deriveInterestRate(p){
+  // User's spec: (monthly mortgage × 12) / mortgage balance → decimal
+  const m = deriveMortgagePay(p); const b = numField(p,'properties','mortgageBal');
+  if (!m || !b) return null; return (m * 12) / b;
+}
+function deriveGrossYield(p){
+  // grossRent is now virtual — must call the derive helper, not look it up by field id
+  const r = derivePropertyGrossRent(p); const v = numField(p,'properties','marketValue');
+  if (!r || !v) return null; return (r * 12) / v;
+}
+function deriveNetRent(p){
+  const r = derivePropertyGrossRent(p); const m = deriveMortgagePay(p);
+  if (r == null) return null; return r - (m||0);
+}
+function deriveCashOnCash(p){
+  const net = deriveNetRent(p); const eq = deriveEquity(p);
+  if (net == null || !eq || eq <= 0) return null; return (net * 12) / eq;
+}
+
+// Status-based link filter — used on Rental Units to keep "Current Tenant /
+// Tenancy" cells from listing historical Former rows alongside the active one.
+function isActiveStatus(rec, entityKey){
+  const sch = SCHEMA_RESOLVED && SCHEMA_RESOLVED[entityKey];
+  const sid = sch?.byKey?.status?.id;
+  if (!sid) return true; // can't filter — show everything
+  const v = rec.fields[sid];
+  const name = Array.isArray(v) ? (v[0]?.name || v[0]) : (typeof v === 'object' ? v?.name : v);
+  return /active/i.test(String(name||''));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Auth — try parent window first, then localStorage, then prompt
+// ═══════════════════════════════════════════════════════════════════════
+function bootAuth(){
+  try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e){}
+  const stored = localStorage.getItem('_dlr_pat');
+  if (stored) { PAT = stored; return true; }
+  return false;
+}
+function saveAuth(){
+  const v = document.getElementById('patInput').value.trim();
+  if (!v) return;
+  PAT = v;
+  localStorage.setItem('_dlr_pat', v);
+  document.getElementById('authError').style.display = 'none';
+  start();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Airtable API helpers
+// ═══════════════════════════════════════════════════════════════════════
+async function airtableFetch(path, opts={}){
+  const url = path.startsWith('http') ? path : `https://api.airtable.com/v0/${path}`;
+  const res = await fetch(url, {
+    ...opts,
+    headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json', ...(opts.headers||{}) },
+  });
+  if (res.status === 401 || res.status === 403) {
+    PAT = ''; localStorage.removeItem('_dlr_pat');
+    document.getElementById('authBar').style.display = 'flex';
+    document.getElementById('authError').style.display = 'inline';
+    document.getElementById('topbar').style.display = 'none';
+    document.getElementById('viewTabs').style.display = 'none';
+    document.getElementById('main').style.display = 'none';
+    throw new Error('Auth failed');
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Airtable ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+async function fetchAllRecords(tableId, opts={}){
+  const out = [];
+  let offset = '';
+  do {
+    const params = new URLSearchParams({ pageSize: '100', returnFieldsByFieldId: 'true', ...(opts.params||{}) });
+    if (offset) params.set('offset', offset);
+    const data = await airtableFetch(`${BASE_ID}/${tableId}?${params}`);
+    out.push(...(data.records||[]));
+    offset = data.offset || '';
+  } while (offset);
+  return out;
+}
+
+// Resolve a single curated field def against an Airtable table's field list.
+// Returns the matched Airtable field or null.
+//
+// When `def.type==='link'`, we restrict the search to multipleRecordLinks
+// fields only — otherwise a money column literally named "Monthly Mortgage
+// Payment" can outrank the actual link field that points at the cost record.
+function resolveField(def, allFields, primaryFieldId){
+  if (def.fixedId) {
+    return allFields.find(f => f.id === def.fixedId) || null;
+  }
+  if (def.primary && !def.exact && !def.keywords) {
+    return allFields.find(f => f.id === primaryFieldId) || null;
+  }
+  const norm = s => String(s||'').toLowerCase().trim();
+  const wantLink = def.type === 'link';
+  const candidates = wantLink ? allFields.filter(f => f.type === 'multipleRecordLinks') : allFields;
+  const byName = new Map(candidates.map(f => [norm(f.name), f]));
+  for (const want of (def.exact || [])) {
+    const f = byName.get(norm(want));
+    if (f) return f;
+  }
+  if (def.keywords && def.keywords.length) {
+    const kw = def.keywords.map(norm);
+    const f = candidates.find(f => {
+      const n = norm(f.name);
+      return kw.every(k => n.includes(k));
+    });
+    if (f) return f;
+  }
+  return null;
+}
+
+async function fetchSchema(){
+  const data = await airtableFetch(`meta/bases/${BASE_ID}/tables`);
+  const result = {};
+  // entity-key → Airtable table-id mapping (entity keys don't always match TABLE keys)
+  const tableIdFor = (k) => TABLE[k === 'units' ? 'rentalUnits' : k];
+  for (const entityKey of Object.keys(SCHEMA)) {
+    const tableId = tableIdFor(entityKey);
+    const meta = data.tables.find(t => t.id === tableId);
+    if (!meta) { console.warn('table not found in metadata:', entityKey, tableId); continue; }
+    const byKey = {}; const byId = {};
+    const usedFieldIds = new Set();
+    const resolveOne = (def) => {
+      // Virtual fields have no Airtable backing — they're computed on render
+      if (def.virtual) {
+        return { ...def, id:null, name:def.label||def.key, atType:'virtual', options:null, readOnly:true, missing:false };
+      }
+      const f = resolveField(def, meta.fields, meta.primaryFieldId);
+      if (f) {
+        return { ...def, id:f.id, name:f.name, atType:f.type, options:f.options || null, readOnly: !def.edit || isReadOnlyAirtable(f.type) };
+      }
+      return { ...def, id:null, name:null, atType:null, options:null, readOnly:true, missing:true };
+    };
+    // Curated columns
+    for (const def of SCHEMA[entityKey].fields) {
+      const r = resolveOne(def);
+      byKey[def.key] = r;
+      if (r.id) { byId[r.id] = r; usedFieldIds.add(r.id); }
+    }
+    // Drawer extras — also indexed in byKey so computes can reference them
+    const extras = [];
+    for (const def of (SCHEMA[entityKey].drawerExtras || [])) {
+      const r = resolveOne(def);
+      if (!r.missing) {
+        extras.push(r);
+        byKey[def.key] = r;
+        if (r.id) { byId[r.id] = r; usedFieldIds.add(r.id); }
+      }
+    }
+    result[entityKey] = {
+      tableId,
+      tableName: meta.name,
+      primaryFieldId: meta.primaryFieldId,
+      hidden: !!SCHEMA[entityKey].hidden,
+      byKey,
+      byId,
+      drawerExtras: extras,
+      allFields: meta.fields,
+      usedFieldIds,
+    };
+  }
+  // Expose for debugging / Schema Inspector
+  window.__OPS_SCHEMA__ = result;
+  // Console-friendly summary so the user can paste it back to me if anything's still off
+  try {
+    console.groupCollapsed('[OPS] Schema resolution');
+    for (const k of Object.keys(result)) {
+      const r = result[k];
+      const mapped = Object.entries(r.byKey).filter(([,v])=>!v.missing).map(([key,v])=>({key, label:v.label, '→ Airtable':v.name, type:v.atType}));
+      const missing = Object.entries(r.byKey).filter(([,v])=>v.missing).map(([key,v])=>({key, label:v.label}));
+      console.log(`-- ${r.tableName} (${k}) --  ${r.allFields.length} fields total`);
+      console.table(mapped);
+      if (missing.length) { console.warn('Unmapped curated fields:', missing); }
+    }
+    console.groupEnd();
+  } catch(e){}
+  // Resolve transaction date field name for filterByFormula
+  const txMeta = data.tables.find(t => t.id === TABLE.transactions);
+  if (txMeta) {
+    const dateFld = txMeta.fields.find(f => f.id === TX.date);
+    if (dateFld) _txDateFieldName = dateFld.name;
+  }
+  return result;
+}
+
+function isReadOnlyAirtable(atType){
+  return ['formula','rollup','count','lookup','autoNumber','createdTime','lastModifiedTime','createdBy','lastModifiedBy','externalSyncSource','aiText','button','barcode'].includes(atType);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Data loading
+// ═══════════════════════════════════════════════════════════════════════
+async function start(){
+  document.getElementById('authBar').style.display = 'none';
+  document.getElementById('topbar').style.display = 'flex';
+  document.getElementById('viewTabs').style.display = 'flex';
+  document.getElementById('main').style.display = 'block';
+  setSync('Loading schema...');
+  try {
+    SCHEMA_RESOLVED = await fetchSchema();
+    setSync('Loading records...');
+    await refreshAll(true);
+    bindHashRouting();
+  } catch(e) {
+    console.error(e);
+    setSync('Error: ' + e.message, true);
+  }
+}
+
+async function refreshAll(initial=false){
+  setSync('Refreshing...');
+  _txLoaded = false;
+  try {
+    const [tn, tc, un, pr, cs, vl, cat] = await Promise.all([
+      fetchAllRecords(TABLE.tenants),
+      fetchAllRecords(TABLE.tenancies),
+      fetchAllRecords(TABLE.rentalUnits),
+      fetchAllRecords(TABLE.properties),
+      fetchAllRecords(TABLE.costs),
+      fetchAllRecords(TABLE.valuations),
+      fetchAllRecords(TABLE.categories),
+    ]);
+    DATA.tenants      = tn;
+    DATA.tenancies    = tc;
+    DATA.units        = un;
+    DATA.properties   = pr;
+    DATA.costs        = cs;
+    DATA.valuations   = vl;
+    DATA.categories   = cat;
+    INDEX.tenants      = Object.fromEntries(tn.map(r=>[r.id,r]));
+    INDEX.tenancies    = Object.fromEntries(tc.map(r=>[r.id,r]));
+    INDEX.units        = Object.fromEntries(un.map(r=>[r.id,r]));
+    INDEX.properties   = Object.fromEntries(pr.map(r=>[r.id,r]));
+    INDEX.costs        = Object.fromEntries(cs.map(r=>[r.id,r]));
+    INDEX.valuations   = Object.fromEntries(vl.map(r=>[r.id,r]));
+    INDEX.categories   = Object.fromEntries(cat.map(r=>[r.id,r]));
+    document.getElementById('cntTenants').textContent    = tn.length;
+    document.getElementById('cntTenancies').textContent  = tc.length;
+    document.getElementById('cntUnits').textContent      = un.length;
+    document.getElementById('cntProperties').textContent = pr.length;
+    populateFilters();
+    renderActiveTab();
+    setSync(`Synced — ${new Date().toLocaleTimeString()}`);
+    _opsDataReady = true;
+    _tryPendingCrossNav();
+    loadTransactionsBackground(!initial);
+
+    // ── Sync Bar + Health Checks ──
+    if (typeof registerSyncBar === 'function') {
+      registerSyncBar('operations', {
+        refreshFn: () => refreshAll(),
+        checks: [
+          {
+            name: 'Tenants table fetched', kind: 'sync', run: () => {
+              const n = (DATA.tenants||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No tenants returned' };
+              return { status: 'pass', detail: `${n} tenant records loaded` };
+            }
+          },
+          {
+            name: 'Tenancies table fetched', kind: 'sync', run: () => {
+              const n = (DATA.tenancies||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No tenancies returned' };
+              return { status: 'pass', detail: `${n} tenancy records loaded` };
+            }
+          },
+          {
+            name: 'Rental Units table fetched', kind: 'sync', run: () => {
+              const n = (DATA.units||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No units returned' };
+              return { status: 'pass', detail: `${n} rental units loaded` };
+            }
+          },
+          {
+            name: 'Properties table fetched', kind: 'sync', run: () => {
+              const n = (DATA.properties||[]).length;
+              if (n === 0) return { status: 'fail', detail: 'No properties returned' };
+              return { status: 'pass', detail: `${n} property records loaded` };
+            }
+          },
+          {
+            name: 'Costs table fetched (used by mortgage derive)', kind: 'sync', run: () => {
+              const n = (DATA.costs||[]).length;
+              if (n === 0) return { status: 'warn', detail: 'No costs loaded — mortgage rate / yield derives will be blank' };
+              return { status: 'pass', detail: `${n} cost records loaded` };
+            }
+          },
+          {
+            name: 'Transactions loaded (background)', kind: 'sync', run: () => {
+              if (!_txLoaded) return { status: 'warn', detail: 'Transactions still loading in background' };
+              const n = (DATA.transactions||[]).length;
+              return { status: 'pass', detail: `${n} transaction records loaded` };
+            }
+          },
+          {
+            name: 'Indexes built for fast linked-record lookup', kind: 'automation', run: () => {
+              const core = ['tenants','tenancies','units','properties','costs'];
+              const missing = core.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
+              if (missing.length) return { status: 'fail', detail: `Missing indexes: ${missing.join(', ')}` };
+              if (!INDEX.categories) return { status: 'warn', detail: 'Categories index not built' };
+              return { status: 'pass', detail: 'All tables indexed by record ID' };
+            }
+          },
+          {
+            name: 'Tenancies link to a known tenant', kind: 'sync', run: () => {
+              const tcs = DATA.tenancies || [];
+              const tenIdx = INDEX.tenants || {};
+              const orphans = tcs.filter(r => {
+                const f = r.fields || {};
+                const tenLink = f['fld1i5bDoHL3B6rUf'];
+                if (!Array.isArray(tenLink) || !tenLink.length) return false;
+                const id = typeof tenLink[0] === 'object' ? tenLink[0].id : tenLink[0];
+                return !tenIdx[id];
+              });
+              if (orphans.length) return { status: 'warn', detail: `${orphans.length} tenancy record(s) link to a tenant that wasn't fetched` };
+              return { status: 'pass', detail: 'All tenancies link to a tenant present in the dataset' };
+            }
+          },
+          {
+            name: 'Active count badges match table data', kind: 'automation', run: () => {
+              const expected = {
+                tenants: (DATA.tenants||[]).length,
+                tenancies: (DATA.tenancies||[]).length,
+                units: (DATA.units||[]).length,
+                properties: (DATA.properties||[]).length,
+              };
+              for (const [k, n] of Object.entries(expected)) {
+                const el = document.getElementById('cnt' + k.charAt(0).toUpperCase() + k.slice(1));
+                if (!el || parseInt(el.textContent, 10) !== n) {
+                  return { status: 'warn', detail: `Sub-tab badge for ${k} doesn't match data length` };
+                }
+              }
+              return { status: 'pass', detail: 'All four sub-tab badges match the loaded record counts' };
+            }
+          },
+          // ── Cross-table integrity: the deeper kind of check that catches
+          // dangling links before they cause display bugs ──
+          {
+            name: 'Tenancies → Rental Unit links resolve', kind: 'sync', run: () => {
+              const tcs = DATA.tenancies || [];
+              const unitIdx = INDEX.units || {};
+              const orphans = tcs.filter(r => {
+                const f = r.fields || {};
+                const link = f['fld7cjLLEHKAx49OK']; // tenUnit
+                if (!Array.isArray(link) || !link.length) return false;
+                const id = typeof link[0] === 'object' ? link[0].id : link[0];
+                return !unitIdx[id];
+              });
+              if (orphans.length) return { status: 'fail', detail: `${orphans.length} tenancy(ies) link to a unit that wasn't fetched — display will show '-' in the Unit column` };
+              return { status: 'pass', detail: 'All tenancies link to a unit present in the dataset' };
+            }
+          },
+          {
+            name: 'Rental Units → Property links resolve', kind: 'sync', run: () => {
+              const units = DATA.units || [];
+              const propIdx = INDEX.properties || {};
+              const orphans = units.filter(r => {
+                const f = r.fields || {};
+                const link = f['fldUJNRGgzgyAwwjt']; // unitProperty
+                if (!Array.isArray(link) || !link.length) return false;
+                const id = typeof link[0] === 'object' ? link[0].id : link[0];
+                return !propIdx[id];
+              });
+              if (orphans.length) return { status: 'fail', detail: `${orphans.length} unit(s) link to a property that wasn't fetched` };
+              return { status: 'pass', detail: 'All units link to a property present in the dataset' };
+            }
+          },
+          {
+            name: 'No duplicate tenancies for the same unit', kind: 'sync', run: () => {
+              // We only care about overlaps between currently-active tenants. If
+              // a Former tenant's Payment Status was never reset on move-out
+              // (which is common — that field gets stale), that's data drift,
+              // not a missed move-out. Require BOTH:
+              //   - Payment Status in {In Payment, CFV, CFV Actioned}, AND
+              //   - Tenant Status (rollup) = Active
+              // before counting a tenancy toward the per-unit duplicate test.
+              const tcs = DATA.tenancies || [];
+              const activeByUnit = {};
+              tcs.forEach(r => {
+                const f = r.fields || {};
+                const payStatus = f['fldxU3dPUnbK0SCDq']; // tenPayStatus
+                const payName = (payStatus && payStatus.name) || payStatus;
+                if (payName !== 'In Payment' && payName !== 'CFV' && payName !== 'CFV Actioned') return;
+                const tenStatusRaw = f['fldgWAyha1Uij1SZP']; // tenStatus rollup of tenant Active/Former
+                const tenName = Array.isArray(tenStatusRaw)
+                  ? (typeof tenStatusRaw[0]==='object'?tenStatusRaw[0]?.name:tenStatusRaw[0])
+                  : (typeof tenStatusRaw==='object'?tenStatusRaw?.name:tenStatusRaw);
+                if (String(tenName||'').toLowerCase() !== 'active') return;
+                const link = f['fld7cjLLEHKAx49OK'];
+                if (!Array.isArray(link) || !link.length) return;
+                const unitId = typeof link[0] === 'object' ? link[0].id : link[0];
+                if (!unitId) return;
+                activeByUnit[unitId] = (activeByUnit[unitId] || 0) + 1;
+              });
+              const dupes = Object.entries(activeByUnit).filter(([_, n]) => n > 1);
+              if (dupes.length) return { status: 'warn', detail: `${dupes.length} unit(s) have multiple active tenancies — likely a missed move-out` };
+              return { status: 'pass', detail: 'Each unit has at most one active tenancy' };
+            }
+          },
+        ],
+      });
+      markTabSynced('operations');
+    }
+  } catch(e) {
+    console.error(e);
+    setSync('Refresh failed: '+e.message, true);
+  }
+}
+
+function setSync(msg, isErr){
+  const el = document.getElementById('syncStatus');
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--danger)' : 'var(--text-muted)';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Filters — populate select dropdowns from data
+// ═══════════════════════════════════════════════════════════════════════
+function populateFilters(){
+  const sel = (id, vals) => {
+    const el = document.getElementById(id); if (!el) return;
+    const cur = el.value;
+    const first = el.querySelector('option').outerHTML;
+    el.innerHTML = first + vals.filter(Boolean).map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    el.value = cur;
+  };
+  // Status filter values from data
+  sel('filterTenantStatus',     uniqVals(DATA.tenants,    SCHEMA_RESOLVED.tenants?.byKey?.status?.id));
+  sel('filterTenancyPayStatus', uniqVals(DATA.tenancies,  SCHEMA_RESOLVED.tenancies?.byKey?.payStatus?.id));
+  sel('filterUnitStatus',       uniqVals(DATA.units,      SCHEMA_RESOLVED.units?.byKey?.status?.id));
+  sel('filterPropertyType',     uniqVals(DATA.properties, SCHEMA_RESOLVED.properties?.byKey?.type?.id));
+  sel('filterPropertyOwnership',uniqVals(DATA.properties, SCHEMA_RESOLVED.properties?.byKey?.ownership?.id));
+  // Property filter for units
+  const propEl = document.getElementById('filterUnitProperty');
+  if (propEl) {
+    const cur = propEl.value;
+    const opts = DATA.properties.map(p => {
+      const nm = getCellRaw(p, SCHEMA_RESOLVED.properties?.byKey?.name);
+      return `<option value="${p.id}">${escapeHtml(displayName(p, 'properties'))}</option>`;
+    }).join('');
+    propEl.innerHTML = '<option value="">All properties</option>' + opts;
+    propEl.value = cur;
+  }
+}
+
+function uniqVals(records, fieldId){
+  if (!fieldId) return [];
+  const set = new Set();
+  for (const r of records) {
+    const v = r.fields[fieldId];
+    if (v == null) continue;
+    if (Array.isArray(v)) v.forEach(x => set.add(typeof x === 'object' ? (x.name||x.id) : x));
+    else if (typeof v === 'object') set.add(v.name || v.id);
+    else set.add(String(v));
+  }
+  return [...set].sort();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Sub-tab switching
+// ═══════════════════════════════════════════════════════════════════════
+function switchSubTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('pane-'+tab).classList.add('active');
+  if (history.replaceState) history.replaceState(null, '', '#'+tab);
+  window.scrollTo(0, 0);
+  renderActiveTab();
+}
+
+function renderActiveTab(){
+  if (activeTab === 'tenants')    renderTenants();
+  if (activeTab === 'tenancies')  renderTenancies();
+  if (activeTab === 'units')      renderUnits();
+  if (activeTab === 'properties') renderProperties();
+  if (activeTab === 'customers')  renderCustomers();
+}
+
+function bindHashRouting(){
+  const apply = () => {
+    const h = window.location.hash.replace('#','').split('/')[0];
+    if (['tenants','tenancies','units','properties','customers','compliance'].includes(h) && h !== activeTab) switchSubTab(h);
+  };
+  window.addEventListener('hashchange', apply);
+  apply();
+}
+
+// ── Deep-link from parent shell (CFV tab, etc.) ──
+// Parent sends { type:'ops:crossNav', entity, recordId } via postMessage.
+// We queue it until data is loaded, then crossNav to the row.
+let _pendingCrossNav = null;
+let _opsDataReady = false;
+
+function _tryPendingCrossNav() {
+  if (!_pendingCrossNav || !_opsDataReady) return;
+  const { entity, recordId } = _pendingCrossNav;
+  _pendingCrossNav = null;
+  crossNav(entity, recordId);
+  window.parent.postMessage({ type: 'ops:crossNavAck' }, '*');
+}
+
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'ops:crossNav') {
+    const { entity, recordId } = e.data;
+    if (entity && recordId) {
+      _pendingCrossNav = { entity, recordId };
+      if (_opsDataReady) {
+        _tryPendingCrossNav();
+      }
+      // else: will fire once refreshAll completes
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Cell helpers — read raw value, render display, link cross-nav
+// ═══════════════════════════════════════════════════════════════════════
+function getCellRaw(record, fieldDef){
+  if (!fieldDef) return null;
+  if (fieldDef.virtual && typeof fieldDef.compute === 'function') return fieldDef.compute(record);
+  if (!fieldDef.id) return null;
+  return record.fields[fieldDef.id];
+}
+
+function displayName(record, entityKey){
+  const sch = SCHEMA_RESOLVED[entityKey];
+  if (!sch) return record.id;
+  // Always use Airtable's primaryFieldId — survives field renames + name guesses
+  let v = sch.primaryFieldId ? record.fields[sch.primaryFieldId] : null;
+  if (v == null) {
+    // Fallback: first non-empty scalar value across resolved fields
+    for (const f of Object.values(sch.byKey)) {
+      if (!f.id) continue;
+      const x = record.fields[f.id];
+      if (x != null && typeof x !== 'object') { v = x; break; }
+    }
+  }
+  if (Array.isArray(v)) v = v.length ? (typeof v[0] === 'object' ? (v[0].name||v[0].id) : v[0]) : '';
+  if (typeof v === 'object' && v !== null) v = v.name || v.id;
+  return String(v ?? '(no name)');
+}
+
+function fmtMoney(n){
+  if (n == null || n === '') return '';
+  const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/[£,]/g,''));
+  if (isNaN(num)) return '';
+  return '£' + num.toLocaleString('en-GB', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtMoneyShort(n){
+  // Compact form for KPI tiles where 2dp adds noise
+  if (n == null || n === '') return '';
+  const num = typeof n === 'number' ? n : parseFloat(String(n).replace(/[£,]/g,''));
+  if (isNaN(num)) return '';
+  return '£' + num.toLocaleString('en-GB', { maximumFractionDigits:0 });
+}
+function fmtPercent(n){
+  if (n == null || n === '') return '';
+  const num = typeof n === 'number' ? n : parseFloat(n);
+  if (isNaN(num)) return '';
+  // Convention: percent values are stored as decimals (0.05 = 5%), matching
+  // both Airtable's percent type and our virtual-field output.
+  return (num*100).toFixed(2) + '%';
+}
+function fmtDate(s){
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderCell(record, fieldDef, entityKey){
+  const v = getCellRaw(record, fieldDef);
+  if (v == null || v === '') {
+    if (fieldDef.edit && !fieldDef.readOnly) return `<span class="editable" data-edit="${fieldDef.id}" data-type="${fieldDef.type}" data-rec="${record.id}" data-entity="${entityKey}">—</span>`;
+    return '<span style="color:var(--text-muted)">—</span>';
+  }
+
+  // Linked records → chips
+  if (fieldDef.type === 'link' || (Array.isArray(v) && v.length && typeof v[0] === 'string' && v[0].startsWith('rec'))) {
+    let ids = Array.isArray(v) ? v : [v];
+    const targetEntity = fieldDef.link;
+    // Optional per-record filter (eg. only Active tenancies under "Current Tenancy")
+    if (typeof fieldDef.linkFilter === 'function' && targetEntity) {
+      ids = ids.filter(id => {
+        const rec = INDEX[targetEntity] && INDEX[targetEntity][id];
+        if (!rec) return true; // unresolved — keep so user can still see it
+        try { return fieldDef.linkFilter(rec, targetEntity); } catch(e){ return true; }
+      });
+      if (!ids.length) return '<span style="color:var(--text-muted)">—</span>';
+    }
+    // Sort chips by linked-record display name with natural numeric ordering so
+    // eg. property "Units" comes out as 1, 2, 3, 10 rather than the random
+    // record-id order Airtable returns. Unresolved IDs sink to the end.
+    if (targetEntity && INDEX[targetEntity]) {
+      ids = [...ids].sort((a,b) => {
+        const ra = INDEX[targetEntity][a]; const rb = INDEX[targetEntity][b];
+        if (!ra && !rb) return 0;
+        if (!ra) return 1;
+        if (!rb) return -1;
+        return String(displayName(ra, targetEntity)).localeCompare(String(displayName(rb, targetEntity)), undefined, { numeric:true, sensitivity:'base' });
+      });
+    }
+    const chips = ids.map(id => {
+      const rec = INDEX[targetEntity] && INDEX[targetEntity][id];
+      const nm = rec ? displayName(rec, targetEntity) : id;
+      const cls = targetEntity ? 'chip' : 'chip chip-readonly';
+      const onClick = targetEntity ? `onclick="event.stopPropagation();crossNav('${targetEntity}','${id}')"` : '';
+      return `<span class="${cls}" ${onClick}><span class="chip-name">${escapeHtml(nm)}</span></span>`;
+    }).join('');
+    return `<div class="chips-cell">${chips}</div>`;
+  }
+
+  // Status badges for select fields
+  if (fieldDef.type === 'select') {
+    // Rollups of singleSelect fields come back as ARRAYS of choice objects,
+    // not a single object. Unwrap before pulling .name/.id — otherwise we
+    // render the literal string "undefined".
+    let val = v;
+    if (Array.isArray(val)) val = val[0];
+    const name = (typeof val === 'object' && val !== null) ? (val.name || val.id || '') : (val == null ? '' : String(val));
+    if (!name) return '<span style="color:var(--text-muted)">—</span>';
+    const cls = badgeClass(name);
+    const inner = fieldDef.edit && !fieldDef.readOnly
+      ? `<span class="editable" data-edit="${fieldDef.id}" data-type="select" data-rec="${record.id}" data-entity="${entityKey}">${escapeHtml(name)}</span>`
+      : escapeHtml(name);
+    return `<span class="badge ${cls}">${inner}</span>`;
+  }
+
+  // Money / percent / date
+  if (fieldDef.type === 'money')    return wrapEditable(fmtMoney(v),      fieldDef, record, entityKey, 'money');
+  // moneyBig: capital amounts (property value, mortgage balance, equity).
+  // Drops the trailing .00 so "£195,000.00" doesn't truncate to "£195,000.00 ..".
+  if (fieldDef.type === 'moneyBig') return wrapEditable(fmtMoneyShort(v), fieldDef, record, entityKey, 'moneyBig');
+  if (fieldDef.type === 'percent')  return wrapEditable(fmtPercent(v),    fieldDef, record, entityKey, 'percent');
+  if (fieldDef.type === 'date')    return wrapEditable(fmtDate(v),     fieldDef, record, entityKey, 'date', v);
+  if (fieldDef.type === 'number')  return wrapEditable(String(v),      fieldDef, record, entityKey, 'number');
+  if (fieldDef.type === 'check')   return `<input type="checkbox" ${v?'checked':''} ${fieldDef.edit&&!fieldDef.readOnly?`onchange="saveCheckbox(this,'${record.id}','${fieldDef.id}','${entityKey}')"`:'disabled'}>`;
+  if (fieldDef.type === 'long') {
+    const trimmed = String(v).length > 80 ? String(v).slice(0,80)+'…' : String(v);
+    return wrapEditable(escapeHtml(trimmed), fieldDef, record, entityKey, 'long', v);
+  }
+
+  // text / formula / fallback
+  let display = '';
+  if (Array.isArray(v)) display = v.map(x => typeof x === 'object' ? (x.name||x.id) : x).join(', ');
+  else if (typeof v === 'object') display = v.name || v.id || JSON.stringify(v);
+  else display = String(v);
+  // Pass the human-readable display string as `raw` so the tooltip shows the
+  // full value (not the underlying object/array shape) when the cell ellipses.
+  return wrapEditable(escapeHtml(display), fieldDef, record, entityKey, 'text', display);
+}
+
+function wrapEditable(html, fieldDef, record, entityKey, type, raw){
+  // clickToDrawer: not editable but clickable — opens the drawer to show how
+  // the value was derived (eg. mortgage cost breakdown, rent per unit).
+  if (fieldDef.clickToDrawer) {
+    return `<span class="cell-drilldown" onclick="event.stopPropagation();openDrawer('${entityKey}','${record.id}')" title="Click to see breakdown">${html}</span>`;
+  }
+  // Long text/long fields can truncate via the td's text-overflow:ellipsis.
+  // Stash the full value as a native browser tooltip so hover reveals it.
+  const fullText = (type === 'text' || type === 'long') && raw != null ? String(raw) : '';
+  const titleAttr = fullText ? ` title="${escapeHtml(fullText)}"` : '';
+  if (!fieldDef.edit || fieldDef.readOnly) return `<span${titleAttr}>${html}</span>`;
+  return `<span class="editable" data-edit="${fieldDef.id}" data-type="${type}" data-rec="${record.id}" data-entity="${entityKey}" data-raw="${escapeHtml(raw==null?'':String(raw))}"${titleAttr}>${html}</span>`;
+}
+
+function badgeClass(name){
+  const n = String(name).toLowerCase();
+  if (/(active|occupied|current|in payment|paid)/.test(n)) return 'badge-active';
+  // Order matters — match void/vacant BEFORE former/inactive so a status
+  // like "Inactive Void" still gets the red treatment.
+  if (/(void|vacant)/.test(n)) return 'badge-void';
+  if (/(former|inactive|ended)/.test(n)) return 'badge-former';
+  // `actioned` MUST be checked before `cfv` — "CFV Actioned" goes gold
+  // (in-progress) not red (open void). Matches the Cash Flow Voids tab.
+  if (/actioned/.test(n)) return 'badge-warning';
+  if (/(cfv|overdue|arrears)/.test(n)) return 'badge-overdue';
+  if (/(warning|due)/.test(n)) return 'badge-warning';
+  return 'badge-info';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Cross-tab navigation
+// ═══════════════════════════════════════════════════════════════════════
+function crossNav(entity, recordId){
+  switchSubTab(entity);
+  // Wait for render then scroll + flash the row
+  setTimeout(() => {
+    const row = document.querySelector(`tr[data-rec="${recordId}"]`);
+    if (row) {
+      row.scrollIntoView({behavior:'smooth', block:'center'});
+      row.classList.add('row-flash');
+      setTimeout(()=>row.classList.remove('row-flash'), 1700);
+    } else {
+      // The row may be filtered out — clear filters and try again
+      if (entity === 'tenancies') {
+        const f = document.getElementById('filterTenancyActive'); if (f) { f.value=''; renderTenancies(); }
+        setTimeout(()=>crossNav(entity, recordId), 60);
+      }
+    }
+  }, 80);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Tenants
+// ═══════════════════════════════════════════════════════════════════════
+function renderTenants(){
+  _expandedRow.tenants = null;
+  const sch = SCHEMA_RESOLVED?.tenants; if (!sch) return;
+  const search = document.getElementById('searchTenants').value.toLowerCase().trim();
+  const status = document.getElementById('filterTenantStatus').value;
+  let rows = DATA.tenants.filter(r => {
+    if (search) {
+      const blob = JSON.stringify(r.fields).toLowerCase();
+      if (!blob.includes(search)) return false;
+    }
+    if (status) {
+      const v = r.fields[sch.byKey.status?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== status) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'tenants', sch);
+  document.getElementById('metaTenants').textContent = `${rows.length} of ${DATA.tenants.length}`;
+  document.getElementById('contentTenants').innerHTML = renderTable('tenants', sch, rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Tenancies
+// ═══════════════════════════════════════════════════════════════════════
+function renderTenancies(){
+  _expandedRow.tenancies = null;
+  const sch = SCHEMA_RESOLVED?.tenancies; if (!sch) return;
+  const search = document.getElementById('searchTenancies').value.toLowerCase().trim();
+  const payStatus = document.getElementById('filterTenancyPayStatus').value;
+  const activeOnly = document.getElementById('filterTenancyActive').value === 'active';
+  let rows = DATA.tenancies.filter(r => {
+    if (search && !JSON.stringify(r.fields).toLowerCase().includes(search)) return false;
+    if (payStatus) {
+      const v = r.fields[sch.byKey.payStatus?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== payStatus) return false;
+    }
+    if (activeOnly) {
+      const sv = r.fields[sch.byKey.status?.id];
+      const sn = Array.isArray(sv) ? (sv[0]?.name || sv[0]) : (typeof sv === 'object' ? sv?.name : sv);
+      if (sn && /former|ended|inactive/i.test(String(sn))) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'tenancies', sch);
+  document.getElementById('metaTenancies').textContent = `${rows.length} of ${DATA.tenancies.length}`;
+  document.getElementById('contentTenancies').innerHTML = renderTable('tenancies', sch, rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Rental Units
+// ═══════════════════════════════════════════════════════════════════════
+function renderUnits(){
+  _expandedRow.units = null;
+  const sch = SCHEMA_RESOLVED?.units; if (!sch) return;
+  const search = document.getElementById('searchUnits').value.toLowerCase().trim();
+  const status = document.getElementById('filterUnitStatus').value;
+  const propId = document.getElementById('filterUnitProperty').value;
+  let rows = DATA.units.filter(r => {
+    if (search && !JSON.stringify(r.fields).toLowerCase().includes(search)) return false;
+    if (status) {
+      const v = r.fields[sch.byKey.status?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== status) return false;
+    }
+    if (propId) {
+      const v = r.fields[sch.byKey.property?.id];
+      if (!Array.isArray(v) || !v.includes(propId)) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'units', sch);
+  document.getElementById('metaUnits').textContent = `${rows.length} of ${DATA.units.length}`;
+  document.getElementById('contentUnits').innerHTML = renderTable('units', sch, rows);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Render — Properties (with portfolio KPIs)
+// ═══════════════════════════════════════════════════════════════════════
+function renderProperties(){
+  _expandedRow.properties = null;
+  const sch = SCHEMA_RESOLVED?.properties; if (!sch) return;
+  const search = document.getElementById('searchProperties').value.toLowerCase().trim();
+  const type = document.getElementById('filterPropertyType').value;
+  const owner = document.getElementById('filterPropertyOwnership').value;
+  let rows = DATA.properties.filter(r => {
+    if (search && !JSON.stringify(r.fields).toLowerCase().includes(search)) return false;
+    if (type) {
+      const v = r.fields[sch.byKey.type?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== type) return false;
+    }
+    if (owner) {
+      const v = r.fields[sch.byKey.ownership?.id];
+      const name = Array.isArray(v) ? v[0]?.name || v[0] : (typeof v === 'object' ? v?.name : v);
+      if (name !== owner) return false;
+    }
+    return true;
+  });
+  rows = applySort(rows, 'properties', sch);
+  document.getElementById('metaProperties').textContent = `${rows.length} of ${DATA.properties.length}`;
+  renderPropertyKpis();
+  document.getElementById('contentProperties').innerHTML = renderTable('properties', sch, rows);
+}
+
+function renderPropertyKpis(){
+  const sch = SCHEMA_RESOLVED?.properties; if (!sch) return;
+  const total = DATA.properties.length;
+  const sumNum = (arr, fieldId) => arr.reduce((s,r)=>{
+    const v = r.fields[fieldId]; const n = typeof v==='number'?v:parseFloat(v); return s + (isNaN(n)?0:n);
+  },0);
+  const sumDerived = (arr, fn) => arr.reduce((s,r)=>{ const n = fn(r); return s + ((n==null||isNaN(n))?0:n); },0);
+  const totalValue    = sumNum(DATA.properties, sch.byKey.marketValue?.id);
+  const totalDebt     = sumNum(DATA.properties, sch.byKey.mortgageBal?.id);
+  const totalRent     = sumDerived(DATA.properties, derivePropertyGrossRent);
+  const totalMortgage = sumDerived(DATA.properties, deriveMortgagePay);
+  const totalBeds     = sumNum(DATA.properties, sch.byKey.beds?.id);
+  const totalPurchase = sumNum(DATA.properties, sch.byKey._purchPrice?.id);
+  const equity     = totalValue - totalDebt;
+  const annualRent = totalRent * 12;
+  const annualNet  = (totalRent - totalMortgage) * 12;
+  const portfolioYield = totalValue > 0 ? (annualRent / totalValue * 100) : 0;
+  const cashOnCash     = equity > 0 ? (annualNet / equity * 100) : 0;
+  const capGrowth      = totalPurchase > 0 ? totalValue - totalPurchase : null;
+  const avgLTV         = totalValue > 0 ? (totalDebt / totalValue * 100) : 0;
+
+  // Occupancy across all units
+  const unitSch = SCHEMA_RESOLVED?.units;
+  let occupied = 0, totalUnits = DATA.units.length;
+  if (unitSch?.byKey?.status?.id) {
+    for (const u of DATA.units) {
+      const v = u.fields[unitSch.byKey.status.id];
+      const name = Array.isArray(v) ? (v[0]?.name||v[0]) : (typeof v==='object'?v?.name:v);
+      if (/occupied|active/i.test(String(name||''))) occupied++;
+    }
+  }
+  const occRate = totalUnits ? (occupied/totalUnits*100) : 0;
+
+  document.getElementById('propertyKpis').innerHTML = `
+    <div class="kpi"><div class="label">Properties</div><div class="value">${total}</div><div class="sub">${totalUnits} units · ${totalBeds||'—'} beds</div></div>
+    <div class="kpi"><div class="label">Portfolio Value</div><div class="value">${fmtMoneyShort(totalValue)}</div><div class="sub">market value</div></div>
+    <div class="kpi"><div class="label">Total Debt</div><div class="value">${fmtMoneyShort(totalDebt)}</div><div class="sub">avg LTV ${avgLTV.toFixed(1)}%</div></div>
+    <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div><div class="sub">${totalValue?(equity/totalValue*100).toFixed(0):0}% of value</div></div>
+    ${capGrowth!=null?`<div class="kpi"><div class="label">Capital Growth</div><div class="value" style="color:${capGrowth>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(capGrowth)}</div><div class="sub">${(capGrowth/totalPurchase*100).toFixed(1)}% since purchase</div></div>`:''}
+    <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(totalRent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
+    <div class="kpi"><div class="label">Fixed Costs / mo</div><div class="value">${fmtMoneyShort(totalMortgage)}</div><div class="sub">all linked monthly costs</div></div>
+    <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(totalRent-totalMortgage)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(totalRent-totalMortgage)}</div><div class="sub">before opex</div></div>
+    <div class="kpi"><div class="label">Gross Yield</div><div class="value">${portfolioYield.toFixed(2)}%</div><div class="sub">annual rent / value</div></div>
+    <div class="kpi"><div class="label">Cash on Cash</div><div class="value" style="color:${cashOnCash>=8?'var(--success)':cashOnCash>=4?'var(--warning)':'var(--danger)'}">${cashOnCash.toFixed(2)}%</div><div class="sub">net rent / equity</div></div>
+    <div class="kpi"><div class="label">Occupancy</div><div class="value" style="color:${occRate>=90?'var(--success)':occRate>=75?'var(--warning)':'var(--danger)'}">${occRate.toFixed(0)}%</div><div class="sub">${occupied} / ${totalUnits} units</div></div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Generic table renderer
+// ═══════════════════════════════════════════════════════════════════════
+function renderTable(entityKey, sch, rows){
+  if (!rows.length) {
+    return `<div class="empty"><div class="icon">📭</div><div class="msg">No ${SCHEMA[entityKey].label.toLowerCase()} match the current filters.</div></div>`;
+  }
+  const cols = SCHEMA[entityKey].fields.map(def => sch.byKey[def.key]).filter(c => c && !c.missing);
+  const sort = sortState[entityKey];
+
+  // Per-column class for body-cell styling. Money/percent/moneyBig right-align;
+  // plain `number` (small integers like Beds, Unit #, Due Day) center so single
+  // digits don't sit on the column border.
+  const colCls = (c) => {
+    const a = [];
+    if (c.type === 'money' || c.type === 'moneyBig' || c.type === 'percent') a.push('money');
+    else if (c.type === 'number') a.push('num-center');
+    if (c.type === 'link' || c.type === 'select') a.push('wrap-cell');
+    return a.join(' ');
+  };
+
+  // <colgroup> defines widths once for both head and body — no need to repeat
+  // them per-cell, and table-layout:fixed honours them strictly so the table
+  // never overflows beyond the sum of declared widths.
+  const colgroup = '<colgroup>'
+    + cols.map(c => `<col${c.width?` style="width:${c.width}"`:''}>`).join('')
+    + '<col style="width:30px">'
+    + '</colgroup>';
+
+  const head = '<tr>' + cols.map(c => {
+    const isSorted = sort && sort.key === c.key;
+    const arrow = isSorted ? (sort.dir==='asc'?'▲':'▼') : '↕';
+    const cls = [colCls(c), isSorted?'sorted':''].filter(Boolean).join(' ');
+    return `<th class="${cls}" data-col="${c.key}" onclick="toggleSort('${entityKey}','${c.key}')"><span class="th-inner"><span class="th-label">${escapeHtml(c.label)}</span><span class="th-sort">${arrow}</span></span></th>`;
+  }).join('') + '<th></th></tr>';
+
+  const hasDrawer = entityKey === 'properties';
+  const body = rows.map(r => {
+    const chevron = `<span class="expand-chevron" id="chev-${r.id}">▶</span>`;
+    const firstCol = cols[0];
+    const firstTd = `<td class="${colCls(firstCol)}">${chevron}${renderCell(r, firstCol, entityKey)}</td>`;
+    const restTds = cols.slice(1).map(c => `<td class="${colCls(c)}">${renderCell(r, c, entityKey)}</td>`).join('');
+    const actionTd = hasDrawer
+      ? `<td><button class="row-open" onclick="event.stopPropagation();openDrawer('${entityKey}','${r.id}')" title="Open detail">↗</button></td>`
+      : '<td></td>';
+    const dataRow = `<tr class="expandable" data-rec="${r.id}" data-entity="${entityKey}" onclick="toggleExpandRow('${entityKey}','${r.id}',this,event)">${firstTd}${restTds}${actionTd}</tr>`;
+    const expandRow = `<tr class="expand-row" id="exp-${r.id}" style="display:none"><td colspan="${cols.length+1}"></td></tr>`;
+    return dataRow + expandRow;
+  }).join('');
+
+  return `<div class="table-wrap"><table class="dt">${colgroup}<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+function applySort(rows, entityKey, sch){
+  const s = sortState[entityKey];
+  if (!s) return rows;
+  const col = sch.byKey[s.key];
+  if (!col) return rows;
+  const dir = s.dir === 'asc' ? 1 : -1;
+
+  // Compute a sortable key per record. For link fields we need the linked
+  // record's display NAME, not its raw `recXXX` id (which sorts as if random).
+  // Virtual fields use their compute(). Numbers fall through unchanged.
+  const sortKey = (rec) => {
+    if (col.virtual && col.compute) return col.compute(rec);
+    if (!col.id) return null;
+    let v = rec.fields[col.id];
+    if (Array.isArray(v)) {
+      if (col.type === 'link' && col.link && v.length) {
+        const linked = INDEX[col.link] && INDEX[col.link][v[0]];
+        return linked ? displayName(linked, col.link) : v[0];
+      }
+      v = v[0];
+    }
+    if (typeof v === 'object' && v) v = v.name || v.id;
+    return v;
+  };
+
+  return [...rows].sort((a,b) => {
+    const av = sortKey(a); const bv = sortKey(b);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av-bv)*dir;
+    // numeric:true gives natural sort so "23 Viola Street" < "30 Burnbank" < "282 X"
+    return String(av).localeCompare(String(bv), undefined, { numeric:true, sensitivity:'base' }) * dir;
+  });
+}
+
+function toggleSort(entityKey, key){
+  const cur = sortState[entityKey];
+  if (cur && cur.key === key) {
+    sortState[entityKey] = cur.dir === 'asc' ? {key, dir:'desc'} : null;
+  } else {
+    sortState[entityKey] = {key, dir:'asc'};
+  }
+  renderActiveTab();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Inline editing
+// ═══════════════════════════════════════════════════════════════════════
+document.addEventListener('click', e => {
+  const editEl = e.target.closest('.editable');
+  if (!editEl || editEl.dataset._editing) return;
+  if (e.target.closest('.chip')) return; // don't trigger from chip clicks
+  startEdit(editEl);
+});
+
+function startEdit(el){
+  if (el.dataset._editing) return;
+  el.dataset._editing = '1';
+  const type = el.dataset.type;
+  const fieldId = el.dataset.edit;
+  const recId = el.dataset.rec;
+  const entityKey = el.dataset.entity;
+  const sch = SCHEMA_RESOLVED[entityKey];
+  const fieldDef = sch.byId[fieldId];
+  const record = INDEX[entityKey][recId];
+  const raw = record.fields[fieldId];
+
+  if (type === 'select') {
+    const sel = document.createElement('select');
+    sel.className = 'inline-select';
+    const cur = (raw && typeof raw === 'object') ? raw.name : (raw || null);
+    sel.innerHTML = '<option value="">—</option>' + (fieldDef.options?.choices||[]).map(c=>`<option value="${escapeHtml(c.name)}" ${c.name===cur?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+    replaceWithEditor(el, sel, async () => {
+      const newVal = sel.value || null;
+      if (newVal === cur) { finishEdit(el, record, entityKey); return; }
+      await saveField(entityKey, recId, fieldId, newVal, el);
+    });
+    sel.focus(); return;
+  }
+
+  if (type === 'date') {
+    const inp = document.createElement('input');
+    inp.type = 'date'; inp.className = 'inline-input';
+    if (raw) inp.value = String(raw).slice(0,10);
+    replaceWithEditor(el, inp, async () => {
+      const v = inp.value || null;
+      if (v === (raw ? String(raw).slice(0,10) : null)) { finishEdit(el, record, entityKey); return; }
+      await saveField(entityKey, recId, fieldId, v, el);
+    });
+    inp.focus(); return;
+  }
+
+  if (type === 'number' || type === 'money' || type === 'moneyBig' || type === 'percent') {
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.className = 'inline-input';
+    inp.step = type === 'percent' ? '0.001' : (type === 'money' ? '0.01' : (type === 'moneyBig' ? '100' : '1'));
+    inp.value = raw == null ? '' : (type === 'percent' && typeof raw === 'number' ? raw : raw);
+    replaceWithEditor(el, inp, async () => {
+      const v = inp.value === '' ? null : parseFloat(inp.value);
+      if (v === raw) { finishEdit(el, record, entityKey); return; }
+      await saveField(entityKey, recId, fieldId, v, el);
+    });
+    inp.focus(); inp.select(); return;
+  }
+
+  // text / long
+  const tag = type === 'long' ? 'textarea' : 'input';
+  const inp = document.createElement(tag);
+  inp.className = 'inline-input';
+  if (tag === 'input') inp.type = 'text';
+  else inp.rows = 4;
+  inp.style.width = '100%';
+  inp.value = raw == null ? '' : String(raw);
+  replaceWithEditor(el, inp, async () => {
+    const v = inp.value;
+    if (v === (raw == null ? '' : String(raw))) { finishEdit(el, record, entityKey); return; }
+    await saveField(entityKey, recId, fieldId, v === '' ? null : v, el);
+  });
+  inp.focus();
+  if (tag === 'input') inp.select();
+}
+
+function replaceWithEditor(el, editor, commit){
+  const original = el.outerHTML;
+  el.dataset._original = original;
+  el.style.display = 'none';
+  el.parentNode.insertBefore(editor, el.nextSibling);
+  let committed = false;
+  const commitOnce = async () => {
+    if (committed) return; committed = true;
+    editor.disabled = true;
+    try { await commit(); } catch (e) { console.error(e); }
+  };
+  editor.addEventListener('blur', commitOnce);
+  editor.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && editor.tagName !== 'TEXTAREA') { e.preventDefault(); editor.blur(); }
+    else if (e.key === 'Escape') {
+      committed = true;
+      editor.remove();
+      el.style.display = '';
+      delete el.dataset._editing;
+    }
+  });
+}
+
+function finishEdit(el, record, entityKey){
+  const fieldId = el.dataset.edit;
+  const sch = SCHEMA_RESOLVED[entityKey];
+  const fieldDef = sch.byId[fieldId];
+  const html = renderCell(record, fieldDef, entityKey);
+  const next = el.nextSibling;
+  if (next && next !== el) next.remove();
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const newNode = tmp.firstChild || document.createTextNode('');
+  // Select cells: the .editable span sits inside a .badge wrapper.
+  // renderCell returns a full badge+editable structure, so replace the
+  // badge parent (not just the inner span) to avoid nested badges.
+  const badgeParent = el.parentNode?.classList?.contains('badge') ? el.parentNode : null;
+  if (badgeParent) {
+    badgeParent.replaceWith(newNode);
+  } else {
+    el.replaceWith(newNode);
+  }
+}
+
+async function saveField(entityKey, recId, fieldId, value, el){
+  const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
+  el.classList.add('cell-saving');
+  try {
+    const body = { fields: { [fieldId]: value }, typecast: true };
+    await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify(body) });
+    // Update local record with the value we sent. The PATCH response keys
+    // fields by name (not ID) despite returnFieldsByFieldId, so merging it
+    // would leave the ID-keyed local data stale. Direct assignment is safe
+    // because we know which field changed and what we set it to.
+    const rec = INDEX[entityKey][recId];
+    if (rec) {
+      rec.fields[fieldId] = value;
+    }
+    el.classList.remove('cell-saving');
+    el.classList.remove('cell-error');
+    finishEdit(el, rec, entityKey);
+    toast('Saved', 'success');
+  } catch (e) {
+    console.error('save failed', e);
+    el.classList.remove('cell-saving');
+    el.classList.add('cell-error');
+    delete el.dataset._editing;
+    el.style.display = '';
+    const next = el.nextSibling;
+    if (next && next.tagName && /input|select|textarea/i.test(next.tagName)) next.remove();
+    toast('Save failed: ' + (e.message||'unknown'), 'error');
+  }
+}
+
+async function saveCheckbox(input, recId, fieldId, entityKey){
+  const v = input.checked;
+  const tableId = TABLE[entityKey === 'units' ? 'rentalUnits' : entityKey];
+  try {
+    await airtableFetch(`${BASE_ID}/${tableId}/${recId}`, { method:'PATCH', body: JSON.stringify({ fields: { [fieldId]: v }, typecast: true }) });
+    const rec = INDEX[entityKey][recId];
+    if (rec) rec.fields[fieldId] = v;
+    toast('Saved', 'success');
+  } catch (e) {
+    input.checked = !v;
+    toast('Save failed: '+e.message, 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Detail drawer
+// ═══════════════════════════════════════════════════════════════════════
+function openDrawer(entityKey, recId){
+  const sch = SCHEMA_RESOLVED[entityKey];
+  const rec = INDEX[entityKey][recId]; if (!rec) return;
+  const title = displayName(rec, entityKey);
+  // Use the explicit `singular` label so "Tenancies" → "Tenancy" (not "Tenancie")
+  const subtitle = (SCHEMA[entityKey].singular || SCHEMA[entityKey].label.replace(/s$/,'')) + ' · ' + recId;
+
+  // Main fields (curated)
+  const mainRows = SCHEMA[entityKey].fields
+    .map(def => sch.byKey[def.key])
+    .filter(c => c && !c.missing)
+    .map(c => fieldRow(c, rec, entityKey))
+    .join('');
+
+  // Drawer extras (Properties only)
+  const extraRows = (sch.drawerExtras||[])
+    .map(c => fieldRow(c, rec, entityKey))
+    .join('');
+
+  // Computed financial sections for Properties
+  let computedSection = '';
+  let valuationSection = '';
+  let rentBreakdownSection = '';
+  let mortgageBreakdownSection = '';
+  if (entityKey === 'properties') {
+    computedSection         = renderPropertyDetailMetrics(rec);
+    valuationSection        = renderPropertyValuationHistory(rec);
+    rentBreakdownSection    = renderPropertyRentBreakdown(rec);
+    mortgageBreakdownSection= renderPropertyMortgageBreakdown(rec);
+  }
+
+  // Document Links section for Tenancies — shows the auto-linked tenancy
+  // docs (signed AST, proof of residency, etc.) with clickable Gmail links.
+  let tenancyDocLinksSection = '';
+  if (entityKey === 'tenancies') {
+    tenancyDocLinksSection = renderTenancyDocLinks(rec);
+  }
+
+  // Linked units list for properties
+  let linkedSection = '';
+  if (entityKey === 'properties') {
+    const unitSch = SCHEMA_RESOLVED.units;
+    const linkedUnits = DATA.units.filter(u => {
+      const v = u.fields[unitSch?.byKey?.property?.id];
+      return Array.isArray(v) && v.includes(recId);
+    });
+    if (linkedUnits.length) {
+      linkedSection = `<div class="drawer-section"><h3>Rental Units (${linkedUnits.length})</h3>` +
+        linkedUnits.map(u => {
+          const status = u.fields[unitSch.byKey.status?.id];
+          const statusName = Array.isArray(status) ? (status[0]?.name||status[0]) : (typeof status==='object'?status?.name:status);
+          const tenant = u.fields[unitSch.byKey.tenant?.id];
+          const tenantName = Array.isArray(tenant) && tenant[0] ? (INDEX.tenants[tenant[0]] ? displayName(INDEX.tenants[tenant[0]],'tenants') : tenant[0]) : '—';
+          return `<div class="field-row" style="grid-template-columns:1fr 100px 1fr;cursor:pointer" onclick="closeDrawer();crossNav('units','${u.id}')">
+            <div><strong>${escapeHtml(displayName(u,'units'))}</strong></div>
+            <div><span class="badge ${badgeClass(statusName||'')}">${escapeHtml(statusName||'—')}</span></div>
+            <div style="color:var(--text-secondary)">${escapeHtml(tenantName)}</div>
+          </div>`;
+        }).join('') + '</div>';
+    }
+  }
+
+  const html = `
+    <div class="drawer-overlay" onclick="if(event.target===this)closeDrawer()">
+      <div class="drawer">
+        <div class="drawer-header">
+          <div class="hdr-main">
+            <h2>${escapeHtml(title)}</h2>
+            <div class="hdr-sub">${escapeHtml(subtitle)}</div>
+          </div>
+          <button class="drawer-close" onclick="closeDrawer()">×</button>
+        </div>
+        <div class="drawer-body">
+          ${computedSection}
+          ${valuationSection}
+          ${rentBreakdownSection}
+          ${mortgageBreakdownSection}
+          ${tenancyDocLinksSection}
+          <div class="drawer-section">
+            <h3>Details</h3>
+            ${mainRows}
+            ${extraRows}
+          </div>
+          ${linkedSection}
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('drawerOverlay').innerHTML = html;
+}
+
+function closeDrawer(){
+  document.getElementById('drawerOverlay').innerHTML = '';
+}
+
+function fieldRow(fieldDef, record, entityKey){
+  const cellHtml = renderCell(record, fieldDef, entityKey);
+  return `<div class="field-row"><div class="field-label">${escapeHtml(fieldDef.label || fieldDef.name)}</div><div class="field-value">${cellHtml}</div></div>`;
+}
+
+// Document Links — drawer section for the Tenancies entity. The Inbound
+// Comms OS auto-populates this multilineText field on the Tenancies table
+// (field ID fldaJGnXuCOLTqAs1) when emails are filed under "11: tenancy
+// docs". Each entry is a single line in the format:
+//   "<YYYY-MM-DD> | <short description> | <Gmail URL>"
+// We parse each line and render it as a clean row with a clickable
+// "Open in Gmail" button so the assignee can jump straight to the email.
+const TENANCY_DOC_LINKS_FIELD_ID = 'fldaJGnXuCOLTqAs1';
+function renderTenancyDocLinks(rec){
+  const raw = rec.fields[TENANCY_DOC_LINKS_FIELD_ID];
+  if (!raw || typeof raw !== 'string' || !raw.trim()) {
+    // Hide the section entirely if no docs are linked yet — no clutter.
+    return '';
+  }
+
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return '';
+
+  const rows = lines.map(line => {
+    // Expected: "<date> | <label> | <url>". Tolerate manual edits that
+    // miss a separator — fall back to showing the raw line as the label.
+    const parts = line.split('|').map(p => p.trim());
+    const date  = parts[0] && /^\d{4}-\d{2}-\d{2}/.test(parts[0]) ? parts[0] : '';
+    const url   = parts.find(p => /^https?:\/\//i.test(p)) || '';
+    const label = parts.length >= 3
+      ? parts.slice(1, -1).join(' | ')
+      : (parts.find(p => p && !/^\d{4}-\d{2}-\d{2}/.test(p) && !/^https?:\/\//i.test(p)) || '(no label)');
+
+    const dateCell  = date ? `<td style="color:var(--text-secondary);white-space:nowrap;font-size:11px;width:90px">${escapeHtml(date)}</td>` : `<td style="width:90px"></td>`;
+    const labelCell = `<td style="word-break:break-word">${escapeHtml(label || '(no label)')}</td>`;
+    const linkCell  = url
+      ? `<td style="text-align:right;width:120px"><a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:var(--fs-sm);font-weight:500;">Open in Gmail ↗</a></td>`
+      : `<td style="text-align:right;width:120px;color:var(--text-muted);font-size:11px">no link</td>`;
+    return `<tr>${dateCell}${labelCell}${linkCell}</tr>`;
+  }).join('');
+
+  return `<div class="drawer-section">
+    <h3>Document Links (${lines.length})</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Auto-populated by Inbound Comms when emails are filed under "11: tenancy docs". Append-only — older entries are preserved.</div>
+    <table class="breakdown-table" style="font-size:var(--fs-base)">
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+// Fixed Cost Breakdown — list every cost record linked to this property
+// with its amount and active flag. Lets the user verify which cost records
+// the Fixed Costs / mo column is summing (mortgage, council tax, insurance, …).
+function renderPropertyMortgageBreakdown(rec){
+  const linkId = fid('properties','_mortCostLink');
+  if (!linkId) return '';
+  const linked = rec.fields[linkId];
+  if (!Array.isArray(linked) || !linked.length) {
+    return `<div class="drawer-section">
+      <h3>Fixed Cost Breakdown</h3>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted)">No costs are linked to this property in Airtable. Fixed Costs / mo therefore shows blank. Link the relevant Cost records (mortgage, council tax, insurance, etc.) on the Properties table to fix.</div>
+    </div>`;
+  }
+  const expFid      = fid('costs','expected');
+  const inactiveFid = fid('costs','inactive');
+  if (!expFid) return '';
+  const rows = linked.map(id => {
+    const cost = INDEX.costs[id];
+    if (!cost) return { id, name:id, amount:null, active:false, missing:true };
+    const amt = parseFloat(cost.fields[expFid]);
+    return {
+      id,
+      name: displayName(cost,'costs'),
+      amount: isNaN(amt) ? null : amt,
+      active: !inactiveFid || !cost.fields[inactiveFid],
+    };
+  });
+  const active   = rows.filter(r => r.active);
+  const inactive = rows.filter(r => !r.active);
+  const total    = active.reduce((s,r) => s + (r.amount||0), 0);
+  return `<div class="drawer-section">
+    <h3>Fixed Cost Breakdown</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">The Fixed Costs / mo column sums the active rows below (mortgage, council tax, insurance, etc.). If a value here looks wrong, fix the link or the cost record in Airtable.</div>
+    <table class="breakdown-table">
+      <thead><tr><th>Cost record</th><th style="text-align:right">Monthly</th><th style="width:80px">Status</th></tr></thead>
+      <tbody>
+        ${active.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="money">${r.amount!=null?fmtMoney(r.amount):'—'}</td><td><span class="badge badge-active">active</span></td></tr>`).join('')}
+        ${inactive.map(r => `<tr style="color:var(--text-muted)"><td>${escapeHtml(r.name)}</td><td class="money">${r.amount!=null?fmtMoney(r.amount):'—'}</td><td><span class="badge badge-former">inactive</span></td></tr>`).join('')}
+        <tr class="total"><td>Total (active)</td><td class="money">${fmtMoney(total)}</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// Rent Breakdown — list units belonging to this property and the active
+// tenancy / rent on each. Lets the user verify what Rent / mo is summing.
+function renderPropertyRentBreakdown(rec){
+  const unitSch = SCHEMA_RESOLVED?.units;
+  const tenSch  = SCHEMA_RESOLVED?.tenancies;
+  if (!unitSch || !tenSch) return '';
+  const propLinkOnUnits = unitSch.byKey.property?.id;
+  const unitLinkOnTen   = tenSch.byKey.unit?.id;
+  const rentFid         = tenSch.byKey.rent?.id;
+  const tenantLinkFid   = tenSch.byKey.tenant?.id;
+  if (!propLinkOnUnits || !unitLinkOnTen || !rentFid) return '';
+  const units = DATA.units.filter(u => {
+    const v = u.fields[propLinkOnUnits];
+    return Array.isArray(v) && v.includes(rec.id);
+  });
+  if (!units.length) return '';
+  let total = 0;
+  const rows = [];
+  for (const u of units) {
+    const unitName = displayName(u,'units');
+    const activeTen = DATA.tenancies.filter(t => {
+      const v = t.fields[unitLinkOnTen];
+      return Array.isArray(v) && v.includes(u.id) && isActiveStatus(t,'tenancies');
+    });
+    if (!activeTen.length) {
+      rows.push({ unit:unitName, tenant:null, rent:null, void:true });
+      continue;
+    }
+    for (const t of activeTen) {
+      const tlink = tenantLinkFid ? t.fields[tenantLinkFid] : null;
+      const tid   = Array.isArray(tlink) ? tlink[0] : null;
+      const tname = (tid && INDEX.tenants[tid]) ? displayName(INDEX.tenants[tid],'tenants') : '—';
+      const r = parseFloat(t.fields[rentFid]);
+      const rent = isNaN(r) ? null : r;
+      if (rent != null) total += rent;
+      rows.push({ unit:unitName, tenant:tname, rent });
+    }
+  }
+  return `<div class="drawer-section">
+    <h3>Rent Breakdown</h3>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Expected monthly rent on active tenancies, per unit. Void units contribute nothing.</div>
+    <table class="breakdown-table">
+      <thead><tr><th>Unit</th><th>Tenant</th><th style="text-align:right">Rent / mo</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `<tr>
+          <td>${escapeHtml(r.unit)}</td>
+          <td>${r.void ? '<span class="badge badge-void">void</span>' : escapeHtml(r.tenant)}</td>
+          <td class="money">${r.rent!=null?fmtMoney(r.rent):'—'}</td>
+        </tr>`).join('')}
+        <tr class="total"><td colspan="2">Total</td><td class="money">${fmtMoney(total)}</td></tr>
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Valuation History — per-property historical estimates with trend chart.
+// Approved valuations update Property.Current Market Value. The chart
+// plots Approved valuations only so the trend line reflects accepted truth.
+// ═══════════════════════════════════════════════════════════════════════
+function getPropertyValuations(propRec){
+  const sch = SCHEMA_RESOLVED.valuations; if (!sch) return [];
+  const propLink = sch.byKey.property?.id; if (!propLink) return [];
+  return DATA.valuations
+    .filter(v => Array.isArray(v.fields[propLink]) && v.fields[propLink].includes(propRec.id))
+    .map(v => ({
+      id: v.id,
+      date: v.fields[sch.byKey.date?.id] || null,
+      value: parseFloat(v.fields[sch.byKey.value?.id]) || 0,
+      source: ((v.fields[sch.byKey.source?.id])||{}).name || '',
+      status: ((v.fields[sch.byKey.status?.id])||{}).name || '',
+      confidence: ((v.fields[sch.byKey.confidence?.id])||{}).name || '',
+      methodology: v.fields[sch.byKey.methodology?.id] || '',
+      previousValue: parseFloat(v.fields[sch.byKey.previousValue?.id]) || null,
+      raw: v,
+    }))
+    .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
+}
+
+function renderPropertyValuationHistory(propRec){
+  const all = getPropertyValuations(propRec);
+  const approved = all.filter(v => /approved/i.test(v.status));
+  const pending  = all.filter(v => /pending/i.test(v.status));
+  const sch = SCHEMA_RESOLVED.properties;
+  const currentValue = parseFloat(propRec.fields[sch.byKey.marketValue?.id]) || 0;
+  const purchPrice   = parseFloat(propRec.fields[sch.byKey._purchPrice?.id]) || null;
+
+  // Headline tiles: current, change since first approved, change since purchase
+  const first = approved[0];
+  const sinceFirst = (first && currentValue) ? currentValue - first.value : null;
+  const sinceFirstPct = (first && first.value) ? ((currentValue - first.value) / first.value * 100) : null;
+  const sincePurch = (purchPrice && currentValue) ? currentValue - purchPrice : null;
+  const sincePurchPct = (purchPrice) ? ((currentValue - purchPrice) / purchPrice * 100) : null;
+
+  const tiles = `
+    <div class="valuation-summary">
+      <div class="val-tile"><div class="lbl">Current Value</div><div class="val">${fmtMoneyShort(currentValue)}</div><div class="sub">latest approved</div></div>
+      ${sincePurch != null ? `<div class="val-tile"><div class="lbl">vs Purchase</div><div class="val" style="color:${sincePurch>=0?'var(--success)':'var(--danger)'}">${sincePurch>=0?'+':''}${fmtMoneyShort(sincePurch)}</div><div class="sub">${sincePurchPct.toFixed(1)}% since ${fmtMoneyShort(purchPrice)}</div></div>` : ''}
+      ${sinceFirst != null ? `<div class="val-tile"><div class="lbl">vs First Valuation</div><div class="val" style="color:${sinceFirst>=0?'var(--success)':'var(--danger)'}">${sinceFirst>=0?'+':''}${fmtMoneyShort(sinceFirst)}</div><div class="sub">${sinceFirstPct.toFixed(1)}% since ${fmtDate(first.date)}</div></div>` : ''}
+      <div class="val-tile"><div class="lbl">Total Valuations</div><div class="val">${all.length}</div><div class="sub">${approved.length} approved · ${pending.length} pending</div></div>
+    </div>`;
+
+  // Chart canvas (approved valuations as a line)
+  const chartId = 'valChart_' + propRec.id;
+  const chartHtml = approved.length >= 2
+    ? `<div class="val-chart-wrap"><canvas id="${chartId}"></canvas></div>`
+    : (approved.length === 1
+        ? `<div class="val-empty">One approved valuation logged. Run another to start the trend.</div>`
+        : `<div class="val-empty">No approved valuations yet. Run an AI valuation below to add the first one.</div>`);
+
+  // Pending review banner
+  const pendingHtml = pending.length ? `
+    <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:var(--fs-sm);color:var(--warning)">
+      <strong>${pending.length} valuation${pending.length>1?'s':''} pending review</strong>
+      — open the most recent below to approve or reject.
+    </div>` : '';
+
+  // History table — most recent first
+  const historyRows = [...all].reverse().map(v => {
+    const isPending = /pending/i.test(v.status);
+    return `<tr style="${isPending?'background:var(--warning-bg)':''}${/rejected/i.test(v.status)?';opacity:.5':''}">
+      <td>${escapeHtml(fmtDate(v.date)||'—')}</td>
+      <td class="money">${fmtMoneyShort(v.value)}</td>
+      <td><span class="schema-tag">${escapeHtml(v.source||'—')}</span></td>
+      <td><span class="badge ${badgeClass(v.status)}">${escapeHtml(v.status||'—')}</span></td>
+      <td>${escapeHtml(v.confidence||'—')}</td>
+      <td><button class="btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();openValuationModal('${propRec.id}','${v.id}')">${isPending?'Review':'View'}</button></td>
+    </tr>`;
+  }).join('');
+
+  const historyTable = all.length ? `
+    <table class="breakdown-table">
+      <thead><tr><th>Date</th><th style="text-align:right">Value</th><th>Source</th><th>Status</th><th>Confidence</th><th></th></tr></thead>
+      <tbody>${historyRows}</tbody>
+    </table>` : '';
+
+  // Render the chart on next tick (canvas needs to be in DOM first)
+  if (approved.length >= 2) {
+    setTimeout(() => renderValuationChart(chartId, approved), 50);
+  }
+
+  return `<div class="drawer-section">
+    <h3>Valuation History</h3>
+    ${tiles}
+    ${pendingHtml}
+    ${chartHtml}
+    <div class="val-actions">
+      <button class="btn-ai" onclick="runAIValuation('${propRec.id}')">✨ Run AI Valuation</button>
+    </div>
+    ${historyTable}
+  </div>`;
+}
+
+function renderValuationChart(canvasId, approvedValuations){
+  if (typeof Chart === 'undefined') return;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  // Tear down any prior instance on this canvas
+  if (canvas._chart) { try { canvas._chart.destroy(); } catch(e){} }
+  // Resolve token colours so the chart matches the design system
+  const css = getComputedStyle(document.body);
+  const accent = css.getPropertyValue('--accent').trim() || '#2C6E49';
+  const textMuted = css.getPropertyValue('--text-muted').trim() || '#8A928C';
+  const borderSubtle = css.getPropertyValue('--border-subtle').trim() || '#E5E8E1';
+  canvas._chart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: approvedValuations.map(v => fmtDate(v.date)),
+      datasets: [{
+        label: 'Approved Valuation',
+        data: approvedValuations.map(v => v.value),
+        borderColor: accent,
+        backgroundColor: accent + '22',
+        tension: 0.2,
+        fill: true,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => '£' + ctx.parsed.y.toLocaleString('en-GB') } },
+      },
+      scales: {
+        y: { ticks: { callback: (v) => '£' + Number(v).toLocaleString('en-GB'), color: textMuted, font:{ size: 10 } }, grid: { color: borderSubtle } },
+        x: { ticks: { color: textMuted, font:{ size: 10 } }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// AI Valuation flow — Anthropic API with web search
+// 1. Confirm or capture API key
+// 2. Send Claude a structured prompt with the property details
+// 3. Claude does up to 6 web searches for comparable sales
+// 4. Parse the <output> JSON block from the response
+// 5. Show review modal with comparables + estimated value
+// 6. On Approve: persist a Pending → Approved valuation + PATCH Market Value
+// ═══════════════════════════════════════════════════════════════════════
+const ANTHROPIC_KEY_LS = '_anthropic_key';
+const ANTHROPIC_PROXY_LS = '_anthropic_proxy_url';
+function getAnthropicKey(){ return localStorage.getItem(ANTHROPIC_KEY_LS) || ''; }
+function setAnthropicKey(k){ localStorage.setItem(ANTHROPIC_KEY_LS, k); }
+// If the user's network/extensions block direct calls to api.anthropic.com,
+// they can deploy the Cloudflare Worker in /cloudflare-worker/ and store its
+// URL here — every Anthropic call is then routed through that proxy.
+function getAnthropicBaseUrl(){
+  const proxy = localStorage.getItem(ANTHROPIC_PROXY_LS);
+  return (proxy && proxy.replace(/\/$/, '')) || 'https://api.anthropic.com';
+}
+function setAnthropicProxyUrl(url){
+  if (!url) { localStorage.removeItem(ANTHROPIC_PROXY_LS); return; }
+  localStorage.setItem(ANTHROPIC_PROXY_LS, url.trim().replace(/\/$/, ''));
+}
+
+function showAIModal(html, opts={}){
+  const close = opts.closable !== false;
+  const wrap = document.getElementById('drawerOverlay');
+  // Render on top of the drawer; we use a separate stacking container
+  let host = document.getElementById('aiModalHost');
+  if (!host) { host = document.createElement('div'); host.id='aiModalHost'; document.body.appendChild(host); }
+  host.innerHTML = `
+    <div class="modal-overlay" style="z-index:10001" ${close?'onclick="if(event.target===this)closeAIModal()"':''}>
+      <div class="modal-card" style="max-width:780px">
+        <div class="modal-header">
+          <h2>${opts.title || 'AI Valuation'}</h2>
+          ${close ? '<button class="modal-close" onclick="closeAIModal()">×</button>' : ''}
+        </div>
+        <div class="modal-body" id="aiModalBody">${html}</div>
+      </div>
+    </div>`;
+}
+function closeAIModal(){ const h=document.getElementById('aiModalHost'); if (h) h.innerHTML=''; }
+
+async function ensureAnthropicKey(){
+  let key = getAnthropicKey();
+  if (key) return key;
+  return new Promise((resolve) => {
+    showAIModal(`
+      <div class="ai-key-prompt">
+        <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5">Connect your Anthropic API key so the page can run web-search-backed property valuations. The key is stored in this browser's localStorage only — same place as your Airtable PAT.</p>
+        <input id="aiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off">
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="btn-ai" onclick="(()=>{const v=document.getElementById('aiKeyInput').value.trim();if(!v)return;setAnthropicKey(v);window.__aiKeyResolve(v);closeAIModal();})()">Save & Continue</button>
+          <button class="btn-secondary" onclick="window.__aiKeyResolve(null);closeAIModal()">Cancel</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Get a key at <a href="https://console.anthropic.com/" target="_blank" rel="noopener" style="color:var(--accent)">console.anthropic.com</a></div>
+      </div>
+    `, { title: 'Connect Anthropic API key' });
+    window.__aiKeyResolve = resolve;
+  });
+}
+
+async function callClaudeForValuation(property, opts = {}){
+  const sch = SCHEMA_RESOLVED.properties;
+  const name = displayName(property, 'properties');
+  const typeRaw = property.fields[sch.byKey.type?.id];
+  const type = typeRaw ? (Array.isArray(typeRaw)?(typeRaw[0]?.name||typeRaw[0]):(typeRaw.name||typeRaw)) : 'Unknown';
+  const beds = property.fields[sch.byKey.beds?.id] || '?';
+  const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
+  const postcode = property.fields[sch.byKey._postcode?.id] || '';
+  const address  = property.fields[sch.byKey._address?.id] || '';
+
+  // Decompose UK postcode for tiered location matching:
+  //   "CB9 0AH" → district "CB9", sector "CB9 0"
+  // Search same sector first (tightest), then district, then 1-mile fallback.
+  const pcMatch = String(postcode || '').toUpperCase().trim().match(/^([A-Z]{1,2}\d{1,2}[A-Z]?)\s*(\d)([A-Z]{2})?$/);
+  const pcDistrict = pcMatch ? pcMatch[1] : '';
+  const pcSector   = pcMatch ? `${pcMatch[1]} ${pcMatch[2]}` : '';
+
+  // Optional refinement context — when the user clicks "Refine with feedback"
+  // on a prior result, their notes are spliced in here so the AI can address
+  // them (e.g. "use only Land Registry data, ignore listings on Trinity Road").
+  const feedbackBlock = (opts.feedback || '').trim()
+    ? `\nUSER FEEDBACK FROM A PRIOR ATTEMPT — incorporate this and explicitly address it in the methodology:\n"""\n${opts.feedback.trim()}\n"""\n`
+    : '';
+
+  const prompt = `You are a UK property valuation analyst. Estimate the current market value of this property by triangulating TWO data types:
+
+1. **~3 COMPLETED SALES** (historical anchor — what buyers actually paid in the last 6 months)
+2. **~3 CURRENT LISTINGS** (forward-looking signal — what sellers are asking RIGHT NOW)
+
+Together these give you a balanced view: completed sales are truth; current asking prices show where the market is heading. Aim for 3 of each (6 comparables total), but never fewer than 2 of each unless the area is genuinely thin.
+
+PROPERTY UNDER VALUATION
+- Name / Address: ${name}${address?` — ${address}`:''}
+- Postcode: ${postcode || '(not provided — infer from address)'}
+- Property Type: ${type}
+- Bedrooms: ${beds}
+- Currently recorded value: £${currentValue.toLocaleString('en-GB')}
+${feedbackBlock}
+LOCATION SEARCH STRATEGY — follow this order:
+1. **Same postcode SECTOR** ${pcSector ? `(${pcSector})` : '(first half + first digit of second half of the postcode)'} — aim for 2+ of EACH type here. This is a tight neighbourhood match.
+2. If <2 of either type found, expand to **same postcode DISTRICT** ${pcDistrict ? `(${pcDistrict})` : '(outward code, e.g. CB9)'}.
+3. Only as a last resort, expand within ~1 mile — and explicitly note in the methodology that you had to.
+
+SOURCES per type:
+**Completed sales** (must show an actual recorded transaction):
+- HM Land Registry "Price Paid" data
+- Rightmove "Sold Prices": rightmove.co.uk/house-prices/...
+- Zoopla "Sold Prices": zoopla.co.uk/house-prices/...
+
+**Current listings** (must be live "For Sale", not removed/sold):
+- Rightmove live property pages
+- Zoopla live property pages
+- OnTheMarket
+- Local estate agent sites where indexed
+
+REJECT (do NOT include):
+- "Sold STC" / "Under Offer" — neither truly completed nor still on market
+- Auction guide prices (frequently misleading)
+- Sales older than 12 months
+- Listings that have been removed / withdrawn
+
+WHAT TO CAPTURE per comparable:
+- address (with postcode)
+- sale_price: actual completed sale price (for completed sales) OR current asking price (for live listings) — in GBP
+- sale_date: completion date (sales) OR listing date (listings) — YYYY-MM-DD or YYYY-MM
+- beds (must equal subject's ${beds})
+- type (must match subject's "${type}")
+- url (link to the source page)
+- distance_miles
+- is_completed_sale: TRUE for completed sales, FALSE for current listings
+- postcode_match: "sector" | "district" | "wider"
+
+ESTIMATE LOGIC
+- **Anchor on the median completed sale price** — that's truth.
+- **Compare to the median current asking price** — if listings are above the sold median, the market is rising; if below, it's softening; adjust accordingly.
+- Account for any material differences (refurb state, garden, parking, off-grid issues).
+- Produce a single estimated current market value reflecting both signals.
+- In the methodology, state the two medians and the % gap between them, then explain your adjustment.
+
+OUTPUT FORMAT — short plain-English explanation first, then this single JSON inside <output>...</output> tags. No other JSON anywhere in the response.
+
+<output>
+{
+  "estimated_value": 195000,
+  "confidence": "Medium",
+  "comparables": [
+    { "address": "...", "sale_price": 198000, "sale_date": "2024-09-15", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.4, "is_completed_sale": true,  "postcode_match": "sector" },
+    { "address": "...", "sale_price": 210000, "sale_date": "2026-04-01", "beds": ${beds}, "type": "${type}", "url": "https://...", "distance_miles": 0.3, "is_completed_sale": false, "postcode_match": "sector" }
+  ],
+  "methodology": "Median completed sale £X (3 comps), median current asking £Y (3 comps); listings ~Z% above sold, suggesting modest market rise. Adjusted for [property-specific reason]. Estimate £..."
+}
+</output>
+
+Confidence guide:
+- **High** = 3+ completed sales AND 3+ current listings, all in same postcode sector, completed sales ≤6 months, listings consistent with sold median ±10%
+- **Medium** = 2-3 of each type, mostly sector/district, gap between sold and listed medians within ±15%
+- **Low** = <2 of either type, OR fell back to district/wider, OR sold and listed medians diverge >20%, OR completed-sale data older than 6 months`;
+
+  let r;
+  try {
+    r = await fetch(getAnthropicBaseUrl() + '/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': getAnthropicKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 12288,
+        // Higher budget — finding 3 sold + 3 listed across multiple sources
+        // typically needs more searches than a single-type pass.
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 10 }],
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch (e) {
+    // TypeError "Failed to fetch" means the request never left the browser.
+    // Re-throw with a network-specific marker so the UI can show diagnostics.
+    if (e instanceof TypeError) {
+      const wrapped = new Error('Network error — request blocked before reaching Anthropic. Likely cause: a browser extension (1Password, uBlock, AdGuard, Privacy Badger), corporate firewall, or VPN intercepting api.anthropic.com.');
+      wrapped.code = 'network_blocked';
+      wrapped.cause = e;
+      throw wrapped;
+    }
+    throw e;
+  }
+  if (!r.ok) {
+    const err = await r.json().catch(()=>({}));
+    const msg = err.error?.message || 'request failed';
+    const wrapped = new Error(`Anthropic ${r.status}: ${msg}`);
+    wrapped.code = r.status === 401 ? 'auth' : (r.status === 403 ? 'forbidden' : 'http_error');
+    wrapped.status = r.status;
+    throw wrapped;
+  }
+  const data = await r.json();
+  // Concatenate every text block (web search produces interleaved blocks)
+  const finalText = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+  const m = finalText.match(/<output>\s*([\s\S]*?)\s*<\/output>/);
+  if (!m) throw new Error('AI response did not contain <output> JSON. Raw: ' + finalText.slice(0, 200));
+  let parsed;
+  try { parsed = JSON.parse(m[1]); }
+  catch(e) { throw new Error('AI response JSON failed to parse: ' + e.message); }
+  return { result: parsed, rawText: finalText, usage: data.usage };
+}
+
+async function runAIValuation(propertyId, opts = {}){
+  const property = INDEX.properties[propertyId];
+  if (!property) { toast('Property not found', 'error'); return; }
+  const key = await ensureAnthropicKey();
+  if (!key) return; // user cancelled
+
+  const propName = displayName(property, 'properties');
+  const refining = !!(opts.feedback && opts.feedback.trim());
+  showAIModal(`
+    <div class="ai-status">
+      <div class="spin"></div>
+      <div>
+        <div style="font-weight:600;color:var(--text-primary);margin-bottom:2px">${refining ? 'Refining valuation' : 'Researching'} ${escapeHtml(propName)}…</div>
+        <div>${refining ? 'Re-running with your feedback. ' : ''}Claude is searching Land Registry, Rightmove Sold Prices and Zoopla Sold Prices for completed sales — postcode sector first, then district. Usually takes 30–90 seconds.</div>
+      </div>
+    </div>`, { title: refining ? 'Refining AI Valuation' : 'AI Valuation', closable: false });
+
+  try {
+    const { result } = await callClaudeForValuation(property, opts);
+    showValuationReviewModal(property, result);
+  } catch (e) {
+    console.error('AI valuation failed', e);
+    // Network/CORS errors get a diagnostic panel + the option to test the
+    // API key with a simple call (no web search, no streaming) so the user
+    // can isolate whether the key itself is fine.
+    const isNetwork = e.code === 'network_blocked';
+    const isAuth    = e.code === 'auth';
+    const advice = isNetwork ? `
+      <ul style="margin-top:10px;margin-left:18px;line-height:1.6">
+        <li>Disable any browser extension that filters network calls (uBlock, AdGuard, Privacy Badger, 1Password, Bitwarden, etc.) and try again.</li>
+        <li>Try a different browser profile / Incognito window with extensions off.</li>
+        <li>If you're on a corporate network or VPN, check that <code>api.anthropic.com</code> isn't blocked.</li>
+        <li>Open DevTools → Network → re-run, look for the failed request to confirm what's blocking it.</li>
+        <li><strong>Permanent workaround:</strong> deploy the Cloudflare Worker in <code>cloudflare-worker/anthropic-proxy.js</code> and click "Set proxy URL" below. Routes the call through a domain that filters don't touch.</li>
+      </ul>` : (isAuth ? `
+      <ul style="margin-top:10px;margin-left:18px;line-height:1.6">
+        <li>The API key was rejected. Double-check it at <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> — it should start with <code>sk-ant-</code>.</li>
+        <li>Re-enter the key with the button below.</li>
+      </ul>` : '');
+    showAIModal(`
+      <div class="ai-error"><strong>Valuation failed.</strong><br>${escapeHtml(e.message)}${advice}</div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+        <button class="btn-secondary" onclick="closeAIModal();testAnthropicKey('${propertyId}')">Test API key (simple call)</button>
+        ${isNetwork ? `<button class="btn-secondary" onclick="closeAIModal();showProxySetupModal('${propertyId}')">Set proxy URL</button>` : ''}
+        ${isAuth ? `<button class="btn-secondary" onclick="localStorage.removeItem('_anthropic_key');closeAIModal();runAIValuation('${propertyId}')">Re-enter key</button>` : ''}
+        <button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')">Try again</button>
+      </div>`, { title: 'AI Valuation' });
+  }
+}
+
+// Stash the current AI result on `window` so the modal's inline handlers can
+// read the (possibly user-edited) value/methodology at click time without
+// having to JSON-encode the whole object onto every onclick attribute.
+let _currentAIReview = null;
+
+// Normalise UK property types so "End Terrace", "End-Terraced", "End Terraced"
+// all collapse to the same key for matching against the subject's type.
+function propertyTypeKey(t){
+  const s = String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  if (!s) return '';
+  if (/end\s*terrac/.test(s)) return 'end-terrace';
+  if (/mid\s*terrac/.test(s) || /^terrac/.test(s) || /\bterrac/.test(s)) return 'terrace';
+  if (/semi\s*detac/.test(s) || /\bsemi\b/.test(s)) return 'semi-detached';
+  if (/detac/.test(s)) return 'detached';
+  if (/flat|apartment|maison/.test(s)) return 'flat';
+  if (/bung/.test(s)) return 'bungalow';
+  if (/cottage/.test(s)) return 'cottage';
+  return s;
+}
+
+function showValuationReviewModal(property, result){
+  _currentAIReview = { property, result };
+  const sch = SCHEMA_RESOLVED.properties;
+  const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
+  const newValue = parseFloat(result.estimated_value) || 0;
+  const comps = Array.isArray(result.comparables) ? result.comparables : [];
+  const completedSales  = comps.filter(c => c.is_completed_sale === true);
+  const currentListings = comps.filter(c => c.is_completed_sale === false);
+
+  // Subject's beds + type — used to flag any comp the AI returned that
+  // doesn't actually match the subject (eg. came back with a 4-bed semi
+  // when we asked for 3-bed end-terrace).
+  const subjectBeds    = property.fields[sch.byKey.beds?.id];
+  const subjectTypeRaw = property.fields[sch.byKey.type?.id];
+  const subjectType    = subjectTypeRaw
+    ? (Array.isArray(subjectTypeRaw)?(subjectTypeRaw[0]?.name||subjectTypeRaw[0]):(subjectTypeRaw.name||subjectTypeRaw))
+    : '';
+  const subjectTypeKey = propertyTypeKey(subjectType);
+
+  // Helper: median of a numeric array
+  const median = (arr) => {
+    const xs = arr.map(c => parseFloat(c.sale_price)).filter(n => !isNaN(n)).sort((a,b)=>a-b);
+    if (!xs.length) return null;
+    const mid = Math.floor(xs.length/2);
+    return xs.length % 2 ? xs[mid] : (xs[mid-1]+xs[mid]) / 2;
+  };
+  const soldMedian   = median(completedSales);
+  const listedMedian = median(currentListings);
+
+  // Render a single section table for one comp type.
+  const renderCompSection = (rows, opts) => {
+    if (!rows.length) {
+      return `<div style="padding:14px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;color:var(--text-muted);font-size:var(--fs-sm);text-align:center;margin-bottom:14px">No ${opts.label.toLowerCase()} returned. Use <em>Refine with feedback</em> to ask Claude to find some.</div>`;
+    }
+    const trs = rows.map(c => {
+      // Beds tag — green-ish (default) if it matches the subject; amber if not
+      const bedsMatch = subjectBeds == null || c.beds == null
+        ? true
+        : Number(c.beds) === Number(subjectBeds);
+      const bedsTag = c.beds != null
+        ? `<span class="schema-tag${bedsMatch?'':' warn'}" style="font-size:9px;margin-left:4px"${!bedsMatch?` title="Subject is ${subjectBeds} bed"`:''}>${escapeHtml(String(c.beds))} bed</span>`
+        : '';
+      // Type tag — same idea, with normalised matching for UK type names
+      const compTypeKey = propertyTypeKey(c.type);
+      const typeMatch = !subjectTypeKey || !compTypeKey || compTypeKey === subjectTypeKey;
+      const typeTag = c.type
+        ? `<span class="schema-tag${typeMatch?'':' warn'}" style="font-size:9px;margin-left:4px"${!typeMatch?` title="Subject is ${escapeHtml(subjectType)}"`:''}>${escapeHtml(c.type)}</span>`
+        : '';
+      const matchTag = c.postcode_match
+        ? `<span class="schema-tag" style="font-size:9px;margin-left:4px">${escapeHtml(c.postcode_match)}</span>`
+        : '';
+      return `<tr>
+        <td>${escapeHtml(c.address || '—')}${bedsTag}${typeTag}${matchTag}</td>
+        <td class="money">${fmtMoneyShort(c.sale_price)}</td>
+        <td>${escapeHtml(c.sale_date || '—')}</td>
+        <td>${c.distance_miles != null ? Number(c.distance_miles).toFixed(1) + ' mi' : '—'}</td>
+        <td>${c.url ? `<a class="ai-comp-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">view ↗</a>` : ''}</td>
+      </tr>`;
+    }).join('');
+    const medianBlurb = opts.median != null
+      ? ` <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:6px">median ${fmtMoneyShort(opts.median)}</span>`
+      : '';
+    return `
+      <h3 style="font-size:var(--fs-sm);text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px;letter-spacing:.5px">
+        ${opts.icon} ${opts.label} (${rows.length})${medianBlurb}
+      </h3>
+      <table class="breakdown-table" style="margin-bottom:14px">
+        <thead><tr>
+          <th>Address</th>
+          <th style="text-align:right">${opts.priceHeader}</th>
+          <th>${opts.dateHeader}</th>
+          <th>Distance</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>`;
+  };
+  const completedHtml = renderCompSection(completedSales, {
+    label: 'Completed Sales', icon: '✓', median: soldMedian,
+    priceHeader: 'Sold £', dateHeader: 'Sold',
+  });
+  const listedHtml = renderCompSection(currentListings, {
+    label: 'Current Listings', icon: '◷', median: listedMedian,
+    priceHeader: 'Asking £', dateHeader: 'Listed',
+  });
+
+  // Sold-vs-listed delta — gives Kevin a quick directional read.
+  let deltaTile = '';
+  if (soldMedian != null && listedMedian != null) {
+    const gapPct = ((listedMedian - soldMedian) / soldMedian) * 100;
+    const dir = gapPct >= 0 ? 'above' : 'below';
+    deltaTile = `<div style="font-size:11px;color:var(--text-secondary);background:var(--bg-surface-2);border:1px solid var(--border-subtle);padding:8px 12px;border-radius:6px;margin:0 0 14px">Listings ${Math.abs(gapPct).toFixed(1)}% ${dir} sold-price median — ${gapPct >= 0 ? 'market trending up' : 'market softening'}.</div>`;
+  }
+
+  // Banner only fires when one side of the data is genuinely thin.
+  // Two completed + two listed is enough triangulation; below that we flag.
+  let warningBanner = '';
+  if (completedSales.length === 0) {
+    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:var(--fs-sm);line-height:1.5"><strong>No completed sales found</strong> — estimate is anchored on current asking prices only, which usually run higher than actuals. Click <em>Refine with feedback</em> and ask for Land Registry / Rightmove Sold Prices data.</div>`;
+  } else if (currentListings.length === 0) {
+    warningBanner = `<div style="background:var(--info-bg);color:var(--info);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:var(--fs-sm);line-height:1.5"><strong>No current listings found</strong> — estimate is anchored on completed sales only. Useful but lacks a forward-looking signal of where the market is heading.</div>`;
+  } else if (completedSales.length < 2 || currentListings.length < 2) {
+    warningBanner = `<div style="background:var(--warning-bg);color:var(--warning);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:var(--fs-sm);line-height:1.5"><strong>Thin data</strong> — only ${completedSales.length} completed sale${completedSales.length===1?'':'s'} and ${currentListings.length} current listing${currentListings.length===1?'':'s'} returned. Click <em>Refine with feedback</em> to push for more.</div>`;
+  }
+
+  const html = `
+    <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:14px">${escapeHtml(displayName(property,'properties'))}</div>
+    ${warningBanner}
+    <div class="ai-headline">
+      <div class="val-tile"><div class="lbl">Current</div><div class="val">${fmtMoneyShort(currentValue)}</div></div>
+      <div class="val-tile primary">
+        <div class="lbl">AI Estimate <span style="font-size:9px;color:var(--text-muted);font-weight:400">(editable)</span></div>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:2px">
+          <span style="font-size:18px;font-weight:700">£</span>
+          <input id="aiEstValue" type="number" step="500" value="${Math.round(newValue)}" oninput="recalcEstimateChange(${currentValue})" style="font-size:18px;font-weight:700;border:1px solid var(--border-default);border-radius:4px;padding:2px 6px;width:120px;background:var(--bg-surface);color:var(--text-primary);font-variant-numeric:tabular-nums">
+        </div>
+        <div class="sub">confidence: ${escapeHtml(result.confidence||'—')}</div>
+      </div>
+      <div class="val-tile">
+        <div class="lbl">Change</div>
+        <div id="aiChangeValue" class="val" style="color:${(newValue-currentValue)>=0?'var(--success)':'var(--danger)'}">${(newValue-currentValue)>=0?'+':''}${fmtMoneyShort(newValue-currentValue)}</div>
+        <div class="sub"><span id="aiChangePct">${currentValue?((newValue-currentValue)/currentValue*100).toFixed(1):'0.0'}%</span></div>
+      </div>
+    </div>
+    ${completedHtml}
+    ${listedHtml}
+    ${deltaTile}
+    <div style="margin-top:14px">
+      <label style="font-size:11px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px;display:block;margin-bottom:4px">Methodology / Notes <span style="font-size:9px;font-weight:400">(editable)</span></label>
+      <textarea id="aiMethodology" rows="3" style="width:100%;font-family:inherit;font-size:var(--fs-sm);padding:8px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5">${escapeHtml(result.methodology||'')}</textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      <button class="btn-secondary" onclick="showFeedbackModal('${property.id}')">↻ Refine with feedback</button>
+      <button class="btn-secondary" onclick="rejectValuation('${property.id}')" style="border-color:var(--danger);color:var(--danger)">Reject</button>
+      <button class="btn-ai" onclick="approveValuationFromModal()">Approve &amp; Update Market Value</button>
+    </div>
+  `;
+  showAIModal(html, { title: 'Review AI Valuation' });
+}
+
+// Inline handler used by the editable AI Estimate field — updates the
+// "Change" tile on every keystroke. Defined at top level so the inline
+// oninput can find it.
+function recalcEstimateChange(currentValue){
+  const input = document.getElementById('aiEstValue');
+  const cb = document.getElementById('aiChangeValue');
+  const cp = document.getElementById('aiChangePct');
+  if (!input || !cb || !cp) return;
+  const v = parseFloat(input.value) || 0;
+  const d = v - (currentValue||0);
+  const sign = d >= 0 ? '+' : '-';
+  cb.textContent = sign + '£' + Math.abs(d).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+  cb.style.color = d >= 0 ? 'var(--success)' : 'var(--danger)';
+  cp.textContent = (currentValue ? (d/currentValue*100).toFixed(1) : '0.0') + '%';
+}
+
+// Open a small modal to capture user feedback, then re-run the AI with that
+// feedback baked into the prompt. Existing comparables aren't shown again —
+// a fresh search is done with the user's guidance.
+function showFeedbackModal(propertyId){
+  // Capture any edited estimate / methodology so we can warn the user
+  // they're about to discard them.
+  const html = `
+    <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5;margin-bottom:10px">
+      Tell Claude what to do differently. Examples:
+    </p>
+    <ul style="font-size:var(--fs-sm);color:var(--text-secondary);margin-left:18px;line-height:1.6;margin-bottom:12px">
+      <li>"Use only Land Registry sold prices — no Rightmove listings."</li>
+      <li>"Comparables on Withersfield Road and Camps Road aren't relevant — different neighbourhood."</li>
+      <li>"Filter to last 6 months and at least 3 of the comps must be in postcode CB9 0."</li>
+      <li>"Subject has been fully refurbished — adjust upward."</li>
+    </ul>
+    <textarea id="aiFeedback" rows="5" placeholder="What should the AI do differently?" style="width:100%;font-family:inherit;font-size:var(--fs-base);padding:10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-surface);color:var(--text-primary);line-height:1.5"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      <button class="btn-ai" onclick="(()=>{const f=document.getElementById('aiFeedback').value.trim();if(!f){toast('Add some feedback first','error');return;}closeAIModal();runAIValuation('${propertyId}',{feedback:f})})()">Re-run with feedback</button>
+    </div>`;
+  showAIModal(html, { title: 'Refine valuation with feedback' });
+}
+
+// Approve handler that reads the (possibly edited) value + methodology from
+// the modal at click time. Replaces the earlier double-JSON-encoded payload.
+function approveValuationFromModal(){
+  if (!_currentAIReview) { toast('Nothing to approve', 'error'); return; }
+  const valEl = document.getElementById('aiEstValue');
+  const methEl = document.getElementById('aiMethodology');
+  const editedValue = parseFloat(valEl?.value) || 0;
+  const editedMethodology = methEl?.value || '';
+  const { property, result } = _currentAIReview;
+  const sch = SCHEMA_RESOLVED.properties;
+  const currentValue = parseFloat(property.fields[sch.byKey.marketValue?.id]) || 0;
+  approveValuation({
+    propertyId: property.id,
+    currentValue,
+    result: { ...result, estimated_value: editedValue, methodology: editedMethodology },
+  });
+}
+
+async function approveValuation(payload){
+  // payload is now a plain object passed in from approveValuationFromModal
+  // (which reads any user edits to the value/methodology at click time).
+  // Stays string-tolerant for any older callers that still pass JSON.
+  if (typeof payload === 'string') {
+    try { payload = JSON.parse(payload); } catch(e) { try { payload = JSON.parse(JSON.parse(payload)); } catch(e2) { toast('Approve failed: payload parse', 'error'); return; } }
+  }
+  const { propertyId, currentValue, result } = payload;
+  const property = INDEX.properties[propertyId]; if (!property) { toast('Property gone','error'); return; }
+  const propName = displayName(property,'properties');
+  const sch = SCHEMA_RESOLVED.properties;
+  const valSch = SCHEMA_RESOLVED.valuations;
+  // Disable buttons + show spinner
+  const body = document.getElementById('aiModalBody');
+  if (body) body.innerHTML = `<div class="ai-status"><div class="spin"></div><div>Saving valuation and updating Market Value…</div></div>`;
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const dateLabel = fmtDate(today);
+    // 1. Create the valuation record
+    const valFields = {
+      [valSch.byKey.title.id]:        `${propName} — ${dateLabel}`,
+      [valSch.byKey.property.id]:     [propertyId],
+      [valSch.byKey.date.id]:         today,
+      [valSch.byKey.value.id]:        Math.round(result.estimated_value),
+      [valSch.byKey.source.id]:       { name: 'AI Estimate' },
+      [valSch.byKey.status.id]:       { name: 'Approved' },
+      [valSch.byKey.confidence.id]:   { name: result.confidence || 'Medium' },
+      [valSch.byKey.comparables.id]:  JSON.stringify(result.comparables||[], null, 2),
+      [valSch.byKey.methodology.id]:  result.methodology || '',
+      [valSch.byKey.previousValue.id]:Math.round(currentValue),
+      [valSch.byKey.approvedOn.id]:   today,
+    };
+    await airtableFetch(`${BASE_ID}/${TABLE.valuations}?returnFieldsByFieldId=true`, {
+      method: 'POST',
+      body: JSON.stringify({ fields: valFields, typecast: true }),
+    });
+    // 2. Update the property's Market Value
+    const marketValueFid = sch.byKey.marketValue.id;
+    await airtableFetch(`${BASE_ID}/${TABLE.properties}/${propertyId}?returnFieldsByFieldId=true`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fields: { [marketValueFid]: Math.round(result.estimated_value) }, typecast: true }),
+    });
+    // 3. Refresh local data + UI
+    await refreshAll();
+    closeAIModal();
+    // Re-open the property drawer so the new valuation shows
+    openDrawer('properties', propertyId);
+    toast('Valuation approved · Market Value updated', 'success');
+  } catch (e) {
+    console.error('approve failed', e);
+    if (body) body.innerHTML = `<div class="ai-error"><strong>Couldn't save.</strong><br>${escapeHtml(e.message)}</div><button class="btn-secondary" onclick="closeAIModal()">Close</button>`;
+  }
+}
+
+// Capture / clear the Cloudflare Worker proxy URL. Stored in localStorage so
+// every Anthropic call (full valuation + the simple test) routes through it.
+function showProxySetupModal(propertyId){
+  const current = localStorage.getItem('_anthropic_proxy_url') || '';
+  showAIModal(`
+    <div class="ai-key-prompt">
+      <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5">
+        Once you've deployed the Worker (file: <code>cloudflare-worker/anthropic-proxy.js</code>),
+        paste its URL here. It looks like <code>https://anthropic-proxy.&lt;your-account&gt;.workers.dev</code>.
+        Leave blank to clear and call api.anthropic.com directly again.
+      </p>
+      <input id="proxyUrlInput" type="url" placeholder="https://anthropic-proxy.your-account.workers.dev" autocomplete="off" value="${escapeHtml(current)}">
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn-ai" onclick="(()=>{const v=document.getElementById('proxyUrlInput').value.trim();setAnthropicProxyUrl(v);closeAIModal();testAnthropicKey('${propertyId}')})()">Save & Test</button>
+        <button class="btn-secondary" onclick="setAnthropicProxyUrl('');closeAIModal();toast('Proxy URL cleared','success')">Clear proxy</button>
+        <button class="btn-secondary" onclick="closeAIModal()">Cancel</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">
+        Setup steps live in <code>cloudflare-worker/anthropic-proxy.js</code> — top-of-file comment.
+      </div>
+    </div>`, { title: 'Cloudflare Worker proxy URL' });
+}
+
+// Minimal API call with no tools — used to isolate whether the issue is
+// network/CORS, auth, or specific to the web_search tool. If THIS works
+// but the full call doesn't, the user's key likely lacks web search access.
+// If this also fails, something is blocking api.anthropic.com from the browser.
+async function testAnthropicKey(propertyId){
+  const key = await ensureAnthropicKey();
+  if (!key) return;
+  const target = getAnthropicBaseUrl();
+  const targetLabel = target === 'https://api.anthropic.com' ? 'api.anthropic.com (direct)' : 'your proxy at ' + target;
+  showAIModal(`<div class="ai-status"><div class="spin"></div><div>Testing connection to ${escapeHtml(targetLabel)}…</div></div>`, { title: 'Test API key', closable: false });
+  try {
+    const r = await fetch(target + '/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5',
+        max_tokens: 32,
+        messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
+      }),
+    }).catch(e => { e.code = 'network_blocked'; throw e; });
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      const status = r.status;
+      const msg = err.error?.message || 'Request failed';
+      throw new Error(`Anthropic ${status}: ${msg}`);
+    }
+    const data = await r.json();
+    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').trim();
+    showAIModal(`
+      <div style="background:var(--success-bg);color:var(--success);padding:14px;border-radius:8px;margin-bottom:14px">
+        <strong>API key works.</strong> Anthropic responded: <code>${escapeHtml(text || '(empty)')}</code>
+      </div>
+      <p style="font-size:var(--fs-base);color:var(--text-secondary);line-height:1.5;margin-bottom:14px">If the full valuation still fails, the issue is specific to the <code>web_search</code> tool. Web search may need to be enabled on your account, or your key may not have access to that beta. Check <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a> → Settings → Web Search.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+        ${propertyId ? `<button class="btn-ai" onclick="closeAIModal();runAIValuation('${propertyId}')">Run full valuation</button>` : ''}
+      </div>`, { title: 'API key OK' });
+  } catch (e) {
+    console.error('Test API key failed', e);
+    const isNetwork = e.code === 'network_blocked' || (e instanceof TypeError);
+    const blurb = isNetwork
+      ? `<p style="margin-top:10px;line-height:1.5">The minimal call also failed at the network layer — so the problem is something blocking <code>api.anthropic.com</code> from your browser, not your API key or the web search tool.</p>
+         <ul style="margin-top:8px;margin-left:18px;line-height:1.6">
+           <li>Disable browser extensions (uBlock, AdGuard, Privacy Badger, 1Password, Bitwarden) and retry.</li>
+           <li>Try in an Incognito / Private window.</li>
+           <li>If you're on a corporate network or VPN, check it allows <code>api.anthropic.com</code>.</li>
+         </ul>`
+      : `<p style="margin-top:10px;line-height:1.5">The API rejected the key (auth or quota issue). Check the error above and verify the key at <a href="https://console.anthropic.com/" target="_blank" style="color:var(--accent)">console.anthropic.com</a>.</p>`;
+    showAIModal(`
+      <div class="ai-error"><strong>Test failed.</strong><br>${escapeHtml(e.message || 'Unknown error')}${blurb}</div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="btn-secondary" onclick="closeAIModal()">Close</button>
+        <button class="btn-secondary" onclick="localStorage.removeItem('_anthropic_key');closeAIModal();testAnthropicKey('${propertyId||''}')">Re-enter key</button>
+      </div>`, { title: 'API key test failed' });
+  }
+}
+
+function rejectValuation(propertyId){
+  // We don't persist rejected AI estimates — keeps the table clean.
+  closeAIModal();
+  toast('Valuation discarded', 'success');
+}
+
+// Open an existing valuation record (Pending → review/approve, Approved/Rejected → read-only)
+function openValuationModal(propertyId, valuationId){
+  const property = INDEX.properties[propertyId];
+  const val      = INDEX.valuations[valuationId];
+  if (!property || !val) return;
+  const sch = SCHEMA_RESOLVED.valuations;
+  const result = {
+    estimated_value: parseFloat(val.fields[sch.byKey.value?.id]) || 0,
+    confidence:      ((val.fields[sch.byKey.confidence?.id])||{}).name || '',
+    methodology:     val.fields[sch.byKey.methodology?.id] || '',
+    comparables:     (() => { try { return JSON.parse(val.fields[sch.byKey.comparables?.id] || '[]'); } catch(e){ return []; } })(),
+  };
+  showValuationReviewModal(property, result);
+}
+
+function renderPropertyDetailMetrics(rec){
+  const sch = SCHEMA_RESOLVED.properties;
+  const numF = (k) => { const id = sch.byKey[k]?.id; if (!id) return null; const v = rec.fields[id]; const n = typeof v==='number'?v:parseFloat(v); return isNaN(n)?null:n; };
+  const value = numF('marketValue') || 0;
+  const debt  = numF('mortgageBal')  || 0;
+  const rent  = derivePropertyGrossRent(rec) || 0;
+  const mort  = deriveMortgagePay(rec) || 0;
+  const beds  = numF('beds') || 0;
+  const purchPrice = numF('_purchPrice');
+  const purchDate  = sch.byKey._purchDate?.id ? rec.fields[sch.byKey._purchDate.id] : null;
+  const equity = value - debt;
+  const annualRent = rent * 12;
+  const annualNet  = annualRent - (mort * 12);
+  const grossYield = value > 0 ? annualRent / value * 100 : 0;
+  const netYield   = value > 0 ? annualNet   / value * 100 : 0;
+  const ltv        = value > 0 ? debt / value * 100 : 0;
+  const rate       = (mort && debt) ? (mort * 12) / debt * 100 : 0;
+  const cashOnCash = equity > 0 ? annualNet / equity * 100 : 0;
+  const rentPerBed = beds > 0 ? rent / beds : null;
+  // Capital growth
+  let yearsHeld = null, growthGBP = null, growthPct = null, cagr = null;
+  if (purchPrice && value) {
+    growthGBP = value - purchPrice;
+    growthPct = (growthGBP / purchPrice) * 100;
+    if (purchDate) {
+      const ms = Date.now() - new Date(purchDate).getTime();
+      yearsHeld = ms / (365.25 * 24 * 3600 * 1000);
+      if (yearsHeld > 0.25) cagr = (Math.pow(value/purchPrice, 1/yearsHeld) - 1) * 100;
+    }
+  }
+  const totalROI = (purchPrice && value) ? (((value - purchPrice) + (annualNet * (yearsHeld||1))) / purchPrice) * 100 : null;
+
+  return `
+  <div class="drawer-section">
+    <h3>Cashflow Performance</h3>
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="label">Gross Rent / mo</div><div class="value">${fmtMoneyShort(rent)}</div><div class="sub">${fmtMoneyShort(annualRent)} / yr</div></div>
+      <div class="kpi"><div class="label">Fixed Costs / mo</div><div class="value">${fmtMoneyShort(mort)}</div><div class="sub">${rate?rate.toFixed(2)+'% of debt':'no linked costs'}</div></div>
+      <div class="kpi"><div class="label">Net Rent / mo</div><div class="value" style="color:${(rent-mort)>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(rent-mort)}</div><div class="sub">before opex</div></div>
+      ${rentPerBed!=null?`<div class="kpi"><div class="label">Rent / bed</div><div class="value">${fmtMoneyShort(rentPerBed)}</div><div class="sub">${beds} beds</div></div>`:''}
+    </div>
+  </div>
+  <div class="drawer-section">
+    <h3>Capital Position</h3>
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="label">Equity</div><div class="value" style="color:var(--success)">${fmtMoneyShort(equity)}</div><div class="sub">${value?(equity/value*100).toFixed(0):0}% of value</div></div>
+      <div class="kpi"><div class="label">LTV</div><div class="value">${ltv.toFixed(2)}%</div></div>
+      ${growthGBP!=null?`<div class="kpi"><div class="label">Capital Growth</div><div class="value" style="color:${growthGBP>=0?'var(--success)':'var(--danger)'}">${fmtMoneyShort(growthGBP)}</div><div class="sub">${growthPct.toFixed(1)}% since ${purchPrice?fmtMoneyShort(purchPrice):'—'}</div></div>`:''}
+      ${cagr!=null?`<div class="kpi"><div class="label">CAGR</div><div class="value">${cagr.toFixed(2)}%</div><div class="sub">over ${yearsHeld.toFixed(1)} years</div></div>`:''}
+    </div>
+  </div>
+  <div class="drawer-section">
+    <h3>Returns</h3>
+    <div class="kpi-grid" style="margin-bottom:0">
+      <div class="kpi"><div class="label">Gross Yield</div><div class="value">${grossYield.toFixed(2)}%</div><div class="sub">rent / value</div></div>
+      <div class="kpi"><div class="label">Net Yield</div><div class="value">${netYield.toFixed(2)}%</div><div class="sub">after mortgage / value</div></div>
+      <div class="kpi"><div class="label">Cash on Cash</div><div class="value" style="color:${cashOnCash>=8?'var(--success)':cashOnCash>=4?'var(--warning)':'var(--danger)'}">${cashOnCash.toFixed(2)}%</div><div class="sub">net rent / equity</div></div>
+      ${totalROI!=null?`<div class="kpi"><div class="label">Total ROI</div><div class="value">${totalROI.toFixed(1)}%</div><div class="sub">income + capital growth on cost</div></div>`:''}
+    </div>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Schema Inspector — shows what's mapped, what's missing, what's unused
+// Opens via the 🔍 Schema button. Use this to diagnose any column showing
+// as "—" everywhere — the unmapped fields are flagged in amber here.
+// ═══════════════════════════════════════════════════════════════════════
+function openSchemaInspector(){
+  if (!SCHEMA_RESOLVED) { toast('Schema not loaded yet', 'error'); return; }
+  const sections = Object.entries(SCHEMA_RESOLVED).map(([entityKey, sch]) => {
+    const curated = Object.entries(sch.byKey).map(([key, def]) => ({
+      key,
+      label: def.label,
+      mapped: !def.missing,
+      airtableName: def.name || '',
+      atType: def.atType || '',
+      readOnly: def.readOnly,
+    }));
+    const drawerExtras = (sch.drawerExtras||[]).map(def => ({
+      key: def.key, label: def.label, mapped: true,
+      airtableName: def.name || '', atType: def.atType || '', readOnly: def.readOnly,
+    }));
+    const allRows = [...curated, ...drawerExtras];
+    const unusedFields = sch.allFields
+      .filter(f => !sch.usedFieldIds.has(f.id))
+      .map(f => ({ name:f.name, type:f.type, id:f.id }))
+      .sort((a,b) => a.name.localeCompare(b.name));
+
+    const mappedCount = allRows.filter(r => r.mapped).length;
+    const totalCurated = allRows.length;
+
+    const curatedTable = `
+      <table class="schema-table">
+        <thead><tr><th>Curated key</th><th>Label</th><th>Airtable field</th><th>Type</th><th>Status</th></tr></thead>
+        <tbody>
+          ${allRows.map(r => `
+            <tr class="${r.mapped?'':'unmapped'}">
+              <td class="col-name">${escapeHtml(r.key)}</td>
+              <td>${escapeHtml(r.label)}</td>
+              <td class="col-name">${r.mapped?escapeHtml(r.airtableName):'<span style="color:var(--warning)">— NOT FOUND —</span>'}</td>
+              <td class="col-type">${escapeHtml(r.atType)}</td>
+              <td>${r.mapped ? (r.readOnly?'<span class="schema-tag">read-only</span>':'<span class="schema-tag ok">editable</span>') : '<span class="schema-tag warn">missing</span>'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    const unusedTable = unusedFields.length ? `
+      <details style="margin-bottom:24px">
+        <summary style="cursor:pointer;font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:8px">▸ ${unusedFields.length} other fields on this table (not currently shown)</summary>
+        <table class="schema-table">
+          <thead><tr><th>Airtable field</th><th>Type</th></tr></thead>
+          <tbody>
+            ${unusedFields.map(f => `<tr class="unused"><td class="col-name">${escapeHtml(f.name)}</td><td class="col-type">${escapeHtml(f.type)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </details>
+    ` : '';
+
+    return `
+      <div class="schema-section">
+        <h3>${escapeHtml(sch.tableName)} <span class="pill">${entityKey}</span> <span style="font-size:11px;color:var(--text-muted);font-weight:400;margin-left:auto">${mappedCount} / ${totalCurated} mapped · ${sch.allFields.length} fields total</span></h3>
+        ${curatedTable}
+        ${unusedTable}
+      </div>
+    `;
+  }).join('');
+
+  const html = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeSchemaInspector()">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h2>🔍 Schema Inspector</h2>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Anything in <span class="schema-tag warn">missing</span> means the page can't find that field. Tell me what it's actually called in Airtable and I'll remap.</div>
+          </div>
+          <button class="modal-close" onclick="closeSchemaInspector()">×</button>
+        </div>
+        <div class="modal-body">${sections}</div>
+      </div>
+    </div>
+  `;
+  let host = document.getElementById('schemaModalHost');
+  if (!host) { host = document.createElement('div'); host.id = 'schemaModalHost'; document.body.appendChild(host); }
+  host.innerHTML = html;
+}
+function closeSchemaInspector(){
+  const host = document.getElementById('schemaModalHost');
+  if (host) host.innerHTML = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// IndexedDB cache for transactions (reuses dashboard's DB, separate key)
+// ═══════════════════════════════════════════════════════════════════════
+const OPS_IDB_NAME  = '_dlr_cache';
+const OPS_IDB_STORE = 'kv';
+const OPS_TX_CACHE_KEY = 'ops_transactions';
+const OPS_TX_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+
+let _opsIdbPromise = null;
+function _opsOpenIDB(){
+  if (_opsIdbPromise) return _opsIdbPromise;
+  _opsIdbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('IDB unsupported')); return; }
+    const req = indexedDB.open(OPS_IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(OPS_IDB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IDB open blocked'));
+  });
+  return _opsIdbPromise;
+}
+function _opsIdbGet(key){
+  return _opsOpenIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(OPS_IDB_STORE, 'readonly');
+    const req = tx.objectStore(OPS_IDB_STORE).get(key);
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  }));
+}
+function _opsIdbSet(key, value){
+  return _opsOpenIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(OPS_IDB_STORE, 'readwrite');
+    tx.objectStore(OPS_IDB_STORE).put(value, key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  }));
+}
+
+// Only fetch the 8 fields we actually use
+const TX_FIELDS = [TX.date, TX.amount, TX.description, TX.category, TX.reconciled, TX.tenancy, TX.unit, TX.property];
+let _txDateFieldName = 'Date'; // resolved from schema metadata at load time
+
+// Transaction lookups — pre-index by tenancy, unit, property for fast expand
+// ═══════════════════════════════════════════════════════════════════════
+const TX_BY_TENANCY  = {};
+const TX_BY_UNIT     = {};
+const TX_BY_PROPERTY = {};
+let _txLoaded = false;
+let _txLoadPromise = null;
+
+function buildTxLookups(){
+  for (const k in TX_BY_TENANCY)  delete TX_BY_TENANCY[k];
+  for (const k in TX_BY_UNIT)     delete TX_BY_UNIT[k];
+  for (const k in TX_BY_PROPERTY) delete TX_BY_PROPERTY[k];
+  for (const tx of (DATA.transactions || [])) {
+    const f = tx.fields;
+    const tenancyIds = Array.isArray(f[TX.tenancy]) ? f[TX.tenancy] : [];
+    const unitIds    = Array.isArray(f[TX.unit])    ? f[TX.unit]    : [];
+    const propIds    = Array.isArray(f[TX.property]) ? f[TX.property] : [];
+    for (const id of tenancyIds) { (TX_BY_TENANCY[id]  || (TX_BY_TENANCY[id]  = [])).push(tx); }
+    for (const id of unitIds)    { (TX_BY_UNIT[id]     || (TX_BY_UNIT[id]     = [])).push(tx); }
+    for (const id of propIds)    { (TX_BY_PROPERTY[id] || (TX_BY_PROPERTY[id] = [])).push(tx); }
+  }
+}
+
+function getLinkedTransactions(entityKey, recId){
+  if (entityKey === 'tenancies') return TX_BY_TENANCY[recId] || [];
+  if (entityKey === 'units')     return TX_BY_UNIT[recId]    || [];
+  if (entityKey === 'properties') return TX_BY_PROPERTY[recId] || [];
+  if (entityKey === 'tenants') {
+    const tenSch = SCHEMA_RESOLVED?.tenancies;
+    if (!tenSch) return [];
+    const tenancyIds = (DATA.tenancies || [])
+      .filter(tc => {
+        const link = tc.fields[tenSch.byKey?.tenant?.id];
+        return Array.isArray(link) && link.includes(recId);
+      })
+      .map(tc => tc.id);
+    const txs = [];
+    for (const tid of tenancyIds) txs.push(...(TX_BY_TENANCY[tid] || []));
+    return txs;
+  }
+  return [];
+}
+
+function _applyTransactions(tx){
+  DATA.transactions = tx;
+  INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
+  buildTxLookups();
+  _txLoaded = true;
+  for (const [ek, rid] of Object.entries(_expandedRow)) {
+    if (!rid) continue;
+    const expTr = document.getElementById('exp-' + rid);
+    if (expTr && expTr.style.display !== 'none') {
+      const td = expTr.querySelector('td');
+      td.innerHTML = `<div class="expand-content">${renderExpandContent(ek, rid)}</div>`;
+    }
+  }
+}
+
+async function loadTransactionsBackground(forceRefresh = false){
+  if (_txLoaded && !forceRefresh) return;
+
+  // 1. Try IndexedDB cache first (instant)
+  if (!forceRefresh) {
+    try {
+      const cached = await _opsIdbGet(OPS_TX_CACHE_KEY);
+      if (cached && cached.savedAt && cached.data) {
+        const age = Date.now() - cached.savedAt;
+        if (age < OPS_TX_CACHE_TTL) {
+          _applyTransactions(cached.data);
+          return;
+        }
+      }
+    } catch(e) { /* cache miss, proceed to fetch */ }
+  }
+
+  // 2. Fetch from Airtable — only fields we need, last 24 months only
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 24);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const fieldParams = { filterByFormula: `IS_AFTER({${_txDateFieldName}}, '${cutoffStr}')` };
+  TX_FIELDS.forEach((fid, i) => { fieldParams[`fields[${i}]`] = fid; });
+  _txLoadPromise = fetchAllRecords(TABLE.transactions, { params: fieldParams });
+  const tx = await _txLoadPromise;
+  _applyTransactions(tx);
+
+  // 3. Save to IndexedDB for next load
+  try { await _opsIdbSet(OPS_TX_CACHE_KEY, { savedAt: Date.now(), data: tx }); } catch(e) { /* non-critical */ }
+}
+
+function sortTransactionsByDate(txs){
+  return [...txs].sort((a,b) => {
+    const da = a.fields[TX.date] || '';
+    const db = b.fields[TX.date] || '';
+    return db.localeCompare(da);
+  });
+}
+
+let _expandedRow = {};
+
+function toggleExpandRow(entityKey, recId, rowEl, evt){
+  if (evt && evt.target.closest('.editable')) return;
+  const expTr = document.getElementById('exp-' + recId);
+  const chevron = document.getElementById('chev-' + recId);
+  if (!expTr) return;
+
+  const wasOpen = expTr.style.display !== 'none';
+
+  if (_expandedRow[entityKey] && _expandedRow[entityKey] !== recId) {
+    const prev = document.getElementById('exp-' + _expandedRow[entityKey]);
+    const prevChev = document.getElementById('chev-' + _expandedRow[entityKey]);
+    if (prev) prev.style.display = 'none';
+    if (prevChev) prevChev.classList.remove('open');
+  }
+
+  if (wasOpen) {
+    expTr.style.display = 'none';
+    if (chevron) chevron.classList.remove('open');
+    _expandedRow[entityKey] = null;
+  } else {
+    const td = expTr.querySelector('td');
+    if (_txLoaded) {
+      td.innerHTML = `<div class="expand-content">${renderExpandContent(entityKey, recId)}</div>`;
+    } else {
+      td.innerHTML = '<div class="expand-content" style="padding:16px;color:var(--text-muted)">Loading transactions...</div>';
+    }
+    expTr.style.display = '';
+    if (chevron) chevron.classList.add('open');
+    _expandedRow[entityKey] = recId;
+  }
+}
+
+function renderExpandContent(entityKey, recId){
+  if (entityKey === 'customers') {
+    return '<div class="expand-empty">No transaction data yet. This will populate when Operations Director connects to your accounting system.</div>';
+  }
+
+  const txs = sortTransactionsByDate(getLinkedTransactions(entityKey, recId));
+  if (!txs.length) {
+    return '<div class="expand-empty">No transactions linked to this record.</div>';
+  }
+
+  const total = txs.reduce((s, t) => s + (parseFloat(t.fields[TX.amount]) || 0), 0);
+  const summary = `<div class="expand-summary"><span><strong>${txs.length}</strong> transaction${txs.length===1?'':'s'}</span><span>Net: <strong style="color:${total>=0?'var(--success)':'var(--danger)'}">${total<0?'-':''}£${Math.abs(total).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></span></div>`;
+
+  const MAX_SHOW = 20;
+  const showAll = txs.length <= MAX_SHOW;
+  const visible = showAll ? txs : txs.slice(0, MAX_SHOW);
+
+  const reconBadge = (val) => {
+    if (val === true)  return '<span class="badge badge-active">Reconciled</span>';
+    if (val === false) return '<span class="badge badge-warning">Unreconciled</span>';
+    if (!val) return '<span class="badge badge-info">—</span>';
+    const v = Array.isArray(val) ? (val[0]?.name || val[0]) : (typeof val === 'object' ? val?.name : val);
+    const s = String(v || '').toLowerCase();
+    const cls = s.includes('reconcil') || s.includes('match') ? 'badge-active' : s.includes('unreconcil') || s.includes('unmatch') ? 'badge-warning' : 'badge-info';
+    return `<span class="badge ${cls}">${escapeHtml(String(v || '—'))}</span>`;
+  };
+
+  const catDisplay = (val) => {
+    if (!val) return '—';
+    const ids = Array.isArray(val) ? val : [val];
+    return ids.map(v => {
+      const id = typeof v === 'object' ? (v.id || v) : v;
+      const rec = INDEX.categories && INDEX.categories[id];
+      if (rec) return escapeHtml(String(rec.fields[CAT_NAME] || id));
+      return typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v));
+    }).join(', ');
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return '—';
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+  };
+
+  const rows = visible.map(t => {
+    const f = t.fields;
+    const amt = parseFloat(f[TX.amount]) || 0;
+    return `<tr>
+      <td>${fmtDate(f[TX.date])}</td>
+      <td>${escapeHtml(String(f[TX.description] || '—'))}</td>
+      <td class="money">${amt<0?'-':''}£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td>${catDisplay(f[TX.category])}</td>
+      <td class="wrap-cell">${reconBadge(f[TX.reconciled])}</td>
+    </tr>`;
+  }).join('');
+
+  const showMoreBtn = showAll ? '' : `<button class="tx-show-all" onclick="event.stopPropagation();this.closest('.expand-content').querySelector('.tx-hidden').style.display='';this.remove()">Show all ${txs.length} transactions</button>`;
+  const hiddenRows = showAll ? '' : `<tbody class="tx-hidden" style="display:none">${txs.slice(MAX_SHOW).map(t => {
+    const f = t.fields;
+    const amt = parseFloat(f[TX.amount]) || 0;
+    return `<tr>
+      <td>${fmtDate(f[TX.date])}</td>
+      <td>${escapeHtml(String(f[TX.description] || '—'))}</td>
+      <td class="money">${amt<0?'-':''}£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td>${catDisplay(f[TX.category])}</td>
+      <td class="wrap-cell">${reconBadge(f[TX.reconciled])}</td>
+    </tr>`;
+  }).join('')}</tbody>`;
+
+  return `${summary}
+    <table class="tx-table">
+      <thead><tr><th style="width:90px">Date</th><th style="max-width:40%">Description</th><th class="money" style="width:110px">Amount</th><th style="width:170px">Category</th><th style="width:90px">Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+      ${hiddenRows}
+    </table>
+    ${showMoreBtn}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Customers (SaaS CRM) — placeholder data, no Airtable integration yet
+// ═══════════════════════════════════════════════════════════════════════
+const CUSTOMER_DEMO_DATA = [
+  { id:'cust_001', company:'Greenleaf Landscaping', contact:'Sarah Mitchell', email:'sarah@greenleafscaping.co.uk', plan:'Growth', stage:'Active',     startDate:'2026-04-15', mrr:149 },
+  { id:'cust_002', company:'Bolt Electrical Ltd',   contact:'James Okafor',   email:'james@boltelectrical.co.uk',  plan:'Starter', stage:'Onboarding', startDate:'2026-05-01', mrr:79 },
+  { id:'cust_003', company:'Pureflow Plumbing',     contact:'Amir Hassan',    email:'amir@pureflow.co.uk',         plan:'Growth', stage:'Lead',        startDate:null,         mrr:0 },
+];
+
+let customerData = [...CUSTOMER_DEMO_DATA];
+let customerSortState = null;
+
+function renderCustomerKpis(){
+  const total   = customerData.length;
+  const active  = customerData.filter(c => c.stage === 'Active').length;
+  const onboard = customerData.filter(c => c.stage === 'Onboarding').length;
+  const leads   = customerData.filter(c => c.stage === 'Lead').length;
+  const totalMrr = customerData.filter(c => c.stage === 'Active' || c.stage === 'Onboarding').reduce((s,c) => s + c.mrr, 0);
+
+  document.getElementById('customerKpis').innerHTML = `
+    <div class="kpi"><div class="label">Total Customers</div><div class="value">${total}</div><div class="sub">${leads} leads in pipeline</div></div>
+    <div class="kpi"><div class="label">Active</div><div class="value" style="color:var(--success)">${active}</div><div class="sub">paying subscribers</div></div>
+    <div class="kpi"><div class="label">Onboarding</div><div class="value" style="color:var(--tone-gold)">${onboard}</div><div class="sub">setting up</div></div>
+    <div class="kpi"><div class="label">MRR</div><div class="value">&pound;${totalMrr.toLocaleString()}</div><div class="sub">monthly recurring revenue</div></div>
+  `;
+}
+
+function customerStageBadge(stage){
+  const cls = {Lead:'badge-lead', Onboarding:'badge-onboarding', Active:'badge-active', Churned:'badge-churned'};
+  return `<span class="badge ${cls[stage]||'badge-info'}">${escapeHtml(stage)}</span>`;
+}
+
+function renderCustomers(){
+  _expandedRow.customers = null;
+  renderCustomerKpis();
+  const search = (document.getElementById('searchCustomers').value || '').toLowerCase().trim();
+  const stage  = document.getElementById('filterCustomerStage').value;
+
+  let rows = customerData.filter(c => {
+    if (search && !c.company.toLowerCase().includes(search) && !c.contact.toLowerCase().includes(search) && !(c.email||'').toLowerCase().includes(search)) return false;
+    if (stage && c.stage !== stage) return false;
+    return true;
+  });
+
+  if (customerSortState) {
+    const { key, dir } = customerSortState;
+    const d = dir === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a,b) => {
+      let av = a[key], bv = b[key];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * d;
+      return String(av).localeCompare(String(bv), undefined, { numeric:true, sensitivity:'base' }) * d;
+    });
+  }
+
+  document.getElementById('cntCustomers').textContent = customerData.length;
+  document.getElementById('metaCustomers').textContent = `${rows.length} of ${customerData.length}`;
+
+  if (!rows.length) {
+    document.getElementById('contentCustomers').innerHTML = `<div class="empty"><div class="icon">💼</div><div class="msg">No customers match the current filters.</div></div>`;
+    return;
+  }
+
+  const cols = [
+    { key:'company',   label:'Company',      width:'200px' },
+    { key:'contact',   label:'Contact',      width:'160px' },
+    { key:'email',     label:'Email',        width:'200px' },
+    { key:'plan',      label:'Plan',         width:'100px' },
+    { key:'stage',     label:'Stage',        width:'110px' },
+    { key:'startDate', label:'Start Date',   width:'110px' },
+    { key:'mrr',       label:'MRR',          width:'100px', money:true },
+  ];
+
+  const colgroup = '<colgroup>' + cols.map(c => `<col style="width:${c.width}">`).join('') + '</colgroup>';
+
+  const sortArrow = (key) => {
+    if (customerSortState && customerSortState.key === key) return customerSortState.dir === 'asc' ? '▲' : '▼';
+    return '↕';
+  };
+
+  const head = '<tr>' + cols.map(c => {
+    const sorted = customerSortState && customerSortState.key === c.key;
+    const cls = [(c.money?'money':''), (sorted?'sorted':'')].filter(Boolean).join(' ');
+    return `<th class="${cls}" onclick="toggleCustomerSort('${c.key}')"><span class="th-inner"><span class="th-label">${escapeHtml(c.label)}</span><span class="th-sort">${sortArrow(c.key)}</span></span></th>`;
+  }).join('') + '</tr>';
+
+  const body = rows.map(r => {
+    const fmtDate = r.startDate ? new Date(r.startDate).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '<span style="color:var(--text-muted)">—</span>';
+    const fmtMrr  = r.mrr ? `&pound;${r.mrr.toLocaleString()}` : '<span style="color:var(--text-muted)">—</span>';
+    const chevron = `<span class="expand-chevron" id="chev-${r.id}">▶</span>`;
+    const dataRow = `<tr class="expandable" onclick="toggleExpandRow('customers','${r.id}',this)">
+      <td>${chevron}${escapeHtml(r.company)}</td>
+      <td>${escapeHtml(r.contact)}</td>
+      <td><a href="mailto:${escapeHtml(r.email)}" onclick="event.stopPropagation()" style="color:var(--accent)">${escapeHtml(r.email)}</a></td>
+      <td>${escapeHtml(r.plan)}</td>
+      <td class="wrap-cell">${customerStageBadge(r.stage)}</td>
+      <td>${fmtDate}</td>
+      <td class="money">${fmtMrr}</td>
+    </tr>`;
+    const expandRow = `<tr class="expand-row" id="exp-${r.id}" style="display:none"><td colspan="7"></td></tr>`;
+    return dataRow + expandRow;
+  }).join('');
+
+  document.getElementById('contentCustomers').innerHTML = `
+    <div class="demo-banner">⚠ Sample data shown below. Real customer records will replace these when the first subscriber signs up.</div>
+    <div class="table-wrap"><table class="dt">${colgroup}<thead>${head}</thead><tbody>${body}</tbody></table></div>
+  `;
+}
+
+function toggleCustomerSort(key){
+  if (customerSortState && customerSortState.key === key) {
+    customerSortState.dir = customerSortState.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    customerSortState = { key, dir:'asc' };
+  }
+  renderCustomers();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Toast
+// ═══════════════════════════════════════════════════════════════════════
+function toast(msg, kind){
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind?' '+kind:'');
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════════════
+// Supabase clone: wait for a Supabase login (shim gate) before initialising.
+window.ensureSbSession().then(function(){
+  if (bootAuth()) {
+    start();
+  } else {
+    document.getElementById('authBar').style.display = 'flex';
+  }
+});
+</script>
+</body>
+</html>
