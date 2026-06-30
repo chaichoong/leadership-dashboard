@@ -438,7 +438,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
     <span id="lastSync" style="font-size:11px;color:var(--text-secondary)"></span>
     <div id="syncPill" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--success-bg);color:var(--success);border:1px solid var(--success);cursor:pointer;user-select:none" title="Click to run a sync check">✓ Saved</div>
     <a class="btn" href="workflow.html" target="_blank" title="Visual map of how the Tasks &amp; Projects OS works" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">📖 Workflow</a>
-    <button class="btn" data-refresh-btn onclick="loadAllData()" title="Reload data from Airtable">Refresh</button>
+    <button class="btn" data-refresh-btn onclick="loadAllData()" title="Reload data from Supabase">Refresh</button>
     <button class="btn" id="undoBtn" onclick="doUndo()" disabled style="opacity:0.4" title="Undo last action (Cmd+Z) — Nothing to undo">
       <span>Undo</span><span id="undoBtnLabel" style="display:none"></span>
     </button>
@@ -603,7 +603,7 @@ body.app-busy,body.app-busy *{cursor:progress!important}
   <div id="view-meetings" style="display:none"></div>
 </div>
 
-<div class="loader" id="loader"><div class="spin"></div>Loading tasks from Airtable...</div>
+<div class="loader" id="loader"><div class="spin"></div>Loading tasks from Supabase...</div>
 <div class="toast" id="toast"></div>
 <!-- Sync popover (positioned relative to pill in topbar-right via JS on open) -->
 <div id="syncPopover" style="display:none;position:fixed;top:60px;right:24px;z-index:9997;width:360px;max-height:60vh;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px;font-size:var(--fs-sm);box-shadow:var(--shadow-lg)"></div>
@@ -8025,8 +8025,8 @@ async function loadAllData(){
         refreshFn:()=>loadAllData(),
         checks:[
           {
-            name:'Tasks fetched from Airtable', kind:'sync', run:()=>{
-              if(!Array.isArray(allTasks)||allTasks.length===0) return {status:'fail',detail:'No tasks loaded — Airtable fetch may have failed'};
+            name:'Tasks fetched from Supabase', kind:'sync', run:()=>{
+              if(!Array.isArray(allTasks)||allTasks.length===0) return {status:'fail',detail:'No tasks loaded — Supabase fetch may have failed'};
               return {status:'pass',detail:`${allTasks.length} non-completed tasks loaded`};
             }
           },
