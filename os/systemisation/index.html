@@ -330,6 +330,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .agentic-q-title{font-size:var(--fs-sm);font-weight:var(--fw-medium);color:var(--accent);margin-bottom:10px}
 .agentic-q{margin-bottom:10px}
 .agentic-q label{display:block;font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:4px}
+/* Make the answer box unmistakably an input field (was transparent until focus). */
+.agentic-answer{display:block;width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;min-height:46px;font-size:var(--fs-sm);color:var(--text-primary);resize:vertical}
+.agentic-answer::placeholder{color:var(--text-muted)}
+.agentic-answer:focus{outline:none;border-color:var(--accent);background:var(--bg-surface);box-shadow:0 0 0 2px var(--accent-soft)}
 .agentic-foot{margin-top:12px;display:flex;justify-content:flex-end}
 .agentic-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
 @media(max-width:760px){.agentic-row{grid-template-columns:20px 1fr;row-gap:2px}.agentic-pill,.agentic-reason{grid-column:2}}
@@ -2475,6 +2479,17 @@ function exportSOPAsHTML(wfId){
     toast('SOP downloaded');
 }
 
+// Turn a Drive-worker failure into a clear, actionable message. The Google OAuth token
+// on the drive-upload worker periodically expires (invalid_grant); the fix then is to
+// reconnect Drive, not to retry.
+function driveErrMsg(e){
+    const m = (e && e.message) ? e.message : String(e);
+    if(/invalid_grant|expired|revoked|unauthor|auth failed|\b401\b|\b403\b/i.test(m)){
+        return 'Google Drive needs reconnecting (token expired). Reconnect Drive, then use "Upload to Drive" on the SOP.';
+    }
+    return 'Drive upload failed: ' + m;
+}
+
 async function autoUploadToDrive(wfId){
     const w = allWorkflows.find(w=>w.id===wfId);
     const wName = w ? (gf(w,WF.name)||'Untitled') : 'Untitled';
@@ -2482,7 +2497,7 @@ async function autoUploadToDrive(wfId){
     try {
         await uploadSOPToDrive(wfId);
     } catch(e){
-        toast('Drive upload skipped: '+e.message);
+        toast(driveErrMsg(e), 'warning');
     }
 }
 
@@ -2520,7 +2535,7 @@ async function uploadSOPToDrive(wfId){
         }
         render();
     } catch(e){
-        toast('Drive upload error: '+e.message);
+        toast(driveErrMsg(e), 'warning');
     } finally {
         if(btn){ btn.disabled = false; btn.textContent = 'Upload to Drive'; }
     }
@@ -2911,7 +2926,7 @@ async function runAgenticCheck(wfId, extraAnswers){
     const stageList = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${s.naAllowed?' (N/A allowed)':''}`).join('\n');
     let answersBlock = '';
     if(extraAnswers && Object.keys(extraAnswers).length){
-        answersBlock = '\n\nThe owner has since answered these follow-up questions. Treat the answers as part of the process description:\n' +
+        answersBlock = '\n\nThe owner has since answered these follow-up questions. Treat the answers as part of the process description. Re-score the stages with these folded in. Do NOT ask any further questions — return an empty "questions" array.\n' +
             Object.entries(extraAnswers).map(([k,v])=>`${k}: ${v}`).join('\n');
     }
 
@@ -2986,10 +3001,14 @@ function normaliseReadiness(parsed, extraAnswers){
     });
     const blocking = stages.filter(s=>s.status==='Missing' || s.status==='Thin');
     const state = blocking.length===0 ? 'Ready' : 'Needs input';
-    const questions = (parsed.questions||[])
+    let questions = (parsed.questions||[])
         .filter(q=>q && q.question)
         .slice(0,3)
         .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }));
+    // ONE BATCH ONLY. Once the owner has answered the follow-up questions we never
+    // surface a fresh batch — the re-check just re-scores the badges with the answers
+    // folded in. Prevents the "endless questions" loop.
+    if(extraAnswers && Object.keys(extraAnswers).length) questions = [];
     return { state, stages, questions, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
 }
 
@@ -3116,8 +3135,10 @@ async function setWfDisposition(wfId, type){
         else { toast('Marked as an AI agent — adding it to the Skills Library…'); doConvertWorkflowToSkill(wfId); }
     }
     renderSteps();
-    // re-score readiness against the new bar (human vs agent) if a check already exists
-    if(sop.readiness) runAgenticCheck(wfId);
+    // Re-render the existing scorecard under the new human/agent framing WITHOUT firing a
+    // fresh AI interrogation. Selecting a disposition must never pop a new batch of
+    // questions. If the owner wants a fresh score under the new bar, the Re-check button does it.
+    if(sop.readiness) renderAgenticScorecard(wfId, sop.readiness);
 }
 
 function selectStepsWf(id){
