@@ -1,0 +1,36 @@
+name: Monthly property valuations (AI estimate → Pending)
+# Fires 06:00 UTC on the 1st of every month. Web-searches a fresh value for each
+# property and writes it as "Pending Review" to the Property Valuations table, which
+# both the Wealth tab and the Operations Properties tab read. Nothing moves in net
+# worth until Kevin approves. Reuses the existing AIRTABLE_PAT secret — no new setup.
+on:
+  schedule:
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (compute + log, write nothing)'
+        type: boolean
+        default: false
+      limit:
+        description: 'Max properties to value (0 = all)'
+        default: '0'
+permissions:
+  contents: read
+concurrency:
+  group: monthly-valuations
+  cancel-in-progress: false
+jobs:
+  valuations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Refresh property valuations
+        env:
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
+          LIMIT: ${{ github.event.inputs.limit || '0' }}
+        run: python3 scripts/monthly-valuations.py
