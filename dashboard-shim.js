@@ -10,8 +10,15 @@
   const SB_URL  = window.SUPABASE_URL  || 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
   const SB_ANON = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
   const BASE = 'appnqjDpqDniH3IRl';
-  const sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
-  window.sbDash = sb;
+  // Lazy client so the fetch override below installs UNCONDITIONALLY even if
+  // supabase-js hasn't finished loading yet — otherwise a throw here would leave
+  // window.fetch un-overridden and the app would fall through to Airtable.
+  let _sb = null;
+  function sbc() {
+    if (!_sb) _sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+    return _sb;
+  }
+  window.sbDash = sbc;
 
   // Airtable table ids
   const ACCOUNTS='tbl1nr0EcX2T62KME', COSTS='tblx5kvhzNEI5TFlS', TENANCIES='tblN51a88qTDB6iMH',
@@ -104,7 +111,7 @@
     if (!cfg) return { records: [] };   // un-migrated table → empty (other tabs stay quiet)
     const rows = []; const page = 1000; let from = 0;
     for (;;) {
-      const { data, error } = await sb.from(cfg.source).select('*').range(from, from+page-1);
+      const { data, error } = await sbc().from(cfg.source).select('*').range(from, from+page-1);
       if (error) throw new Error(error.message);
       rows.push(...data);
       if (data.length < page) break;
@@ -115,7 +122,7 @@
   async function readOne(tableId, id) {
     const cfg = M[tableId];
     if (!cfg) return { id, fields: {} };
-    const { data, error } = await sb.from(cfg.source).select('*').eq('id', id).single();
+    const { data, error } = await sbc().from(cfg.source).select('*').eq('id', id).single();
     if (error) throw new Error(error.message);
     return rowToRecord(data, cfg);
   }
@@ -143,7 +150,7 @@
         if (method === 'GET') return json(recId ? await readOne(tableId, recId) : await readList(tableId));
         if (method === 'POST') {
           const b = JSON.parse(init.body || '{}');
-          const { data, error } = await sb.from(M[tableId].write).insert(fieldsToColumns(tableId, b.fields||{})).select().single();
+          const { data, error } = await sbc().from(M[tableId].write).insert(fieldsToColumns(tableId, b.fields||{})).select().single();
           if (error) return json({ error:{ message:error.message } }, 422);
           return json(await readOne(tableId, data.id));
         }
@@ -151,13 +158,13 @@
           const b = JSON.parse(init.body || '{}');
           const cols = fieldsToColumns(tableId, b.fields||{});
           if (Object.keys(cols).length) {
-            const { error } = await sb.from(M[tableId].write).update(cols).eq('id', recId);
+            const { error } = await sbc().from(M[tableId].write).update(cols).eq('id', recId);
             if (error) return json({ error:{ message:error.message } }, 422);
           }
           return json(await readOne(tableId, recId));
         }
         if (method === 'DELETE') {
-          await sb.from(M[tableId].write).delete().eq('id', recId);
+          await sbc().from(M[tableId].write).delete().eq('id', recId);
           return json({ id: recId, deleted: true });
         }
       }
@@ -168,7 +175,7 @@
     return _realFetch(input, init);
   };
 
-  window.sbDashSignIn  = (email, password) => sb.auth.signInWithPassword({ email, password });
-  window.sbDashSession = () => sb.auth.getSession().then(r => r.data.session);
+  window.sbDashSignIn  = (email, password) => sbc().auth.signInWithPassword({ email, password });
+  window.sbDashSession = () => sbc().auth.getSession().then(r => r.data.session);
   console.log('[dash-shim] Supabase Leadership Dashboard shim active →', SB_URL);
 })();
