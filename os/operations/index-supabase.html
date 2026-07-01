@@ -2962,7 +2962,7 @@ function closeSchemaInspector(){
 // so on a cache miss the shim returns empty and rows show "no transactions".
 const OPS_IDB_NAME  = '_dlr_cache_sb';
 const OPS_IDB_STORE = 'kv';
-const OPS_TX_CACHE_KEY = 'ops_transactions';
+const OPS_TX_CACHE_KEY = 'ops_transactions_v2'; // bumped to bypass a stale empty (deferred) cache
 const OPS_TX_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
 let _opsIdbPromise = null;
@@ -3064,7 +3064,7 @@ async function loadTransactionsBackground(forceRefresh = false){
   if (!forceRefresh) {
     try {
       const cached = await _opsIdbGet(OPS_TX_CACHE_KEY);
-      if (cached && cached.savedAt && cached.data) {
+      if (cached && cached.savedAt && Array.isArray(cached.data) && cached.data.length) {
         const age = Date.now() - cached.savedAt;
         if (age < OPS_TX_CACHE_TTL) {
           _applyTransactions(cached.data);
@@ -3085,7 +3085,7 @@ async function loadTransactionsBackground(forceRefresh = false){
   _applyTransactions(tx);
 
   // 3. Save to IndexedDB for next load
-  try { await _opsIdbSet(OPS_TX_CACHE_KEY, { savedAt: Date.now(), data: tx }); } catch(e) { /* non-critical */ }
+  try { if (Array.isArray(tx) && tx.length) await _opsIdbSet(OPS_TX_CACHE_KEY, { savedAt: Date.now(), data: tx }); } catch(e) { /* non-critical */ }
 }
 
 function sortTransactionsByDate(txs){
