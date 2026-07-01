@@ -107,35 +107,33 @@
     </div>
 
     <div id="today" class="hidden">
-      <div class="metrics">
-        <div class="metric"><div class="lbl">Notes</div><div class="val">3</div></div>
-        <div class="metric"><div class="lbl">Meetings</div><div class="val">1</div></div>
-        <div class="metric"><div class="lbl">Documents</div><div class="val">7</div></div>
-        <div class="metric"><div class="lbl">Post</div><div class="val">2</div></div>
+      <p id="todayDate" class="foot" style="margin-bottom:12px;"></p>
+      <div class="metrics" id="metrics"></div>
+
+      <div class="card">
+        <h2>Today's review</h2>
+        <p class="hint">Your brain's honest read on where things stand, from last night's review.</p>
+        <div id="review"><p class="hint">Loading your review…</p></div>
       </div>
 
       <div class="card">
         <h2>Your brain has a few questions</h2>
-        <p class="hint">Answer in a tap. It learns from every answer, so it asks less over time.</p>
-        <div id="queries">
-          <div class="query"><div class="q"><span class="tag">Where to file</span>A new document looks like an invoice. File it under Finance or Legal?</div><div class="answers"><button class="btn" data-a>Finance</button><button class="btn" data-a>Legal</button></div></div>
-          <div class="query"><div class="q"><span class="tag">Same person</span>Is "J. Smith" the same person as "John Smith"?</div><div class="answers"><button class="btn" data-a>Same</button><button class="btn" data-a>Different</button></div></div>
-          <div class="query"><div class="q"><span class="tag">Keep or archive</span>A note has not been touched in 90 days. Keep it or archive it?</div><div class="answers"><button class="btn" data-a>Keep</button><button class="btn" data-a>Archive</button></div></div>
-        </div>
-        <div class="esc">One item was flagged as sensitive and kept private for your eyes only. Confirm? <button class="btn" data-a style="margin-left:6px;">Confirm</button></div>
+        <p class="hint">When it is unsure where something belongs, it asks here. Each answer teaches it.</p>
+        <div id="queries"></div>
+        <div id="sensitive"></div>
       </div>
 
       <div class="card">
         <h2>Add to your brain</h2>
         <p class="hint">Drop a thought, or hand it a video and it does the watching for you.</p>
-        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type a quick note"><button class="btn primary" onclick="toast('Added to your brain')">Add note</button></div>
-        <div class="row"><input class="fld" id="yt" placeholder="Paste a YouTube link or transcript"><button class="btn" onclick="toast('Summarising and filing, actions go to Tasks')">Add video</button></div>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type a quick note"><button class="btn primary" onclick="toast('Coming next: this drops into your brain inbox for tonight')">Add note</button></div>
+        <div class="row"><input class="fld" id="yt" placeholder="Paste a YouTube link or transcript"><button class="btn" onclick="toast('Coming next: runs the transcript skill, actions go to Tasks')">Add video</button></div>
       </div>
 
       <div class="card">
         <h2>Ask your brain</h2>
         <p class="hint">Ask in plain language. The assistant answers using everything the brain knows.</p>
-        <div class="row"><input class="fld" id="ask" placeholder="Where is the latest lease for the Oldham Road property?"><button class="btn primary" onclick="toast('Opening the assistant with your brain as context')">Ask</button></div>
+        <div class="row"><input class="fld" id="ask" placeholder="Where is the latest lease for the Oldham Road property?"><button class="btn primary" onclick="toast('Coming next: opens the assistant with your brain as context')">Ask</button></div>
         <p class="foot">Powered by your AI engine, with your brain as context.</p>
       </div>
 
@@ -147,6 +145,107 @@
   <div id="toast" style="position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px); background:var(--bg-inverse); color:var(--text-inverse); padding:10px 18px; border-radius:var(--radius-md); font-size:var(--fs-base); opacity:0; transition:all var(--dur-base) var(--ease); pointer-events:none;"></div>
 
 <script>
+  // ── AI Brain — Today tab, wired to the private "AI Brain Today" Airtable feed ──
+  var BASE = 'appnqjDpqDniH3IRl';
+  var TABLE = 'tblZ75JgE1wzDP0ps';
+  var PAT = '';
+  try { PAT = localStorage.getItem('_dlr_pat') || ''; } catch (e) { PAT = ''; }
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function fmtDate(iso){
+    if (!iso) return '';
+    var p = iso.split('-'); if (p.length !== 3) return iso;
+    var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return Number(p[2]) + ' ' + months[Number(p[1]) - 1] + ' ' + p[0];
+  }
+
+  var todayLoaded = false;
+  function loadToday(){
+    if (todayLoaded) return;
+    todayLoaded = true;
+    var reviewEl = document.getElementById('review');
+    if (!PAT){
+      reviewEl.innerHTML = '<p class="hint">Sign in to the dashboard to load your brain. Your data stays private, behind your login.</p>';
+      document.getElementById('queries').innerHTML = '';
+      return;
+    }
+    var url = 'https://api.airtable.com/v0/' + BASE + '/' + TABLE + '?pageSize=100';
+    fetch(url, { headers: { Authorization: 'Bearer ' + PAT } })
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(data){ render(data.records || []); })
+      .catch(function(err){
+        todayLoaded = false;
+        reviewEl.innerHTML = '<p class="hint">Could not load your brain just now (' + esc(err.message) + '). It refreshes each night; try again shortly.</p>';
+      });
+  }
+
+  function render(records){
+    var rows = records.map(function(r){ return r.fields || {}; });
+    rows.forEach(function(f, i){ f._id = records[i].id; });
+    rows.sort(function(a,b){ return (a.SortOrder || 0) - (b.SortOrder || 0); });
+
+    var date = rows.length ? (rows[0].Date || '') : '';
+    document.getElementById('todayDate').textContent = date ? 'Your brain, as of ' + fmtDate(date) : '';
+
+    // Metrics
+    var order = ['notes','meetings','documents','post'];
+    var labels = { notes:'Notes', meetings:'Meetings', documents:'Documents', post:'Post' };
+    var metrics = {};
+    rows.filter(function(f){ return f.Kind === 'metric'; }).forEach(function(f){ metrics[f.Category] = f.Value || 0; });
+    document.getElementById('metrics').innerHTML = order.map(function(k){
+      return '<div class="metric"><div class="lbl">' + labels[k] + '</div><div class="val">' + (metrics[k] != null ? metrics[k] : 0) + '</div></div>';
+    }).join('');
+
+    // Review
+    var review = rows.filter(function(f){ return f.Kind === 'review'; });
+    document.getElementById('review').innerHTML = review.length
+      ? review.map(function(f){
+          return '<div class="step"><div class="body"><div class="t">' + esc(f.Item) + '</div><div class="d">' + esc(f.Text) + '</div></div></div>';
+        }).join('')
+      : '<p class="hint">No review captured for today yet. It runs each night.</p>';
+
+    // Questions (queries)
+    var queries = rows.filter(function(f){ return f.Kind === 'query'; });
+    document.getElementById('queries').innerHTML = queries.length
+      ? queries.map(function(f){
+          var link = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener">Open document</a>' : '';
+          return '<div class="query"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div><div class="answers">' + link + '</div></div>';
+        }).join('')
+      : '<p class="hint">Nothing to file right now. Your inbox is clear and everything is sorted.</p>';
+
+    // Sensitive — pointer + link only, never the content
+    var sensitive = rows.filter(function(f){ return f.Kind === 'sensitive' && f.Status !== 'resolved'; });
+    var sEl = document.getElementById('sensitive');
+    if (sensitive.length){
+      sEl.innerHTML = sensitive.map(function(f){
+        var link = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener" style="margin-left:6px;">Open ' + esc(f.DocName || 'document') + '</a>' : '';
+        return '<div class="esc" data-id="' + esc(f._id) + '">' +
+          (sensitive.length === 1 ? 'One item' : sensitive.length + ' items') +
+          ' flagged sensitive and kept private, for your eyes only. It lives in ' + esc(f.DocName || 'the private brain') + ' and is not in this app.' +
+          link + '<button class="btn" data-confirm="' + esc(f._id) + '" style="margin-left:6px;">Confirm seen</button></div>';
+      }).join('');
+      sEl.querySelectorAll('[data-confirm]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var id = btn.getAttribute('data-confirm');
+          var box = sEl.querySelector('.esc[data-id="' + id + '"]');
+          fetch('https://api.airtable.com/v0/' + BASE + '/' + TABLE + '/' + id, {
+            method: 'PATCH',
+            headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: { Status: 'resolved' } })
+          }).then(function(r){
+            box.innerHTML = r.ok ? '<span class="resolved">Confirmed. Kept private.</span>' : 'Could not save just now.';
+          }).catch(function(){ box.innerHTML = 'Could not save just now.'; });
+        });
+      });
+    } else {
+      sEl.innerHTML = '';
+    }
+  }
+
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
       document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
@@ -154,14 +253,10 @@
       var v = t.getAttribute('data-view');
       document.getElementById('setup').classList.toggle('hidden', v !== 'setup');
       document.getElementById('today').classList.toggle('hidden', v !== 'today');
+      if (v === 'today') loadToday();
     });
   });
-  document.querySelectorAll('[data-a]').forEach(function(b){
-    b.addEventListener('click', function(){
-      var parent = b.closest('.query') || b.closest('.esc');
-      parent.innerHTML = '<span class="resolved">Thanks, I have learned that.</span>';
-    });
-  });
+
   var tEl = document.getElementById('toast'); var tT;
   window.toast = function(msg){
     tEl.textContent = msg; tEl.style.opacity = '1'; tEl.style.transform = 'translateX(-50%) translateY(0)';
