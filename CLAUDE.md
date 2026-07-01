@@ -91,6 +91,7 @@ Each session should only edit the file(s) for its feature. Before starting work:
 | Reconciliation engine | `js/reconciliation.js` | Other js/ files |
 | Invoices | `js/invoices.js` | Other js/ files |
 | CFVs | `js/cfv.js` | Other js/ files |
+| Rent chase (arrears chase queue) | `js/rent-chase.js` | Other js/ files |
 | Fintable monitor | `js/fintable.js` | Other js/ files |
 | Site map & links | `js/sitemap.js` | Other js/ files |
 | AI assistant | `js/ai-assistant.js` | Other js/ files |

@@ -463,6 +463,9 @@
             loadArrearsRecords().finally(() => renderArrearsSection('arrearsPipelineContainer'));
         }
 
+        // Rent Chase queue — AI drafts arrears chases for human approval (nothing auto-sends)
+        if (typeof renderRentChasePanel === 'function') renderRentChasePanel('rentChaseContainer');
+
         // Table
         if (!tbody) return;
 
