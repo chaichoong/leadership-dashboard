@@ -60,7 +60,23 @@
   input.fld { flex: 1; font-family: inherit; font-size: var(--fs-md); padding: 9px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface); color: var(--text-primary); }
   input.fld:focus { outline: none; border-color: var(--border-focus); }
   .foot { color: var(--text-muted); font-size: var(--fs-sm); margin-top: 6px; }
-  .esc { background: var(--danger-bg); border: 1px solid var(--danger-border); color: var(--danger); border-radius: var(--radius-md); padding: 10px 12px; font-size: var(--fs-sm); margin-top: 10px; }
+  .esc { background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius-md); padding: 12px 14px; font-size: var(--fs-sm); margin-top: 12px; }
+  .esc .etag { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--danger); font-weight: var(--fw-medium); display: block; margin-bottom: 4px; }
+  .esc .etxt { color: var(--text-primary); margin-bottom: 10px; }
+
+  .synbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: var(--fs-sm); color: var(--text-secondary); }
+  .synbar .refresh { margin-left: auto; padding: 5px 12px; }
+  .synbar .serr { color: var(--danger); }
+  .synbar .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); display: inline-block; }
+
+  .filed { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: var(--fs-sm); color: var(--text-secondary); border-top: 1px solid var(--border-subtle); }
+  .filed:first-child { border-top: none; }
+  .filed .fldr { color: var(--text-muted); font-size: var(--fs-xs); background: var(--bg-subtle); padding: 1px 7px; border-radius: var(--radius-full); }
+  .filed a { margin-left: auto; white-space: nowrap; }
+
+  .tile-hd { display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: var(--fs-xs); background: var(--accent-soft); color: var(--accent); padding: 1px 8px; border-radius: var(--radius-full); }
+  a { color: var(--accent); }
   .hidden { display: none; }
 </style>
 </head>
@@ -107,37 +123,42 @@
     </div>
 
     <div id="today" class="hidden">
-      <p id="todayDate" class="foot" style="margin-bottom:12px;"></p>
+      <div class="synbar">
+        <span class="sdot" id="syncDot" aria-hidden="true"></span>
+        <span id="syncStatus">Loading…</span>
+        <button class="btn refresh" id="refreshBtn" type="button">Refresh</button>
+      </div>
+
       <div class="metrics" id="metrics"></div>
 
       <div class="card">
-        <h2>Today's review</h2>
-        <p class="hint">Your brain's honest read on where things stand, from last night's review.</p>
-        <div id="review"><p class="hint">Loading your review…</p></div>
+        <h2>Recently filed</h2>
+        <p class="hint">What your brain has captured and filed. Tap to open the note.</p>
+        <div id="captured"><p class="hint">Loading…</p></div>
       </div>
 
       <div class="card">
-        <h2>Your brain has a few questions</h2>
-        <p class="hint">When it is unsure where something belongs, it asks here. Each answer teaches it.</p>
+        <h2>Needs your call</h2>
+        <p class="hint">When the brain is unsure where something belongs, it asks here. Each answer teaches it.</p>
         <div id="queries"></div>
         <div id="sensitive"></div>
       </div>
 
       <div class="card">
-        <h2>Add to your brain</h2>
-        <p class="hint">Drop a thought, or hand it a video and it does the watching for you.</p>
-        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type a quick note"><button class="btn primary" onclick="toast('Coming next: this drops into your brain inbox for tonight')">Add note</button></div>
-        <div class="row"><input class="fld" id="yt" placeholder="Paste a YouTube link or transcript"><button class="btn" onclick="toast('Coming next: runs the transcript skill, actions go to Tasks')">Add video</button></div>
+        <h2>Feed your brain</h2>
+        <p class="hint">Drop it in. The brain files it and links it to the rest.</p>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type or dictate a quick note"><button class="btn primary" onclick="toast('Coming next: drops into your brain inbox for tonight')">Add note</button></div>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="yt" placeholder="Paste a YouTube link or transcript"><button class="btn" onclick="toast('Coming next: runs the transcript skill, actions go to Tasks')">Add video</button></div>
+        <div class="row"><input class="fld" id="doc" placeholder="Scan a document into your Drive inbox"><button class="btn" onclick="toast('Coming next: OCR and file into the right cabinet')">Add document</button></div>
       </div>
 
       <div class="card">
         <h2>Ask your brain</h2>
-        <p class="hint">Ask in plain language. The assistant answers using everything the brain knows.</p>
+        <p class="hint">Plain language. It answers from everything it has filed.</p>
         <div class="row"><input class="fld" id="ask" placeholder="Where is the latest lease for the Oldham Road property?"><button class="btn primary" onclick="toast('Coming next: opens the assistant with your brain as context')">Ask</button></div>
-        <p class="foot">Powered by your AI engine, with your brain as context.</p>
       </div>
 
-      <p class="foot" style="text-align:center;">Last run, tidied 23:00 · meetings 22:45 · notes 22:40 · documents 09:00.</p>
+      <p class="foot" style="text-align:center;">Files nightly · notes 22:40 · meetings 22:45 · tidy 23:00.</p>
     </div>
 
   </div>
@@ -163,88 +184,98 @@
     return Number(p[2]) + ' ' + months[Number(p[1]) - 1] + ' ' + p[0];
   }
 
-  var todayLoaded = false;
-  function loadToday(){
-    if (todayLoaded) return;
-    todayLoaded = true;
-    var reviewEl = document.getElementById('review');
+  var loaded = false, loading = false;
+
+  function setSync(text, isErr){
+    document.getElementById('syncStatus').textContent = text;
+    document.getElementById('syncDot').style.background = isErr ? 'var(--danger)' : 'var(--success)';
+  }
+
+  function loadToday(force){
+    if (loading || (loaded && !force)) return;
+    loading = true;
+    var btn = document.getElementById('refreshBtn');
+    btn.disabled = true; setSync('Syncing…', false);
     if (!PAT){
-      reviewEl.innerHTML = '<p class="hint">Sign in to the dashboard to load your brain. Your data stays private, behind your login.</p>';
+      loading = false; btn.disabled = false;
+      setSync('Sign in to the dashboard to load your brain', true);
+      document.getElementById('metrics').innerHTML = '';
+      document.getElementById('captured').innerHTML = '<p class="hint">Your data stays private, behind your login.</p>';
       document.getElementById('queries').innerHTML = '';
+      document.getElementById('sensitive').innerHTML = '';
       return;
     }
-    var url = 'https://api.airtable.com/v0/' + BASE + '/' + TABLE + '?pageSize=100';
+    var url = 'https://api.airtable.com/v0/' + BASE + '/' + TABLE + '?pageSize=100&cb=' + Date.now();
     fetch(url, { headers: { Authorization: 'Bearer ' + PAT } })
       .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function(data){ render(data.records || []); })
+      .then(function(data){ render(data.records || []); loaded = true; })
       .catch(function(err){
-        todayLoaded = false;
-        reviewEl.innerHTML = '<p class="hint">Could not load your brain just now (' + esc(err.message) + '). It refreshes each night; try again shortly.</p>';
-      });
+        setSync('Could not sync (' + esc(err.message) + ')', true);
+        document.getElementById('captured').innerHTML = '<p class="hint">Your brain refreshes each night. Try Refresh in a moment.</p>';
+      })
+      .then(function(){ loading = false; btn.disabled = false; });
   }
 
   function render(records){
-    var rows = records.map(function(r){ return r.fields || {}; });
-    rows.forEach(function(f, i){ f._id = records[i].id; });
+    var rows = records.map(function(r){ var f = r.fields || {}; f._id = r.id; return f; });
     rows.sort(function(a,b){ return (a.SortOrder || 0) - (b.SortOrder || 0); });
 
     var date = rows.length ? (rows[0].Date || '') : '';
-    document.getElementById('todayDate').textContent = date ? 'Your brain, as of ' + fmtDate(date) : '';
+    setSync(date ? 'Synced · ' + fmtDate(date) : 'No data yet', false);
 
-    // Metrics
-    var order = ['notes','meetings','documents','post'];
-    var labels = { notes:'Notes', meetings:'Meetings', documents:'Documents', post:'Post' };
+    // Metrics — what was captured today
+    var order = ['notes','meetings','documents','videos'];
+    var labels = { notes:'Notes', meetings:'Meetings', documents:'Documents', videos:'Videos' };
     var metrics = {};
     rows.filter(function(f){ return f.Kind === 'metric'; }).forEach(function(f){ metrics[f.Category] = f.Value || 0; });
     document.getElementById('metrics').innerHTML = order.map(function(k){
       return '<div class="metric"><div class="lbl">' + labels[k] + '</div><div class="val">' + (metrics[k] != null ? metrics[k] : 0) + '</div></div>';
     }).join('');
 
-    // Review
-    var review = rows.filter(function(f){ return f.Kind === 'review'; });
-    document.getElementById('review').innerHTML = review.length
-      ? review.map(function(f){
-          return '<div class="step"><div class="body"><div class="t">' + esc(f.Item) + '</div><div class="d">' + esc(f.Text) + '</div></div></div>';
+    // Recently filed
+    var captured = rows.filter(function(f){ return f.Kind === 'captured'; });
+    document.getElementById('captured').innerHTML = captured.length
+      ? captured.map(function(f){
+          var link = f.DocLink ? '<a href="' + esc(f.DocLink) + '" target="_blank" rel="noopener">open</a>' : '';
+          return '<div class="filed"><span>' + esc(f.DocName || f.Item) + '</span><span class="fldr">' + esc(f.Category || '') + '</span>' + link + '</div>';
         }).join('')
-      : '<p class="hint">No review captured for today yet. It runs each night.</p>';
+      : '<p class="hint">Nothing filed yet. As you feed your brain, captures show here.</p>';
 
-    // Questions (queries)
+    // Needs your call — filing questions
     var queries = rows.filter(function(f){ return f.Kind === 'query'; });
     document.getElementById('queries').innerHTML = queries.length
       ? queries.map(function(f){
           var link = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener">Open document</a>' : '';
           return '<div class="query"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div><div class="answers">' + link + '</div></div>';
         }).join('')
-      : '<p class="hint">Nothing to file right now. Your inbox is clear and everything is sorted.</p>';
+      : '<p class="hint">Nothing to sort right now. Everything is filed. Questions appear here when the brain is unsure.</p>';
 
-    // Sensitive — pointer + link only, never the content
+    // Sensitive — pointer + link only. You can view it; the brain never acts on it or shares it.
     var sensitive = rows.filter(function(f){ return f.Kind === 'sensitive' && f.Status !== 'resolved'; });
     var sEl = document.getElementById('sensitive');
-    if (sensitive.length){
-      sEl.innerHTML = sensitive.map(function(f){
-        var link = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener" style="margin-left:6px;">Open ' + esc(f.DocName || 'document') + '</a>' : '';
-        return '<div class="esc" data-id="' + esc(f._id) + '">' +
-          (sensitive.length === 1 ? 'One item' : sensitive.length + ' items') +
-          ' flagged sensitive and kept private, for your eyes only. It lives in ' + esc(f.DocName || 'the private brain') + ' and is not in this app.' +
-          link + '<button class="btn" data-confirm="' + esc(f._id) + '" style="margin-left:6px;">Confirm seen</button></div>';
-      }).join('');
-      sEl.querySelectorAll('[data-confirm]').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var id = btn.getAttribute('data-confirm');
-          var box = sEl.querySelector('.esc[data-id="' + id + '"]');
-          fetch('https://api.airtable.com/v0/' + BASE + '/' + TABLE + '/' + id, {
-            method: 'PATCH',
-            headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields: { Status: 'resolved' } })
-          }).then(function(r){
-            box.innerHTML = r.ok ? '<span class="resolved">Confirmed. Kept private.</span>' : 'Could not save just now.';
-          }).catch(function(){ box.innerHTML = 'Could not save just now.'; });
-        });
+    sEl.innerHTML = sensitive.map(function(f){
+      var view = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener">View</a>' : '';
+      return '<div class="esc" data-id="' + esc(f._id) + '">' +
+        '<span class="etag">Sensitive · legal</span>' +
+        '<div class="etxt">A note relates to a sensitive matter, filed and held privately in ' + esc(f.DocName || 'your brain') + '. The brain will not act on it or share it. For your eyes only.</div>' +
+        view + '<button class="btn" data-leave="' + esc(f._id) + '" style="margin-left:6px;">Leave it, no action</button></div>';
+    }).join('');
+    sEl.querySelectorAll('[data-leave]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-leave');
+        var box = sEl.querySelector('.esc[data-id="' + id + '"]');
+        fetch('https://api.airtable.com/v0/' + BASE + '/' + TABLE + '/' + id, {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { Status: 'resolved' } })
+        }).then(function(r){
+          box.innerHTML = r.ok ? '<span class="resolved">Acknowledged. Left private, no action taken.</span>' : 'Could not save just now.';
+        }).catch(function(){ box.innerHTML = 'Could not save just now.'; });
       });
-    } else {
-      sEl.innerHTML = '';
-    }
+    });
   }
+
+  document.getElementById('refreshBtn').addEventListener('click', function(){ loadToday(true); });
 
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
@@ -253,7 +284,7 @@
       var v = t.getAttribute('data-view');
       document.getElementById('setup').classList.toggle('hidden', v !== 'setup');
       document.getElementById('today').classList.toggle('hidden', v !== 'today');
-      if (v === 'today') loadToday();
+      if (v === 'today') loadToday(false);
     });
   });
 
