@@ -1,0 +1,25 @@
+name: Sync bank transactions (Airtable → Supabase)
+on:
+  schedule:
+    - cron: '17 * * * *'   # hourly
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: sync-transactions
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Sync recent transactions
+        env:
+          AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+          SUPABASE_URL: 'https://ptkyhzlsvijcwyovgrgv.supabase.co'
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SYNC_WINDOW_DAYS: '3'
+        run: python3 scripts/sync-transactions.py
