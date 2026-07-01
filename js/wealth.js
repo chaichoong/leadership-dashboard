@@ -326,6 +326,55 @@ async function saveWealthUpdate(curMonth, curYear) {
     }
 }
 
+// ── Auto roll-forward (monthly snapshot) ─────────────────────────────────────
+// Kevin's rule: it happens automatically without him, but he can override any
+// figure and that value is carried forward. When the Wealth tab loads on/after
+// the 1st, this stamps the PREVIOUS completed month's snapshot if it's missing —
+// using the same live figures the matrix shows (cash + cards live, mortgages
+// amortised incl. 17 Newington, real estate at latest approved valuation, and
+// loans/businesses/investments carried from the last snapshot). It only ever
+// CREATES a missing month; it never overwrites, so manual edits are safe and
+// carry forward naturally (carried classes copy the previous month).
+let _wealthAutoStamping = false;
+async function maybeAutoStampPrevMonth(periods, gatherItems) {
+    if (_wealthAutoStamping) return;                     // one attempt per load cycle
+    if (typeof PAT === 'undefined' || !PAT) return;      // not authed yet
+    if (!periods || !periods.length) return;             // need a prior snapshot to carry from
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1); // previous completed month
+    const tMonth = WEALTH_MONTHS[d.getMonth()];
+    const tYear = String(d.getFullYear());
+    if (periods.some(p => p.month === tMonth && String(p.year) === tYear)) return; // already stamped
+    const items = gatherItems();
+    if (!items.length) return;
+    _wealthAutoStamping = true;
+    const records = items.map(it => ({ fields: {
+        [NW.name]: it.name,
+        [NW.amount]: Number(it.amount) || 0,
+        [NW.type]: it.type,
+        [NW.month]: tMonth,
+        [NW.year]: tYear,
+    } }));
+    try {
+        for (let i = 0; i < records.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.netWorthByMonth}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: records.slice(i, i + 10), typecast: true }),
+            });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+            if (i + 10 < records.length) await new Promise(r => setTimeout(r, 300)); // stay under the rate limit
+        }
+        if (typeof showToast === 'function') showToast(`${tMonth} ${tYear} net worth snapshot saved automatically — edit any figure to override it`, { type: 'success', duration: 6000 });
+        _wealthRecords = null; _wealthPromise = null;
+        await renderWealthTab();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast(`Could not auto-save ${tMonth}'s snapshot — you can still update it manually`, { type: 'warning' });
+    } finally {
+        _wealthAutoStamping = false;
+    }
+}
+
 // Show a small amber badge on the Wealth sidebar item when monthly figures are
 // stale, so the "needs updating" alert is visible from any tab (the sidebar is
 // always on screen). Isolated: only touches the Wealth nav item.
@@ -592,6 +641,29 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
 
     // Refresh + sync status + health checks — the standard bar every other tab has.
     registerWealthSyncBar(view, monthsBehind, asOf, currentLabel);
+
+    // Auto roll-forward: stamp the previous completed month's snapshot if missing,
+    // using the exact figures shown above. Only runs once accounts are loaded so
+    // cash/cards are live (otherwise they'd carry the last snapshot). Never
+    // overwrites an existing month, so manual overrides are preserved and carried.
+    if (accountsLoaded) {
+        maybeAutoStampPrevMonth(periods, () => {
+            const out = [];
+            const add = (cls, arr) => (arr || []).forEach(it => {
+                if (it && it.name && it.name !== '(unnamed)') out.push({ name: it.name, amount: Number(it.amount) || 0, type: cls });
+            });
+            // Cash + cards: live per named account, falling back to last snapshot if not mapped.
+            const liveClassItems = cls => (latest.items[cls] || []).map(it => { const lv = wealthLiveValue(it.name); return { name: it.name, amount: (lv != null ? lv : it.amount) }; });
+            add('Cash', liveClassItems('Cash'));
+            add('Credit Cards', liveClassItems('Credit Cards'));
+            add('Real Estate', reItems);                 // latest approved valuations
+            add('Mortgages', mortItems);                 // amortised (incl. 17 Newington)
+            add('Investments', snapItems('Investments')); // carried forward
+            add('Businesses', snapItems('Businesses'));   // carried forward
+            add('Loans', snapItems('Loans'));             // carried forward
+            return out;
+        });
+    }
 }
 
 // Wire the shared sync bar for the Wealth tab: a Refresh button (reloads the
