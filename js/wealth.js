@@ -650,6 +650,9 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
 
         ${kpiStrip}
 
+        <!-- Property valuations to review (from the monthly AI job) — approve here, syncs to Operations -->
+        <div id="wealthPendingVals" style="margin-bottom:var(--space-5)"></div>
+
         ${changeSelector}
 
         ${monthsBehind > 0 ? `<!-- Staleness alert -->
@@ -677,6 +680,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     // Cash flow reads the already-loaded transactions (sync). Buckets fetch their table.
     renderWealthCashflow();
     loadWealthBuckets();
+    renderWealthPendingVals();
 
     // Refresh + sync status + health checks — the standard bar every other tab has.
     registerWealthSyncBar(view, monthsBehind, asOf, currentLabel);
@@ -1004,6 +1008,91 @@ function renderWealthCashflow() {
 // This itemises what the monthly snapshot holds as single lumped lines.
 let _valRecords = null;
 let _valPromise = null;
+
+// ── Pending property valuations (review + approve on the Wealth tab) ──────────
+// The monthly AI job writes fresh values as "Pending Review". Kevin approves them
+// here; because both the Wealth tab and the Operations Properties tab read the same
+// Property Valuations table, approving from here updates both. Net worth only moves
+// once approved.
+function renderWealthPendingVals() {
+    const el = document.getElementById('wealthPendingVals');
+    if (!el) return;
+    const vals = (typeof _valRecords !== 'undefined' && _valRecords) ? _valRecords : [];
+    const pend = vals.filter(r => getField(r, VAL.status) === 'Pending Review');
+    if (!pend.length) { el.innerHTML = ''; return; }
+    // Latest Approved value per property key, so each row shows old → new.
+    const approvedByKey = {};
+    vals.forEach(r => {
+        if (getField(r, VAL.status) !== 'Approved') return;
+        const key = wealthPropKey(getField(r, VAL.title) || '');
+        if (!key) return;
+        const date = getField(r, VAL.date) || '';
+        if (!approvedByKey[key] || date > approvedByKey[key].date) approvedByKey[key] = { date, value: Number(getField(r, VAL.value)) || 0 };
+    });
+    const rowsHtml = pend.map(r => {
+        const title = getField(r, VAL.title) || '';
+        const name = (title.split('·')[0] || title).trim();
+        const nv = Number(getField(r, VAL.value)) || 0;
+        const cur = approvedByKey[wealthPropKey(title)];
+        const conf = getField(r, VAL.confidence) || '';
+        const comps = getField(r, VAL.comparables) || '';
+        const diff = cur ? nv - cur.value : null;
+        const delta = (diff == null || diff === 0) ? '' :
+            `<span style="color:${diff > 0 ? 'var(--success)' : 'var(--danger)'};font-weight:var(--fw-semibold)"> ${diff > 0 ? '▲' : '▼'} ${fmt0(Math.abs(diff))}</span>`;
+        return `<div style="border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:10px 12px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+                <div style="min-width:0">
+                    <div style="font-weight:var(--fw-semibold);color:var(--text-primary)">${escHtml(name)}</div>
+                    <div style="font-size:var(--fs-xs);color:var(--text-muted)">${cur ? escHtml(fmt0(cur.value)) + ' → ' : ''}<span style="color:var(--text-primary);font-weight:var(--fw-semibold)">${escHtml(fmt0(nv))}</span>${delta} &middot; ${escHtml(conf || 'no')} confidence</div>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0">
+                    <button onclick="wealthValuationAction(['${r.id}'],'Approved')" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Approve</button>
+                    <button onclick="wealthValuationAction(['${r.id}'],'Rejected')" style="background:none;border:1px solid var(--border-default);color:var(--text-secondary);border-radius:var(--radius-md);padding:6px 12px;font-size:var(--fs-sm);cursor:pointer">Reject</button>
+                </div>
+            </div>
+            ${comps ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:var(--fs-xs);color:var(--text-secondary)">Why this figure</summary><div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:4px;line-height:1.5">${escHtml(comps)}</div></details>` : ''}
+        </div>`;
+    }).join('');
+    el.innerHTML = `<div class="kpi-card" style="border-left:3px solid var(--accent-gold)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+            <div class="kpi-card-label" style="margin:0">${pend.length} property valuation${pend.length === 1 ? '' : 's'} to review</div>
+            <button onclick="wealthApproveAllValuations()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Approve all</button>
+        </div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Fresh AI estimates from the monthly job. Approving updates net worth here and the Operations Properties tab (same source). Nothing changes until you approve.</div>
+        ${rowsHtml}
+    </div>`;
+}
+
+async function wealthApproveAllValuations() {
+    const ids = ((typeof _valRecords !== 'undefined' && _valRecords) ? _valRecords : [])
+        .filter(r => getField(r, VAL.status) === 'Pending Review').map(r => r.id);
+    await wealthValuationAction(ids, 'Approved');
+}
+
+// Set the status on one or more Property Valuations records, then re-fetch and
+// re-render so net worth and the review list reflect the change immediately.
+async function wealthValuationAction(ids, status) {
+    if (!ids || !ids.length) return;
+    try {
+        const recs = ids.map(id => ({ id, fields: { [VAL.status]: status } }));
+        for (let i = 0; i < recs.length; i += 10) {
+            const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.valuations}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: recs.slice(i, i + 10), typecast: true }),
+            });
+            if (!resp.ok) throw new Error('Airtable ' + resp.status);
+            if (i + 10 < recs.length) await new Promise(r => setTimeout(r, 300));
+        }
+        if (typeof showToast === 'function') showToast(`${ids.length} valuation${ids.length === 1 ? '' : 's'} ${status.toLowerCase()}`, { type: 'success' });
+        _valPromise = null; _valRecords = null;
+        try { _valRecords = await airtableFetch(TABLES.valuations); } catch (e) { /* keep going; render handles empty */ }
+        const el = document.getElementById('tab-wealth');
+        if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not update the valuation — please try again', { type: 'error' });
+    }
+}
 
 // Normalise a property name for matching valuation titles to mortgage notes.
 // Strips a trailing " · ..." suffix, any "(…)" parenthetical, punctuation and case.
