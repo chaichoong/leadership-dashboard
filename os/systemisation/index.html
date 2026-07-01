@@ -522,7 +522,30 @@ let _drawerKey = null;
 let _drawerView = null;
 let bizFilterId = '';
 let selectedStepsWf = null;
+let _allSearch = '', _stepsSearch = '', _autoSearch = '', _refocusSearchId = '';
 let _bulkPendingAssigns = {};
+
+// Case-insensitive match of a workflow against a search query (name + description).
+function wfMatchesQuery(w, q){
+    q = (q||'').trim().toLowerCase();
+    if(!q) return true;
+    return String(gf(w,WF.name)||'').toLowerCase().includes(q)
+        || String(gf(w,WF.description)||'').toLowerCase().includes(q);
+}
+// A styled search input. oninput updates the state var, flags itself for re-focus,
+// and re-renders — the render restores focus + caret so typing is not interrupted.
+function sysSearchInput(id, value, expr){
+    return `<input id="${id}" type="search" placeholder="Search workflows…" value="${esc(value||'')}"
+        style="font-size:var(--fs-xs);padding:5px 10px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary);min-width:180px"
+        oninput="${expr}">`;
+}
+// Called at the end of a render that a search box triggered: restore focus + caret.
+function restoreSearchFocus(){
+    if(!_refocusSearchId) return;
+    const el = document.getElementById(_refocusSearchId);
+    _refocusSearchId = '';
+    if(el){ el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n); } catch(e){} }
+}
 
 function isSkillCreated(stepId){
     if(localStorage.getItem('sys_skill_'+stepId)==='1') return true;
@@ -1073,7 +1096,7 @@ function renderAll(){
     allBusinesses.forEach(b=>{ orderedMethodsForBiz(b.id).forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); }); });
     allMethods.forEach(m=>{ if(!methodOrder.includes(m.id)) methodOrder.push(m.id); });
     const nameCmp = (a,b)=>{ const na=(gf(a,WF.name)||'').toLowerCase(), nb=(gf(b,WF.name)||'').toLowerCase(); return na<nb?-1:na>nb?1:0; };
-    const wfs = filteredWorkflows().slice().sort((a,b)=>{
+    const wfs = filteredWorkflows().filter(w=>wfMatchesQuery(w,_allSearch)).slice().sort((a,b)=>{
         if(_allSortMode==='alpha') return nameCmp(a,b);
         if(_allSortMode==='department'){
             const da=selName(gf(a,WF.department))||'', db=selName(gf(b,WF.department))||'';
@@ -1114,7 +1137,8 @@ function renderAll(){
     topBar.appendChild(hint);
     const sortWrap = document.createElement('div');
     sortWrap.style.cssText = 'display:flex;align-items:center;gap:8px';
-    sortWrap.innerHTML = `<label style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap">Sort by</label>
+    sortWrap.innerHTML = `${sysSearchInput('allSearchInput', _allSearch, "_allSearch=this.value;_refocusSearchId='allSearchInput';renderAll()")}
+        <label style="font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap">Sort by</label>
         <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_allSortMode=this.value;renderAll()">
             <option value="method"${_allSortMode==='method'?' selected':''}>Main Method</option>
             <option value="department"${_allSortMode==='department'?' selected':''}>Department</option>
@@ -1218,6 +1242,7 @@ function renderAll(){
     paneEl.appendChild(table);
     pane.innerHTML = '';
     pane.appendChild(paneEl);
+    restoreSearchFocus();
 }
 
 function buildAllGridRow(w){
@@ -1417,47 +1442,49 @@ function buildNewRow(stageKey, view){
     const tr = document.createElement('tr');
     tr.className = 'wf-grid-new';
     tr.innerHTML = `
-        <td><input class="wf-grid-input" placeholder="Type workflow name and press Enter" data-field="name"></td>
+        <td><input class="wf-grid-input" placeholder="Type workflow name (saves automatically)" data-field="name"></td>
         <td><textarea class="wf-grid-input" rows="1" placeholder="Description (optional)" data-field="desc"></textarea></td>
         <td></td>`;
 
     const nameInput = tr.querySelector('[data-field="name"]');
     const descInput = tr.querySelector('[data-field="desc"]');
+    let committing = false;
 
-    nameInput.addEventListener('keydown', async(e)=>{
-        if(e.key==='Enter'){
-            e.preventDefault();
-            const name = nameInput.value.trim();
-            if(!name) return;
-            nameInput.disabled = true;
-            const fields = { [WF.name]: name, [WF.status]: 'Not Started' };
-            const desc = descInput.value.trim();
-            if(desc) fields[WF.description] = desc;
-            if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
-            else if(view==='method') fields[WF.mainMethodStage] = [stageKey];
-            else if(view==='dept') fields[WF.department] = stageKey;
-            if(bizFilterId) fields[WF.business] = [bizFilterId];
-            try {
-                const rec = await atCreate(TBL.workflows, fields);
-                allWorkflows.push(rec);
-                const tbody = tr.parentElement;
-                const newDataRow = buildGridRow(rec, stageKey, view);
-                tbody.insertBefore(newDataRow, tr);
-                nameInput.value = ''; descInput.value = '';
-                nameInput.disabled = false;
-                nameInput.focus();
-                updateTabCounts();
-                if(currentView==='fulfill') renderFulfill();
-                else if(currentView==='method') renderMethod();
-                else if(currentView==='dept') renderDept();
-                toast('Workflow added');
-            } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
-        }
-    });
+    async function commitNew(){
+        const name = nameInput.value.trim();
+        if(!name || committing || nameInput.disabled) return;
+        committing = true;
+        nameInput.disabled = true;
+        const fields = { [WF.name]: name, [WF.status]: 'Not Started' };
+        const desc = descInput.value.trim();
+        if(desc) fields[WF.description] = desc;
+        if(view==='fulfill') fields[WF.fulfillStage] = stageKey;
+        else if(view==='method') fields[WF.mainMethodStage] = [stageKey];
+        else if(view==='dept') fields[WF.department] = stageKey;
+        if(bizFilterId) fields[WF.business] = [bizFilterId];
+        try {
+            const rec = await atCreate(TBL.workflows, fields);
+            allWorkflows.push(rec);
+            const tbody = tr.parentElement;
+            if(tbody){ const newDataRow = buildGridRow(rec, stageKey, view); tbody.insertBefore(newDataRow, tr); }
+            nameInput.value = ''; descInput.value = '';
+            nameInput.disabled = false;
+            updateTabCounts();
+            if(currentView==='fulfill') renderFulfill();
+            else if(currentView==='method') renderMethod();
+            else if(currentView==='dept') renderDept();
+            toast('Workflow added');
+        } catch(err){ toast('Error: '+err.message); nameInput.disabled = false; }
+        committing = false;
+    }
 
-    descInput.addEventListener('keydown', (e)=>{
-        if(e.key==='Enter'){ e.preventDefault(); nameInput.focus(); nameInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'})); }
-    });
+    // Commit on Enter, OR when focus leaves the whole new row (no Enter needed).
+    // Skip when focus just moves between the name and description of the same row.
+    const commitOnLeave = (e)=>{ const to = e.relatedTarget; if(to && tr.contains(to)) return; commitNew(); };
+    nameInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); commitNew(); } });
+    descInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); commitNew(); } });
+    nameInput.addEventListener('blur', commitOnLeave);
+    descInput.addEventListener('blur', commitOnLeave);
 
     autoGrowTextarea(descInput);
 
@@ -2738,7 +2765,8 @@ function renderSteps(){
     let html = '<div class="steps-layout">';
     html += '<div class="steps-sidebar">';
     html += '<div class="steps-sidebar-title">Workflows</div>';
-    const wfs = filteredWorkflows().slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
+    html += `<div style="padding:0 8px 10px">${sysSearchInput('stepsSearchInput', _stepsSearch, "_stepsSearch=this.value;_refocusSearchId='stepsSearchInput';renderSteps()")}</div>`;
+    const wfs = filteredWorkflows().filter(w=>wfMatchesQuery(w,_stepsSearch)).slice().sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
     wfs.forEach(w=>{
         const name = gf(w,WF.name)||'Untitled';
         const hasSop = !!gf(w,WF.sopDocument);
@@ -2874,6 +2902,7 @@ function renderSteps(){
     html += '</div></div>';
     pane.innerHTML = html;
     restoreSavedSOPs();
+    restoreSearchFocus();
 }
 
 function restoreSavedSOPs(){
@@ -3207,7 +3236,7 @@ async function deleteStepInline(stepId){
 // ═══════════════════════════════════════════════════════════════════════
 function renderAutomation(){
     const pane = document.getElementById('pane-automation');
-    const wfs = filteredWorkflows().slice().sort((a,b)=>{
+    const wfs = filteredWorkflows().filter(w=>wfMatchesQuery(w,_autoSearch)).slice().sort((a,b)=>{
         if(_autoSortMode==='alpha') return (gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
         if(_autoSortMode==='department'){
             const da = selName(gf(a,WF.department))||'zzz', db = selName(gf(b,WF.department))||'zzz';
@@ -3226,6 +3255,7 @@ function renderAutomation(){
     const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
 
     let html = `<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:12px">
+        ${sysSearchInput('autoSearchInput', _autoSearch, "_autoSearch=this.value;_refocusSearchId='autoSearchInput';renderAutomation()")}
         <span style="font-size:var(--fs-xs);color:var(--text-secondary)">Sort by:</span>
         <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_autoSortMode=this.value;renderAutomation()">
             <option value="method"${_autoSortMode==='method'?' selected':''}>Main Method</option>
@@ -3376,6 +3406,7 @@ function renderAutomation(){
 
     pane.innerHTML = html;
     updateCounts();
+    restoreSearchFocus();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
