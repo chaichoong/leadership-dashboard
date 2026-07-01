@@ -23,7 +23,8 @@
   // Airtable table ids
   const ACCOUNTS='tbl1nr0EcX2T62KME', COSTS='tblx5kvhzNEI5TFlS', TENANCIES='tblN51a88qTDB6iMH',
         TX='tbln0gzhCAorFc3zB', UNITS='tblM3mZCR5kiEdWMj', TENANTS='tblX4elTuu01gwBYh',
-        CATS='tbleWb8ioptnEwPR8', SUBCATS='tblOTdRcPf8AgRz25', BIZ='tblpqkvWJJo8Uu25q';
+        CATS='tbleWb8ioptnEwPR8', SUBCATS='tblOTdRcPf8AgRz25', BIZ='tblpqkvWJJo8Uu25q',
+        PROJECTS='tblHrpTMd5LNYn8v1';
 
   const M = {};
   M[ACCOUNTS] = { source:'accounts', write:'accounts', map:{
@@ -68,6 +69,15 @@
   M[CATS]    = { source:'coa_categories', write:'coa_categories', map:{ fldii4oUzSfmplihO:['name','scalar'] }};
   M[SUBCATS] = { source:'coa_sub_categories', write:'coa_sub_categories', map:{ fldO4BTJhFv5EsN6i:['name','scalar'] }};
   M[BIZ]     = { source:'businesses', write:'businesses', map:{ fldbbRqVxLxUdHwIR:['name','scalar'], fldhXBnRrngCVsgSk:['active','bool'] }};
+  M[PROJECTS] = { source:'v_projects', write:'projects', map:{
+    fldiMZICg1KOORpte:['name','scalar'], fldZ0SpReVaDS1VXb:['status','scalar'],
+    fldGIlsn0cSEpnj18:['start_date','date'], fldU0cJparnkvOUsV:['end_date','date'],
+    fldABYFMf2yBKWdlD:['kpi_name','scalar'], fldaI0voHia91SYZz:['kpi_target','num'],
+    fldB1QJDUsukxKzjQ:['kpi_current','num'], fldrYZEghROXYf6w0:['kpi_unit','scalar'],
+    fld2wYB5ZEn9WRcjN:['kpi_tracking','scalar'], fldtdJTFkMtldxEVf:['business_id','link'],
+    fldXUAPrpStGwc2V9:['owner','scalar'], fldic3mgIRLLu2Sre:['kpi_source','scalar'],
+    fldA7vPiLnbgEoKh1:['kpi_compute_code','scalar'], fldeGDKEg6HEXCUh4:['kpi_detail_json','scalar'],
+  }};
 
   const toIso = v => { try { return new Date(v).toISOString(); } catch (e) { return v; } };
   function rowToRecord(row, cfg) {
