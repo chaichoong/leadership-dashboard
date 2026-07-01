@@ -166,6 +166,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .sop-spinner{width:32px;height:32px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:sop-spin .8s linear infinite;margin:0 auto}
 @keyframes sop-spin{to{transform:rotate(360deg)}}
 .sop-doc-ai-detail ul{margin:0;padding:0 0 0 18px;list-style:disc}.sop-doc-ai-detail li{margin-bottom:4px}
+.sop-fb{margin-top:8px}
+.sop-fb-toggle{background:none;border:none;color:var(--accent);font-size:var(--fs-xs);cursor:pointer;padding:2px 0;font-weight:var(--fw-medium)}
+.sop-fb-toggle:hover{text-decoration:underline}
+.sop-fb-box{margin-top:8px}
+.sop-fb-text{width:100%;box-sizing:border-box;border:1px solid var(--border-default);background:var(--bg-surface);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--fs-sm);color:var(--text-primary);font-family:var(--font-family-base);resize:vertical}
+.sop-fb-actions{display:flex;gap:8px;margin-top:6px}
 
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
 .empty-state p{margin-bottom:12px}
@@ -2365,6 +2371,16 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
                     <div class="sop-doc-step-name">${esc(sName)}</div>
                     ${sDesc?`<div class="sop-doc-step-desc">${esc(sDesc)}</div>`:''}
                     ${detailHtml?`<div class="sop-doc-ai-detail">${detailHtml}</div>`:''}
+                    <div class="sop-fb">
+                        <button class="sop-fb-toggle" onclick="toggleSopFb('${s.id}')">&#x270E; Improve this step</button>
+                        <div class="sop-fb-box" id="sopfbbox-${s.id}" style="display:none">
+                            <textarea id="sopfbtext-${s.id}" class="sop-fb-text" rows="2" placeholder="Say what to change. For example: remove the specific example and keep it general."></textarea>
+                            <div class="sop-fb-actions">
+                                <button class="btn btn-sm btn-ai" onclick="submitSopStepFeedback('${wfId}','${s.id}')">Submit &amp; revise</button>
+                                <button class="btn btn-sm" onclick="toggleSopFb('${s.id}')">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -2947,6 +2963,81 @@ function getWfSopData(wfId){
     if(!raw) return null;
     try { return JSON.parse(raw); } catch(e){ return null; }
 }
+
+// ── Per-step SOP feedback: comment on a step, AI revises its text, save + re-render ──
+function toggleSopFb(stepId){
+    const box = document.getElementById('sopfbbox-'+stepId);
+    if(!box) return;
+    const showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : 'block';
+    if(!showing){ const t = document.getElementById('sopfbtext-'+stepId); if(t) t.focus(); }
+}
+async function submitSopStepFeedback(wfId, stepId){
+    const t = document.getElementById('sopfbtext-'+stepId);
+    const feedback = t ? t.value.trim() : '';
+    if(!feedback){ toast('Type what to change first'); return; }
+    const step = allSteps.find(s=>s.id===stepId);
+    if(!step){ toast('Step not found'); return; }
+    const sName = gf(step,ST.name)||'';
+    const sDesc = gf(step,ST.description)||'';
+    const sop = getWfSopData(wfId) || {};
+    const entry = (sop.sopSteps||[]).find(ss=>ss.name===sName);
+    const curDetail = entry ? entry.detail : '';
+    const detailText = Array.isArray(curDetail) ? curDetail.map(b=>'- '+b).join('\n') : (curDetail||'');
+
+    const btn = document.querySelector('#sopfbbox-'+stepId+' .btn-ai');
+    if(btn){ btn.disabled = true; btn.textContent = 'Revising…'; }
+    try {
+        const prompt = `You are revising ONE step of a written SOP based on the owner's feedback.
+
+Step name: ${sName}
+Current description: ${sDesc || '(none)'}
+Current detailed instructions:
+${detailText || '(none)'}
+
+The owner's requested change: ${feedback}
+
+Rules:
+- Apply the change. If they ask to remove a specific one-off example, rewrite it so the wording is general and applies to EVERY case, not just that example.
+- Keep it a clear, followable SOP step. British English. No preamble.
+- Keep the step name unchanged.
+Return ONLY JSON: {"description": "a one-line brief description", "detail": ["bullet 1", "bullet 2", ...]}`;
+        const res = await fetch(CLAUDE_PROXY, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1200, messages:[{role:'user',content:prompt}] })
+        });
+        if(!res.ok) throw new Error('AI request failed: '+res.status);
+        const data = await res.json();
+        const text = data.content?.[0]?.text || '{}';
+        const m = text.match(/\{[\s\S]*\}/);
+        if(!m) throw new Error('Invalid AI response');
+        const revised = JSON.parse(m[0]);
+        const newDesc = String(revised.description || sDesc).slice(0,500);
+        let newDetail = revised.detail;
+        if(!Array.isArray(newDetail)) newDetail = newDetail ? [String(newDetail)] : [];
+        newDetail = newDetail.map(b=>String(b).slice(0,400)).filter(Boolean).slice(0,12);
+
+        // 1) step record description
+        await atUpdate(TBL.steps, stepId, { [ST.description]: newDesc });
+        step.fields[ST.description] = newDesc;
+        // 2) SOP JSON elaborated detail for this step
+        let e = (sop.sopSteps || (sop.sopSteps = [])).find(ss=>ss.name===sName);
+        if(!e){ e = { name:sName }; sop.sopSteps.push(e); }
+        e.detail = newDetail;
+        const w = allWorkflows.find(x=>x.id===wfId);
+        const json = JSON.stringify(sop);
+        if(w) w.fields[WF.sopDocument] = json;
+        await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json });
+
+        toast('Step revised');
+        renderSteps();
+    } catch(err){
+        toast('Revise failed: '+err.message);
+        if(btn){ btn.disabled = false; btn.textContent = 'Submit & revise'; }
+    }
+}
+window.toggleSopFb = toggleSopFb;
+window.submitSopStepFeedback = submitSopStepFeedback;
 
 function agenticSopText(wfId){
     const sop = getWfSopData(wfId);
