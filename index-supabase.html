@@ -11,6 +11,12 @@
     <link rel="stylesheet" href="css/sync-bar.css?v=2">
     <link rel="stylesheet" href="css/quick-task.css?v=2">
     <link rel="stylesheet" href="css/styles.css?v=21">
+    <!-- Supabase clone: hide the full-app sidebar/auth-screen in the HEAD so they never
+         paint (avoids the split-second double-sidebar flash on load). -->
+    <style>
+      #sidebar, .sidebar-toggle, .sidebar-overlay, #authScreen { display: none !important; }
+      .main-content { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+    </style>
 </head>
 <body>
     <!-- Auth Screen -->
