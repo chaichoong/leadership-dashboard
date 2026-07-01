@@ -335,6 +335,14 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .agentic-answer::placeholder{color:var(--text-muted)}
 .agentic-answer:focus{outline:none;border-color:var(--accent);background:var(--bg-surface);box-shadow:0 0 0 2px var(--accent-soft)}
 .agentic-foot{margin-top:12px;display:flex;justify-content:flex-end}
+/* Sync / refresh bar in the topbar */
+.sync-status{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
+.sync-dot.ok{background:var(--success,#2C6E49)}
+.sync-dot.syncing{background:var(--warning,#C6A15B)}
+.sync-dot.error{background:var(--danger,#C0392B)}
+.settings-icon.spinning{animation:sys-spin .8s linear infinite}
+@keyframes sys-spin{to{transform:rotate(360deg)}}
 .agentic-loading{display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:var(--fs-sm)}
 @media(max-width:760px){.agentic-row{grid-template-columns:20px 1fr;row-gap:2px}.agentic-pill,.agentic-reason{grid-column:2}}
 /* Disposition fork */
@@ -366,6 +374,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <div class="subtitle">Map, document and automate every business process</div>
     </div>
     <div class="topbar-right">
+        <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
+        <button class="settings-icon" id="refreshBtn" onclick="refreshData()" title="Refresh data">&#x21BB;</button>
         <select id="bizFilter" class="filter-select" onchange="applyBizFilter()">
             <option value="">All Businesses</option>
         </select>
@@ -4161,6 +4171,42 @@ function hidePipelineProgress() {
 // ═══════════════════════════════════════════════════════════════════════
 // Boot
 // ═══════════════════════════════════════════════════════════════════════
+let _lastSyncAt = null;
+function updateSyncStatus(state, msg){
+    const el = document.getElementById('syncStatus');
+    if(!el) return;
+    if(state==='ok'){
+        _lastSyncAt = new Date();
+        const t = _lastSyncAt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+        el.innerHTML = `<span class="sync-dot ok"></span>Synced ${t}`;
+        el.title = 'Last synced ' + _lastSyncAt.toLocaleString('en-GB');
+    } else if(state==='syncing'){
+        el.innerHTML = `<span class="sync-dot syncing"></span>Syncing…`;
+        el.title = 'Refreshing from Airtable';
+    } else {
+        el.innerHTML = `<span class="sync-dot error"></span>Sync failed`;
+        el.title = msg || 'Sync failed';
+    }
+}
+// Manual refresh: reload data from Airtable and re-render the current view.
+async function refreshData(){
+    const btn = document.getElementById('refreshBtn');
+    if(btn){ btn.disabled = true; btn.classList.add('spinning'); }
+    updateSyncStatus('syncing');
+    try {
+        await loadData();
+        render();
+        updateSyncStatus('ok');
+    } catch(e){
+        if(e.message==='auth') return;
+        updateSyncStatus('error', e.message);
+        toast('Refresh failed: ' + e.message);
+    } finally {
+        if(btn){ btn.disabled = false; btn.classList.remove('spinning'); }
+    }
+}
+window.refreshData = refreshData;
+
 async function start(){
     document.getElementById('loader').style.display='block';
     document.getElementById('authBar').style.display='none';
@@ -4172,9 +4218,11 @@ async function start(){
         document.getElementById('loader').style.display='none';
         populateBizFilter();
         render();
+        updateSyncStatus('ok');
     } catch(e){
         if(e.message==='auth') return;
         document.getElementById('loader').textContent='Error loading data: '+e.message;
+        updateSyncStatus('error', e.message);
     }
 }
 
