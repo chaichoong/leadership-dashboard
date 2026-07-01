@@ -19,9 +19,9 @@ if _missing:
     print("Skipping sync — add these GitHub repo secrets first:", ", ".join(_missing))
     sys.exit(0)
 
-PAT  = os.environ["AIRTABLE_PAT"]
-SB   = os.environ["SUPABASE_URL"].rstrip("/")
-KEY  = os.environ["SUPABASE_SERVICE_KEY"]
+PAT  = os.environ["AIRTABLE_PAT"].strip()          # .strip() defends against a
+SB   = os.environ["SUPABASE_URL"].strip().rstrip("/")  # stray newline/space when the
+KEY  = os.environ["SUPABASE_SERVICE_KEY"].strip()      # secret was pasted into GitHub
 BASE = os.environ.get("AIRTABLE_BASE_ID", "appnqjDpqDniH3IRl")
 WIN  = int(os.environ.get("SYNC_WINDOW_DAYS", "3"))
 TX_TABLE = "tbln0gzhCAorFc3zB"
@@ -57,7 +57,12 @@ def airtable_recent():
         if offset: q.append(("offset", offset))
         url = f"https://api.airtable.com/v0/{BASE}/{TX_TABLE}?" + urllib.parse.urlencode(q)
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {PAT}"})
-        with urllib.request.urlopen(req, timeout=60) as r: d = json.load(r)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r: d = json.load(r)
+        except urllib.error.HTTPError as e:
+            print(f"Airtable read FAILED: HTTP {e.code} — {e.read().decode()[:200]}")
+            print("→ Check the AIRTABLE_PAT secret: correct token, has data.records:read on the base, no stray spaces.")
+            sys.exit(1)
         out += d["records"]; offset = d.get("offset")
         if not offset: break
     return out
@@ -121,7 +126,9 @@ def main():
                 if s2 < 300: ok += 1
                 else: bad += 1; print(f"  skip {row['id']}: {b2[:120]}")
     print(f"Synced {ok} transaction(s){f', {bad} skipped' if bad else ''}.")
-    if bad: sys.exit(1)
+    if ok == 0 and bad:
+        print("→ Every upsert failed. Check the SUPABASE_SERVICE_KEY secret (correct service_role key, no stray spaces).")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
