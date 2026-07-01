@@ -67,7 +67,7 @@
         </div>
 
         <div class="section">Leadership</div>
-        <div class="navitem disabled"><span class="ico">📊</span> Leadership Dashboard <span class="soon">soon</span></div>
+        <div class="navitem" data-page="dashboard"><span class="ico">📊</span> Leadership Dashboard <span class="dot"></span></div>
         <div class="navitem disabled"><span class="ico">🎯</span> Objective &amp; Strategy <span class="soon">soon</span></div>
         <div class="navitem disabled"><span class="ico">📋</span> Plan Builder <span class="soon">soon</span></div>
 
@@ -90,6 +90,7 @@
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
 
     const PAGES = {
+      dashboard: 'index-supabase.html',
       tasks: 'os/tasks/index-supabase.html',
       operations: 'os/operations/index-supabase.html',
     };
@@ -104,8 +105,8 @@
     function showApp() {
       document.getElementById('login').style.display = 'none';
       document.getElementById('app').style.display = 'block';
-      const page = (location.hash || '#tasks').slice(1);
-      navTo(PAGES[page] ? page : 'tasks');
+      const page = (location.hash || '#dashboard').slice(1);
+      navTo(PAGES[page] ? page : 'dashboard');
     }
 
     document.getElementById('go').addEventListener('click', signIn);

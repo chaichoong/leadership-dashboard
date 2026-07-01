@@ -6,9 +6,11 @@
     // Uses IndexedDB, not localStorage: the full dataset is ~50MB (7000+ transactions)
     // which blows through localStorage's 5-10MB quota and silently fails to save.
     // IndexedDB handles hundreds of MB and stores objects directly (no JSON stringify).
-    const DASH_CACHE_KEY = '_dlr_dashcache_v2';
+    // The Supabase clone (index-supabase.html) sets window.__SB_CLONE__ so its cache
+    // is isolated from the live Airtable dashboard (same-origin IndexedDB is shared).
+    const DASH_CACHE_KEY = (typeof window !== 'undefined' && window.__SB_CLONE__) ? '_dlr_dashcache_sb' : '_dlr_dashcache_v2';
     const DASH_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h — older than this, don't show stale
-    const IDB_DB_NAME = '_dlr_cache';
+    const IDB_DB_NAME = (typeof window !== 'undefined' && window.__SB_CLONE__) ? '_dlr_cache_sb' : '_dlr_cache';
     const IDB_STORE = 'kv';
 
     let _idbPromise = null;
