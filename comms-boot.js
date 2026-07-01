@@ -1,10 +1,24 @@
 // comms-boot.js — Supabase login gate for the Inbound Comms clone.
 // The page still uses Google OAuth for Gmail; this adds a Supabase login IN FRONT,
-// so the shim's task queries have a session. Sets a dummy airtable_pat so the page's
-// write-gate passes (the shim supplies the data).
+// so the shim's task queries have a session.
+//
+// IMPORTANT: this origin (chaichoong.github.io) shares ONE localStorage between the
+// live Airtable page (follow-up.html) and this Supabase clone. The clone must NEVER
+// write the shared `airtable_pat` key — doing so overwrites the live site's real
+// Airtable token and breaks task-creation there ("Authentication required").
+// Instead we satisfy the page's write-gate purely in memory by overriding
+// getAirtablePat() to return a truthy dummy. The shim intercepts every Airtable call
+// and routes it to Supabase, so the dummy is never sent anywhere real.
 (function () {
   window.__SB_CLONE__ = true;
-  try { localStorage.setItem('airtable_pat', 'supabase'); } catch (e) {}
+
+  // Override the page's token getter in memory only (no localStorage writes).
+  // The page declares `function getAirtablePat()` in its inline body script, which
+  // runs during body parse — before DOMContentLoaded — so re-assigning it here wins.
+  function installPatShim() { try { window.getAirtablePat = function () { return 'supabase'; }; } catch (e) {} }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installPatShim);
+  else installPatShim();
+  window.addEventListener('load', installPatShim);
 
   function overlay() {
     const d = document.createElement('div');
