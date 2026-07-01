@@ -142,7 +142,9 @@
   const CONTENT_RE = new RegExp(`https://content\\.airtable\\.com/v0/${BASE}/`);
 
   window.fetch = async function (input, init = {}) {
-    const urlStr = (typeof input === 'string') ? input : (input && input.url) || '';
+    // input can be a string, a Request (.url), or a URL object (.href). The dashboard's
+    // airtableFetch passes a URL object — missing .href here made every call fall through to Airtable.
+    const urlStr = (typeof input === 'string') ? input : (input && (input.url || input.href)) || '';
     try {
       if (CONTENT_RE.test(urlStr)) return json({ id: 'noop', fields: {} });  // attachment uploads — no-op
       const m = AT_RE.exec(urlStr);
