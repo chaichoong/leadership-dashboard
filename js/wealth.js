@@ -214,7 +214,18 @@ async function wealthExtractIntoRow(row, file) {
 
 // One editable row. Existing items carry their name in data-name (label shown);
 // new items get a name text input so you can add a property/business/loan.
-function wealthRowHtml(cls, name, amount, live, isNew) {
+function wealthRowHtml(cls, name, amount, live, isNew, readonly, sourceNote) {
+    // Read-only row: for classes managed by their single source (cash/cards live,
+    // real estate = Property Valuations, mortgages = Debt Terms). Shows the value but
+    // can't be typed over here, so Wealth and Operations can never disagree. The value
+    // still travels into the saved snapshot via data-amount.
+    if (readonly) {
+        return `<div class="wealth-row" data-wealth-type="${escHtml(cls)}" data-name="${escHtml(name)}" data-amount="${amount == null ? '' : amount}" data-readonly="1" style="display:flex;align-items:center;gap:8px;padding:5px 0">
+            <label style="flex:1;font-size:var(--fs-sm);color:var(--text-secondary)">${escHtml(name)}${sourceNote ? ` <span style="color:var(--text-muted);font-size:var(--fs-xs)">· ${escHtml(sourceNote)}</span>` : ''}</label>
+            <span style="color:var(--text-muted)">£</span>
+            <span style="width:130px;text-align:right;font-size:var(--fs-sm);color:var(--text-primary)">${amount == null ? '–' : fmt0(amount)}</span>
+        </div>`;
+    }
     const tag = (live != null) ? `<span style="color:var(--success);font-size:var(--fs-xs);margin-left:8px">live</span>` : '';
     const nameCell = isNew
         ? `<input type="text" class="wn" placeholder="Name (e.g. new property)" style="flex:1;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">`
@@ -253,23 +264,45 @@ function openWealthUpdate() {
     const curYear = String(now.getFullYear());
     const alreadySaved = periods.some(p => p.month === curMonth && String(p.year) === curYear);
 
+    // Classes managed by their single source are read-only here, so a figure can only
+    // ever be changed in one place and Wealth + Operations can never disagree. Only the
+    // genuinely manual classes (loans, businesses, investments) stay editable.
+    const READONLY_CLASSES = {
+        'Cash': 'live from accounts',
+        'Credit Cards': 'live from accounts',
+        'Real Estate': 'managed in Operations → Properties',
+        'Mortgages': 'calculated from loan terms',
+    };
+    // Live per-property figures so read-only real estate + mortgages match the matrix
+    // and the Operations Properties tab exactly (same Property Valuations source).
+    let livePf = null;
+    if (_valRecords && _debtRecords) { try { const pf = buildPortfolio(_valRecords, _debtRecords); if (pf.rows.length) livePf = pf; } catch (e) { /* fall back to snapshot items */ } }
+    const itemsFor = cls => {
+        if (cls === 'Real Estate' && livePf) return livePf.rows.map(p => ({ name: p.name, amount: p.value }));
+        if (cls === 'Mortgages' && livePf) return livePf.rows.filter(p => p.mort > 0).map(p => ({ name: p.name, amount: p.mort }));
+        return (latest.items[cls] || []).map(it => ({ name: it.name, amount: it.amount }));
+    };
+
     let rowsHtml = '';
     WEALTH_CLASS_ORDER.forEach(cls => {
-        const items = latest.items[cls] || [];
-        const itemRows = items.map(it => {
-            const live = WEALTH_LIVE_CLASSES.includes(cls) ? wealthLiveValue(it.name) : null;
-            return wealthRowHtml(cls, it.name, (live != null) ? live : it.amount, live, false);
+        const ro = READONLY_CLASSES[cls];
+        const itemRows = itemsFor(cls).map(it => {
+            if (ro) {
+                const live = WEALTH_LIVE_CLASSES.includes(cls) ? wealthLiveValue(it.name) : null;
+                return wealthRowHtml(cls, it.name, (live != null) ? live : it.amount, null, false, true, ro);
+            }
+            return wealthRowHtml(cls, it.name, it.amount, null, false);
         }).join('');
-        rowsHtml += `<div style="margin-top:18px;margin-bottom:4px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${escHtml(cls)}</div>
+        rowsHtml += `<div style="margin-top:18px;margin-bottom:4px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${escHtml(cls)}${ro ? ` <span style="text-transform:none;letter-spacing:0;font-weight:var(--fw-regular)">· automatic</span>` : ''}</div>
             <div class="wealth-section" data-section="${escHtml(cls)}">${itemRows}</div>
-            <button onclick="addWealthRow('${cls.replace(/'/g, "\\'")}')" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:5px 12px;margin-top:6px;font-size:var(--fs-xs);color:var(--accent);cursor:pointer">+ Add ${escHtml(cls)}</button>`;
+            ${ro ? '' : `<button onclick="addWealthRow('${cls.replace(/'/g, "\\'")}')" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:5px 12px;margin-top:6px;font-size:var(--fs-xs);color:var(--accent);cursor:pointer">+ Add ${escHtml(cls)}</button>`}`;
     });
 
     el.innerHTML = `<div style="max-width:720px;margin:0 auto">
         <div style="margin-bottom:8px"><button onclick="renderWealthTab()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);padding:0">&larr; Back to net worth</button></div>
         <div class="kpi-card">
-            <div class="kpi-card-label" style="margin-bottom:4px">Update figures for ${escHtml(curMonth)} ${escHtml(curYear)}</div>
-            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Cash and cards are pre-filled live. Everything else shows last month's value — change only what moved. Use "+ Add" to record a new property, business, loan or investment, and the &times; to drop anything you have sold or cleared. Dragging a statement or screenshot to auto-read figures is the next upgrade.</div>
+            <div class="kpi-card-label" style="margin-bottom:4px">Correct a figure &middot; ${escHtml(curMonth)} ${escHtml(curYear)}</div>
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Your figures update automatically each month, so there is nothing you need to do here routinely. Use this only to correct a figure you know is wrong. Cash, cards, real estate and mortgages are managed by their own source and shown read only (edit a property value in Operations, Properties so both pages always agree). You can still correct a loan, business or investment balance below, drag a statement or screenshot onto a row to read it, use "+ Add" for something new, or &times; to drop what you have cleared.</div>
             ${alreadySaved ? `<div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(curMonth)} ${escHtml(curYear)} already has a saved snapshot. Editing an existing month is coming next; saving now would duplicate it, so it is disabled.</div>` : ''}
             <div id="wealthUpdateError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin:8px 0"></div>
             ${rowsHtml}
@@ -298,9 +331,10 @@ async function saveWealthUpdate(curMonth, curYear) {
         const nameInput = row.querySelector('.wn');
         const name = (row.dataset.name != null ? row.dataset.name : (nameInput ? nameInput.value : '')).trim();
         if (!name) return; // skip blank added rows
+        const amtInput = row.querySelector('.wa'); // read-only rows have no input — value is in data-amount
         records.push({ fields: {
             [NW.name]: name,
-            [NW.amount]: Number(row.querySelector('.wa').value) || 0,
+            [NW.amount]: (amtInput ? Number(amtInput.value) : Number(row.dataset.amount)) || 0,
             [NW.type]: row.dataset.wealthType,
             [NW.month]: curMonth,
             [NW.year]: curYear,
@@ -459,7 +493,12 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const REALTIME_CLASSES = ['Cash', 'Credit Cards'];
     const MANUAL_CLASSES = ['Real Estate', 'Investments', 'Businesses', 'Loans', 'Mortgages'];
     const now = new Date();
-    const monthsBehind = (now.getFullYear() * 12 + now.getMonth()) - (latest.year * 12 + latest.monthIdx);
+    // "Behind" is measured against the last COMPLETED month, not the in-progress one.
+    // The auto roll-forward keeps the previous month stamped, so in normal operation
+    // this is 0 and no "update figures" nag shows — the current month stays live and
+    // is frozen automatically on the 1st. It only goes positive if a completed month
+    // genuinely has no snapshot (e.g. the app was not opened for a while).
+    const monthsBehind = Math.max(0, (now.getFullYear() * 12 + now.getMonth() - 1) - (latest.year * 12 + latest.monthIdx));
     const currentLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
     const manualItemCount = MANUAL_CLASSES.reduce((s, c) => s + ((latest.items[c] || []).length), 0);
     // Flag the sidebar so the "needs updating" alert is visible from anywhere.
