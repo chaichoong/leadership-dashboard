@@ -783,8 +783,19 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <!-- ── Supabase clone: supabase-js + shim + login gate. NON-deferred so window.fetch
-         is overridden during parse, before the deferred app scripts ever call it. ── -->
+    <!-- ── Supabase clone: strip the full-app chrome so only the Overview page shows
+         (this clone exists to surface the Leadership Dashboard overview on Supabase). ── -->
+    <style id="sb-embed-style">
+      #sidebar, .sidebar-toggle, .sidebar-overlay { display: none !important; }
+      .app-layout { display: block !important; }
+      .main-content { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+      .tabs-nav, #dashboardSubtabBar { display: none !important; }
+      /* only the overview tab panel is relevant here */
+      .tab-panel:not(#tab-overview) { display: none !important; }
+      body { overflow-x: hidden; }
+    </style>
+    <!-- ── supabase-js + shim + login gate. NON-deferred so window.fetch is overridden
+         during parse, before the deferred app scripts ever call it. ── -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="dashboard-shim.js?v=2"></script>
     <script src="dashboard-boot.js?v=2"></script>
