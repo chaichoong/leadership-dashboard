@@ -2347,9 +2347,15 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
 
     html += '</div>';
 
+    const driveDoc = getWfDriveDocUrl(wfId);
+    const driveBtns = driveDoc
+        ? `<a class="btn btn-sm" href="${esc(driveDoc)}" target="_blank" rel="noopener">View in Drive</a>
+           <button class="btn btn-sm btn-drive-upload" onclick="uploadSOPToDrive('${wfId}')">Re-upload to Drive</button>`
+        : `<button class="btn btn-sm btn-drive-upload" onclick="uploadSOPToDrive('${wfId}')">Upload to Drive</button>`;
     html += `<div class="sop-doc-footer">
         <span>Generated ${now}</span>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${driveBtns}
             <button class="btn btn-sm btn-primary" onclick="exportSOPAsHTML('${wfId}')">Export</button>
             <button class="btn btn-sm btn-danger" onclick="deleteSOPDocument('${wfId}')">Clear</button>
         </div>
