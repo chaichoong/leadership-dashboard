@@ -783,10 +783,11 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <!-- ── Supabase clone: supabase-js + shim + login gate, BEFORE the app scripts ── -->
-    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script defer src="dashboard-shim.js?v=1"></script>
-    <script defer src="dashboard-boot.js?v=1"></script>
+    <!-- ── Supabase clone: supabase-js + shim + login gate. NON-deferred so window.fetch
+         is overridden during parse, before the deferred app scripts ever call it. ── -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="dashboard-shim.js?v=2"></script>
+    <script src="dashboard-boot.js?v=2"></script>
     <script defer src="js/config.js?v=37"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
     <script defer src="js/shared.js?v=27"></script>
