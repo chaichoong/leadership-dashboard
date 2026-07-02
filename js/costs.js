@@ -3,7 +3,6 @@
 // Reads from the clean "Last Reconciled *" fields owned by the dashboard
 // (written by the reconciliation flow + one-off backfill button).
 // ══════════════════════════════════════════
-    let costsTabRendered = false;
 
     // ── Loading + sync indicators ──
     // Shows a spinner overlay when costs haven't loaded yet, plus a small
@@ -49,7 +48,7 @@
         try {
             // Bust the dash cache (indexedDB)
             if (typeof clearDashCache === 'function') {
-                try { await clearDashCache(); } catch (_) {}
+                try { await clearDashCache(); } catch (err) { console.warn('clearDashCache failed:', err); }
             }
             // Re-run the full dashboard load
             if (typeof loadDashboard === 'function') {
@@ -104,7 +103,6 @@
     const VAR_HARD_PCT = 0.10; // > 10% = red
 
     function renderCostsTab() {
-        costsTabRendered = true;
         const costs = (allCosts || []);
         const activeCosts = costs.filter(r => isCostActive(r));
         const inactiveCosts = costs.filter(r => !isCostActive(r));
@@ -113,7 +111,17 @@
         if (!panel) return;
 
         // Loading state: if no costs loaded yet, show a clear spinner with explainer.
+        // Distinguish "still fetching" from "loaded but genuinely empty" — the other
+        // tables land in the same dashboard load, so if any of them have data the
+        // fetch has completed and the Costs table is simply empty.
         if (costs.length === 0) {
+            const dashLoaded = (allTransactions || []).length > 0 || (allTenancies || []).length > 0 || (allBusinesses || []).length > 0;
+            if (dashLoaded) {
+                hideCostsLoadingState();
+                const tableBodyEl = document.getElementById('costsTableBody');
+                if (tableBodyEl) tableBodyEl.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:32px">No costs yet — add your first fixed cost in Airtable.</td></tr>`;
+                return;
+            }
             showCostsLoadingState();
             return;
         } else {
@@ -228,7 +236,11 @@
 
         const tableBodyEl = document.getElementById('costsTableBody');
         if (tableBodyEl) {
-            tableBodyEl.innerHTML = sorted.map((e, idx) => renderCostRow(e, idx)).join('');
+            if (sorted.length === 0) {
+                tableBodyEl.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--text-muted);padding:32px">No costs match your filters.</td></tr>`;
+            } else {
+                tableBodyEl.innerHTML = sorted.map((e, idx) => renderCostRow(e, idx)).join('');
+            }
         }
 
         const breakdownEl = document.getElementById('costsBreakdown');
@@ -957,36 +969,6 @@
     // Runs in dry-run mode by default; click again to commit.
     let _costsBackfillState = { plan: null };
 
-    // Recency threshold for "In Payment" classification — costs with a transaction
-    // within this many days are considered active. Anything older (or never used)
-    // defaults to Inactive. Kevin reviews the dry-run before committing.
-    const ACTIVE_WINDOW_DAYS = 60;
-
-    function classifyCostStatus(cost) {
-        // Returns { status: 'In Payment' | 'Inactive', reason: string, daysSinceLastTx: number|null }
-        if (getField(cost, F.costInactive)) {
-            return { status: 'Inactive', reason: 'Inactive checkbox ticked' };
-        }
-        // Use ALL linked txs (reconciled or not) — gives best signal of recent activity
-        const linkedTxs = (allTransactions || []).filter(tx => {
-            const linked = getField(tx, F.txCost);
-            if (!Array.isArray(linked)) return false;
-            return linked.some(v => (v.id || v) === cost.id);
-        });
-        if (linkedTxs.length === 0) {
-            return { status: 'Inactive', reason: 'No linked transactions ever', daysSinceLastTx: null };
-        }
-        const sorted = [...linkedTxs].sort((a, b) =>
-            new Date(getField(b, F.txDate) || 0) - new Date(getField(a, F.txDate) || 0));
-        const latestDate = getField(sorted[0], F.txDate);
-        const today = new Date(); today.setHours(0,0,0,0);
-        const days = Math.floor((today - new Date(latestDate)) / 86400000);
-        if (days <= ACTIVE_WINDOW_DAYS) {
-            return { status: 'In Payment', reason: `Last tx ${days}d ago`, daysSinceLastTx: days };
-        }
-        return { status: 'Inactive', reason: `Last tx ${days}d ago (>${ACTIVE_WINDOW_DAYS}d threshold)`, daysSinceLastTx: days };
-    }
-
     async function runCostsBackfillDryRun() {
         const btn = document.getElementById('costsBackfillBtn');
         const out = document.getElementById('costsBackfillOutput');
@@ -1045,8 +1027,8 @@
             const parts = [];
             parts.push(`Last Paid → ${formatCostDate(w[F.costLastReconDate])}`);
             parts.push(`Amount → ${fmt(w[F.costLastReconAmount])}`);
-            if (w[F.costLastReconAccount]) parts.push(`Account → ${getAccountName(w[F.costLastReconAccount][0]) || '(linked)'}`);
-            if (w[F.costLastReconSubCat]) parts.push(`Sub-Cat → ${getSubCatNameById(w[F.costLastReconSubCat][0]) || '(linked)'}`);
+            if (w[F.costLastReconAccount]) parts.push(`Account → ${escHtml(getAccountName(w[F.costLastReconAccount][0]) || '(linked)')}`);
+            if (w[F.costLastReconSubCat]) parts.push(`Sub-Cat → ${escHtml(getSubCatNameById(w[F.costLastReconSubCat][0]) || '(linked)')}`);
             return `<div style="padding:4px 0;border-bottom:1px solid var(--border-subtle);font-size:12px"><strong>${escHtml(p.name)}</strong> <span style="color:var(--text-muted)">[${escHtml(p.paymentStatus)}] · ${p.reconciledCount} reconciled tx${p.reconciledCount !== 1 ? 's' : ''}</span><br><span style="color:var(--text-secondary)">${parts.join(' · ')}</span></div>`;
         };
 
@@ -1079,7 +1061,7 @@
     // Strategy: only write when the computed value actually differs from the stored value
     // (avoid hammering Airtable with no-op PATCHes). Batch in groups of 10 (Airtable max).
     let _syncDerivedInFlight = false;
-    async function syncDerivedCostFields(opts = {}) {
+    async function syncDerivedCostFields() {
         if (_syncDerivedInFlight) return { skipped: true };
         _syncDerivedInFlight = true;
         try {
@@ -1168,7 +1150,6 @@
                 }
                 showSyncPill(`Syncing ${Math.min(i + 10, writes.length)} of ${writes.length}…`);
             }
-            if (opts.verbose) console.log(`syncDerivedCostFields: ${written} written, ${failed} failed`);
             return { ok: failed === 0, written, failed };
         } finally {
             _syncDerivedInFlight = false;
@@ -1379,7 +1360,9 @@
             });
             if (!resp.ok) throw new Error('PATCH ' + resp.status);
             if (!cost.fields) cost.fields = {};
-            cost.fields[F.costDueDay] = { name: newValue };
+            // Store the raw value — same shape editCostField writes. Readers do
+            // Number(getField(...)), which would return NaN for a { name } object.
+            cost.fields[F.costDueDay] = newValue;
             pushUndoAction({ kind: 'edit', costId, fieldId: F.costDueDay, oldValue, newValue, label: `Due Day → ${newValue}` });
             renderCostsTab();
         } catch (err) {
@@ -1658,9 +1641,6 @@
         panel.style.cssText = 'background:var(--bg-surface);border-radius:var(--radius-lg);padding:24px;max-width:440px;width:90%;box-shadow:var(--shadow-lg)';
 
         const today = new Date();
-        const currentYear = today.getFullYear();
-        const currentMonth = today.getMonth();
-        const taxYearStart = (currentMonth >= 3) ? `${currentYear}-04-06` : `${currentYear - 1}-04-06`;
         const defaultStart = '2025-04-01';
         const defaultEnd = today.toISOString().slice(0, 10);
 
@@ -1742,6 +1722,12 @@
         const dueDayLabel = e.dueDay ? `Day ${e.dueDay} of each ${freq === 'monthly' ? 'month' : 'period'}` : 'Not set';
 
         const printWin = window.open('', '_blank', 'width=800,height=900');
+        if (!printWin) {
+            showToast('Pop-up blocked — allow pop-ups to print', { type: 'error' });
+            return;
+        }
+        // Hex values below are intentional — tokens.css does not load in the popup,
+        // so the token values are inlined directly.
         printWin.document.write(`<!DOCTYPE html><html><head><title>Cost Statement — ${escHtml(e.name)}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -1757,7 +1743,7 @@
             th { text-align:left; padding:6px 8px; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#5A6660; font-weight:600; border-bottom:2px solid #DDE1D9; }
             td { padding:6px 8px; border-bottom:1px solid #E5E8E1; font-size:11px; }
             .text-right { text-align:right; }
-            .text-danger { color:#C53030; }
+            .text-danger { color:#A33B3B; }
             .text-success { color:#2C6E49; }
             .footer { margin-top:32px; font-size:10px; color:#8A928C; border-top:1px solid #E5E8E1; padding-top:12px; }
             @media print { body { padding:20px; } .no-print { display:none; } }
@@ -1767,7 +1753,7 @@
                 <h1>Cost Statement</h1>
                 <div class="meta">${fmtDateStr(startDate)} to ${fmtDateStr(endDate)}</div>
             </div>
-            <button class="no-print od-btn od-btn-primary od-btn-lg" onclick="window.print()">Print</button>
+            <button class="no-print" onclick="window.print()" style="background:#2C6E49;color:#FBFBF9;border:1px solid #2C6E49;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer">Print</button>
         </div>
         <div class="summary-grid">
             <div class="summary-box"><div class="label">Cost Name</div><div class="value">${escHtml(e.name)}</div></div>
@@ -1779,9 +1765,9 @@
             <div class="summary-box"><div class="label">Total expected</div><div class="value">${fmt(totalExpected)}</div></div>
             <div class="summary-box"><div class="label">Total paid</div><div class="value">${fmt(totalPaid)}</div></div>
         </div>
-        ${totalExpected > 0 ? `<div style="margin-bottom:24px;padding:12px;border:1px solid ${Math.abs(variance) < 0.01 ? '#DDE1D9' : (variance > 0 ? '#C53030' : '#2C6E49')};border-radius:8px;display:flex;justify-content:space-between;align-items:center">
+        ${totalExpected > 0 ? `<div style="margin-bottom:24px;padding:12px;border:1px solid ${Math.abs(variance) < 0.01 ? '#DDE1D9' : (variance > 0 ? '#A33B3B' : '#2C6E49')};border-radius:8px;display:flex;justify-content:space-between;align-items:center">
             <span style="font-size:12px;font-weight:600">Variance</span>
-            <span style="font-size:16px;font-weight:700;color:${Math.abs(variance) < 0.01 ? '#1C2422' : (variance > 0 ? '#C53030' : '#2C6E49')}">${variance > 0 ? '+' : variance < 0 ? '-' : ''}${fmt(Math.abs(variance))}</span>
+            <span style="font-size:16px;font-weight:700;color:${Math.abs(variance) < 0.01 ? '#1C2422' : (variance > 0 ? '#A33B3B' : '#2C6E49')}">${variance > 0 ? '+' : variance < 0 ? '-' : ''}${fmt(Math.abs(variance))}</span>
         </div>` : ''}
         <table>
             <thead><tr><th>Date</th><th>Description</th><th>Account</th><th class="text-right">Amount</th><th class="text-right">Running Total</th></tr></thead>

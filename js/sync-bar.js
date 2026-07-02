@@ -48,6 +48,7 @@
         if (!s) return;
         s.lastSyncedAt = Date.now();
         s.isRefreshing = false;
+        s._pendingRetries = 0;
         // Auto-run passive checks only — active checks (heavy round-trips) wait
         // for the user to click Re-run in the drawer. This keeps the auto-pill
         // up-to-date on every load without burning Airtable rate limits or
@@ -94,11 +95,11 @@
         const prevByName = {};
         (s.lastResults || []).forEach(r => { prevByName[r.name] = r; });
         s.lastResults = allItems.map((c, i) => {
-            if (runIdx.has(i)) return { name: c.name, kind: c.kind || 'sync', active: !!c.active, status: 'warn', detail: 'Running…' };
+            if (runIdx.has(i)) return { name: c.name, kind: c.kind || 'sync', active: !!c.active, status: 'pending', detail: 'Running…' };
             if (prevByName[c.name]) return prevByName[c.name];
             // Active check that's never been run — show a "click to verify" placeholder
             if (c.active) return { name: c.name, kind: c.kind || 'sync', active: true, status: 'warn', detail: 'Click Re-run in the drawer to verify' };
-            return { name: c.name, kind: c.kind || 'sync', active: false, status: 'warn', detail: 'Not yet run' };
+            return { name: c.name, kind: c.kind || 'sync', active: false, status: 'pending', detail: 'Not yet run' };
         });
         s.lastRunAt = Date.now();
         renderSyncBar(tabId);
@@ -114,10 +115,33 @@
                 return { name: c.name, kind: c.kind || 'sync', active: !!c.active, status: 'fail', detail: 'Check threw: ' + ((sr.reason && sr.reason.message) || String(sr.reason)) };
             }
             const r = sr.value || { status: 'warn', detail: 'No result returned' };
-            return { name: c.name, kind: c.kind || 'sync', active: !!c.active, ...r };
+            return _normalisePending({ name: c.name, kind: c.kind || 'sync', active: !!c.active, ...r });
         });
         s.lastRunAt = Date.now();
         renderSyncBar(tabId);
+
+        // While anything is still loading in the background, quietly re-run
+        // the passive checks so transient "still loading" states resolve on
+        // their own instead of sitting as warnings until a manual Re-run.
+        const stillPending = s.lastResults.some(r => r.status === 'pending' && !r.active);
+        clearTimeout(s._pendingTimer);
+        if (stillPending && (s._pendingRetries || 0) < 6) {
+            s._pendingRetries = (s._pendingRetries || 0) + 1;
+            s._pendingTimer = setTimeout(() => runHealthChecks(tabId, { activeOnly: false }), 5000);
+        }
+    }
+
+    // A check that reports "data still loading" is a loading state, not a
+    // health problem. Checks can return status 'pending' explicitly; this
+    // also catches older checks that report loading states as warn/fail.
+    function _normalisePending(r) {
+        if (r.status === 'warn' || r.status === 'fail') {
+            const d = String(r.detail || '');
+            if (/still loading|loading in background|not yet loaded|waiting for data/i.test(d)) {
+                return { ...r, status: 'pending' };
+            }
+        }
+        return r;
     }
 
     // Convenience for the drawer: re-run ALL checks (passive + active).
@@ -137,8 +161,10 @@
 
     function _rollupStatus(results) {
         if (!results || !results.length) return 'unknown';
-        if (results.some(r => r.status === 'fail')) return 'fail';
-        if (results.some(r => r.status === 'warn')) return 'warn';
+        const settled = results.filter(r => r.status !== 'pending');
+        if (!settled.length) return 'pending';
+        if (settled.some(r => r.status === 'fail')) return 'fail';
+        if (settled.some(r => r.status === 'warn')) return 'warn';
         return 'pass';
     }
 
@@ -195,9 +221,15 @@
         let pillClass = 'gray';
         if (s.lastResults && s.lastResults.length) {
             const pass = s.lastResults.filter(r => r.status === 'pass').length;
-            const total = s.lastResults.length;
-            pillText = `${pass}/${total} checks ${rollup === 'pass' ? '✓' : rollup === 'warn' ? '⚠' : '✗'}`;
-            pillClass = rollup === 'pass' ? 'green' : rollup === 'warn' ? 'amber' : 'red';
+            const pending = s.lastResults.filter(r => r.status === 'pending').length;
+            const total = s.lastResults.length - pending;
+            if (rollup === 'pending') {
+                pillText = 'Checking…';
+                pillClass = 'gray';
+            } else {
+                pillText = `${pass}/${total} checks ${rollup === 'pass' ? '✓' : rollup === 'warn' ? '⚠' : '✗'}${pending ? ` · ${pending} loading` : ''}`;
+                pillClass = rollup === 'pass' ? 'green' : rollup === 'warn' ? 'amber' : 'red';
+            }
         }
 
         const refreshDisabled = s.isRefreshing || !s.refreshFn;
@@ -234,7 +266,7 @@
                     <div class="sync-check-heading">${heading}</div>
                     ${items.map(r => `
                         <div class="sync-check-item ${r.status}">
-                            <span class="sync-check-icon">${r.status === 'pass' ? '✓' : r.status === 'warn' ? '⚠' : '✗'}</span>
+                            <span class="sync-check-icon">${r.status === 'pass' ? '✓' : r.status === 'pending' ? '…' : r.status === 'warn' ? '⚠' : '✗'}</span>
                             <div class="sync-check-body">
                                 <div class="sync-check-name">${_escHtml(r.name)}${r.active ? ' <span class="sync-check-active-tag">active</span>' : ''}</div>
                                 <div class="sync-check-detail">${_escHtml(r.detail || '')}</div>

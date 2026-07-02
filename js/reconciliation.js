@@ -546,7 +546,9 @@
                         </tr>
                     </thead>
                     <tbody id="reconTableBody">
-                        ${results.map((r, i) => reconRowHtml(r, i)).join('')}
+                        ${results.length === 0
+                            ? '<tr><td colspan="14" class="od-empty-state">Nothing to reconcile — all transactions are up to date</td></tr>'
+                            : results.map((r, i) => reconRowHtml(r, i)).join('')}
                     </tbody>
                 </table>
             </div>
@@ -584,8 +586,10 @@
             : `<button onclick="openReconSplitModal(${i})" title="Split this transaction into N portions (the Airtable automation owns duplication)" class="od-btn od-btn-secondary od-btn-sm">Split</button>`;
         const actionHtml = r.status === 'approved'
             ? `<span class="od-status-badge success">Done ✓</span>`
+            : r.status === 'pending'
+            ? `<button disabled class="od-btn od-btn-secondary od-btn-sm" style="color:var(--text-muted);cursor:not-allowed" title="Airtable is still creating this split portion — refresh in a few seconds">Pending sync</button>`
             : `<div style="display:flex;flex-direction:column;gap:3px;align-items:stretch">
-                  <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveRecon(${i})" style="font-size:10px;min-width:55px">Approve</button>
+                  <button id="recon-btn-${i}" class="cfv-action-btn success" onclick="approveReconClick(${i})" style="font-size:10px;min-width:55px">Approve</button>
                   ${splitBtnHtml}
               </div>`;
 
@@ -772,78 +776,6 @@
     }
     window.reconCostChanged = reconCostChanged;
 
-    function toggleAmendRow(idx) {
-        const row = document.getElementById('recon-amend-' + idx);
-        if (row) {
-            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-            const input = document.getElementById('recon-amend-input-' + idx);
-            if (input) input.focus();
-        }
-    }
-
-    function applyAmendment(idx) {
-        const input = document.getElementById('recon-amend-input-' + idx);
-        const text = (input ? input.value : '').toLowerCase().trim();
-        if (!text) return;
-        const r = window._reconResults[idx];
-
-        // Match against sub-category names
-        allSubCategories.forEach(sc => {
-            const name = (getField(sc, 'fldO4BTJhFv5EsN6i') || '').toLowerCase();
-            if (name && text.includes(name)) { r.subCatId = sc.id; r.subCatName = getField(sc, 'fldO4BTJhFv5EsN6i'); }
-        });
-        // Match against category names
-        allCategories.forEach(cat => {
-            const name = (getField(cat, 'fldii4oUzSfmplihO') || '').toLowerCase();
-            if (name && text.includes(name)) { r.categoryId = cat.id; r.categoryName = getField(cat, 'fldii4oUzSfmplihO'); }
-        });
-        // Match against tenant names
-        allTenants.forEach(t => {
-            const name = (getField(t, F.tenantName) || '').toLowerCase();
-            if (name && name.length >= 3 && text.includes(name)) { r.tenantName = getField(t, F.tenantName); r.tenantId = t.id; }
-        });
-        // Match against tenancy references — ONLY active tenancies (Former
-        // tenancies left without an end-date were silently winning matches
-        // on units that had a newer current tenancy, e.g. the Serco/IMMO LTD
-        // dupes on 42 Elmdon Place. Filter ensures we never auto-match a
-        // payment to a former tenancy, regardless of array iteration order.
-        allTenancies.forEach(ten => {
-            if (!isTenancyActive(getField(ten, F.tenPayStatus))) return;
-            const surname = (getField(ten, F.tenSurname) || '').toLowerCase();
-            if (surname && surname.length >= 3 && text.includes(surname)) {
-                r.tenancyLabel = getField(ten, F.tenRef) || '';
-                r.tenancyId = ten.id;
-                r.tenantName = r.tenantName || getField(ten, F.tenSurname);
-                const unitRef = getField(ten, F.tenUnitRef);
-                const unitId = getField(ten, F.tenUnit);
-                r.unitName = Array.isArray(unitRef) ? unitRef[0] : (unitRef || '');
-                r.unitId = Array.isArray(unitId) ? unitId[0] : unitId;
-                r.propertyId = getPropertyIdFromUnit(r.unitId);
-            }
-        });
-        // Match against cost names
-        allCosts.forEach(c => {
-            const name = (getField(c, F.costName) || '').toLowerCase();
-            if (name && name.length >= 3 && text.includes(name)) { r.costLabel = getField(c, F.costName); r.costId = c.id; }
-        });
-
-        r.status = 'suggestion';
-        r.matchType = 'Amended';
-
-        // Re-render just this row
-        const row = document.getElementById('recon-row-' + idx);
-        const amendRow = document.getElementById('recon-amend-' + idx);
-        if (row && amendRow) {
-            const temp = document.createElement('tbody');
-            temp.innerHTML = reconRowHtml(r, idx);
-            row.replaceWith(temp.children[0]);
-            amendRow.replaceWith(temp.children[0] || document.createElement('tr'));
-        }
-        // Simpler: just re-render the whole table
-        const tbody = document.getElementById('reconTableBody');
-        if (tbody) tbody.innerHTML = window._reconResults.map((r, i) => reconRowHtml(r, i)).join('');
-    }
-
     // ── AI Reconciliation Accuracy Tracking ──
     // Persistent audit log lives in the Airtable "AI Recon Audit" table (TABLES.reconAudit).
     // Design for performance as the data accumulates:
@@ -1014,6 +946,19 @@
             console.warn('migrateLocalReconLog failed, will retry next load:', e);
         }
     }
+
+    // Onclick wrapper for the per-row Approve button. approveRecon() throws on
+    // failure so approveAllRecon() can keep its batch success/fail accounting —
+    // when invoked directly from a button that throw would be an unhandled
+    // rejection, so catch it here and surface a toast instead.
+    function approveReconClick(idx) {
+        approveRecon(idx).catch(e => {
+            if (typeof showToast === 'function') {
+                showToast('Approve failed: ' + ((e && e.message) || 'unknown error'), { type: 'error' });
+            }
+        });
+    }
+    window.approveReconClick = approveReconClick;
 
     async function approveRecon(idx) {
         const r = window._reconResults[idx];
@@ -1337,9 +1282,11 @@
         // per-row Approve button: PATCH `txReconciled = true` plus
         // whatever dropdown values are filled. Empty rows still get
         // marked reconciled (matching individual-Approve behaviour).
+        // Skip split placeholders ('pending' — Airtable is still creating the
+        // record, txId is a fake 'pending-…' id that would 404 on PATCH).
         const approveIdxs = [];
         for (let i = 0; i < results.length; i++) {
-            if (results[i].status !== 'approved') approveIdxs.push(i);
+            if (results[i].status !== 'approved' && results[i].status !== 'pending') approveIdxs.push(i);
         }
 
         if (approveIdxs.length === 0) {
@@ -1949,7 +1896,7 @@
                     const row = document.getElementById('recon-row-' + (idx + k));
                     if (row) {
                         row.style.transition = 'background-color 0.4s ease';
-                        row.style.backgroundColor = 'var(--accent-soft, #DDE8DF)';
+                        row.style.backgroundColor = 'var(--accent-soft)';
                         setTimeout(() => { row.style.backgroundColor = ''; }, 1600);
                     }
                 }

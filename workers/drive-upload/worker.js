@@ -3,12 +3,57 @@
 // Returns { folderId, folderUrl, fileId, fileUrl, docId, docUrl }
 // GET /auth/start — redirects to Google OAuth consent screen
 // GET /auth/callback — exchanges code for refresh token, displays it
+//
+// AUTH (the repo is public, so the worker URL is public):
+//   - Browser calls (os/systemisation/index.html "Upload to Drive" button):
+//     authenticated by strict Origin allow-list alone — browsers cannot
+//     spoof Origin. The matched origin is reflected exactly, never '*'.
+//     A claimed-browser call missing Sec-Fetch-* headers is treated as a
+//     script and must present the bearer token instead.
+//   - Script/automation calls: Authorization: Bearer <DRIVE_UPLOAD_TOKEN>
+//     (REQUIRED secret for non-browser callers — uploads are high-consequence).
+//   - Everything else: 403.
+//
+// Secrets: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN,
+//          DRIVE_PARENT_FOLDER_ID, DRIVE_UPLOAD_TOKEN
+// Optional vars: ALLOWED_ORIGINS_EXTRA (comma-separated extra origins)
 
-const CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-};
+const ALLOWED_ORIGINS = [
+    'https://chaichoong.github.io',
+    'http://localhost:8765', // local preview
+];
+
+function allowedOrigins(env) {
+    const extra = (env.ALLOWED_ORIGINS_EXTRA || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+    return ALLOWED_ORIGINS.concat(extra);
+}
+
+// Returns the origin to reflect in CORS headers, or null if not allowed.
+// A real browser fetch sends Sec-Fetch-Mode (fetch metadata); a script that
+// spoofs Origin usually does not. Spoofed-Origin scripts must use the token.
+function matchBrowserOrigin(request, env) {
+    const origin = request.headers.get('Origin') || '';
+    if (!allowedOrigins(env).includes(origin)) return null;
+    if (!request.headers.get('Sec-Fetch-Mode') && !request.headers.get('Sec-Fetch-Site')) return null;
+    return origin;
+}
+
+function hasServiceToken(request, env) {
+    if (!env.DRIVE_UPLOAD_TOKEN) return false;
+    const auth = request.headers.get('Authorization') || '';
+    return auth === `Bearer ${env.DRIVE_UPLOAD_TOKEN}`;
+}
+
+function corsHeaders(allowOrigin) {
+    const headers = {
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Vary': 'Origin',
+    };
+    if (allowOrigin) headers['Access-Control-Allow-Origin'] = allowOrigin;
+    return headers;
+}
 
 export default {
     async fetch(request, env) {
@@ -46,6 +91,20 @@ export default {
             return new Response('Error: ' + JSON.stringify(tokenData), { status: 400 });
         }
 
+        const allowOrigin = matchBrowserOrigin(request, env);
+
+        if (request.method === 'OPTIONS') {
+            // Preflight: only answer for allow-listed origins.
+            if (!allowOrigin) return new Response(null, { status: 403 });
+            return new Response(null, { status: 204, headers: corsHeaders(allowOrigin) });
+        }
+
+        // Auth gate for everything below (/test and /upload):
+        // allow-listed browser Origin OR service bearer token.
+        if (!allowOrigin && !hasServiceToken(request, env)) {
+            return jsonResponse({ error: 'Forbidden: origin not allowed and no valid service token' }, 403, allowOrigin);
+        }
+
         if (url.pathname === '/test') {
             try {
                 const accessToken = await getAccessToken(env);
@@ -55,24 +114,20 @@ export default {
                     headers: { Authorization: `Bearer ${accessToken}` },
                 });
                 const folderInfo = listRes.ok ? await listRes.json() : { error: await listRes.text() };
-                return jsonResponse({ status: 'ok', auth: 'valid', parentFolder: folderInfo });
+                return jsonResponse({ status: 'ok', auth: 'valid', parentFolder: folderInfo }, 200, allowOrigin);
             } catch (e) {
-                return jsonResponse({ status: 'error', message: e.message }, 500);
+                return jsonResponse({ status: 'error', message: e.message }, 500, allowOrigin);
             }
         }
 
-        if (request.method === 'OPTIONS') {
-            return new Response(null, { status: 204, headers: CORS_HEADERS });
-        }
-
         if (request.method !== 'POST') {
-            return jsonResponse({ error: 'POST required' }, 405);
+            return jsonResponse({ error: 'POST required' }, 405, allowOrigin);
         }
 
         try {
             const { workflowName, htmlContent, fileName } = await request.json();
             if (!workflowName || !htmlContent) {
-                return jsonResponse({ error: 'workflowName and htmlContent are required' }, 400);
+                return jsonResponse({ error: 'workflowName and htmlContent are required' }, 400, allowOrigin);
             }
 
             const accessToken = await getAccessToken(env);
@@ -103,17 +158,17 @@ export default {
                 docId: doc ? doc.id : null,
                 docUrl: doc ? `https://docs.google.com/document/d/${doc.id}/edit` : null,
                 docError: docError,
-            });
+            }, 200, allowOrigin);
         } catch (e) {
-            return jsonResponse({ error: e.message }, 500);
+            return jsonResponse({ error: e.message }, 500, allowOrigin);
         }
     },
 };
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status = 200, allowOrigin = null) {
     return new Response(JSON.stringify(data), {
         status,
-        headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        headers: { 'Content-Type': 'application/json', ...corsHeaders(allowOrigin) },
     });
 }
 

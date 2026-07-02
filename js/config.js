@@ -5,6 +5,15 @@
     const BASE_ID = 'appnqjDpqDniH3IRl';
     const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
+    // ── AI models (single source of truth — never hardcode model IDs in
+    // feature files; a retired ID is an app-wide AI outage) ──
+    const AI_MODEL_DEFAULT = 'claude-sonnet-4-6';
+    const AI_MODEL_LIGHT = 'claude-haiku-4-5-20251001';
+
+    // ── Slack notify worker (outbound DM dispatch). SaaS migration: swap
+    // for the Supabase Edge Function URL; request shape stays identical. ──
+    const SLACK_NOTIFY_URL = 'https://slack-notify.kevinbrittain.workers.dev/';
+
     // ── Page & SOP Version Registry ──
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.37', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
@@ -29,7 +38,7 @@
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.3', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.16', sopFile: 'sop-sitemap.html',            sopVer: '1.1', standalone: 'index.html#sitemap' },
+        { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.16', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.3', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'ai-brain.html' },
         { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
@@ -192,7 +201,7 @@
     const NW = {
         name:    'fldswqUWxdoQj1QPC',  // Name (singleLineText) — e.g. "Real Estate Portfolio"
         amount:  'fld4biGCBBQbknNmF',  // Amount (currency, £)
-        type:    'fld2uSD30IeWqEJYU',  // Net Worth Type (singleSelect): Cash | Investments & Real Estate | Businesses | Credit Cards | Loans | Mortgages
+        type:    'fld2uSD30IeWqEJYU',  // Net Worth Type (singleSelect): Cash | Real Estate | Investments | Businesses | Credit Cards | Loans | Mortgages. A legacy combined "Investments & Real Estate" choice remains in Airtable with 0 records — delete it there; rows coded to it are excluded from totals (wealth.js only sums NW_ASSET_CLASSES).
         month:   'fldN3YpeJVK9MtW2d',  // Month (singleSelect): January … December
         year:    'fld0iFQ9PwFv0jKBa',  // Year (singleSelect): 2025, 2026, …
     };

@@ -451,8 +451,11 @@
             waProjected.push({ opening: waOpening, balance: waRunning, dayIn, dayOut });
         });
 
-        // Calculate safety buffer
-        const lagAnalysis = analysePaymentLag(window._waTransactions || [], window._waIncomeTenancies || []);
+        // Calculate safety buffer — use the in-scope fresh data, not the
+        // window._wa* globals (those are only set at the END of this function,
+        // so on the first render they were empty and the buffer fell back to
+        // the 3-day default, diverging from money.js which uses live data).
+        const lagAnalysis = analysePaymentLag(transactions || [], incomeTenancies || []);
         const maxSingleInflow = rows.reduce((max, r) => {
             r.inflows.forEach(f => { if (!f.cleared && f.amount > max) max = f.amount; });
             return max;
@@ -921,21 +924,31 @@
                 d.setDate(d.getDate() + 1);
             }
         } else if (freq === 'quarterly') {
-            for (let m = 0; m < 3; m++) {
-                const checkDate = new Date(today.getFullYear(), today.getMonth() + m, 1);
-                const lastDay = new Date(checkDate.getFullYear(), checkDate.getMonth() + 1, 0).getDate();
-                const actualDay = Math.min(dueDay, lastDay);
-                const d = new Date(checkDate.getFullYear(), checkDate.getMonth(), actualDay);
-                if (d >= today && d <= windowEnd && [0, 3, 6, 9].includes(d.getMonth())) {
-                    dates.push(dateKey(d));
+            // Derive the cycle from the cost's OWN anchor date (its next/last
+            // due date) rather than assuming calendar quarters — a cost billed
+            // Feb/May/Aug/Nov never appeared under the old Jan/Apr/Jul/Oct rule.
+            const anchor = dueDateNext ? new Date(dueDateNext) : null;
+            if (anchor && !isNaN(anchor.getTime())) {
+                const anchorDay = anchor.getDate();
+                // Step forward in 3-month hops (anchor month + 3k) until at/after today
+                let d = new Date(anchor.getFullYear(), anchor.getMonth(), anchorDay);
+                while (d < today) {
+                    const nextLast = new Date(d.getFullYear(), d.getMonth() + 4, 0).getDate();
+                    d = new Date(d.getFullYear(), d.getMonth() + 3, Math.min(anchorDay, nextLast));
                 }
-            }
-            if (dates.length === 0) {
-                const thisMonth = new Date(today.getFullYear(), today.getMonth(), Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()));
-                const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, Math.min(dueDay, new Date(today.getFullYear(), today.getMonth() + 2, 0).getDate()));
-                [thisMonth, nextMonth].forEach(d => {
+                if (d <= windowEnd) dates.push(dateKey(d));
+            } else {
+                // No anchor date on the cost — fall back to calendar quarters,
+                // projecting the NEXT cycle month (Jan/Apr/Jul/Oct), not simply
+                // next month, so the cost lands once per quarter at most.
+                const cycleMonths = [0, 3, 6, 9];
+                for (let m = 0; m < 4 && dates.length === 0; m++) {
+                    const checkDate = new Date(today.getFullYear(), today.getMonth() + m, 1);
+                    if (!cycleMonths.includes(checkDate.getMonth())) continue;
+                    const lastDay = new Date(checkDate.getFullYear(), checkDate.getMonth() + 1, 0).getDate();
+                    const d = new Date(checkDate.getFullYear(), checkDate.getMonth(), Math.min(dueDay, lastDay));
                     if (d >= today && d <= windowEnd) dates.push(dateKey(d));
-                });
+                }
             }
         } else if (freq === 'annually' || freq === 'annual') {
             for (let m = 0; m < 2; m++) {

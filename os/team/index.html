@@ -177,6 +177,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <div class="subtitle" id="subtitleText">Loading...</div>
     </div>
     <div class="topbar-right">
+        <span id="teamSyncStamp" style="font-size:12px;color:var(--text-muted);margin-right:4px">Not yet loaded</span>
         <button class="btn" onclick="loadAll(true)">&#x1F504; Refresh</button>
         <button class="btn" onclick="window.parent.postMessage({action:'switchTab',tab:'overview'},'*');window.history.back()">&#x2190; Back</button>
     </div>
@@ -420,7 +421,15 @@ async function loadAll(force) {
         const activeCount = allMembers.filter(m => isActive(m)).length;
         document.getElementById('subtitleText').textContent = `${activeCount} active team member${activeCount !== 1 ? 's' : ''} across ${allDepts.length} departments`;
 
+        const stamp = document.getElementById('teamSyncStamp');
+        if (stamp) {
+            stamp.textContent = `✓ Synced just now · ${allMembers.length} members · ${allDepts.length} departments`;
+            stamp.style.color = 'var(--success)';
+        }
+
     } catch (e) {
+        const stamp = document.getElementById('teamSyncStamp');
+        if (stamp) { stamp.textContent = '✗ Load failed'; stamp.style.color = 'var(--danger)'; }
         grid.innerHTML = `<div class="empty-state"><div class="empty-state-icon">&#x26A0;</div><div class="empty-state-text">Failed to load: ${escHtml(e.message)}</div></div>`;
         console.error('[Team] load error', e);
     }

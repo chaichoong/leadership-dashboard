@@ -3,7 +3,6 @@
 // Read-only view of fixed recurring income (tenancy rent).
 // Data comes from global arrays loaded by dashboard.js.
 // ══════════════════════════════════════════
-    let incomeTabRendered = false;
     let _incomeBreakdownView = 'property';
 
     // ── Loading state ──
@@ -44,7 +43,7 @@
         if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
         try {
             if (typeof clearDashCache === 'function') {
-                try { await clearDashCache(); } catch (_) {}
+                try { await clearDashCache(); } catch (err) { console.warn('clearDashCache failed:', err); }
             }
             if (typeof loadDashboard === 'function') {
                 await loadDashboard();
@@ -167,7 +166,6 @@
 
     // ── Render ──
     function renderIncomeTab() {
-        incomeTabRendered = true;
         const tenancies = (allTenancies || []);
         const activeTenancies = tenancies.filter(r => isActiveTenancy(r));
 
@@ -209,8 +207,23 @@
             filtered = filtered.filter(e => e.payStatus === 'CFV' || e.payStatus === 'CFV Actioned');
         }
 
-        // Business filter (not yet wired to tenancy business field — placeholder for multi-business)
-        // TODO: wire when tenancy → business link is available
+        // Business filter — tenancies have no direct business link, so derive
+        // tenancy → business from transactions (txTenancy + txBusiness are both
+        // written by the reconciliation engine when rent is reconciled).
+        if (businessFilter !== 'all') {
+            const tenancyBusinesses = {};
+            (allTransactions || []).forEach(tx => {
+                const tens = getField(tx, F.txTenancy);
+                const biz = getField(tx, F.txBusiness);
+                if (!Array.isArray(tens) || tens.length === 0 || !Array.isArray(biz) || biz.length === 0) return;
+                tens.forEach(t => {
+                    const tid = typeof t === 'object' ? t.id : t;
+                    if (!tenancyBusinesses[tid]) tenancyBusinesses[tid] = new Set();
+                    biz.forEach(b => tenancyBusinesses[tid].add(typeof b === 'object' ? b.id : b));
+                });
+            });
+            filtered = filtered.filter(e => tenancyBusinesses[e.id] && tenancyBusinesses[e.id].has(businessFilter));
+        }
 
         // Text search
         if (filterText) {
@@ -361,7 +374,7 @@
         const statusBadge = `<span class="inv-badge" style="background:var(--${statusClass}-bg);color:var(--${statusClass})">${escHtml(e.payStatus)}</span>`;
 
         const cfvLink = (e.payStatus === 'CFV' || e.payStatus === 'CFV Actioned')
-            ? `<span style="margin-left:4px;cursor:pointer;color:var(--accent);font-size:11px;text-decoration:underline" onclick="event.stopPropagation(); navigateToCFV('${e.id}')" title="Go to CFV page for this tenancy">View CFV</span>`
+            ? `<span style="margin-left:4px;cursor:pointer;color:var(--accent);font-size:11px;text-decoration:underline" onclick="event.stopPropagation(); navigateToCFV()" title="Go to CFV page for this tenancy">View CFV</span>`
             : '';
 
         const dueDayStr = e.dueDay ? `Day ${e.dueDay}` : '<span style="color:var(--text-muted)">—</span>';
@@ -384,7 +397,7 @@
     }
 
     // ── CFV navigation ──
-    function navigateToCFV(_tenancyId) {
+    function navigateToCFV() {
         if (typeof switchTab === 'function') {
             switchTab('cfv');
         }
@@ -474,7 +487,7 @@
         // Payment type breakdown
         const ptGroups = {};
         enriched.forEach(e => { ptGroups[e.payType] = (ptGroups[e.payType] || 0) + 1; });
-        const ptParts = Object.entries(ptGroups).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v} ${k}`);
+        const ptParts = Object.entries(ptGroups).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${escHtml(String(v))} ${escHtml(k)}`);
         if (ptParts.length > 1) {
             lines.push(`<strong>Payment type mix:</strong> ${ptParts.join(', ')}.`);
         }

@@ -29,7 +29,7 @@
         return pat ? { 'Authorization': 'Bearer ' + pat } : {};
     }
 
-    function setGitHubToken() {
+    async function setGitHubToken() {
         const current = localStorage.getItem(GITHUB_PAT_KEY);
         const input = prompt(
             'Paste a GitHub personal access token to raise the rate limit from 60/hr to 5,000/hr.\n\n' +
@@ -40,9 +40,10 @@
         const trimmed = input.trim();
         if (!trimmed) {
             localStorage.removeItem(GITHUB_PAT_KEY);
-            alert('GitHub token removed. Reverting to 60/hr unauthenticated limit.');
+            showToast('GitHub token removed — reverting to 60/hr unauthenticated limit', { type: 'info' });
         } else if (!/^gh[pous]_[A-Za-z0-9]{20,}$|^github_pat_[A-Za-z0-9_]{20,}$/.test(trimmed)) {
-            if (!confirm('That doesn\'t look like a standard GitHub token (ghp_… or github_pat_…). Save anyway?')) return;
+            const ok = await showConfirm('That doesn\'t look like a standard GitHub token (ghp_… or github_pat_…). Save anyway?', { title: 'Unusual token', okLabel: 'Save anyway' });
+            if (!ok) return;
             localStorage.setItem(GITHUB_PAT_KEY, trimmed);
         } else {
             localStorage.setItem(GITHUB_PAT_KEY, trimmed);
@@ -209,7 +210,7 @@
             }
             renderSiteMap();
         } catch (e) {
-            alert('Git sync check failed: ' + e.message);
+            showToast('Git sync check failed: ' + e.message, { type: 'error' });
             if (btn) { btn.textContent = 'Check Git Sync'; btn.disabled = false; }
         }
     }
@@ -694,7 +695,7 @@
     }
 
     async function requestSOPUpdate(pageId, sopFile, pageVer, pageName, btn) {
-        if (!PAT) { alert('No Airtable token'); return; }
+        if (!PAT) { showToast('No Airtable token', { type: 'error' }); return; }
         btn.textContent = 'Requesting...';
         btn.disabled = true;
         // If sopFile is empty, this is a "create new SOP" request, not a regeneration.
@@ -730,7 +731,7 @@
         } catch (e) {
             btn.textContent = 'Failed';
             btn.disabled = false;
-            alert('Error: ' + e.message);
+            showToast('Error: ' + e.message, { type: 'error' });
         }
     }
 
@@ -749,10 +750,11 @@
             }
         }
         if (stalePages.length === 0) {
-            alert('Nothing to update — all tracked SOPs are current.');
+            showToast('Nothing to update — all tracked SOPs are current', { type: 'info' });
             return;
         }
-        if (!confirm(`Queue SOP updates for ${stalePages.length} out-of-sync page${stalePages.length === 1 ? '' : 's'}?\n\n${stalePages.map(p => '• ' + p.name).join('\n')}`)) return;
+        const ok = await showConfirm(`Queue SOP updates for ${stalePages.length} out-of-sync page${stalePages.length === 1 ? '' : 's'}?\n\n${stalePages.map(p => '• ' + p.name).join('\n')}`, { title: 'Queue SOP updates', okLabel: 'Queue updates' });
+        if (!ok) return;
         btn.textContent = 'Requesting...';
         btn.disabled = true;
         for (const p of stalePages) {
