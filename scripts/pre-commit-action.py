@@ -40,6 +40,15 @@ FILE_TO_PAGE = {
     'os/systemisation/index.html': 'systemisation',
     'os/team/index.html':          'os-team',
     'how-it-works.html':           'how-it-works',
+    # Previously-unmapped registered pages (their versions never bumped)
+    'js/money.js':          'money',
+    'js/wealth.js':         'wealth',
+    'js/transactions.js':   'transactions',
+    'ai-brain.html':        'ai-brain',
+    # Supporting files that ship page behaviour but had no mapping
+    'js/cashflow.js':       'overview',
+    'js/arrears.js':        'cfv',
+    'js/reconciliation.js': 'overview',
 }
 
 CONFIG_FILE = 'js/config.js'
