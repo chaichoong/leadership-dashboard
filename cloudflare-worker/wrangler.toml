@@ -1,0 +1,9 @@
+name = "claude-proxy"
+main = "anthropic-proxy.js"
+compatibility_date = "2024-09-01"
+
+# Knowledge-base store for the Inbound-Comms /shared-data endpoint.
+# Namespace title "SHARED_DATA" (id fixed below so deploys keep the same store).
+[[kv_namespaces]]
+binding = "SHARED_DATA"
+id = "15a5ae9b43364e95838b463c9d7f14a4"

@@ -28,13 +28,11 @@ BASE_ID = 'appnqjDpqDniH3IRl'
 VAL_TABLE = 'tblZYsa0u1M17N7ZE'      # Property Valuations
 PROP_TABLE = 'tbl6f0OkAmTC2jbuG'     # Properties
 PROXY = 'https://claude-proxy.kevinbrittain.workers.dev'
-PROXY_ORIGIN = 'https://chaichoong.github.io'
-# NOTE: this Origin/UA path matches the CURRENTLY DEPLOYED claude-proxy, which
-# authenticates by ALLOWED_ORIGIN. When the proxy is reconciled and redeployed
-# with the hardened browser/service-token modes (see cloudflare-worker/
-# anthropic-proxy.js), switch this to send Authorization: Bearer
-# PROXY_SERVICE_TOKEN and drop the Origin/UA spoof. Kept as-is for now so the
-# monthly job does not break against the live proxy.
+# The hardened claude-proxy authenticates scripts with a bearer token (it no
+# longer accepts a spoofed Origin). PROXY_SERVICE_TOKEN must be set in the job
+# environment; the workflow passes it from the GitHub Actions secret of the
+# same name. Deployed on the worker 2026-07-02.
+PROXY_SERVICE_TOKEN = os.environ.get('PROXY_SERVICE_TOKEN', '').strip()
 
 # Property Valuations field IDs
 F_TITLE = 'fldRBIx2kRFAVmH0k'
@@ -105,10 +103,17 @@ def value_property(address, last_value, last_date):
         'messages': [{'role': 'user', 'content': prompt}],
     }
     status, d = _http(PROXY, method='POST', data=body, headers={
-        'Content-Type': 'application/json', 'Origin': PROXY_ORIGIN, 'Referer': PROXY_ORIGIN + '/',
-        # The proxy blocks the default python-urllib agent; present a browser UA.
+        'Content-Type': 'application/json',
+        # Worker auth: the hardened proxy authenticates scripts by this token.
+        'Authorization': f'Bearer {PROXY_SERVICE_TOKEN}',
+        # Cloudflare edge: the default python-urllib UA trips Cloudflare's bot
+        # block (error 1010) before the request reaches the worker, so present
+        # a normal browser UA. This is NOT origin-spoofing — the worker no
+        # longer trusts UA/Origin for scripts; the token above is what authorises.
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
     })
+    if status == 403:
+        return None, 'Low', 'proxy 403 — PROXY_SERVICE_TOKEN missing/wrong, or Cloudflare 1010 (check UA)'
     if status != 200:
         return None, 'Low', f'proxy error {status}'
     text = ''
