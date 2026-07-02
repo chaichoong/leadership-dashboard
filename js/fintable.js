@@ -104,7 +104,7 @@
             <span style="font-size:20px">&#x1F50C;</span>
             <div style="flex:1">
                 <div style="font-weight:600;font-size:13px;color:${iconColor}">Account Sync Alert</div>
-                <div style="font-size:12px;color:var(--text-secondary)">${parts.join(' · ')} — <span style="color:${iconColor};text-decoration:underline">View Sync Monitor</span></div>
+                <div class="od-text-muted-sm" style="font-size:12px;color:var(--text-secondary)">${parts.join(' · ')} — <span style="color:${iconColor};text-decoration:underline">View Sync Monitor</span></div>
             </div>
         </div>`;
     }
@@ -165,24 +165,24 @@
         const summaryEl = document.getElementById('fintableSummary');
         summaryEl.innerHTML = `
             <div style="background:var(--success-bg);border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:var(--success)">${ok}</div>
-                <div style="font-size:12px;color:var(--success)">Healthy</div>
+                <div class="od-metric-value" style="font-size:28px;color:var(--success)">${ok}</div>
+                <div class="od-metric-label" style="font-size:12px;color:var(--success)">Healthy</div>
             </div>
             <div style="background:#fefce8;border:1px solid #fef08a;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:#ca8a04">${warning}</div>
-                <div style="font-size:12px;color:#a16207">1–3 Days</div>
+                <div class="od-metric-value" style="font-size:28px;color:#ca8a04">${warning}</div>
+                <div class="od-metric-label" style="font-size:12px;color:#a16207">1–3 Days</div>
             </div>
             <div style="background:var(--warning-bg);border:1px solid #fed7aa;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:#ea580c">${alert}</div>
-                <div style="font-size:12px;color:#c2410c">3–7 Days</div>
+                <div class="od-metric-value" style="font-size:28px;color:#ea580c">${alert}</div>
+                <div class="od-metric-label" style="font-size:12px;color:#c2410c">3–7 Days</div>
             </div>
             <div style="background:var(--danger-bg);border:1px solid #fecaca;border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:var(--danger)">${critical}</div>
-                <div style="font-size:12px;color:var(--danger)">Needs Reconnect</div>
+                <div class="od-metric-value" style="font-size:28px;color:var(--danger)">${critical}</div>
+                <div class="od-metric-label" style="font-size:12px;color:var(--danger)">Needs Reconnect</div>
             </div>
             <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:16px;text-align:center">
-                <div style="font-size:28px;font-weight:700;color:var(--text-primary)">${total}</div>
-                <div style="font-size:12px;color:var(--text-secondary)">Total Active</div>
+                <div class="od-metric-value" style="font-size:28px;color:var(--text-primary)">${total}</div>
+                <div class="od-metric-label" style="font-size:12px;color:var(--text-secondary)">Total Active</div>
             </div>
         `;
 
