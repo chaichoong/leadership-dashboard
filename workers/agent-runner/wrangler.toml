@@ -1,0 +1,25 @@
+# Agent Runner — the execution engine for Systemisation-built AI agents.
+#
+# Loads every workflow whose disposition is "Autonomous agent" and whose agent
+# state is "testing" or "live", then runs an AI tool-use loop over real Airtable
+# data. TESTING agents can only PROPOSE (shadow mode). LIVE agents auto-execute
+# only pre-approved safe writes; everything else queues for human approval.
+# Every action is logged to the Agent Activity table with an undo payload.
+#
+# Secrets (set via `wrangler secret put <NAME>`):
+#   AIRTABLE_PAT        - Airtable personal access token (data read/write)
+#   PROXY_TOKEN         - PROXY_SERVICE_TOKEN_2 on claude-proxy (AI access)
+#   AGENT_RUNNER_TOKEN  - bearer token for manual /run triggers from scripts
+
+name = "agent-runner"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+[triggers]
+crons = ["0 7 * * *"]
+
+# Same-zone workers cannot call each other via public URLs (Cloudflare error
+# 1042) — the AI calls go through a direct service binding to claude-proxy.
+[[services]]
+binding = "PROXY"
+service = "claude-proxy"
