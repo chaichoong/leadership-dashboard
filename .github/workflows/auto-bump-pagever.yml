@@ -21,22 +21,6 @@ on:
       - 'os/strategy/strategy.js'
       - 'os/strategy/strategy.css'
       - 'os/operations/index.html'
-      # Keep in sync with FILE_TO_PAGE in scripts/pre-commit-action.py
-      - 'js/income.js'
-      - 'js/costs.js'
-      - 'js/ar-variable.js'
-      - 'js/skills.js'
-      - 'js/skills-data.js'
-      - 'js/money.js'
-      - 'js/wealth.js'
-      - 'js/transactions.js'
-      - 'js/cashflow.js'
-      - 'js/arrears.js'
-      - 'js/reconciliation.js'
-      - 'ai-brain.html'
-      - 'os/systemisation/index.html'
-      - 'os/team/index.html'
-      - 'how-it-works.html'
 
 permissions:
   contents: write  # needed so the job can push its auto-bump commit back to main

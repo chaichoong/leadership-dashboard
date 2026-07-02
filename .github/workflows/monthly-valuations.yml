@@ -27,7 +27,6 @@ jobs:
       - name: Refresh property valuations
         env:
           AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
-          PROXY_SERVICE_TOKEN: ${{ secrets.PROXY_SERVICE_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
           LIMIT: ${{ github.event.inputs.limit || '0' }}
         run: python3 scripts/monthly-valuations.py
