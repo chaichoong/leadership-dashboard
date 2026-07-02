@@ -892,7 +892,7 @@ if (tabId === 'comms') {
         const valTimeEst = isEdit ? (tf[TASK_FIELDS.timeEstimate] || '15 min') : '15 min';
         const valPriority = isEdit ? (tf[TASK_FIELDS.priority] || 'Not Urgent') : 'Not Urgent';
         const valStatus = isEdit ? (tf[TASK_FIELDS.status] || 'Today') : 'Today';
-        const valBusinessRaw = isEdit ? (tf[TASK_FIELDS.business] || []) : [];
+        const valBusinessRaw = isEdit ? (tf[TASK_FIELDS.business] || []) : (opts.business ? [opts.business] : []);
         const selectedBusinessId = Array.isArray(valBusinessRaw) ? valBusinessRaw[0] : valBusinessRaw;
         const valRecurring = isEdit ? (tf[TASK_FIELDS.recurring] || '') : '';
         const valProject = isEdit ? (tf[TASK_FIELDS.project] || []) : [];
@@ -1106,6 +1106,32 @@ if (tabId === 'comms') {
 
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
+
+        // The Business options are built from allBusinesses, which may still be
+        // loading when the drawer opens (e.g. straight into Systemisation →
+        // Assign Video Task). Repopulate once the data lands so the field is
+        // never an empty, dead dropdown.
+        if (businessOpts === '<option value="">-</option>') {
+            let bizTries = 0;
+            const bizPoll = setInterval(() => {
+                bizTries++;
+                const selEl = panel.querySelector('#qtBusiness');
+                if (!selEl || !document.body.contains(selEl) || bizTries > 40) { clearInterval(bizPoll); return; }
+                if (typeof allBusinesses !== 'undefined' && Array.isArray(allBusinesses) && allBusinesses.length) {
+                    clearInterval(bizPoll);
+                    let optsHtml = '<option value="">-</option>';
+                    allBusinesses
+                        .filter(b => getField(b, BIZ_ACTIVE_FIELD))
+                        .sort((a, b) => ((getField(a, BIZ_NAME_FIELD) || '') + '').localeCompare((getField(b, BIZ_NAME_FIELD) || '') + ''))
+                        .forEach(b => {
+                            const s2 = b.id === selectedBusinessId ? ' selected' : '';
+                            optsHtml += `<option value="${escHtml(b.id)}"${s2}>${escHtml(getField(b, BIZ_NAME_FIELD) || 'Unnamed')}</option>`;
+                        });
+                    selEl.innerHTML = optsHtml;
+                    if (selectedBusinessId) selEl.value = selectedBusinessId;
+                }
+            }, 500);
+        }
 
         // Close handlers
         const handleEsc = (e) => { if (e.key === 'Escape') closeModal(); };
@@ -1393,6 +1419,12 @@ if (tabId === 'comms') {
             panel.querySelector('#qtSubmit').onclick = async () => {
                 const taskName = panel.querySelector('#qtName').value.trim();
                 if (!taskName) { showToast('Task name is required', { type: 'warning' }); return; }
+                // Systemisation video tasks must belong to a business so the SOP
+                // (and everything generated from it) is segregated per business.
+                if (opts.requireBusiness && !panel.querySelector('#qtBusiness').value) {
+                    showToast('Pick a Business — every SOP must belong to one', { type: 'warning' });
+                    return;
+                }
 
                 const submitBtn = panel.querySelector('#qtSubmit');
                 submitBtn.disabled = true; submitBtn.textContent = 'Creating...';

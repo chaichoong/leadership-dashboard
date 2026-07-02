@@ -1,0 +1,11 @@
+# Loom Transcript Worker
+# Extracts the REAL spoken transcript for a Loom video — no Loom API key needed.
+# The public share page embeds a signed CDN URL to the transcription JSON; the
+# browser can't fetch loom.com cross-origin, so this worker does it server-side.
+#
+# Deploy: npx wrangler deploy   (needs CLOUDFLARE_API_TOKEN or wrangler login)
+# No secrets required.
+
+name = "loom-transcript"
+main = "worker.js"
+compatibility_date = "2024-01-01"

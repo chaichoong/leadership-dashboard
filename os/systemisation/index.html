@@ -457,6 +457,8 @@ const ST = {
 };
 const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 const DRIVE_UPLOAD_ENDPOINT = 'https://drive-upload.kevinbrittain.workers.dev/upload';
+// Real spoken transcripts (no Loom API key needed) — see workers/loom-transcript
+const LOOM_TRANSCRIPT_ENDPOINT = 'https://loom-transcript.kevinbrittain.workers.dev/';
 const MM = { name: 'fldRphzaAUzBqconG', description: 'fldWDxL9EyS1iaGlf', business: 'fldi4uVOf2NgxiSKy' };
 const BIZ_NAME = 'fldbbRqVxLxUdHwIR';
 const BIZ_ACTIVE = 'fldhXBnRrngCVsgSk';
@@ -506,6 +508,7 @@ const TF = {
     assignee:    'fldELMncVJYPDRJNc',
     description: 'fldRGhBQViKZKtkQ6',
     category:    'fldVDvfhfOUBNvAxe',
+    business:    'fldLu1Y4GzyWcDoxr',  // link to Businesses — ties the video task (and its SOP) to a business
     notes:       'fldR7apBzSp3oxFxz',
     dueDate:     'fld7XP8w8kbxfETV4',
     priority:    'fldS21RwmwOqt71LI',
@@ -727,7 +730,41 @@ async function loadData(){
     allObjStrat = os;
     buildMethodBizMap();
     populateBizFilter();
+    await rebuildVideoTaskTracking();
     await checkVideoTasks();
+}
+
+// The task↔workflow link used to live ONLY in this browser's localStorage, so the
+// pipeline automation never fired on another device or after a cache clear. The
+// workflow id is stamped in every video task's Notes ("[Systemisation] Workflow
+// ID: recX") — rebuild the local tracking from Airtable on every load.
+async function rebuildVideoTaskTracking(){
+    try {
+        const records = [];
+        let offset = null;
+        do {
+            const params = new URLSearchParams({
+                returnFieldsByFieldId:'true', pageSize:'100',
+                filterByFormula: "AND({Task Category}='Systemisation', FIND('[Systemisation] Workflow ID:', {Notes}&''))"
+            });
+            params.append('fields[]', TF.notes);
+            if(offset) params.set('offset', offset);
+            const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TBL}?${params}`,{
+                headers:{'Authorization':`Bearer ${PAT}`}
+            });
+            if(!res.ok) return;
+            const data = await res.json();
+            records.push(...(data.records||[]));
+            offset = data.offset || null;
+        } while(offset);
+        for(const t of records){
+            const m = String(gf(t,TF.notes)||'').match(/\[Systemisation\] Workflow ID:\s*(rec\w+)/);
+            if(!m) continue;
+            const wfId = m[1];
+            if(!allWorkflows.some(w=>w.id===wfId)) continue;   // workflow deleted
+            if(!getWfVideoTaskId(wfId)) setWfVideoTaskId(wfId, t.id);
+        }
+    } catch(e){ console.warn('Video task tracking rebuild failed:', e); }
 }
 
 async function checkVideoTasks(){
@@ -3970,6 +4007,17 @@ function renderStepsResourceEmbed(wfId){
 async function fetchLoomTranscript(loomUrl){
     const match = loomUrl.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
     if(!match) return '';
+    // 1) The loom-transcript worker returns the REAL spoken transcript, extracted
+    //    server-side from the share page's signed CDN link. Before this, the only
+    //    working path was the oembed fallback below — the video TITLE — so SOPs
+    //    were generated from the title, not what was actually said.
+    try {
+        const wres = await fetch(LOOM_TRANSCRIPT_ENDPOINT + '?id=' + match[1]);
+        if(wres.ok){
+            const wdata = await wres.json();
+            if(wdata.transcript && wdata.transcript.trim().split(/\s+/).length > 15) return wdata.transcript.trim();
+        }
+    } catch(e){ console.warn('[loom] transcript worker unavailable, falling back', e); }
     const apiKey = getLoomApiKey();
     let transcript = '';
     if(apiKey){
@@ -4119,14 +4167,23 @@ function assignVideoTask(wfId){
     if(!w) return;
     const wName = gf(w,WF.name)||'Untitled';
 
+    // The AGENTIC script travels WITH the task so whoever records the video sees
+    // the seven prompts in Tasks & Projects — not just on the Systemisation page.
+    const agenticScript = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}: ${s.prompt}`).join('\n\n');
     const taskName = 'Record video: ' + wName;
-    const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
+    const taskDesc = 'Record a Loom video walkthrough of the "' + wName + '" workflow.\n\n'
+        + 'Follow the AGENTIC script — cover all seven while you record:\n\n'
+        + agenticScript
+        + '\n\nWhen finished, replace the placeholder below with your Loom share URL and mark this task as Done.\n\n[loom:paste your Loom share URL here]';
 
+    const bizIds = linkIds(gf(w,WF.business));
     window.parent.postMessage({
         type: 'qt:open-new-task-drawer',
         opts: {
             name: taskName,
             description: taskDesc,
+            business: bizIds[0] || '',
+            requireBusiness: true,   // every SOP must belong to a business
             _wfId: wfId,
         }
     }, '*');
