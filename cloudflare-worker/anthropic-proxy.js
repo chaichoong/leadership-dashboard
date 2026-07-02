@@ -1,5 +1,14 @@
 // Cloudflare Worker — Anthropic API proxy
 //
+// ⚠️ DO NOT `wrangler deploy` this file blind. It is NOT the source of the
+// live `claude-proxy` worker. The deployed worker uses different secret names
+// (CLAUDE_API_KEY + ALLOWED_ORIGIN, and a SLACK_BOT_TOKEN this file has no code
+// for), so deploying this copy would break in-app AI and drop Slack behaviour.
+// Before deploying: pull the real deployed source from the Cloudflare dashboard,
+// reconcile it with the hardened browser/service-token logic below, rename the
+// env reads to match (CLAUDE_API_KEY), set PROXY_SERVICE_TOKEN, then deploy and
+// immediately verify P&L "Generate Analysis" still works in the app.
+//
 // Why this exists:
 //   The Operations OS calls api.anthropic.com from the browser. Some
 //   browser extensions and corporate networks block direct calls to
@@ -103,10 +112,21 @@ export default {
     for (const [k, v] of request.headers.entries()) {
       if (FORWARD_HEADERS.has(k.toLowerCase())) upstreamHeaders.set(k, v);
     }
-    // Server/script mode: inject the server-side key ONLY for token-authed
-    // callers, never for a bare Origin claim. Browser mode relays the caller's
-    // own x-api-key untouched.
-    if (serviceAuthed && env.ANTHROPIC_API_KEY) {
+    // Inject the server-side key when the caller did NOT bring its own
+    // x-api-key. Both trusted modes qualify: legitimate browser calls (the
+    // in-app AI features send no key and rely on injection) and token-authed
+    // scripts. A caller that DID send x-api-key (e.g. the Operations valuation
+    // flow, which uses a user-entered key) is relayed untouched.
+    // Security vs the old proxy: the old code injected for ANY request carrying
+    // an allowed Origin STRING, which non-browser scripts can freely set (the
+    // monthly-valuations job proved the hole). Browser mode now also requires
+    // the Sec-Fetch-Site metadata header, which browsers set automatically and
+    // plain HTTP clients (curl/urllib) omit — so a bare Origin-spoof no longer
+    // spends the key. Residual risk (a client forging both Origin and
+    // Sec-Fetch) is accepted for now; the durable fix is per-key rate limiting
+    // and moving off browser-injected keys at the multi-tenant migration.
+    const callerSentKey = upstreamHeaders.has('x-api-key');
+    if (!callerSentKey && (looksLikeBrowser || serviceAuthed) && env && env.ANTHROPIC_API_KEY) {
       upstreamHeaders.set('x-api-key', env.ANTHROPIC_API_KEY);
       if (!upstreamHeaders.has('anthropic-version')) upstreamHeaders.set('anthropic-version', '2023-06-01');
     }
