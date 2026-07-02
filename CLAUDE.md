@@ -27,6 +27,7 @@ These patterns cause production bugs. Never introduce them:
 - `catch` blocks that swallow errors silently (must log or toast)
 - `TODO` / `FIXME` comments without a linked issue or concrete next action
 - Secrets, API keys, or PAT tokens hardcoded anywhere (use env vars or runtime auth)
+- Hardcoded AI model IDs in feature files (use `AI_MODEL_DEFAULT` / `AI_MODEL_LIGHT` from `js/config.js`; a retired ID is an app-wide AI outage)
 - `eval()`, `document.write()`, or `Function()` constructor
 - `innerHTML` with unescaped external data (use `escHtml()`)
 
@@ -67,9 +68,8 @@ os/                 ← Operating Systems (separate pages loaded via iframe)
 - `follow-up.html` — Inbound Comms (standalone, loaded via iframe)
 - `compliance.html` — Property Compliance (standalone, loaded via iframe)
 - `sop*.html` — SOPs for each page
-- `os/index.html` — Operating Systems Hub
 - `os/business-plan-builder/` — Business Launch Plan Builder
-- `os/launch-plan.html` — Operations Director Master Action Plan
+- `os/tasks/`, `os/operations/`, `os/strategy/`, `os/systemisation/`, `os/team/` — Operating Systems pages (loaded via iframe; the old os/index.html hub and os/launch-plan.html were removed in the sidebar restructure)
 - `sitemap.xml` / `robots.txt` — SEO files (update when adding new pages)
 
 ## CRITICAL: Concurrent Session Rules
@@ -106,14 +106,12 @@ These files are used by ALL features. Only ONE session should edit them at a tim
 
 ## Protected Sections
 
-### OS-INTEGRATION Comment Pairs
-When editing `index.html`, preserve the Operating Systems integration points marked with `<!-- OS-INTEGRATION -->` comment pairs:
-1. **Sidebar** — OS menu items
-2. **Tab panels** — OS iframe containers
+When editing `index.html`, preserve the Operating Systems integration points (the old `<!-- OS-INTEGRATION -->` comment markers were removed in the sidebar restructure; the structures themselves remain protected):
+1. **Sidebar** — OS menu items and their health dots
+2. **Tab panels** — OS iframe containers (`tab-tasks`, `tab-operations`, `tab-systemisation`, `tab-os-strategy`, `tab-os-team`, `tab-os-bplan`)
 3. **PAGE_REGISTRY** in `js/config.js` — OS entries
-4. **tabLabelMap** in `js/shared.js` — OS label keys
 
-**Never remove or overwrite code between OS-INTEGRATION comment pairs.**
+Never remove or overwrite these when restructuring the shell.
 
 ## Global Variables
 
@@ -230,7 +228,7 @@ The platform uses a **single design-token stylesheet** so every page — main sh
 ```
 
 This gives the page:
-- **Inter** font (auto-loaded from Google Fonts)
+- **DM Sans** font (auto-loaded from Google Fonts; the platform switched from Inter — never reintroduce Inter in new code or export templates)
 - The sage-executive palette via CSS custom properties
 - Default body background, text colour, and font rendering
 
@@ -277,7 +275,7 @@ Shadows: `--shadow-sm/md/lg`.
 ### Rules
 
 1. **Never hardcode a colour.** If the token palette lacks what you need, add it to `css/tokens.css` rather than inlining a hex. Example: a new status colour should be added as `--info-2` in tokens, not `#abcdef` in a feature stylesheet.
-2. **Never set `font-family` manually.** Inter comes via tokens.css; body inherits it. Delete any `-apple-system, BlinkMacSystemFont, ...` declarations in new code.
+2. **Never set `font-family` manually.** DM Sans comes via tokens.css; body inherits it. Delete any `-apple-system, BlinkMacSystemFont, ...` declarations in new code. Exception: print/export popups that cannot load tokens.css carry their own self-contained 'DM Sans' declaration with a comment saying why.
 3. **Don't introduce a dark theme** for a single page. The whole platform is light-only for now; a dark-mode toggle would be a platform-level change.
 4. **Inline styles should use tokens too:** `<div style="color:var(--text-secondary)">` rather than `color:#64748b`. This makes future rebrands painless.
 5. **Iframe pages** must import tokens.css with the correct relative path (see examples above) so they render on the same palette as the parent shell.
