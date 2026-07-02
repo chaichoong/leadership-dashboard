@@ -3054,6 +3054,9 @@ async function runAgenticCheck(wfId, extraAnswers){
     const w = allWorkflows.find(x=>x.id===wfId);
     if(!w) return;
     if(!getWfSopData(wfId)){ toast('Generate the SOP first'); return; }
+    // A plain Re-check must NOT throw away the owner's saved answers — fold them
+    // back in so the score never regresses and answered questions never resurface.
+    if(!extraAnswers){ extraAnswers = ((getWfSopData(wfId)||{}).readiness||{}).answers || {}; }
     const container = document.getElementById('agentic-'+wfId);
     const disp = getWfDisposition(wfId);
     const human = !!(disp && (disp.type==='recurring' || disp.type==='adhoc'));
@@ -3188,7 +3191,14 @@ function renderAgenticScorecard(wfId, readiness){
     }).join('');
 
     let questions = '';
-    if(readiness.questions && readiness.questions.length){
+    if(!ready && (!readiness.questions || !readiness.questions.length) && Object.keys(readiness.answers||{}).length){
+        // Answered but still short somewhere: no dead-end — point at the fix routes.
+        const thin = (readiness.stages||[]).filter(s=>s.status==='Thin'||s.status==='Missing').map(s=>s.name).join(', ');
+        questions = `<div class="agentic-questions">
+            <div class="agentic-q-title">Nearly there. ${esc(thin)} still need${thin.includes(',')?'':'s'} more detail — use the "Improve this step" boxes on the SOP below to add it, or re-record that part of the video, then hit Re-check.</div>
+        </div>`;
+    }
+    else if(readiness.questions && readiness.questions.length){
         questions = `<div class="agentic-questions">
             <div class="agentic-q-title">${esc(stateMeta.sub)}</div>
             ${readiness.questions.map((q,i)=>`<div class="agentic-q">
