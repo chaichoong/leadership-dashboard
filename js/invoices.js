@@ -18,31 +18,41 @@
         localStorage.setItem('lastSeenInvoiceTime', new Date().toISOString());
     }
     function updateInvoicesSidebarBadge() {
+        // The invoices view is reached via the "AP Variable" subtab button in the
+        // Accounts subtab bar — that is the navigation element that hosts the badge.
+        const navBtn = document.querySelector('.accounts-subtab[data-tab="invoices"]');
+        if (!navBtn) return false;
+        let badge = navBtn.querySelector('.invoices-nav-badge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'invoices-nav-badge od-count-badge';
+            badge.style.marginLeft = '6px';
+            navBtn.appendChild(badge);
+        }
         const unpaid = airtableInvoices.filter(inv => inv.status !== 'Paid');
         const lastSeen = new Date(getLastSeenInvoiceTime());
         const newCount = unpaid.filter(inv => inv.createdTime && new Date(inv.createdTime) > lastSeen).length;
-        const sidebarItem = document.querySelector('.sidebar-item[onclick*="invoices"]');
-        if (!sidebarItem) return;
-        const label = sidebarItem.querySelector('.sidebar-label');
-        if (!label) return;
-        let badge = sidebarItem.querySelector('.sidebar-invoice-badge');
-        if (!badge) {
-            badge = document.createElement('span');
-            badge.className = 'sidebar-invoice-badge';
-            badge.className = 'sidebar-invoice-badge od-count-badge';
-            label.appendChild(badge);
-        }
         if (newCount > 0) {
+            badge.style.display = '';
             badge.style.background = 'var(--danger)';
-            badge.style.color = 'white';
+            badge.style.color = 'var(--accent-on)';
             badge.textContent = `${unpaid.length} • ${newCount} new`;
         } else if (unpaid.length > 0) {
+            badge.style.display = '';
             badge.style.background = 'var(--border-default)';
             badge.style.color = 'var(--text-secondary)';
             badge.textContent = `${unpaid.length}`;
         } else {
             badge.textContent = '';
+            badge.style.display = 'none';
         }
+        return true;
+    }
+
+    // Only trust genuine Gmail thread links — anything else coming out of
+    // Airtable is dropped rather than rendered into an href/onclick.
+    function safeGmailUrl(url) {
+        return (typeof url === 'string' && url.startsWith('https://mail.google.com/')) ? url : '';
     }
 
     async function fetchInvoicesFromAirtable() {
@@ -94,7 +104,6 @@
                 };
             });
             invoiceRefreshedAt = new Date();
-            invoiceTabRendered = false;
             updateInvoicesSidebarBadge();
             // Hide spinner, show table
             if (spinner) spinner.style.display = 'none';
@@ -108,6 +117,15 @@
             // Hide spinner on error too, show table with whatever we have
             if (spinner) spinner.style.display = 'none';
             if (table) table.style.display = '';
+            if (typeof showToast === 'function') {
+                showToast('Could not load invoices from Airtable: ' + (e.message || 'unknown error'), { type: 'error' });
+            }
+            // If nothing is cached, show an inline error with a retry link
+            // instead of leaving the table blank.
+            const tbody = document.getElementById('invoiceTableBody');
+            if (tbody && airtableInvoices.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="9" class="od-empty-state" style="color:var(--danger)">Could not load invoices — ${escHtml(e.message || 'unknown error')}. <a href="#" onclick="event.preventDefault(); fetchInvoicesFromAirtable()" style="color:var(--info);text-decoration:underline">Try again</a></td></tr>`;
+            }
         }
     }
 
@@ -187,9 +205,46 @@
         return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
-    let invoiceTabRendered = false;
+    // Recompute and repaint just the summary KPI cards (Unpaid / Known Amount
+    // Due / Amount Unknown / Overdue). Called from renderInvoiceTab and after
+    // inline cell saves — a full renderInvoiceTab() there would rebuild the
+    // table inputs and destroy the user's typing focus.
+    function renderInvoiceSummaryCards() {
+        const summaryCards = document.getElementById('invoiceSummaryCards');
+        if (!summaryCards) return;
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        const sourceData = airtableInvoices.filter(inv => inv.status !== 'Paid');
+        let knownTotal = 0, unknownCount = 0, overdueCount = 0;
+        sourceData.forEach(inv => {
+            if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
+            if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
+        });
+        summaryCards.innerHTML = `
+            <div class="kpi-card">
+                <div class="kpi-card-label">Unpaid Invoices</div>
+                <div class="kpi-card-value">${sourceData.length}</div>
+                <div class="kpi-card-sub">Synced from Gmail "3. to pay"</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Known Amount Due</div>
+                <div class="kpi-card-value text-red">${fmt(knownTotal)}</div>
+                <div class="kpi-card-sub">${sourceData.length - unknownCount} of ${sourceData.length} invoices with amounts</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Amount Unknown</div>
+                <div class="kpi-card-value" style="color:var(--text-muted)">${unknownCount}</div>
+                <div class="kpi-card-sub">${unknownCount > 0 ? 'Click to enter amounts on table below' : 'All amounts populated'}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-card-label">Overdue / Past Date</div>
+                <div class="kpi-card-value text-red">${overdueCount}</div>
+                <div class="kpi-card-sub">${overdueCount > 0 ? 'Due date has passed' : 'No overdue invoices'}</div>
+            </div>
+        `;
+    }
+
     function renderInvoiceTab() {
-        invoiceTabRendered = true;
         const today = new Date();
         today.setHours(0,0,0,0);
         // Capture "last seen" BEFORE marking as seen, so NEW badges still show this render
@@ -234,39 +289,8 @@
             return 0;
         });
 
-        // Summary calculations (always based on all unpaid, not filtered)
-        let knownTotal = 0, unknownCount = 0, overdueCount = 0;
-        sourceData.forEach(inv => {
-            if (inv.amount !== null) knownTotal += inv.amount; else unknownCount++;
-            if (new Date(inv.dueDate || inv.emailDate) < today) overdueCount++;
-        });
-
-        // Summary cards
-        const summaryCards = document.getElementById('invoiceSummaryCards');
-        if (summaryCards) {
-            summaryCards.innerHTML = `
-                <div class="kpi-card">
-                    <div class="kpi-card-label">Unpaid Invoices</div>
-                    <div class="kpi-card-value">${sourceData.length}</div>
-                    <div class="kpi-card-sub">Synced from Gmail "3. to pay"</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-card-label">Known Amount Due</div>
-                    <div class="kpi-card-value text-red">${fmt(knownTotal)}</div>
-                    <div class="kpi-card-sub">${sourceData.length - unknownCount} of ${sourceData.length} invoices with amounts</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-card-label">Amount Unknown</div>
-                    <div class="kpi-card-value" style="color:var(--text-muted)">${unknownCount}</div>
-                    <div class="kpi-card-sub">${unknownCount > 0 ? 'Click to enter amounts on table below' : 'All amounts populated'}</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-card-label">Overdue / Past Date</div>
-                    <div class="kpi-card-value text-red">${overdueCount}</div>
-                    <div class="kpi-card-sub">${overdueCount > 0 ? 'Due date has passed' : 'No overdue invoices'}</div>
-                </div>
-            `;
-        }
+        // Summary cards (always based on all unpaid, not filtered)
+        renderInvoiceSummaryCards();
 
         // Table rows
         const tbody = document.getElementById('invoiceTableBody');
@@ -331,11 +355,13 @@
             ).join('');
             const businessHtml = `<select class="inv-cell-input inv-cell-business od-inline-input" data-record="${inv.recordId}" data-field="${INV.business}" data-type="link" style="cursor:pointer">${bizOptions}</select>`;
 
-            const gmailUrl = inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`;
-            const threadId = inv.threadId || inv.id;
+            const gmailUrl = safeGmailUrl(inv.gmailUrl || `https://mail.google.com/mail/u/0/#all/${inv.id}`);
             const isSelected = invSelectedIds.has(inv.recordId);
             const checkboxHtml = `<input type="checkbox" class="inv-row-check" data-record="${inv.recordId}"${isSelected ? ' checked' : ''} title="Select for bulk action">`;
-            const gmailLinkHtml = `<a href="${gmailUrl}" target="_blank" class="inv-gmail-link" title="Open in Gmail" style="font-size:13px;text-decoration:none;margin-left:6px">📧</a>`;
+            // Validated URL only, escaped for the attribute context. No link when invalid.
+            const gmailLinkHtml = gmailUrl
+                ? `<a href="${escHtml(gmailUrl)}" target="_blank" rel="noopener" class="inv-gmail-link" title="Open in Gmail" style="font-size:13px;text-decoration:none;margin-left:6px">📧</a>`
+                : '';
 
             // AI match suggestion row
             let matchRow = '';
@@ -346,7 +372,7 @@
                             <span style="font-size:11px;font-weight:700;color:var(--info)">🤖 AI Match Found:</span>
                             <span style="font-size:12px;color:var(--text-primary)">${escHtml(match.txDate)} · ${escHtml(match.txLabel)} · <strong>${fmt(Math.abs(match.txAmount))}</strong></span>
                             <div style="margin-left:auto;display:flex;gap:6px">
-                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatch('${escJs(inv.recordId)}','${escJs(threadId)}','${escJs(match.txRecordId)}','${escJs(gmailUrl)}',this,${idx})" title="Approve this match and move to paid">✓ Approve</button>
+                                <button class="inv-approve-btn" onclick="event.stopPropagation(); approveMatchClick('${inv.recordId}','${match.txRecordId}',${idx},this)" title="Approve this match and move to paid">✓ Approve</button>
                                 <button class="inv-reject-btn" onclick="event.stopPropagation(); rejectMatch('${inv.recordId}',${idx})" title="Dismiss this suggestion">✗ Reject</button>
                             </div>
                         </div>
@@ -354,8 +380,9 @@
                 </tr>`;
             }
 
-            // Action column
-            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaid('${escJs(inv.recordId)}','${escJs(threadId)}','','${escJs(gmailUrl)}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
+            // Action column — recordId is an Airtable record ID (safe); the
+            // Gmail URL is resolved inside the click wrapper, never inlined.
+            const actionHtml = `<button class="inv-mark-paid-btn" onclick="event.stopPropagation(); markInvoicePaidClick('${inv.recordId}',this)" title="Mark as paid — updates Airtable + moves Gmail label">Mark Paid</button>`;
 
             return `<tr data-record-id="${inv.recordId}"${isSelected ? ' class="inv-row-selected"' : ''}>
                 <td style="text-align:center;width:32px">${checkboxHtml}</td>
@@ -369,6 +396,13 @@
                 <td style="width:110px;text-align:center">${actionHtml}</td>
             </tr>${matchRow}`;
         }).join('');
+
+        // Empty state — never leave a blank table
+        if (sorted.length === 0) {
+            tbody.innerHTML = filterText
+                ? `<tr><td colspan="9" class="od-empty-state">No unpaid invoices match "${escHtml(filterText)}" — clear the search to see all</td></tr>`
+                : `<tr><td colspan="9" class="od-empty-state">No unpaid invoices — all clear</td></tr>`;
+        }
 
         // ── Wire up cell input save (delegate via tbody) ──
         // Save fires on `change` for selects/numbers and on `blur` for text inputs.
@@ -402,13 +436,13 @@
                         name: 'Invoices fetched from Airtable', kind: 'sync', run: () => {
                             const n = (airtableInvoices || []).length;
                             if (n === 0) return { status: 'warn', detail: 'No invoices loaded yet — Airtable fetch may be in flight' };
-                            return { status: 'pass', detail: `${n} invoice records loaded (all statuses)` };
+                            return { status: 'pass', detail: `${n} unpaid invoice records loaded (fetch filters Status = Unpaid)` };
                         }
                     },
                     {
                         name: 'Outstanding invoices count', kind: 'sync', run: () => {
                             const open = (airtableInvoices || []).filter(inv => inv.status !== 'Paid');
-                            return { status: 'pass', detail: `${open.length} not yet paid · ${(airtableInvoices||[]).length - open.length} marked Paid` };
+                            return { status: 'pass', detail: `${open.length} unpaid invoice${open.length === 1 ? '' : 's'} awaiting payment` };
                         }
                     },
                     {
@@ -439,9 +473,13 @@
                         }
                     },
                     {
-                        name: 'Sidebar "new invoices" badge wired', kind: 'automation', run: () => {
-                            if (typeof updateInvoicesSidebarBadge !== 'function') return { status: 'fail', detail: 'updateInvoicesSidebarBadge() not loaded' };
-                            return { status: 'pass', detail: 'Badge updates on render and after fetch' };
+                        name: 'AP Variable "new invoices" badge wired', kind: 'automation', run: () => {
+                            // Test the actual outcome: the badge element exists on the
+                            // AP Variable subtab and updateInvoicesSidebarBadge() found it.
+                            const updated = typeof updateInvoicesSidebarBadge === 'function' && updateInvoicesSidebarBadge();
+                            const badge = document.querySelector('.accounts-subtab[data-tab="invoices"] .invoices-nav-badge');
+                            if (!updated || !badge) return { status: 'fail', detail: 'Badge element not found on the AP Variable subtab button' };
+                            return { status: 'pass', detail: badge.textContent ? `Badge showing "${badge.textContent}"` : 'Badge present — no unpaid invoices to flag' };
                         }
                     },
                     {
@@ -600,6 +638,9 @@
         if (saveOk && type === 'number' && fieldValue !== null) {
             input.value = Number(fieldValue).toFixed(2);
         }
+        // Refresh the summary KPI cards (Known Amount Due / Amount Unknown etc.)
+        // without re-rendering the table, so the user's input focus survives.
+        if (saveOk) renderInvoiceSummaryCards();
         // Flash the input's parent cell
         const td = input.closest('td');
         if (td) {
@@ -795,7 +836,6 @@
         invSelectedIds.clear();
         updateInvoicesSidebarBadge();
         lastApprovalAttempt = { ok: failed === 0, when: new Date(), error: failed ? `${failed} failed` : null, action: 'markPaid' };
-        invoiceTabRendered = false;
         renderInvoiceTab();
         setTimeout(() => { if (typeof fetchGmailLabelCount === 'function') fetchGmailLabelCount(); }, 3500);
 
@@ -803,148 +843,18 @@
         if (failed > 0) alert(`Marked ${succeeded} of ${targets.length} as Paid. ${failed} failed — see console.`);
     }
 
-    // ── Click-to-edit any invoice field — saves to Airtable ──
-    function editInvField(el, recordId, fieldId, inputType) {
-        const input = document.createElement('input');
-        input.type = inputType === 'number' ? 'number' : 'text';
-        if (inputType === 'number') { input.step = '0.01'; input.placeholder = '0.00'; }
-        else { input.placeholder = fieldId === INV.payee ? 'Payee name' : fieldId === INV.desc ? 'Description' : fieldId === INV.ref ? 'Invoice ref' : 'Value'; }
-        // Pre-populate with current value so corrections don't require retyping
-        const currentInv = airtableInvoices.find(i => i.recordId === recordId);
-        if (currentInv) {
-            const currentVal = fieldId === INV.amount ? currentInv.amount
-                : fieldId === INV.payee ? currentInv.payee
-                : fieldId === INV.desc ? currentInv.desc
-                : fieldId === INV.ref ? currentInv.ref
-                : fieldId === INV.dueDate ? currentInv.dueDate
-                : null;
-            if (currentVal !== null && currentVal !== undefined && currentVal !== '') {
-                input.value = String(currentVal);
-            }
-        }
-        const w = inputType === 'number' ? '90px' : (fieldId === INV.ref ? '110px' : '170px');
-        input.className = 'od-inline-input';
-        input.style.cssText = `width:${w};border-color:var(--info);${inputType === 'number' ? 'text-align:right;' : ''}`;
-
-        async function save() {
-            const val = input.value.trim();
-            if (!val) { renderInvoiceTab(); return; }
-            let fieldValue;
-            if (inputType === 'number') {
-                const num = parseFloat(val);
-                if (isNaN(num) || num <= 0) { renderInvoiceTab(); return; }
-                fieldValue = num;
-            } else {
-                fieldValue = val;
-            }
-            // Save to Airtable
-            input.disabled = true;
-            input.style.opacity = '0.5';
-            let saveOk = false;
-            try {
-                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
-                    method: 'PATCH',
-                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fields: { [fieldId]: fieldValue } })
-                });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                // Update local data so re-render shows new value without refetching
-                const inv = airtableInvoices.find(i => i.recordId === recordId);
-                if (inv) {
-                    if (fieldId === INV.amount) inv.amount = fieldValue;
-                    else if (fieldId === INV.payee) inv.payee = fieldValue;
-                    else if (fieldId === INV.desc) inv.desc = fieldValue;
-                    else if (fieldId === INV.ref) inv.ref = fieldValue;
-                    else if (fieldId === INV.dueDate) inv.dueDate = fieldValue;
-                }
-                saveOk = true;
-            } catch (e) {
-                console.error('Failed to save invoice field to Airtable:', e);
-            }
-            // Map field to column index: payee=2, desc=3, ref=4, amount=5
-            const flashCol = fieldId === INV.payee ? 2 : fieldId === INV.desc ? 3 : fieldId === INV.ref ? 4 : fieldId === INV.amount ? 5 : -1;
-            renderInvoiceTab();
-            // Flash the cell green (saved) or red (failed) after re-render
-            if (flashCol >= 0) {
-                const newRow = document.querySelector(`tr[data-record-id="${recordId}"]`);
-                const newTd = newRow && newRow.cells[flashCol];
-                if (newTd) {
-                    newTd.classList.add(saveOk ? 'inv-flash-ok' : 'inv-flash-fail');
-                    setTimeout(() => newTd.classList.remove('inv-flash-ok', 'inv-flash-fail'), 1500);
-                }
-            }
-        }
-
-        input.onkeydown = function(e) {
-            if (e.key === 'Enter') save();
-            if (e.key === 'Escape') renderInvoiceTab();
-        };
-        input.onblur = save;
-        el.replaceWith(input);
-        input.focus();
-        // Pre-select the current value so typing immediately replaces it
-        if (input.value) input.select();
+    // ── Onclick wrappers — resolve thread ID + Gmail link from local state so
+    // no Airtable-sourced URL is ever interpolated into an onclick attribute ──
+    function approveMatchClick(recordId, txRecordId, rowIdx, btn) {
+        const inv = airtableInvoices.find(i => i.recordId === recordId);
+        if (!inv) return;
+        approveMatch(recordId, inv.threadId || inv.id, txRecordId, safeGmailUrl(inv.gmailUrl), btn, rowIdx);
     }
 
-    // ── Click-to-edit Business field (linked record dropdown) — saves to Airtable ──
-    function editInvBusiness(el, recordId) {
+    function markInvoicePaidClick(recordId, btn) {
         const inv = airtableInvoices.find(i => i.recordId === recordId);
-        const currentBizId = (inv && inv.businessIds && inv.businessIds[0]) || '';
-        const select = document.createElement('select');
-        select.className = 'od-inline-input';
-        select.style.cssText = 'border-color:var(--info);cursor:pointer';
-        // Empty option for "no business assigned"
-        const blank = document.createElement('option');
-        blank.value = ''; blank.textContent = '— None —';
-        select.appendChild(blank);
-        const bizPickList = getActiveBusinesses();
-        if (currentBizId && !bizPickList.some(b => b.id === currentBizId)) {
-            const cur = (allBusinesses || []).find(b => b.id === currentBizId);
-            if (cur) bizPickList.push(cur);
-        }
-        bizPickList.forEach(b => {
-            const opt = document.createElement('option');
-            opt.value = b.id;
-            const nm = getField(b, BIZ_NAME_FIELD);
-            opt.textContent = (typeof nm === 'string' ? nm : (nm && nm.name) || b.id);
-            if (b.id === currentBizId) opt.selected = true;
-            select.appendChild(opt);
-        });
-
-        async function save() {
-            const newBizId = select.value;
-            const fieldValue = newBizId ? [newBizId] : [];
-            select.disabled = true;
-            select.style.opacity = '0.5';
-            let saveOk = false;
-            try {
-                const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.invoices}/${recordId}?returnFieldsByFieldId=true`, {
-                    method: 'PATCH',
-                    headers: { 'Authorization': 'Bearer ' + PAT, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fields: { [INV.business]: fieldValue } })
-                });
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                if (inv) inv.businessIds = fieldValue;
-                saveOk = true;
-            } catch (e) {
-                console.error('Failed to save business:', e);
-            }
-            renderInvoiceTab();
-            // Flash the cell green/red after re-render. Business is column index 6 (after Business header insert).
-            const newRow = document.querySelector(`tr[data-record-id="${recordId}"]`);
-            const newTd = newRow && newRow.cells[6];
-            if (newTd) {
-                newTd.classList.add(saveOk ? 'inv-flash-ok' : 'inv-flash-fail');
-                setTimeout(() => newTd.classList.remove('inv-flash-ok', 'inv-flash-fail'), 1500);
-            }
-        }
-
-        // Save on change. Escape or click-away cancels by re-rendering.
-        select.onchange = save;
-        select.onblur = function() { if (!select.disabled) renderInvoiceTab(); };
-        select.onkeydown = function(e) { if (e.key === 'Escape') renderInvoiceTab(); };
-        el.replaceWith(select);
-        select.focus();
+        if (!inv) return;
+        markInvoicePaid(recordId, inv.threadId || inv.id, '', safeGmailUrl(inv.gmailUrl), btn);
     }
 
     // ── Approve AI match — mark paid in Airtable + move Gmail label ──
@@ -1032,7 +942,6 @@
             // Record success for the health checks panel
             lastApprovalAttempt = { ok: true, when: new Date(), error: null, action: txRecordId ? 'approveMatch' : 'markPaid' };
             setTimeout(() => {
-                invoiceTabRendered = false;
                 renderInvoiceTab();
             }, 1500);
             // Re-fetch Gmail count after the label-move has had time to propagate

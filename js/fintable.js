@@ -36,6 +36,7 @@
             if (offset) url.searchParams.set('offset', offset);
 
             const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${PAT}` } });
+            if (!resp.ok) throw new Error('Airtable accounts fetch failed: HTTP ' + resp.status);
             const data = await resp.json();
             if (data.records) allRecords = allRecords.concat(data.records);
             offset = data.offset || null;
@@ -109,14 +110,34 @@
         </div>`;
     }
 
+    // Called un-awaited from switchTab in shared.js — must handle its own
+    // errors and render a visible error state rather than reject silently.
     async function loadFintableSyncMonitor(forceRefresh) {
         if (!PAT) return;
-        if (!fintableAccountsCache || forceRefresh) {
-            fintableAccountsCache = await fetchFintableAccounts();
-            updateFintableAlerts(fintableAccountsCache);
+        try {
+            if (!fintableAccountsCache || forceRefresh) {
+                fintableAccountsCache = await fetchFintableAccounts();
+                updateFintableAlerts(fintableAccountsCache);
+            }
+            renderFintableMonitor(fintableAccountsCache);
+            fintableLoaded = true;
+        } catch (e) {
+            console.error('Fintable sync monitor load failed:', e);
+            renderFintableLoadError(e);
+            if (typeof showToast === 'function') {
+                showToast('Could not load bank account sync data: ' + ((e && e.message) || 'unknown error'), { type: 'error' });
+            }
         }
-        renderFintableMonitor(fintableAccountsCache);
-        fintableLoaded = true;
+    }
+
+    // Visible error state for the Bank Accounts tab, with a retry button
+    function renderFintableLoadError(e) {
+        const tbody = document.getElementById('fintableBody');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="6" class="od-empty-state" style="color:var(--danger)">Could not load accounts — ${escHtml((e && e.message) || 'unknown error')}<br><button onclick="loadFintableSyncMonitor(true)" class="od-btn od-btn-secondary" style="margin-top:8px">Retry</button></td></tr>`;
+        }
+        const summaryEl = document.getElementById('fintableSummary');
+        if (summaryEl) summaryEl.innerHTML = '';
     }
 
     // Background check — runs on dashboard load without rendering the full table
@@ -189,7 +210,7 @@
         // Table rows — sort most recently synced first
         const sorted = [...accounts].sort((a, b) => a.hoursAgo - b.hoursAgo);
         const tbody = document.getElementById('fintableBody');
-        tbody.innerHTML = sorted.map(a => {
+        const rowsHtml = sorted.map(a => {
             const syncStr = a.lastSync
                 ? a.lastSync.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + a.lastSync.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
                 : 'Never';
@@ -206,6 +227,8 @@
                 <td class="inv-amount">${balStr}</td>
             </tr>`;
         }).join('');
+        // Empty state — never leave the table blank
+        tbody.innerHTML = rowsHtml || '<tr><td colspan="6" class="od-empty-state">No Fintable accounts found — accounts appear here once they have synced within the last 6 months. Check the Fintable connection if you expected accounts to show.</td></tr>';
 
         // ── Sync Bar + Health Checks ──
         if (typeof registerSyncBar === 'function') {

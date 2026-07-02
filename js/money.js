@@ -143,28 +143,82 @@ function waitForMoneyData(timeoutMs) {
     });
 }
 
+let _moneyRendered = false;
+
+// Register the Money tab's sync bar + health checks. The refresh piggybacks
+// on the dashboard load (money mirrors that data); it never fires its own
+// Airtable burst — see waitForMoneyData for why.
+function registerMoneySyncBar() {
+    if (typeof registerSyncBar !== 'function') return;
+    registerSyncBar('money', {
+        refreshFn: () => {
+            if (typeof loadDashboard === 'function') return loadDashboard({ force: true });
+            return renderMoneyTab();
+        },
+        checks: [
+            { name: 'Dashboard data present', kind: 'sync', run: () => moneyDataReady()
+                ? { status: 'pass', detail: `${allAccounts.length} account(s) loaded` }
+                : { status: 'warn', detail: 'Waiting for data — open the Leadership Dashboard' } },
+            { name: 'Bank balances loaded', kind: 'sync', run: () => {
+                if (!moneyDataReady()) return { status: 'warn', detail: 'Not yet loaded' };
+                const m = computeSafeToAct();
+                return (m && isFinite(m.clearedBalance)) ? { status: 'pass', detail: fmt(m.clearedBalance) + ' cleared' } : { status: 'warn', detail: 'No balance figure' };
+            } },
+            { name: 'Safe-to-act figure computed', kind: 'sync', run: () => {
+                if (!moneyDataReady()) return { status: 'warn', detail: 'Not yet loaded' };
+                const m = computeSafeToAct();
+                return (m && isFinite(m.safeToActToday)) ? { status: 'pass', detail: fmt(m.safeToActToday) + ' safe to act' } : { status: 'fail', detail: 'Figure not finite' };
+            } },
+            { name: 'Reliable rent computed', kind: 'sync', run: () => {
+                if (!moneyDataReady()) return { status: 'warn', detail: 'Not yet loaded' };
+                const m = computeSafeToAct();
+                return (m && isFinite(m.netExpectedRent)) ? { status: 'pass', detail: fmt(m.netExpectedRent) + ' reliable rent' } : { status: 'warn', detail: 'No reliable-rent figure' };
+            } },
+        ],
+    });
+}
+
 async function renderMoneyTab() {
     const el = document.getElementById('tab-money');
     if (!el) return;
+    registerMoneySyncBar();
 
-    if (moneyDataReady()) { renderMoneyContent(el, computeSafeToAct()); return; }
+    if (moneyDataReady()) { renderMoneyContent(el, computeSafeToAct()); if (typeof markTabSynced === 'function') markTabSynced('money'); return; }
 
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:240px;color:var(--text-muted)">
+    el.innerHTML = `<div data-sync-bar="money"></div>
+        <div style="display:flex;align-items:center;justify-content:center;min-height:240px;color:var(--text-muted)">
         <div style="text-align:center">
             <div class="spinner" style="margin:0 auto 12px"></div>
             <div>Loading money data…</div>
         </div></div>`;
+    registerMoneySyncBar();
 
     const ok = await waitForMoneyData(90000);
     if (!ok) {
-        el.innerHTML = `<div style="max-width:920px;margin:0 auto"><div class="kpi-card" style="text-align:center;color:var(--text-secondary)">
+        el.innerHTML = `<div data-sync-bar="money"></div>
+        <div style="max-width:920px;margin:0 auto"><div class="kpi-card" style="text-align:center;color:var(--text-secondary)">
             <div style="font-weight:var(--fw-semibold);margin-bottom:6px;color:var(--text-primary)">Money data did not load</div>
-            <div style="font-size:var(--fs-sm)">Use the Refresh button, or switch to the Leadership Dashboard and back.</div>
+            <div style="font-size:var(--fs-sm);margin-bottom:12px">The Leadership Dashboard data hasn't arrived yet.</div>
+            <button onclick="renderMoneyTab()" style="padding:8px 16px;border:none;background:var(--accent);color:var(--accent-on);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)">Retry</button>
         </div></div>`;
+        registerMoneySyncBar();
         return;
     }
     renderMoneyContent(el, computeSafeToAct());
+    if (typeof markTabSynced === 'function') markTabSynced('money');
 }
+
+// Called by renderDashboard after a fresh data load so the Money tab reflects
+// the same numbers without its own fetch. Only re-renders once the tab has
+// been opened at least once (avoids building hidden DOM on every load).
+function notifyMoneyDataUpdated() {
+    if (!_moneyRendered) return;
+    const el = document.getElementById('tab-money');
+    if (!el || !moneyDataReady()) return;
+    renderMoneyContent(el, computeSafeToAct());
+    if (typeof markTabSynced === 'function') markTabSynced('money');
+}
+window.notifyMoneyDataUpdated = notifyMoneyDataUpdated;
 
 function renderMoneyContent(el, m) {
     const lightColour = { green: 'var(--success)', amber: 'var(--warning)', red: 'var(--danger)' }[m.light];
@@ -184,7 +238,9 @@ function renderMoneyContent(el, m) {
         </div>`;
     };
 
+    _moneyRendered = true;
     el.innerHTML = `
+    <div data-sync-bar="money"></div>
     <div style="max-width:920px;margin:0 auto">
 
         <!-- Hero: the one number -->

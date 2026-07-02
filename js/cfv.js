@@ -17,10 +17,18 @@
         { day: 7, label: 'Stage 3', desc: 'Escalation', cssClass: 'stage-3' },
     ];
 
-    // Build tenant lookup from allTenants array
+    // Build tenant lookup from allTenants array. Memoised per sweep so a
+    // full CFV detection pass doesn't rebuild it once per tenancy (O(tenancies
+    // × tenants)); the cache is keyed on the allTenants reference, so it
+    // rebuilds automatically whenever the data array is replaced on refresh.
+    let _tenantLookupCache = null;
+    let _tenantLookupSource = null;
     function buildTenantLookup() {
+        if (_tenantLookupCache && _tenantLookupSource === allTenants) return _tenantLookupCache;
         const lookup = {};
         allTenants.forEach(t => { lookup[t.id] = t; });
+        _tenantLookupCache = lookup;
+        _tenantLookupSource = allTenants;
         return lookup;
     }
 
@@ -190,7 +198,7 @@
                 // Add audit comment
                 const surname = rec ? String(getField(rec, F.tenSurname) || '') : '';
                 await addTenancyComment(tenancyId, `Auto-returned to In Payment — reconciled transaction linked to this tenancy detected for ${new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}.`);
-                console.log(`CFV auto-return: ${surname || tenancyId} → In Payment`);
+                if (typeof showToast === 'function') showToast(`Rent restarted — ${surname || tenancyId} auto-returned to In Payment`, { type: 'info' });
             } else {
                 // Airtable update failed — remove local flag so it retries next load
                 localStorage.removeItem('cfv_' + tenancyId + '_returned');
@@ -497,8 +505,18 @@
             let contactHtml = '';
             if (entry.tenantPhone || entry.tenantEmail) {
                 contactHtml = '<div class="cfv-contact-info">';
-                if (entry.tenantPhone) contactHtml += `<a href="tel:${entry.tenantPhone}">${escHtml(entry.tenantPhone)}</a><br>`;
-                if (entry.tenantEmail) contactHtml += `<a href="mailto:${entry.tenantEmail}">${escHtml(entry.tenantEmail)}</a>`;
+                if (entry.tenantPhone) {
+                    const telClean = String(entry.tenantPhone).replace(/[^0-9+]/g, '');
+                    contactHtml += telClean
+                        ? `<a href="tel:${escHtml(telClean)}">${escHtml(entry.tenantPhone)}</a><br>`
+                        : `${escHtml(entry.tenantPhone)}<br>`;
+                }
+                if (entry.tenantEmail) {
+                    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(entry.tenantEmail).trim());
+                    contactHtml += emailOk
+                        ? `<a href="mailto:${escHtml(String(entry.tenantEmail).trim())}">${escHtml(entry.tenantEmail)}</a>`
+                        : `${escHtml(entry.tenantEmail)}`;
+                }
                 contactHtml += '</div>';
             } else {
                 contactHtml = '<span class="cfv-contact-missing">⚠️ No contact info</span>';
