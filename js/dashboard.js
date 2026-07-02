@@ -370,14 +370,23 @@
         };
     }
 
-    const _KPI_BLOCKED = /\b(fetch|XMLHttpRequest|import|require|eval|Function|document|window|localStorage|sessionStorage|globalThis|navigator|location|cookie|postMessage|Worker|ServiceWorker|WebSocket)\b/;
+    // Denylist: network/DOM/storage escape hatches, `constructor` (prototype-walk
+    // escapes), backticks (template-literal string building), and a string literal
+    // immediately followed by `[` (bracket-access evasion like ""["constructor"]).
+    const _KPI_BLOCKED = /\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|import|require|eval|Function|constructor|document|window|self|globalThis|top|parent|frames|opener|localStorage|sessionStorage|navigator|location|cookie|postMessage|Worker|ServiceWorker)\b|`|["']\s*\[/;
     function runKpiComputeCode(code, ctx){
         if(!code||!String(code).trim())return null;
         if(_KPI_BLOCKED.test(code)){console.warn('[runKpiComputeCode] blocked unsafe token in code');return null}
         try{
+            // SECURITY: this executes founder-authored compute code from the
+            // Projects table (ctx-only maths over the loaded finance data).
+            // Acceptable single-tenant only — the author already controls the
+            // deployment. MUST be replaced with server-side execution before
+            // any multi-tenant rollout. The extra parameters shadow dangerous
+            // globals so even code that slips past the denylist sees undefined.
             // eslint-disable-next-line no-new-func
-            const fn=new Function('ctx','"use strict";'+code);
-            const v=fn(ctx);
+            const fn=new Function('ctx','PAT','fetch','localStorage','sessionStorage','document','window','self','globalThis','top','parent','frames','opener','XMLHttpRequest','WebSocket','EventSource','importScripts','"use strict";'+code);
+            const v=fn.call(null,ctx);
             if(typeof v==='number'&&isFinite(v))return v;
             if(typeof v==='string'){const n=parseFloat(v);if(!isNaN(n))return n}
             // If the function returns an object (e.g. { rolling, months }), stash it
@@ -552,12 +561,22 @@
             .filter(Boolean)
             .sort((a,b)=>a.localeCompare(b));
         const filters=['all',...activeBizNames];
+        // Business names are user data — never inline them into onclick handlers
+        // (a name containing a quote would escape the attribute). Render each pill
+        // with an escHtml'd data-filter attribute and use one delegated listener.
         pills.innerHTML=filters.map(f=>{
             const label=f==='all'?'All':f;
             const isActive=strategicKpiFilter===f;
 
-            return `<button onclick="setStrategicKpiFilter('${f.replace(/'/g,"\\'")}')" class="od-filter-pill${isActive?' active':''}">${escHtml(label)}</button>`;
+            return `<button data-filter="${escHtml(f)}" class="od-filter-pill${isActive?' active':''}">${escHtml(label)}</button>`;
         }).join('');
+        if(!pills.dataset.filterWired){
+            pills.dataset.filterWired='1';
+            pills.addEventListener('click',e=>{
+                const btn=e.target.closest('button[data-filter]');
+                if(btn)setStrategicKpiFilter(btn.dataset.filter);
+            });
+        }
 
         let filtered=active.slice();
         if(strategicKpiFilter!=='all')filtered=filtered.filter(p=>p.business===strategicKpiFilter);
@@ -753,7 +772,22 @@
     window.toggleStratKpiDrill=toggleStratKpiDrill;
 
     // ── Dashboard Load ──
-    async function loadDashboard() {
+    // In-flight guard: concurrent loadDashboard() calls (sync-bar refresh,
+    // smartRefresh, other tabs' refreshFns firing together) share ONE run
+    // instead of doubling the 9-table Airtable request burst. The guard clears
+    // when a run settles, so the next call — or an explicit
+    // loadDashboard({ force: true }) after completion — starts a fresh fetch.
+    let _loadDashboardPromise = null;
+    function loadDashboard(opts) {
+        if (_loadDashboardPromise && !(opts && opts.force)) return _loadDashboardPromise;
+        const run = _runLoadDashboard().finally(() => {
+            if (_loadDashboardPromise === run) _loadDashboardPromise = null;
+        });
+        _loadDashboardPromise = run;
+        return run;
+    }
+
+    async function _runLoadDashboard() {
         // Schedule the smart-refresh timer FIRST, before any rendering paths fire.
         // Reason: renderDashboard (called from both the cache-hit and fresh-fetch
         // paths) ends with markTabSynced('overview'), which auto-runs the health
@@ -788,6 +822,10 @@
                 allBusinesses  = d.businesses;
                 // Let runAutomatedKpis (fired via loadStrategicKpis at top) proceed.
                 markMainDataReady();
+                // Businesses are now populated — re-render the strategic KPI
+                // section in case its first paint raced ahead of them (filter
+                // chips showed only 'All' and rows said 'No business').
+                try { renderStrategicKpis(); } catch (e) { console.warn('[loadDashboard] strategic KPI re-render failed:', e); }
                 renderDashboard(d.accounts, d.costs, d.tenancies, d.transactions, d.rentalUnits, d.tenants);
                 document.getElementById('dashboard').style.display = 'block';
                 document.getElementById('loadingOverlay').style.display = 'none';
@@ -836,6 +874,10 @@
             // Signal to runAutomatedKpis that the globals it depends on are now
             // populated. (No-op if cache-hit already resolved it.)
             markMainDataReady();
+            // Businesses are now populated — re-render the strategic KPI section
+            // in case its first paint raced ahead of them (filter chips showed
+            // only 'All' and rows said 'No business').
+            try { renderStrategicKpis(); } catch (e) { console.warn('[loadDashboard] strategic KPI re-render failed:', e); }
 
             // Clear stale "returned" flags — if Airtable now shows In Payment, the flag is no longer needed
             tenancies.forEach(t => {
@@ -905,6 +947,17 @@
                 (e.message || 'Unknown error') + '</div>';
             document.getElementById('loadingActions').style.display = 'block';
         }
+    }
+
+    // Single shared predicate for "is this rental unit void". Accepts select
+    // objects and plain strings, case-insensitive, matches 'Void', 'void',
+    // 'Void – refurb' etc. Used by BOTH the Void Units count and the
+    // per-property breakdown so the two figures can never disagree.
+    function isUnitVoid(unitRec) {
+        const status = getField(unitRec, F.unitStatus);
+        if (!status) return false;
+        const name = typeof status === 'string' ? status : (status.name || '');
+        return name.trim().toLowerCase().startsWith('void');
     }
 
     function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
@@ -1007,12 +1060,12 @@
         // Background: migrate legacy localStorage log → Airtable (one-shot, no-op after first run),
         // then refresh from Airtable and swap in the up-to-date card.
         (async () => {
-            try { await migrateLocalReconLog(); } catch {}
+            try { await migrateLocalReconLog(); } catch (e) { console.warn('[renderDashboard] recon log migration failed:', e); }
             try {
                 const fresh = await refreshReconAccuracyStats();
                 const host = document.getElementById('accuracyKpiCard');
                 if (host) host.innerHTML = buildAccuracyKPIHtml(fresh);
-            } catch {}
+            } catch (e) { console.warn('[renderDashboard] accuracy stats refresh failed:', e); }
         })();
 
         document.getElementById('financialCards').innerHTML = `
@@ -1062,10 +1115,7 @@
 
         // ── SECTION 2: Portfolio Overview ──
         const totalUnits = rentalUnits.length;
-        const voidUnits = rentalUnits.filter(r => {
-            const status = getField(r, F.unitStatus);
-            return status && (typeof status === 'string' ? status : (status.name || '')).toLowerCase().includes('void');
-        });
+        const voidUnits = rentalUnits.filter(isUnitVoid);
         const occupiedCount = totalUnits - voidUnits.length;
         const occupancyRate = totalUnits > 0 ? (occupiedCount / totalUnits * 100).toFixed(2) : '0.00';
 
@@ -1076,9 +1126,7 @@
             const propName = propVals.length > 0 ? propVals.join(', ') : 'Unknown';
             if (!unitsByProperty[propName]) unitsByProperty[propName] = { total: 0, occupied: 0, voids: [] };
             unitsByProperty[propName].total++;
-            const status = getField(r, F.unitStatus);
-            const isVoid = typeof status === 'string' && status.toLowerCase() === 'void';
-            if (isVoid) {
+            if (isUnitVoid(r)) {
                 unitsByProperty[propName].voids.push(r);
             } else {
                 unitsByProperty[propName].occupied++;
@@ -1207,11 +1255,14 @@
         const thirtyDaysAgo = new Date(today);
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+        // Compare date STRINGS (YYYY-MM-DD), not Date objects. new Date('YYYY-MM-DD')
+        // parses as UTC midnight, which during BST is 1h AFTER local midnight — so
+        // today's transactions fell outside the window for half the year.
+        const windowStartKey = dateKey(thirtyDaysAgo);
+        const windowEndKey = dateKey(today);
         const recentTx = transactions.filter(r => {
-            const d = getField(r, F.txDate);
-            if (!d) return false;
-            const txDate = new Date(d);
-            return txDate >= thirtyDaysAgo && txDate <= today;
+            const d = String(getField(r, F.txDate) || '').slice(0, 10);
+            return d && d >= windowStartKey && d <= windowEndKey;
         });
 
         function txBySubCat(recIds) {
@@ -1626,5 +1677,12 @@
                 ],
             });
             markTabSynced('overview');
+        }
+
+        // Money Confidence mirrors this data — tell it a fresh data load just
+        // landed so its "Safe to act today" figure re-renders (cheap local
+        // recompute over the globals set above; no extra fetches).
+        if (typeof notifyMoneyDataUpdated === 'function') {
+            try { notifyMoneyDataUpdated(); } catch (e) { console.warn('[renderDashboard] money re-render failed:', e); }
         }
     }

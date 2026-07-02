@@ -43,10 +43,20 @@ const FORWARD_HEADERS = new Set([
   'anthropic-beta',
 ]);
 
+// Two call modes, each with its own auth so a spoofed Origin can never make
+// the Worker spend the server-side key:
+//   1. Browser mode — Origin is in ALLOWED_ORIGINS (browsers cannot forge the
+//      Origin header) AND the caller supplies its own x-api-key, which we relay.
+//      The Worker injects nothing.
+//   2. Server/script mode — no trusted browser Origin, so the caller must
+//      present Authorization: Bearer <PROXY_SERVICE_TOKEN>. Only then does the
+//      Worker inject env.ANTHROPIC_API_KEY. This is the mode monthly-valuations
+//      uses; it removes the old Origin-spoofing workaround.
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const origin = request.headers.get('Origin') || '';
-    const allowOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : 'null';
+    const originAllowed = ALLOWED_ORIGINS.includes(origin);
+    const allowOrigin = originAllowed ? origin : 'null';
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
@@ -72,8 +82,16 @@ export default {
       });
     }
 
-    if (allowOrigin === 'null') {
-      return new Response(JSON.stringify({ error: 'Origin not allowed', origin }), {
+    // Decide the call mode. A real browser sends Sec-Fetch-* headers; scripts
+    // that merely set an Origin string do not — so a browser Origin claim is
+    // only trusted alongside those fetch-metadata headers.
+    const secFetchSite = request.headers.get('Sec-Fetch-Site');
+    const looksLikeBrowser = originAllowed && secFetchSite !== null;
+    const serviceToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    const serviceAuthed = env && env.PROXY_SERVICE_TOKEN && serviceToken === env.PROXY_SERVICE_TOKEN;
+
+    if (!looksLikeBrowser && !serviceAuthed) {
+      return new Response(JSON.stringify({ error: 'Unauthorized — browser Origin or service token required', origin }), {
         status: 403,
         headers: { ...corsHeaders(allowOrigin), 'content-type': 'application/json' },
       });
@@ -84,6 +102,13 @@ export default {
     const upstreamHeaders = new Headers();
     for (const [k, v] of request.headers.entries()) {
       if (FORWARD_HEADERS.has(k.toLowerCase())) upstreamHeaders.set(k, v);
+    }
+    // Server/script mode: inject the server-side key ONLY for token-authed
+    // callers, never for a bare Origin claim. Browser mode relays the caller's
+    // own x-api-key untouched.
+    if (serviceAuthed && env.ANTHROPIC_API_KEY) {
+      upstreamHeaders.set('x-api-key', env.ANTHROPIC_API_KEY);
+      if (!upstreamHeaders.has('anthropic-version')) upstreamHeaders.set('anthropic-version', '2023-06-01');
     }
 
     let upstream;

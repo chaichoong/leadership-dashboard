@@ -444,12 +444,17 @@
         }
 
         if (created > 0) {
-            console.log(`UC tasks: created ${created} new verification tasks`);
+            if (typeof showToast === 'function') showToast(`Created ${created} UC verification ${created === 1 ? 'task' : 'tasks'}`, { type: 'info' });
         }
     }
 
     async function ucFetchExistingTasks(tenancyIds) {
+        // Only fetch UC verification tasks, not the whole Tasks table: push the
+        // name-prefix match server-side so this scales as the table grows. The
+        // client-side filter below stays as a belt-and-braces refinement.
+        const formula = encodeURIComponent("SEARCH('UC verification:', {Task Name}) = 1");
         const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}?returnFieldsByFieldId=true&pageSize=100`
+            + `&filterByFormula=${formula}`
             + `&fields[]=fldgFjGBw6bTKJFCD&fields[]=fld7XP8w8kbxfETV4&fields[]=fldmne4RYJU22ICub&fields[]=fldx4qCw17UfrKpaN`;
 
         const all = [];
@@ -725,7 +730,7 @@
             }
         } catch (err) {
             if (indicator) { indicator.textContent = '✗'; indicator.style.color = 'var(--danger)'; }
-            if (typeof showToast === 'function') showToast('Save failed: ' + err.message, 'error');
+            if (typeof showToast === 'function') showToast('Save failed: ' + err.message, { type: 'error' });
         }
     }
     window.rsSaveTxField = rsSaveTxField;
@@ -870,9 +875,9 @@
                 if (localTx) localTx.fields[F.txProperty] = action.oldProperty || [];
             }
             renderArrearsSection('arrearsPipelineContainer');
-            if (typeof showToast === 'function') showToast('Change undone', 'success');
+            if (typeof showToast === 'function') showToast('Change undone', { type: 'success' });
         } catch (err) {
-            if (typeof showToast === 'function') showToast('Undo failed: ' + err.message, 'error');
+            if (typeof showToast === 'function') showToast('Undo failed: ' + err.message, { type: 'error' });
         }
     }
     window.rsPerformUndo = rsPerformUndo;
@@ -1227,15 +1232,16 @@
         ];
         allEvents.sort((a, b) => a.date - b.date || (a.type === 'rent' ? -1 : 1));
 
+        const fmtLedgerDate = d => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         let runningBalance = 0;
         const ledgerRows = [];
         for (const ev of allEvents) {
             if (ev.type === 'rent') {
                 runningBalance += ev.amount;
-                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: ev.desc, debit: fmtMoney(ev.amount), credit: '', balance: fmtMoney(runningBalance) });
+                ledgerRows.push({ date: fmtLedgerDate(ev.date), desc: ev.desc, debit: fmtMoney(ev.amount), credit: '', balance: fmtMoney(runningBalance) });
             } else {
                 runningBalance -= ev.amount;
-                ledgerRows.push({ date: ev.date.toISOString().slice(0, 10), desc: ev.desc, debit: '', credit: fmtMoney(ev.amount), balance: fmtMoney(runningBalance) });
+                ledgerRows.push({ date: fmtLedgerDate(ev.date), desc: ev.desc, debit: '', credit: fmtMoney(ev.amount), balance: fmtMoney(runningBalance) });
             }
         }
 
@@ -1244,11 +1250,18 @@
         const daysInArrears = dailyRent > 0 ? Math.round(balance / dailyRent) : 0;
 
         const printWin = window.open('', '_blank', 'width=800,height=900');
+        if (!printWin) {
+            if (typeof showToast === 'function') showToast('Pop-up blocked — allow pop-ups to print the statement', { type: 'error' });
+            return;
+        }
+        // Hex literals and the font import are intentional: a document.write
+        // print window does not load tokens.css, so it must carry its own
+        // self-contained styling (values mirror the sage-executive tokens).
         printWin.document.write(`<!DOCTYPE html><html><head><title>Rent Statement — ${escHtml(tenantName)}</title>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
             * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family:'Inter',sans-serif; color:#1C2422; padding:40px; font-size:12px; line-height:1.5; }
+            body { font-family:'DM Sans',sans-serif; color:#1C2422; padding:40px; font-size:12px; line-height:1.5; }
             h1 { font-size:20px; margin-bottom:4px; }
             .meta { color:#5A6660; font-size:12px; margin-bottom:24px; }
             .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
@@ -1367,12 +1380,12 @@
                 if (localTx) localTx.fields[F.txTenancy] = [{ id: newTenancyId }];
 
                 overlay.remove();
-                if (typeof showToast === 'function') showToast('Transaction reassigned', 'success');
+                if (typeof showToast === 'function') showToast('Transaction reassigned', { type: 'success' });
                 renderArrearsSection('arrearsPipelineContainer');
             } catch (err) {
                 opt.textContent = 'Failed — try again';
                 opt.style.background = 'var(--danger-bg)';
-                if (typeof showToast === 'function') showToast('Reassign failed: ' + err.message, 'error');
+                if (typeof showToast === 'function') showToast('Reassign failed: ' + err.message, { type: 'error' });
             }
         });
 

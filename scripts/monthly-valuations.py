@@ -28,7 +28,10 @@ BASE_ID = 'appnqjDpqDniH3IRl'
 VAL_TABLE = 'tblZYsa0u1M17N7ZE'      # Property Valuations
 PROP_TABLE = 'tbl6f0OkAmTC2jbuG'     # Properties
 PROXY = 'https://claude-proxy.kevinbrittain.workers.dev'
-PROXY_ORIGIN = 'https://chaichoong.github.io'
+# Server-side calls authenticate with the proxy's service token (set as a
+# GitHub Actions secret), so the proxy injects the server-side Anthropic key.
+# This replaces the old Origin/User-Agent spoofing workaround.
+PROXY_SERVICE_TOKEN = os.environ.get('PROXY_SERVICE_TOKEN', '').strip()
 
 # Property Valuations field IDs
 F_TITLE = 'fldRBIx2kRFAVmH0k'
@@ -99,9 +102,8 @@ def value_property(address, last_value, last_date):
         'messages': [{'role': 'user', 'content': prompt}],
     }
     status, d = _http(PROXY, method='POST', data=body, headers={
-        'Content-Type': 'application/json', 'Origin': PROXY_ORIGIN, 'Referer': PROXY_ORIGIN + '/',
-        # The proxy blocks the default python-urllib agent; present a browser UA.
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36',
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {PROXY_SERVICE_TOKEN}',
     })
     if status != 200:
         return None, 'Low', f'proxy error {status}'

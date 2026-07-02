@@ -7,6 +7,8 @@
     let arvRefreshedAt = null;
     let arvTabRendered = false;
     let arvFetchInProgress = false;
+    let arvLastRefreshFailed = false; // a refresh failed AFTER a successful load — old data kept on screen
+    let arvFirstLoadFailed = false;   // the very first load failed — nothing to fall back to
 
     // ── Fetch from Airtable ──
     async function fetchARVariableData() {
@@ -47,6 +49,8 @@
                 };
             });
             arvRefreshedAt = new Date();
+            arvLastRefreshFailed = false;
+            arvFirstLoadFailed = false;
             arvTabRendered = false;
             hideARVLoadingState();
             if (document.getElementById('tab-ar-variable')?.classList.contains('active')) {
@@ -55,7 +59,16 @@
         } catch (e) {
             hideARVLoadingState();
             if (e.message !== 'Auth failed') {
-                arvData = [];
+                if (arvRefreshedAt) {
+                    // A previous load succeeded — keep the old data on screen rather
+                    // than wiping it, flag it as stale, and tell the user.
+                    arvLastRefreshFailed = true;
+                    if (typeof showToast === 'function') showToast('Could not refresh outbound invoices — showing earlier data', { type: 'error' });
+                } else {
+                    // First-ever load failed — nothing to fall back to. renderARVariableTab
+                    // shows an error state with a Retry button (no re-fetch loop).
+                    arvFirstLoadFailed = true;
+                }
                 arvTabRendered = false;
                 if (document.getElementById('tab-ar-variable')?.classList.contains('active')) {
                     renderARVariableTab();
@@ -107,6 +120,38 @@
         }
     }
 
+    // ── First-load error state ──
+    // Shown when the very first fetch fails, so the tab never re-enters the
+    // fetch → fail → render → fetch loop. Retry re-runs the fetch explicitly.
+    function showARVErrorState() {
+        hideARVLoadingState();
+        const cards = document.getElementById('arvSummaryCards');
+        if (cards) cards.style.display = 'none';
+        const table = document.getElementById('arvTable');
+        if (table) table.style.display = 'none';
+        let errEl = document.getElementById('arvErrorState');
+        if (!errEl) {
+            errEl = document.createElement('div');
+            errEl.id = 'arvErrorState';
+            errEl.style.cssText = 'text-align:center;padding:48px 24px;color:var(--text-muted)';
+            table?.parentElement?.appendChild(errEl);
+        }
+        errEl.innerHTML = `
+            <div style="font-size:15px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Could not load outbound invoices</div>
+            <div style="font-size:13px;max-width:420px;margin:0 auto 16px;line-height:1.5">Airtable did not respond. Check your connection, then try again.</div>
+            <button onclick="retryARVFirstLoad(this)" style="background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer">Retry</button>
+        `;
+        errEl.style.display = '';
+    }
+
+    function retryARVFirstLoad(btn) {
+        if (btn) { btn.disabled = true; btn.textContent = 'Retrying...'; }
+        arvFirstLoadFailed = false;
+        const errEl = document.getElementById('arvErrorState');
+        if (errEl) errEl.style.display = 'none';
+        fetchARVariableData();
+    }
+
     // ── Business name resolver ──
     function arvBusinessName(businessIds) {
         if (!businessIds || businessIds.length === 0) return '';
@@ -149,6 +194,12 @@
         const isPlaceholder = TABLES.arVariable.includes('PLACEHOLDER');
 
         if (!isPlaceholder && arvData.length === 0 && !arvRefreshedAt) {
+            if (arvFirstLoadFailed) {
+                // First load failed — show the error state with a Retry button
+                // instead of re-fetching (which looped back here on every failure).
+                showARVErrorState();
+                return;
+            }
             if (PAT) {
                 fetchARVariableData();
                 return;
@@ -157,6 +208,8 @@
         }
 
         hideARVLoadingState();
+        const errState = document.getElementById('arvErrorState');
+        if (errState) errState.style.display = 'none';
         populateARVBusinessFilter();
 
         const filterText = (document.getElementById('arvFilterText')?.value || '').toLowerCase().trim();
@@ -169,7 +222,11 @@
         if (refreshedEl) {
             if (isPlaceholder) {
                 refreshedEl.textContent = 'Airtable table not yet connected';
+            } else if (arvLastRefreshFailed) {
+                refreshedEl.textContent = 'Last refresh failed — showing earlier data';
+                refreshedEl.style.color = 'var(--danger)';
             } else if (arvRefreshedAt) {
+                refreshedEl.style.color = '';
                 refreshedEl.textContent = 'Last refreshed: ' + arvRefreshedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
             }
         }
@@ -231,11 +288,12 @@
             return 0;
         });
 
-        // Summary calculations (on full dataset, not filtered)
-        const allSent = arvData.filter(inv => inv.status === 'Sent');
-        const allOverdue = arvData.filter(inv => inv.status === 'Overdue');
+        // Summary calculations (on full dataset, not filtered).
+        // Overdue uses the shared arvIsOverdue rule so the KPI, the row badges
+        // and the health check all agree (a 'Sent' invoice past due counts).
+        const allOverdue = arvData.filter(arvIsOverdue);
         const allPaid = arvData.filter(inv => inv.status === 'Paid');
-        const unpaid = [...allSent, ...allOverdue];
+        const unpaid = arvData.filter(inv => inv.status === 'Sent' || inv.status === 'Overdue');
         const totalOutstanding = unpaid.reduce((s, inv) => s + (inv.amount || 0), 0);
         const totalOverdue = allOverdue.reduce((s, inv) => s + (inv.amount || 0), 0);
         const avgDaysOverdue = allOverdue.length > 0
@@ -355,6 +413,14 @@
         }
     }
 
+    // ── Overdue rule (single source of truth) ──
+    // An invoice counts as overdue when Airtable says so, OR when it is still
+    // 'Sent' but its due date has passed. Used by the KPI cards, the row badges
+    // and the health check so all three always agree.
+    function arvIsOverdue(inv) {
+        return inv.status === 'Overdue' || (inv.status === 'Sent' && inv.daysOverdue > 0);
+    }
+
     // ── Row renderer ──
     function renderARVRow(inv, idx) {
         const statusColors = {
@@ -364,8 +430,9 @@
             'Paid':        { bg: 'var(--success-bg)',   text: 'var(--success)' },
             'Written Off': { bg: 'var(--warning-bg)',   text: 'var(--warning)' },
         };
-        const sc = statusColors[inv.status] || statusColors['Draft'];
-        const statusBadge = `<span class="inv-badge" style="background:${sc.bg};color:${sc.text}">${escHtml(inv.status || 'Unknown')}</span>`;
+        const effectiveStatus = arvIsOverdue(inv) ? 'Overdue' : inv.status;
+        const sc = statusColors[effectiveStatus] || statusColors['Draft'];
+        const statusBadge = `<span class="inv-badge" style="background:${sc.bg};color:${sc.text}">${escHtml(effectiveStatus || 'Unknown')}</span>`;
 
         const bizName = arvBusinessName(inv.businessIds);
         const overdueDisplay = inv.daysOverdue > 0

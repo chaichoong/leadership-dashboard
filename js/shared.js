@@ -381,7 +381,7 @@
         return `
             <div class="kpi-card clickable" onclick="toggleCard(this)">
                 <div class="kpi-card-label">${escHtml(label)} <span class="chevron">▸</span></div>
-                <div class="kpi-card-value ${valueClass}">${typeof value === 'number' ? value : value}</div>
+                <div class="kpi-card-value ${valueClass}">${value}</div>
                 ${sub ? `<div class="kpi-card-sub">${sub}</div>` : ''}
                 ${extraHtml}
                 <div class="kpi-card-detail">${detailHtml}</div>
@@ -766,9 +766,15 @@ if (tabId === 'comms') {
     }
 
     function escHtml(str) {
-        const d = document.createElement('div');
-        d.textContent = str;
-        return d.innerHTML;
+        // Escapes quotes as well as &<> so output is safe inside
+        // double- AND single-quoted HTML attributes, not just text nodes.
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function escJs(str) {
@@ -845,7 +851,7 @@ if (tabId === 'comms') {
             cancelBtn.style.cssText = 'padding:8px 16px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm)';
             const okBtn = document.createElement('button');
             okBtn.textContent = okLabel;
-            okBtn.style.cssText = `padding:8px 16px;border:none;background:${danger ? 'var(--danger)' : 'var(--accent)'};color:#fff;border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)`;
+            okBtn.style.cssText = `padding:8px 16px;border:none;background:${danger ? 'var(--danger)' : 'var(--accent)'};color:var(--accent-on);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)`;
             btnRow.appendChild(cancelBtn);
             btnRow.appendChild(okBtn);
             function close(result) { overlay.remove(); resolve(result); }
@@ -902,10 +908,13 @@ if (tabId === 'comms') {
             `<option value="${escHtml(m.key)}"${(m.email === valAssignee || m.key === valAssignee) ? ' selected' : ''}>${escHtml(m.name)}</option>`
         ).join('');
 
-        // Build project options
+        // Build project options. The shell has no allProjects global (that
+        // lives inside the os/tasks iframe), so projects are fetched once
+        // and cached; the select is populated when the fetch resolves.
         let projectOptions = '<option value="">-</option>';
-        if (typeof allProjects !== 'undefined' && Array.isArray(allProjects)) {
-            allProjects
+        const buildProjectOptions = (records) => {
+            let opts = '<option value="">-</option>';
+            records
                 .filter(p => {
                     const st = (p.fields && (p.fields['Status'] || p.fields['Project Status'])) || '';
                     return st !== 'Completed' && st !== 'Cancelled';
@@ -914,8 +923,26 @@ if (tabId === 'comms') {
                 .forEach(p => {
                     const pName = p.fields['Name'] || p.fields['Project Name'] || 'Unnamed';
                     const sel = p.id === selectedProjectId ? ' selected' : '';
-                    projectOptions += `<option value="${escHtml(p.id)}"${sel}>${escHtml(pName)}</option>`;
+                    opts += `<option value="${escHtml(p.id)}"${sel}>${escHtml(pName)}</option>`;
                 });
+            return opts;
+        };
+        if (window._qtProjectsCache) {
+            projectOptions = buildProjectOptions(window._qtProjectsCache);
+        } else {
+            limitedApiFetch(() => fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.projects}?pageSize=100`, {
+                headers: { 'Authorization': `Bearer ${PAT}` }
+            }).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+                .then(data => {
+                    window._qtProjectsCache = data.records || [];
+                    const selEl = document.getElementById('qtProject');
+                    if (selEl) {
+                        const current = selEl.value;
+                        selEl.innerHTML = buildProjectOptions(window._qtProjectsCache);
+                        if (current) selEl.value = current;
+                    }
+                })
+                .catch(e => console.warn('Quick Task: projects fetch failed', e));
         }
 
         // Build select option helpers
@@ -929,11 +956,13 @@ if (tabId === 'comms') {
         const statusOpts = makeOpts(['Today','Upcoming','Approval'], valStatus);
         let businessOpts = '<option value="">-</option>';
         if (typeof allBusinesses !== 'undefined' && Array.isArray(allBusinesses)) {
+            // allBusinesses is fetched with returnFieldsByFieldId, so fields
+            // are keyed by field ID — read via the BIZ_* constants, never names.
             allBusinesses
-                .filter(b => b.fields && b.fields['Active'])
-                .sort((a, b) => ((a.fields['Business Name'] || a.fields['Name'] || '') + '').localeCompare((b.fields['Business Name'] || b.fields['Name'] || '') + ''))
+                .filter(b => getField(b, BIZ_ACTIVE_FIELD))
+                .sort((a, b) => ((getField(a, BIZ_NAME_FIELD) || '') + '').localeCompare((getField(b, BIZ_NAME_FIELD) || '') + ''))
                 .forEach(b => {
-                    const bName = b.fields['Business Name'] || b.fields['Name'] || 'Unnamed';
+                    const bName = getField(b, BIZ_NAME_FIELD) || 'Unnamed';
                     const sel = b.id === selectedBusinessId ? ' selected' : '';
                     businessOpts += `<option value="${escHtml(b.id)}"${sel}>${escHtml(bName)}</option>`;
                 });
@@ -973,7 +1002,7 @@ if (tabId === 'comms') {
                 <!-- Due Date -->
                 <div style="${row}">
                     <span style="${lbl}">Due Date</span>
-                    <div style="flex:1"><input id="qtDue" type="date" value="${valDue}" style="${inp}" /></div>
+                    <div style="flex:1"><input id="qtDue" type="date" value="${escHtml(valDue)}" style="${inp}" /></div>
                 </div>
 
                 <!-- Hard Deadline -->
@@ -1115,7 +1144,7 @@ if (tabId === 'comms') {
                         body: JSON.stringify({ fields: f })
                     });
                     if (!res.ok) throw new Error(res.status);
-                } catch (e) { showToast('Failed to save: ' + e.message, { type: 'danger' }); }
+                } catch (e) { showToast('Failed to save: ' + e.message, { type: 'error' }); }
             };
 
             // Wire auto-save on every field
@@ -1145,10 +1174,8 @@ if (tabId === 'comms') {
             const deleteBtn = panel.querySelector('#qtDelete');
             if (deleteBtn) {
                 deleteBtn.onclick = async () => {
-                    if (typeof confirmDialog === 'function') {
-                        const ok = await confirmDialog('Delete Task', 'Are you sure you want to delete this task? This cannot be undone.');
-                        if (!ok) return;
-                    } else if (!confirm('Delete this task? This cannot be undone.')) return;
+                    const ok = await showConfirm('Are you sure you want to delete this task? This cannot be undone.', { title: 'Delete Task', okLabel: 'Delete', danger: true });
+                    if (!ok) return;
                     deleteBtn.disabled = true; deleteBtn.textContent = 'Deleting...';
                     try {
                         const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.tasks}/${taskId}`, {
@@ -1163,7 +1190,7 @@ if (tabId === 'comms') {
                         }
                     } catch (err) {
                         deleteBtn.disabled = false; deleteBtn.textContent = 'Delete';
-                        showToast('Failed to delete: ' + err.message, { type: 'danger' });
+                        showToast('Failed to delete: ' + err.message, { type: 'error' });
                     }
                 };
             }
@@ -1189,15 +1216,36 @@ if (tabId === 'comms') {
                         }
                     } catch (err) {
                         completeBtn.disabled = false; completeBtn.textContent = 'Complete';
-                        showToast('Failed to complete: ' + err.message, { type: 'danger' });
+                        showToast('Failed to complete: ' + err.message, { type: 'error' });
                     }
                 };
             }
 
-            // ── Resend Slack stub ──
+            // ── Resend Slack notification (calls the slack-notify worker,
+            // same request shape as os/tasks notifyAssigneeSlack) ──
             const resendBtn = panel.querySelector('#qtResendSlack');
             if (resendBtn) {
-                resendBtn.onclick = () => showToast('Slack notification sent', { type: 'success' });
+                resendBtn.onclick = async () => {
+                    const assigneeKey = panel.querySelector('#qtAssignee')?.value || '';
+                    const member = (typeof TASK_TEAM !== 'undefined' ? TASK_TEAM : []).find(m => m.key === assigneeKey || m.email === assigneeKey);
+                    const taskName = (panel.querySelector('#qtName')?.value || '').trim();
+                    if (!member || !member.email) { showToast('Pick an assignee first', { type: 'warning' }); return; }
+                    if (!taskName || taskName === '(Untitled)') { showToast('Give the task a name first', { type: 'warning' }); return; }
+                    resendBtn.disabled = true;
+                    try {
+                        const res = await fetch(SLACK_NOTIFY_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ recipientEmail: member.email, taskName, taskId, actorName: 'Operations Director', action: 'assigned' })
+                        });
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        showToast('Slack notification sent to ' + member.name, { type: 'success' });
+                    } catch (err) {
+                        showToast('Slack notification failed: ' + err.message, { type: 'error' });
+                    } finally {
+                        resendBtn.disabled = false;
+                    }
+                };
             }
 
             // ── Attachments ──
@@ -1255,7 +1303,7 @@ if (tabId === 'comms') {
                         }
                         showToast(files.length + ' file(s) uploaded', { type: 'success' });
                     } catch (err) {
-                        showToast('Upload failed: ' + err.message, { type: 'danger' });
+                        showToast('Upload failed: ' + err.message, { type: 'error' });
                     }
                     attDrop.innerHTML = '<span style="pointer-events:none">&#x1F4CE; Drop files here or click to upload</span><input type="file" id="qtFileInput" multiple style="display:none">';
                     const newInput = attDrop.querySelector('#qtFileInput');
@@ -1280,7 +1328,7 @@ if (tabId === 'comms') {
                             const countEl = panel.querySelector('#qtCommentCount');
                             if (countEl && comments.length > 0) countEl.textContent = comments.length;
                         }
-                    } catch (e) { /* silent */ }
+                    } catch (e) { console.warn('Quick Task: comment count load failed', e); }
                 })();
 
                 commentsBtn.onclick = () => {
@@ -1333,7 +1381,7 @@ if (tabId === 'comms') {
                                 commentsBtn.click();
                             }
                         } catch (err) {
-                            showToast('Failed to post comment: ' + err.message, { type: 'danger' });
+                            showToast('Failed to post comment: ' + err.message, { type: 'error' });
                         }
                         postBtn.disabled = false; postBtn.textContent = 'Post Comment';
                     };
@@ -1394,7 +1442,7 @@ if (tabId === 'comms') {
                     showToast('Task created: ' + taskName, { type: 'success' });
                 } catch (err) {
                     submitBtn.disabled = false; submitBtn.textContent = 'Create Task';
-                    showToast('Failed to create task: ' + err.message, { type: 'danger' });
+                    showToast('Failed to create task: ' + err.message, { type: 'error' });
                 }
             };
         }

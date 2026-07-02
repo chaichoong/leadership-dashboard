@@ -11,6 +11,7 @@
     let _sourceFilter = 'mine'; // 'mine' (custom + SOP), 'active' (mine + used presets), 'presets' (preset only), 'all' (everything)
     let _sopSkills = [];
     let _sopSkillsFetched = false;
+    let _sopFetchFailed = false;
     let _activePresetIds = [];
     let _activePresetsFetched = false;
 
@@ -36,7 +37,9 @@
                 try { _activePresetIds = JSON.parse(raw); } catch (e) { _activePresetIds = []; }
             }
             _activePresetsFetched = true;
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Skills: failed to fetch active presets from Airtable', e);
+        }
     }
 
     async function saveActivePreset(skillId) {
@@ -50,23 +53,49 @@
                 headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: f })
             });
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Skills: failed to save active preset', skillId, e);
+        }
+    }
+
+    // One-time non-blocking notice when SOP skills can't be fetched from Airtable.
+    // Shown once per failure (not per catch), cleared on the next successful fetch.
+    let _sopNoticeShown = false;
+    function showSOPSkillsNotice() {
+        if (_sopNoticeShown) return;
+        const anchor = document.getElementById('skillsLibraryContent');
+        if (!anchor || !anchor.parentNode) return;
+        _sopNoticeShown = true;
+        const notice = document.createElement('div');
+        notice.id = 'skillsSopNotice';
+        notice.style.cssText = 'background:var(--warning-bg,#FBF3E4);border:1px solid var(--warning,#B8933A);border-radius:var(--radius-md,8px);padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--text-primary,#1C2422)';
+        notice.textContent = 'Couldn’t load SOP skills — showing local presets';
+        anchor.parentNode.insertBefore(notice, anchor);
+    }
+    function clearSOPSkillsNotice() {
+        _sopNoticeShown = false;
+        const el = document.getElementById('skillsSopNotice');
+        if (el) el.remove();
     }
 
     async function fetchSOPSkills() {
         if (_sopSkillsFetched || typeof PAT === 'undefined' || !PAT) return;
         try {
-            const baseId = 'appnqjDpqDniH3IRl';
             const tableId = 'tblLPoRHFBl0vqR24';
             const skillFieldName = 'Skill Definition';
             const driveFieldName = 'Drive URL';
-            const baseUrl = `https://api.airtable.com/v0/${baseId}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
+            const baseUrl = `https://api.airtable.com/v0/${BASE_ID}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
             const skills = [];
             let offset = '';
             do {
                 const pageUrl = offset ? `${baseUrl}&offset=${encodeURIComponent(offset)}` : baseUrl;
                 const res = await fetch(pageUrl, { headers: { Authorization: `Bearer ${PAT}` } });
-                if (!res.ok) break;
+                if (!res.ok) {
+                    console.warn('Skills: SOP skills fetch returned HTTP', res.status);
+                    _sopFetchFailed = true;
+                    showSOPSkillsNotice();
+                    break;
+                }
                 const data = await res.json();
                 (data.records || []).forEach(r => {
                     const raw = r.fields[skillFieldName];
@@ -82,13 +111,20 @@
                                 if (!SKILLS_LIBRARY.some(s => s.id === sk.id)) skills.push(sk);
                             }
                         });
-                    } catch (e) {}
+                    } catch (e) {
+                        console.warn('Skills: could not parse Skill Definition on record', r.id, e);
+                    }
                 });
                 offset = data.offset || '';
             } while (offset);
             _sopSkills = skills;
             _sopSkillsFetched = true;
-        } catch (e) {}
+            if (!_sopFetchFailed) clearSOPSkillsNotice();
+        } catch (e) {
+            console.warn('Skills: SOP skills fetch failed', e);
+            _sopFetchFailed = true;
+            showSOPSkillsNotice();
+        }
     }
 
     function allSkills() {
@@ -151,8 +187,8 @@
                 const sourceClass = 'skills-source-' + s.source;
                 const hasDrive = s.driveUrl || s.driveDocUrl;
                 html += `<div class="skills-card" data-skill-id="${escHtml(s.id)}">
-                    <div class="skills-card-header" onclick="toggleSkillDetail('${escHtml(s.id)}')" role="button" tabindex="0" aria-expanded="false"
-                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSkillDetail('${escHtml(s.id)}')}">
+                    <div class="skills-card-header" onclick="toggleSkillDetail('${escJs(s.id)}')" role="button" tabindex="0" aria-expanded="false"
+                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSkillDetail('${escJs(s.id)}')}">
                         <div class="skills-card-title">${escHtml(s.name)}</div>
                         <div style="display:flex;align-items:center;gap:8px">
                             <span class="skills-source-badge ${sourceClass}">${escHtml(sourceBadge)}</span>
@@ -161,7 +197,7 @@
                     </div>
                     <div class="skills-card-desc">${escHtml(s.description)}</div>
                     <div class="skills-card-actions" style="padding:8px 16px 4px;display:flex;gap:8px;align-items:center">
-                        <button class="skills-run-btn" onclick="event.stopPropagation();runSkill('${escHtml(s.id)}')" style="padding:6px 14px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;display:flex;align-items:center;gap:4px">&#x25B6; Run Skill</button>
+                        <button class="skills-run-btn" onclick="event.stopPropagation();runSkill('${escJs(s.id)}')" style="padding:6px 14px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;display:flex;align-items:center;gap:4px">&#x25B6; Run Skill</button>
                         ${hasDrive ? `<a href="${escHtml(s.driveUrl || s.driveDocUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:6px 10px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-secondary,#5A6660);cursor:pointer;font-size:12px;font-family:inherit;text-decoration:none;display:flex;align-items:center;gap:4px">&#x1F4C2; Drive Folder</a>` : ''}
                     </div>
                     <div class="skills-card-detail" id="skill-detail-${escHtml(s.id)}" style="display:none">
@@ -182,10 +218,10 @@
                             <span class="skills-detail-value skills-tags">${s.tags.map(t => '<span class="skills-tag">' + escHtml(t) + '</span>').join('')}</span>
                         </div>` : ''}
                         ${s.instructions ? `<div class="skills-detail-row" style="flex-direction:column;align-items:stretch">
-                            <span class="skills-detail-label" style="margin-bottom:6px">Instructions <button onclick="event.stopPropagation();openSkillDetail('${escHtml(s.id)}')" style="margin-left:8px;padding:2px 8px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:11px;font-family:inherit">View Full</button></span>
+                            <span class="skills-detail-label" style="margin-bottom:6px">Instructions <button onclick="event.stopPropagation();openSkillDetail('${escJs(s.id)}')" style="margin-left:8px;padding:2px 8px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:11px;font-family:inherit">View Full</button></span>
                             <div class="skills-detail-value" style="max-height:120px;overflow-y:auto;white-space:pre-wrap;font-size:12px;line-height:1.5;background:var(--bg-surface-2,#F4F6F1);padding:10px 12px;border-radius:var(--radius-sm,4px);border:1px solid var(--border-subtle,#E5E8E1)">${escHtml(s.instructions)}</div>
                         </div>` : ''}
-                        ${!s.instructions ? `<div style="padding:4px 0"><button onclick="event.stopPropagation();openSkillDetail('${escHtml(s.id)}')" style="padding:4px 12px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:12px;font-family:inherit">View Full Details</button></div>` : ''}
+                        ${!s.instructions ? `<div style="padding:4px 0"><button onclick="event.stopPropagation();openSkillDetail('${escJs(s.id)}')" style="padding:4px 12px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--accent,#2C6E49);cursor:pointer;font-size:12px;font-family:inherit">View Full Details</button></div>` : ''}
                     </div>
                 </div>`;
             });
@@ -285,7 +321,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model: 'claude-sonnet-4-6',
+                    model: AI_MODEL_DEFAULT,
                     max_tokens: 4096,
                     system: systemMsg,
                     messages: _skillConversation,
@@ -329,8 +365,16 @@
         chatEl.scrollTop = chatEl.scrollHeight;
     }
 
+    // SECURITY: the raw text is HTML-escaped FIRST so model output can never
+    // inject markup — only the markdown patterns below produce HTML.
     function renderSkillMarkdown(text) {
-        return text
+        const escaped = String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        return escaped
             .replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg-subtle,#E5E8E1);padding:10px 14px;border-radius:6px;font-size:12px;overflow-x:auto;margin:8px 0"><code>$1</code></pre>')
             .replace(/`([^`]+)`/g, '<code style="background:var(--bg-subtle,#E5E8E1);padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -459,7 +503,66 @@
         renderSourcePills();
         renderFilterPills();
         renderSkillsLibrary();
+        registerSkillsSyncBar();
     };
+
+    // ── Sync / status bar (shared component from js/sync-bar.js) ──────────────
+    // Injects its own host div at the top of the Skills panel (same pattern as
+    // js/wealth.js) so index.html doesn't need editing. No-ops gracefully if the
+    // panel or sync-bar module isn't present.
+    function ensureSkillsSyncBarHost() {
+        if (document.querySelector('[data-sync-bar="skills"]')) return true;
+        const section = document.querySelector('#tab-skills .section');
+        if (!section) return false;
+        const host = document.createElement('div');
+        host.setAttribute('data-sync-bar', 'skills');
+        section.insertBefore(host, section.firstChild);
+        return true;
+    }
+
+    function registerSkillsSyncBar() {
+        if (typeof registerSyncBar !== 'function') return;
+        if (!ensureSkillsSyncBarHost()) return;
+        registerSyncBar('skills', {
+            refreshFn: async function () {
+                // Re-fetch SOP skills + active presets from Airtable and re-render
+                _sopSkillsFetched = false;
+                _sopFetchFailed = false;
+                _activePresetsFetched = false;
+                clearSOPSkillsNotice();
+                await window.renderSkillsTab();
+            },
+            checks: [
+                { name: 'Skills library data loaded', kind: 'sync', run: function () {
+                    const n = (typeof SKILLS_LIBRARY !== 'undefined' && SKILLS_LIBRARY) ? SKILLS_LIBRARY.length : 0;
+                    if (n === 0) return { status: 'fail', detail: 'SKILLS_LIBRARY is empty — js/skills-data.js may not have loaded' };
+                    return { status: 'pass', detail: n + ' preset skills + ' + _sopSkills.length + ' SOP skills available' };
+                }},
+                { name: 'SOP skills fetched from Airtable', kind: 'sync', run: function () {
+                    if (typeof PAT === 'undefined' || !PAT) return { status: 'warn', detail: 'Not signed in to Airtable yet — SOP skills unavailable' };
+                    if (_sopFetchFailed) return { status: 'fail', detail: 'SOP skills fetch failed — showing local presets only. Click Refresh to retry' };
+                    if (!_sopSkillsFetched) return { status: 'warn', detail: 'SOP skills not fetched yet' };
+                    return { status: 'pass', detail: _sopSkills.length + ' SOP skills loaded' };
+                }},
+                { name: 'Active preset settings readable', kind: 'sync', run: function () {
+                    if (typeof PAT === 'undefined' || !PAT) return { status: 'warn', detail: 'Not signed in to Airtable yet' };
+                    if (!_activePresetsFetched) return { status: 'warn', detail: 'Active preset record not read — "Active" filter counts may be stale' };
+                    return { status: 'pass', detail: _activePresetIds.length + ' active preset' + (_activePresetIds.length === 1 ? '' : 's') + ' recorded' };
+                }},
+                { name: 'AI model constant defined', kind: 'automation', run: function () {
+                    if (typeof AI_MODEL_DEFAULT === 'undefined' || !AI_MODEL_DEFAULT) return { status: 'fail', detail: 'AI_MODEL_DEFAULT missing from js/config.js — Run Skill chat will fail' };
+                    return { status: 'pass', detail: 'Skill runner uses ' + AI_MODEL_DEFAULT };
+                }},
+                { name: 'Skill cards rendered', kind: 'automation', run: function () {
+                    const el = document.getElementById('skillsLibraryContent');
+                    if (!el) return { status: 'warn', detail: 'Skills container not on this page' };
+                    if (!_skillsRendered || !el.innerHTML.trim()) return { status: 'fail', detail: 'Skills list has not rendered' };
+                    return { status: 'pass', detail: 'Skill cards rendered on the page' };
+                }},
+            ],
+        });
+        if (typeof markTabSynced === 'function') markTabSynced('skills');
+    }
 
     window.expandAllSkills = function () {
         document.querySelectorAll('.skills-card-detail').forEach(d => {
@@ -507,7 +610,7 @@
         }
 
         html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border-subtle,#E5E8E1)">
-            <button onclick="runSkill('${escHtml(skill.id)}')" style="padding:8px 20px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">&#x25B6; Run Skill</button>
+            <button onclick="runSkill('${escJs(skill.id)}')" style="padding:8px 20px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">&#x25B6; Run Skill</button>
             ${hasDrive ? `<a href="${escHtml(skill.driveUrl || skill.driveDocUrl)}" target="_blank" rel="noopener" style="padding:8px 16px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-secondary,#5A6660);cursor:pointer;font-size:13px;font-family:inherit;text-decoration:none">&#x1F4C2; Drive Folder</a>` : ''}
         </div></div>`;
 
