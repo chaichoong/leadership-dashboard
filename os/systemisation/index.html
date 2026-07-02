@@ -2298,6 +2298,8 @@ ${stepsText}
 
 ${transcript ? `IMPORTANT: Below is the transcript from the actual video walkthrough of this process. Use the specific details, system names, screen locations, and actions mentioned in the transcript to write accurate, context-specific instructions. Do NOT write generic software help. Write instructions that match exactly what happens in the video.
 
+CRITICAL — examples are not rules: when the narrator walks through specific cases (a tenant's name, one bank account, a particular amount or date), treat them as worked examples ONLY. Write every instruction generically so it applies to EVERY case of this process. Never hard-code an example case, name, or date into a step.
+
 VIDEO TRANSCRIPT:
 ${transcript}` : ''}
 
@@ -2343,7 +2345,14 @@ No other text outside the JSON object.`;
         const tips = sopData.tips || [];
 
         renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container, sopTitle, cautions, tips, videoTitle);
-        const sopJson = JSON.stringify({ sopTitle, sopSteps, cautions, tips, videoTitle, generatedDate: new Date().toISOString() });
+        // Regenerating must NOT wipe how the workflow runs: keep the disposition and
+        // the agent config. Readiness is deliberately reset — new content, new score.
+        const prevSop = getWfSopData(wfId) || {};
+        const sopJson = JSON.stringify(Object.assign(
+            { sopTitle, sopSteps, cautions, tips, videoTitle, generatedDate: new Date().toISOString() },
+            prevSop.disposition ? { disposition: prevSop.disposition } : {},
+            prevSop.agent ? { agent: prevSop.agent } : {}
+        ));
         try {
             await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: sopJson });
             const wi = allWorkflows.findIndex(w2=>w2.id===wfId);
