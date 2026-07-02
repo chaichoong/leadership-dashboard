@@ -711,7 +711,7 @@ var isLoading = false;
 // PERSISTENCE
 // ══════════════════════════════════════════════════════════════
 function saveState() {
-  try { localStorage.setItem('od-bplan-v4', JSON.stringify({ config: config, messages: messages, planData: planData, completedSections: completedSections, sectionMessages: sectionMessages, lastSectionMsgIndex: lastSectionMsgIndex })); } catch(e) {}
+  try { localStorage.setItem('od-bplan-v4', JSON.stringify({ config: config, messages: messages, planData: planData, completedSections: completedSections, sectionMessages: sectionMessages, lastSectionMsgIndex: lastSectionMsgIndex })); } catch(e) { console.warn('[bplan] localStorage save failed', e); }
 }
 
 function loadState() {
@@ -726,7 +726,7 @@ function loadState() {
       if (s.lastSectionMsgIndex) lastSectionMsgIndex = s.lastSectionMsgIndex;
       return true;
     }
-  } catch(e) {}
+  } catch(e) {/* best-effort: safe fallback */}
   return false;
 }
 
@@ -1006,14 +1006,14 @@ function extractPlanDataFromText(text) {
   // [PLANDATA:sectionId]{...}[/PLANDATA]
   var regex = /\[PLANDATA:(\w+)\]([\s\S]*?)\[\/PLANDATA\]/g;
   while ((match = regex.exec(text)) !== null) {
-    try { extracted[match[1]] = JSON.parse(match[2].trim()); } catch(e) {}
+    try { extracted[match[1]] = JSON.parse(match[2].trim()); } catch(e) {/* best-effort: safe fallback */}
     cleanText = cleanText.replace(match[0], '');
   }
 
   // <plan_data section="id">...</plan_data> fallback
   var xmlRegex = /<plan_data section="(\w+)">([\s\S]*?)<\/plan_data>/g;
   while ((match = xmlRegex.exec(text)) !== null) {
-    try { extracted[match[1]] = JSON.parse(match[2].trim()); } catch(e) {}
+    try { extracted[match[1]] = JSON.parse(match[2].trim()); } catch(e) {/* best-effort: safe fallback */}
     cleanText = cleanText.replace(match[0], '');
   }
 
@@ -1746,9 +1746,9 @@ function getPlanId() {
 function lpStatusKey(){ return 'bpb-launch-status-' + getPlanId(); }
 function lpOwnersKey(){ return 'bpb-launch-owners-' + getPlanId(); }
 function lpGetStatuses(){ try{return JSON.parse(localStorage.getItem(lpStatusKey())||'{}');}catch(e){return {};} }
-function lpSaveStatuses(s){ try{localStorage.setItem(lpStatusKey(), JSON.stringify(s));}catch(e){} }
+function lpSaveStatuses(s){ try{localStorage.setItem(lpStatusKey(), JSON.stringify(s));}catch(e){ console.warn('[launch-plan] localStorage save failed', e); } }
 function lpGetOwners(){ try{return JSON.parse(localStorage.getItem(lpOwnersKey())||'{}');}catch(e){return {};} }
-function lpSaveOwners(o){ try{localStorage.setItem(lpOwnersKey(), JSON.stringify(o));}catch(e){} }
+function lpSaveOwners(o){ try{localStorage.setItem(lpOwnersKey(), JSON.stringify(o));}catch(e){ console.warn('[launch-plan] localStorage save failed', e); } }
 
 function lpGetTeamMembers() {
   var tm = (planData.team && planData.team.teamMembers) || [];

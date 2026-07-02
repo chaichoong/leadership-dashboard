@@ -43,11 +43,6 @@ function authenticate() {
     const patDlr = localStorage.getItem('_dlr_pat');
     const patAirtable = localStorage.getItem('airtable_pat');
     const patSession = sessionStorage.getItem('_dlr_pat');
-    console.log('[strategy init] PAT lookup — _dlr_pat:', patDlr ? 'FOUND (' + patDlr.length + 'ch)' : 'missing',
-                '· airtable_pat:', patAirtable ? 'FOUND' : 'missing',
-                '· session _dlr_pat:', patSession ? 'FOUND' : 'missing',
-                '· origin:', window.location.origin,
-                '· parent origin:', (window.parent === window) ? 'self (standalone)' : 'iframe');
     const saved = patDlr || patAirtable || patSession;
     if (saved) {
         PAT_LOCAL = saved;
@@ -988,7 +983,6 @@ async function saveRecord() {
 // flow through to Projects OS automatically.
 async function propagateQpNamesToLinkedProjects(savedFields) {
     if (!currentRecord || !currentRecord.id) {
-        console.log('[propagate] no currentRecord — skipping');
         return;
     }
     // Airtable's PATCH response may not include fields that weren't in the
@@ -1000,7 +994,6 @@ async function propagateQpNamesToLinkedProjects(savedFields) {
         const fresh = await airtableFetch(`${TABLES.objStrat}/${currentRecord.id}?returnFieldsByFieldId=true`);
         recordFields = fresh.fields || recordFields;
         currentRecord.fields = recordFields;
-        console.log('[propagate] fresh record fetched, field count:', Object.keys(recordFields).length);
     } catch (e) {
         console.warn('[propagate] fresh fetch failed, falling back to cached record', e);
     }
@@ -1011,26 +1004,21 @@ async function propagateQpNamesToLinkedProjects(savedFields) {
             ? (typeof linkArr[0] === 'object' ? linkArr[0].id : linkArr[0])
             : null;
         if (!linkedId) {
-            console.log(`[propagate] QP${i + 1}: no linked project — skipping`);
             continue;
         }
         const qpText = (savedFields[OBJSTRAT.quarterlyProjects[i]] || '').trim();
         if (!qpText) {
-            console.log(`[propagate] QP${i + 1}: empty text — skipping`);
             continue;
         }
         const newName = deriveProjectName(qpText);
         if (!newName) {
-            console.log(`[propagate] QP${i + 1}: empty derived name — skipping`);
             continue;
         }
-        console.log(`[propagate] QP${i + 1}: renaming project ${linkedId} → "${newName.slice(0, 60)}…"`);
         try {
             await airtableFetch(`${TABLES.projects}/${linkedId}`, {
                 method: 'PATCH',
                 body: JSON.stringify({ fields: { [PROJ_F.name]: newName }, typecast: true }),
             });
-            console.log(`[propagate] QP${i + 1}: ✓ renamed`);
         } catch (e) {
             console.warn(`[propagate] QP${i + 1}: PATCH failed`, e);
         }
@@ -1343,7 +1331,6 @@ async function buildPushProposal(qps, fields, onProgress) {
                 : [];
             existingByName.set(String(n).trim().toLowerCase(), { id: r.id, collaboratorIds });
         });
-        console.log('[buildPushProposal] existing projects for dedup:', Array.from(existingByName.entries()));
     } catch (e) {
         console.warn('[buildPushProposal] project dedup check failed — will still allow push', e);
     }
@@ -1646,7 +1633,6 @@ async function executePush(proposal, fields, opts) {
                 const created = await airtableFetch(TABLES.projects, { method: 'POST', body: JSON.stringify(projBody) });
                 projectId = created.id;
                 results.projectsCreated++;
-                console.log('[executePush] project created', projectId, p.projectName);
                 // Write the new Project's record ID back onto the O&S record's
                 // QP{n} Project field, so future pushes dedup by link and
                 // renames are safe.
@@ -1884,7 +1870,7 @@ function persistWizardState() {
 }
 
 function clearWizardSession() {
-    try { localStorage.removeItem(wizSessionKey()); } catch (e) {}
+    try { localStorage.removeItem(wizSessionKey()); } catch (e) {/* best-effort: safe fallback */}
 }
 
 function openWizard(opts = {}) {
@@ -1901,7 +1887,7 @@ function openWizard(opts = {}) {
     try {
         const raw = localStorage.getItem(wizSessionKey());
         if (raw) saved = JSON.parse(raw);
-    } catch (e) {}
+    } catch (e) {/* best-effort: safe fallback */}
 
     wizardState = {
         stepIndex: 0,
@@ -2900,7 +2886,7 @@ async function exportPlanToPDF() {
     // flash in and out of view while html2canvas is rendering.
     const blocker = document.createElement('div');
     blocker.id = 'pdf-blocker';
-    blocker.style.cssText = 'position:fixed;inset:0;background:rgba(28,36,34,0.75);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;gap:14px;font-family:Inter,system-ui,sans-serif';
+    blocker.style.cssText = 'position:fixed;inset:0;background:rgba(28,36,34,0.75);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;gap:14px;font-family:"DM Sans",system-ui,sans-serif';
     blocker.innerHTML = '<div class="spinner" style="width:36px;height:36px;border:3px solid rgba(255,255,255,0.25);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite"></div><div>Building your PDF…</div>';
     document.body.appendChild(blocker);
 
@@ -2908,7 +2894,7 @@ async function exportPlanToPDF() {
     // viewport, so we position it top-left at z-index just below the blocker.
     // Width 794px = A4 portrait at 96 DPI.
     const stage = document.createElement('div');
-    stage.style.cssText = 'position:fixed;top:0;left:0;width:794px;background:#fff;color:#1C2422;font-family:Inter,system-ui,sans-serif;z-index:9999;overflow:visible';
+    stage.style.cssText = 'position:fixed;top:0;left:0;width:794px;background:#fff;color:#1C2422;font-family:"DM Sans",system-ui,sans-serif;z-index:9999;overflow:visible';
     stage.appendChild(doc);
     document.body.appendChild(stage);
 
@@ -2975,6 +2961,7 @@ function buildPrintableDocument(f, businessName, quarter, year) {
     root.className = 'pdf-root';
     root.innerHTML = `
 <style>
+/* PDF stage is rasterised by html2canvas — sage token values inlined as hex literals */
 .pdf-root { padding: 16px 20px; }
 .pdf-root * { box-sizing: border-box; }
 .pdf-cover { text-align: left; padding: 28px 20px 40px; border-bottom: 4px solid #2C6E49; margin-bottom: 30px; }

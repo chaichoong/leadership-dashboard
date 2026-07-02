@@ -41,7 +41,7 @@
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.17', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'ai-brain.html' },
-        { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '1.0', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
+        { id: 'how-it-works', name: 'How It Works',               icon: '🗺️', pageVer: '2.0', sopFile: '',                             sopVer: '1.0', standalone: 'how-it-works.html' },
     ];
 
     // Gmail Invoice Script URL — deploy gmail-invoice-script.gs as a Google Apps Script web app

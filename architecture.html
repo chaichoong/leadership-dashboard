@@ -11,7 +11,7 @@
 
         .arch-header {
             background: var(--bg-sidebar);
-            color: #fff;
+            color: var(--text-inverse);
             padding: 20px 32px;
             display: flex;
             align-items: center;
@@ -111,9 +111,9 @@
         }
         .arch-node-type.inline { background: var(--accent-soft); color: var(--accent); }
         .arch-node-type.iframe { background: var(--info-bg); color: var(--info); }
-        .arch-node-type.worker { background: #FFF3E0; color: #E65100; }
-        .arch-node-type.external { background: var(--warning-bg); color: #8B6914; }
-        .arch-node-type.storage { background: #E8EAF6; color: #283593; }
+        .arch-node-type.worker { background: var(--warning-bg); color: var(--warning); }
+        .arch-node-type.external { background: var(--bg-subtle); color: var(--text-secondary); }
+        .arch-node-type.storage { background: var(--info-bg); color: var(--info); }
 
         .arch-node-detail {
             display: none;
@@ -198,10 +198,10 @@
             min-width: 120px;
             text-align: center;
         }
-        .arch-flow-box.source { background: #E8F5E9; border-color: #4CAF50; color: #2E7D32; }
-        .arch-flow-box.worker { background: #FFF3E0; border-color: #FF9800; color: #E65100; }
-        .arch-flow-box.store { background: #E8EAF6; border-color: #5C6BC0; color: #283593; }
-        .arch-flow-box.output { background: #E3F2FD; border-color: #42A5F5; color: #1565C0; }
+        .arch-flow-box.source { background: var(--success-bg); border-color: var(--success); color: var(--success); }
+        .arch-flow-box.worker { background: var(--warning-bg); border-color: var(--gold-500); color: var(--warning); }
+        .arch-flow-box.store { background: var(--info-bg); border-color: var(--info); color: var(--info); }
+        .arch-flow-box.output { background: var(--bg-subtle); border-color: var(--border-strong); color: var(--text-secondary); }
         .arch-flow-box.app { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
 
         .arch-flow-arrow {
@@ -281,9 +281,9 @@
     <div class="arch-legend">
         <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--accent-soft);border:1px solid var(--accent)"></div> Inline tab (JS renders in main shell)</div>
         <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--info-bg);border:1px solid var(--info)"></div> Iframe page (standalone HTML)</div>
-        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:#FFF3E0;border:1px solid #FF9800"></div> Cloudflare Worker</div>
-        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--warning-bg);border:1px solid #C6A15B"></div> External service</div>
-        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:#E8EAF6;border:1px solid #5C6BC0"></div> Data store</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--warning-bg);border:1px solid var(--gold-500)"></div> Cloudflare Worker</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--bg-subtle);border:1px solid var(--border-strong)"></div> External service</div>
+        <div class="arch-legend-item"><div class="arch-legend-swatch" style="background:var(--info-bg);border:1px solid var(--info)"></div> Data store</div>
     </div>
 
     <div class="arch-container">

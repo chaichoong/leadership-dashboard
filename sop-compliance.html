@@ -363,12 +363,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tr>
           <td><code>row-expired</code></td>
           <td>Any of the three cert cells is Expired (status = Expired or days &lt; 0)</td>
-          <td>Light red background (<code>#fff5f5</code>), red hover (<code>#fff0f0</code>)</td>
+          <td>Light red background (<code>var(--danger-bg)</code>), same on hover (<code>var(--danger-bg)</code>)</td>
         </tr>
         <tr>
           <td><code>row-expiring</code></td>
           <td>No expired certs, but any cert expires within 30 days</td>
-          <td>Light amber background (<code>#fffdf5</code>), amber hover (<code>var(--warning-bg)</code>)</td>
+          <td>Light amber background (<code>var(--warning-bg)</code>), same on hover (<code>var(--warning-bg)</code>)</td>
         </tr>
         <tr>
           <td>(no class)</td>

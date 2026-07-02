@@ -17,6 +17,17 @@
 
 function doGet(e) {
   try {
+    // Access gate: the web app is deployed "Anyone", so without this check
+    // anybody with the URL (public repo) can read the calendar. Set Script
+    // Property GCAL_PROXY_TOKEN, redeploy, and paste the same token into the
+    // Tasks page when prompted (stored in the browser only).
+    var requiredToken = PropertiesService.getScriptProperties().getProperty('GCAL_PROXY_TOKEN');
+    var givenToken = e && e.parameter && e.parameter.key;
+    if (requiredToken && givenToken !== requiredToken) {
+      return ContentService.createTextOutput(JSON.stringify({ error: 'unauthorized' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     var dateParam = e && e.parameter && e.parameter.date;
     var targetDate = dateParam ? new Date(dateParam + 'T00:00:00') : new Date();
 
