@@ -53,10 +53,11 @@ export default {
       });
     }
 
-    // Reset checkpoint (for testing/debug)
+    // Reset checkpoint (for testing/debug). Fails closed: if the secret is not
+    // configured the endpoint is unavailable rather than open to anyone.
     if (url.pathname === '/reset' && request.method === 'POST') {
-      const secret = request.headers.get('x-webhook-secret');
-      if (env.WEBHOOK_SECRET && secret !== env.WEBHOOK_SECRET) {
+      if (!env.WEBHOOK_SECRET) return json({ error: 'Not configured' }, 503);
+      if (request.headers.get('x-webhook-secret') !== env.WEBHOOK_SECRET) {
         return json({ error: 'Unauthorized' }, 401);
       }
       await env.SMS_STATE.delete('lastMessageTimestamp');
@@ -64,10 +65,10 @@ export default {
       return json({ status: 'reset' });
     }
 
-    // Manual trigger for testing
+    // Manual trigger for testing. Fails closed like /reset.
     if (url.pathname === '/poll' && request.method === 'POST') {
-      const secret = request.headers.get('x-webhook-secret');
-      if (env.WEBHOOK_SECRET && secret !== env.WEBHOOK_SECRET) {
+      if (!env.WEBHOOK_SECRET) return json({ error: 'Not configured' }, 503);
+      if (request.headers.get('x-webhook-secret') !== env.WEBHOOK_SECRET) {
         return json({ error: 'Unauthorized' }, 401);
       }
       const result = await pollGhlMessages(env);
@@ -330,8 +331,15 @@ async function handleSmsReply(request, env) {
     return json({ error: 'Invalid JSON' }, 400);
   }
 
-  // Auth: accept the GHL API key in header or use the Worker's own key
-  const providedKey = request.headers.get('x-ghl-key') || env.GHL_API_KEY;
+  // Auth: this endpoint sends SMS from Kevin's GHL number, so it must require
+  // the shared webhook secret. Fails closed if the secret is not configured.
+  // The GHL API key is always the Worker's own env key — never caller-supplied,
+  // so an unauthenticated caller can never send on Kevin's behalf.
+  if (!env.WEBHOOK_SECRET) return json({ error: 'Not configured' }, 503);
+  if (request.headers.get('x-webhook-secret') !== env.WEBHOOK_SECRET) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  const providedKey = env.GHL_API_KEY;
   if (!providedKey) {
     return json({ error: 'No GHL API key available' }, 401);
   }
