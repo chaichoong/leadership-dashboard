@@ -2359,7 +2359,7 @@ Confidence guide:
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: 'claude-sonnet-4-6',
         max_tokens: 12288,
         // Higher budget — finding 3 sold + 3 listed across multiple sources
         // typically needs more searches than a single-type pass.
@@ -2764,7 +2764,7 @@ async function testAnthropicKey(propertyId){
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 32,
         messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
       }),

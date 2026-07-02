@@ -91,6 +91,13 @@
     }
 
     // ── Build P&L data structure ──
+    // Percent of revenue, guarded: with zero revenue the ratio is Infinity
+    // (truthy, so `|| 0` does not catch it) — show an em dash instead.
+    function pnlPctOfRevenue(part, revenue) {
+        if (!revenue || !isFinite(part / revenue)) return '—';
+        return ((part / revenue) * 100).toFixed(1) + '%';
+    }
+
     function buildPnL(transactions, businessName, monthKeys) {
         const monthSet = new Set(monthKeys);
         const subCatNames = pnlBuildLookup(allSubCategories, 'fldO4BTJhFv5EsN6i');
@@ -375,7 +382,7 @@
         const gpMData = keys.map(k => pnl.grossMargin[k] || 0);
         const npMData = keys.map(k => pnl.netMargin[k] || 0);
 
-        const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        const fontFamily = 'DM Sans, sans-serif';
         const sharedOptions = {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { font: { size: 11, family: fontFamily }, padding: 12, usePointStyle: true, pointStyle: 'circle' } } },
@@ -565,7 +572,7 @@ RULES:
             const resp = await fetch(typeof AI_PROXY !== 'undefined' ? AI_PROXY : 'https://claude-proxy.kevinbrittain.workers.dev', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system: systemPrompt, messages: [{ role: 'user', content: userMsg }] })
+                body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 1500, system: systemPrompt, messages: [{ role: 'user', content: userMsg }] })
             });
             if (!resp.ok) throw new Error(`API ${resp.status}`);
             const data = await resp.json();
@@ -691,7 +698,7 @@ RULES:
                 <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:12px">
                     <div>
                         <h2 class="section-title" style="margin-bottom:4px">Profit &amp; Loss</h2>
-                        <span style="font-size:12px;color:var(--text-muted)">Live from reconciled transactions · ${pnlBusinessName}</span>
+                        <span style="font-size:12px;color:var(--text-muted)">Live from all categorised transactions · ${pnlBusinessName}</span>
                     </div>
                     <div class="od-filter-row">
                         <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">Business:
@@ -716,8 +723,8 @@ RULES:
                 <!-- Row 1: Revenue · COGS · OpEx — same format: period total + avg/mo -->
                 <div class="cards-grid" style="margin-bottom:12px">
                     ${pnlKpiCard('Revenue', pnl.grand.revenue, `${pnlMonths}-month total · Avg £${Math.round(avgRev).toLocaleString()}/mo`, { target: PNL_REVENUE_TARGET * pnlMonths, targetLabel: `£${(PNL_REVENUE_TARGET/1000).toFixed(0)}k/mo` })}
-                    ${pnlKpiCard('Cost of Goods Sold', pnl.grand.cogs, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.cogs / pnlMonths).toLocaleString()}/mo · ${((pnl.grand.cogs / pnl.grand.revenue) * 100 || 0).toFixed(1)}% of revenue`, { invertComparison: true })}
-                    ${pnlKpiCard('Operating Expenses', pnl.grand.opex, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.opex / pnlMonths).toLocaleString()}/mo · ${((pnl.grand.opex / pnl.grand.revenue) * 100 || 0).toFixed(1)}% of revenue`, { invertComparison: true })}
+                    ${pnlKpiCard('Cost of Goods Sold', pnl.grand.cogs, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.cogs / pnlMonths).toLocaleString()}/mo · ${pnlPctOfRevenue(pnl.grand.cogs, pnl.grand.revenue)} of revenue`, { invertComparison: true })}
+                    ${pnlKpiCard('Operating Expenses', pnl.grand.opex, `${pnlMonths}-month total · Avg £${Math.round(pnl.grand.opex / pnlMonths).toLocaleString()}/mo · ${pnlPctOfRevenue(pnl.grand.opex, pnl.grand.revenue)} of revenue`, { invertComparison: true })}
                 </div>
 
                 <!-- Row 2: Gross Profit · Gross Margin · Net Profit · Net Margin -->
@@ -808,10 +815,12 @@ RULES:
                 refreshFn: async () => { await loadDashboard(); renderPnL(); },
                 checks: [
                     {
-                        name: 'Reconciled transactions present', kind: 'sync', run: () => {
-                            const rec = (allTransactions || []).filter(r => getField(r, F.txReconciled));
-                            if (rec.length === 0) return { status: 'fail', detail: 'No reconciled transactions — P&L cannot be computed' };
-                            return { status: 'pass', detail: `${rec.length} reconciled transactions available across all business filters` };
+                        name: 'Transactions loaded', kind: 'sync', run: () => {
+                            const all = (allTransactions || []);
+                            if (all.length === 0) return { status: 'fail', detail: 'No transactions loaded — P&L cannot be computed' };
+                            const rec = all.filter(r => getField(r, F.txReconciled)).length;
+                            const pct = Math.round((rec / all.length) * 100);
+                            return { status: 'pass', detail: `${all.length} transactions loaded · ${pct}% reconciled (P&L counts all categorised transactions)` };
                         }
                     },
                     {

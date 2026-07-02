@@ -199,7 +199,7 @@ async function wealthExtractIntoRow(row, file) {
         const resp = await fetch(AI_PROXY, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 80, system: '', messages }),
+            body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 80, system: '', messages }),
         });
         if (!resp.ok) { setStatus('couldn’t read — enter manually', 'var(--danger)'); return; }
         const data = await resp.json();
@@ -307,7 +307,7 @@ function openWealthUpdate() {
             <div id="wealthUpdateError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin:8px 0"></div>
             ${rowsHtml}
             <div style="display:flex;gap:10px;margin-top:22px">
-                <button id="wealthSaveBtn" ${alreadySaved ? 'disabled style="opacity:0.5;cursor:not-allowed;' : 'style="cursor:pointer;'}background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:10px 20px;font-weight:var(--fw-semibold)" onclick="saveWealthUpdate('${curMonth}','${curYear}')">Save ${escHtml(curMonth)} ${escHtml(curYear)}</button>
+                <button id="wealthSaveBtn" ${alreadySaved ? 'disabled style="opacity:0.5;cursor:not-allowed;' : 'style="cursor:pointer;'}background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:10px 20px;font-weight:var(--fw-semibold)" onclick="saveWealthUpdate('${curMonth}','${curYear}')">Save ${escHtml(curMonth)} ${escHtml(curYear)}</button>
                 <button onclick="renderWealthTab()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:10px 20px;cursor:pointer;color:var(--text-secondary)">Cancel</button>
             </div>
         </div>
@@ -421,7 +421,7 @@ function updateWealthSidebarFlag(monthsBehind) {
         if (!badge) {
             badge = document.createElement('span');
             badge.className = 'wealth-stale-badge';
-            badge.style.cssText = 'margin-left:6px;min-width:18px;height:18px;border-radius:9px;font-size:10px;font-weight:700;color:#fff;background:var(--warning);text-align:center;line-height:18px;padding:0 5px';
+            badge.style.cssText = 'margin-left:6px;min-width:18px;height:18px;border-radius:9px;font-size:10px;font-weight:700;color:var(--accent-on);background:var(--warning);text-align:center;line-height:18px;padding:0 5px';
             navItem.appendChild(badge);
         }
         badge.textContent = monthsBehind + 'm';
@@ -636,7 +636,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     </div>`;
 
     // Trend-column period selector (drives the Δ column on every matrix below).
-    const periodBtn = n => `<button onclick="setWealthChangePeriod(${n})" style="padding:5px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);background:${_wealthChangeMonths === n ? 'var(--accent)' : 'var(--bg-surface)'};color:${_wealthChangeMonths === n ? '#fff' : 'var(--text-secondary)'};font-weight:${_wealthChangeMonths === n ? 'var(--fw-semibold)' : 'var(--fw-regular)'}">${n}M</button>`;
+    const periodBtn = n => `<button onclick="setWealthChangePeriod(${n})" style="padding:5px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);cursor:pointer;font-size:var(--fs-sm);background:${_wealthChangeMonths === n ? 'var(--accent)' : 'var(--bg-surface)'};color:${_wealthChangeMonths === n ? 'var(--accent-on)' : 'var(--text-secondary)'};font-weight:${_wealthChangeMonths === n ? 'var(--fw-semibold)' : 'var(--fw-regular)'}">${n}M</button>`;
     const changeSelector = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:var(--space-5);flex-wrap:wrap">
         <span style="color:var(--text-secondary);font-size:var(--fs-sm)">Trend column (Δ):</span>
         ${[1, 3, 6, 9, 12].map(periodBtn).join('')}
@@ -661,7 +661,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             <div>
                 <div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:2px">Your figures are ${monthsBehind} month${monthsBehind === 1 ? '' : 's'} out of date</div>
                 <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Latest snapshot is ${escHtml(asOf)}. To bring this up to ${escHtml(currentLabel)}, ${manualItemCount} manual figures need updating: property and business valuations, loan and mortgage balances, and investments. Cash and credit cards update live.</div>
-                <button onclick="openWealthUpdate()" style="margin-top:10px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 16px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Update figures for ${escHtml(currentLabel)}</button>
+                <button onclick="openWealthUpdate()" style="margin-top:10px;background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:8px 16px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Update figures for ${escHtml(currentLabel)}</button>
             </div>
         </div>` : ''}
 
@@ -761,9 +761,43 @@ function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
                 return { status: 'warn', detail: `Allocations total ${total}% (aim for 100%)` };
             }},
             { name: 'Net worth reconciles', kind: 'sync', run: () => {
-                const diff = Math.round((view.assets - view.liabilities) - view.net);
-                if (Math.abs(diff) > 1) return { status: 'fail', detail: `Assets − liabilities (${fmt(view.assets - view.liabilities)}) ≠ net worth (${fmt(view.net)})` };
-                return { status: 'pass', detail: `Assets ${fmt(view.assets)} − liabilities ${fmt(view.liabilities)} = ${fmt(view.net)}` };
+                // Recompute assets and liabilities straight from the raw snapshot
+                // rows (independently of computeNetWorth) and compare against the
+                // rendered view totals. Catches a drift anywhere in the pipeline
+                // rather than comparing the view to itself.
+                const recs = _wealthRecords || [];
+                if (!recs.length) return { status: 'warn', detail: 'No snapshot rows to reconcile against' };
+                const rows = [];
+                let latestKey = -1;
+                recs.forEach(r => {
+                    const type = getField(r, NW.type);
+                    const mi = WEALTH_MONTH_INDEX[getField(r, NW.month)];
+                    const yr = parseInt(getField(r, NW.year), 10);
+                    if (!type || mi === undefined || isNaN(yr)) return;
+                    if (WEALTH_EXCLUDE_ITEMS.includes(getField(r, NW.name))) return;
+                    const key = yr * 12 + mi;
+                    if (key > latestKey) latestKey = key;
+                    rows.push({ key, type, amount: Number(getField(r, NW.amount)) || 0 });
+                });
+                if (latestKey < 0) return { status: 'warn', detail: 'No dated snapshot rows to reconcile against' };
+                const byClass = {};
+                rows.forEach(r => { if (r.key === latestKey) byClass[r.type] = (byClass[r.type] || 0) + r.amount; });
+                // Mirror the live real-estate/mortgage override the view applies.
+                if (_valRecords && _debtRecords) {
+                    try {
+                        const pf = buildPortfolio(_valRecords, _debtRecords);
+                        if (pf.rows.length) { byClass['Real Estate'] = pf.totalValue; byClass['Mortgages'] = pf.totalMortAll; }
+                    } catch (e) { /* compare against the snapshot figures instead */ }
+                }
+                const rawAssets = NW_ASSET_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
+                const rawLiabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
+                const assetDiff = rawAssets - view.assets;
+                const liabDiff = rawLiabilities - view.liabilities;
+                const netDiff = (rawAssets - rawLiabilities) - view.net;
+                if (Math.abs(assetDiff) > 1 || Math.abs(liabDiff) > 1 || Math.abs(netDiff) > 1) {
+                    return { status: 'fail', detail: `Rendered totals drift from the raw snapshot rows — assets Δ ${fmt(assetDiff)}, liabilities Δ ${fmt(liabDiff)}, net Δ ${fmt(netDiff)}` };
+                }
+                return { status: 'pass', detail: `Raw rows recompute to assets ${fmt(rawAssets)} − liabilities ${fmt(rawLiabilities)} = ${fmt(rawAssets - rawLiabilities)}, matching the view` };
             }},
         ],
     });
@@ -1046,7 +1080,7 @@ function renderWealthPendingVals() {
                     <div style="font-size:var(--fs-xs);color:var(--text-muted)">${cur ? escHtml(fmt0(cur.value)) + ' → ' : ''}<span style="color:var(--text-primary);font-weight:var(--fw-semibold)">${escHtml(fmt0(nv))}</span>${delta} &middot; ${escHtml(conf || 'no')} confidence</div>
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0">
-                    <button onclick="wealthValuationAction(['${r.id}'],'Approved')" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Approve</button>
+                    <button onclick="wealthValuationAction(['${r.id}'],'Approved')" style="background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Approve</button>
                     <button onclick="wealthValuationAction(['${r.id}'],'Rejected')" style="background:none;border:1px solid var(--border-default);color:var(--text-secondary);border-radius:var(--radius-md);padding:6px 12px;font-size:var(--fs-sm);cursor:pointer">Reject</button>
                 </div>
             </div>
@@ -1056,7 +1090,7 @@ function renderWealthPendingVals() {
     el.innerHTML = `<div class="kpi-card" style="border-left:3px solid var(--accent-gold)">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;flex-wrap:wrap">
             <div class="kpi-card-label" style="margin:0">${pend.length} property valuation${pend.length === 1 ? '' : 's'} to review</div>
-            <button onclick="wealthApproveAllValuations()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Approve all</button>
+            <button onclick="wealthApproveAllValuations()" style="background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Approve all</button>
         </div>
         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Fresh AI estimates from the monthly job. Approving updates net worth here and the Operations Properties tab (same source). Nothing changes until you approve.</div>
         ${rowsHtml}
@@ -1694,7 +1728,7 @@ function renderBucketEditor(el) {
         <div id="beError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:6px"></div>
         <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
             <button onclick="addBucketRow()" style="background:none;border:1px dashed var(--border-default);border-radius:var(--radius-md);padding:7px 14px;cursor:pointer;color:var(--accent);font-size:var(--fs-sm)">+ Add bucket</button>
-            <button id="beSave" onclick="saveBucketEditor()" style="margin-left:auto;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save buckets</button>
+            <button id="beSave" onclick="saveBucketEditor()" style="margin-left:auto;background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:8px 18px;font-weight:var(--fw-semibold);cursor:pointer">Save buckets</button>
         </div>
     </div>`;
     bucketEditorTotal();

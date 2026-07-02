@@ -576,6 +576,13 @@
                 : `${rows.length.toLocaleString()} of ${total.toLocaleString()} transactions`;
         }
 
+        if (rows.length === 0) {
+            spacer.style.height = '0px';
+            rowsHost.style.transform = 'translateY(0)';
+            rowsHost.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:48px 16px;font-size:13px">No transactions match your filters.</div>`;
+            return;
+        }
+
         spacer.style.height = (rows.length * s.rowH) + 'px';
         const viewportH = viewport.clientHeight || s.viewportH;
         const startIdx = Math.max(0, Math.floor(s.scrollTop / s.rowH) - 5);
@@ -681,6 +688,7 @@
                 const tenantId = _txResolveInputId(input);
                 if (!tenantId) {
                     // Cleared — leave tenancy alone (don't unlink); user can clear tenancy explicitly.
+                    input.style.background = origBg;
                     return;
                 }
                 // Find tenancy(ies) linked to this tenant. If exactly one, link it.
@@ -694,9 +702,11 @@
                     await _txPatchTransaction(rec, { [F.txTenancy]: [matches[0].id] });
                 } else if (matches.length === 0) {
                     alert('No tenancy found for this tenant.');
+                    input.style.background = origBg;
                     return;
                 } else {
                     alert(`This tenant has ${matches.length} tenancies — please pick the Tenancy directly.`);
+                    input.style.background = origBg;
                     return;
                 }
             } else if (map.kind === 'link') {
@@ -1188,6 +1198,11 @@
             if (typeof sendAIMessage === 'function') sendAIMessage();
         } else {
             // Fallback — copy to clipboard if AI panel is unavailable
-            navigator.clipboard.writeText(prompt).then(() => alert('AI analysis prompt copied to clipboard — paste it into the AI assistant.'));
+            navigator.clipboard.writeText(prompt)
+                .then(() => alert('AI analysis prompt copied to clipboard — paste it into the AI assistant.'))
+                .catch(() => {
+                    if (typeof showToast === 'function') showToast('Copy failed — select and copy manually', { type: 'error' });
+                    else alert('Copy failed — select and copy manually');
+                });
         }
     }

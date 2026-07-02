@@ -17,38 +17,38 @@
     // Quick actions — rotate based on active tab
     const AI_ACTIONS = {
         overview: [
-            { label: 'Summarise Financial Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Give me a concise summary of the current financial health based on the dashboard data. Include opening balance, income vs costs, operating cushion (revenue minus fixed costs), and any concerns.' },
-            { label: 'Cash Flow Report', model: 'claude-sonnet-4-6', maxTokens: 2000, prompt: 'Generate a detailed 31-day cash flow forecast report. Include the daily projections, highlight risk dates where the balance drops low, and suggest actions to maintain positive cash flow.' },
-            { label: 'Compare vs Budget', model: 'claude-sonnet-4-6', maxTokens: 1500, prompt: 'Compare actual spending against budget targets for maintenance, wages, and CFV. Identify which are over/under budget and by how much. Suggest corrective actions.' },
-            { label: 'Weekly Briefing', model: 'claude-sonnet-4-6', maxTokens: 3000, prompt: 'Generate a professional weekly briefing I can share with stakeholders. Cover financial position, operational metrics, key risks, and recommended actions. Format with clear headers.' },
+            { label: 'Summarise Financial Health', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Give me a concise summary of the current financial health based on the dashboard data. Include opening balance, income vs costs, operating cushion (revenue minus fixed costs), and any concerns.' },
+            { label: 'Cash Flow Report', model: AI_MODEL_DEFAULT, maxTokens: 2000, prompt: 'Generate a detailed 31-day cash flow forecast report. Include the daily projections, highlight risk dates where the balance drops low, and suggest actions to maintain positive cash flow.' },
+            { label: 'Compare vs Budget', model: AI_MODEL_DEFAULT, maxTokens: 1500, prompt: 'Compare actual spending against budget targets for maintenance, wages, and CFV. Identify which are over/under budget and by how much. Suggest corrective actions.' },
+            { label: 'Weekly Briefing', model: AI_MODEL_DEFAULT, maxTokens: 3000, prompt: 'Generate a professional weekly briefing I can share with stakeholders. Cover financial position, operational metrics, key risks, and recommended actions. Format with clear headers.' },
         ],
         cfv: [
-            { label: 'Analyse CFV Risk', model: 'claude-sonnet-4-6', maxTokens: 2000, prompt: 'Analyse all current cash flow voids. For each CFV tenancy, assess the risk level, days overdue, and recommended action. Prioritise by exposure amount.' },
-            { label: 'CFV Action Plan', model: 'claude-sonnet-4-6', maxTokens: 1500, prompt: 'Create an action plan for resolving the current CFVs. Include chase sequence status, next steps for each, and estimated recovery timeline.' },
+            { label: 'Analyse CFV Risk', model: AI_MODEL_DEFAULT, maxTokens: 2000, prompt: 'Analyse all current cash flow voids. For each CFV tenancy, assess the risk level, days overdue, and recommended action. Prioritise by exposure amount.' },
+            { label: 'CFV Action Plan', model: AI_MODEL_DEFAULT, maxTokens: 1500, prompt: 'Create an action plan for resolving the current CFVs. Include chase sequence status, next steps for each, and estimated recovery timeline.' },
         ],
         invoices: [
-            { label: 'Overdue Summary', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'List all overdue invoices with amounts and how long overdue. Calculate total overdue amount.' },
-            { label: 'Payment Priority', model: 'claude-sonnet-4-6', maxTokens: 1000, prompt: 'Prioritise the pending invoices for payment based on due date, amount, and business importance. Suggest a payment schedule.' },
+            { label: 'Overdue Summary', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'List all overdue invoices with amounts and how long overdue. Calculate total overdue amount.' },
+            { label: 'Payment Priority', model: AI_MODEL_DEFAULT, maxTokens: 1000, prompt: 'Prioritise the pending invoices for payment based on due date, amount, and business importance. Suggest a payment schedule.' },
         ],
         airtable: [
-            { label: 'Job List Overview', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the current contractor job list. How many active jobs are there? Are any overdue or stalled? What needs attention?' },
+            { label: 'Job List Overview', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Summarise the current contractor job list. How many active jobs are there? Are any overdue or stalled? What needs attention?' },
         ],
         comms: [
-            { label: 'Inbox Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the current inbound communications status. How many emails need responding to? Are there any urgent items?' },
-            { label: 'Follow-up Priorities', model: 'claude-sonnet-4-6', maxTokens: 1000, prompt: 'Review the pending follow-ups and suggest which ones to prioritise based on urgency and importance.' },
+            { label: 'Inbox Status', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Summarise the current inbound communications status. How many emails need responding to? Are there any urgent items?' },
+            { label: 'Follow-up Priorities', model: AI_MODEL_DEFAULT, maxTokens: 1000, prompt: 'Review the pending follow-ups and suggest which ones to prioritise based on urgency and importance.' },
         ],
         compliance: [
-            { label: 'Compliance Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Summarise the property compliance status. Are any certificates expired or expiring soon? Which properties need attention?' },
-            { label: 'Expiry Report', model: 'claude-sonnet-4-6', maxTokens: 1500, prompt: 'Generate a compliance expiry report. List all certificates by expiry date, flag any that are expired or expiring within 30 days, and suggest an action plan.' },
+            { label: 'Compliance Status', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Summarise the property compliance status. Are any certificates expired or expiring soon? Which properties need attention?' },
+            { label: 'Expiry Report', model: AI_MODEL_DEFAULT, maxTokens: 1500, prompt: 'Generate a compliance expiry report. List all certificates by expiry date, flag any that are expired or expiring within 30 days, and suggest an action plan.' },
         ],
         sitemap: [
-            { label: 'Version Status', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Check the version sync status across all pages and SOPs. Which SOPs are out of date and need updating?' },
+            { label: 'Version Status', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Check the version sync status across all pages and SOPs. Which SOPs are out of date and need updating?' },
         ],
         fintable: [
-            { label: 'Sync Health', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: 'Check the Fintable bank sync status. Are all accounts syncing correctly? Are any stale or disconnected?' },
+            { label: 'Sync Health', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: 'Check the Fintable bank sync status. Are all accounts syncing correctly? Are any stale or disconnected?' },
         ],
         _default: [
-            { label: 'Ask a Question', model: 'claude-haiku-4-5-20251001', maxTokens: 500, prompt: '' },
+            { label: 'Ask a Question', model: AI_MODEL_LIGHT, maxTokens: 500, prompt: '' },
         ],
     };
 
@@ -143,7 +143,7 @@
         const tab = getActiveTab();
         const actions = AI_ACTIONS[tab] || AI_ACTIONS._default;
         container.innerHTML = actions.filter(a => a.prompt).map(a =>
-            `<div class="ai-chip" onclick="sendQuickAction('${escHtml(a.label)}')">${a.label}</div>`
+            `<div class="ai-chip" onclick="sendQuickAction('${escJs(a.label)}')">${escHtml(a.label)}</div>`
         ).join('');
     }
 
@@ -185,7 +185,6 @@
                 }
             }
             if (tab === 'compliance') {
-                const frame = document.getElementById('complianceFrame');
                 ctx.compliancePage = 'Property compliance tracking page (loaded as iframe)';
             }
             if (tab === 'comms') {
@@ -257,9 +256,17 @@
         return div;
     }
 
-    // Simple markdown renderer
+    // Simple markdown renderer.
+    // SECURITY: the raw text is HTML-escaped FIRST so model (or error) output can
+    // never inject markup — only the markdown patterns below produce HTML.
     function renderMarkdown(text) {
-        return text
+        const escaped = String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        return escaped
             .replace(/```([\s\S]*?)```/g, '<pre style="background:var(--bg-subtle);padding:8px;border-radius:6px;font-size:var(--fs-xs);overflow-x:auto"><code>$1</code></pre>')
             .replace(/`([^`]+)`/g, '<code style="background:var(--bg-subtle);padding:1px 4px;border-radius:3px;font-size:var(--fs-sm)">$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -321,7 +328,7 @@
 
         // Determine model
         const isComplex = text.length > 80 || /report|analyse|analyze|compare|strategy|plan|briefing|export|trend|forecast/i.test(text);
-        const model = isComplex ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+        const model = isComplex ? AI_MODEL_DEFAULT : AI_MODEL_LIGHT;
         const maxTokens = isComplex ? 2000 : 500;
 
         showTyping();
@@ -340,8 +347,10 @@
             hideTyping();
 
             if (!response.ok) {
-                const errText = await response.text().catch(() => '');
-                appendAIMessage('assistant', `Sorry, I couldn't process that (${response.status}). ${errText ? errText.substring(0, 100) : 'Please try again.'}`);
+                // Proxy errors can be long multi-line bodies — flatten and truncate before showing
+                const errRaw = await response.text().catch(() => '');
+                const errText = errRaw.replace(/\s+/g, ' ').trim().substring(0, 120);
+                appendAIMessage('assistant', `Sorry, I couldn't process that (${response.status}). ${errText || 'Please try again.'}`);
                 return;
             }
 
@@ -370,9 +379,8 @@
 
     // Quick action
     function sendQuickAction(label) {
-        const tab = getActiveTab();
-        const actions = AI_ACTIONS[tab] || AI_ACTIONS._default;
-        const action = [...(AI_ACTIONS.overview || []), ...(actions || [])].find(a => a.label === label);
+        // Search every tab's actions so command-palette entries work from any tab
+        const action = Object.values(AI_ACTIONS).flat().find(a => a.label === label);
         if (!action) return;
         document.getElementById('aiInput').value = action.prompt || label;
         sendAIMessage();
@@ -385,10 +393,21 @@
     }
     function printAIResponse(btn) {
         const msg = btn.closest('.ai-msg');
-        const w = window.open('', '_blank');
-        w.document.write(`<html><head><title>AI Report</title><style>body{font-family:-apple-system,sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;color:#1e293b}h1,h2,h3,h4{color:#0f172a}code{background:#f1f5f9;padding:2px 4px;border-radius:3px}pre{background:#f1f5f9;padding:12px;border-radius:6px;overflow-x:auto}</style></head><body><h1>Operations Director \u2014 AI Report</h1><p style="color:#64748b">${new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}</p><hr>${msg.innerHTML}</body></html>`);
-        w.document.close();
-        w.print();
+        const printWin = window.open('', '_blank');
+        if (!printWin) {
+            showToast('Pop-up blocked \u2014 allow pop-ups to print', { type: 'warning' });
+            return;
+        }
+        const doc = printWin.document;
+        doc.title = 'AI Report';
+        // Hex literals are intentional here: tokens.css does not load inside this standalone print popup.
+        const style = doc.createElement('style');
+        style.textContent = 'body{font-family:"DM Sans",sans-serif;padding:40px;max-width:800px;margin:0 auto;line-height:1.6;color:#1C2422;background:#FBFBF9}h1,h2,h3,h4{color:#1C2422}code{background:#FBFBF9;border:1px solid #DDE1D9;padding:2px 4px;border-radius:3px}pre{background:#FBFBF9;border:1px solid #DDE1D9;padding:12px;border-radius:6px;overflow-x:auto}hr{border:none;border-top:1px solid #DDE1D9}';
+        doc.head.appendChild(style);
+        // msg.innerHTML is already safe: it was produced by renderMarkdown, which escapes all raw HTML first.
+        doc.body.innerHTML = `<h1>Operations Director \u2014 AI Report</h1><p style="color:#5A6660">${new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}</p><hr>${msg.innerHTML}`;
+        doc.close();
+        printWin.print();
     }
 
     // Command palette
@@ -406,7 +425,7 @@
         const all = Object.values(AI_ACTIONS).flat().filter(a => a.prompt);
         const filtered = filter ? all.filter(a => a.label.toLowerCase().includes(filter.toLowerCase())) : all;
         list.innerHTML = filtered.map(a =>
-            `<div class="ai-cmd-item" onclick="closeCmdPalette();sendQuickAction('${escHtml(a.label)}')">${a.label}</div>`
+            `<div class="ai-cmd-item" onclick="closeCmdPalette();sendQuickAction('${escJs(a.label)}')">${escHtml(a.label)}</div>`
         ).join('') || '<div class="od-empty-state" style="padding:12px">No matching commands</div>';
     }
     function filterCmdPalette() {
