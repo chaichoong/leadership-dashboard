@@ -4070,6 +4070,7 @@ Here is the video transcript:
 ${transcript}
 
 Extract discrete, actionable workflow steps from this transcript. Each step should be a specific task someone would perform.
+CRITICAL — examples are not steps: when the narrator walks through specific cases (a tenant's name, one account, an amount), those are worked examples of ONE generic step, not separate steps. Never name a step after a specific case (no "Review John Smith Case"); write the generic step it demonstrates (e.g. "Review each open case individually") and keep all names/amounts out of step names and descriptions.
 Return ONLY a JSON array of objects with "name" and "description" keys. No other text.`
         : `Suggest 5-8 workflow steps for a workflow called "${wName}".
 ${wDesc ? `Workflow description: ${wDesc}` : ''}
