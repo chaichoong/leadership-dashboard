@@ -39,9 +39,12 @@ function isBrowserCall(request) {
 }
 
 function hasServiceToken(request, env) {
-  if (!env.PROXY_SERVICE_TOKEN) return false;
   const auth = request.headers.get('Authorization') || '';
-  return auth === `Bearer ${env.PROXY_SERVICE_TOKEN}`;
+  // Two independently named tokens so services can be added or rotated without
+  // breaking each other (TOKEN = GitHub valuations job, TOKEN_2 = agent-runner).
+  if (env.PROXY_SERVICE_TOKEN && auth === `Bearer ${env.PROXY_SERVICE_TOKEN}`) return true;
+  if (env.PROXY_SERVICE_TOKEN_2 && auth === `Bearer ${env.PROXY_SERVICE_TOKEN_2}`) return true;
+  return false;
 }
 
 export default {
