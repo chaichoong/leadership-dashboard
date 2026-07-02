@@ -178,6 +178,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     </div>
     <div class="topbar-right">
         <span id="teamSyncStamp" style="font-size:12px;color:var(--text-muted);margin-right:4px">Not yet loaded</span>
+        <a class="btn" href="workflow.html" target="_blank" title="Visual map of how the Team OS works" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">&#x1F4D6; Workflow</a>
         <button class="btn" onclick="loadAll(true)">&#x1F504; Refresh</button>
         <button class="btn" onclick="window.parent.postMessage({action:'switchTab',tab:'overview'},'*');window.history.back()">&#x2190; Back</button>
     </div>
@@ -298,7 +299,7 @@ function authenticate() {
     const v = document.getElementById('patInput').value.trim();
     if (!v) return;
     PAT = v;
-    try { localStorage.setItem('_dlr_pat', v); } catch(e) {}
+    try { localStorage.setItem('_dlr_pat', v); } catch(e) {/* best-effort: safe fallback */}
     document.getElementById('authBar').style.display = 'none';
     document.getElementById('appShell').style.display = '';
     loadAll();
@@ -310,14 +311,14 @@ function showApp() {
 }
 
 (function autoAuth() {
-    try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; showApp(); loadAll(); return; } } catch(e) {}
+    try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; showApp(); loadAll(); return; } } catch(e) {/* best-effort: safe fallback */}
     let stored = '';
-    try { stored = localStorage.getItem('_dlr_pat') || ''; } catch(e) {}
+    try { stored = localStorage.getItem('_dlr_pat') || ''; } catch(e) {/* best-effort: safe fallback */}
     if (stored) { PAT = stored; showApp(); loadAll(); return; }
     window.addEventListener('message', e => {
         if (e.data?.type === 'pat-broadcast' && e.data.pat) {
             PAT = e.data.pat;
-            try { localStorage.setItem('_dlr_pat', PAT); } catch(ex) {}
+            try { localStorage.setItem('_dlr_pat', PAT); } catch(ex) {/* best-effort: safe fallback */}
             showApp(); loadAll();
         }
     });

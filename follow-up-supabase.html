@@ -1066,7 +1066,6 @@
         const refreshIn = Math.max((expiresInSeconds - 300) * 1000, 60000);
         tokenRefreshTimer = setTimeout(() => {
             if (accessToken && tokenClient) {
-                console.log('Proactively refreshing OAuth token...');
                 tokenClient.requestAccessToken({ prompt: '' });
             }
         }, refreshIn);
@@ -1677,10 +1676,7 @@
         if (autoRefreshTimer) clearInterval(autoRefreshTimer);
         autoRefreshTimer = setInterval(() => {
             if (!isUserActive()) {
-                console.log('Auto-refresh triggered (user idle)');
                 loadEmails();
-            } else {
-                console.log('Auto-refresh skipped (user active)');
             }
         }, 30 * 60 * 1000); // 30 minutes — halves AI suggestion call volume
     }
@@ -1754,7 +1750,6 @@
                         } catch (e) { /* ignore errors */ }
                     }
                 }
-                console.log(`Auto-trashed ${ghlDupes.length} GHL SMS notification(s)`);
             }
 
             // Auto-remove follow-up label if someone has replied (latest message not from us)
@@ -2052,7 +2047,6 @@
                         } catch (e) { /* ignore errors */ }
                     }
                 }
-                console.log(`Auto-trashed ${ghlDupesInbox.length} GHL SMS notification(s) from inbox view`);
             }
             allEmails.sort((a, b) => b.lastDate - a.lastDate); // newest first for inbox
             renderInboxEmails(allEmails);
@@ -3166,9 +3160,6 @@ Respond with ONLY the JSON object, no markdown.`;
                 console.warn('[attach-upload] error for', item.filename, err);
             }
         }
-        if (uploaded > 0) {
-            console.log(`[attach-upload] ${uploaded}/${items.length} attachment(s) uploaded to task ${taskId}`);
-        }
     }
 
     // ============================================================
@@ -3186,7 +3177,6 @@ Respond with ONLY the JSON object, no markdown.`;
     //   4. If uncertain: fall back to creating an Airtable task for
     //      Mica with the Gmail URL, asking her to link manually.
     async function processTenancyDocsEmail(email) {
-        console.log(`[tenancy-link] starting auto-link for email "${(email.subject || '').slice(0, 60)}"`);
         const pat = getAirtablePat();
         if (!pat) {
             console.warn('[tenancy-link] aborting — Airtable PAT not configured in Settings');
@@ -3198,7 +3188,6 @@ Respond with ONLY the JSON object, no markdown.`;
         let tenancies;
         try {
             tenancies = await fetchActiveTenancies();
-            console.log(`[tenancy-link] fetched ${tenancies.length} active tenancies`);
         } catch (err) {
             console.error('[tenancy-link] failed to fetch tenancies:', err);
             await fallbackTenancyDocTask(email, 'Could not fetch tenancies from Airtable: ' + err.message);
@@ -3214,7 +3203,6 @@ Respond with ONLY the JSON object, no markdown.`;
         let match;
         try {
             match = await matchEmailToTenancy(email, tenancies);
-            console.log('[tenancy-link] AI match result:', match);
         } catch (err) {
             console.error('[tenancy-link] AI match call failed:', err);
             await fallbackTenancyDocTask(email, 'AI tenancy-match failed: ' + err.message);
@@ -3237,11 +3225,8 @@ Respond with ONLY the JSON object, no markdown.`;
 
         // 3. Append link to tenancy record + star Gmail message
         try {
-            console.log(`[tenancy-link] writing link to tenancy ${matched.id} (${matched.surname} – ${matched.unitRef})`);
             await appendTenancyDocLink(matched, email, match.label || email.subject);
-            console.log(`[tenancy-link] ✓ link written; starring Gmail thread`);
             await starGmailMessages(email);
-            console.log(`[tenancy-link] ✓ done — tenancy ${matched.surname} (${matched.unitRef}) updated`);
             showSuccess(`Tenancy doc linked → ${matched.surname} (${matched.unitRef})`);
             addAuditEntry('tenancy_doc_linked', `Linked email "${truncate(email.subject, 40)}" to tenancy ${matched.surname} (${matched.unitRef})`);
         } catch (err) {
@@ -3432,7 +3417,7 @@ Body: ${bodyText}`;
                     body: JSON.stringify({ recipientEmail: fbEmail, taskName: record.fields[AIRTABLE_FIELDS.taskName], taskId: fbTaskId, actorName: 'Inbound Comms', action: 'assigned' }),
                     keepalive: true,
                 }).catch(e => console.warn('[inbound notify] failed', e));
-            } catch (e) {}
+            } catch (e) { console.warn('[inbound notify] dispatch failed', e); }
             // Star the Gmail thread so the sweep treats it as "already
             // processed" and never re-creates this task.
             await starGmailMessages(email);
@@ -3494,7 +3479,6 @@ Body: ${bodyText}`;
                 offset = data.offset;
             }
 
-            console.log(`[dedupe] loaded ${records.length} inbound task(s) with a Gmail URL`);
 
             // Group by threadId extracted from the Gmail URL — supports both
             // legacy "#inbox/<id>" and current "#all/<id>" formats.
@@ -3521,7 +3505,6 @@ Body: ${bodyText}`;
                 for (const d of dupes) toDelete.push(d.id);
             }
 
-            console.log(`[dedupe] found ${affectedThreads.length} thread(s) with duplicates; ${toDelete.length} record(s) to remove`);
 
             if (toDelete.length === 0) {
                 progressEl.style.display = 'none';
@@ -3696,7 +3679,6 @@ Body: ${bodyText}`;
 
             // Dedupe to threads
             const threadIds = [...new Set(messages.map(m => m.threadId))];
-            console.log(`[backfill] found ${messages.length} message(s) across ${threadIds.length} thread(s)`);
 
             if (threadIds.length === 0) {
                 progressEl.innerHTML = '<span style="color:var(--text-secondary);">No matching emails found in Gmail since 1 April 2025.</span>';
@@ -3998,11 +3980,11 @@ Body: ${bodyText}`;
         tenancyDocSweepInFlight = true;
         try {
             if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) {
-                console.log('[tenancy-sweep] gapi not ready');
+                console.warn('[tenancy-sweep] gapi not ready');
                 return;
             }
             if (!getAirtablePat()) {
-                console.log('[tenancy-sweep] Airtable PAT not configured — skipping');
+                console.warn('[tenancy-sweep] Airtable PAT not configured — skipping');
                 return;
             }
 
@@ -4034,7 +4016,6 @@ Body: ${bodyText}`;
                 return;
             }
             const threads = listResp.result.threads || [];
-            console.log(`[tenancy-sweep] ${threads.length} thread(s) in label 11`);
             if (threads.length === 0) return;
 
             const PROCESS_CAP = 10;
@@ -4043,7 +4024,6 @@ Body: ${bodyText}`;
 
             for (const t of threads) {
                 if (processedCount >= PROCESS_CAP) {
-                    console.log(`[tenancy-sweep] reached cap of ${PROCESS_CAP} — remaining ${threads.length - threads.indexOf(t)} thread(s) deferred to next sweep`);
                     break;
                 }
 
@@ -4076,7 +4056,6 @@ Body: ${bodyText}`;
                     continue;
                 }
 
-                console.log(`[tenancy-sweep] processing unlinked thread "${(parsedEmail.subject || '').slice(0, 60)}"`);
                 try {
                     await processTenancyDocsEmail(parsedEmail);
                     processedCount++;
@@ -4088,7 +4067,6 @@ Body: ${bodyText}`;
                 await new Promise(r => setTimeout(r, 1500));
             }
 
-            console.log(`[tenancy-sweep] done — processed ${processedCount}, skipped ${skippedStarredCount} (already linked)`);
             if (processedCount > 0) {
                 localStorage.setItem('last_tenancy_doc_sweep', new Date().toISOString());
                 scheduleLabelCountRefresh();
@@ -4522,11 +4500,11 @@ Body: ${bodyText}`;
         sweepInFlight = true;
         try {
             if (typeof gapi === 'undefined' || !gapi.client || !gapi.client.gmail) {
-                console.log('[sweep] gapi not ready');
+                console.warn('[sweep] gapi not ready');
                 return;
             }
             if (!getAirtablePat()) {
-                console.log('[sweep] Airtable PAT not configured');
+                console.warn('[sweep] Airtable PAT not configured');
                 return;
             }
 
@@ -4549,7 +4527,6 @@ Body: ${bodyText}`;
 
             // ── JOB 1 + 3: COMPLETION SWEEP ──
             const completedMap = await fetchCompletedInboundThreadIds();
-            console.log(`[sweep] ${completedMap.size} completed inbound task(s) in Airtable`);
 
             // All task-source labels
             const sourceLabels = [label8, label12, label13].filter(Boolean);
@@ -4572,7 +4549,6 @@ Body: ${bodyText}`;
                     console.warn(`[sweep] failed to list ${sourceLabel.name} threads:`, err);
                 }
             }
-            console.log(`[sweep] ${threadToSourceLabel.size} thread(s) across labels 8/12/13`);
 
             let completionMoved = 0;
             if (completedMap.size > 0) {
@@ -4604,7 +4580,6 @@ Body: ${bodyText}`;
             let reassignMoved = 0;
             if (label8 && label12) {
                 const activeMap = await fetchActiveInboundTaskAssignees();
-                console.log(`[sweep] ${activeMap.size} active inbound task(s) for reassignment check`);
 
                 for (const [threadId, taskInfo] of activeMap) {
                     if (!threadToSourceLabel.has(threadId)) continue;
@@ -4656,7 +4631,6 @@ Body: ${bodyText}`;
                 const onSource = typeof isTaskCreatedView === 'function' &&
                     (isTaskCreatedView() || isKevinToRespondView() || isMaintenanceView());
                 if (onSource) loadEmails();
-                console.log(`[sweep] Completion: ${completionMoved}, Reassignment: ${reassignMoved}`);
             }
         } catch (err) {
             console.error('Completion sweep failed:', err);
@@ -4728,7 +4702,6 @@ Body: ${bodyText}`;
                 } else if (isInboxView) {
                     loadInboxEmails();
                 }
-                console.log(`Follow-up sweep cleared ${clearedCount} thread(s) — replies received`);
             }
         } catch (err) {
             console.error('Follow-up sweep failed:', err);
@@ -4960,7 +4933,6 @@ Respond with ONLY valid JSON, no markdown.`;
                                         body: JSON.stringify({ records: batch })
                                     });
                                 }
-                                console.log(`Marked ${toExpire.length} older ${cert.cert_type} cert(s) for ${matchedProp.shortName} as Expired`);
                             }
                         }
                     } catch (auditErr) {
@@ -5331,7 +5303,7 @@ Respond with ONLY valid JSON, no markdown.`;
     // ============================================================
     function logAiAccuracy(suggestedLabel, appliedLabel) {
         let log = [];
-        try { log = JSON.parse(localStorage.getItem('ai_accuracy_log') || '[]'); } catch {}
+        try { log = JSON.parse(localStorage.getItem('ai_accuracy_log') || '[]'); } catch {/* best-effort: safe fallback */}
         const entry = {
             date: new Date().toISOString(),
             suggested: suggestedLabel,
@@ -5438,7 +5410,7 @@ Respond with ONLY valid JSON, no markdown.`;
 
     function getAiAccuracy30Day() {
         let log = [];
-        try { log = JSON.parse(localStorage.getItem('ai_accuracy_log') || '[]'); } catch {}
+        try { log = JSON.parse(localStorage.getItem('ai_accuracy_log') || '[]'); } catch {/* best-effort: safe fallback */}
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - 30);
         const recent = log.filter(e => new Date(e.date) >= cutoff);
@@ -5450,7 +5422,7 @@ Respond with ONLY valid JSON, no markdown.`;
 
     function storeCorrection(email, suggestedLabel, correctedLabel) {
         let corrections = [];
-        try { corrections = JSON.parse(localStorage.getItem('label_corrections') || '[]'); } catch {}
+        try { corrections = JSON.parse(localStorage.getItem('label_corrections') || '[]'); } catch {/* best-effort: safe fallback */}
         corrections.push({
             sender: email.fromEmail,
             subject: email.subject,
@@ -5474,7 +5446,7 @@ Respond with ONLY valid JSON, no markdown.`;
         if (Object.keys(kb).length === 0) return;
 
         let corrections = [];
-        try { corrections = JSON.parse(localStorage.getItem('label_corrections') || '[]'); } catch {}
+        try { corrections = JSON.parse(localStorage.getItem('label_corrections') || '[]'); } catch {/* best-effort: safe fallback */}
         const recentCorrections = corrections.slice(-20);
 
         // Build KB summary for prompt

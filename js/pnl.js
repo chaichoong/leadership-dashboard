@@ -383,10 +383,17 @@
         const npMData = keys.map(k => pnl.netMargin[k] || 0);
 
         const fontFamily = 'DM Sans, sans-serif';
+        // Chart.js canvases cannot resolve CSS variables — resolve the design
+        // tokens once here so the charts stay on-palette after any rebrand.
+        const _tok = (name, fallback) => (getComputedStyle(document.documentElement).getPropertyValue(name) || '').trim() || fallback;
+        const tokAccent = _tok('--accent', '#2C6E49');
+        const tokDanger = _tok('--danger', '#A33B3B');
+        const tokGold = _tok('--tone-gold', '#B8933A');
+        const tokGrid = _tok('--bg-subtle', '#E5E8E1');
         const sharedOptions = {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { font: { size: 11, family: fontFamily }, padding: 12, usePointStyle: true, pointStyle: 'circle' } } },
-            scales: { x: { grid: { display: false }, ticks: { font: { size: 10, family: fontFamily } } }, y: { grid: { color: 'var(--bg-surface-2)' }, ticks: { font: { size: 10, family: fontFamily } } } },
+            scales: { x: { grid: { display: false }, ticks: { font: { size: 10, family: fontFamily } } }, y: { grid: { color: tokGrid }, ticks: { font: { size: 10, family: fontFamily } } } },
         };
 
         // 1. Revenue vs Expenses bar chart
@@ -397,9 +404,9 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Revenue', data: revData, backgroundColor: "#2C6E49", borderRadius: 4, barPercentage: 0.7 },
-                        { label: 'COGS', data: cogsData.map(v => -v), backgroundColor: '#f87171', borderRadius: 4, barPercentage: 0.7 },
-                        { label: 'OpEx', data: opexData.map(v => -v), backgroundColor: '#fb923c', borderRadius: 4, barPercentage: 0.7 },
+                        { label: 'Revenue', data: revData, backgroundColor: tokAccent, borderRadius: 4, barPercentage: 0.7 },
+                        { label: 'COGS', data: cogsData.map(v => -v), backgroundColor: tokDanger, borderRadius: 4, barPercentage: 0.7 },
+                        { label: 'OpEx', data: opexData.map(v => -v), backgroundColor: tokGold, borderRadius: 4, barPercentage: 0.7 },
                     ]
                 },
                 options: {
@@ -479,10 +486,13 @@
         if (ctx4) {
             // Combine all COGS + OpEx sub-cats with non-zero totals
             const slices = [];
+            // First five = the tonal token family (resolved above); the rest
+            // extend the wheel for long category lists.
             const colours = [
-                '#f87171','#fb923c','#fbbf24','#a3e635','#34d399','#22d3ee','#60a5fa','#a78bfa','#f472b6','#e879f9',
+                _tok('--tone-sage', '#2C6E49'), _tok('--tone-olive', '#5F7A3A'), _tok('--tone-gold', '#B8933A'), _tok('--tone-blue', '#5A86CF'), _tok('--tone-plum', '#8B6FAE'),
+                '#22d3ee','#60a5fa','#a78bfa','#f472b6','#e879f9',
                 '#d97706','#84cc16','#14b8a6','#06b6d4','#8b5cf6','#ec4899','#A33B3B','#2C6E49','#6366f1','#d946ef',
-                '#f59e0b','#0ea5e9','#8b5cf6','#5A6660'
+                '#f59e0b','#0ea5e9','#34d399','#5A6660'
             ];
             [pnl.cogs, pnl.opex].forEach(sec => {
                 sec.rows.forEach(r => { if (r.total > 0) slices.push({ label: r.subCat, value: r.total }); });

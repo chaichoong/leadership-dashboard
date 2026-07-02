@@ -181,9 +181,9 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 /* Avatars */
 .avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:#fff;flex-shrink:0}
 .avatar-kevin{background:var(--tone-sage)}.avatar-mica{background:var(--tone-plum)}
-.avatar-erica{background:#f59e0b}.avatar-may{background:#22c55e}
-.avatar-gary{background:#0ea5e9}.avatar-rob{background:#a855f7}.avatar-roy{background:#14b8a6}
-.avatar-other{background:#64748b}
+.avatar-erica{background:var(--tone-gold)}.avatar-may{background:var(--tone-olive)}
+.avatar-gary{background:var(--tone-blue)}.avatar-rob{background:var(--accent-hover)}.avatar-roy{background:var(--accent-gold)}
+.avatar-other{background:var(--text-muted)}
 .assignee-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
 
 /* Task detail drawer (modal) */
@@ -759,8 +759,8 @@ const DEFAULT_ROUTINE = [
 ];
 const DEFAULT_WORK_CONFIG = { startHour:8, endHour:18, maxTaskHours:6, autoSchedulePullInDays:14 };
 
-function getRoutineBlocks(){try{const s=localStorage.getItem('_task_routine');if(s)return JSON.parse(s)}catch(e){}return DEFAULT_ROUTINE}
-function getWorkConfig(){try{const s=localStorage.getItem('_task_workconfig');if(s)return JSON.parse(s)}catch(e){}return DEFAULT_WORK_CONFIG}
+function getRoutineBlocks(){try{const s=localStorage.getItem('_task_routine');if(s)return JSON.parse(s)}catch(e){/* best-effort: safe fallback */}return DEFAULT_ROUTINE}
+function getWorkConfig(){try{const s=localStorage.getItem('_task_workconfig');if(s)return JSON.parse(s)}catch(e){/* best-effort: safe fallback */}return DEFAULT_WORK_CONFIG}
 function saveRoutineBlocks(b){localStorage.setItem('_task_routine',JSON.stringify(b))}
 function saveWorkConfig(c){localStorage.setItem('_task_workconfig',JSON.stringify(c))}
 function getPersonCapacity(key){const s=localStorage.getItem('_task_capacity_'+key);return s?parseInt(s):40}
@@ -819,7 +819,7 @@ const _saveState={pending:0,ok:0,failed:0,log:[]};
 // Persist the last N PATCHes across page reloads so a post-refresh sync
 // check can verify what WE thought saved actually landed in Airtable.
 const _SAVE_LOG_KEY='_task_save_log_v1';
-function _loadPersistedLog(){try{const s=localStorage.getItem(_SAVE_LOG_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr}}catch(e){}return []}
+function _loadPersistedLog(){try{const s=localStorage.getItem(_SAVE_LOG_KEY);if(s){const arr=JSON.parse(s);if(Array.isArray(arr))return arr}}catch(e){/* best-effort: safe fallback */}return []}
 function _persistSaveLog(){try{const slim=_saveState.log.slice(0,50).map(l=>({taskId:l.taskId,taskName:l.taskName,fieldKey:l.fieldKey,value:l.value,status:l.status,error:l.error,when:l.when}));localStorage.setItem(_SAVE_LOG_KEY,JSON.stringify(slim))}catch(e){}}
 function _saveLog(entry){_saveState.log.unshift({...entry,when:new Date()});if(_saveState.log.length>100)_saveState.log.length=100;try{_persistSaveLog()}catch(e){}}
 
@@ -931,11 +931,9 @@ function runNotificationCatchup(){
     });
     notified.add(t.id);
     sent++;
-    console.log('[notification catchup] sent assignment DM for',t.name);
   });
   const arr=[...notified].slice(-500);
   localStorage.setItem(LS_KEY,JSON.stringify(arr));
-  if(sent)console.log(`[notification catchup] ${sent} catch-up DM(s) dispatched`);
 }
 // Send a known-good Slack DM and surface the worker's HTTP response so
 // the user can see exactly why the pipeline did or didn't deliver.
@@ -1476,7 +1474,7 @@ function addDays(dateStr,n){const p=dateStr.split('-').map(Number);const d=new D
 
 // ===== AUTH =====
 function initAuth(){
-  try{if(window.parent&&window.parent.PAT){PAT=window.parent.PAT;return true}}catch(e){}
+  try{if(window.parent&&window.parent.PAT){PAT=window.parent.PAT;return true}}catch(e){/* best-effort: safe fallback */}
   const stored=localStorage.getItem('_dlr_pat');
   if(stored){PAT=stored;return true}
   document.getElementById('authBar').style.display='flex';
@@ -1560,7 +1558,6 @@ async function fetchProperties(){
       const name=full||short||r.id;
       PROPERTY_ID_TO_NAME[r.id]=name;
     });
-    console.log('[Properties] loaded',Object.keys(PROPERTY_ID_TO_NAME).length,'rows');
   }catch(e){console.warn('properties fetch failed',e)}
 }
 async function fetchBusinesses(){
@@ -1576,16 +1573,18 @@ async function fetchBusinesses(){
         if(BUSINESS_OPTIONS.includes(name))BUSINESS_MAP[name]=r.id;
       }
     });
-    console.log('[Businesses] loaded',BUSINESS_MAP,'reverse',BUSINESS_ID_TO_NAME);
   }catch(e){console.warn('businesses fetch failed',e)}
 }
 
 async function fetchCalendarEvents(){
   if(!GCAL_SCRIPT_URL)return[];
   try{
-    const res=await fetch(`${GCAL_SCRIPT_URL}?date=${todayStr()}`);
+    // Optional access token for the calendar proxy — see os/tasks/index.html
+    const gcalKey=localStorage.getItem('gcal_proxy_key')||'';
+    const res=await fetch(`${GCAL_SCRIPT_URL}?date=${todayStr()}${gcalKey?`&key=${encodeURIComponent(gcalKey)}`:''}`);
     if(!res.ok)return[];
     const data=await res.json();
+    if(data&&data.error==='unauthorized'){console.warn('[gcal] proxy token required — set localStorage gcal_proxy_key');return[];}
     return(data.events||[]).map(ev=>({
       summary:ev.summary||ev.title||'(No title)',
       start:ev.start||ev.startTime||'',
@@ -2818,7 +2817,6 @@ async function patchCollaborators(taskId,newList,label){
 }
 async function addCollaborator(taskId,email,ev){
   if(ev){try{ev.stopPropagation();ev.preventDefault()}catch(_){}}
-  console.log('[addCollaborator]',taskId,email);
   const task=allTasks.find(t=>t.id===taskId);
   if(!task){console.warn('addCollaborator: task not found',taskId);toast('Could not find task',true);return}
   // Close the add menu if open
@@ -2829,7 +2827,6 @@ async function addCollaborator(taskId,email,ev){
 }
 async function removeCollaborator(taskId,email,ev){
   if(ev){try{ev.stopPropagation();ev.preventDefault()}catch(_){}}
-  console.log('[removeCollaborator]',taskId,email);
   const task=allTasks.find(t=>t.id===taskId);
   if(!task){console.warn('removeCollaborator: task not found',taskId);toast('Could not find task',true);return}
   const next=(task.collaborators||[]).filter(c=>(c.email||'').toLowerCase()!==(email||'').toLowerCase());
@@ -3977,7 +3974,6 @@ function tlDoubleClickAddTask(e){
           t.businessId=BUSINESS_MAP['Real Estate'];
         }
       }
-      console.log('[tlInlineAdd] created task',created.id,'pinned at',minOfDay,'local task:',t);
       // Render every view so the task shows up on timeline + list + kanban + capacity
       try{renderAll()}catch(e){console.warn('renderAll failed',e)}
       // Sanity check: did the task block actually end up rendered?
@@ -4317,26 +4313,20 @@ function resetRoutineConfig(){localStorage.removeItem('_task_routine');localStor
 // ======================================================
 function scheduleTasksAcrossDays(){
  try{
-  console.log('[Scheduler] Step 1: resolve member. activeTeam=',activeTeam);
   const member=TEAM.find(m=>m.key===activeTeam)||(currentUser?TEAM.find(m=>m.key===currentUser.key):null);
-  if(!member){console.log('[Scheduler] No member');return{moves:[],warnings:['Pick a user first']}}
+  if(!member)return{moves:[],warnings:['Pick a user first']}
 
-  console.log('[Scheduler] Step 2: get config');
   const config=getWorkConfig();
   // Daily task budget = user's configured maxTaskHours (the number they
   // explicitly set in Configure Routine). Routine and meetings are
   // scheduled separately on the timeline and don't eat into this budget.
   const dailyCapMin=Math.max(0,(config.maxTaskHours||6)*60);
-  console.log('[Scheduler] dailyCapMin=',dailyCapMin,'(maxTaskHours=',config.maxTaskHours,')');
   if(dailyCapMin<=0)return{moves:[],warnings:['Daily task budget is 0 — increase Max hrs in Configure Routine']};
 
-  console.log('[Scheduler] Step 3: filter tasks');
   let tasks=allTasks.filter(t=>t.assigneeEmail===member.email&&t.status!=='Completed'&&!t.someDay);
-  console.log('[Scheduler] filtered tasks count=',tasks.length);
 
   if(tasks.length>500){console.warn('[Scheduler] task count too large, aborting');return{moves:[],warnings:['Too many tasks to schedule ('+tasks.length+'); reduce task count first']}}
 
-  console.log('[Scheduler] Step 4: sort');
   // Order: hard deadlines first (so their capacity is reserved before any
   // movement happens), then soonest due date, then priority as a tiebreak.
   tasks.sort((a,b)=>{
@@ -4347,7 +4337,6 @@ function scheduleTasksAcrossDays(){
     return (PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99);
   });
 
-  console.log('[Scheduler] Step 5: seed usage map');
   const usage={};
   const today=todayStr();
   usage[today]=calendarEvents.filter(e=>!e.allDay).reduce((s,e)=>{const st=parseTimeToMinutes(e.start),en=parseTimeToMinutes(e.end);return s+(st!==null&&en!==null?en-st:0)},0);
@@ -4373,7 +4362,6 @@ function scheduleTasksAcrossDays(){
   const endOfWeek=addDays(today,_daysToSunday);
   const calendarMinsToday=usage[today]||0;
 
-  console.log('[Scheduler] Step 6: process',tasks.length,'tasks  (horizon:',PULL_IN_DAYS,'days, eow:',endOfWeek,')');
   let processed=0;
   for(let i=0;i<tasks.length;i++){
     const task=tasks[i];
@@ -4413,10 +4401,7 @@ function scheduleTasksAcrossDays(){
     }
     if(!placed)warnings.push(`Could not schedule "${task.name}" within 60 days`);
     processed++;
-    if(processed%25===0)console.log('[Scheduler] processed',processed,'/',tasks.length);
   }
-  console.log('[Scheduler] excluded hard:',excluded.hard.length,'projectFuture:',excluded.projectFuture.length,'farFuture:',excluded.farFuture.length);
-  console.log('[Scheduler] stayingToday:',stayingToday.length,'moves:',moves.length,'warnings:',warnings.length);
 
   return{moves,warnings,stayingToday,excluded,calendarMinsToday,dailyCapMin,todayTaskMins:usage[today]||0,totalConsidered:tasks.length};
  }catch(e){
@@ -4426,12 +4411,10 @@ function scheduleTasksAcrossDays(){
 }
 
 function runAutoSchedulePreview(){
-  console.log('[Auto-Schedule] Starting. activeTeam=',activeTeam,'currentUser=',currentUser);
   try{closeAllOverlays()}catch(e){console.warn('closeAllOverlays failed',e)}
   let result;
   try{result=scheduleTasksAcrossDays()}catch(e){console.error('[Auto-Schedule] scheduler threw',e);toast('Scheduler error — check console',true);return}
   const {moves,warnings,stayingToday,excluded,calendarMinsToday,dailyCapMin,todayTaskMins,totalConsidered}=result;
-  console.log('[Auto-Schedule] Preview ready. moves=',moves.length,'staying=',stayingToday.length,'excluded=',excluded.hard.length+excluded.projectFuture.length+excluded.farFuture.length);
   const overlay=document.createElement('div');
   overlay.className='modal-overlay';overlay.id='autoModal';
   overlay.onclick=(e)=>{if(e.target===overlay)overlay.remove()};
@@ -5278,7 +5261,7 @@ function renderProjects(){
     // Which period is the user currently viewing for this project's KPI?
     // If we have detail JSON, we can swap to any month. Default: rolling.
     let headerKpiDetail=null;
-    if(p.kpiDetailJson){try{headerKpiDetail=JSON.parse(p.kpiDetailJson)}catch(e){}}
+    if(p.kpiDetailJson){try{headerKpiDetail=JSON.parse(p.kpiDetailJson)}catch(e){/* best-effort: safe fallback */}}
     const selectedPeriod=_projectKpiPeriod[p.id]||'rolling';
     const monthNamesLong={'01':'January','02':'February','03':'March','04':'April','05':'May','06':'June','07':'July','08':'August','09':'September','10':'October','11':'November','12':'December'};
     let headerValue=p.kpiCurrent||0;
@@ -5483,7 +5466,7 @@ function toggleProject(id){
           _projectKpiPeriod[id]=_projectKpiPeriod[id]||'rolling';
           setTimeout(()=>renderProjKpiDrill(id,_projectKpiPeriod[id]||'rolling'),0);
         }
-      }catch(e){}
+      }catch(e){/* best-effort: safe fallback */}
     }
   }
 }
@@ -6087,7 +6070,6 @@ async function refreshAutomatedKpis(){
     }catch(e){console.warn('[KPI] compute failed for',p.name,p.kpiSource,e)}
   }
   if(projectsToUpdate.length===0)return;
-  console.log(`[KPI] Refreshing ${projectsToUpdate.length} automated KPIs`);
   _bulkOperation=true;
   try{
     for(const {project,newValue} of projectsToUpdate){
@@ -6533,11 +6515,11 @@ async function catchUpRecurringTasks(){
       // User-stop check: any task in this series with recurring cleared means
       // the user turned the series off. Respect that decision.
       const userStopped=allKnown.some(s=>s.name===t.name&&s.assigneeEmail===t.assigneeEmail&&(!s.recurring||s.recurring===''||s.recurring==='None'));
-      if(userStopped){console.log('[catchUp] series stopped by user, skipping spawn for',t.name);continue}
+      if(userStopped)continue;
       const next=await spawnRecurringNext(t,{silent:true});
       if(next)spawned++;
     }
-    if(spawned>0){console.log(`[catchUpRecurringTasks] spawned ${spawned} next-cycle task(s)`);renderAll();}
+    if(spawned>0)renderAll();
   }catch(e){console.warn('[catchUpRecurringTasks] fetch failed',e)}
 }
 // Backwards-compat alias
@@ -7507,9 +7489,9 @@ function renderJobs(){
   // Email is matched against parseTask's t.assigneeEmail so the count
   // stays in sync with the top team bar (which uses the same field).
   const CONTRACTORS=[
-    {name:'Gary Marsh',  email:'gkm.property.maintenance@outlook.com', key:'gary', colour:'#0ea5e9'},
-    {name:'Rob Jackson', email:'rjm320@hotmail.com',                   key:'rob',  colour:'#a855f7'},
-    {name:'Roy Lavin',   email:'roy.lavin1978@gmail.com',              key:'roy',  colour:'#14b8a6'},
+    {name:'Gary Marsh',  email:'gkm.property.maintenance@outlook.com', key:'gary', colour:'var(--tone-blue)'},
+    {name:'Rob Jackson', email:'rjm320@hotmail.com',                   key:'rob',  colour:'var(--accent-hover)'},
+    {name:'Roy Lavin',   email:'roy.lavin1978@gmail.com',              key:'roy',  colour:'var(--accent-gold)'},
   ];
   // Email matching is intentionally case-insensitive — Airtable doesn't
   // guarantee case stability on collaborator emails, so a "Gary@..." vs
@@ -8015,7 +7997,6 @@ async function loadAllData(){
     // values + JSON from Airtable.
 
     const r=await autoRescheduleOverdue();
-    if(r.count>0)console.log(`Rescheduled ${r.count} overdue`);
 
     const tc=document.getElementById('taskCount');if(tc)tc.textContent=`${allTasks.length} tasks, ${allProjects.length} projects${cal.length?`, ${cal.length} cal events`:''}`;
     const ls=document.getElementById('lastSync');if(ls)ls.textContent=`Synced ${new Date().toLocaleTimeString('en-GB')}`;
@@ -8193,7 +8174,6 @@ window.addEventListener('keydown',(e)=>{
 // Bulletproof Auto-Schedule entry: wraps the call so even if runAutoSchedulePreview
 // doesn't exist, we show a visible error instead of silently doing nothing.
 window.safeAutoSchedule=function(){
-  console.log('[safeAutoSchedule] click received');
   try{
     if(typeof closeAllOverlays==='function')closeAllOverlays();
     if(typeof window.runAutoSchedulePreview!=='function'){
@@ -8223,8 +8203,6 @@ window.safeAutoSchedule=function(){
 };
 
 // Visible sanity banner — prints once when the page script finishes parsing
-console.log('%c[Task OS] Script loaded at '+new Date().toLocaleTimeString(),'color:#2C6E49;font-weight:bold');
-console.log('[Task OS] runAutoSchedulePreview is',typeof window.runAutoSchedulePreview);
 </script>
 </body>
 </html>

@@ -673,7 +673,7 @@ function isActiveStatus(rec, entityKey){
 // Auth — try parent window first, then localStorage, then prompt
 // ═══════════════════════════════════════════════════════════════════════
 function bootAuth(){
-  try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e){}
+  try { if (window.parent && window.parent !== window && window.parent.PAT) { PAT = window.parent.PAT; return true; } } catch(e){/* best-effort: safe fallback */}
   const stored = localStorage.getItem('_dlr_pat');
   if (stored) { PAT = stored; return true; }
   return false;
@@ -816,12 +816,11 @@ async function fetchSchema(){
       const r = result[k];
       const mapped = Object.entries(r.byKey).filter(([,v])=>!v.missing).map(([key,v])=>({key, label:v.label, '→ Airtable':v.name, type:v.atType}));
       const missing = Object.entries(r.byKey).filter(([,v])=>v.missing).map(([key,v])=>({key, label:v.label}));
-      console.log(`-- ${r.tableName} (${k}) --  ${r.allFields.length} fields total`);
       console.table(mapped);
       if (missing.length) { console.warn('Unmapped curated fields:', missing); }
     }
     console.groupEnd();
-  } catch(e){}
+  } catch(e){/* best-effort: safe fallback */ /* console-only schema dump */}
   // Resolve transaction date field name for filterByFormula
   const txMeta = data.tables.find(t => t.id === TABLE.transactions);
   if (txMeta) {

@@ -418,9 +418,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="wf-body">
       <p>Canvas ID: <code>pnlChartRevExp</code>. Three dataset bars per month:</p>
       <ul>
-        <li><strong style="color:#22c55e">Revenue</strong> (green, <code>#22c55e</code>) — positive values</li>
-        <li><strong style="color:#f87171">COGS</strong> (red, <code>#f87171</code>) — displayed as negative (inverted)</li>
-        <li><strong style="color:#fb923c">OpEx</strong> (orange, <code>#fb923c</code>) — displayed as negative (inverted)</li>
+        <li><strong style="color:var(--accent)">Revenue</strong> (sage green, <code>var(--accent)</code> / <code>#2C6E49</code>) — positive values</li>
+        <li><strong style="color:var(--danger)">COGS</strong> (red, <code>var(--danger)</code> / <code>#A33B3B</code>) — displayed as negative (inverted)</li>
+        <li><strong style="color:var(--tone-gold)">OpEx</strong> (gold, <code>var(--tone-gold)</code> / <code>#B8933A</code>) — displayed as negative (inverted)</li>
       </ul>
       <p>Y-axis labels use abbreviated thousands: <code>£10k</code>, <code>£20k</code>, etc. Tooltip shows the absolute &pound; value with the dataset label.</p>
     </div>
@@ -435,9 +435,9 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <div class="wf-body">
       <p>Canvas ID: <code>pnlChartProfit</code>. Three datasets:</p>
       <ul>
-        <li><strong>Gross Profit</strong> — blue line (<code>#3b82f6</code>) with light-blue fill, tension 0.3</li>
-        <li><strong>Net Profit</strong> — green line (<code>#10b981</code>) with light-green fill, tension 0.3</li>
-        <li><strong>NP Target (£5k/mo)</strong> — red dashed line (<code>#ef4444</code>, <code>borderDash: [6,4]</code>), no fill, no data points</li>
+        <li><strong>Gross Profit</strong> — blue line (<code>var(--info)</code> / <code>#3560A8</code>) with light-blue fill, tension 0.3</li>
+        <li><strong>Net Profit</strong> — sage green line (<code>var(--accent)</code> / <code>#2C6E49</code>) with light-green fill, tension 0.3</li>
+        <li><strong>NP Target (£5k/mo)</strong> — red dashed line (<code>var(--danger)</code> / <code>#A33B3B</code>, <code>borderDash: [6,4]</code>), no fill, no data points</li>
       </ul>
       <p>Y-axis uses <code>£Xk</code> format. Tooltip shows <code>£</code> value rounded to nearest integer.</p>
     </div>

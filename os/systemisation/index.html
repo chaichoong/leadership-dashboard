@@ -637,7 +637,7 @@ function toast(msg,ms=2500){ const t=document.getElementById('toast'); t.textCon
 // Auth
 // ═══════════════════════════════════════════════════════════════════════
 function bootAuth(){
-    try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){}
+    try { if(window.parent && window.parent!==window && window.parent.PAT){ PAT=window.parent.PAT; return true; } } catch(e){/* best-effort: safe fallback */}
     const stored=localStorage.getItem('_dlr_pat');
     if(stored){ PAT=stored; return true; }
     return false;
@@ -2243,7 +2243,7 @@ async function generateWorkflowSOP(wfId){
             transcript = await fetchLoomTranscript(loomUrl);
             const oembedRes = await fetch(`https://www.loom.com/v1/oembed?url=${encodeURIComponent(loomUrl)}`);
             if(oembedRes.ok){ const od = await oembedRes.json(); videoTitle = od.title||''; }
-        } catch(e){}
+        } catch(e){ console.warn('[skill-gen] Loom transcript fetch failed', e); }
     }
 
     const stepsText = steps.map((s,i)=>`Step ${i+1}: ${gf(s,ST.name)||'Untitled'}\nDescription: ${gf(s,ST.description)||'None'}`).join('\n\n');
@@ -2464,10 +2464,11 @@ function buildSOPExportHTML(d){
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(d.sopTitle)} - SOP</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* Standalone export doc — no tokens.css, so sage token values are inlined as hex literals */
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',system-ui,sans-serif;line-height:1.6;color:#1C2422;background:#fff;max-width:800px;margin:0 auto;padding:40px 24px}
+body{font-family:'DM Sans',system-ui,sans-serif;line-height:1.6;color:#1C2422;background:#fff;max-width:800px;margin:0 auto;padding:40px 24px}
 .header{background:#2C6E49;color:#fff;padding:24px 32px;border-radius:8px;margin-bottom:32px}
 .header h1{font-size:22px;font-weight:700;margin:0 0 4px 0}
 .header p{margin:0;opacity:.85;font-size:14px}
@@ -2487,11 +2488,11 @@ body{font-family:'Inter',system-ui,sans-serif;line-height:1.6;color:#1C2422;back
 .step-desc{font-size:14px;color:#5A6660;margin:0 0 8px 0}
 .step-detail{margin-top:8px;padding:14px;background:#F4F6F1;border-radius:6px;font-size:14px;line-height:1.7}
 .step-detail ul{margin:0;padding:0 0 0 18px;list-style:disc}.step-detail li{margin-bottom:4px}
-.cautions{margin-top:32px;padding:20px;background:#FFF8E6;border-radius:8px;border-left:4px solid #C6A15B}
-.cautions h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#946B1F}
+.cautions{margin-top:32px;padding:20px;background:#EFE3CA;border-radius:8px;border-left:4px solid #C6A15B}
+.cautions h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#8A6B2D}
 .cautions ul{margin:0;padding:0 0 0 20px;font-size:14px;line-height:2}
-.tips{margin-top:16px;padding:20px;background:#E8F4FD;border-radius:8px;border-left:4px solid #5A86CF}
-.tips h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#3A6AB0}
+.tips{margin-top:16px;padding:20px;background:#DCE5F2;border-radius:8px;border-left:4px solid #5A86CF}
+.tips h3{font-size:14px;font-weight:700;margin:0 0 10px 0;color:#3560A8}
 .tips ul{margin:0;padding:0 0 0 20px;font-size:14px;line-height:2}
 .footer{margin-top:32px;padding-top:16px;border-top:1px solid #DDE1D9;font-size:12px;color:#8A928C;display:flex;justify-content:space-between}
 @media print{body{max-width:100%;padding:20px}.header{-webkit-print-color-adjust:exact;print-color-adjust:exact}.step-num{-webkit-print-color-adjust:exact;print-color-adjust:exact}.cautions,.tips{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
@@ -3427,11 +3428,11 @@ function renderAutomation(){
             const stepsWithSkills = stepsForWorkflow(w.id).filter(s=>isSkillCreated(s.id));
             const lsSkill = localStorage.getItem('sys_wfskill_'+w.id);
             let lsSkillData = null;
-            if(lsSkill){ try { lsSkillData = JSON.parse(lsSkill); } catch(e){} }
+            if(lsSkill){ try { lsSkillData = JSON.parse(lsSkill); } catch(e){/* best-effort: safe fallback */} }
             const hasSkill = hasWfSkill || stepsWithSkills.length > 0 || !!lsSkillData;
             let skillName = '';
             if(hasWfSkill){
-                try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){}
+                try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){/* best-effort: safe fallback */}
             } else if(lsSkillData){
                 skillName = lsSkillData.name||'';
             } else if(stepsWithSkills.length){
@@ -3683,7 +3684,7 @@ async function doConvertWorkflowToSkill(wfId){
         try {
             const sopData = JSON.parse(raw);
             sopContent = (sopData.sopSteps||[]).map(s=>s.title+': '+(s.body||'')).join('\n');
-        } catch(e){}
+        } catch(e){ /* best-effort: safe fallback */ }
     }
 
     toast('Generating skill definition...');
@@ -3814,7 +3815,7 @@ function openInCowork(wfId){
     const driveUrl = getWfDriveUrl(wfId);
     const driveDocUrl = getWfDriveDocUrl(wfId);
     let skills = [];
-    try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){}
+    try { skills = JSON.parse(gf(w,WF.skillDefinition)); if(!Array.isArray(skills)) skills = [skills]; } catch(e){/* best-effort: safe fallback */}
     const wfSkill = skills.find(sk => sk.workflowId === wfId && !sk.stepId) || skills[0] || {};
     const instructions = wfSkill.instructions || wfSkill.description || '';
 
@@ -3972,7 +3973,7 @@ async function fetchLoomTranscript(loomUrl){
                 if(data.transcript) transcript = data.transcript;
                 else if(data.data) transcript = typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
             }
-        } catch(e){}
+        } catch(e){ console.warn('[loom] transcription API fetch failed', e); }
     }
     if(!transcript){
         try {
@@ -3982,7 +3983,7 @@ async function fetchLoomTranscript(loomUrl){
                 transcript = odata.title || '';
                 if(odata.description) transcript += '. ' + odata.description;
             }
-        } catch(e){}
+        } catch(e){ console.warn('[loom] oembed fallback failed', e); }
     }
     return transcript;
 }

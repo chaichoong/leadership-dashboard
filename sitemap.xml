@@ -32,21 +32,45 @@
   </url>
   <url>
     <loc>https://chaichoong.github.io/leadership-dashboard/os/operations/</loc>
-    <lastmod>2026-04-28</lastmod>
+    <lastmod>2026-07-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://chaichoong.github.io/leadership-dashboard/os/systemisation/</loc>
-    <lastmod>2026-05-13</lastmod>
+    <lastmod>2026-07-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://chaichoong.github.io/leadership-dashboard/os/team/</loc>
-    <lastmod>2026-05-14</lastmod>
+    <lastmod>2026-07-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/os/strategy/</loc>
+    <lastmod>2026-07-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/os/tasks/</loc>
+    <lastmod>2026-07-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/ai-brain.html</loc>
+    <lastmod>2026-07-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/architecture.html</loc>
+    <lastmod>2026-07-02</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://chaichoong.github.io/leadership-dashboard/index.html#skills</loc>

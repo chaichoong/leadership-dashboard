@@ -2,7 +2,7 @@
 // Sets a dummy Airtable token so the page's old auth check passes (the shim
 // ignores it), then gates the page's init on a real Supabase login.
 (function () {
-  try { localStorage.setItem('_dlr_pat', 'supabase'); } catch (e) {}
+  try { localStorage.setItem('_dlr_pat', 'supabase'); } catch (e) {/* best-effort: safe fallback */}
 
   let resolveReady;
   const ready = new Promise(r => { resolveReady = r; });
@@ -25,7 +25,7 @@
 
   async function start() {
     let sess = null;
-    try { sess = await window.sbOpsSession(); } catch (e) {}
+    try { sess = await window.sbOpsSession(); } catch (e) {/* best-effort: safe fallback */}
     if (sess) { resolveReady(); return; }
     const ov = overlay();
     document.body.appendChild(ov);
