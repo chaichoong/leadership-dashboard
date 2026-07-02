@@ -874,6 +874,7 @@ if (tabId === 'comms') {
     // No tab switching required. Creates the task directly via Airtable API.
     // Fields match the full Task Drawer in os/tasks/index.html.
     function openQuickTaskModal(opts) {
+        opts = opts || {};
         const existing = document.getElementById('quickTaskOverlay');
         if (existing) existing.remove();
 
