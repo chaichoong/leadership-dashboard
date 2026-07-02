@@ -149,11 +149,8 @@
         const isPlaceholder = TABLES.arVariable.includes('PLACEHOLDER');
 
         if (!isPlaceholder && arvData.length === 0 && !arvRefreshedAt) {
-            if (PAT) {
-                fetchARVariableData();
-                return;
-            }
-            // No PAT yet — fall through to render empty state
+            fetchARVariableData();
+            return;
         }
 
         hideARVLoadingState();
@@ -178,8 +175,6 @@
         let filtered = [...arvData];
         if (statusFilter === 'unpaid') {
             filtered = filtered.filter(inv => inv.status === 'Sent' || inv.status === 'Overdue');
-        } else if (statusFilter === 'written off') {
-            filtered = filtered.filter(inv => inv.status === 'Written Off');
         } else if (statusFilter !== 'all') {
             const target = statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1);
             filtered = filtered.filter(inv => inv.status === target);

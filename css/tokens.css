@@ -6,10 +6,10 @@
  * file. Change a value here, and the whole platform updates.
  *
  * Theme: "Sage Executive" (light only)
- * Font: Inter throughout
+ * Font: DM Sans throughout
  * ========================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 
 :root {
   /* ── PALETTE — raw colours ─────────────────────────────── */
@@ -114,8 +114,8 @@
   --info-border:    #C0CFE3;
 
   /* Typography */
-  --font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-family-num:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-base: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-num:  'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
   --fs-xs:   11px;
   --fs-sm:   12px;

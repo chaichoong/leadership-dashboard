@@ -17,27 +17,27 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Auth bar */
 .auth-bar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:14px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:13px;width:340px}
-.auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600}
+.auth-bar input{background:var(--bg-surface-2);border:1px solid var(--border-default);color:var(--text-primary);padding:6px 12px;border-radius:6px;font-size:var(--fs-base);width:340px}
+.auth-bar button{background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold)}
 .auth-bar button:hover{background:var(--accent-hover)}
 
 /* Topbar */
 .topbar{background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:50;box-shadow:0 1px 0 var(--border-subtle)}
-.topbar h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px}
-.topbar .subtitle{font-size:12px;color:var(--text-secondary)}
+.topbar h1{font-size:20px;font-weight:var(--fw-bold);display:flex;align-items:center;gap:8px}
+.topbar .subtitle{font-size:var(--fs-sm);color:var(--text-secondary)}
 .topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:12px;font-weight:600}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn-primary:hover{background:var(--accent-hover);color:#fff}
-.btn-sm{padding:4px 10px;font-size:11px}
+.btn-sm{padding:4px 10px;font-size:var(--fs-xs)}
 
 /* Sub-tabs */
 .view-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-default);overflow-x:auto;background:var(--bg-app);padding:8px 24px 0}
-.view-tab{padding:10px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.view-tab{padding:10px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-base);font-weight:var(--fw-semibold);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
 .view-tab:hover{color:var(--text-primary)}
 .view-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.view-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700}
+.view-tab .count{background:var(--bg-subtle);color:var(--text-secondary);padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);font-weight:var(--fw-bold)}
 .view-tab.active .count{background:var(--accent-soft);color:var(--accent)}
 
 /* Main */
@@ -47,38 +47,38 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 
 /* Controls */
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
-.search-box{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 12px;border-radius:6px;font-size:13px;width:280px}
+.search-box{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 12px;border-radius:6px;font-size:var(--fs-base);width:280px}
 .search-box:focus{outline:none;border-color:var(--accent)}
-.filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 10px;border-radius:6px;font-size:13px;cursor:pointer}
+.filter-select{background:var(--bg-surface);border:1px solid var(--border-default);color:var(--text-primary);padding:7px 10px;border-radius:6px;font-size:var(--fs-base);cursor:pointer}
 .filter-select:focus{outline:none;border-color:var(--accent)}
-.controls .meta{margin-left:auto;font-size:11px;color:var(--text-muted)}
+.controls .meta{margin-left:auto;font-size:var(--fs-xs);color:var(--text-muted)}
 
 /* KPI grid (Properties portfolio overview) */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:20px}
 .kpi{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:10px;padding:14px 16px}
-.kpi .label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
-.kpi .value{font-size:22px;font-weight:700;margin-top:4px;color:var(--text-primary)}
-.kpi .sub{font-size:11px;color:var(--text-muted);margin-top:2px}
+.kpi .label{font-size:var(--fs-xs);color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;font-weight:var(--fw-semibold)}
+.kpi .value{font-size:var(--fs-2xl);font-weight:var(--fw-bold);margin-top:4px;color:var(--text-primary)}
+.kpi .sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:2px}
 
 /* Data table */
 .table-wrap{overflow-x:auto;border:1px solid var(--border-default);border-radius:10px;background:var(--bg-surface)}
-.dt{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.dt{width:100%;border-collapse:collapse;font-size:var(--fs-sm);table-layout:fixed}
 /* Headers — flex layout pins the sort arrow at the right edge no matter how
    the label wraps. word-break:normal + overflow-wrap:normal stop mid-word
    breaks; per-column widths give every label enough room for two lines. */
-.dt th{background:var(--bg-surface-2);padding:0;text-align:left;font-weight:700;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.4px;vertical-align:middle;height:48px;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle);cursor:pointer;user-select:none}
+.dt th{background:var(--bg-surface-2);padding:0;text-align:left;font-weight:var(--fw-bold);color:var(--text-secondary);font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;vertical-align:middle;height:48px;position:sticky;top:0;z-index:1;border-bottom:2px solid var(--border-default);border-right:1px solid var(--border-subtle);cursor:pointer;user-select:none}
 .dt th:last-child{border-right:none}
 .dt th:hover{background:var(--bg-subtle)}
-.dt th .th-inner{display:flex;align-items:center;gap:6px;height:100%;padding:6px 10px}
+.dt th .th-inner{display:flex;align-items:center;gap:4px;height:100%;padding:5px 8px}
 .dt th .th-label{flex:1;min-width:0;white-space:normal;word-break:normal;overflow-wrap:normal;hyphens:none;line-height:1.25}
-.dt th .th-sort{flex-shrink:0;font-size:9px;color:var(--text-muted);font-weight:400}
+.dt th .th-sort{flex-shrink:0;font-size:9px;color:var(--text-muted);font-weight:var(--fw-regular)}
 .dt th.sorted .th-sort{color:var(--accent)}
 .dt th.money .th-inner{justify-content:space-between}
 .dt th.money .th-label{text-align:right}
 /* Center small integer columns (Beds, Unit #, Due Day) so single digits don't sit against the column border */
 .dt th.num-center .th-label{text-align:center}
 .dt td.num-center{text-align:center}
-.dt td{padding:7px 10px;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dt td{padding:6px 8px;border-top:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dt td:last-child{border-right:none}
 /* Cells with stacked content (chips, multi-line) opt out of single-line ellipsis,
    but still clip horizontally — chips inside size themselves to fit the cell. */
@@ -93,13 +93,13 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .editable{cursor:text;padding:3px 6px;border-radius:4px;display:inline-block;min-width:60px;min-height:20px}
 .editable:hover{background:var(--bg-surface);outline:1px solid var(--border-default)}
 .editable[contenteditable=true]:focus{background:var(--bg-surface);outline:2px solid var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.inline-input,.inline-select{background:var(--bg-surface);border:1px solid var(--accent);color:var(--text-primary);padding:3px 6px;border-radius:4px;font-size:13px;font-family:inherit}
+.inline-input,.inline-select{background:var(--bg-surface);border:1px solid var(--accent);color:var(--text-primary);padding:3px 6px;border-radius:4px;font-size:var(--fs-base);font-family:inherit}
 .inline-select{cursor:pointer}
 .cell-saving{opacity:.55}
 .cell-error{outline:2px solid var(--danger)!important;background:var(--danger-bg)!important}
 
 /* Linked record chip — must fit within its cell, never overflow into the next column. */
-.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid transparent;max-width:100%;box-sizing:border-box;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:12px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);cursor:pointer;border:1px solid transparent;max-width:100%;box-sizing:border-box;min-width:0}
 .chip:hover{border-color:var(--accent);background:var(--bg-surface)}
 .chip-readonly{cursor:default;background:var(--bg-subtle);color:var(--text-secondary)}
 .chip-readonly:hover{border-color:transparent;background:var(--bg-subtle)}
@@ -107,7 +107,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .chips-cell{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;min-width:0}
 
 /* Status badges */
-.badge{display:inline-block;padding:3px 9px;border-radius:11px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge{display:inline-block;padding:3px 9px;border-radius:11px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);white-space:nowrap}
 .badge-active,.badge-occupied,.badge-current,.badge-in-payment{background:var(--success-bg);color:var(--success)}
 /* Void / vacant — red so they jump out from the green Occupied rows */
 .badge-void,.badge-vacant{background:var(--danger-bg);color:var(--danger)}
@@ -122,7 +122,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .badge-churned{background:var(--bg-subtle);color:var(--text-secondary)}
 
 /* Customer demo banner */
-.demo-banner{background:var(--warning-bg);color:var(--warning);padding:8px 16px;border-radius:8px;font-size:12px;font-weight:500;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.demo-banner{background:var(--warning-bg);color:var(--warning);padding:8px 16px;border-radius:8px;font-size:var(--fs-sm);font-weight:var(--fw-medium);margin-bottom:16px;display:flex;align-items:center;gap:8px}
 
 /* Expandable row */
 .dt tbody tr.expandable{cursor:pointer}
@@ -132,32 +132,35 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 tr.expand-row td{padding:0!important;border-top:none!important;background:var(--bg-surface-2)!important}
 tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 .expand-content{padding:12px 16px 16px;border-top:1px dashed var(--border-default)}
-.expand-summary{display:flex;gap:16px;margin-bottom:10px;font-size:12px;color:var(--text-secondary)}
+.expand-summary{display:flex;gap:16px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-secondary)}
 .expand-summary strong{color:var(--text-primary)}
-.tx-table{width:100%;border-collapse:collapse;font-size:12px}
-.tx-table th{text-align:left;padding:5px 8px;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.4px}
+.tx-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);table-layout:fixed}
+.tx-table th{text-align:left;padding:5px 8px;background:var(--bg-subtle);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:var(--fw-bold);letter-spacing:.4px}
 .tx-table th.money{text-align:right}
-.tx-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle)}
-.tx-table td.money{text-align:right;font-variant-numeric:tabular-nums}
+.tx-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+.tx-table td:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0}
+.tx-table td.money{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;padding-right:12px}
+.tx-table td:nth-child(4){padding-left:12px}
+.tx-table .badge{padding:2px 7px;font-size:10px;border-radius:8px}
 .tx-table tbody tr:nth-child(even) td{background:var(--bg-surface)}
-.tx-show-all{background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;padding:6px 0;margin-top:4px}
+.tx-show-all{background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);padding:6px 0;margin-top:4px}
 .tx-show-all:hover{text-decoration:underline}
-.expand-empty{padding:16px;text-align:center;color:var(--text-muted);font-size:12px}
+.expand-empty{padding:16px;text-align:center;color:var(--text-muted);font-size:var(--fs-sm)}
 
 /* Drawer */
 .drawer-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.45);z-index:9998;display:flex;justify-content:flex-end}
 .drawer{background:var(--bg-surface);width:640px;max-width:95vw;height:100vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
 .drawer-header{position:sticky;top:0;background:var(--bg-surface);border-bottom:1px solid var(--border-default);padding:16px 24px;z-index:2;display:flex;align-items:flex-start;gap:10px}
 .drawer-header .hdr-main{flex:1;min-width:0}
-.drawer-header h2{font-size:18px;margin:0;word-break:break-word}
-.drawer-header .hdr-sub{font-size:12px;color:var(--text-secondary);margin-top:2px}
+.drawer-header h2{font-size:var(--fs-xl);margin:0;word-break:break-word}
+.drawer-header .hdr-sub{font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px}
 .drawer-body{flex:1;overflow-y:auto;padding:20px 24px}
-.drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
+.drawer-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-2xl);line-height:1;padding:0 4px}
 .drawer-section{margin-bottom:24px}
-.drawer-section h3{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:10px;font-weight:700}
-.field-row{display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;align-items:center}
+.drawer-section h3{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:10px;font-weight:var(--fw-bold)}
+.field-row{display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-base);align-items:center}
 .field-row:last-child{border-bottom:none}
-.field-label{color:var(--text-secondary);font-weight:500;font-size:12px}
+.field-label{color:var(--text-secondary);font-weight:var(--fw-medium);font-size:var(--fs-sm)}
 .field-value{color:var(--text-primary);word-break:break-word;min-width:0}
 /* Editable cells use a hover-box (padding + bg on focus) but a negative
    margin-left so the text itself starts on the same x as non-editable
@@ -168,7 +171,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 .field-value .chips-cell{vertical-align:middle}
 
 /* Toast */
-.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-sidebar);color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:500;z-index:10000;box-shadow:var(--shadow-lg);max-width:340px;animation:slideUp .3s ease-out}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-sidebar);color:#fff;padding:12px 20px;border-radius:8px;font-size:var(--fs-base);font-weight:var(--fw-medium);z-index:10000;box-shadow:var(--shadow-lg);max-width:340px;animation:slideUp .3s ease-out}
 .toast.error{background:var(--danger)}
 .toast.success{background:var(--success)}
 @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -176,7 +179,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 /* Empty state */
 .empty{text-align:center;padding:60px 20px;color:var(--text-muted)}
 .empty .icon{font-size:48px;margin-bottom:12px;opacity:.4}
-.empty .msg{font-size:14px}
+.empty .msg{font-size:var(--fs-md)}
 
 /* Loading */
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;color:var(--text-muted)}
@@ -192,7 +195,7 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 .dt th.money,.dt td.money{text-align:right}
 
 /* Detail link button */
-.row-open{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
+.row-open{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:var(--fs-md);padding:2px 6px;border-radius:4px}
 .row-open:hover{background:var(--bg-surface);color:var(--accent)}
 
 /* Drilldown cell — value is calculated, click opens drawer to see how */
@@ -200,11 +203,11 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 .cell-drilldown:hover{color:var(--accent);border-bottom-color:var(--accent)}
 
 /* Breakdown table — used inside drawer for mortgage / rent breakdowns */
-.breakdown-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
-.breakdown-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px}
+.breakdown-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-top:4px}
+.breakdown-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:var(--fw-bold);letter-spacing:.5px}
 .breakdown-table td{padding:6px 8px;border-bottom:1px solid var(--border-subtle)}
 .breakdown-table td.money{text-align:right;font-variant-numeric:tabular-nums}
-.breakdown-table tr.total td{border-top:2px solid var(--border-default);border-bottom:none;font-weight:700;background:var(--bg-surface-2)}
+.breakdown-table tr.total td{border-top:2px solid var(--border-default);border-bottom:none;font-weight:var(--fw-bold);background:var(--bg-surface-2)}
 
 /* Schema inspector modal */
 .modal-overlay{position:fixed;inset:0;background:rgba(28,36,34,0.5);z-index:9997;display:flex;align-items:center;justify-content:center;padding:24px}
@@ -212,48 +215,48 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 .modal-header{padding:18px 24px;border-bottom:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between}
 .modal-header h2{font-size:17px}
 .modal-body{flex:1;overflow-y:auto;padding:18px 24px}
-.modal-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:22px;line-height:1;padding:0 4px}
-.schema-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:24px}
-.schema-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:700;letter-spacing:.5px}
+.modal-close{background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-2xl);line-height:1;padding:0 4px}
+.schema-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm);margin-bottom:24px}
+.schema-table th{text-align:left;padding:6px 8px;background:var(--bg-surface-2);border-bottom:1px solid var(--border-default);font-size:10px;text-transform:uppercase;color:var(--text-secondary);font-weight:var(--fw-bold);letter-spacing:.5px}
 .schema-table td{padding:5px 8px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
 .schema-table tr.unmapped td{background:var(--warning-bg)}
 .schema-table tr.unused td{color:var(--text-muted)}
-.schema-table .col-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
-.schema-table .col-type{color:var(--text-muted);font-size:11px}
-.schema-section h3{font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
-.schema-section h3 .pill{font-size:10px;padding:1px 7px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:700}
-.schema-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-secondary);font-weight:600}
+.schema-table .col-name{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:var(--fs-xs)}
+.schema-table .col-type{color:var(--text-muted);font-size:var(--fs-xs)}
+.schema-section h3{font-size:var(--fs-base);margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.schema-section h3 .pill{font-size:10px;padding:1px 7px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:var(--fw-bold)}
+.schema-tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-secondary);font-weight:var(--fw-semibold)}
 .schema-tag.warn{background:var(--warning-bg);color:var(--warning)}
 .schema-tag.ok{background:var(--success-bg);color:var(--success)}
 
 /* Valuation history (in property drawer) */
 .valuation-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px}
 .val-tile{background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:10px 12px}
-.val-tile .lbl{font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
-.val-tile .val{font-size:16px;font-weight:700;margin-top:2px;color:var(--text-primary);font-variant-numeric:tabular-nums}
+.val-tile .lbl{font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.4px;font-weight:var(--fw-bold)}
+.val-tile .val{font-size:var(--fs-lg);font-weight:var(--fw-bold);margin-top:2px;color:var(--text-primary);font-variant-numeric:tabular-nums}
 .val-tile .sub{font-size:10px;color:var(--text-muted);margin-top:2px}
 .val-chart-wrap{height:180px;background:var(--bg-surface-2);border:1px solid var(--border-default);border-radius:8px;padding:8px;margin-bottom:12px;position:relative}
 .val-chart-wrap canvas{display:block}
-.val-empty{padding:20px;text-align:center;color:var(--text-muted);font-size:12px;background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;margin-bottom:12px}
+.val-empty{padding:20px;text-align:center;color:var(--text-muted);font-size:var(--fs-sm);background:var(--bg-surface-2);border:1px dashed var(--border-default);border-radius:8px;margin-bottom:12px}
 .val-actions{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
-.btn-ai{background:linear-gradient(135deg,var(--accent),var(--accent-hover));color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.btn-ai{background:linear-gradient(135deg,var(--accent),var(--accent-hover));color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold);display:inline-flex;align-items:center;gap:6px}
 .btn-ai:hover{filter:brightness(1.06)}
 .btn-ai:disabled{opacity:.5;cursor:not-allowed}
-.btn-secondary{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600}
+.btn-secondary{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);padding:7px 14px;border-radius:6px;cursor:pointer;font-size:var(--fs-sm);font-weight:var(--fw-semibold)}
 .btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
 
 /* AI valuation modal */
-.ai-status{display:flex;align-items:center;gap:10px;padding:14px;background:var(--bg-surface-2);border-radius:8px;font-size:13px;color:var(--text-secondary);margin-bottom:14px}
+.ai-status{display:flex;align-items:center;gap:10px;padding:14px;background:var(--bg-surface-2);border-radius:8px;font-size:var(--fs-base);color:var(--text-secondary);margin-bottom:14px}
 .ai-status .spin{width:18px;height:18px;border:2px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
-.ai-error{background:var(--danger-bg);color:var(--danger);padding:12px 14px;border-radius:8px;font-size:12px;margin-bottom:14px;line-height:1.5}
+.ai-error{background:var(--danger-bg);color:var(--danger);padding:12px 14px;border-radius:8px;font-size:var(--fs-sm);margin-bottom:14px;line-height:1.5}
 .ai-headline{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
 .ai-headline .val-tile{background:var(--bg-surface);border-color:var(--accent-soft)}
 .ai-headline .val-tile.primary{background:var(--accent-soft);border-color:var(--accent)}
-.ai-comp-link{color:var(--accent);font-size:11px;text-decoration:none}
+.ai-comp-link{color:var(--accent);font-size:var(--fs-xs);text-decoration:none}
 .ai-comp-link:hover{text-decoration:underline}
-.ai-methodology{padding:12px;background:var(--bg-surface-2);border-radius:8px;font-size:12px;color:var(--text-secondary);line-height:1.5;margin-top:14px;white-space:pre-wrap}
+.ai-methodology{padding:12px;background:var(--bg-surface-2);border-radius:8px;font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5;margin-top:14px;white-space:pre-wrap}
 .ai-key-prompt{display:flex;flex-direction:column;gap:8px}
-.ai-key-prompt input{padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-size:13px;background:var(--bg-surface)}
+.ai-key-prompt input{padding:8px 12px;border:1px solid var(--border-default);border-radius:6px;font-size:var(--fs-base);background:var(--bg-surface)}
 .ai-key-prompt input:focus{outline:none;border-color:var(--accent)}
 </style>
 </head>
@@ -393,6 +396,7 @@ const TABLE = {
   costs:        'tblx5kvhzNEI5TFlS',
   valuations:   'tblZYsa0u1M17N7ZE',
   transactions: 'tbln0gzhCAorFc3zB',
+  categories:   'tbleWb8ioptnEwPR8',
 };
 
 const TX = {
@@ -405,6 +409,7 @@ const TX = {
   unit:        'fldJGIhSbgXNIEW4a',
   property:    'fldvp44VfF8uTTthp',
 };
+const CAT_NAME = 'fldii4oUzSfmplihO';
 
 // Curated field RESOLVERS per entity. Field IDs are resolved at load time
 // via the Airtable metadata API. Each field provides MULTIPLE name candidates
@@ -425,70 +430,66 @@ const SCHEMA = {
   tenants: {
     label: 'Tenants', singular: 'Tenant',
     fields: [
-      { key:'name',    label:'Name',         primary:true,                                                                      type:'text',   edit:true,  width:'180px' },
-      { key:'status',  label:'Status',       exact:['Tenant Status','Status'],                                                  type:'select', edit:true,  width:'100px' },
-      { key:'unit',    label:'Current Unit', exact:['Rental Unit','Current Unit','Unit','Rental Units'],                        type:'link',   edit:true,  link:'units',     width:'150px' },
-      { key:'phone',   label:'Phone',        exact:['Contact Number','Phone Number','Phone','Mobile','Mobile Number'],          type:'text',   edit:true,  width:'130px' },
-      { key:'email',   label:'Email',        exact:['Email Address','Email','Email Address (Tenant)'],                          type:'text',   edit:true,  width:'200px' },
-      { key:'dob',     label:'DOB',          exact:['Date of Birth','DOB'],                                                     type:'date',   edit:true,  width:'110px' },
-      { key:'payType', label:'Pay Type',     exact:['Rent Payment Type','Payment Type'], keywords:['payment','type'],           type:'select', edit:true,  width:'120px' },
-      { key:'tenancy', label:'Tenancy',      exact:['Tenancies','Tenancy','Linked Tenancy'],                                    type:'link',   edit:true,  link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies'), width:'150px' },
+      { key:'name',    label:'Name',         primary:true,                                                                      type:'text',   edit:true,  width:'160px' },
+      { key:'status',  label:'Status',       exact:['Tenant Status','Status'],                                                  type:'select', edit:true,  width:'85px' },
+      { key:'unit',    label:'Unit',         exact:['Rental Unit','Current Unit','Unit','Rental Units'],                        type:'link',   edit:true,  link:'units',     width:'130px' },
+      { key:'phone',   label:'Phone',        exact:['Contact Number','Phone Number','Phone','Mobile','Mobile Number'],          type:'text',   edit:true,  width:'120px' },
+      { key:'email',   label:'Email',        exact:['Email Address','Email','Email Address (Tenant)'],                          type:'text',   edit:true,  width:'180px' },
+      { key:'dob',     label:'DOB',          exact:['Date of Birth','DOB'],                                                     type:'date',   edit:true,  width:'90px' },
+      { key:'payType', label:'Pay Type',     exact:['Rent Payment Type','Payment Type'], keywords:['payment','type'],           type:'select', edit:true,  width:'90px' },
+      { key:'tenancy', label:'Tenancy',      exact:['Tenancies','Tenancy','Linked Tenancy'],                                    type:'link',   edit:true,  link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies'), width:'130px' },
     ],
   },
   tenancies: {
     label: 'Tenancies', singular: 'Tenancy',
     fields: [
-      { key:'ref',         label:'Reference',      primary:true,                                                                                                          type:'text',   edit:false, width:'170px' },
-      { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                                                type:'link',   edit:true,  link:'tenants',    width:'150px' },
-      { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                                                           type:'link',   edit:true,  link:'units',      width:'140px' },
-      { key:'property',    label:'Property',       exact:['Property','Properties'],                                                                                       type:'link',   edit:false, link:'properties', width:'160px' },
-      // The plain "Status" field on Tenancies holds Active/Former. "Tenant Status" remains as a fallback only.
-      { key:'status',      label:'Status',         exact:['Status','Tenant Status'],                                                                                      type:'select', edit:false, width:'100px' },
-      // Field name in Airtable is "Payment Status (Unified)" — note the parens.
-      { key:'payStatus',   label:'Payment Status', exact:['Payment Status (Unified)','Payment Status Unified','Payment Status'], keywords:['payment','status'],          type:'select', edit:true,  width:'130px' },
-      { key:'startDate',   label:'Start Date',     exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                                                  type:'date',   edit:true,  width:'110px' },
-      { key:'rent',        label:'Monthly Rent',   exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],                                    type:'money',  edit:true,  width:'115px' },
-      { key:'dueDay',      label:'Due Day',        exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],                                   type:'number', edit:true,  width:'80px' },
-      { key:'payFreq',     label:'Pay Freq',       exact:['Payment Frequency','Pay Frequency'], keywords:['payment','frequency'],                                         type:'select', edit:true,  width:'110px' },
+      { key:'ref',         label:'Reference',      primary:true,                                                                                                          type:'text',   edit:false, width:'150px' },
+      { key:'tenant',      label:'Tenant',         exact:['Customers','Tenant','Tenants','Linked Tenant'],                                                                type:'link',   edit:true,  link:'tenants',    width:'130px' },
+      { key:'unit',        label:'Unit',           exact:['Rental Unit','Unit','Rental Units'],                                                                           type:'link',   edit:true,  link:'units',      width:'120px' },
+      { key:'property',    label:'Property',       exact:['Property','Properties'],                                                                                       type:'link',   edit:false, link:'properties', width:'140px' },
+      { key:'status',      label:'Status',         exact:['Status','Tenant Status'],                                                                                      type:'select', edit:false, width:'85px' },
+      { key:'payStatus',   label:'Pay Status',     exact:['Payment Status (Unified)','Payment Status Unified','Payment Status'], keywords:['payment','status'],          type:'select', edit:true,  width:'100px' },
+      { key:'startDate',   label:'Start',          exact:['Tenancy Start Date','Start Date'], keywords:['start','date'],                                                  type:'date',   edit:true,  width:'90px' },
+      { key:'rent',        label:'Rent/mo',        exact:['Expected Monthly Rent','Monthly Rent','Rent'], keywords:['monthly','rent'],                                    type:'money',  edit:true,  width:'90px' },
+      { key:'dueDay',      label:'Due',            exact:['Day of Month Rent is Due','Due Day','Rent Due Day'], keywords:['due','day'],                                   type:'number', edit:true,  width:'50px' },
+      { key:'payFreq',     label:'Freq',           exact:['Payment Frequency','Pay Frequency'], keywords:['payment','frequency'],                                         type:'select', edit:true,  width:'80px' },
     ],
   },
   units: {
     label: 'Rental Units', singular: 'Rental Unit',
     fields: [
-      { key:'name',     label:'Unit',            primary:true,                                                                              type:'text',   edit:false, width:'190px' },
-      { key:'unitType', label:'Type',            exact:['Unit Type'], keywords:['unit','type'],                                             type:'select', edit:true,  width:'110px' },
-      { key:'unitNum',  label:'Unit #',          exact:['Unit Number'], keywords:['unit','number'],                                         type:'number', edit:true,  width:'80px' },
-      { key:'property', label:'Property',        exact:['Property','Properties'],                                                           type:'link',   edit:false, link:'properties', width:'170px' },
-      { key:'status',   label:'Status',          exact:['Status','Unit Status','Occupancy Status'], keywords:['status'],                    type:'select', edit:true,  width:'100px' },
+      { key:'name',     label:'Unit',            primary:true,                                                                              type:'text',   edit:false, width:'170px' },
+      { key:'unitType', label:'Type',            exact:['Unit Type'], keywords:['unit','type'],                                             type:'select', edit:true,  width:'90px' },
+      { key:'unitNum',  label:'#',               exact:['Unit Number'], keywords:['unit','number'],                                         type:'number', edit:true,  width:'45px' },
+      { key:'property', label:'Property',        exact:['Property','Properties'],                                                           type:'link',   edit:false, link:'properties', width:'150px' },
+      { key:'status',   label:'Status',          exact:['Status','Unit Status','Occupancy Status'], keywords:['status'],                    type:'select', edit:true,  width:'85px' },
       // Filter linked tenants/tenancies to the ACTIVE one — the raw link includes
       // historical (Former) records too, which we don't want under "Current".
-      { key:'tenant',   label:'Current Tenant',  exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants',   linkFilter:(rec)=>isActiveStatus(rec,'tenants'),     width:'150px' },
-      { key:'tenancy',  label:'Current Tenancy', exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies'),   width:'150px' },
+      { key:'tenant',   label:'Tenant',          exact:['Current Tenant','Tenant','Tenants','Customers'],                                   type:'link',   edit:false, link:'tenants',   linkFilter:(rec)=>isActiveStatus(rec,'tenants'),     width:'130px' },
+      { key:'tenancy',  label:'Tenancy',         exact:['Current Tenancy','Tenancies','Tenancy'],                                           type:'link',   edit:false, link:'tenancies', linkFilter:(rec)=>isActiveStatus(rec,'tenancies'),   width:'130px' },
       // Virtual: sum expected monthly rent from active tenancies linked to this unit.
       // Switching from a direct field match to derived means we always show the
       // contractual rent regardless of how the unit table is set up.
-      { key:'rent',     label:'Rent / mo',       virtual:true, compute:r=>deriveUnitRent(r), tooltip:'Sum of expected monthly rent from active tenancies linked to this unit', type:'money', edit:false, width:'110px' },
+      { key:'rent',     label:'Rent/mo',         virtual:true, compute:r=>deriveUnitRent(r), tooltip:'Sum of expected monthly rent from active tenancies linked to this unit', type:'money', edit:false, width:'90px' },
     ],
   },
   properties: {
     label: 'Properties', singular: 'Property',
     fields: [
-      { key:'name',         label:'Property',     primary:true,                                                                                                                                          type:'text',    edit:true,  width:'220px' },
-      { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true,  width:'110px' },
-      { key:'beds',         label:'Beds',         exact:['No. of Bedrooms','Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds','# of Beds'], keywords:['beds','bedrooms'],          type:'number',  edit:true,  width:'55px' },
-      { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units', width:'150px' },
-      { key:'marketValue',  label:'Market Value', exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'moneyBig',edit:true,  width:'100px' },
-      { key:'mortgageBal',  label:'Mortgage Bal', exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'moneyBig',edit:true,  width:'100px' },
-      { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'moneyBig',edit:false, width:'100px' },
-      { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false, width:'72px' },
-      { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false, width:'72px' },
-      // Virtual: derived from active tenancies linked via rental units (expected rent).
-      // clickToDrawer makes the cell clickable — the drawer shows a unit-by-unit breakdown.
-      { key:'grossRent',    label:'Rent / mo',    virtual:true, clickToDrawer:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies. Click for breakdown.', type:'money', edit:false, width:'100px' },
-      { key:'mortgagePay',  label:'Fixed Costs / mo',virtual:true, clickToDrawer:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked monthly costs (mortgage, council tax, insurance, etc.). Click to see which records.', type:'money', edit:false, width:'115px' },
-      { key:'netRent',      label:'Net / mo',     virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false, width:'100px' },
-      { key:'grossYield',   label:'Gross Yield',  virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false, width:'80px' },
-      { key:'cashOnCash',   label:'Cash on Cash', virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false, width:'90px' },
+      { key:'name',         label:'Property',     exact:['Property Name','Name','Property Address','Address','Full Address','Property'],                                                             type:'text',    edit:true,  width:'170px' },
+      { key:'type',         label:'Type',         exact:['Property Type','Type'], keywords:['property','type'],                                                                                           type:'select',  edit:true,  width:'85px' },
+      { key:'beds',         label:'Beds',         exact:['No. of Bedrooms','Number of Beds','Beds','Bedrooms','Bed Count','No. of Beds','Total Beds','# of Beds'], keywords:['beds','bedrooms'],          type:'number',  edit:true,  width:'42px' },
+      { key:'units',        label:'Units',        exact:['Rental Units','Units','Linked Units'],                                                                                                          type:'link',    edit:false, link:'units', width:'120px' },
+      { key:'marketValue',  label:'Value',        exact:['Current Market Value','Market Value','Property Value'], keywords:['market','value'],                                                            type:'moneyBig',edit:true,  width:'80px' },
+      { key:'mortgageBal',  label:'Bal',          exact:['Mortgage Balance','Outstanding Mortgage','Mortgage Outstanding','Outstanding Balance'], keywords:['mortgage','balance'],                        type:'moneyBig',edit:true,  width:'80px' },
+      { key:'equity',       label:'Equity',       virtual:true, compute:r => deriveEquity(r),                                                                                                             type:'moneyBig',edit:false, width:'72px' },
+      { key:'ltv',          label:'LTV',          virtual:true, compute:r => deriveLTV(r),                                                                                                                type:'percent', edit:false, width:'50px' },
+      { key:'rate',         label:'Rate',         virtual:true, compute:r => deriveInterestRate(r), tooltip:'(monthly mortgage × 12) ÷ mortgage balance',                                                  type:'percent', edit:false, width:'50px' },
+      { key:'grossRent',    label:'Rent/mo',      virtual:true, clickToDrawer:true, compute:r => derivePropertyGrossRent(r), tooltip:'Sum of expected monthly rent from active tenancies. Click for breakdown.', type:'money', edit:false, width:'74px' },
+      { key:'mortgagePay',  label:'Costs/mo',     virtual:true, clickToDrawer:true, compute:r => deriveMortgagePay(r), tooltip:'Sum of all non-inactive linked monthly costs (mortgage, council tax, insurance, etc.). Click to see which records.', type:'money', edit:false, width:'74px' },
+      { key:'netRent',      label:'Net/mo',       virtual:true, compute:r => deriveNetRent(r),                                                                                                            type:'money',   edit:false, width:'74px' },
+      { key:'grossYield',   label:'Yield',        virtual:true, compute:r => deriveGrossYield(r), tooltip:'(annual rent) ÷ market value',                                                                 type:'percent', edit:false, width:'50px' },
+      { key:'cashOnCash',   label:'Cash %',       virtual:true, compute:r => deriveCashOnCash(r), tooltip:'(annual net rent) ÷ equity — the headline cashflow number',                                    type:'percent', edit:false, width:'52px' },
     ],
     // Drawer-only fields. The mortgage-cost link drives the Fixed Costs / mo column;
     // purchase price/date drive the capital-growth metrics in the drawer.
@@ -723,7 +724,7 @@ async function fetchAllRecords(tableId, opts={}){
 // fields only — otherwise a money column literally named "Monthly Mortgage
 // Payment" can outrank the actual link field that points at the cost record.
 function resolveField(def, allFields, primaryFieldId){
-  if (def.primary) {
+  if (def.primary && !def.exact && !def.keywords) {
     return allFields.find(f => f.id === primaryFieldId) || null;
   }
   const norm = s => String(s||'').toLowerCase().trim();
@@ -742,6 +743,7 @@ function resolveField(def, allFields, primaryFieldId){
     });
     if (f) return f;
   }
+  if (def.primary) return allFields.find(f => f.id === primaryFieldId) || null;
   return null;
 }
 
@@ -810,6 +812,12 @@ async function fetchSchema(){
     }
     console.groupEnd();
   } catch(e){}
+  // Resolve transaction date field name for filterByFormula
+  const txMeta = data.tables.find(t => t.id === TABLE.transactions);
+  if (txMeta) {
+    const dateFld = txMeta.fields.find(f => f.id === TX.date);
+    if (dateFld) _txDateFieldName = dateFld.name;
+  }
   return result;
 }
 
@@ -839,15 +847,16 @@ async function start(){
 
 async function refreshAll(initial=false){
   setSync('Refreshing...');
+  _txLoaded = false;
   try {
-    const [tn, tc, un, pr, cs, vl, tx] = await Promise.all([
+    const [tn, tc, un, pr, cs, vl, cat] = await Promise.all([
       fetchAllRecords(TABLE.tenants),
       fetchAllRecords(TABLE.tenancies),
       fetchAllRecords(TABLE.rentalUnits),
       fetchAllRecords(TABLE.properties),
       fetchAllRecords(TABLE.costs),
       fetchAllRecords(TABLE.valuations),
-      fetchAllRecords(TABLE.transactions),
+      fetchAllRecords(TABLE.categories),
     ]);
     DATA.tenants      = tn;
     DATA.tenancies    = tc;
@@ -855,15 +864,14 @@ async function refreshAll(initial=false){
     DATA.properties   = pr;
     DATA.costs        = cs;
     DATA.valuations   = vl;
-    DATA.transactions = tx;
+    DATA.categories   = cat;
     INDEX.tenants      = Object.fromEntries(tn.map(r=>[r.id,r]));
     INDEX.tenancies    = Object.fromEntries(tc.map(r=>[r.id,r]));
     INDEX.units        = Object.fromEntries(un.map(r=>[r.id,r]));
     INDEX.properties   = Object.fromEntries(pr.map(r=>[r.id,r]));
     INDEX.costs        = Object.fromEntries(cs.map(r=>[r.id,r]));
     INDEX.valuations   = Object.fromEntries(vl.map(r=>[r.id,r]));
-    INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
-    buildTxLookups();
+    INDEX.categories   = Object.fromEntries(cat.map(r=>[r.id,r]));
     document.getElementById('cntTenants').textContent    = tn.length;
     document.getElementById('cntTenancies').textContent  = tc.length;
     document.getElementById('cntUnits').textContent      = un.length;
@@ -873,6 +881,7 @@ async function refreshAll(initial=false){
     setSync(`Synced — ${new Date().toLocaleTimeString()}`);
     _opsDataReady = true;
     _tryPendingCrossNav();
+    loadTransactionsBackground(!initial);
 
     // ── Sync Bar + Health Checks ──
     if (typeof registerSyncBar === 'function') {
@@ -915,18 +924,19 @@ async function refreshAll(initial=false){
             }
           },
           {
-            name: 'Transactions table fetched (expand rows)', kind: 'sync', run: () => {
+            name: 'Transactions loaded (background)', kind: 'sync', run: () => {
+              if (!_txLoaded) return { status: 'warn', detail: 'Transactions still loading in background' };
               const n = (DATA.transactions||[]).length;
-              if (n === 0) return { status: 'warn', detail: 'No transactions loaded — expand rows will be empty' };
               return { status: 'pass', detail: `${n} transaction records loaded` };
             }
           },
           {
             name: 'Indexes built for fast linked-record lookup', kind: 'automation', run: () => {
-              const expected = ['tenants','tenancies','units','properties','costs','transactions'];
-              const missing = expected.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
+              const core = ['tenants','tenancies','units','properties','costs'];
+              const missing = core.filter(k => !INDEX[k] || Object.keys(INDEX[k]).length === 0);
               if (missing.length) return { status: 'fail', detail: `Missing indexes: ${missing.join(', ')}` };
-              return { status: 'pass', detail: 'All six tables indexed by record ID' };
+              if (!INDEX.categories) return { status: 'warn', detail: 'Categories index not built' };
+              return { status: 'pass', detail: 'All tables indexed by record ID' };
             }
           },
           {
@@ -1334,6 +1344,7 @@ function crossNav(entity, recordId){
 // Render — Tenants
 // ═══════════════════════════════════════════════════════════════════════
 function renderTenants(){
+  _expandedRow.tenants = null;
   const sch = SCHEMA_RESOLVED?.tenants; if (!sch) return;
   const search = document.getElementById('searchTenants').value.toLowerCase().trim();
   const status = document.getElementById('filterTenantStatus').value;
@@ -1358,6 +1369,7 @@ function renderTenants(){
 // Render — Tenancies
 // ═══════════════════════════════════════════════════════════════════════
 function renderTenancies(){
+  _expandedRow.tenancies = null;
   const sch = SCHEMA_RESOLVED?.tenancies; if (!sch) return;
   const search = document.getElementById('searchTenancies').value.toLowerCase().trim();
   const payStatus = document.getElementById('filterTenancyPayStatus').value;
@@ -1385,6 +1397,7 @@ function renderTenancies(){
 // Render — Rental Units
 // ═══════════════════════════════════════════════════════════════════════
 function renderUnits(){
+  _expandedRow.units = null;
   const sch = SCHEMA_RESOLVED?.units; if (!sch) return;
   const search = document.getElementById('searchUnits').value.toLowerCase().trim();
   const status = document.getElementById('filterUnitStatus').value;
@@ -1411,6 +1424,7 @@ function renderUnits(){
 // Render — Properties (with portfolio KPIs)
 // ═══════════════════════════════════════════════════════════════════════
 function renderProperties(){
+  _expandedRow.properties = null;
   const sch = SCHEMA_RESOLVED?.properties; if (!sch) return;
   const search = document.getElementById('searchProperties').value.toLowerCase().trim();
   const type = document.getElementById('filterPropertyType').value;
@@ -1509,7 +1523,7 @@ function renderTable(entityKey, sch, rows){
   // never overflows beyond the sum of declared widths.
   const colgroup = '<colgroup>'
     + cols.map(c => `<col${c.width?` style="width:${c.width}"`:''}>`).join('')
-    + '<col style="width:36px">'
+    + '<col style="width:30px">'
     + '</colgroup>';
 
   const head = '<tr>' + cols.map(c => {
@@ -2915,17 +2929,59 @@ function closeSchemaInspector(){
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// IndexedDB cache for transactions (reuses dashboard's DB, separate key)
+// ═══════════════════════════════════════════════════════════════════════
+const OPS_IDB_NAME  = '_dlr_cache';
+const OPS_IDB_STORE = 'kv';
+const OPS_TX_CACHE_KEY = 'ops_transactions';
+const OPS_TX_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+
+let _opsIdbPromise = null;
+function _opsOpenIDB(){
+  if (_opsIdbPromise) return _opsIdbPromise;
+  _opsIdbPromise = new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('IDB unsupported')); return; }
+    const req = indexedDB.open(OPS_IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(OPS_IDB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IDB open blocked'));
+  });
+  return _opsIdbPromise;
+}
+function _opsIdbGet(key){
+  return _opsOpenIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(OPS_IDB_STORE, 'readonly');
+    const req = tx.objectStore(OPS_IDB_STORE).get(key);
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  }));
+}
+function _opsIdbSet(key, value){
+  return _opsOpenIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(OPS_IDB_STORE, 'readwrite');
+    tx.objectStore(OPS_IDB_STORE).put(value, key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  }));
+}
+
+// Only fetch the 8 fields we actually use
+const TX_FIELDS = [TX.date, TX.amount, TX.description, TX.category, TX.reconciled, TX.tenancy, TX.unit, TX.property];
+let _txDateFieldName = 'Date'; // resolved from schema metadata at load time
+
 // Transaction lookups — pre-index by tenancy, unit, property for fast expand
 // ═══════════════════════════════════════════════════════════════════════
 const TX_BY_TENANCY  = {};
 const TX_BY_UNIT     = {};
 const TX_BY_PROPERTY = {};
+let _txLoaded = false;
+let _txLoadPromise = null;
 
 function buildTxLookups(){
   for (const k in TX_BY_TENANCY)  delete TX_BY_TENANCY[k];
   for (const k in TX_BY_UNIT)     delete TX_BY_UNIT[k];
   for (const k in TX_BY_PROPERTY) delete TX_BY_PROPERTY[k];
-
   for (const tx of (DATA.transactions || [])) {
     const f = tx.fields;
     const tenancyIds = Array.isArray(f[TX.tenancy]) ? f[TX.tenancy] : [];
@@ -2955,6 +3011,52 @@ function getLinkedTransactions(entityKey, recId){
     return txs;
   }
   return [];
+}
+
+function _applyTransactions(tx){
+  DATA.transactions = tx;
+  INDEX.transactions = Object.fromEntries(tx.map(r=>[r.id,r]));
+  buildTxLookups();
+  _txLoaded = true;
+  for (const [ek, rid] of Object.entries(_expandedRow)) {
+    if (!rid) continue;
+    const expTr = document.getElementById('exp-' + rid);
+    if (expTr && expTr.style.display !== 'none') {
+      const td = expTr.querySelector('td');
+      td.innerHTML = `<div class="expand-content">${renderExpandContent(ek, rid)}</div>`;
+    }
+  }
+}
+
+async function loadTransactionsBackground(forceRefresh = false){
+  if (_txLoaded && !forceRefresh) return;
+
+  // 1. Try IndexedDB cache first (instant)
+  if (!forceRefresh) {
+    try {
+      const cached = await _opsIdbGet(OPS_TX_CACHE_KEY);
+      if (cached && cached.savedAt && cached.data) {
+        const age = Date.now() - cached.savedAt;
+        if (age < OPS_TX_CACHE_TTL) {
+          _applyTransactions(cached.data);
+          return;
+        }
+      }
+    } catch(e) { /* cache miss, proceed to fetch */ }
+  }
+
+  // 2. Fetch from Airtable — only fields we need, last 24 months only
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 24);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const fieldParams = { filterByFormula: `IS_AFTER({${_txDateFieldName}}, '${cutoffStr}')` };
+  TX_FIELDS.forEach((fid, i) => { fieldParams[`fields[${i}]`] = fid; });
+  _txLoadPromise = fetchAllRecords(TABLE.transactions, { params: fieldParams });
+  const tx = await _txLoadPromise;
+  _applyTransactions(tx);
+
+  // 3. Save to IndexedDB for next load
+  try { await _opsIdbSet(OPS_TX_CACHE_KEY, { savedAt: Date.now(), data: tx }); } catch(e) { /* non-critical */ }
 }
 
 function sortTransactionsByDate(txs){
@@ -2987,7 +3089,11 @@ function toggleExpandRow(entityKey, recId, rowEl){
     _expandedRow[entityKey] = null;
   } else {
     const td = expTr.querySelector('td');
-    td.innerHTML = `<div class="expand-content">${renderExpandContent(entityKey, recId)}</div>`;
+    if (_txLoaded) {
+      td.innerHTML = `<div class="expand-content">${renderExpandContent(entityKey, recId)}</div>`;
+    } else {
+      td.innerHTML = '<div class="expand-content" style="padding:16px;color:var(--text-muted)">Loading transactions...</div>';
+    }
     expTr.style.display = '';
     if (chevron) chevron.classList.add('open');
     _expandedRow[entityKey] = recId;
@@ -3005,13 +3111,15 @@ function renderExpandContent(entityKey, recId){
   }
 
   const total = txs.reduce((s, t) => s + (parseFloat(t.fields[TX.amount]) || 0), 0);
-  const summary = `<div class="expand-summary"><span><strong>${txs.length}</strong> transaction${txs.length===1?'':'s'}</span><span>Net: <strong style="color:${total>=0?'var(--success)':'var(--danger)'}">£${Math.abs(total).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}${total<0?' DR':''}</strong></span></div>`;
+  const summary = `<div class="expand-summary"><span><strong>${txs.length}</strong> transaction${txs.length===1?'':'s'}</span><span>Net: <strong style="color:${total>=0?'var(--success)':'var(--danger)'}">${total<0?'-':''}£${Math.abs(total).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></span></div>`;
 
   const MAX_SHOW = 20;
   const showAll = txs.length <= MAX_SHOW;
   const visible = showAll ? txs : txs.slice(0, MAX_SHOW);
 
   const reconBadge = (val) => {
+    if (val === true)  return '<span class="badge badge-active">Reconciled</span>';
+    if (val === false) return '<span class="badge badge-warning">Unreconciled</span>';
     if (!val) return '<span class="badge badge-info">—</span>';
     const v = Array.isArray(val) ? (val[0]?.name || val[0]) : (typeof val === 'object' ? val?.name : val);
     const s = String(v || '').toLowerCase();
@@ -3021,8 +3129,13 @@ function renderExpandContent(entityKey, recId){
 
   const catDisplay = (val) => {
     if (!val) return '—';
-    if (Array.isArray(val)) return val.map(v => typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v))).join(', ');
-    return typeof val === 'object' ? escapeHtml(val.name || val.id || '—') : escapeHtml(String(val));
+    const ids = Array.isArray(val) ? val : [val];
+    return ids.map(v => {
+      const id = typeof v === 'object' ? (v.id || v) : v;
+      const rec = INDEX.categories && INDEX.categories[id];
+      if (rec) return escapeHtml(String(rec.fields[CAT_NAME] || id));
+      return typeof v === 'object' ? escapeHtml(v.name || v.id || '—') : escapeHtml(String(v));
+    }).join(', ');
   };
 
   const fmtDate = (d) => {
@@ -3037,7 +3150,7 @@ function renderExpandContent(entityKey, recId){
     return `<tr>
       <td>${fmtDate(f[TX.date])}</td>
       <td>${escapeHtml(String(f[TX.description] || '—'))}</td>
-      <td class="money">£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}${amt<0?' DR':''}</td>
+      <td class="money">${amt<0?'-':''}£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td>${catDisplay(f[TX.category])}</td>
       <td class="wrap-cell">${reconBadge(f[TX.reconciled])}</td>
     </tr>`;
@@ -3050,7 +3163,7 @@ function renderExpandContent(entityKey, recId){
     return `<tr>
       <td>${fmtDate(f[TX.date])}</td>
       <td>${escapeHtml(String(f[TX.description] || '—'))}</td>
-      <td class="money">£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}${amt<0?' DR':''}</td>
+      <td class="money">${amt<0?'-':''}£${Math.abs(amt).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td>${catDisplay(f[TX.category])}</td>
       <td class="wrap-cell">${reconBadge(f[TX.reconciled])}</td>
     </tr>`;
@@ -3058,7 +3171,7 @@ function renderExpandContent(entityKey, recId){
 
   return `${summary}
     <table class="tx-table">
-      <thead><tr><th style="width:100px">Date</th><th>Description</th><th class="money" style="width:100px">Amount</th><th style="width:130px">Category</th><th style="width:120px">Status</th></tr></thead>
+      <thead><tr><th style="width:90px">Date</th><th style="max-width:40%">Description</th><th class="money" style="width:110px">Amount</th><th style="width:170px">Category</th><th style="width:90px">Status</th></tr></thead>
       <tbody>${rows}</tbody>
       ${hiddenRows}
     </table>
@@ -3098,6 +3211,7 @@ function customerStageBadge(stage){
 }
 
 function renderCustomers(){
+  _expandedRow.customers = null;
   renderCustomerKpis();
   const search = (document.getElementById('searchCustomers').value || '').toLowerCase().trim();
   const stage  = document.getElementById('filterCustomerStage').value;
