@@ -263,11 +263,13 @@ async function runAgent(env, wf) {
     // Recent activity → dedup + learning (rejections must not be re-proposed)
     let recentBlock = '';
     try {
+        // NOTE: link-field formulas match display names, not record ids — fetch and
+        // filter in code on the Agent link array so dedup/learning actually work.
         const act = await atList(env, ACTIVITY_TBL, {
-            pageSize: '40',
-            filterByFormula: `FIND('${wfId}', ARRAYJOIN({Agent} & ''))`,
+            pageSize: '100',
             'sort[0][field]': 'Run', 'sort[0][direction]': 'desc',
         });
+        act.records = (act.records || []).filter(r => Array.isArray(r.fields['Agent']) && r.fields['Agent'].includes(wfId)).slice(0, 40);
         const rows = (act.records || []).map(r => {
             const f = r.fields;
             const p = f['Payload'] || '';

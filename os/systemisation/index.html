@@ -341,6 +341,20 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .agentic-answer::placeholder{color:var(--text-muted)}
 .agentic-answer:focus{outline:none;border-color:var(--accent);background:var(--bg-surface);box-shadow:0 0 0 2px var(--accent-soft)}
 .agentic-foot{margin-top:12px;display:flex;justify-content:flex-end}
+/* Agent panel */
+.agent-card{border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface);padding:14px 16px;margin:14px 0}
+.agent-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.agent-pill{display:inline-block;font-size:11px;font-weight:var(--fw-bold);letter-spacing:.5px;padding:3px 10px;border-radius:var(--radius-full)}
+.agent-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+.agent-feed{margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:6px;max-height:420px;overflow-y:auto}
+.agent-row{padding:9px 0;border-bottom:1px solid var(--border-subtle)}
+.agent-row:last-child{border-bottom:none}
+.agent-row-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.agent-chip{font-size:10px;font-weight:var(--fw-semibold);padding:2px 8px;border-radius:var(--radius-full);white-space:nowrap}
+.agent-row-summary{font-size:var(--fs-sm);font-weight:var(--fw-medium);flex:1;min-width:200px}
+.agent-row-when{font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap}
+.agent-row-detail{font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.55;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+.agent-row-actions{display:flex;gap:8px;margin-top:8px}
 /* Sync / refresh bar in the topbar */
 .sync-status{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-secondary);white-space:nowrap}
 .sync-dot{width:8px;height:8px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
@@ -380,6 +394,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
         <div class="subtitle">Map, document and automate every business process</div>
     </div>
     <div class="topbar-right">
+        <span id="agentsLiveBadge" style="display:none;align-items:center;gap:6px;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--accent);background:var(--accent-soft);padding:3px 10px;border-radius:var(--radius-full);white-space:nowrap"></span>
         <span id="syncStatus" class="sync-status" title="Not synced yet"><span class="sync-dot"></span>Loading…</span>
         <button class="settings-icon" id="refreshBtn" onclick="refreshData()" title="Refresh data">&#x21BB;</button>
         <select id="bizFilter" class="filter-select" onchange="applyBizFilter()">
@@ -2968,6 +2983,7 @@ function renderSteps(){
             html += '</tbody></table>';
 
             html += `<div id="disposition-${w.id}">${hasSopDoc ? dispositionBarHtml(w.id) : ''}</div>`;
+            html += `<div id="agentpanel-${w.id}"></div>`;
             html += `<div id="agentic-${w.id}"></div>`;
             html += `<div id="sopDoc-${w.id}"></div>`;
         }
@@ -2976,6 +2992,7 @@ function renderSteps(){
     pane.innerHTML = html;
     restoreSavedSOPs();
     restoreSearchFocus();
+    if(selectedStepsWf) renderAgentPanel(selectedStepsWf);
 }
 
 function restoreSavedSOPs(){
@@ -3337,6 +3354,236 @@ async function setWfDisposition(wfId, type){
 function selectStepsWf(id){
     selectedStepsWf = id;
     renderSteps();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Agent panel — testing/live controls, activity feed, approve/reject/undo
+// (front end for the agent-runner worker; actions execute via the page's PAT)
+// ═══════════════════════════════════════════════════════════════════════
+const AGENT_RUNNER_URL = 'https://agent-runner.kevinbrittain.workers.dev';
+const AGENT_ACTIVITY_TBL = 'tblJ3GFnAAoXf99e9';
+
+function getWfAgent(wfId){
+    const sop = getWfSopData(wfId);
+    return (sop && sop.agent) ? sop.agent : null;
+}
+async function setWfAgent(wfId, agent){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId) || {};
+    sop.agent = agent;
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ toast('Agent state save failed: '+e.message); }
+    updateAgentsLiveBadge();
+}
+
+function updateAgentsLiveBadge(){
+    const live = allWorkflows.filter(w=>{ const a=(getWfSopData(w.id)||{}).agent; return a && a.state==='live'; }).length;
+    const el = document.getElementById('agentsLiveBadge');
+    if(!el) return;
+    if(live > 0){ el.style.display='inline-flex'; el.textContent = `⚡ ${live} agent${live===1?'':'s'} live`; }
+    else { el.style.display='none'; }
+}
+
+const AGENT_STATES = {
+    testing: { label:'TESTING', bg:'var(--warning-bg)', fg:'var(--warning)', sub:'Watching your data. It only proposes — nothing happens without your tick.' },
+    live:    { label:'LIVE',    bg:'var(--success-bg)', fg:'var(--success)', sub:'Running on a daily schedule. Safe actions automatic, anything risky asks first.' },
+    off:     { label:'PAUSED',  bg:'var(--bg-subtle)',  fg:'var(--text-muted)', sub:'Not running. Resume testing or go live when ready.' },
+};
+
+async function renderAgentPanel(wfId){
+    const el = document.getElementById('agentpanel-'+wfId);
+    if(!el) return;
+    const disp = getWfDisposition(wfId);
+    if(!disp || disp.type!=='agent'){ el.innerHTML=''; return; }
+    const agent = getWfAgent(wfId);
+
+    if(!agent || !agent.state || agent.state==='draft'){
+        el.innerHTML = `<div class="agent-card">
+            <div class="agent-head">
+                <div><span class="agent-pill" style="background:var(--bg-subtle);color:var(--text-muted)">DRAFT</span>
+                <span class="agent-sub">This process is marked to run as an AI agent, but the agent hasn't started yet.</span></div>
+                <button class="btn btn-sm btn-ai" onclick="startAgentTesting('${wfId}')">Start testing</button>
+            </div>
+        </div>`;
+        return;
+    }
+
+    const meta = AGENT_STATES[agent.state] || AGENT_STATES.off;
+    let controls = '';
+    if(agent.state==='testing'){
+        controls = `<button class="btn btn-sm" onclick="runAgentNow('${wfId}')" id="agentRunBtn-${wfId}">Run now</button>
+            <button class="btn btn-sm btn-primary" onclick="confirmGoLive('${wfId}')">Go live</button>
+            <button class="btn btn-sm" onclick="setAgentState('${wfId}','off')">Pause</button>`;
+    } else if(agent.state==='live'){
+        controls = `<button class="btn btn-sm" onclick="runAgentNow('${wfId}')" id="agentRunBtn-${wfId}">Run now</button>
+            <button class="btn btn-sm" onclick="setAgentState('${wfId}','testing')">Back to testing</button>
+            <button class="btn btn-sm" onclick="setAgentState('${wfId}','off')">Pause</button>`;
+    } else {
+        controls = `<button class="btn btn-sm btn-ai" onclick="setAgentState('${wfId}','testing')">Resume testing</button>`;
+    }
+
+    el.innerHTML = `<div class="agent-card">
+        <div class="agent-head">
+            <div><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span>
+            <span class="agent-sub">${esc(meta.sub)}</span></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${controls}</div>
+        </div>
+        <div class="agent-feed" id="agentfeed-${wfId}"><div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">Loading activity…</div></div>
+    </div>`;
+    renderAgentFeed(wfId);
+}
+
+async function fetchAgentActivity(wfId){
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}?pageSize=100`, {
+        headers:{ 'Authorization':`Bearer ${PAT}` }
+    });
+    if(!res.ok) throw new Error('activity fetch '+res.status);
+    const data = await res.json();
+    return (data.records||[])
+        .filter(r=>Array.isArray(r.fields['Agent']) && r.fields['Agent'].includes(wfId))
+        .sort((a,b)=> new Date(b.createdTime) - new Date(a.createdTime))
+        .slice(0, 25);
+}
+
+function agentFeedRow(r){
+    const f = r.fields;
+    const state = f['State'] || 'Note';
+    const chipColors = {
+        'Proposed':  'background:var(--warning-bg);color:var(--warning)',
+        'Auto-done': 'background:var(--success-bg);color:var(--success)',
+        'Approved':  'background:var(--success-bg);color:var(--success)',
+        'Rejected':  'background:var(--danger-bg);color:var(--danger)',
+        'Undone':    'background:var(--bg-subtle);color:var(--text-muted)',
+        'Note':      'background:var(--info-bg,var(--bg-subtle));color:var(--info,var(--text-secondary))',
+    };
+    let payload = null;
+    try { payload = JSON.parse(f['Payload']||'null'); } catch(e){}
+    const undoable = payload && payload.kind==='update' && payload.before && !payload.before._fetchFailed;
+    let actions = '';
+    if(state==='Proposed'){
+        actions = `<button class="btn btn-sm btn-primary" onclick="approveAgentActivity('${r.id}')">&#x2713; Approve</button>
+            <button class="btn btn-sm" style="border-color:var(--danger);color:var(--danger)" onclick="rejectAgentActivity('${r.id}')">&#x2715; Reject</button>`;
+    } else if((state==='Auto-done'||state==='Approved') && undoable){
+        actions = `<button class="btn btn-sm" onclick="undoAgentActivity('${r.id}')">Undo</button>`;
+    }
+    const when = new Date(r.createdTime).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    const detail = String(f['Detail']||'').trim();
+    return `<div class="agent-row" data-act="${r.id}">
+        <div class="agent-row-top">
+            <span class="agent-chip" style="${chipColors[state]||chipColors.Note}">${esc(state)}</span>
+            <span class="agent-row-summary">${esc(f['Summary']||'')}</span>
+            <span class="agent-row-when">${when}</span>
+        </div>
+        ${detail?`<div class="agent-row-detail">${esc(detail.slice(0,700))}${detail.length>700?'…':''}</div>`:''}
+        ${actions?`<div class="agent-row-actions">${actions}</div>`:''}
+    </div>`;
+}
+
+async function renderAgentFeed(wfId){
+    const el = document.getElementById('agentfeed-'+wfId);
+    if(!el) return;
+    try {
+        const rows = await fetchAgentActivity(wfId);
+        el.innerHTML = rows.length
+            ? rows.map(agentFeedRow).join('')
+            : `<div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">No activity yet. Hit "Run now" to do a first pass over your data.</div>`;
+    } catch(e){
+        el.innerHTML = `<div style="padding:8px 0;font-size:var(--fs-xs);color:var(--danger)">Could not load activity: ${esc(e.message)}</div>`;
+    }
+}
+
+async function setActivityState(actId, state){
+    await atUpdate(AGENT_ACTIVITY_TBL, actId, { 'State': state });
+}
+
+async function approveAgentActivity(actId){
+    const row = document.querySelector(`[data-act="${actId}"]`);
+    const btns = row ? row.querySelectorAll('button') : [];
+    btns.forEach(b=>b.disabled=true);
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        let payload = null;
+        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){}
+        if(payload && payload.kind==='update'){
+            await atUpdate(payload.tableId, payload.recordId, payload.fields);
+        } else if(payload && payload.kind==='comment'){
+            await fetch(`https://api.airtable.com/v0/${BASE_ID}/${payload.tableId}/${payload.recordId}/comments`, {
+                method:'POST', headers:{ 'Authorization':`Bearer ${PAT}`, 'Content-Type':'application/json' },
+                body: JSON.stringify({ text: String(payload.text||'').slice(0,4000) })
+            });
+        }
+        // 'manual' payloads have nothing to execute — approving acknowledges them.
+        await setActivityState(actId, 'Approved');
+        toast(payload && payload.kind!=='manual' ? 'Approved and done' : 'Approved');
+        const wfId = (rec.fields['Agent']||[])[0];
+        if(wfId) renderAgentFeed(wfId);
+    } catch(e){ toast('Approve failed: '+e.message); btns.forEach(b=>b.disabled=false); }
+}
+
+async function rejectAgentActivity(actId){
+    try {
+        await setActivityState(actId, 'Rejected');
+        toast('Rejected — the agent won’t propose this again');
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        const wfId = (rec.fields['Agent']||[])[0];
+        if(wfId) renderAgentFeed(wfId);
+    } catch(e){ toast('Reject failed: '+e.message); }
+}
+
+async function undoAgentActivity(actId){
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        let payload = null;
+        try { payload = JSON.parse(rec.fields['Payload']||'null'); } catch(e){}
+        if(!payload || payload.kind!=='update' || !payload.before){ toast('Nothing undoable on this entry'); return; }
+        await atUpdate(payload.tableId, payload.recordId, payload.before);
+        await setActivityState(actId, 'Undone');
+        toast('Undone — record restored');
+        const wfId = (rec.fields['Agent']||[])[0];
+        if(wfId) renderAgentFeed(wfId);
+    } catch(e){ toast('Undo failed: '+e.message); }
+}
+
+async function startAgentTesting(wfId){
+    await setWfAgent(wfId, { state:'testing', tables:['tenancies','tenants'], autoFields:[], configuredAt:new Date().toISOString() });
+    toast('Agent is in testing — it will propose, never act');
+    renderAgentPanel(wfId);
+}
+async function setAgentState(wfId, state){
+    const agent = getWfAgent(wfId) || { tables:['tenancies','tenants'], autoFields:[] };
+    agent.state = state;
+    await setWfAgent(wfId, agent);
+    toast(state==='live' ? 'Agent is LIVE' : state==='testing' ? 'Back to testing' : 'Agent paused');
+    renderAgentPanel(wfId);
+}
+function confirmGoLive(wfId){
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">Going live means the agent runs every day on its own.<br><br>
+        <strong>Safe actions</strong> (pre-approved field updates) happen automatically.<br>
+        <strong>Everything else</strong> still queues here for your approval.<br>
+        Every action stays logged with one-click Undo, and you can pause any time.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Not yet</button>
+        <button class="btn btn-primary" onclick="closeModal();setAgentState('${wfId}','live')">Go live</button>`;
+    showModal('Take this agent live?', body, footer);
+}
+
+async function runAgentNow(wfId){
+    const btn = document.getElementById('agentRunBtn-'+wfId);
+    if(btn){ btn.disabled=true; btn.textContent='Running…'; }
+    try {
+        const res = await fetch(`${AGENT_RUNNER_URL}/run?wf=${wfId}`, { method:'POST' });
+        if(!res.ok) throw new Error('runner '+res.status);
+        const data = await res.json();
+        const stats = (data.results && data.results[0] && data.results[0].stats) || {};
+        toast(`Run complete — ${stats.proposed||0} proposed, ${stats.auto||0} done automatically`);
+    } catch(e){ toast('Run failed: '+e.message); }
+    if(btn){ btn.disabled=false; btn.textContent='Run now'; }
+    renderAgentFeed(wfId);
 }
 
 let _stepSaveTimers = {};
@@ -4388,6 +4635,7 @@ async function start(){
         populateBizFilter();
         render();
         updateSyncStatus('ok');
+        updateAgentsLiveBadge();
     } catch(e){
         if(e.message==='auth') return;
         document.getElementById('loader').textContent='Error loading data: '+e.message;
