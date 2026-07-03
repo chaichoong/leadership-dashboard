@@ -240,46 +240,11 @@
         const tenantPhone = tenant ? String(getField(tenant, F.tenantPhone) || '') : '';
         const tenantEmail = tenant ? String(getField(tenant, F.tenantEmail) || '') : '';
 
-        // ── Days overdue: calculated from the CFV start date ──
-        // When a CFV is first detected, we store the due date of that month as the start date.
-        // Days overdue = today minus that start date. This persists across months.
         const cfvKey = 'cfv_' + tenancy.id;
-        const storedStartDate = localStorage.getItem(cfvKey + '_startDate');
-        let cfvStartDate = storedStartDate ? new Date(storedStartDate) : null;
 
-        if (!cfvStartDate && (status === 'cfv' || status === 'potential' || status === 'cfv actioned')) {
-            // Calculate the due date for the current month (or last month if due day hasn't passed)
-            const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay || 1);
-            // If due day this month is in the future, the CFV is from last month's due date
-            if (dueThisMonth > today) {
-                cfvStartDate = new Date(today.getFullYear(), today.getMonth() - 1, dueDay || 1);
-            } else {
-                cfvStartDate = dueThisMonth;
-            }
-            localStorage.setItem(cfvKey + '_startDate', cfvStartDate.toISOString());
-        }
-
-        const daysOverdue = cfvStartDate ? Math.max(0, Math.floor((today - cfvStartDate) / 86400000)) : 0;
-
-        // Chase stage from localStorage
-        const chaseStartStr = localStorage.getItem(cfvKey + '_chaseStart');
-        let chaseStart = chaseStartStr ? new Date(chaseStartStr) : null;
-        if (!chaseStart && (status === 'cfv' || status === 'potential')) {
-            chaseStart = today;
-            localStorage.setItem(cfvKey + '_chaseStart', today.toISOString());
-        }
-
-        let chaseStage = 0;
-        if (chaseStart) {
-            const daysSinceChase = Math.floor((today - chaseStart) / 86400000);
-            for (let i = CFV_CHASE_STAGES.length - 1; i >= 0; i--) {
-                if (daysSinceChase >= CFV_CHASE_STAGES[i].day) { chaseStage = i; break; }
-            }
-        }
-
-        // Most recent reconciled payment linked to this tenancy — gives the
-        // user a "when did we last actually see money from them?" anchor right
-        // in the CFV table without having to drill into Operations.
+        // Most recent reconciled payment linked to this tenancy — used both as the
+        // "when did we last actually see money from them?" anchor in the table and
+        // to derive days overdue below.
         let lastPaymentDate = null;
         let lastPaymentAmount = null;
         const lpSource = txIndex
@@ -297,6 +262,49 @@
             }
         }
 
+        // ── Days overdue — derived from the actual last reconciled payment, NOT a
+        // frozen localStorage start date. The old approach stored the due date at
+        // first detection and never advanced it, so a tenancy that later made a
+        // payment still read an ever-growing figure (e.g. "65 days" when the last
+        // payment was five weeks ago). We instead find the cycle the last payment
+        // covered and count from the NEXT (first unpaid) monthly due date.
+        const CFV_EARLY_PAY_DAYS = 5; // a payment up to 5 days early still pays that cycle
+        let daysOverdue = 0;
+        if (lastPaymentDate) {
+            const dd = dueDay || 1;
+            const anchor = new Date(lastPaymentDate);
+            anchor.setDate(anchor.getDate() + CFV_EARLY_PAY_DAYS);
+            // Cycle the payment covered = latest monthly due date on/before the anchor.
+            let coveredDue = new Date(anchor.getFullYear(), anchor.getMonth(), dd);
+            if (coveredDue > anchor) coveredDue = new Date(anchor.getFullYear(), anchor.getMonth() - 1, dd);
+            const nextDue = new Date(coveredDue.getFullYear(), coveredDue.getMonth() + 1, dd);
+            daysOverdue = Math.max(0, Math.floor((today - nextDue) / 86400000));
+        } else if (status === 'cfv' || status === 'potential' || status === 'cfv actioned') {
+            // No payment history at all — measure from the most recent due date that
+            // has already passed (this month's, or last month's if not yet reached).
+            const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay || 1);
+            const startDue = dueThisMonth > today
+                ? new Date(today.getFullYear(), today.getMonth() - 1, dueDay || 1)
+                : dueThisMonth;
+            daysOverdue = Math.max(0, Math.floor((today - startDue) / 86400000));
+        }
+
+        // Chase stage from localStorage
+        const chaseStartStr = localStorage.getItem(cfvKey + '_chaseStart');
+        let chaseStart = chaseStartStr ? new Date(chaseStartStr) : null;
+        if (!chaseStart && (status === 'cfv' || status === 'potential')) {
+            chaseStart = today;
+            localStorage.setItem(cfvKey + '_chaseStart', today.toISOString());
+        }
+
+        let chaseStage = 0;
+        if (chaseStart) {
+            const daysSinceChase = Math.floor((today - chaseStart) / 86400000);
+            for (let i = CFV_CHASE_STAGES.length - 1; i >= 0; i--) {
+                if (daysSinceChase >= CFV_CHASE_STAGES[i].day) { chaseStage = i; break; }
+            }
+        }
+
         return {
             tenancyId: tenancy.id,
             surname, ref, rent, dueDay, daysOverdue,
@@ -304,7 +312,7 @@
             status,
             tenantName, tenantPhone, tenantEmail,
             tenantId: tenant ? tenant.id : null,
-            chaseStage, chaseStart, cfvStartDate,
+            chaseStage, chaseStart,
             lastPaymentDate, lastPaymentAmount,
             autoDetected: false,
         };
