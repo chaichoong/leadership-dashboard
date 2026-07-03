@@ -290,14 +290,31 @@ async function runAgent(env, wf) {
         return `Step ${i + 1}: ${s.name}\n${detail}`;
     }).join('\n\n');
     const cautions = (sop.cautions || []).map(c => `- ${c}`).join('\n');
+    // The owner's answers to the AGENTIC readiness questions are part of the
+    // process definition — the decision rules often live here, not in the steps.
+    const answers = (sop.readiness && sop.readiness.answers) || {};
+    const answersBlock = Object.keys(answers).length
+        ? `\n\nOWNER'S ANSWERS TO PROCESS QUESTIONS (authoritative decision rules):\n${Object.entries(answers).map(([k, v]) => `- ${v}`).join('\n')}`
+        : '';
+    const operator = agent.operator || 'Kevin';
+    const fieldGuide = agent.fieldGuide
+        ? `\n\nFIELD GUIDE for this base (follow exactly):\n${agent.fieldGuide}`
+        : '';
 
     const system = `You are an autonomous operations agent named "${name}" working inside a UK property business's Airtable base. You were built from the owner's own SOP. Today's date: ${new Date().toISOString().slice(0, 10)}.
 
 YOUR SOP (follow it exactly):
-${sopText}
+${sopText}${answersBlock}
 
 CAUTIONS (never violate these):
 ${cautions || '- none recorded'}
+
+DATA TRUST RULES (critical — the tables contain historical noise):
+- Records carry legacy fields. NEVER base a decision on fields whose names contain "(Deprecated)", "Legacy", "Debug", "Static", or bare flag fields like "CFV" / "CFV Status" — they are stale.
+- Prefer fields marked "(Unified)" or "Derived" — e.g. "Payment Status (Unified)" is the authoritative payment status.
+- If authoritative fields conflict with each other, do NOT pick the alarming one: flag the conflict with propose_action instead.${fieldGuide}
+
+IDENTITY: you act on behalf of ${operator}. Every outward message (chasers, emails, texts) signs off as ${operator} — never as a company, account, or management name.
 
 OPERATING RULES:
 - You are in ${state.toUpperCase()} mode. ${state === 'testing' ? 'Nothing you do executes — every action is proposed to the owner for approval. Be thorough but precise.' : 'Only allowlisted safe updates execute automatically; everything else queues for the owner.'}
