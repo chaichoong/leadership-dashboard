@@ -3670,6 +3670,31 @@ function renderAutomation(){
         </select>
     </div>`;
 
+    // ── AI Agents fleet — every workflow marked "Autonomous agent" ──
+    const agentWfs = wfs.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; });
+    if(agentWfs.length){
+        html += '<div class="auto-wf-group">';
+        html += '<div class="auto-wf-header">AI Agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + agentWfs.length + ')</span></div>';
+        html += '<p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 8px 0">Your agent fleet. Approvals and controls live on each agent\'s page — click View agent.</p>';
+        html += `<table class="wf-grid"><thead><tr>
+            <th style="width:32%">Agent</th>
+            <th style="width:110px">Status</th>
+            <th style="width:150px">Awaiting your OK</th>
+            <th>Actions</th>
+        </tr></thead><tbody>`;
+        agentWfs.forEach(w=>{
+            const a = getWfAgent(w.id);
+            const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
+            html += `<tr>
+                <td style="font-weight:var(--fw-semibold)">${esc(gf(w,WF.name)||'Untitled')}</td>
+                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span></td>
+                <td><span id="agpend-${w.id}" style="font-size:var(--fs-xs);color:var(--text-muted)">—</span></td>
+                <td><button class="btn btn-sm" onclick="selectStepsWf('${w.id}');switchView('steps')">View agent</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+    }
+
     const wfsWithTasks = wfs.filter(w=>getWfVideoTaskId(w.id));
     if(wfsWithTasks.length){
         html += '<div class="auto-wf-group">';
@@ -3812,6 +3837,30 @@ function renderAutomation(){
     pane.innerHTML = html;
     updateCounts();
     restoreSearchFocus();
+    if(agentWfs.length) fillAgentPendingCounts(agentWfs.map(w=>w.id));
+}
+
+// One fetch for the fleet: count Proposed activity rows per agent, fill the badges.
+async function fillAgentPendingCounts(agentIds){
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}?pageSize=100`, {
+            headers:{ 'Authorization':`Bearer ${PAT}` }
+        });
+        if(!res.ok) return;
+        const data = await res.json();
+        const counts = {};
+        (data.records||[]).forEach(r=>{
+            if((r.fields['State']||'')!=='Proposed') return;
+            (r.fields['Agent']||[]).forEach(id=>{ counts[id]=(counts[id]||0)+1; });
+        });
+        agentIds.forEach(id=>{
+            const el = document.getElementById('agpend-'+id);
+            if(!el) return;
+            const n = counts[id]||0;
+            el.textContent = n ? `${n} proposal${n===1?'':'s'}` : 'Nothing waiting';
+            if(n){ el.style.color='var(--warning)'; el.style.fontWeight='var(--fw-semibold)'; }
+        });
+    } catch(e){ console.warn('pending counts failed', e); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
