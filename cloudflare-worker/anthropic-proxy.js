@@ -1,124 +1,184 @@
-// Cloudflare Worker — Anthropic API proxy
+// Cloudflare Worker — claude-proxy
 //
-// Why this exists:
-//   The Operations OS calls api.anthropic.com from the browser. Some
-//   browser extensions and corporate networks block direct calls to
-//   that host — the request fails with "Failed to fetch" before it
-//   even leaves the device. This Worker sits on a *.workers.dev URL
-//   that those filters don't touch, forwards every request to
-//   api.anthropic.com, and adds the CORS headers Chrome wants.
+// THIS IS THE RECONCILED SOURCE OF THE LIVE `claude-proxy` worker (pulled from
+// the Cloudflare dashboard on 2026-07-02 and re-hardened). Two jobs:
+//   1. Relay browser AI calls to api.anthropic.com, injecting the server-side
+//      key so the key never ships to the browser (in-app AI, P&L, Skills, Tasks
+//      all rely on this — they send NO key of their own).
+//   2. Store the Inbound-Comms shared knowledge base in KV (/shared-data).
 //
-// What it does NOT do:
-//   - It does NOT store your API key. You still send the x-api-key
-//     header from the browser; the Worker just relays it.
-//   - It does NOT log request bodies.
+// Auth model (hardened): the old version trusted a plain Origin/Referer STRING,
+// which any script can set — that let the monthly-valuations job (and anyone
+// else) spend the key by faking the header. Now:
+//   - Browser calls: Origin/Referer must match AND a Sec-Fetch-* header must be
+//     present. Browsers always send Sec-Fetch metadata; plain HTTP clients
+//     (curl/urllib) omit it, so a bare header-spoof no longer passes.
+//   - Script/automation calls: send Authorization: Bearer <PROXY_SERVICE_TOKEN>.
+//   - Neither → 403.
+// Residual risk (a client forging BOTH Origin and Sec-Fetch) is accepted for
+// now; the durable fix is per-key rate limiting + moving off browser-injected
+// keys at the multi-tenant migration.
 //
-// Lock down the origin allow-list before deploying:
-//   ALLOWED_ORIGINS controls who can call this Worker. By default
-//   we accept the GitHub Pages dashboard host. Add others as needed.
-//
-// Deploy in 5 minutes:
-//   1. Go to dash.cloudflare.com and create a free Workers account.
-//   2. Workers & Pages → Create → Create Worker → name it
-//      'anthropic-proxy' (or whatever).
-//   3. Click 'Quick edit' / 'Edit code' and replace the default code
-//      with the contents of this file.
-//   4. Deploy. Copy the URL it gives you (something like
-//      https://anthropic-proxy.<your-account>.workers.dev).
-//   5. In the Operations OS, click any property → Run AI Valuation →
-//      when prompted (or via the test button), paste the Worker URL.
-//      The page stores it in localStorage and uses it from then on.
+// Secrets/bindings (already set on the deployed worker; keep them):
+//   CLAUDE_API_KEY (secret)      — the Anthropic key, injected server-side
+//   PROXY_SERVICE_TOKEN (secret) — bearer token for script callers (NEW)
+//   SHARED_DATA (KV namespace)   — knowledge-base store for /shared-data
+//   SLACK_BOT_TOKEN (secret)     — vestigial, unused by this code; left in place
 
+// DEPLOYED CONTRACT — read before replacing this worker:
+// This proxy holds the Anthropic key server-side (CLAUDE_API_KEY secret) and
+// authenticates callers by browser origin+Sec-Fetch OR service bearer tokens
+// (PROXY_SERVICE_TOKEN = GitHub valuations job, PROXY_SERVICE_TOKEN_2 =
+// agent-runner via a Cloudflare service binding). Deploying a version without
+// these breaks every AI feature in the app AND the agent runtime.
 const ALLOWED_ORIGINS = [
   'https://chaichoong.github.io',
   'https://leadership-dashboard-gamma.vercel.app', // Supabase build on Vercel
-  'http://localhost:8765', // local preview
 ];
+const ALLOWED_ORIGIN = ALLOWED_ORIGINS[0]; // fallback for CORS reflection
 
-// Headers the Anthropic SDK sends that we should forward upstream
-const FORWARD_HEADERS = new Set([
-  'content-type',
-  'x-api-key',
-  'anthropic-version',
-  'anthropic-dangerous-direct-browser-access',
-  'anthropic-beta',
-]);
+function isBrowserCall(request) {
+  const origin = request.headers.get('Origin') || '';
+  const referer = request.headers.get('Referer') || '';
+  const originOk = ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.some(o => referer.startsWith(o + '/'));
+  // Real browsers set fetch-metadata headers automatically; scripts that merely
+  // set Origin/Referer usually do not.
+  const hasFetchMeta = request.headers.get('Sec-Fetch-Site') !== null
+    || request.headers.get('Sec-Fetch-Mode') !== null;
+  return originOk && hasFetchMeta;
+}
+
+function hasServiceToken(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  // Two independently named tokens so services can be added or rotated without
+  // breaking each other (TOKEN = GitHub valuations job, TOKEN_2 = agent-runner).
+  if (env.PROXY_SERVICE_TOKEN && auth === `Bearer ${env.PROXY_SERVICE_TOKEN}`) return true;
+  if (env.PROXY_SERVICE_TOKEN_2 && auth === `Bearer ${env.PROXY_SERVICE_TOKEN_2}`) return true;
+  return false;
+}
 
 export default {
-  async fetch(request) {
-    const origin = request.headers.get('Origin') || '';
-    const allowOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : 'null';
+  async fetch(request, env) {
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(request.headers.get('Origin') || '') ? request.headers.get('Origin') : ALLOWED_ORIGIN,
+      'Vary': 'Origin',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
 
-    // CORS preflight
+    // CORS preflight — must not require auth.
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(allowOrigin),
-      });
+      return new Response(null, { headers: corsHeaders });
     }
 
-    // Allow GET on root for a quick health check
+    // Single auth gate: legitimate browser OR a token-bearing script.
+    if (!isBrowserCall(request) && !hasServiceToken(request, env)) {
+      return new Response('Forbidden', { status: 403, headers: corsHeaders });
+    }
+
     const url = new URL(request.url);
-    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '')) {
-      return new Response('Anthropic proxy is alive. POST to /v1/messages.', {
-        status: 200,
-        headers: { ...corsHeaders(allowOrigin), 'content-type': 'text/plain' },
-      });
+    const path = url.pathname;
+
+    // ============================================================
+    // GET /shared-data — Retrieve shared data from KV
+    // ============================================================
+    if (path === '/shared-data' && request.method === 'GET') {
+      try {
+        const keys = ['knowledge_base', 'kb_last_built', 'ai_corrections'];
+        const result = {};
+
+        for (const key of keys) {
+          const stored = await env.SHARED_DATA.get(key);
+          if (stored) {
+            try {
+              result[key] = JSON.parse(stored);
+            } catch {
+              result[key] = { data: stored, timestamp: 0 };
+            }
+          }
+        }
+
+        return new Response(JSON.stringify(result), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: { message: err.message } }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
+    // ============================================================
+    // POST /shared-data — Save shared data to KV
+    // ============================================================
+    if (path === '/shared-data' && request.method === 'POST') {
+      try {
+        const { key, data, timestamp } = await request.json();
+
+        if (!key || data === undefined) {
+          return new Response(JSON.stringify({ error: { message: 'Missing required fields: key, data' } }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const allowedKeys = ['knowledge_base', 'kb_last_built', 'ai_corrections'];
+        if (!allowedKeys.includes(key)) {
+          return new Response(JSON.stringify({ error: { message: 'Invalid key. Allowed: ' + allowedKeys.join(', ') } }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const entry = JSON.stringify({
+          data: data,
+          timestamp: timestamp || Date.now(),
+        });
+
+        await env.SHARED_DATA.put(key, entry);
+
+        return new Response(JSON.stringify({ success: true, key }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: { message: err.message } }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // ============================================================
+    // POST / — Claude API proxy (server-side key injected)
+    // ============================================================
     if (request.method !== 'POST') {
-      return new Response('Method not allowed', {
-        status: 405,
-        headers: corsHeaders(allowOrigin),
-      });
+      return new Response('Method not allowed', { status: 405, headers: corsHeaders });
     }
 
-    if (allowOrigin === 'null') {
-      return new Response(JSON.stringify({ error: 'Origin not allowed', origin }), {
-        status: 403,
-        headers: { ...corsHeaders(allowOrigin), 'content-type': 'application/json' },
-      });
-    }
-
-    // Build upstream request
-    const upstreamUrl = 'https://api.anthropic.com' + url.pathname + url.search;
-    const upstreamHeaders = new Headers();
-    for (const [k, v] of request.headers.entries()) {
-      if (FORWARD_HEADERS.has(k.toLowerCase())) upstreamHeaders.set(k, v);
-    }
-
-    let upstream;
     try {
-      upstream = await fetch(upstreamUrl, {
+      const body = await request.json();
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: upstreamHeaders,
-        body: request.body,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': env.CLAUDE_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
       });
-    } catch (e) {
-      return new Response(JSON.stringify({ error: 'Upstream fetch failed', message: String(e) }), {
-        status: 502,
-        headers: { ...corsHeaders(allowOrigin), 'content-type': 'application/json' },
+
+      const data = await response.text();
+      return new Response(data, {
+        status: response.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: { message: err.message } }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    // Mirror status + body, add CORS
-    const respHeaders = new Headers(upstream.headers);
-    for (const [k, v] of Object.entries(corsHeaders(allowOrigin))) respHeaders.set(k, v);
-    return new Response(upstream.body, {
-      status: upstream.status,
-      statusText: upstream.statusText,
-      headers: respHeaders,
-    });
   },
 };
-
-function corsHeaders(allowOrigin) {
-  return {
-    'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-    'Access-Control-Allow-Headers':
-      'Content-Type, X-API-Key, Anthropic-Version, Anthropic-Dangerous-Direct-Browser-Access, Anthropic-Beta',
-    'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
-  };
-}
