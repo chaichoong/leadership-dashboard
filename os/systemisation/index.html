@@ -3180,12 +3180,21 @@ Include at most 3 questions, only for Thin or Missing stages, most important fir
         const text = data.content?.[0]?.text || '{}';
         const m = text.match(/\{[\s\S]*\}/);
         if(!m) throw new Error('Invalid AI response');
-        const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers, (getWfSopData(wfId)||{}).readiness || null);
+        const prevR = (getWfSopData(wfId)||{}).readiness || null;
+        const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers, prevR);
         await saveAgenticReadiness(wfId, readiness);
         renderAgenticScorecard(wfId, readiness);
         const _ac = document.getElementById('agentic-'+wfId);
         if(_ac) _ac.scrollIntoView({block:'start'}); // bring the finished scorecard into view
-        toast('Readiness check complete');
+        // Say what MOVED, so a re-check never looks like it did nothing.
+        let delta = '';
+        if(prevR && Array.isArray(prevR.stages)){
+            const changes = readiness.stages
+                .map(s=>{ const p = prevR.stages.find(x=>x.letter===s.letter); return (p && p.status!==s.status) ? `${s.letter}: ${p.status} → ${s.status}` : null; })
+                .filter(Boolean);
+            delta = changes.length ? ' — ' + changes.join(' · ') : ' — scores unchanged';
+        }
+        toast('Readiness check complete' + delta);
     } catch(e){
         toast('Readiness check error: '+e.message);
         if(container) container.innerHTML = `<div style="padding:12px;color:var(--danger)">Could not run the readiness check: ${esc(e.message)}</div>`;
@@ -3219,12 +3228,21 @@ function normaliseReadiness(parsed, extraAnswers, prevReadiness){
         });
     }
     const thinLetters = new Set(blocking.map(s=>s.letter));
+    // Never re-ask a question the owner has already been asked (same stage, same
+    // wording) — if the AI repeats itself, the repeat is dropped and the stage
+    // falls through to the "Nearly there" guidance instead of looping.
+    const prevAsked = (prevReadiness && prevReadiness.asked) || {};
+    const normQ = s=>String(s).toLowerCase().replace(/\s+/g,' ').trim();
     const questions = (parsed.questions||[])
         .filter(q=>q && q.question)
         .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }))
         .filter(q=>thinLetters.has(q.letter) && (rounds[q.letter]||0) < 2)
+        .filter(q=>!(prevAsked[q.letter]||[]).some(t=>normQ(t)===normQ(q.question)))
         .slice(0,3);
-    return { state, stages, questions, rounds, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
+    const asked = {};
+    Object.entries(prevAsked).forEach(([L,list])=>{ asked[L]=list.slice(-4); });
+    questions.forEach(q=>{ (asked[q.letter]=asked[q.letter]||[]).push(q.question); });
+    return { state, stages, questions, rounds, asked, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
 }
 
 async function saveAgenticReadiness(wfId, readiness){
@@ -3276,10 +3294,13 @@ function renderAgenticScorecard(wfId, readiness){
     else if(readiness.questions && readiness.questions.length){
         questions = `<div class="agentic-questions">
             <div class="agentic-q-title">${esc(stateMeta.sub)}</div>
-            ${readiness.questions.map((q,i)=>`<div class="agentic-q">
+            ${readiness.questions.map((q,i)=>{
+                const prevA = readiness.answers && readiness.answers[q.letter];
+                return `<div class="agentic-q">
                 <label><strong>${esc(q.letter)}</strong> &middot; ${esc(q.question)}</label>
-                <textarea class="wf-grid-input agentic-answer" rows="2" data-q="${i}" placeholder="Type your answer, or re-record this stage in a new video">${esc((readiness.answers&&readiness.answers[q.letter])||'')}</textarea>
-            </div>`).join('')}
+                ${prevA?`<div style="font-size:var(--fs-xs);color:var(--text-muted);margin:2px 0 4px">You previously said: ${esc(String(prevA).slice(0,220))}</div>`:''}
+                <textarea class="wf-grid-input agentic-answer" rows="2" data-q="${i}" placeholder="${prevA?'Add the NEW detail this question asks for — no need to repeat what you already said':'Type your answer, or re-record this stage in a new video'}"></textarea>
+            </div>`}).join('')}
             <button class="btn btn-sm btn-ai" onclick="submitAgenticAnswers('${wfId}')">Submit answers &amp; re-check</button>
         </div>`;
     }
