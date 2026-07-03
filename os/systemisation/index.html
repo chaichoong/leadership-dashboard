@@ -3129,7 +3129,7 @@ async function runAgenticCheck(wfId, extraAnswers){
     const stageList = AGENTIC_STAGES.map(s=>`${s.letter} — ${s.name}${s.naAllowed?' (N/A allowed)':''}`).join('\n');
     let answersBlock = '';
     if(extraAnswers && Object.keys(extraAnswers).length){
-        answersBlock = '\n\nThe owner has since answered these follow-up questions. Treat the answers as part of the process description. Re-score the stages with these folded in. Do NOT ask any further questions — return an empty "questions" array.\n' +
+        answersBlock = '\n\nThe owner has answered these follow-up questions. Treat the answers as an authoritative part of the process description. IMPORTANT: if an answer resolves a stage\'s gap, score that stage "Clear" — do not hold a stage at Thin when the owner has supplied the missing detail. Only ask a follow-up question for a stage that is STILL Thin or Missing after crediting the answers, and make it a sharper, more specific question than before — never repeat an answered one.\n' +
             Object.entries(extraAnswers).map(([k,v])=>`${k}: ${v}`).join('\n');
     }
 
@@ -3180,7 +3180,7 @@ Include at most 3 questions, only for Thin or Missing stages, most important fir
         const text = data.content?.[0]?.text || '{}';
         const m = text.match(/\{[\s\S]*\}/);
         if(!m) throw new Error('Invalid AI response');
-        const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers);
+        const readiness = normaliseReadiness(JSON.parse(m[0]), extraAnswers, (getWfSopData(wfId)||{}).readiness || null);
         await saveAgenticReadiness(wfId, readiness);
         renderAgenticScorecard(wfId, readiness);
         const _ac = document.getElementById('agentic-'+wfId);
@@ -3192,7 +3192,7 @@ Include at most 3 questions, only for Thin or Missing stages, most important fir
     }
 }
 
-function normaliseReadiness(parsed, extraAnswers){
+function normaliseReadiness(parsed, extraAnswers, prevReadiness){
     const byLetter = {};
     (parsed.stages||[]).forEach(s=>{ if(s && s.letter) byLetter[s.letter] = s; });
     const stages = AGENTIC_STAGES.map(def=>{
@@ -3204,15 +3204,27 @@ function normaliseReadiness(parsed, extraAnswers){
     });
     const blocking = stages.filter(s=>s.status==='Missing' || s.status==='Thin');
     const state = blocking.length===0 ? 'Ready' : 'Needs input';
-    let questions = (parsed.questions||[])
+
+    // Per-stage question rounds. A stage may be asked about at most TWICE:
+    // answering counts a round; a still-thin stage gets ONE better follow-up,
+    // then no more questions for it (the note points at step-edit / re-record).
+    // This keeps "no endless questions" while never dead-ending a thin stage.
+    const prevRounds = (prevReadiness && prevReadiness.rounds) || {};
+    const rounds = Object.assign({}, prevRounds);
+    if(extraAnswers && prevReadiness && Array.isArray(prevReadiness.questions)){
+        prevReadiness.questions.forEach(q=>{
+            if(q && q.letter && extraAnswers[q.letter] !== undefined){
+                rounds[q.letter] = (rounds[q.letter]||0) + 1;
+            }
+        });
+    }
+    const thinLetters = new Set(blocking.map(s=>s.letter));
+    const questions = (parsed.questions||[])
         .filter(q=>q && q.question)
-        .slice(0,3)
-        .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }));
-    // ONE BATCH ONLY. Once the owner has answered the follow-up questions we never
-    // surface a fresh batch — the re-check just re-scores the badges with the answers
-    // folded in. Prevents the "endless questions" loop.
-    if(extraAnswers && Object.keys(extraAnswers).length) questions = [];
-    return { state, stages, questions, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
+        .map(q=>({ letter:String(q.letter||'').slice(0,1), question:String(q.question).slice(0,240) }))
+        .filter(q=>thinLetters.has(q.letter) && (rounds[q.letter]||0) < 2)
+        .slice(0,3);
+    return { state, stages, questions, rounds, answers:(extraAnswers||{}), checkedAt:new Date().toISOString() };
 }
 
 async function saveAgenticReadiness(wfId, readiness){
@@ -3428,7 +3440,8 @@ async function renderAgentPanel(wfId){
     el.innerHTML = `<div class="agent-card">
         <div class="agent-head">
             <div><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span>
-            <span class="agent-sub">${esc(meta.sub)}</span></div>
+            <span class="agent-sub">${esc(meta.sub)}</span>
+            <span class="agent-sub" id="agstats-${wfId}" style="color:var(--text-muted)"></span></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">${controls}</div>
         </div>
         <div class="agent-feed" id="agentfeed-${wfId}"><div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">Loading activity…</div></div>
@@ -3463,14 +3476,24 @@ function agentFeedRow(r){
     try { payload = JSON.parse(f['Payload']||'null'); } catch(e){}
     const undoable = payload && payload.kind==='update' && payload.before && !payload.before._fetchFailed;
     let actions = '';
+    let fbBox = '';
     if(state==='Proposed'){
         actions = `<button class="btn btn-sm btn-primary" onclick="approveAgentActivity('${r.id}')">&#x2713; Approve</button>
-            <button class="btn btn-sm" style="border-color:var(--danger);color:var(--danger)" onclick="rejectAgentActivity('${r.id}')">&#x2715; Reject</button>`;
+            <button class="btn btn-sm" style="border-color:var(--danger);color:var(--danger)" onclick="rejectAgentActivity('${r.id}')">&#x2715; Reject</button>
+            <button class="btn btn-sm" onclick="toggleAgentFb('${r.id}')">&#x270E; Feedback</button>`;
+        fbBox = `<div id="agfb-${r.id}" style="display:none;margin-top:8px">
+            <textarea id="agfbtext-${r.id}" class="sop-fb-text" rows="2" placeholder="Tell the agent what's wrong or what to do differently — it learns this permanently"></textarea>
+            <div class="sop-fb-actions">
+                <button class="btn btn-sm btn-ai" onclick="sendAgentFeedback('${r.id}')">Send feedback</button>
+                <button class="btn btn-sm" onclick="toggleAgentFb('${r.id}')">Cancel</button>
+            </div>
+        </div>`;
     } else if((state==='Auto-done'||state==='Approved') && undoable){
         actions = `<button class="btn btn-sm" onclick="undoAgentActivity('${r.id}')">Undo</button>`;
     }
     const when = new Date(r.createdTime).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
     const detail = String(f['Detail']||'').trim();
+    const fbShown = f['Feedback'] ? `<div class="agent-row-detail" style="color:var(--accent)">Your feedback: ${esc(String(f['Feedback']).slice(0,300))}</div>` : '';
     return `<div class="agent-row" data-act="${r.id}">
         <div class="agent-row-top">
             <span class="agent-chip" style="${chipColors[state]||chipColors.Note}">${esc(state)}</span>
@@ -3478,8 +3501,41 @@ function agentFeedRow(r){
             <span class="agent-row-when">${when}</span>
         </div>
         ${detail?`<div class="agent-row-detail">${esc(detail.slice(0,700))}${detail.length>700?'…':''}</div>`:''}
+        ${fbShown}
         ${actions?`<div class="agent-row-actions">${actions}</div>`:''}
+        ${fbBox}
     </div>`;
+}
+
+function toggleAgentFb(actId){
+    const box = document.getElementById('agfb-'+actId);
+    if(!box) return;
+    const showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : 'block';
+    if(!showing){ const t=document.getElementById('agfbtext-'+actId); if(t) t.focus(); }
+}
+
+// Feedback = reject + teach. The proposal won't execute, the runner sees the
+// feedback on the rejected row, AND it becomes a permanent lesson in the agent
+// config injected into every future run.
+async function sendAgentFeedback(actId){
+    const ta = document.getElementById('agfbtext-'+actId);
+    const text = ta ? ta.value.trim() : '';
+    if(!text){ toast('Type your feedback first'); return; }
+    try {
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENT_ACTIVITY_TBL}/${actId}`, { headers:{ 'Authorization':`Bearer ${PAT}` } });
+        const rec = await res.json();
+        const wfId = (rec.fields['Agent']||[])[0];
+        await atUpdate(AGENT_ACTIVITY_TBL, actId, { 'Feedback': text, 'State': 'Rejected' });
+        if(wfId){
+            const agent = getWfAgent(wfId) || { state:'testing', tables:[], autoFields:[] };
+            agent.lessons = (agent.lessons||[]).slice(-19);
+            agent.lessons.push({ text: text.slice(0,300), at: new Date().toISOString() });
+            await setWfAgent(wfId, agent);
+            renderAgentFeed(wfId);
+        }
+        toast('Feedback saved — the agent learns this permanently');
+    } catch(e){ toast('Feedback failed: '+e.message); }
 }
 
 async function renderAgentFeed(wfId){
@@ -3490,6 +3546,13 @@ async function renderAgentFeed(wfId){
         el.innerHTML = rows.length
             ? rows.map(agentFeedRow).join('')
             : `<div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">No activity yet. Hit "Run now" to do a first pass over your data.</div>`;
+        // The Go-Live guardrail metric: how often you've agreed with the agent.
+        const ok = rows.filter(r=>['Approved','Auto-done'].includes(r.fields['State'])).length;
+        const bad = rows.filter(r=>r.fields['State']==='Rejected').length;
+        const statsEl = document.getElementById('agstats-'+wfId);
+        if(statsEl){
+            statsEl.textContent = (ok+bad) ? `· ${ok} approved · ${bad} rejected (${Math.round(ok/(ok+bad)*100)}% approval)` : '';
+        }
     } catch(e){
         el.innerHTML = `<div style="padding:8px 0;font-size:var(--fs-xs);color:var(--danger)">Could not load activity: ${esc(e.message)}</div>`;
     }
