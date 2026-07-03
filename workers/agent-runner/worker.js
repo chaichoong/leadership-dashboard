@@ -129,10 +129,11 @@ function toolDefs(allowedTables) {
                 properties: {
                     table: { type: 'string' },
                     recordId: { type: 'string' },
+                    recordLabel: { type: 'string', description: 'Human name of the record — tenant / property / unit (e.g. "Unit 7 – Duckworth Building (Intus Lettings)"). The owner reads this first.' },
                     fields: { type: 'object', description: 'Field name → new value' },
                     why: { type: 'string', description: 'One-line reason a human will read' },
                 },
-                required: ['table', 'recordId', 'fields', 'why'],
+                required: ['table', 'recordId', 'recordLabel', 'fields', 'why'],
             },
         },
         {
@@ -143,9 +144,10 @@ function toolDefs(allowedTables) {
                 properties: {
                     table: { type: 'string' },
                     recordId: { type: 'string' },
+                    recordLabel: { type: 'string', description: 'Human name of the record — tenant / property / unit. The owner reads this first.' },
                     text: { type: 'string' },
                 },
-                required: ['table', 'recordId', 'text'],
+                required: ['table', 'recordId', 'recordLabel', 'text'],
             },
         },
         {
@@ -200,15 +202,16 @@ async function execTool(env, ctx, name, input) {
 
         const payload = { kind: 'update', table: input.table, tableId, recordId: input.recordId, fields: input.fields, before };
 
+        const label = String(input.recordLabel || input.recordId).slice(0, 120);
         const fieldsAllAllowlisted = Object.keys(input.fields || {}).every(f => (autoFields || []).includes(f));
         if (state === 'live' && fieldsAllAllowlisted) {
             await atPatch(env, tableId, input.recordId, input.fields);
             stats.auto++;
-            await logActivity(env, wfId, runId, 'Auto-done', `Updated ${input.table} record`, input.why, payload);
+            await logActivity(env, wfId, runId, 'Auto-done', `${label} — updated ${Object.keys(input.fields || {}).join(', ')}`, input.why, payload);
             return { ok: true, executed: true };
         }
         stats.proposed++;
-        await logActivity(env, wfId, runId, 'Proposed', `Update ${input.table}: ${Object.keys(input.fields || {}).join(', ')}`, input.why, payload);
+        await logActivity(env, wfId, runId, 'Proposed', `${label} — update ${Object.keys(input.fields || {}).join(', ')}`, input.why, payload);
         return { ok: true, executed: false, note: state === 'testing' ? 'testing mode: proposed for human approval' : 'field(s) not auto-allowlisted: proposed for human approval' };
     }
 
@@ -224,11 +227,11 @@ async function execTool(env, ctx, name, input) {
             });
             if (!res.ok) return { error: `comment failed: ${res.status}` };
             stats.auto++;
-            await logActivity(env, wfId, runId, 'Auto-done', 'Added audit comment', input.text, payload);
+            await logActivity(env, wfId, runId, 'Auto-done', `${String(input.recordLabel || input.recordId).slice(0, 120)} — audit comment added`, input.text, payload);
             return { ok: true, executed: true };
         }
         stats.proposed++;
-        await logActivity(env, wfId, runId, 'Proposed', 'Add audit comment', input.text, payload);
+        await logActivity(env, wfId, runId, 'Proposed', `${String(input.recordLabel || input.recordId).slice(0, 120)} — add audit comment`, input.text, payload);
         return { ok: true, executed: false, note: 'testing mode: proposed' };
     }
 
@@ -280,7 +283,8 @@ async function runAgent(env, wf) {
                     if (pl.kind === 'manual') seenPayloads.add(`prop:${String(pl.summary).slice(0, 120)}`);
                 } catch (e) {}
             }
-            return `- [${f['State']}] ${f['Summary']}${f['State'] === 'Rejected' ? ' (REJECTED — do not propose again)' : ''}`;
+            const fb = f['Feedback'] ? ` — owner's feedback: "${String(f['Feedback']).slice(0, 300)}"` : '';
+            return `- [${f['State']}] ${f['Summary']}${f['State'] === 'Rejected' ? ` (REJECTED${fb} — do not propose this again, and apply the feedback to everything you do)` : fb}`;
         });
         if (rows.length) recentBlock = `\n\nYour recent activity (do not repeat existing proposals; never re-propose rejected items):\n${rows.slice(0, 30).join('\n')}`;
     } catch (e) {}
@@ -300,6 +304,10 @@ async function runAgent(env, wf) {
     const fieldGuide = agent.fieldGuide
         ? `\n\nFIELD GUIDE for this base (follow exactly):\n${agent.fieldGuide}`
         : '';
+    // Permanent lessons distilled from the owner's feedback — the agent's memory.
+    const lessons = (agent.lessons || []).length
+        ? `\n\nLESSONS FROM THE OWNER (permanent rules — apply to every decision):\n${agent.lessons.map(l => `- ${typeof l === 'string' ? l : l.text}`).join('\n')}`
+        : '';
 
     const system = `You are an autonomous operations agent named "${name}" working inside a UK property business's Airtable base. You were built from the owner's own SOP. Today's date: ${new Date().toISOString().slice(0, 10)}.
 
@@ -314,7 +322,7 @@ DATA TRUST RULES (critical — the tables contain historical noise):
 - Prefer fields marked "(Unified)" or "Derived" — e.g. "Payment Status (Unified)" is the authoritative payment status.
 - If authoritative fields conflict with each other, do NOT pick the alarming one: flag the conflict with propose_action instead.${fieldGuide}
 
-IDENTITY: you act on behalf of ${operator}. Every outward message (chasers, emails, texts) signs off as ${operator} — never as a company, account, or management name.
+IDENTITY: you act on behalf of ${operator}. Every outward message (chasers, emails, texts) signs off as ${operator} — never as a company, account, or management name.${lessons}
 
 OPERATING RULES:
 - You are in ${state.toUpperCase()} mode. ${state === 'testing' ? 'Nothing you do executes — every action is proposed to the owner for approval. Be thorough but precise.' : 'Only allowlisted safe updates execute automatically; everything else queues for the owner.'}
