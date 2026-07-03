@@ -19,7 +19,7 @@ const WORKFLOWS_TBL = 'tblLPoRHFBl0vqR24';
 const ACTIVITY_TBL = 'tblJ3GFnAAoXf99e9';
 const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
 const MODEL = 'claude-sonnet-4-6';
-const MAX_TOOL_TURNS = 8;
+const MAX_TOOL_TURNS = 16;
 const ALLOWED_ORIGINS = ['https://chaichoong.github.io'];
 
 // Workflow-table field IDs (match os/systemisation/index.html WF constants)
@@ -137,6 +137,19 @@ function toolDefs(allowedTables) {
             },
         },
         {
+            name: 'read_comments',
+            description: 'Read the comment history on a record, newest first. ALWAYS read a case\'s comments before deciding what to do with it — the latest comments carry the current position, agreed plans, and what has already been done.',
+            input_schema: {
+                type: 'object',
+                properties: {
+                    table: { type: 'string', description: `One of: ${tableList}` },
+                    recordId: { type: 'string' },
+                    max: { type: 'number', description: 'Max comments (default 10, cap 25)' },
+                },
+                required: ['table', 'recordId'],
+            },
+        },
+        {
             name: 'add_comment',
             description: 'Add an audit comment to a record (goes to the record comment feed).',
             input_schema: {
@@ -184,6 +197,23 @@ async function execTool(env, ctx, name, input) {
         const data = await atList(env, tableId, params);
         const records = (data.records || []).slice(0, max).map(r => ({ id: r.id, fields: r.fields }));
         return { count: records.length, records };
+    }
+
+    if (name === 'read_comments') {
+        const tableId = resolveTable(input.table);
+        if (!tableId) return { error: `table not allowed: ${input.table}` };
+        const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${input.recordId}/comments`, {
+            headers: { Authorization: `Bearer ${env.AIRTABLE_PAT}` },
+        });
+        if (!res.ok) return { error: `comments fetch failed: ${res.status}` };
+        const data = await res.json();
+        const max = Math.min(Number(input.max) || 10, 25);
+        const comments = (data.comments || []).slice(-max).reverse().map(c => ({
+            at: c.createdTime,
+            by: (c.author && (c.author.name || c.author.email)) || 'unknown',
+            text: String(c.text || '').slice(0, 600),
+        }));
+        return { count: comments.length, comments };
     }
 
     if (name === 'update_record') {
@@ -327,9 +357,11 @@ IDENTITY: you act on behalf of ${operator}. Every outward message (chasers, emai
 OPERATING RULES:
 - You are in ${state.toUpperCase()} mode. ${state === 'testing' ? 'Nothing you do executes — every action is proposed to the owner for approval. Be thorough but precise.' : 'Only allowlisted safe updates execute automatically; everything else queues for the owner.'}
 - Work ONLY from real data you read with search_records. Never invent records or values.
+- Before deciding anything about a specific case, read its comment history (read_comments). The latest comments are the current position — never propose something the comments show is already done, agreed, or ruled out, and reference the history in your reasoning.
 - Every update_record needs a clear one-line "why" a human can judge instantly.
 - Use propose_action for anything outside your tools (messages to people, escalations), including full drafted text.
 - Be conservative: if unsure, propose rather than act, or do nothing and say so.
+- Work efficiently: batch several tool calls in one turn where possible (e.g. propose the comment, status update, and chaser for a case together) — you have a limited number of turns per run.
 - When you have finished the SOP pass, reply with a short plain-text summary of what you found and did. Do not call more tools after that.${recentBlock}`;
 
     const tools = toolDefs(allowedTables);
