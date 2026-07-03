@@ -1202,23 +1202,32 @@
             })
             .join('');
 
-        // Detect potential CFVs for the alert badge on the Leadership Dashboard
+        // Detect potential CFVs for the alert badge on the Leadership Dashboard.
+        // Use the same early-payment-aware arrears check as the CFV tab so this
+        // count always matches what the tab shows. The old inline check compared
+        // against the calendar-month "Paid This Month?" flag, which flagged early
+        // payers (e.g. rent due the 1st, paid the 30th of the previous month).
         let potentialCfvCount = 0;
         const todayForCfv = new Date();
         todayForCfv.setHours(0,0,0,0);
+        const cfvTxIndex = (typeof buildTxByTenancyIndex === 'function') ? buildTxByTenancyIndex() : null;
         tenancies.forEach(t => {
             const status = getPaymentStatusName(getField(t, F.tenPayStatus)).toLowerCase().trim();
             if (status !== 'in payment') return;
             if (!isTenantStatusActive(t)) return;
             const rent = Number(getField(t, F.tenRent)) || 0;
             if (rent <= 0) return;
-            const dueDay = getNumVal(t, F.tenDueDay, 1);
-            const dueThisMonth = new Date(todayForCfv.getFullYear(), todayForCfv.getMonth(), dueDay);
-            const daysOver = todayForCfv >= dueThisMonth ? Math.floor((todayForCfv - dueThisMonth) / 86400000) : 0;
-            const paid = getField(t, F.tenPaidThisMonth);
-            if (daysOver >= CFV_TOLERANCE_DAYS && !paid && !localStorage.getItem('cfv_dismissed_' + t.id)) {
-                potentialCfvCount++;
+            if (localStorage.getItem('cfv_dismissed_' + t.id)) return;
+            let inArrears;
+            if (typeof isCurrentlyInArrears === 'function') {
+                inArrears = isCurrentlyInArrears(t, null, todayForCfv, cfvTxIndex);
+            } else {
+                const dueDay = getNumVal(t, F.tenDueDay, 1);
+                const dueThisMonth = new Date(todayForCfv.getFullYear(), todayForCfv.getMonth(), dueDay);
+                const daysOver = todayForCfv >= dueThisMonth ? Math.floor((todayForCfv - dueThisMonth) / 86400000) : 0;
+                inArrears = daysOver >= CFV_TOLERANCE_DAYS && !getField(t, F.tenPaidThisMonth);
             }
+            if (inArrears) potentialCfvCount++;
         });
 
         const potentialCfvAlert = potentialCfvCount > 0

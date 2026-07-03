@@ -7810,6 +7810,15 @@ Close short: "You're set. Start a new task from the sidebar anytime, or type \`/
         source: 'system',
         tags: ['loop', 'recurring', 'polling', 'interval']
     },
+    {
+        id: 'update-master-prompt',
+        name: 'Update Master Prompt',
+        command: 'update-master-prompt',
+        description: 'Quarterly review of Kevin\'s global master prompt (~/.claude/CLAUDE.md) against the AI Brain, memory, and live systems. Detects what has gone stale, inaccurate, or missing, proposes a change-by-change diff with sources, and writes only approved changes. Runs automatically at the start of each quarter in propose-only mode.',
+        category: 'Automation',
+        source: 'custom',
+        tags: ['master-prompt', 'context', 'ai-brain', 'quarterly', 'maintenance', 'accuracy']
+    },
 ];
 
 const SKILLS_CATEGORIES = [

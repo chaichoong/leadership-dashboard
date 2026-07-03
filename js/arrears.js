@@ -238,29 +238,53 @@
 
         const dueDay = getNumVal(tenancy, F.tenDueDay, 1);
         const tolerance = 2;
+        // Credit a payment made up to this many days BEFORE the due date to that
+        // cycle. Rent due on the 1st is routinely paid on the 30th/31st of the
+        // previous month (standing orders, weekends, bank holidays). A strict
+        // calendar-month check treated that as the previous month's payment and
+        // wrongly flagged fully-paid tenancies as cash flow voids.
+        const EARLY_PAY_DAYS = 5;
 
         // Read this tenancy's reconciled payments from the index when supplied,
         // else fall back to a full scan (keeps standalone callers correct).
         const txnSource = txIndex
             ? (txIndex.get(tenancy.id) || [])
             : allTransactions.filter(tx => getField(tx, F.txReconciled) && txLinkedToTenancy(tx, tenancy.id));
-        const paidIn = (y, m) => txnSource.some(tx => {
-            const txDateStr = getField(tx, F.txDate);
-            if (!txDateStr) return false;
-            const txDate = new Date(txDateStr);
-            return txDate.getFullYear() === y && txDate.getMonth() === m;
-        });
 
-        if (paidIn(today.getFullYear(), today.getMonth())) return false;
+        // Most recent reconciled payment date for this tenancy.
+        let latestPaid = null;
+        for (const tx of txnSource) {
+            const txDateStr = getField(tx, F.txDate);
+            if (!txDateStr) continue;
+            const d = new Date(txDateStr);
+            if (isNaN(d.getTime())) continue;
+            if (!latestPaid || d > latestPaid) latestPaid = d;
+        }
+
+        // Has the cycle whose due date is `due` been paid? True when the latest
+        // reconciled payment is dated on/after (due − EARLY_PAY_DAYS), i.e. it
+        // covers this cycle or a later one. Using the latest payment is equivalent
+        // to "any payment in the window" because a newer payment only strengthens it.
+        const paidForCycle = (due) => {
+            if (!latestPaid) return false;
+            const windowStart = new Date(due);
+            windowStart.setDate(windowStart.getDate() - EARLY_PAY_DAYS);
+            windowStart.setHours(0, 0, 0, 0);
+            return latestPaid >= windowStart;
+        };
 
         const dueThisMonth = new Date(today.getFullYear(), today.getMonth(), dueDay);
         dueThisMonth.setHours(0, 0, 0, 0);
         const daysSinceDue = Math.floor((today - dueThisMonth) / 86400000);
-        if (daysSinceDue >= tolerance) return true;
 
-        const prevY = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
-        const prevM = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
-        return !paidIn(prevY, prevM);
+        if (daysSinceDue >= tolerance) {
+            // This month's due date has passed beyond tolerance — require this cycle paid.
+            return !paidForCycle(dueThisMonth);
+        }
+        // Before/at the due date (within tolerance) — require the PREVIOUS cycle paid.
+        const prevDue = new Date(dueThisMonth);
+        prevDue.setMonth(prevDue.getMonth() - 1);
+        return !paidForCycle(prevDue);
     }
 
     // ══════════════════════════════════════════
