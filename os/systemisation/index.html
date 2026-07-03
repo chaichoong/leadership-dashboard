@@ -3285,10 +3285,16 @@ function renderAgenticScorecard(wfId, readiness){
 
     let questions = '';
     if(!ready && (!readiness.questions || !readiness.questions.length) && Object.keys(readiness.answers||{}).length){
-        // Answered but still short somewhere: no dead-end — point at the fix routes.
-        const thin = (readiness.stages||[]).filter(s=>s.status==='Thin'||s.status==='Missing').map(s=>s.name).join(', ');
+        // Answered but still short somewhere: no dead-end. The questions are used up,
+        // so flip the direction — let the owner TELL it what's missing, free-text.
+        const thinStages = (readiness.stages||[]).filter(s=>s.status==='Thin'||s.status==='Missing');
         questions = `<div class="agentic-questions">
-            <div class="agentic-q-title">Nearly there. ${esc(thin)} still need${thin.includes(',')?'':'s'} more detail — use the "Improve this step" boxes on the SOP below to add it, or re-record that part of the video, then hit Re-check.</div>
+            <div class="agentic-q-title">Nearly there. Tell it what's missing in your own words below — or use the "Improve this step" boxes on the SOP, or re-record that part of the video.</div>
+            ${thinStages.map(s=>`<div class="agentic-q">
+                <label><strong>${esc(s.letter)}</strong> &middot; ${esc(s.name)} — <span style="color:var(--text-muted)">${esc(s.reason||'still thin')}</span></label>
+                <textarea class="wf-grid-input agentic-answer agentic-extra" data-letter="${esc(s.letter)}" rows="2" placeholder="Add the missing detail for ${esc(s.name)}, in your own words"></textarea>
+            </div>`).join('')}
+            <button class="btn btn-sm btn-ai" onclick="submitAgenticExtra('${wfId}')">Add detail &amp; re-check</button>
         </div>`;
     }
     else if(readiness.questions && readiness.questions.length){
@@ -3319,6 +3325,25 @@ function renderAgenticScorecard(wfId, readiness){
             <button class="btn btn-sm" onclick="runAgenticCheck('${wfId}')">Re-check</button>
         </div>
     </div>`;
+}
+
+// Owner-initiated extra detail for still-thin stages (after the question rounds
+// are used up). Appends to the existing answer so nothing already said is lost.
+function submitAgenticExtra(wfId){
+    const container = document.getElementById('agentic-'+wfId);
+    if(!container) return;
+    const readiness = (getWfSopData(wfId)||{}).readiness || {};
+    const answers = Object.assign({}, readiness.answers||{});
+    let added = 0;
+    container.querySelectorAll('.agentic-extra').forEach(el=>{
+        const L = el.dataset.letter;
+        const v = el.value.trim();
+        if(!L || !v) return;
+        answers[L] = ((answers[L] ? answers[L] + ' ' : '') + v).slice(0, 1500);
+        added++;
+    });
+    if(!added){ toast('Type the missing detail first'); return; }
+    runAgenticCheck(wfId, answers);
 }
 
 function submitAgenticAnswers(wfId){
