@@ -23,6 +23,7 @@
   var BASE_ID = 'appnqjDpqDniH3IRl';
   var PAT = 'supabase';
   function escHtml(str){ const d = document.createElement('div'); d.textContent = (str == null ? '' : str); return d.innerHTML; }
+  function escJs(str){ if (str == null) return ''; return String(str).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"').replace(/\n/g,'\\n').replace(/\r/g,'\\r'); }
   function showToast(msg){ try { console.log('[toast]', msg); } catch (e) {} }
 </script>
 
