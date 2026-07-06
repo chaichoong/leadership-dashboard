@@ -1,8 +1,14 @@
 // supabase-boot.js — login gate for the Supabase Tasks clone.
-// Sets a dummy Airtable token so the page's old auth check passes (the shim
+// Provides a dummy Airtable token so the page's bootAuth() passes (the shim
 // ignores it), then gates the page's init on a real Supabase login.
+//
+// SHARED-ORIGIN SAFETY: this origin's localStorage is shared with the LIVE Tasks
+// page, which reads the same `_dlr_pat` key. So we NEVER overwrite it — in the
+// shell we set the parent window's in-memory PAT, and only seed localStorage if
+// it's empty (never clobber a real token). Mirrors the comms/systemisation fix.
 (function () {
-  try { localStorage.setItem('_dlr_pat', 'supabase'); } catch (e) {}
+  try { if (window.parent && window.parent !== window) window.parent.PAT = window.parent.PAT || 'supabase'; } catch (e) {}
+  try { if (!localStorage.getItem('_dlr_pat')) localStorage.setItem('_dlr_pat', 'supabase'); } catch (e) {}
 
   let resolveReady;
   const ready = new Promise(r => { resolveReady = r; });
