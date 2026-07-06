@@ -154,8 +154,8 @@
 
       <div class="card">
         <h2>Ask your brain</h2>
-        <p class="hint">Plain language. It answers from everything it has filed.</p>
-        <div class="row"><input class="fld" id="ask" placeholder="Where is the latest lease for the Oldham Road property?"><button class="btn primary" onclick="toast('Coming next: opens the assistant with your brain as context')">Ask</button></div>
+        <p class="hint">Plain language. It answers from everything it has filed, with a link to the note.</p>
+        <div class="row"><input class="fld" id="ask" placeholder="What did we decide about Evernote?"><button class="btn primary" id="askBtn">Ask</button></div>
       </div>
 
       <p class="foot" style="text-align:center;">Files nightly · notes 22:40 · meetings 22:45 · tidy 23:00.</p>
@@ -276,6 +276,23 @@
   }
 
   document.getElementById('refreshBtn').addEventListener('click', function(){ loadToday(true); });
+
+  // Ask your brain — hand the question to the dashboard's AI assistant, which
+  // loads the brain index (published nightly) as context and answers with links.
+  function askBrain(){
+    var input = document.getElementById('ask');
+    var q = input.value.trim();
+    if (!q) return;
+    if (window.parent === window){
+      toast('Open the AI Brain tab inside the dashboard to ask');
+      return;
+    }
+    window.parent.postMessage({ type: 'od-ask-brain', question: q }, window.location.origin);
+    input.value = '';
+    toast('Asking your brain…');
+  }
+  document.getElementById('askBtn').addEventListener('click', askBrain);
+  document.getElementById('ask').addEventListener('keydown', function(e){ if (e.key === 'Enter') askBrain(); });
 
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){

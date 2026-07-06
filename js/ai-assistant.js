@@ -82,7 +82,64 @@
         'os-strategy': 'Objective & Strategy — quarterly strategy plan per business with Boardroom Mentor wizard support.',
         'fintable': 'Fintable Sync Monitor — health of bank-account sync across all connected accounts; flags stale or disconnected feeds.',
         'sitemap': 'Site Map & Guides — registry of every page, current version, matching SOP/user-guide version, and sync status.',
+        'ai-brain': 'AI Brain — Kevin\'s second brain. Captures notes, meetings, documents, and videos; files and links them nightly; answers questions from everything filed.',
     };
+
+    // ──────────────────────────────────────────
+    // AI Brain context — the brain's note index + today's feed, published
+    // nightly to two private Airtable tables. Loaded once per session and
+    // injected into the system prompt when the question comes from the
+    // AI Brain tab, so "Ask your brain" answers from what is actually filed.
+    // ──────────────────────────────────────────
+    const BRAIN_BASE = 'appnqjDpqDniH3IRl';
+    const BRAIN_TODAY_TABLE = 'tblZ75JgE1wzDP0ps';
+    const BRAIN_INDEX_TABLE = 'tbl5MY9FbImFQfvez';
+    let brainContext;            // undefined = not loaded, null = failed/unavailable
+    let brainInflight = null;
+
+    async function fetchAllAirtableRows(table) {
+        let records = [], offset = '';
+        do {
+            const url = `https://api.airtable.com/v0/${BRAIN_BASE}/${table}?pageSize=100${offset ? '&offset=' + offset : ''}`;
+            const r = await fetch(url, { headers: { Authorization: 'Bearer ' + PAT } });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            records = records.concat(data.records || []);
+            offset = data.offset || '';
+        } while (offset);
+        return records.map(rec => rec.fields || {});
+    }
+
+    async function loadBrainContext() {
+        if (brainContext !== undefined) return brainContext;
+        if (brainInflight) return brainInflight;
+        if (typeof PAT === 'undefined' || !PAT) { brainContext = null; return null; }
+        brainInflight = (async () => {
+            try {
+                const [index, today] = await Promise.all([
+                    fetchAllAirtableRows(BRAIN_INDEX_TABLE),
+                    fetchAllAirtableRows(BRAIN_TODAY_TABLE),
+                ]);
+                brainContext = {
+                    index: index.map(f => ({
+                        name: f.Name, folder: f.Folder,
+                        summary: f.Sensitive ? '(sensitive — content stays in the private brain)' : (f.Summary || ''),
+                        link: f.DocLink || '',
+                    })),
+                    today: today.filter(f => f.Kind !== 'metric').map(f => ({
+                        kind: f.Kind, item: f.Item, text: f.Text || '', doc: f.DocName || '', link: f.DocLink || '',
+                    })),
+                };
+            } catch (e) {
+                console.warn('Brain context load failed:', e);
+                brainContext = null;
+            } finally {
+                brainInflight = null;
+            }
+            return brainContext;
+        })();
+        return brainInflight;
+    }
 
     function stripHtmlToText(html) {
         // Remove non-content blocks before parsing so textContent is clean
@@ -134,6 +191,7 @@
     function prewarmSOP() {
         const tab = getActiveTab();
         loadSOPForTab(tab).catch(() => {});
+        if (tab === 'ai-brain') loadBrainContext();
     }
     window.addEventListener('hashchange', prewarmSOP);
 
@@ -217,9 +275,26 @@
 
         const mentor = (typeof BOARDROOM_MENTOR_PROMPT !== 'undefined') ? BOARDROOM_MENTOR_PROMPT : '';
 
+        let brainBlock = '';
+        if (tab === 'ai-brain') {
+            const brain = await loadBrainContext();
+            if (brain) {
+                ctx.aiBrain = brain;
+                brainBlock = [
+                    `AI BRAIN MODE — the user is asking their second brain a question.`,
+                    `The dashboard state below includes "aiBrain": an index of every note filed in the brain (name, folder, one-line summary, link) plus today's captures and open questions.`,
+                    `Answer FROM THE INDEX. When you reference a note, name it and give its link as a plain URL so the user can open it. If the index does not cover the question, say the brain has nothing filed on it yet and suggest capturing it — do not guess or invent notes.`,
+                    `Notes marked "(sensitive — content stays in the private brain)" exist but their content is not available here. If the answer lies in one, say so and give the link for the user to open privately. Never speculate about their contents.`,
+                ].join('\n');
+            } else {
+                brainBlock = `AI BRAIN MODE — the brain index could not be loaded (not signed in, or the feed is unavailable). Say so honestly and suggest using the Refresh button on the AI Brain tab or trying again shortly. Do not guess at brain contents.`;
+            }
+        }
+
         const pageBlock = [
             `CURRENT PAGE: ${pageName} (tab id: "${tab}")`,
             purpose ? `PAGE PURPOSE: ${purpose}` : '',
+            brainBlock,
             sopText
                 ? `PAGE SOP — read this before answering. It describes exactly what this page does, how it works, and its limitations. Ground every answer in this:\n\n${sopText}`
                 : `PAGE SOP: Not available for this page. Work from the page purpose above and the dashboard state below. If the user asks how something works on this page and you can't tell from the state, say so rather than guessing.`,
@@ -276,6 +351,7 @@
             .replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;font-size:var(--fs-lg);color:var(--text-primary)">$1</h2>')
             .replace(/^- (.+)$/gm, '<div style="padding-left:12px">\u2022 $1</div>')
             .replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px">$&</div>')
+            .replace(/(https?:\/\/[^\s<]+[^\s<.,)])/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--accent)">$1</a>')
             .replace(/\n/g, '<br>');
     }
 
@@ -431,6 +507,21 @@
     function filterCmdPalette() {
         populateCmdPalette(document.getElementById('aiCmdInput').value);
     }
+
+    // "Ask your brain" — the AI Brain iframe posts the question here; open the
+    // panel, prewarm the brain context, and send it through the normal flow.
+    window.addEventListener('message', e => {
+        if (e.origin !== window.location.origin) return;
+        const d = e.data || {};
+        if (d.type !== 'od-ask-brain' || typeof d.question !== 'string' || !d.question.trim()) return;
+        loadBrainContext();
+        const panel = document.getElementById('aiPanel');
+        if (panel && !panel.classList.contains('open')) toggleAIPanel();
+        const input = document.getElementById('aiInput');
+        if (!input) return;
+        input.value = d.question.trim().slice(0, 2000);
+        sendAIMessage();
+    });
 
     // Keyboard shortcut: Cmd+K / Ctrl+K
     document.addEventListener('keydown', e => {
