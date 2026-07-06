@@ -500,13 +500,13 @@ const DEPARTMENTS = ['Marketing', 'Sales', 'Operations', 'Finance', 'Admin / HR'
 // AGENTIC extraction script — the seven stages the owner narrates in their Loom.
 // Wording is the single source of truth (see docs/agentic-extraction-spec.md).
 const AGENTIC_STAGES = [
-    { letter:'A', name:'Aim',                     naAllowed:false, prompt:'In a sentence or two, what is this process for? And how would you know it has been done right? What would tell you someone made a mistake?' },
+    { letter:'A', name:'Aim',                     naAllowed:false, prompt:'In a sentence or two, what is this process for, and why does it matter to the business?' },
     { letter:'G', name:'Go Signal',               naAllowed:false, prompt:'What tells you it is time to do this? A set time, an email arriving, a new record, a payment landing, or someone asking?' },
     { letter:'E', name:'Entry Points',            naAllowed:false, prompt:'Where do you go and what do you open to do this? Which systems, inboxes, files, or records, and what do you need from each?' },
     { letter:'N', name:'Navigate the Process',    naAllowed:false, prompt:'Walk me through exactly what you do, step by step. Most important: every time you make a choice, say out loud how you decide and why you pick what you pick.' },
-    { letter:'T', name:'Tools & Transformations', naAllowed:false, prompt:'What do you actually change, create, or send? Name every system you write into, and describe what the finished result looks like.' },
-    { letter:'I', name:'Inspections',             naAllowed:true,  prompt:'Before you call it done, what do you check? And what would you never let go out without looking at it yourself?' },
-    { letter:'C', name:'Caveats',                 naAllowed:true,  prompt:'What trips this up? The odd cases, the exceptions, and anything you must never do.' },
+    { letter:'T', name:'Tools & Transformations', naAllowed:false, prompt:'What do you actually change, create, or send? Name every system you write into.' },
+    { letter:'I', name:'Inspections & Caveats',   naAllowed:true,  prompt:'Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?' },
+    { letter:'C', name:'Conclusion',              naAllowed:false, prompt:'What does the finished job look like? Describe the end result of a successful run — what exists or has changed, and how you would know it was a success.' },
 ];
 
 // Disposition fork — what a documented process becomes once its SOP exists.
@@ -3140,15 +3140,16 @@ async function runAgenticCheck(wfId, extraAnswers){
         ? `- "Clear": clear enough for a person to follow.
 - "Thin": mentioned but a person might get stuck.
 - "Missing": not covered.
-- "NA": genuinely not applicable. Only allowed for Inspections and Caveats. Never for A, E, N.
+- "NA": genuinely not applicable. Only allowed for I (Inspections & Caveats). Never for A, E, N, C.
 - This is for a HUMAN to do, not an AI agent. Navigate needs clear, followable steps; the person supplies their own judgement, so do NOT require written decision-reasoning. Go Signal and Tools help but a person can infer them, so mark Thin (not Missing) when vague.
-- Aim should still say what a good result looks like.`
+- Conclusion should describe what the finished job looks like, so the person knows when they are done.`
         : `- "Clear": the stage is fully covered.
 - "Thin": mentioned but incomplete.
 - "Missing": not covered.
-- "NA": genuinely not applicable. Only allowed for Inspections and Caveats. Never for A, G, E, N, T.
+- "NA": genuinely not applicable. Only allowed for I (Inspections & Caveats). Never for A, G, E, N, T, C.
 - Navigate must contain the DECISION REASONING (how the person decides at each choice), not just a list of clicks or steps. If it is only steps with no "how I decide", mark it Thin at best.
-- Aim must include a concrete way to tell a result is wrong, not just a vague purpose.`;
+- Aim is the purpose — why the process exists.
+- Conclusion must describe the CONCRETE end state of a successful run (what exists or has changed) and a way to tell success from failure. A vague "it's done" is Thin.`;
 
     const prompt = `${intro}
 
