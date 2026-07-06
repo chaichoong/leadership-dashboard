@@ -2469,6 +2469,7 @@ function renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, so
     html += `<div class="sop-doc-footer">
         <span>Generated ${now}</span>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${loomUrl ? `<button class="btn btn-sm btn-ai" onclick="regenerateFromVideo('${wfId}')">&#x21BB; Regenerate from video</button>` : ''}
             ${driveBtns}
             <button class="btn btn-sm btn-primary" onclick="exportSOPAsHTML('${wfId}')">Export</button>
             <button class="btn btn-sm btn-danger" onclick="deleteSOPDocument('${wfId}')">Clear</button>
@@ -2660,6 +2661,35 @@ async function uploadSOPToDrive(wfId){
     } finally {
         if(btn){ btn.disabled = false; btn.textContent = 'Upload to Drive'; }
     }
+}
+
+// One-click full rebuild from the video: clears the extracted steps and re-runs
+// the whole pipeline (real transcript → steps → SOP → Drive → readiness → skill).
+// Disposition and agent config survive (generateWorkflowSOP carries them forward);
+// readiness deliberately resets for a fresh score. Used after a re-record, or when
+// the pipeline itself has improved (e.g. the AGENTIC definition changed).
+function regenerateFromVideo(wfId){
+    const body = `<p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">This rebuilds everything from the video: fresh steps, a fresh SOP, a fresh readiness check.<br><br>
+        Your agent settings and how it runs are kept.<br>
+        Step edits and readiness answers are replaced by what the video says — use this after a re-record or to pick up improvements.</p>`;
+    const footer = `<button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-ai" onclick="closeModal();doRegenerateFromVideo('${wfId}')">Rebuild from video</button>`;
+    showModal('Rebuild this SOP from the video?', body, footer);
+}
+
+async function doRegenerateFromVideo(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    if(!getWfLoomUrl(wfId)){ toast('No video linked to this workflow'); return; }
+    toast('Rebuilding from the video…');
+    try {
+        // clear the old extracted steps so extraction starts clean
+        const old = stepsForWorkflow(wfId);
+        for(const s of old){ try { await atDelete(TBL.steps, s.id); } catch(e){} }
+        allSteps = allSteps.filter(s=>!old.some(o=>o.id===s.id));
+        renderSteps();
+        await autoGenerateSOPPipeline(wfId);
+    } catch(e){ toast('Rebuild failed: '+e.message); }
 }
 
 function deleteSOPDocument(wfId){
