@@ -410,7 +410,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
     <button class="pipeline-tab" data-tab="dept" onclick="switchView('dept')">Departmental <span class="count" id="deptCount">0</span></button>
     <button class="pipeline-tab" data-tab="all" onclick="switchView('all')">All Workflows <span class="count" id="allCount">0</span></button>
     <button class="pipeline-tab" data-tab="steps" onclick="switchView('steps')">SOPs <span class="count" id="stepsCount">0</span></button>
-    <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')">Automation <span class="count" id="autoCount">0</span></button>
+    <button class="pipeline-tab" data-tab="automation" onclick="switchView('automation')">AI Agents <span class="count" id="autoCount">0</span></button>
 </div>
 
 <div id="main" class="main" style="display:none">
@@ -981,8 +981,8 @@ function updateCounts(){
     document.getElementById('allCount').textContent=wfs.length;
     const sopCount = wfs.filter(w=>!!gf(w,WF.sopDocument)).length;
     document.getElementById('stepsCount').textContent=sopCount;
-    const skillsBuilt = wfs.filter(w=>!!gf(w,WF.skillDefinition) || !!localStorage.getItem('sys_wfskill_'+w.id)).length;
-    document.getElementById('autoCount').textContent=skillsBuilt;
+    const agentCount = wfs.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; }).length;
+    document.getElementById('autoCount').textContent=agentCount;
 }
 
 // ── Customer Journey (FULFILL) ──
@@ -2906,6 +2906,7 @@ function renderSteps(){
     html += '<div class="steps-main">';
     if(!selectedStepsWf){
         html += '<div class="empty-state"><p>Select a workflow from the list to view and manage its steps.</p></div>';
+        html += buildVideoTasksTable();
     } else {
         const w = allWorkflows.find(w=>w.id===selectedStepsWf);
         if(!w){
@@ -3013,7 +3014,7 @@ function renderSteps(){
             html += '</tbody></table>';
 
             html += `<div id="disposition-${w.id}">${hasSopDoc ? dispositionBarHtml(w.id) : ''}</div>`;
-            html += `<div id="agentpanel-${w.id}"></div>`;
+            html += agentLinkBarHtml(w.id);
             html += `<div id="agentic-${w.id}"></div>`;
             html += `<div id="sopDoc-${w.id}"></div>`;
         }
@@ -3022,7 +3023,7 @@ function renderSteps(){
     pane.innerHTML = html;
     restoreSavedSOPs();
     restoreSearchFocus();
-    if(selectedStepsWf) renderAgentPanel(selectedStepsWf);
+
 }
 
 function restoreSavedSOPs(){
@@ -3482,6 +3483,19 @@ const AGENT_STATES = {
     off:     { label:'PAUSED',  bg:'var(--bg-subtle)',  fg:'var(--text-muted)', sub:'Not running. Resume testing or go live when ready.' },
 };
 
+// Slim pointer on the SOPs (builder) page — the agent is OPERATED on the AI Agents tab.
+function agentLinkBarHtml(wfId){
+    const disp = getWfDisposition(wfId);
+    if(!disp || disp.type!=='agent') return '';
+    const agent = getWfAgent(wfId);
+    const meta = agent && AGENT_STATES[agent.state] ? AGENT_STATES[agent.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
+    return `<div class="agent-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span>
+        <span class="agent-sub">This process runs as an AI agent — review its work and controls on the AI Agents tab.</span></div>
+        <button class="btn btn-sm btn-ai" onclick="selectedAgentWf='${wfId}';switchView('automation')">Open in AI Agents</button>
+    </div>`;
+}
+
 async function renderAgentPanel(wfId){
     const el = document.getElementById('agentpanel-'+wfId);
     if(!el) return;
@@ -3814,205 +3828,104 @@ async function deleteStepInline(stepId){
 // ═══════════════════════════════════════════════════════════════════════
 // Automation (Tab 6)
 // ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// AI AGENTS tab — the operating home for every agent.
+// Fleet selector on top, the selected agent's full working panel below
+// (status, approvals feed, feedback, permissions, Run now, Go live).
+// Building SOPs stays on the SOPs tab; this tab is where agents are RUN.
+// ═══════════════════════════════════════════════════════════════════════
+let selectedAgentWf = null;
+
 function renderAutomation(){
     const pane = document.getElementById('pane-automation');
-    const wfs = filteredWorkflows().filter(w=>wfMatchesQuery(w,_autoSearch)).slice().sort((a,b)=>{
-        if(_autoSortMode==='alpha') return (gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-        if(_autoSortMode==='department'){
-            const da = selName(gf(a,WF.department))||'zzz', db = selName(gf(b,WF.department))||'zzz';
-            return da<db?-1:da>db?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-        }
-        if(_autoSortMode==='journey'){
-            const fa = selName(gf(a,WF.fulfillStage))||'zzz', fb = selName(gf(b,WF.fulfillStage))||'zzz';
-            return fa<fb?-1:fa>fb?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-        }
-        // method
-        const mA = linkIds(gf(a,WF.mainMethodStage)), mB = linkIds(gf(b,WF.mainMethodStage));
-        const mAn = mA.length ? (gf(allMethods.find(m=>m.id===mA[0]),MM.name)||'zzz') : 'zzz';
-        const mBn = mB.length ? (gf(allMethods.find(m=>m.id===mB[0]),MM.name)||'zzz') : 'zzz';
-        return mAn<mBn?-1:mAn>mBn?1:(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1;
-    });
-    const stepsWithSop = allSteps.filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
+    const agentWfs = filteredWorkflows()
+        .filter(w=>wfMatchesQuery(w,_autoSearch))
+        .filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; })
+        .sort((a,b)=>(gf(a,WF.name)||'').toLowerCase()<(gf(b,WF.name)||'').toLowerCase()?-1:1);
 
-    let html = `<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:12px">
-        ${sysSearchInput('autoSearchInput', _autoSearch, "_autoSearch=this.value;_refocusSearchId='autoSearchInput';renderAutomation()")}
-        <span style="font-size:var(--fs-xs);color:var(--text-secondary)">Sort by:</span>
-        <select style="font-size:var(--fs-xs);padding:4px 8px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-surface);color:var(--text-primary)" onchange="_autoSortMode=this.value;renderAutomation()">
-            <option value="method"${_autoSortMode==='method'?' selected':''}>Main Method</option>
-            <option value="department"${_autoSortMode==='department'?' selected':''}>Department</option>
-            <option value="journey"${_autoSortMode==='journey'?' selected':''}>Customer Journey</option>
-            <option value="alpha"${_autoSortMode==='alpha'?' selected':''}>Alphabetical (A-Z)</option>
-        </select>
-    </div>`;
-
-    // ── AI Agents fleet — every workflow marked "Autonomous agent" ──
-    const agentWfs = wfs.filter(w=>{ const s=getWfSopData(w.id); return s && s.disposition && s.disposition.type==='agent'; });
-    if(agentWfs.length){
-        html += '<div class="auto-wf-group">';
-        html += '<div class="auto-wf-header">AI Agents <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + agentWfs.length + ')</span></div>';
-        html += '<p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 8px 0">Your agent fleet. Approvals and controls live on each agent\'s page — click View agent.</p>';
-        html += `<table class="wf-grid"><thead><tr>
-            <th style="width:32%">Agent</th>
-            <th style="width:110px">Status</th>
-            <th style="width:150px">Awaiting your OK</th>
-            <th>Actions</th>
-        </tr></thead><tbody>`;
-        agentWfs.forEach(w=>{
-            const a = getWfAgent(w.id);
-            const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
-            html += `<tr>
-                <td style="font-weight:var(--fw-semibold)">${esc(gf(w,WF.name)||'Untitled')}</td>
-                <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span></td>
-                <td><span id="agpend-${w.id}" style="font-size:var(--fs-xs);color:var(--text-muted)">—</span></td>
-                <td><button class="btn btn-sm" onclick="selectStepsWf('${w.id}');switchView('steps')">View agent</button></td>
-            </tr>`;
-        });
-        html += '</tbody></table></div>';
-    }
-
-    const wfsWithTasks = wfs.filter(w=>getWfVideoTaskId(w.id));
-    if(wfsWithTasks.length){
-        html += '<div class="auto-wf-group">';
-        html += '<div class="auto-wf-header">Video Recording Tasks <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithTasks.length + ' assigned)</span></div>';
-        html += `<table class="wf-grid"><thead><tr>
-            <th style="width:30%">Workflow</th>
-            <th style="width:100px">Task Status</th>
-            <th style="width:100px">Loom URL</th>
-            <th style="width:100px">Steps Extracted</th>
-            <th style="width:120px">Actions</th>
-        </tr></thead><tbody>`;
-
-        wfsWithTasks.forEach(w=>{
-            const wName = gf(w,WF.name)||'Untitled';
-            const vtaskStatus = getWfVideoTaskStatus(w.id);
-            const loomUrl = getWfLoomUrl(w.id);
-            const steps = stepsForWorkflow(w.id);
-            const statusCls = vtaskStatus==='complete'?'task-complete':'task-pending';
-            const statusLabel = vtaskStatus==='complete'?'Complete':'Pending';
-            const hasSteps = steps.length > 0;
-
-            html += `<tr>
-                <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
-                <td><span class="task-status-badge ${statusCls}">${statusLabel}</span></td>
-                <td>${loomUrl?'<span style="color:var(--success);font-size:var(--fs-xs)">Linked</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">None</span>'}</td>
-                <td>${hasSteps?'<span style="color:var(--success);font-size:var(--fs-xs)">'+steps.length+' steps</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">Not yet</span>'}</td>
-                <td style="display:flex;gap:4px;flex-wrap:wrap">
-                    ${vtaskStatus==='complete'&&loomUrl&&!hasSteps?`<button class="btn btn-sm btn-ai" onclick="selectedStepsWf='${w.id}';importFromLoom('${w.id}')">Extract Steps</button>`:''}
-                    <button class="btn btn-sm" onclick="selectedStepsWf='${w.id}';switchView('steps')">View</button>
-                </td>
-            </tr>`;
-        });
-
-        html += '</tbody></table></div>';
-    }
-
-    // Completed SOPs section — workflows with generated SOP documents
-    const wfsWithSop = wfs.filter(w=>!!gf(w,WF.sopDocument));
-    if(wfsWithSop.length){
-        html += '<div class="auto-wf-group" style="margin-top:16px">';
-        html += '<div class="auto-wf-header">Completed SOPs <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithSop.length + ' workflows)</span></div>';
-        html += '<p style="font-size:var(--fs-xs);color:var(--text-secondary);margin:0 0 8px 0">Workflows with generated SOP documents. Assign as a recurring task or convert to an AI skill.</p>';
-        html += `<table class="wf-grid"><thead><tr>
-            <th style="width:22%">Workflow</th>
-            <th style="width:15%">Department</th>
-            <th style="width:12%">SOP</th>
-            <th style="width:12%">Drive</th>
-            <th style="width:12%">Skill Status</th>
-            <th style="width:15%">Skill Name</th>
-            <th>Actions</th>
-        </tr></thead><tbody>`;
-
-        wfsWithSop.forEach(w=>{
-            const wName = gf(w,WF.name)||'Untitled';
-            const dept = selName(gf(w,WF.department))||'';
-            const driveDocUrl = getWfDriveDocUrl(w.id);
-            const driveUrl = getWfDriveUrl(w.id);
-            const hasWfSkill = !!gf(w,WF.skillDefinition);
-            const stepsWithSkills = stepsForWorkflow(w.id).filter(s=>isSkillCreated(s.id));
-            const lsSkill = localStorage.getItem('sys_wfskill_'+w.id);
-            let lsSkillData = null;
-            if(lsSkill){ try { lsSkillData = JSON.parse(lsSkill); } catch(e){/* best-effort: safe fallback */} }
-            const hasSkill = hasWfSkill || stepsWithSkills.length > 0 || !!lsSkillData;
-            let skillName = '';
-            if(hasWfSkill){
-                try { const sk = JSON.parse(gf(w,WF.skillDefinition)); skillName = Array.isArray(sk) ? (sk[0]||{}).name||'' : sk.name||''; } catch(e){/* best-effort: safe fallback */}
-            } else if(lsSkillData){
-                skillName = lsSkillData.name||'';
-            } else if(stepsWithSkills.length){
-                const sid = gf(stepsWithSkills[0],ST.skillId);
-                skillName = sid || (gf(stepsWithSkills[0],ST.name)||'');
-            }
-
-            html += `<tr>
-                <td style="font-weight:var(--fw-semibold);cursor:pointer;color:var(--accent)" onclick="selectedStepsWf='${w.id}';switchView('steps')">${esc(wName)}</td>
-                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(dept)}</td>
-                <td>${driveDocUrl?`<a href="${esc(driveDocUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Open SOP &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Local only</span>'}</td>
-                <td>${driveUrl?`<a href="${esc(driveUrl)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs-xs)">Folder &#x2197;</a>`:'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Not uploaded</span>'}</td>
-                <td>${hasSkill?'<span style="font-size:var(--fs-xs);color:var(--success)">Skill Created</span>':'<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertWorkflowToSkill(\''+w.id+'\')">Convert to Skill</button>'}</td>
-                <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(skillName)}</td>
-                <td style="display:flex;gap:4px;flex-wrap:wrap">
-                    <button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="assignRecurringTask('${w.id}')">Assign Task</button>
-                    ${hasWfSkill?`<button class="btn btn-sm" style="border-color:var(--success);color:var(--success)" onclick="runWorkflowSkill('${w.id}')">Run Skill</button>`:''}
-                </td>
-            </tr>`;
-        });
-
-        html += '</tbody></table></div>';
-    }
-
-    if(!stepsWithSop.length && !wfsWithTasks.length && !wfsWithSop.length){
-        pane.innerHTML = '<div class="empty-state"><p>No automation activity yet.</p><p>Assign video tasks in the SOPs tab, or complete SOPs to convert them to Skills or Tasks.</p></div>';
+    if(!agentWfs.length && !_autoSearch){
+        pane.innerHTML = `<div class="empty-state"><p>No AI agents yet.</p>
+            <p>Build a workflow's SOP on the SOPs tab, then choose "Autonomous agent" as how it runs — it appears here, ready to test.</p></div>`;
+        updateCounts();
         return;
     }
+    if(!selectedAgentWf || !agentWfs.some(w=>w.id===selectedAgentWf)) selectedAgentWf = agentWfs.length ? agentWfs[0].id : null;
 
-    if(stepsWithSop.length){
-        html += '<p style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:16px;margin-top:16px">Steps with completed SOPs, ready for automation. Convert to an AI Skill (automated) or a recurring Task (manual).</p>';
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <p style="font-size:var(--fs-sm);color:var(--text-secondary);margin:0">Your AI workforce. Pick an agent to review its work, teach it, and take it live.</p>
+        ${sysSearchInput('autoSearchInput', _autoSearch, "_autoSearch=this.value;_refocusSearchId='autoSearchInput';renderAutomation()")}
+    </div>`;
 
-        wfs.forEach(w=>{
-            const steps = stepsForWorkflow(w.id).filter(s=>selName(gf(s,ST.sopStatus))==='Complete');
-            if(!steps.length) return;
-            const wName = gf(w,WF.name)||'Untitled';
+    html += `<table class="wf-grid" style="margin-bottom:14px"><thead><tr>
+        <th style="width:32%">Agent</th>
+        <th style="width:110px">Status</th>
+        <th style="width:150px">Awaiting your OK</th>
+        <th>Actions</th>
+    </tr></thead><tbody>`;
+    agentWfs.forEach(w=>{
+        const a = getWfAgent(w.id);
+        const meta = a && AGENT_STATES[a.state] ? AGENT_STATES[a.state] : { label:'DRAFT', bg:'var(--bg-subtle)', fg:'var(--text-muted)' };
+        const sel = w.id===selectedAgentWf;
+        html += `<tr style="${sel?'background:var(--accent-soft)':''};cursor:pointer" onclick="selectAgentWf('${w.id}')">
+            <td style="font-weight:var(--fw-semibold)">${esc(gf(w,WF.name)||'Untitled')}</td>
+            <td><span class="agent-pill" style="background:${meta.bg};color:${meta.fg}">${meta.label}</span></td>
+            <td><span id="agpend-${w.id}" style="font-size:var(--fs-xs);color:var(--text-muted)">&mdash;</span></td>
+            <td style="display:flex;gap:4px;flex-wrap:wrap">
+                ${sel?'<span style="font-size:var(--fs-xs);color:var(--accent);font-weight:var(--fw-semibold);padding:4px 2px">Selected</span>':`<button class="btn btn-sm" onclick="event.stopPropagation();selectAgentWf('${w.id}')">Select</button>`}
+                <button class="btn btn-sm" onclick="event.stopPropagation();selectedStepsWf='${w.id}';switchView('steps')">View SOP</button>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
 
-            html += `<div class="auto-wf-group">
-                <div class="auto-wf-header">${esc(wName)} <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(${steps.length} ready)</span></div>
-                <table class="wf-grid"><thead><tr>
-                    <th style="width:25%">Step</th>
-                    <th style="width:30%">Description</th>
-                    <th style="width:90px">Type</th>
-                    <th style="width:100px">Pipeline</th>
-                    <th style="width:120px">Actions</th>
-                </tr></thead><tbody>`;
-
-            steps.forEach(s=>{
-                const sName = gf(s,ST.name)||'Untitled';
-                const sDesc = gf(s,ST.description)||'';
-                const sType = selName(gf(s,ST.stepType))||'Staff Task';
-                const sTypeClass = sType==='AI Skill'?'step-type-ai':sType==='Both'?'step-type-both':'step-type-staff';
-                const ps = pipelineStatus(s);
-                const canSkill = (sType==='AI Skill'||sType==='Both') && !isSkillCreated(s.id);
-                const canTask = (sType==='Staff Task'||sType==='Both') && !isTaskCreated(s.id);
-
-                html += `<tr>
-                    <td>${esc(sName)}</td>
-                    <td style="font-size:var(--fs-xs);color:var(--text-secondary)">${esc(sDesc)}</td>
-                    <td><span class="step-type-badge ${sTypeClass}">${esc(sType)}</span></td>
-                    <td><span class="pipeline-badge ${ps.cls}">${esc(ps.label)}</span></td>
-                    <td style="display:flex;gap:4px;flex-wrap:wrap">
-                        ${canSkill?`<button class="btn btn-sm" style="border-color:var(--info);color:var(--info)" onclick="convertToSkill('${s.id}')">To Skill</button>`:''}
-                        ${canTask?`<button class="btn btn-sm" style="border-color:var(--accent-gold);color:var(--accent-gold)" onclick="convertToTask('${s.id}')">To Task</button>`:''}
-                        ${!canSkill&&!canTask?'<span style="font-size:var(--fs-xs);color:var(--text-muted)">Converted</span>':''}
-                    </td>
-                </tr>`;
-            });
-
-            html += '</tbody></table></div>';
-        });
-    }
+    if(selectedAgentWf) html += `<div id="agentpanel-${selectedAgentWf}"></div>`;
 
     pane.innerHTML = html;
     updateCounts();
     restoreSearchFocus();
     if(agentWfs.length) fillAgentPendingCounts(agentWfs.map(w=>w.id));
+    if(selectedAgentWf) renderAgentPanel(selectedAgentWf);
+}
+
+function selectAgentWf(id){
+    selectedAgentWf = id;
+    renderAutomation();
+}
+
+// In-flight video recordings — build tracking, shown on the SOPs tab landing.
+function buildVideoTasksTable(){
+    const wfsWithTasks = filteredWorkflows().filter(w=>getWfVideoTaskId(w.id));
+    if(!wfsWithTasks.length) return '';
+    let html = '<div class="auto-wf-group" style="margin-top:18px">';
+    html += '<div class="auto-wf-header">Video recordings in progress <span style="color:var(--text-muted);font-weight:var(--fw-regular)">(' + wfsWithTasks.length + ')</span></div>';
+    html += `<table class="wf-grid"><thead><tr>
+        <th style="width:30%">Workflow</th>
+        <th style="width:100px">Task Status</th>
+        <th style="width:100px">Loom URL</th>
+        <th style="width:100px">Steps Extracted</th>
+        <th style="width:120px">Actions</th>
+    </tr></thead><tbody>`;
+    wfsWithTasks.forEach(w=>{
+        const wName = gf(w,WF.name)||'Untitled';
+        const vtaskStatus = getWfVideoTaskStatus(w.id);
+        const loomUrl = getWfLoomUrl(w.id);
+        const steps = stepsForWorkflow(w.id);
+        const statusCls = vtaskStatus==='complete'?'task-complete':'task-pending';
+        const statusLabel = vtaskStatus==='complete'?'Complete':'Pending';
+        const hasSteps = steps.length > 0;
+        html += `<tr>
+            <td style="font-weight:var(--fw-semibold)">${esc(wName)}</td>
+            <td><span class="task-status-badge ${statusCls}">${statusLabel}</span></td>
+            <td>${loomUrl?'<span style="color:var(--success);font-size:var(--fs-xs)">Linked</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">None</span>'}</td>
+            <td>${hasSteps?'<span style="color:var(--success);font-size:var(--fs-xs)">'+steps.length+' steps</span>':'<span style="color:var(--text-muted);font-size:var(--fs-xs)">Not yet</span>'}</td>
+            <td style="display:flex;gap:4px;flex-wrap:wrap">
+                ${vtaskStatus==='complete'&&loomUrl&&!hasSteps?`<button class="btn btn-sm btn-ai" onclick="selectedStepsWf='${w.id}';importFromLoom('${w.id}')">Extract Steps</button>`:''}
+                <button class="btn btn-sm" onclick="selectStepsWf('${w.id}')">View</button>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    return html;
 }
 
 // One fetch for the fleet: count Proposed activity rows per agent, fill the badges.
