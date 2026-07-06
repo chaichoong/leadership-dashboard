@@ -77,24 +77,26 @@ An agent can never go Live with an unresolved gap.
   - "You update the record. Which fields exactly, and what do they end up saying?"
   - "Does anything get sent to anyone? Who, and what does it say?"
 
-### I — Inspections
-- **Prompt:** "Before you call it done, what do you check? And what would you never let go out without looking at it yourself?"
-- **Captures:** the approval gate and the must-not-auto items.
-- **Pass criteria:** the checks are named, and anything that must always have a human eye is flagged.
-- **Not Applicable:** allowed, but rare. If the owner genuinely checks nothing, mark N/A with a reason and flag it as a risk for review.
+### I — Inspections & Caveats
+- **Prompt:** "Before you call it done, what do you check? What would you never let go out unchecked? And what trips this up — the odd cases, the exceptions, anything you must never do?"
+- **Captures:** the approval gate, the must-not-auto items, the edge cases, and the hard guardrails — the checks and the never-dos live together.
+- **Pass criteria:** the checks are named, anything that must always have a human eye is flagged, and the known exceptions / "never do" rules are captured (or an explicit "none").
+- **Not Applicable:** allowed, but rare. If the owner genuinely checks nothing and knows no exceptions, mark N/A with a reason and flag it as a risk for review.
 - **Follow-ups when thin:**
   - "Is there anything here that, if it were wrong, would be costly or hard to undo? That is what we would always check."
-  - "What does 'looks right' mean to you at the end?"
-
-### C — Caveats
-- **Prompt:** "What trips this up? The odd cases, the exceptions, and anything you must never do."
-- **Captures:** the edge cases and the hard guardrails.
-- **Pass criteria:** the known exceptions and any "never do" rules are captured, or an explicit "none I can think of".
-- **Not Applicable:** allowed (explicit "none").
-- **Follow-ups when thin:**
   - "Has this ever gone wrong? What happened?"
-  - "Is there a situation where the normal steps do not apply?"
   - "Anything that would be a disaster if the agent did it by accident?"
+
+### C — Conclusion
+- **Prompt:** "What does the finished job look like? Describe the end result of a successful run — what exists or has changed, and how you would know it was a success."
+- **Captures:** the definition of done — the concrete end state the agent (and the readiness check) verifies itself against.
+- **Pass criteria:** a concrete finished state (what exists or has changed) plus a way to tell success from failure. A vague "it's done" is Thin.
+- **Not Applicable:** never — every process has an end state.
+- **Follow-ups when thin:**
+  - "If you walked in the next morning, what would you look at to confirm it worked?"
+  - "What would the record/file/message look like after a perfect run?"
+
+_Amended 2026-07-06: the final C changed from Caveats to Conclusion (the successful end state); caveats folded into I as "Inspections & Caveats"._
 
 ---
 
