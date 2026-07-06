@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skills Library — Supabase</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<link rel="stylesheet" href="css/styles.css">
+<!-- Supabase clone: supabase-js + shim + login gate (non-deferred so window.fetch
+     is overridden before skills.js runs). Run-Skill (Claude proxy) passes through. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="skills-shim.js?v=1"></script>
+<script src="skills-boot.js?v=1"></script>
+<style>
+  body { background: var(--bg-app); color: var(--text-primary); margin: 0; }
+  .section { padding: 22px 26px; max-width: 1120px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<!-- Globals skills.js (a strict-mode IIFE) reads from the global scope. Define
+     them BEFORE loading skills.js. PAT is a dummy — the shim ignores it. -->
+<script>
+  var BASE_ID = 'appnqjDpqDniH3IRl';
+  var PAT = 'supabase';
+  function escHtml(str){ const d = document.createElement('div'); d.textContent = (str == null ? '' : str); return d.innerHTML; }
+  function showToast(msg){ try { console.log('[toast]', msg); } catch (e) {} }
+</script>
+
+<!-- Skills Library markup (mirrors the #skills tab in index.html) -->
+<div class="tab-panel" id="tab-skills" style="display:block">
+  <div class="section">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+      <div>
+        <h2 class="section-title" style="margin-bottom:2px">Skills Library</h2>
+        <p style="color:var(--text-secondary);font-size:13px;margin:0">All Claude Code and Cowork skills available in your setup. <span id="skillsTotalCount" style="font-weight:600"></span></p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="expandAllSkills()" class="skills-toolbar-btn" title="Expand all">Expand All</button>
+        <button onclick="collapseAllSkills()" class="skills-toolbar-btn" title="Collapse all">Collapse All</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <input type="text" id="skillsSearchInput" class="skills-search-input" placeholder="Search skills by name, keyword, or category..." oninput="onSkillsSearch(event)" aria-label="Search skills">
+    </div>
+    <div class="skills-source-bar" id="skillsSourceBar" style="display:flex;gap:6px;margin-bottom:12px"></div>
+    <div class="skills-filter-bar" id="skillsFilterBar"></div>
+    <div id="skillsLibraryContent"></div>
+  </div>
+</div>
+
+<script src="js/skills-data.js?v=3"></script>
+<script src="js/skills.js?v=6"></script>
+<script>
+  // Wait for a real Supabase session (shell login already covers this in the app),
+  // then render. renderSkillsTab pulls active presets + SOP skills via the shim.
+  (window.ensureSbSession ? window.ensureSbSession() : Promise.resolve())
+    .then(function () { if (typeof renderSkillsTab === 'function') renderSkillsTab(); });
+</script>
+</body>
+</html>
