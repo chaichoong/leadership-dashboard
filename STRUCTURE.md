@@ -10,7 +10,7 @@ Single source of truth for file locations across the Operations Director Platfor
 
 | Location | Purpose | New files go here when… |
 |---|---|---|
-| `/` (root) | Live HTML pages served by GitHub Pages (`index.html`, `follow-up.html`, `compliance.html`, `sop*.html`, `inbound-comms-sop.html`, `ai-brain.html`, `architecture.html`, `how-it-works.html`) plus repo config (`CLAUDE.md`, `STRUCTURE.md`, `CONTRIBUTING.md`, `CHEAT-SHEET.md`, `sitemap.xml`, `robots.txt`, `package.json`, `vercel.json`, `playwright.config.js`, `vitest.config.js`, `serve-test.py`). Legacy exceptions grandfathered at root: the two Apps Script sources (`gmail-invoice-script.gs`, `gmail-meetings-script.gs` — new `.gs` files go in `scripts/`), the Supabase-migration variants (`*-supabase.html`, `supabase-app.html`) and their boot/shim JS (`comms-boot.js`, `comms-shim.js`, `dashboard-boot.js`, `dashboard-shim.js`) | The file is a new public page. Nothing else new goes at root |
+| `/` (root) | Live HTML pages served by GitHub Pages (`index.html`, `follow-up.html`, `compliance.html`, `sop*.html`, `inbound-comms-sop.html`, `ai-brain.html`, `architecture.html`, `how-it-works.html`) plus repo config (`CLAUDE.md`, `STRUCTURE.md`, `PRODUCTISATION.md`, `CONTRIBUTING.md`, `CHEAT-SHEET.md`, `sitemap.xml`, `robots.txt`, `package.json`, `vercel.json`, `playwright.config.js`, `vitest.config.js`, `serve-test.py`). Legacy exceptions grandfathered at root: the two Apps Script sources (`gmail-invoice-script.gs`, `gmail-meetings-script.gs` — new `.gs` files go in `scripts/`), the Supabase-migration variants (`*-supabase.html`, `supabase-app.html`) and their boot/shim JS (`comms-boot.js`, `comms-shim.js`, `dashboard-boot.js`, `dashboard-shim.js`) | The file is a new public page. Nothing else new goes at root |
 | `js/` | One file per feature tab (see CLAUDE.md table). `config.js` = constants, `shared.js` = helpers | New feature tab logic |
 | `js/prompts/` | AI prompt sources (`boardroom-mentor.js`) | New AI prompt used by the app |
 | `css/` | `tokens.css` (design tokens, single source of truth) + `styles.css` | Never add per-feature stylesheets without checking tokens first |
@@ -29,6 +29,7 @@ Single source of truth for file locations across the Operations Director Platfor
 1. **`~/.claude/CLAUDE.md`** — who Kevin is, decision frameworks, writing style. Applies to every project.
 2. **`CLAUDE.md` (this repo)** — build rules, quality gates, file ownership for concurrent sessions.
 3. **`STRUCTURE.md` (this file)** — where everything lives.
+   **`PRODUCTISATION.md`** — what a generic client gets on each page (universal / module / vertical / bespoke). Read before building any client-facing version of a page.
 4. **Memory** (`~/.claude/projects/-Users-kevinbrittain-Projects-leadership-dashboard/memory/`) — durable facts, preferences, project state. Indexed by `MEMORY.md`.
 5. **Skills** — three tiers, by design:
    - Project skills: `.claude/skills/` in this repo (workflow pipeline)
