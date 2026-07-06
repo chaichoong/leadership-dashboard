@@ -960,6 +960,55 @@
         return name.trim().toLowerCase().startsWith('void');
     }
 
+    // ── AI Agents KPI — the headline Systemisation metric on the front page ──
+    // Agent state lives in the workflows table's SOP JSON (sop.agent.state);
+    // pending approvals live in the Agent Activity table. Loaded async so the
+    // dashboard render never waits on it; the slot stays empty on failure.
+    const AGENTS_WF_TBL = 'tblLPoRHFBl0vqR24';
+    const AGENTS_WF_SOP = 'fldW4qoDv2mrTNvu7';
+    const AGENTS_ACTIVITY_TBL = 'tblJ3GFnAAoXf99e9';
+
+    async function loadAgentKpi() {
+        const slot = document.getElementById('agentKpiCard');
+        if (!slot || !PAT) return;
+        try {
+            const [wfRes, actRes] = await Promise.all([
+                fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_WF_TBL}?returnFieldsByFieldId=true&pageSize=100&fields%5B%5D=${AGENTS_WF_SOP}`, { headers: { Authorization: `Bearer ${PAT}` } }),
+                fetch(`https://api.airtable.com/v0/${BASE_ID}/${AGENTS_ACTIVITY_TBL}?pageSize=100`, { headers: { Authorization: `Bearer ${PAT}` } }),
+            ]);
+            if (!wfRes.ok) return;
+            const wfs = (await wfRes.json()).records || [];
+            const agents = [];
+            wfs.forEach(w => {
+                try {
+                    const sop = JSON.parse(w.fields[AGENTS_WF_SOP] || 'null');
+                    if (sop && sop.disposition && sop.disposition.type === 'agent' && sop.agent && sop.agent.state) {
+                        agents.push({ id: w.id, state: sop.agent.state, title: sop.sopTitle || 'Agent' });
+                    }
+                } catch (e) { /* not JSON — not an agent workflow */ }
+            });
+            const pendingByAgent = {};
+            if (actRes.ok) {
+                ((await actRes.json()).records || []).forEach(r => {
+                    if ((r.fields['State'] || '') !== 'Proposed') return;
+                    (r.fields['Agent'] || []).forEach(id => { pendingByAgent[id] = (pendingByAgent[id] || 0) + 1; });
+                });
+            }
+            const live = agents.filter(a => a.state === 'live').length;
+            const testing = agents.filter(a => a.state === 'testing').length;
+            const pending = agents.reduce((s, a) => s + (pendingByAgent[a.id] || 0), 0);
+            const detail = agents.length
+                ? agents.map(a => `<div class="od-breakdown-row"><span>${escHtml(a.title)}</span><span>${escHtml(a.state.toUpperCase())}${pendingByAgent[a.id] ? ` · ${pendingByAgent[a.id]} awaiting OK` : ''}</span></div>`).join('')
+                    + `<div style="margin-top:8px"><button class="od-btn-secondary od-btn-sm" onclick="event.stopPropagation();switchTab('systemisation')">Open Systemisation</button></div>`
+                : '<div class="od-breakdown-row"><span>No agents yet — build one from a workflow SOP in Systemisation.</span></div>';
+            const card = document.getElementById('agentKpiCard');
+            if (!card) return;
+            card.outerHTML = expandableCard('AI Agents', `${live} live`,
+                `${testing} testing${pending ? ` | <span class="text-amber">${pending} awaiting your OK</span>` : ''}`,
+                detail, live > 0 ? 'text-green' : '');
+        } catch (e) { console.warn('Agent KPI load failed:', e); }
+    }
+
     function renderDashboard(accounts, costs, tenancies, transactions, rentalUnits, tenants) {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1390,7 +1439,9 @@
                     </div>
                 </div>
             </div>
+            <div id="agentKpiCard"></div>
         `;
+        loadAgentKpi();
 
         // ── SECTION 5: 31-Day Cash Flow Forecast ──
         // Build UC tenant map: tenant record ID → true if Universal Credit

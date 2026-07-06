@@ -3490,9 +3490,43 @@ async function renderAgentPanel(wfId){
             <span class="agent-sub" id="agstats-${wfId}" style="color:var(--text-muted)"></span></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">${controls}</div>
         </div>
+        <div class="agent-perms" id="agentperms-${wfId}"></div>
         <div class="agent-feed" id="agentfeed-${wfId}"><div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">Loading activity…</div></div>
     </div>`;
     renderAgentFeed(wfId);
+}
+
+// ── Permissions: what the agent may do WITHOUT asking (the graduated ramp) ──
+// Candidates come from what the agent has actually proposed, so the list only
+// ever offers actions the owner has seen it attempt.
+function renderAgentPerms(wfId, rows){
+    const el = document.getElementById('agentperms-'+wfId);
+    if(!el) return;
+    const agent = getWfAgent(wfId) || {};
+    const fieldSet = new Set(agent.autoFields||[]);
+    (rows||[]).forEach(r=>{
+        try { const p = JSON.parse(r.fields['Payload']||'null'); if(p && p.kind==='update' && p.fields) Object.keys(p.fields).forEach(f=>fieldSet.add(f)); } catch(e){}
+    });
+    const fields = [...fieldSet].sort();
+    const autoFields = agent.autoFields||[];
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);margin-top:10px;font-size:var(--fs-xs)">
+        <span style="font-weight:var(--fw-semibold);color:var(--text-secondary)">May do on its own when live:</span>
+        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-primary)">
+            <input type="checkbox" id="agc-comments-${wfId}" ${agent.autoComments?'checked':''} onchange="saveAgentPerms('${wfId}')"> post audit comments
+        </label>
+        ${fields.map(f=>`<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-primary)">
+            <input type="checkbox" class="agc-field-${wfId}" data-field="${esc(f)}" ${autoFields.includes(f)?'checked':''} onchange="saveAgentPerms('${wfId}')"> update "${esc(f)}"
+        </label>`).join('')}
+        <span style="color:var(--text-muted)">everything else always asks first — messages to people always ask</span>
+    </div>`;
+}
+
+async function saveAgentPerms(wfId){
+    const agent = getWfAgent(wfId) || { state:'testing', tables:[] };
+    agent.autoComments = !!document.getElementById('agc-comments-'+wfId)?.checked;
+    agent.autoFields = [...document.querySelectorAll('.agc-field-'+wfId)].filter(c=>c.checked).map(c=>c.dataset.field);
+    await setWfAgent(wfId, agent);
+    toast('Saved — the agent may now do '+((agent.autoComments?1:0)+agent.autoFields.length)+' thing'+(((agent.autoComments?1:0)+agent.autoFields.length)===1?'':'s')+' without asking');
 }
 
 async function fetchAgentActivity(wfId){
@@ -3592,6 +3626,7 @@ async function renderAgentFeed(wfId){
         el.innerHTML = rows.length
             ? rows.map(agentFeedRow).join('')
             : `<div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">No activity yet. Hit "Run now" to do a first pass over your data.</div>`;
+        renderAgentPerms(wfId, rows);
         // The Go-Live guardrail metric: how often you've agreed with the agent.
         const ok = rows.filter(r=>['Approved','Auto-done'].includes(r.fields['State'])).length;
         const bad = rows.filter(r=>r.fields['State']==='Rejected').length;

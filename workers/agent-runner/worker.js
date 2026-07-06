@@ -180,7 +180,7 @@ function toolDefs(allowedTables) {
 
 // ── Tool execution with the safety gate ──
 async function execTool(env, ctx, name, input) {
-    const { wfId, runId, state, allowedTables, autoFields, stats, seenPayloads } = ctx;
+    const { wfId, runId, state, allowedTables, autoFields, autoComments, stats, seenPayloads } = ctx;
 
     const resolveTable = (t) => {
         const key = String(t || '').toLowerCase().trim();
@@ -249,7 +249,9 @@ async function execTool(env, ctx, name, input) {
         const tableId = resolveTable(input.table);
         if (!tableId) return { error: `table not allowed: ${input.table}` };
         const payload = { kind: 'comment', table: input.table, tableId, recordId: input.recordId, text: input.text };
-        if (state === 'live') {
+        // Comments only auto-post when the owner has explicitly allowed it —
+        // a freshly-live agent with no permissions still queues EVERYTHING.
+        if (state === 'live' && autoComments === true) {
             const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}/${input.recordId}/comments`, {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${env.AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
@@ -379,7 +381,7 @@ OPERATING RULES:
         const results = [];
         for (const tu of toolUses) {
             let out;
-            try { out = await execTool(env, { wfId, runId, state, allowedTables, autoFields, stats, seenPayloads }, tu.name, tu.input || {}); }
+            try { out = await execTool(env, { wfId, runId, state, allowedTables, autoFields, autoComments: agent.autoComments === true, stats, seenPayloads }, tu.name, tu.input || {}); }
             catch (e) { out = { error: e.message }; }
             results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 12000) });
         }
