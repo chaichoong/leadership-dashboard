@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Money Confidence — Supabase</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="css/tokens.css?v=1">
+    <link rel="stylesheet" href="css/sync-bar.css?v=2">
+    <link rel="stylesheet" href="css/quick-task.css?v=2">
+    <link rel="stylesheet" href="css/styles.css?v=21">
+    <!-- Supabase clone: hide the full-app sidebar/auth-screen in the HEAD so they never
+         paint (avoids the split-second double-sidebar flash on load). -->
+    <style>
+      #sidebar, .sidebar-toggle, .sidebar-overlay, #authScreen { display: none !important; }
+      .main-content { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+    </style>
+</head>
+<body>
+    <!-- Auth Screen -->
+    <div class="auth-screen" id="authScreen">
+        <div class="auth-box">
+            <h2>Operations Director</h2>
+            <p>Enter your Airtable Personal Access Token to connect</p>
+            <label for="patInput" class="sr-only">Airtable Personal Access Token</label><input type="password" class="auth-input" id="patInput" placeholder="pat_xxxxxxxxxxxx..." autocomplete="off" aria-label="Airtable Personal Access Token">
+            <button class="auth-btn" onclick="authenticate()">Connect</button>
+            <div class="auth-error" id="authError" role="alert">Invalid token. Please check and try again.</div>
+            <div class="auth-note">Your token is saved in this browser so you stay logged in. Use "Logout" in the sidebar to clear it. No data is sent anywhere except Airtable's API.</div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+        <div class="spinner" id="loadingSpinner"></div>
+        <div id="loadingText" aria-live="polite">Loading your dashboard...</div>
+        <div id="loadingActions" style="display:none;margin-top:20px">
+            <button class="loading-retry-btn" onclick="loadDashboard()">Retry</button>
+            <button class="loading-retry-btn secondary" onclick="logout()">Re-enter PAT</button>
+        </div>
+    </div>
+
+    <!-- Sidebar Toggle (mobile) -->
+    <button class="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()" role="presentation"></div>
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h1>&#x2699;&#xFE0F; Operations Director</h1>
+            <p>Kevin Brittain &bull; Founder &nbsp;<a href="#" onclick="event.preventDefault();logout()" style="color:var(--text-inverse-dim);font-size:10px;text-decoration:underline">Logout</a></p>
+        </div>
+        <!-- ──────────────────────────────────────────────────────────────────
+             Sidebar — Department-shaped navigation.
+             Six business-departments + System for tools, modelled on the
+             standard Leadership/Marketing/Sales/Operations/Finance/HR org chart.
+             Sections are collapsible (state persisted in localStorage); each
+             section's dot is a worst-case rollup of its children's health.
+             ────────────────────────────────────────────────────────────────── -->
+        <nav class="sidebar-nav" id="sidebarNav">
+
+            <div class="sidebar-section" data-section="leadership" data-tabs="overview,cfv,os-strategy,os-bplan">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('leadership')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('leadership')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">Leadership</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="leadership"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item active" role="menuitem" tabindex="0" data-tab-group="dashboard" onclick="switchTab('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('overview')}"><span class="sidebar-icon">&#x1F4CA;</span><span class="sidebar-label">Leadership Dashboard</span><span class="sidebar-health-dot unknown" data-sidebar-health="overview" title="No checks run yet"></span><span id="cfvSidebarBadges" style="margin-left:6px;display:flex;gap:4px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-strategy')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-strategy')}"><span class="sidebar-icon">&#x1F3AF;</span><span class="sidebar-label">Objective &amp; Strategy</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-strategy" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-bplan')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-bplan')}"><span class="sidebar-icon">&#x1F4CB;</span><span class="sidebar-label">Plan Builder</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-bplan" title="No checks run yet"></span></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" data-section="operations" data-tabs="tasks,comms,operations,systemisation,skills,ai-brain">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('operations')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('operations')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">Operations</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="operations"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('tasks')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('tasks')}"><span class="sidebar-icon">&#x2705;</span><span class="sidebar-label">Tasks &amp; Projects</span><span class="sidebar-health-dot unknown" data-sidebar-health="tasks" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('operations')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('operations')}"><span class="sidebar-icon">&#x1F3E2;</span><span class="sidebar-label">Operations</span><span class="sidebar-health-dot unknown" data-sidebar-health="operations" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('skills')}"><span class="sidebar-icon">&#x1F9E0;</span><span class="sidebar-label">Skills Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="skills" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ai-brain')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ai-brain')}"><span class="sidebar-icon">&#x1F4AD;</span><span class="sidebar-label">AI Brain</span><span class="sidebar-health-dot unknown" data-sidebar-health="ai-brain" title="No checks run yet"></span></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" data-section="finance" data-tabs="income,ar-variable,costs,invoices,pnl,transactions,fintable">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('finance')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('finance')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">Finance</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="finance"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('money')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('money')}"><span class="sidebar-icon">&#x1F9ED;</span><span class="sidebar-label">Money Confidence</span><span class="sidebar-health-dot unknown" data-sidebar-health="money" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('wealth')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('wealth')}"><span class="sidebar-icon">&#x1F4C8;</span><span class="sidebar-label">Wealth</span><span class="sidebar-health-dot unknown" data-sidebar-health="wealth" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" data-tab-group="accounts" onclick="switchTab('income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('income')}"><span class="sidebar-icon">&#x1F4B7;</span><span class="sidebar-label">Accounts</span><span class="sidebar-health-dot unknown" data-sidebar-health="accounts" title="No checks run yet"></span><span id="fintableBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('pnl')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('pnl')}"><span class="sidebar-icon">&#x1F4B0;</span><span class="sidebar-label">Profit &amp; Loss</span><span class="sidebar-health-dot unknown" data-sidebar-health="pnl" title="No checks run yet"></span></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" data-section="team" data-tabs="os-team">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('team')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('team')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">HR / Admin</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="team"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('os-team')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('os-team')}"><span class="sidebar-icon">&#x1F465;</span><span class="sidebar-label">Team Members</span><span class="sidebar-health-dot unknown" data-sidebar-health="os-team" title="No checks run yet"></span></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" data-section="marketing" data-tabs="content-machine">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('marketing')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('marketing')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">Marketing</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="marketing"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('content-machine')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('content-machine')}"><span class="sidebar-icon">&#x1F3AC;</span><span class="sidebar-label">Content Machine</span><span class="sidebar-health-dot unknown" data-sidebar-health="content-machine" title="No checks run yet"></span></div>
+                </div>
+            </div>
+
+            <div class="sidebar-section" data-section="system" data-tabs="sitemap">
+                <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('system')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('system')">
+                    <span class="sidebar-section-chevron">&#x25BE;</span>
+                    <span class="sidebar-section-name">System</span>
+                    <span class="sidebar-section-dot unknown" data-section-dot="system"></span>
+                </div>
+                <div class="sidebar-section-body">
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('sitemap')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('sitemap')}"><span class="sidebar-icon">&#x1F517;</span><span class="sidebar-label">Site Map &amp; Guides</span><span class="sidebar-health-dot unknown" data-sidebar-health="sitemap" title="No checks run yet"></span><span id="sitemapBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center;line-height:20px;padding:0 6px"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="shareCurrentPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();shareCurrentPage()}" title="Copy link to this page"><span class="sidebar-icon">&#x1F4CE;</span><span class="sidebar-label">Share Current Page</span></div>
+                </div>
+            </div>
+
+        </nav>
+    </div>
+
+    <!-- Share toast (button moved into sidebar) -->
+    <div class="share-toast" id="shareToast">Link copied to clipboard!</div>
+
+    <!-- AI Assistant -->
+    <div class="ai-bubble" id="aiBubble" role="button" tabindex="0" onclick="toggleAIPanel()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIPanel()}" title="AI Assistant (Cmd+K)" aria-label="Open AI Assistant">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
+    </div>
+    <div class="ai-panel" id="aiPanel" role="dialog" aria-label="AI Assistant" aria-modal="false">
+      <div class="ai-panel-header">
+        <div>
+          <div style="font-size:14px;font-weight:700">AI Assistant</div>
+          <div style="font-size:10px;opacity:0.7">Ask anything about your data</div>
+        </div>
+        <button onclick="toggleAIPanel()" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;padding:4px">&#x2715;</button>
+      </div>
+      <div class="ai-messages" id="aiMessages">
+        <div class="ai-msg assistant">Hello! I'm your AI analyst. I can see all your dashboard data. Ask me anything, or try one of the quick actions below.</div>
+      </div>
+      <div class="ai-chips" id="aiChips"></div>
+      <div class="ai-input-bar">
+        <textarea class="ai-input" id="aiInput" rows="1" placeholder="Ask about your data..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage()}"></textarea>
+        <button class="ai-send-btn" onclick="sendAIMessage()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+    <!-- Command Palette -->
+    <div class="ai-cmd-overlay" id="aiCmdOverlay" onclick="closeCmdPalette()" style="display:none" role="presentation">
+      <div class="ai-cmd-panel" role="dialog" aria-label="Command Palette" aria-modal="true" onclick="event.stopPropagation()">
+        <input class="ai-cmd-input" id="aiCmdInput" placeholder="Search commands..." aria-label="Search commands" oninput="filterCmdPalette()">
+        <div class="ai-cmd-list" id="aiCmdList"></div>
+      </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="app-layout">
+    <div class="main-content">
+    <div class="container dashboard" id="dashboard">
+
+        <!-- Tabs Navigation (hidden — replaced by sidebar) -->
+        <div class="tabs-nav">
+            <button class="tab-btn active" onclick="switchTab('overview')">Leadership Dashboard</button>
+            <button class="tab-btn" onclick="switchTab('invoices')">Accounts Payable Variable</button>
+            <button class="tab-btn" onclick="switchTab('cfv')">Cash Flow Voids</button>
+        </div>
+
+        <!-- Dashboard sub-tab bar (shown when overview or cfv is active) -->
+        <div class="accounts-subtab-bar" id="dashboardSubtabBar" style="display:none">
+            <button class="accounts-subtab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+            <button class="accounts-subtab" data-tab="cfv" onclick="switchTab('cfv')">Cash Flow Voids</button>
+        </div>
+
+        <!-- Tab 1: Leadership Dashboard -->
+        <div class="tab-panel active" id="tab-overview">
+
+        <div data-sync-bar="overview"></div>
+
+        <div class="header">
+            <h1>Leadership Dashboard</h1>
+            <p id="headerDate"></p>
+            <div class="refresh-info">
+                <div class="refresh-dot"></div>
+                <span>Live — smart refresh every 15 minutes (defers while active) | Last updated: <span id="lastUpdated"></span></span>
+                <span id="refreshingBadge" class="refreshing-badge" style="display:none"></span>
+            </div>
+        </div>
+
+        <!-- Fintable Sync Alert Banner (hidden when all OK) -->
+        <div id="fintableAlertBanner" style="display:none"></div>
+
+        <!-- Cash Flow Opening Balance Override -->
+
+        <!-- Utility Bar: Unreconciled Transactions -->
+        <div id="reconBar" class="cards-grid" style="margin-bottom:16px"></div>
+
+        <!-- Section 1: Financial Overview -->
+        <div class="section">
+            <h2 class="section-title">Financial Overview</h2>
+            <div class="cards-grid" id="financialCards"></div>
+        </div>
+
+        <!-- Strategic KPIs (from Projects) -->
+        <div class="section" id="strategicKpiSection" style="display:none">
+            <h2 class="section-title">Strategic KPIs <span id="strategicKpiCount" style="font-size:var(--fs-sm);color:var(--text-secondary);font-weight:var(--fw-regular);margin-left:6px"></span></h2>
+            <div id="strategicKpiPills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
+            <div id="strategicKpiList"></div>
+        </div>
+
+        <!-- Section 2: Portfolio Overview -->
+        <div class="section">
+            <h2 class="section-title">Portfolio Overview</h2>
+            <div class="cards-grid" id="portfolioCards"></div>
+        </div>
+
+        <!-- Section 3: Tenancy Metrics -->
+        <div class="section">
+            <h2 class="section-title">Tenancy Metrics</h2>
+            <div class="cards-grid" id="tenancyCards"></div>
+        </div>
+
+        <!-- Section 4: 31-Day Operational Metrics -->
+        <div class="section">
+            <h2 class="section-title">31-Day Operational Metrics</h2>
+            <div class="cards-grid" id="operationalCards"></div>
+        </div>
+
+        <!-- Section 5: 31-Day Cash Flow Forecast -->
+        <div class="section">
+            <h2 class="section-title">31-Day Cash Flow Forecast</h2>
+            <div class="cards-grid" id="cashflowKPIs"></div>
+            <div class="cashflow-container">
+                <div class="chart-container">
+                    <canvas id="cashflowChart"></canvas>
+                </div>
+                <div id="cfWaControls"></div>
+                <table class="cashflow-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Opening</th>
+                            <th>In</th>
+                            <th>Out</th>
+                            <th>Closing</th>
+                            <th>Withdraw</th>
+                            <th>Last Acct</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cashflowBody"></tbody>
+                </table>
+            </div>
+            <div id="creditCardSummary"></div>
+        </div>
+
+        <!-- Section 6: AI Analysis -->
+        <div class="section">
+            <h2 class="section-title">AI Analysis &amp; Commentary</h2>
+            <div class="ai-commentary" id="aiCommentary"></div>
+        </div>
+
+        </div><!-- end tab-overview -->
+
+        <!-- Tab: Tasks & Projects -->
+        <div class="tab-panel" id="tab-tasks">
+            <iframe class="tab-panel-iframe" id="tasksFrame" src="" data-src="os/tasks/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+
+        <!-- Accounts sub-tab bar (shown when any finance sub-tab is active) -->
+        <div class="accounts-subtab-bar" id="accountsSubtabBar" style="display:none">
+            <button class="accounts-subtab active" data-tab="income" onclick="switchTab('income')">AR Fixed</button>
+            <button class="accounts-subtab" data-tab="ar-variable" onclick="switchTab('ar-variable')">AR Variable</button>
+            <button class="accounts-subtab" data-tab="costs" onclick="switchTab('costs')">AP Fixed</button>
+            <button class="accounts-subtab" data-tab="invoices" onclick="switchTab('invoices')">AP Variable</button>
+            <button class="accounts-subtab" data-tab="transactions" onclick="switchTab('transactions')">Transactions</button>
+            <button class="accounts-subtab" data-tab="fintable" onclick="switchTab('fintable')">Bank Accounts</button>
+        </div>
+
+        <!-- Tab: Accounts Receivable Fixed (Income) -->
+        <div class="tab-panel" id="tab-income">
+            <div data-sync-bar="income"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Receivable Fixed</h2>
+                </div>
+                <div class="cards-grid" id="incomeSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="od-filter-row" style="margin-bottom:8px">
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Sort:
+                        <select id="incomeSortBy" onchange="renderIncomeTab()" class="od-filter-select">
+                            <option value="due-day">Due Day</option>
+                            <option value="rent-desc">Rent (high to low)</option>
+                            <option value="rent-asc">Rent (low to high)</option>
+                            <option value="tenant">Tenant (A to Z)</option>
+                            <option value="status">Payment Status</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Status:
+                        <select id="incomeStatusFilter" onchange="renderIncomeTab()" class="od-filter-select">
+                            <option value="in-payment">In Payment</option>
+                            <option value="cfv">CFV / Not In Payment</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Business:
+                        <select id="incomeBusinessFilter" onchange="renderIncomeTab()" class="od-filter-select">
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
+                        Search:
+                        <input id="incomeFilterText" type="text" placeholder="Search tenant, property, amount, status..." oninput="renderIncomeTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <div class="invoice-table-wrapper">
+                    <table class="invoice-table" id="incomeTable" style="display:none">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;text-align:center">#</th>
+                                <th>Tenant</th>
+                                <th>Property</th>
+                                <th>Unit</th>
+                                <th style="text-align:right">Rent</th>
+                                <th>Due Day</th>
+                                <th>Status</th>
+                                <th>Payment Type</th>
+                                <th>Frequency</th>
+                            </tr>
+                        </thead>
+                        <tbody id="incomeTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="section">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                    <h3 class="od-section-header" style="margin-bottom:0;border-bottom:none">Income Breakdown</h3>
+                    <div id="incomeBreakdownToggles" style="display:flex;gap:4px"></div>
+                </div>
+                <div id="incomeBreakdown"></div>
+            </div>
+            <div class="section">
+                <h3 class="od-section-header">AI Analysis</h3>
+                <div id="incomeAIAnalysis"></div>
+            </div>
+        </div>
+
+        <!-- Tab: Accounts Receivable Variable -->
+        <div class="tab-panel" id="tab-ar-variable">
+            <div data-sync-bar="ar-variable"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Receivable Variable</h2>
+                    <span id="arvRefreshedAt" style="font-size:12px;color:var(--text-muted)"></span>
+                </div>
+                <div class="cards-grid" id="arvSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="od-filter-row" style="margin-bottom:8px">
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Sort:
+                        <select id="arvSortBy" onchange="renderARVariableTab()" class="od-filter-select">
+                            <option value="due-date">Due Date (soonest first)</option>
+                            <option value="due-date-desc">Due Date (latest first)</option>
+                            <option value="amount-desc">Amount (high to low)</option>
+                            <option value="amount-asc">Amount (low to high)</option>
+                            <option value="customer">Customer (A to Z)</option>
+                            <option value="status">Status</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Status:
+                        <select id="arvStatusFilter" onchange="renderARVariableTab()" class="od-filter-select">
+                            <option value="unpaid">Unpaid (Sent + Overdue)</option>
+                            <option value="sent">Sent</option>
+                            <option value="overdue">Overdue</option>
+                            <option value="draft">Draft</option>
+                            <option value="paid">Paid</option>
+                            <option value="written off">Written Off</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Business:
+                        <select id="arvBusinessFilter" onchange="renderARVariableTab()" class="od-filter-select">
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
+                        Search:
+                        <input id="arvFilterText" type="text" placeholder="Search customer, invoice, amount, ref..." oninput="renderARVariableTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <div class="invoice-table-wrapper">
+                    <div id="arvLoadingSpinner" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:12px">
+                        <div style="width:36px;height:36px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:arv-spin 0.8s linear infinite"></div>
+                        <span id="arvLoadingMessage" style="font-size:13px;color:var(--text-muted);font-weight:500">Loading outbound invoices...</span>
+                        <button id="arvLoadingRetryBtn" onclick="forceARVRefresh()" style="margin-top:8px;padding:8px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:6px;cursor:pointer;display:none">Force Refresh from Airtable</button>
+                        <style>@keyframes arv-spin { to { transform: rotate(360deg); } }</style>
+                    </div>
+                    <table class="invoice-table" id="arvTable" style="display:none">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;text-align:center">#</th>
+                                <th>Customer</th>
+                                <th>Invoice No.</th>
+                                <th>Description</th>
+                                <th style="text-align:right">Amount</th>
+                                <th>Date Sent</th>
+                                <th>Due Date</th>
+                                <th>Status</th>
+                                <th>Business</th>
+                                <th>Days Overdue</th>
+                            </tr>
+                        </thead>
+                        <tbody id="arvTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Accounts Payable Fixed (Costs) -->
+        <div class="tab-panel" id="tab-costs">
+            <div data-sync-bar="costs"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Payable Fixed</h2>
+                </div>
+                <div class="cards-grid" id="costsSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="od-filter-row" style="margin-bottom:8px">
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Sort:
+                        <select id="costsSortBy" onchange="renderCostsTab()" class="od-filter-select">
+                            <option value="due-day">Due Day</option>
+                            <option value="amount-desc">Amount (high→low)</option>
+                            <option value="amount-asc">Amount (low→high)</option>
+                            <option value="overdue-desc">Days Overdue (most first)</option>
+                            <option value="last-paid-desc">Last Paid (newest first)</option>
+                            <option value="name">Name (A→Z)</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Status:
+                        <select id="costsStatusFilter" onchange="renderCostsTab()" class="od-filter-select">
+                            <option value="active">Active only</option>
+                            <option value="inactive">Inactive only</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Frequency:
+                        <select id="costsFreqFilter" onchange="renderCostsTab()" class="od-filter-select">
+                            <option value="all">All</option>
+                            <option value="monthly">Monthly &amp; sub-monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="annual">Annual</option>
+                        </select>
+                    </label>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;flex:1;min-width:240px">
+                        Search:
+                        <input id="costsFilterText" type="text" placeholder="Search across name, amount, dates, status, account, category…" oninput="renderCostsTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;flex:1;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <div class="invoice-table-wrapper">
+                    <table class="invoice-table" id="costsTable" style="display:none">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;text-align:center">#</th>
+                                <th>Cost Name</th>
+                                <th style="text-align:right">Expected</th>
+                                <th style="text-align:right">Last Reconciled</th>
+                                <th>Due Day</th>
+                                <th>Last Paid</th>
+                                <th>Days Overdue</th>
+                                <th>Status</th>
+                                <th>Frequency</th>
+                                <th>Account</th>
+                                <th>Sub-Category</th>
+                                <th>End Date</th>
+                                <th style="width:80px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="costsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="section">
+                <h3 class="od-section-header">Spending Breakdown by Category</h3>
+                <div id="costsBreakdown"></div>
+            </div>
+            <div class="section">
+                <h3 class="od-section-header">AI Analysis</h3>
+                <div id="costsAIAnalysis"></div>
+            </div>
+            <div class="section">
+                <h3 class="od-section-header">Backfill Cost Status &amp; Last Reconciled Fields</h3>
+                <p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px">One-shot tool. Populates <code>Cost Status (New)</code>, <code>Last Reconciled Payment Date</code>, <code>Last Reconciled Amount</code>, <code>Last Reconciled Account</code>, and <code>Last Reconciled Sub-Category</code> for any cost that's missing them. Run dry-run first; review the plan; then commit.</p>
+                <div style="display:flex;gap:8px;margin-bottom:12px">
+                    <button id="costsBackfillBtn" onclick="runCostsBackfillDryRun()" style="padding:6px 12px;font-size:12px;font-weight:600;background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer">Run Dry-Run</button>
+                    <button id="costsCommitBtn" onclick="commitCostsBackfill()" style="display:none;padding:6px 12px;font-size:12px;font-weight:600;background:var(--accent);color:var(--accent-on);border:none;border-radius:4px;cursor:pointer">Commit Backfill</button>
+                </div>
+                <div id="costsBackfillOutput" style="font-size:12px;color:var(--text-secondary);max-height:400px;overflow-y:auto"></div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Invoices -->
+        <div class="tab-panel" id="tab-invoices">
+            <div data-sync-bar="invoices"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Accounts Payable Variable</h2>
+                    <span style="font-size:12px;color:var(--text-muted)">Gmail label: <strong style="color:var(--text-secondary)">3. to pay</strong> &nbsp;·&nbsp; Last refreshed: <strong style="color:var(--text-secondary)">28 Mar 2026</strong> &nbsp;·&nbsp; Ask Claude to refresh</span>
+                </div>
+                <div class="cards-grid" id="invoiceSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="od-filter-row" style="margin-bottom:8px">
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Sort by:
+                        <select id="invSortBy" onchange="renderInvoiceTab()" class="od-filter-select">
+                            <option value="date">Date (oldest first)</option>
+                            <option value="date-desc">Date (newest first)</option>
+                            <option value="amount">Amount (high→low)</option>
+                            <option value="amount-asc">Amount (low→high)</option>
+                            <option value="payee">Payee (A→Z)</option>
+                        </select>
+                    </label>
+                    <label class="od-filter-label" style="display:flex;align-items:center;gap:4px">
+                        Filter:
+                        <input id="invFilterText" type="text" placeholder="Search payee, description, ref…" oninput="renderInvoiceTab()" style="font-size:12px;padding:2px 8px;border:1px solid var(--border-default);border-radius:4px;width:220px;background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                </div>
+                <!-- Bulk action toolbar — only visible when 1+ rows selected via checkboxes -->
+                <div id="invBulkBar" style="display:none;align-items:center;gap:12px;padding:8px 12px;margin-bottom:8px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-md)">
+                    <strong id="invBulkCount" style="font-size:13px;color:var(--accent-hover)">0 selected</strong>
+                    <span style="color:var(--text-secondary);font-size:12px">Bulk action:</span>
+                    <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
+                        Set business:
+                        <select id="invBulkBusinessSelect" style="font-size:12px;padding:3px 6px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-surface);color:var(--text-primary)"></select>
+                        <button onclick="applyBulkBusiness()" style="font-size:12px;padding:3px 10px;background:var(--accent);color:var(--accent-on);border:none;border-radius:4px;cursor:pointer;font-weight:600">Apply</button>
+                    </label>
+                    <button id="invBulkMarkPaidBtn" onclick="applyBulkMarkPaid()" style="font-size:12px;padding:3px 12px;background:var(--success);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">Mark as Paid</button>
+                    <button onclick="clearInvoiceSelection()" style="font-size:11px;padding:3px 8px;background:transparent;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;cursor:pointer;margin-left:auto">Clear selection</button>
+                </div>
+                <div class="invoice-table-wrapper">
+                    <div id="invoiceLoadingSpinner" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 0;gap:12px">
+                        <div style="width:36px;height:36px;border:3px solid var(--border-default);border-top-color:var(--accent);border-radius:50%;animation:inv-spin 0.8s linear infinite"></div>
+                        <span style="font-size:13px;color:var(--text-muted);font-weight:500">Loading invoices…</span>
+                    </div>
+                    <table class="invoice-table" id="invoiceTable" style="display:none">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;text-align:center"><input type="checkbox" id="invSelectAll" title="Select all visible"></th>
+                                <th style="width:32px;text-align:center">#</th>
+                                <th>Due / Date</th>
+                                <th>Payee</th>
+                                <th>Description</th>
+                                <th>Ref</th>
+                                <th style="text-align:right">Amount</th>
+                                <th>Business</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="invoiceTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Profit & Loss -->
+        <div class="tab-panel" id="tab-pnl"></div>
+
+        <!-- Tab: Transactions -->
+        <div class="tab-panel" id="tab-transactions"></div>
+
+        <!-- Tab: Money Confidence (isolated — does not touch the Leadership Dashboard) -->
+        <div class="tab-panel" id="tab-money"></div>
+
+        <!-- Tab: Wealth (isolated — net worth + income buckets) -->
+        <div class="tab-panel" id="tab-wealth"></div>
+
+        <!-- Tab 4: CFVs -->
+        <div class="tab-panel" id="tab-cfv">
+            <div data-sync-bar="cfv"></div>
+            <div class="section">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+                    <h2 class="section-title" style="margin-bottom:0">Cash Flow Voids</h2>
+                    <span style="font-size:12px;color:var(--text-muted)">Auto-detected from Airtable &nbsp;·&nbsp; 2-day tolerance after due date</span>
+                </div>
+                <div class="cards-grid" id="cfvSummaryCards"></div>
+            </div>
+            <div class="section">
+                <div class="invoice-table-wrapper">
+                    <table class="invoice-table" id="cfvTable">
+                        <thead>
+                            <tr>
+                                <th>Tenant</th>
+                                <th>Property</th>
+                                <th style="text-align:right">Rent</th>
+                                <th>Due Day</th>
+                                <th>Days Overdue</th>
+                                <th>Last Payment</th>
+                                <th>Status</th>
+                                <th>Contact</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cfvTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div id="arrearsPipelineContainer"></div>
+            <div class="section" id="cfvCommentsSection" style="display:none">
+                <h2 class="od-section-header">Comments &amp; Updates</h2>
+                <div id="cfvCommentsContainer"></div>
+            </div>
+        </div>
+
+        <!-- Tab 5: Inbound Comms -->
+        <div class="tab-panel" id="tab-comms">
+            <iframe class="tab-panel-iframe" id="commsFrame"
+                src=""
+                data-src="follow-up.html"
+                loading="lazy"
+                allowfullscreen
+                style="border:none">
+            </iframe>
+        </div>
+
+        <!-- Tab 6: Property Compliance (moved into Operations iframe) -->
+        <div class="tab-panel" id="tab-compliance" style="display:none">
+        </div>
+
+        <!-- Tab: Operations (Tenants, Tenancies, Rental Units, Properties) -->
+        <div class="tab-panel" id="tab-operations">
+            <iframe class="tab-panel-iframe" id="operationsFrame" src="" data-src="os/operations/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Tab: Systemisation -->
+        <div class="tab-panel" id="tab-systemisation">
+            <iframe class="tab-panel-iframe" id="systemisationFrame" src="" data-src="os/systemisation/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Tab: Team Members -->
+        <div class="tab-panel" id="tab-os-team">
+            <iframe class="tab-panel-iframe" id="osTeamFrame" src="" data-src="os/team/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Plan Builder + Strategy iframe panels (Operating Systems Hub removed in Phase 3 sidebar restructure) -->
+        <div class="tab-panel" id="tab-os-bplan">
+            <iframe class="tab-panel-iframe" id="osBplanFrame" src="" data-src="os/business-plan-builder/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+        <div class="tab-panel" id="tab-os-strategy">
+            <iframe class="tab-panel-iframe" id="osStrategyFrame" src="" data-src="os/strategy/index.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Marketing: Content Machine (standalone app at chaichoong.github.io/content-machine — same origin on Pages, so its localStorage keys are shared) -->
+        <div class="tab-panel" id="tab-content-machine">
+            <iframe class="tab-panel-iframe" id="contentMachineFrame" src="" data-src="https://chaichoong.github.io/content-machine/" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Operations: AI Brain (standalone module page loaded via iframe) -->
+        <div class="tab-panel" id="tab-ai-brain">
+            <iframe class="tab-panel-iframe" id="aiBrainFrame" src="" data-src="ai-brain.html" loading="lazy" allowfullscreen style="border:none"></iframe>
+        </div>
+
+        <!-- Tab 7: Site Map -->
+        <div class="tab-panel" id="tab-sitemap">
+            <div data-sync-bar="sitemap"></div>
+            <div class="section">
+                <h2 class="section-title">Site Map & Guides</h2>
+                <div id="sitemapIntegrity" style="margin-bottom:16px"></div>
+                <div style="margin-bottom:16px"><a href="architecture.html" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--accent);text-decoration:none;transition:all .15s ease" onmouseover="this.style.background='var(--accent-soft)';this.style.borderColor='var(--accent)'" onmouseout="this.style.background='var(--bg-surface)';this.style.borderColor='var(--border-default)'">🗺️ Platform Architecture Map</a></div>
+                <div style="overflow-x:auto">
+                    <table class="invoice-table" style="min-width:900px">
+                        <thead>
+                            <tr>
+                                <th style="width:30px">#</th>
+                                <th>Page</th>
+                                <th>Page v.</th>
+                                <th>Platform Link</th>
+                                <th>Standalone Link</th>
+                                <th>SOP</th>
+                                <th>SOP v.</th>
+                                <th>Status</th>
+                                <th>Git Sync</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sitemapTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 8: Accounts -->
+        <div class="tab-panel" id="tab-fintable">
+            <div data-sync-bar="fintable"></div>
+            <div class="section">
+                <h2 class="section-title">Accounts</h2>
+                <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">Monitors active bank account syncs. Accounts that haven't synced recently are flagged so you can reconnect them.</p>
+
+                <!-- Summary cards -->
+                <div id="fintableSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px"></div>
+
+                <!-- Alert thresholds info -->
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;font-size:12px;color:var(--text-secondary)">
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--success);margin-right:4px"></span> Synced within 24 hours</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warning);margin-right:4px"></span> 1–3 days since last sync</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent-gold);margin-right:4px"></span> 3–7 days since last sync</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--danger);margin-right:4px"></span> 7+ days — reconnection likely needed</span>
+                </div>
+
+                <!-- Accounts table -->
+                <div style="overflow-x:auto">
+                    <table class="invoice-table" id="fintableTable">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Account</th>
+                                <th>Institution</th>
+                                <th>Last Synced</th>
+                                <th>Time Ago</th>
+                                <th style="text-align:right">Balance (GBP)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fintableBody">
+                            <tr><td colspan="6" class="od-empty-state">Loading accounts...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p style="color:var(--text-muted);font-size:11px;margin-top:16px">Showing accounts synced within the last 6 months. Data refreshes each time you open this tab.</p>
+            </div>
+        </div>
+    </div>
+
+        <!-- Tab: Skills Library -->
+        <div class="tab-panel" id="tab-skills">
+            <div class="section">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+                    <div>
+                        <h2 class="section-title" style="margin-bottom:2px">Skills Library</h2>
+                        <p style="color:var(--text-secondary);font-size:13px;margin:0">All Claude Code and Cowork skills available in your setup. <span id="skillsTotalCount" style="font-weight:600"></span></p>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button onclick="expandAllSkills()" class="skills-toolbar-btn" title="Expand all">Expand All</button>
+                        <button onclick="collapseAllSkills()" class="skills-toolbar-btn" title="Collapse all">Collapse All</button>
+                    </div>
+                </div>
+                <div style="margin-bottom:16px">
+                    <input type="text" id="skillsSearchInput" class="skills-search-input" placeholder="Search skills by name, keyword, or category..." oninput="onSkillsSearch(event)" aria-label="Search skills">
+                </div>
+                <div class="skills-source-bar" id="skillsSourceBar" style="display:flex;gap:6px;margin-bottom:12px"></div>
+                <div class="skills-filter-bar" id="skillsFilterBar"></div>
+                <div id="skillsLibraryContent"></div>
+            </div>
+        </div>
+
+    </div><!-- end main-content -->
+    </div><!-- end app-layout -->
+
+
+    <!-- JavaScript: split into modules for concurrent development -->
+    <!-- v=cb versions bust stale caches when modules change -->
+    <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
+    <!-- ── Supabase clone: strip the full-app chrome so only the Overview page shows
+         (this clone exists to surface the Leadership Dashboard overview on Supabase). ── -->
+    <style id="sb-embed-style">
+      #sidebar, .sidebar-toggle, .sidebar-overlay { display: none !important; }
+      /* Never show the Airtable-PAT screen — this clone authenticates via Supabase.
+         A stray Airtable 401 from a secondary call must not cover the dashboard. */
+      #authScreen { display: none !important; }
+      .app-layout { display: block !important; }
+      .main-content { margin-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+      .tabs-nav, #dashboardSubtabBar { display: none !important; }
+      /* only the overview tab panel is relevant here */
+      .tab-panel:not(#tab-money) { display: none !important; }   /* money-only view (was #tab-overview) */
+      body { overflow-x: hidden; }
+    </style>
+    <!-- ── supabase-js + shim + login gate. NON-deferred so window.fetch is overridden
+         during parse, before the deferred app scripts ever call it. ── -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="dashboard-shim.js?v=5"></script>
+    <script src="dashboard-boot.js?v=5"></script>
+    <script defer src="js/config.js?v=37"></script>
+    <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
+    <script defer src="js/shared.js?v=27"></script>
+    <script defer src="js/sync-bar.js?v=4"></script>
+    <script defer src="js/dashboard.js?v=19"></script>
+    <script defer src="js/cashflow.js?v=20"></script>
+    <script defer src="js/money.js?v=3"></script>
+    <script defer src="js/wealth.js?v=32"></script>
+    <script defer src="js/sitemap.js?v=25"></script>
+    <script defer src="js/income.js?v=1"></script>
+    <script defer src="js/costs.js?v=13"></script>
+    <script defer src="js/ar-variable.js?v=1"></script>
+    <script defer src="js/invoices.js?v=12"></script>
+    <script defer src="js/pnl.js?v=21"></script>
+    <script defer src="js/transactions.js?v=6"></script>
+    <script defer src="js/reconciliation.js?v=24"></script>
+    <script defer src="js/cfv.js?v=25"></script>
+    <script defer src="js/arrears.js?v=30"></script>
+    <script defer src="js/fintable.js?v=13"></script>
+    <script defer src="js/skills-data.js?v=3"></script>
+    <script defer src="js/skills.js?v=6"></script>
+    <script defer src="js/ai-assistant.js?v=16"></script>
+    <script defer src="js/quick-task.js?v=4"></script>
+    <script defer src="js/admin-repair-splits.js?v=5"></script>
+</body>
+</html>
