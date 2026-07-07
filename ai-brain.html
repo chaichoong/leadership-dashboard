@@ -96,29 +96,22 @@
 
     <div id="setup">
       <div class="card">
-        <h2>Set up your brain</h2>
-        <p class="hint">Do this once. After that it runs quietly in the background and every AI answer gets better.</p>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Connect your storage</div><div class="d">Google Drive, where your files live</div></div><span class="act">Connected</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Connect your notes</div><div class="d">Apple Notes, dictate into the Brain folder</div></div><span class="act">Connected</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Connect your meetings</div><div class="d">Zoom, summaries captured after each call</div></div><span class="act">Connected</span></div>
-        <div class="step"><span class="ic todo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg></span><div class="body"><div class="t">Connect your AI engine</div><div class="d">Your own AI account powers the heavy work</div></div><button class="btn">Connect</button></div>
+        <h2>Your connections</h2>
+        <p class="hint">What your brain is plugged into, checked from last night's runs.</p>
+        <div id="setupConnections"><p class="hint">Loading…</p></div>
       </div>
 
       <div class="card">
         <h2>Your context profile</h2>
         <p class="hint">What the brain knows about you and the business. The more complete, the sharper every answer.</p>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Founder and businesses</div><div class="d">Who you are, what you run</div></div><span class="act">Done</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">People and preferences</div><div class="d">Your team, how you like to work</div></div><span class="act">Done</span></div>
-        <div class="step"><span class="ic todo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg></span><div class="body"><div class="t">A few details to confirm</div><div class="d">Quick interview, 5 minutes</div></div><button class="btn primary">Continue</button></div>
-        <div class="bar"><span style="width:75%"></span></div>
-        <p class="foot">9 of 12 sections complete.</p>
+        <div class="bar"><span id="profileBar" style="width:0%"></span></div>
+        <p class="foot" id="profileText">Loading…</p>
       </div>
 
       <div class="card">
         <h2>Capture lanes and schedule</h2>
-        <p class="hint">How things get in, and when the brain tidies itself.</p>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Capture lanes set</div><div class="d">Notes, documents, post, meetings</div></div><span class="act">On</span></div>
-        <div class="step"><span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span><div class="body"><div class="t">Daily tidy and review</div><div class="d">Runs every night, files and links on its own</div></div><span class="act">On</span></div>
+        <p class="hint">When each part of the brain runs, and whether it ran on time.</p>
+        <div id="setupSchedule"><p class="hint">Loading…</p></div>
       </div>
     </div>
 
@@ -204,6 +197,10 @@
       document.getElementById('captured').innerHTML = '<p class="hint">Your data stays private, behind your login.</p>';
       document.getElementById('queries').innerHTML = '';
       document.getElementById('sensitive').innerHTML = '';
+      var signIn = '<p class="hint">Sign in to the dashboard to see your setup.</p>';
+      document.getElementById('setupConnections').innerHTML = signIn;
+      document.getElementById('setupSchedule').innerHTML = signIn;
+      document.getElementById('profileText').textContent = 'Sign in to the dashboard to see your profile.';
       return;
     }
     var url = 'https://api.airtable.com/v0/' + BASE + '/' + TABLE + '?pageSize=100&cb=' + Date.now();
@@ -282,6 +279,29 @@
         }).catch(function(){ toast('Could not save just now, try again'); });
       });
     });
+
+    // Setup tab — real connection health, schedule last-runs, profile completeness
+    var setupRows = rows.filter(function(f){ return f.Kind === 'setup'; });
+    function stepRow(f){
+      var ok = (f.Value || 0) > 0;
+      var icon = ok
+        ? '<span class="ic done" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 13l4 4L19 7"/></svg></span>'
+        : '<span class="ic todo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg></span>';
+      return '<div class="step">' + icon + '<div class="body"><div class="t">' + esc(f.Item) + '</div><div class="d">' + esc(f.Text || '') + '</div></div><span class="act">' + (ok ? 'Working' : 'Needs attention') + '</span></div>';
+    }
+    var conns = setupRows.filter(function(f){ return f.Category === 'connection'; });
+    var sched = setupRows.filter(function(f){ return f.Category === 'schedule'; });
+    var prof = setupRows.filter(function(f){ return f.Category === 'profile'; })[0];
+    document.getElementById('setupConnections').innerHTML = conns.length
+      ? conns.map(stepRow).join('') : '<p class="hint">No connection data yet. It publishes with tonight’s run.</p>';
+    document.getElementById('setupSchedule').innerHTML = sched.length
+      ? sched.map(stepRow).join('') : '<p class="hint">No schedule data yet. It publishes with tonight’s run.</p>';
+    if (prof){
+      document.getElementById('profileBar').style.width = (prof.Value || 0) + '%';
+      document.getElementById('profileText').textContent = prof.Text || '';
+    } else {
+      document.getElementById('profileText').textContent = 'No profile data yet. It publishes with tonight’s run.';
+    }
 
     // Sensitive — pointer + link only. You can view it; the brain never acts on it or shares it.
     var sensitive = rows.filter(function(f){ return f.Kind === 'sensitive' && f.Status !== 'resolved'; });
@@ -364,6 +384,9 @@
       if (v === 'today') loadToday(false);
     });
   });
+
+  // Setup is the landing view, so load the feed straight away (renders both tabs).
+  loadToday(false);
 
   var tEl = document.getElementById('toast'); var tT;
   window.toast = function(msg){
