@@ -84,7 +84,8 @@
             const tableId = 'tblLPoRHFBl0vqR24';
             const skillFieldName = 'Skill Definition';
             const driveFieldName = 'Drive URL';
-            const baseUrl = `https://api.airtable.com/v0/${BASE_ID}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
+            const sopFieldName = 'SOP Document';
+            const baseUrl = `https://api.airtable.com/v0/${BASE_ID}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&fields[]=${encodeURIComponent(sopFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
             const skills = [];
             let offset = '';
             do {
@@ -101,6 +102,13 @@
                     const raw = r.fields[skillFieldName];
                     if (!raw) return;
                     const driveUrl = r.fields[driveFieldName] || '';
+                    // Workflows that run as AI AGENTS get their own section — record the state.
+                    try {
+                        const sop = JSON.parse(r.fields[sopFieldName] || 'null');
+                        if (sop && sop.disposition && sop.disposition.type === 'agent') {
+                            _agentByWf[r.id] = { state: (sop.agent && sop.agent.state) || 'draft' };
+                        }
+                    } catch (e) { /* no SOP JSON — not an agent */ }
                     try {
                         const parsed = JSON.parse(raw);
                         const arr = Array.isArray(parsed) ? parsed : [parsed];
@@ -132,6 +140,25 @@
     }
     window.allSkills = allSkills;
 
+    // ── Agents vs Skills: the library is the CATALOGUE, the AI Agents tab in
+    // Systemisation is the OPERATIONS room. Agent-workflow skills get their own
+    // section up top with the agent's state and a Manage button that deep-links
+    // through (localStorage handoff — the Systemisation iframe consumes it).
+    let _agentByWf = {};
+
+    const AGENT_STATE_META = {
+        live:    { label: 'LIVE',    bg: 'var(--success-bg)', fg: 'var(--success)' },
+        testing: { label: 'TESTING', bg: 'var(--warning-bg)', fg: 'var(--warning)' },
+        off:     { label: 'PAUSED',  bg: 'var(--bg-subtle)',  fg: 'var(--text-muted)' },
+        draft:   { label: 'DRAFT',   bg: 'var(--bg-subtle)',  fg: 'var(--text-muted)' },
+    };
+
+    function openAgentInSystemisation(wfId) {
+        localStorage.setItem('sys_open_agent', wfId);
+        if (typeof switchTab === 'function') switchTab('systemisation');
+    }
+    window.openAgentInSystemisation = openAgentInSystemisation;
+
     function renderSkillsLibrary() {
         const container = document.getElementById('skillsLibraryContent');
         if (!container) return;
@@ -159,9 +186,14 @@
             return true;
         });
 
+        // Agents are workers, skills are tools: agent-workflow entries get their
+        // own section on top; everything else stays in the category catalogue.
+        const agentSkills = filtered.filter(s => s.workflowId && _agentByWf[s.workflowId]);
+        const restSkills = filtered.filter(s => !(s.workflowId && _agentByWf[s.workflowId]));
+
         const grouped = {};
         SKILLS_CATEGORIES.forEach(cat => { grouped[cat] = []; });
-        filtered.forEach(s => {
+        restSkills.forEach(s => {
             if (!grouped[s.category]) grouped[s.category] = [];
             grouped[s.category].push(s);
         });
@@ -170,6 +202,31 @@
         if (countEl) countEl.textContent = filtered.length + ' of ' + all.length + ' skills';
 
         let html = '';
+        if (agentSkills.length) {
+            html += `<div class="skills-category-group">
+                <div class="skills-category-header">
+                    <span class="skills-category-icon">&#x26A1;</span>
+                    <span class="skills-category-name">AI Agents &mdash; autonomous workers</span>
+                    <span class="skills-category-count">${agentSkills.length}</span>
+                </div>
+                <div class="skills-grid">`;
+            agentSkills.forEach(s => {
+                const st = _agentByWf[s.workflowId] || {};
+                const meta = AGENT_STATE_META[st.state] || AGENT_STATE_META.draft;
+                html += `<div class="skills-card" data-skill-id="${escHtml(s.id)}">
+                    <div class="skills-card-header">
+                        <div class="skills-card-title">${escHtml(s.name)}</div>
+                        <span style="font-size:11px;font-weight:700;letter-spacing:.5px;padding:3px 10px;border-radius:999px;background:${meta.bg};color:${meta.fg}">${meta.label}</span>
+                    </div>
+                    <div class="skills-card-desc">${escHtml(s.description)}</div>
+                    <div class="skills-card-actions" style="padding:8px 16px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <button class="skills-run-btn" onclick="openAgentInSystemisation('${escJs(s.workflowId)}')" style="padding:6px 14px;border:none;border-radius:var(--radius-sm,4px);background:var(--accent,#2C6E49);color:#fff;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">&#x26A1; Manage in AI Agents</button>
+                        <button onclick="runSkill('${escJs(s.id)}')" style="padding:6px 14px;border:1px solid var(--border-default,#DDE1D9);border-radius:var(--radius-sm,4px);background:var(--bg-surface,#fff);color:var(--text-primary,#1C2422);cursor:pointer;font-size:12px;font-family:inherit">Open as chat guide</button>
+                    </div>
+                </div>`;
+            });
+            html += '</div></div>';
+        }
         SKILLS_CATEGORIES.forEach(cat => {
             const skills = grouped[cat];
             if (!skills || skills.length === 0) return;

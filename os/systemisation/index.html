@@ -3892,6 +3892,22 @@ function selectAgentWf(id){
     renderAutomation();
 }
 
+// Deep-link from the Skills Library ("Manage in AI Agents"): the shell writes
+// sys_open_agent to localStorage then switches to this tab. Consume it on load
+// AND via the storage event (fires here when the shell writes it while this
+// iframe is already loaded).
+function consumeAgentDeepLink(){
+    const wfId = localStorage.getItem('sys_open_agent');
+    if(!wfId) return false;
+    localStorage.removeItem('sys_open_agent');
+    selectedAgentWf = wfId;
+    switchView('automation');
+    return true;
+}
+window.addEventListener('storage', (e)=>{
+    if(e.key==='sys_open_agent' && e.newValue){ consumeAgentDeepLink(); }
+});
+
 // In-flight video recordings — build tracking, shown on the SOPs tab landing.
 function buildVideoTasksTable(){
     const wfsWithTasks = filteredWorkflows().filter(w=>getWfVideoTaskId(w.id));
@@ -4773,6 +4789,7 @@ async function start(){
         render();
         updateSyncStatus('ok');
         updateAgentsLiveBadge();
+        consumeAgentDeepLink();
     } catch(e){
         if(e.message==='auth') return;
         document.getElementById('loader').textContent='Error loading data: '+e.message;
