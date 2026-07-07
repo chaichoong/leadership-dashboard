@@ -85,7 +85,9 @@
             const skillFieldName = 'Skill Definition';
             const driveFieldName = 'Drive URL';
             const sopFieldName = 'SOP Document';
-            const baseUrl = `https://api.airtable.com/v0/${BASE_ID}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&fields[]=${encodeURIComponent(sopFieldName)}&filterByFormula=NOT({${skillFieldName}}='')`;
+            // Encode the formula explicitly — relying on the browser to normalise
+            // spaces/quotes inside filterByFormula is what made this fetch fragile.
+            const baseUrl = `https://api.airtable.com/v0/${BASE_ID}/${tableId}?fields[]=${encodeURIComponent(skillFieldName)}&fields[]=${encodeURIComponent(driveFieldName)}&fields[]=${encodeURIComponent(sopFieldName)}&filterByFormula=${encodeURIComponent(`NOT({${skillFieldName}}='')`)}`;
             const skills = [];
             let offset = '';
             do {
@@ -133,7 +135,18 @@
             _sopFetchFailed = true;
             showSOPSkillsNotice();
         }
+        // A transient failure (rate limit, blip) used to stick as a permanent
+        // banner. Retry once, quietly, and re-render if it comes good.
+        if (_sopFetchFailed && !_sopRetryScheduled) {
+            _sopRetryScheduled = true;
+            setTimeout(async () => {
+                _sopFetchFailed = false;
+                await fetchSOPSkills();
+                if (!_sopFetchFailed && typeof renderSkillsLibrary === 'function') renderSkillsLibrary();
+            }, 2500);
+        }
     }
+    let _sopRetryScheduled = false;
 
     function allSkills() {
         return SKILLS_LIBRARY.concat(_sopSkills);
