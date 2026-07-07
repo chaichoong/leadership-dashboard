@@ -55,6 +55,7 @@
     fld9hm24JQUPOCoWj:['account_id','link'], fldPmAMmxwqs4SdPa:['tenancy_id','link'],
     fldGkpkVqSeiGvUGL:['cost_id','link'], fldFPmNixqHPQy4D6:['category_id','link'],
     fldQ37YsyR9r3EbkP:['split_override','num'], fld20FWX7yjM8P2Kz:['split_count','num'],
+    fldX1aFlJyzpXGhbF:['business_id','link'],   // "Business (For Reports)" — used by the P&L business filter
   }};
   M[UNITS] = { source:'v_rental_units', write:'rental_units', map:{
     fldBvqysXBm9rIm0E:['status','scalar'], fld7NBHkhjqfbcxk7:['property_name_short','lookupOne'],
