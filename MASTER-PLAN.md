@@ -6,6 +6,7 @@
 - Canonical location: repo root `MASTER-PLAN.md`.
 - Legend: `[ ]` open · `[x]` done · `[~]` in progress · `[D]` dropped (reason in Changelog)
 - Lanes: **KEVIN** · **MICA** · **ERICAMAE** · **OPUS** (any Claude build session)
+- OPUS driver rule (Kevin, 7 Jul): hybrid by lane — Kevin runs product/shared-file/security/worker Opus tasks; Mica runs migration-lane Opus tasks; every OPUS task has a named human owner in Airtable who starts the session and ticks the box.
 - Task format: one action, one owner, one sitting, binary done-test in brackets. `[AT:recXXX]` = existing Airtable task record.
 
 ---
@@ -39,22 +40,24 @@ Live, taking money, generating leads, and delivering what we sell:
 ## 3. Phase 1 — Decisions & foundations (7–11 Jul)
 
 ### Decisions (KEVIN — briefs prepared, mostly yes/no)
-- [ ] KEVIN — Decide D1 CRM entity model (done: choice given to Claude)
-- [ ] KEVIN — Decide D2 mentor-profile onboarding (done: choice given)
-- [ ] KEVIN — Decide D3 recurring-revenue rebuild timing (done: choice given)
-- [ ] KEVIN — Decide D4 skills starter set rule (done: choice given)
-- [ ] KEVIN — Decide D5 Money Confidence module home (done: choice given)
-- [ ] KEVIN — Decide D6 derived fields: views vs columns (done: choice given)
-- [ ] KEVIN — Decide D7 comms label taxonomy (done: choice given)
-- [ ] KEVIN — Decide D8 site map internal-only (done: choice given)
-- [ ] KEVIN — Decide D9 AI cost policy (done: choice given)
-- [ ] OPUS — Record all nine D-outcomes in PRODUCTISATION.md §5 in one commit (done: commit on main)
+- [x] KEVIN — Decide D1 CRM entity model (done 7 Jul: generic entities table)
+- [x] KEVIN — Decide D2 mentor-profile onboarding (done 7 Jul: approved)
+- [x] KEVIN — Decide D3 recurring-revenue rebuild timing (done 7 Jul: defer; companion decision on no-Finance KPIs below)
+- [x] KEVIN — Decide D4 skills starter set rule (done 7 Jul: curated universal set)
+- [x] KEVIN — Decide D5 Money Confidence module home (done 7 Jul: Finance)
+- [x] KEVIN — Decide D6 derived fields: views vs columns (done 7 Jul: computed views)
+- [x] KEVIN — Decide D7 comms label taxonomy (done 7 Jul: opinionated 1-14 standard)
+- [x] KEVIN — Decide D8 site map internal-only (done 7 Jul: confirmed)
+- [x] KEVIN — Decide D9 AI cost policy (done 7 Jul: clients pay their own — per-tenant API key provisioned at onboarding)
+- [x] OPUS — Record all nine D-outcomes in PRODUCTISATION.md §5 in one commit (done 7 Jul, same session)
 - [ ] KEVIN — Answer Ericamae on the sales-page trust video, yes or no (done: Slack reply sent; also resolves [AT:recG4RxL6ewQoEvPX])
 - [ ] KEVIN — Adopt this plan at the team meeting (done: both team members told this is the only plan)
 
-### Airtable cleanse
-- [ ] KEVIN — Approve the cleanse proposal (docs/airtable-cleanse-2026-07-07.md) (done: go given)
+### Airtable cleanse + plan-sync automation
+- [x] KEVIN — Approve the cleanse proposal (docs/airtable-cleanse-2026-07-07.md) (done 7 Jul, with added scope: scan no-business tasks for open-ended OD items + SMART pass on everything)
 - [ ] OPUS — Apply the cleanse: close duplicates/stale with a comment naming this plan, re-date/reassign keepers, create the missing tasks under "Launch & First Revenue" (done: Airtable matches §3–§7 one-for-one, zero dupes)
+- [ ] OPUS — Add a dedupe gate to the meetings task-extraction script: before creating a task, check open tasks for a match and link/skip instead of duplicating (done: a test meeting summary naming an existing task creates zero new records) [gmail-meetings-script.gs — merging does NOT redeploy; manual paste into Apps Script]
+- [ ] OPUS — Nightly plan↔Airtable sync job: tick this plan from Airtable completions, push approved new plan tasks to Airtable, flag unmapped/duplicate tasks in a short report (done: first nightly run produces a correct report)
 
 ### Security (this week)
 - [ ] OPUS — Inventory every consumer of the current Airtable PAT (repo, workers, GitHub secrets, HR app, scripts, ~/.config/od) (done: written list)
@@ -103,7 +106,10 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] OPUS — Thresholds/targets → tenant_config (done: budget targets read from config)
 - [ ] OPUS — Infrastructure URLs → tenant_config (done: worker/proxy URLs configurable)
 - [ ] OPUS — AI voice: per-tenant mentor prompt per D2 (done: AI features read tenant prompt)
-- [ ] OPUS — Remove 'enter your API key' prompts, route via proxy per D9 (done: no key prompt anywhere; usage logged per tenant)
+- [ ] OPUS — Per-tenant AI key routing in claude-proxy per D9: client tenants use the client's own Anthropic key (provisioned done-for-you at onboarding), Kevin's key serves only Kevin's tenant, usage logged per tenant (done: a test tenant's calls bill the test key)
+- [ ] OPUS — Remove 'enter your API key' prompts from all pages — key handling moves to per-tenant config per D9 (done: no key prompt anywhere)
+- [ ] OPUS — Manual KPI entry as STANDARD + honest "Connect your numbers — Finance module" upsell state on finance cards for no-Finance tenants (D3 companion) (done: both states verified on a test tenant)
+- [ ] OPUS — Onboarding seeds recurring KPI-update tasks (weekly/monthly per installed manual KPI) in the client's Tasks & Projects (done: provisioning rehearsal creates the recurring tasks)
 - [ ] OPUS — Empty-state sweep: every page renders helpfully with zero records [AT:recKYTvkpyVZERmnN] (done: new-tenant walkthrough shows no blank/broken panels)
 
 ### Product finish + fixes
@@ -211,3 +217,4 @@ Live, taking money, generating leads, and delivering what we sell:
 | Date | Source | Change |
 |---|---|---|
 | 2026-07-07 | Fable 5 session with Kevin (day-long planning) | Plan created from full audit (repo, Airtable, Slack, Drive). Supersedes all prior plan docs (§9). Baseline snapshot §2. Airtable cleanse proposed (docs/airtable-cleanse-2026-07-07.md), pending Kevin's approval. |
+| 2026-07-07 | Kevin, in-session | D1-D9 all decided (outcomes in PRODUCTISATION.md §5). D3 companion: manual KPI entry standard + upsell state + seeded recurring update tasks. D9: clients pay their own AI via per-tenant keys. Cleanse approved with added scope (no-business scan + SMART pass). New tasks: meetings dedupe gate, nightly plan↔Airtable sync, per-tenant key routing, manual-KPI features. OPUS driver rule: hybrid by lane. |

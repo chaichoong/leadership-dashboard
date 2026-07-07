@@ -65,3 +65,6 @@ S4. D1 entities + D2 mentor-prompt config + wizard write target.
 S5. Page-at-a-time: finish shell coverage (Finance set next) — Mica continues.
 S6. Write-path cutover per module (tasks first) + parity checks.
 S7. Agent runner reads Supabase (Phase C pairing).
+
+## Addendum — D-decisions locked (Kevin, 7 Jul 2026)
+D1 entities table = as specced (§2.1). D6 computed views = as specced (§2.4). D2 mentor prompt → tenant_config key `mentor_prompt`. D9 CHANGED from the fair-use assumption: clients pay their own AI — add `tenant_config` key `anthropic_key` (encrypted at rest; Supabase Vault or pgsodium) + claude-proxy per-tenant key routing; `ai_usage_log` stays for visibility. D3 companion: manual-KPI standard → `tenant_config` key `manual_kpis` (jsonb: kpi id, value, updated_at) + onboarding seeds recurring update tasks.
