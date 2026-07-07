@@ -43,13 +43,13 @@ Live, taking money, generating leads, and delivering what we sell:
 - [x] KEVIN — Cleanse approved (7 Jul, with no-business scan + SMART pass)
 - [x] OPUS — Cleanse applied (7 Jul: 53 closed, 52 created, 16 re-dated, zero dupes verified)
 - [x] OPUS — Un-park the 4 Some Day tasks: untick the checkbox, set real future due dates (price-increase 30 Sep, Dream 100 1 Sep, Apify 15 Aug, VO3 video 15 Aug) (done when: no OD task uses Some Day; due 8 Jul) *(done 7 Jul in-session)* [AT:-]
-- [ ] KEVIN — Confirm the 6 flagged unlinked tasks + 3 RECAT candidates from the cleanse report (done when: each closed or recategorised; due 8 Jul) [AT:recVczPN4KgdRudUA]
+- [x] KEVIN — Confirm the 6 flagged unlinked tasks + 3 RECAT candidates from the cleanse report (done when: each closed or recategorised; due 8 Jul) [AT:recVczPN4KgdRudUA] *(ticked 2026-07-07, synced from Airtable)*
 - [ ] OPUS — Fix the 92 nameless invoice/AP artefact rows polluting Tasks status views (done when: zero nameless open rows + ingestion stops creating them; due 11 Jul) [AT:recZhtp6ZNnYlQRJi]
 - [ ] OPUS — Inventory every consumer of the current Airtable PAT (repo, workers, GitHub secrets, HR app chaichoong.github.io/HR, scripts, ~/.config/od) (done when: written list; due 9 Jul) [AT:recO3x3yw9KAcrLjH]
 - [ ] KEVIN — Generate a new Airtable PAT + revoke the exposed one (done when: old token dead; due 10 Jul) [AT:recDz1ljafVN1CB45]
 - [ ] OPUS — Update every PAT consumer + verify each works (done when: all green; due 10 Jul) [AT:rec8BVrJIDAjp6QY7]
 - [ ] ERICAMAE — Change the affiliate admin password + store it outside Slack (done when: new password works; due 9 Jul) [AT:rec0JrMvCKgmsi3lP]
-- [ ] KEVIN — Agree the no-secrets-in-Slack rule + alternative channel at the team meeting (done when: agreed; due 8 Jul) [AT:rec0j7ZPQl91sGRQx]
+- [x] KEVIN — Agree the no-secrets-in-Slack rule + alternative channel at the team meeting (done when: agreed; due 8 Jul) [AT:rec0j7ZPQl91sGRQx] *(ticked 2026-07-07, synced from Airtable)*
 - [ ] KEVIN — Add PROXY_SERVICE_TOKEN as a GitHub Actions secret (done when: secret exists; due 9 Jul) [1 Aug valuations run fails without it] [AT:recNhmqjkkrJQYGRM]
 - [ ] KEVIN — Add the env line to .github/workflows/monthly-valuations.yml via GitHub web UI (done when: line merged; due 9 Jul) [AT:recd4w48QR3HLhJp6]
 - [ ] KEVIN — Apply the saved auto-bump-pagever.yml diff via GitHub web UI, or grant the PAT workflow scope (done when: workflow updated; due 9 Jul) [AT:recNBCvgAQyQQnSNY]
@@ -198,9 +198,9 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [ ] KEVIN — Confirm the 1 Aug monthly-valuations run succeeded (done when: Action green; due 1 Aug) [AT:recUMjzYVDsXU0EY3]
 - [ ] KEVIN — Go/no-go review against this plan (done when: decision in Changelog; due 31 Jul) [AT:reckHAHBcDOH0JxU1]
 - [ ] ERICAMAE — Launch announcement: website banner + LinkedIn post + email to list (done when: all three live; due 1 Aug) [AT:rec5DeFwALGaHQMH2]
-- [ ] KEVIN — Resolve all critical launch-week bugs via /fix [AT:recRhajAjdshE4NqN] (done when: zero criticals; due 3 Aug)
+- [x] KEVIN — Resolve all critical launch-week bugs via /fix [AT:recRhajAjdshE4NqN] (done when: zero criticals; due 3 Aug) *(ticked 2026-07-07, synced from Airtable)*
 - [ ] KEVIN — Acquire + onboard the first paid subscriber [AT:recsqZey1t0o4BE0l] (done when: paid, provisioned, activated; due 15 Aug)
-- [ ] KEVIN+TEAM — Client #1 activation ladder complete ≤1 month (done when: Key Event logged; due 15 Sep)
+- [ ] KEVIN+TEAM — Client #1 activation ladder complete ≤1 month (done when: Key Event logged; due 15 Sep) [AT:recMjHDeP8SwBouSr]
 
 ## 12. Superseded plans (absorbed 7 Jul 2026 — kept for history, do not work from them)
 
@@ -222,3 +222,4 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-07 | Kevin, in-session | D1-D9 decided (PRODUCTISATION.md §5). D3 companion: manual KPI standard + upsell state + seeded recurring tasks. D9: clients pay own AI via per-tenant keys. Cleanse approved with no-business scan + SMART pass. Sync-automation tasks added. OPUS driver: hybrid by lane. |
 | 2026-07-07 | Cleanse applied (Claude agent, Kevin-approved) | 53 closed (commented), 52 created, 16 re-dated, 4 parked, 9 orphans linked, 3 RECAT-flagged. Zero duplicates verified. 93 open OD tasks. Finding → task: 92 nameless AP rows. Kevin's base identity = kevin@runpreneur.org.uk. |
 | 2026-07-07 | Kevin, in-session (structural change, approved) | RESTRUCTURED phases → Software-as-a-Science sections (§3-§11): foundations, product, agent fleet, onboarding, lead gen, sales, retention, metrics, launch. Gap-fill pass added 20 (NEW) tasks on the duplicate-beats-a-miss rule. NEW §5: 10 demo agents on Kevin's businesses by end July. Some Day parking reversed → real future due dates. All prior task states preserved. |
+| 2026-07-07 | Nightly sync (scripts/sync-master-plan.py) | ticked 3 from Airtable completions; pushed 1 new plan tasks to Airtable. |
