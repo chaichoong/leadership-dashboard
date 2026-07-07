@@ -31,6 +31,10 @@
     fldhDG5jDA8Tu2JyI:['gbp','num'], fld8HOlbBrXbHesoA:['last_update','date'],
     fld21HAxSawQCxICj:['account_alias','scalar'], fldqr09KqLGGYCYkC:['name','scalar'],
     fldvDKRsMRtIglykK:['business_id','link'],
+    // name-keyed aliases: the Accounts (fintable) page reads these fields by NAME
+    // (it fetches without returnFieldsByFieldId). Additive — id keys above unaffected.
+    '**GBP':['gbp','num'], '**Last Successful Update':['last_update','date'],
+    'Account Alias':['account_alias','scalar'], '**Institution':['institution','scalar'],
   }};
   M[COSTS] = { source:'costs', write:'costs', map:{
     fldS6FYfpkhu6tJG0:['name','scalar'], fld9JibXkMpTeMcxw:['expected','num'],
@@ -55,6 +59,7 @@
     fld9hm24JQUPOCoWj:['account_id','link'], fldPmAMmxwqs4SdPa:['tenancy_id','link'],
     fldGkpkVqSeiGvUGL:['cost_id','link'], fldFPmNixqHPQy4D6:['category_id','link'],
     fldQ37YsyR9r3EbkP:['split_override','num'], fld20FWX7yjM8P2Kz:['split_count','num'],
+    fldX1aFlJyzpXGhbF:['business_id','link'],   // "Business (For Reports)" — used by the P&L business filter
   }};
   M[UNITS] = { source:'v_rental_units', write:'rental_units', map:{
     fldBvqysXBm9rIm0E:['status','scalar'], fld7NBHkhjqfbcxk7:['property_name_short','lookupOne'],
