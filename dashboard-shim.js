@@ -31,6 +31,10 @@
     fldhDG5jDA8Tu2JyI:['gbp','num'], fld8HOlbBrXbHesoA:['last_update','date'],
     fld21HAxSawQCxICj:['account_alias','scalar'], fldqr09KqLGGYCYkC:['name','scalar'],
     fldvDKRsMRtIglykK:['business_id','link'],
+    // name-keyed aliases: the Accounts (fintable) page reads these fields by NAME
+    // (it fetches without returnFieldsByFieldId). Additive — id keys above unaffected.
+    '**GBP':['gbp','num'], '**Last Successful Update':['last_update','date'],
+    'Account Alias':['account_alias','scalar'], '**Institution':['institution','scalar'],
   }};
   M[COSTS] = { source:'costs', write:'costs', map:{
     fldS6FYfpkhu6tJG0:['name','scalar'], fld9JibXkMpTeMcxw:['expected','num'],
