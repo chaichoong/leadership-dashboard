@@ -146,10 +146,11 @@
 
       <div class="card">
         <h2>Feed your brain</h2>
-        <p class="hint">Drop it in. The brain files it and links it to the rest.</p>
-        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type or dictate a quick note"><button class="btn primary" onclick="toast('Coming next: drops into your brain inbox for tonight')">Add note</button></div>
-        <div class="row" style="margin-bottom:10px;"><input class="fld" id="yt" placeholder="Paste a YouTube link or transcript"><button class="btn" onclick="toast('Coming next: runs the transcript skill, actions go to Tasks')">Add video</button></div>
-        <div class="row"><input class="fld" id="doc" placeholder="Scan a document into your Drive inbox"><button class="btn" onclick="toast('Coming next: OCR and file into the right cabinet')">Add document</button></div>
+        <p class="hint">Drop it in. The brain files it tonight and links it to the rest.</p>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="note" placeholder="Type or dictate a quick note"><button class="btn primary" id="noteBtn">Add note</button></div>
+        <div class="row" style="margin-bottom:10px;"><input class="fld" id="yt" placeholder="Paste a YouTube link"><button class="btn" id="ytBtn">Add video</button></div>
+        <p class="foot" style="margin-top:2px;">Videos are watched and filed overnight. For the full implementation session on one, ask Claude directly.</p>
+        <p class="foot">Documents: scan with the Google Drive app on your phone. They land in your inbox and file themselves at 09:00.</p>
       </div>
 
       <div class="card">
@@ -241,14 +242,46 @@
         }).join('')
       : '<p class="hint">Nothing filed yet. As you feed your brain, captures show here.</p>';
 
-    // Needs your call — filing questions
+    // Needs your call — filing questions with tap-answers. A tap (or typed
+    // answer) writes back to the feed; the brain applies it tonight.
     var queries = rows.filter(function(f){ return f.Kind === 'query'; });
-    document.getElementById('queries').innerHTML = queries.length
+    var qEl = document.getElementById('queries');
+    qEl.innerHTML = queries.length
       ? queries.map(function(f){
           var link = f.DocLink ? '<a class="btn" href="' + esc(f.DocLink) + '" target="_blank" rel="noopener">Open document</a>' : '';
-          return '<div class="query"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div><div class="answers">' + link + '</div></div>';
+          if (f.Status === 'answered' || f.Answer){
+            return '<div class="query"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div><span class="resolved">Answered: ' + esc(f.Answer || '') + '. Applies tonight.</span></div>';
+          }
+          var opts = (f.Options || '').split('|').map(function(o){ return o.trim(); }).filter(Boolean);
+          var btns = opts.map(function(o){
+            return '<button class="btn" data-answer="' + esc(f._id) + '" data-val="' + esc(o) + '">' + esc(o) + '</button>';
+          }).join('');
+          var free = '<input class="fld" data-free="' + esc(f._id) + '" placeholder="Or tell it in your own words" style="min-width:180px;">' +
+                     '<button class="btn" data-answer="' + esc(f._id) + '" data-from="free">Send</button>';
+          return '<div class="query" data-qid="' + esc(f._id) + '"><div class="q"><span class="tag">' + esc(f.Category || 'Question') + '</span>' + esc(f.Text) + '</div>' +
+                 '<div class="answers">' + btns + link + '</div>' +
+                 '<div class="answers" style="margin-top:8px;">' + free + '</div></div>';
         }).join('')
       : '<p class="hint">Nothing to sort right now. Everything is filed. Questions appear here when the brain is unsure.</p>';
+    qEl.querySelectorAll('[data-answer]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-answer');
+        var val = btn.getAttribute('data-from') === 'free'
+          ? (qEl.querySelector('[data-free="' + id + '"]') || {value:''}).value.trim()
+          : btn.getAttribute('data-val');
+        if (!val) return;
+        var box = qEl.querySelector('.query[data-qid="' + id + '"]');
+        fetch('https://api.airtable.com/v0/' + BASE + '/' + TABLE + '/' + id, {
+          method: 'PATCH',
+          headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { Answer: val, Status: 'answered' }, typecast: true })
+        }).then(function(r){
+          if (r.ok){
+            box.innerHTML = '<span class="resolved">Answered: ' + esc(val) + '. Your brain learns and applies it tonight.</span>';
+          } else { toast('Could not save just now, try again'); }
+        }).catch(function(){ toast('Could not save just now, try again'); });
+      });
+    });
 
     // Sensitive — pointer + link only. You can view it; the brain never acts on it or shares it.
     var sensitive = rows.filter(function(f){ return f.Kind === 'sensitive' && f.Status !== 'resolved'; });
@@ -293,6 +326,33 @@
   }
   document.getElementById('askBtn').addEventListener('click', askBrain);
   document.getElementById('ask').addEventListener('keydown', function(e){ if (e.key === 'Enter') askBrain(); });
+
+  // Feed your brain — capture to the private inbox table; the nightly pull
+  // moves notes into the brain inbox and queues videos for transcript filing.
+  var INBOX_TABLE = 'tbliR8KkOV4SKNiIZ';
+  function capture(kind, inputId, okMsg){
+    var input = document.getElementById(inputId);
+    var text = input.value.trim();
+    if (!text) return;
+    if (!PAT){ toast('Sign in to the dashboard first'); return; }
+    if (kind === 'video' && !/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(text)){
+      toast('Paste a YouTube link'); return;
+    }
+    fetch('https://api.airtable.com/v0/' + BASE + '/' + INBOX_TABLE, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + PAT, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records: [{ fields: {
+        Text: text, Kind: kind, Submitted: new Date().toISOString(), Status: 'new'
+      } }], typecast: true })
+    }).then(function(r){
+      if (r.ok){ input.value = ''; toast(okMsg); }
+      else { toast('Could not save just now, try again'); }
+    }).catch(function(){ toast('Could not save just now, try again'); });
+  }
+  document.getElementById('noteBtn').addEventListener('click', function(){ capture('note', 'note', 'Captured. Your brain files it tonight.'); });
+  document.getElementById('note').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('noteBtn').click(); });
+  document.getElementById('ytBtn').addEventListener('click', function(){ capture('video', 'yt', 'Queued. It watches and files it tonight.'); });
+  document.getElementById('yt').addEventListener('keydown', function(e){ if (e.key === 'Enter') document.getElementById('ytBtn').click(); });
 
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
