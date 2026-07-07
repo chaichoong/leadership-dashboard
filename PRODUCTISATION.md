@@ -451,6 +451,18 @@ Hardcodes that must become per-client configuration in the Supabase build, where
 - **D8 — Site Map page.** Confirm it stays internal-only, with clients getting a simple Guides list instead.
 - **D9 — AI cost policy.** Plan Builder, Boardroom Mentor, SOP generation and valuations spend real API money per use. Fair-use within module price (recommended at current scale) or metered?
 
+### Decision outcomes (Kevin, 2026-07-07)
+
+- **D1 — DECIDED: generic entities table.** One `entities` table with a type field (customer, supplier, partner, other) + tenant_id. Day-one UI shows Customers only; the schema carries the rest.
+- **D2 — APPROVED.** Boardroom Mentor profile step in the onboarding wizard; generated per-client prompt stored in tenant_config.
+- **D3 — DECIDED: defer.** Finance module v1 ships without the generic AR-Fixed/CFV rebuild; build post-launch via the queue when a client needs it. **Companion decision — dashboard financial KPIs WITHOUT the Finance module:** finance KPI cards show an honest "Connect your numbers — Finance module" upsell state, AND manual monthly KPI entry ships as STANDARD, AND onboarding seeds recurring update tasks (weekly/monthly per KPI) in the client's Tasks & Projects so manual KPIs stay current.
+- **D4 — DECIDED: curated universal starter set** (~8-12 skills); property + personal skills excluded by default, shipped only with the Property pack or on request.
+- **D5 — DECIDED: Finance module.**
+- **D6 — DECIDED: computed views**, never persisted write-back columns.
+- **D7 — DECIDED: opinionated 1-14 standard**; client-defined labels become an Optional Extra later.
+- **D8 — CONFIRMED: internal-only**; clients get a simple Guides list.
+- **D9 — DECIDED: clients pay their own AI usage.** Each client gets their own Anthropic API key set up done-for-you at onboarding, stored per tenant; the proxy routes client tenants with the client's key. Kevin's key serves only Kevin's tenant. Per-tenant usage logging still ships from day one (visibility + support).
+
 ---
 
 *Maintenance rule: when a page's generic offer changes (feature promoted, extra enabled for all, new page added), update this file in the same commit. When the Supabase build implements a page, record the decision outcomes (D1-D9) here.*
