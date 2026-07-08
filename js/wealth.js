@@ -1154,6 +1154,7 @@ function debtCostByAcct() {
     const costs = (typeof allCosts !== 'undefined' && allCosts) ? allCosts : [];
     const map = {};
     costs.forEach(c => {
+        if (typeof isCostActive === 'function' && !isCostActive(c)) return; // only active payments count (skip paused/inactive)
         const key = debtAcctKey(getField(c, F.costName) || '');
         const amt = Number(getField(c, F.costExpected)) || 0;
         if (key && amt > 0 && map[key] == null) map[key] = amt;
@@ -1195,8 +1196,11 @@ function debtRows() {
         const rec = cardRec[nm.toLowerCase()];
         const live = wealthLiveValue(nm.toLowerCase());
         const rate = rec ? _num(getField(rec, DEBT.rate)) : null;
+        // Balance ALWAYS comes from the Accounts table (live) — never the stored figure.
         const balance = live != null ? live : (rec ? Number(getField(rec, DEBT.principal)) || 0 : 0);
-        return { id: rec ? rec.id : '', name: nm, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly: null, live: live != null, principal: balance, term: 0, start: '', flag: false };
+        // Monthly interest = balance × annual APR ÷ 12 (the rate is an annual APR).
+        const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
+        return { id: rec ? rec.id : '', name: nm, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly, live: live != null, principal: balance, term: 0, start: '', flag: false };
     });
     const otherRows = debts.filter(r => getField(r, DEBT.cls) !== 'Credit Cards').map(r => {
         const name = getField(r, DEBT.name) || '';
@@ -1206,9 +1210,10 @@ function debtRows() {
         const principal = Number(getField(r, DEBT.principal)) || 0;
         const term = Number(getField(r, DEBT.term)) || 0;
         const start = getField(r, DEBT.start) || '';
-        // Balance: loans from the snapshot; mortgages amortise (interest-only holds at principal).
+        // Balance: loans use your edited figure (Debt Terms) first, falling back to the
+        // snapshot; mortgages amortise (interest-only holds at principal).
         let balance;
-        if (cls === 'Loans') { const lb = loanBal[name.trim().toLowerCase()]; balance = lb != null ? lb : principal; }
+        if (cls === 'Loans') { const lb = loanBal[name.trim().toLowerCase()]; balance = principal > 0 ? principal : (lb != null ? lb : 0); }
         else { balance = amortisedBalance(type, principal, storedRate || 0, term, start).balance; }
         // Real monthly payment, matched by account number.
         const monthly = costByAcct[debtAcctKey(name)] != null ? costByAcct[debtAcctKey(name)] : null;
@@ -1278,7 +1283,7 @@ function renderDebtsDetail() {
             <div class="kpi-card-label" style="margin:0">Debts in detail</div>
             <button onclick="getDebtGuidance(this)" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Get pay-down guidance</button>
         </div>
-        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · payments <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} still need a rate</span>` : ''}. Monthly figures are your real payments from the Costs table; the rate is what that payment implies. &#9888; means it differs from the lender's rate, so that balance is worth checking${flagged ? ` (${flagged} flagged)` : ''}.${noPay ? ` ${noPay} debt${noPay === 1 ? '' : 's'} have no matched payment yet — set the terms by typing, dropping a screenshot, or dropping the terms document.` : ''}</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · payments <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} still need a rate</span>` : ''}. For mortgages, the monthly figure is your real payment (active costs only) and the rate is what that payment implies; &#9888; means it differs from the lender's rate, so that balance is worth checking${flagged ? ` (${flagged} flagged)` : ''}. For credit cards, the balance is live from your accounts (never overwritten) and the monthly figure is the interest at the card's annual APR. Loan balances are editable and carry forward.${noPay ? ` ${noPay} debt${noPay === 1 ? '' : 's'} have no matched payment yet — set the terms by typing, dropping a screenshot, or dropping the terms document.` : ''}</div>
         ${sections}
         <div id="wealthDebtGuidance" style="margin-top:12px"></div>
     </div>`;
@@ -1298,7 +1303,9 @@ function debtEditorHtml(r) {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:8px">
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Rate %${inp('de-rate', 'e.g. 22.9', r.rate, 'type="number" step="0.01"')}</label>
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Type<select class="de-type" style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);width:100%"><option${r.type === 'Interest-only' ? ' selected' : ''}>Interest-only</option><option${isRepay ? ' selected' : ''}>Repayment</option><option${r.cls === 'Credit Cards' ? ' selected' : ''}>Revolving</option></select></label>
-            <label style="font-size:var(--fs-xs);color:var(--text-muted)">${r.cls === 'Credit Cards' ? 'Balance £' : 'Original amount £'}${inp('de-principal', '0', r.principal || '', 'type="number" step="0.01"')}</label>
+            ${r.cls === 'Credit Cards'
+                ? `<label style="font-size:var(--fs-xs);color:var(--text-muted)">Balance (from Accounts, live)<div style="padding:5px 8px;font-size:var(--fs-sm);color:var(--text-secondary)">${escHtml(fmt0(r.balance))}</div></label>`
+                : `<label style="font-size:var(--fs-xs);color:var(--text-muted)">${r.cls === 'Loans' ? 'Current balance £' : 'Original amount £'}${inp('de-principal', '0', (r.cls === 'Loans' ? r.balance : r.principal) || '', 'type="number" step="0.01"')}</label>`}
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Term (months)${inp('de-term', 'repayment only', r.term || '', 'type="number"')}</label>
             <label style="font-size:var(--fs-xs);color:var(--text-muted)">Start date${inp('de-start', 'YYYY-MM-DD', r.start || '', 'type="date"')}</label>
         </div>
@@ -1318,7 +1325,8 @@ async function wealthSaveDebt(btn) {
     const fields = {};
     const rate = _num(val('.de-rate')); if (rate != null) fields[DEBT.rate] = rate;
     const type = val('.de-type'); if (type) fields[DEBT.type] = type;
-    const principal = _num(val('.de-principal')); if (principal != null) fields[DEBT.principal] = principal;
+    // Credit-card balances come from the Accounts table and are never stored/overwritten here.
+    const principal = _num(val('.de-principal')); if (principal != null && box.dataset.cls !== 'Credit Cards') fields[DEBT.principal] = principal;
     const term = _num(val('.de-term')); if (term != null) fields[DEBT.term] = Math.round(term);
     const start = val('.de-start'); if (start) fields[DEBT.start] = start;
     if (!Object.keys(fields).length) { if (status) { status.textContent = 'Nothing to save yet.'; } return; }
