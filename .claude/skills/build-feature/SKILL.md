@@ -411,15 +411,21 @@ If Vitest is set up in the project:
 
 If no test framework exists, skip this step and note it in the final report.
 
-### 8c. Code review
+### 8c. Independent review gate (blocking — iterate until approved)
 
-Review all changed files for:
-1. Logic bugs (off-by-one, wrong operator, missing null check)
-2. Style inconsistencies with the rest of the codebase
-3. Performance issues (N+1 queries, unnecessary re-renders, missing pagination)
-4. Accessibility gaps (missing aria attributes, broken keyboard nav)
+This is a hard gate, not a self-check. Get a fresh, independent perspective on the changed code and do not proceed to deploy until it comes back clean.
 
-Fix anything found.
+1. Run an independent review of the diff. Use the `/code-review` skill, or spawn a fresh reviewer subagent (Agent tool, `code-reviewer` or `general-purpose`) that has NOT seen the build reasoning, so it reviews the code on its own merits.
+2. The reviewer checks for:
+   - Logic bugs (off-by-one, wrong operator, missing null check)
+   - Style inconsistencies with the rest of the codebase
+   - Performance issues (N+1 queries, unnecessary re-renders, missing pagination)
+   - Accessibility gaps (missing aria attributes, broken keyboard nav)
+3. Fix every correctness finding. Then run the review AGAIN on the updated diff.
+4. Repeat until the review returns no correctness findings (a clean pass). Only then continue to the next step.
+5. If the reviewer and you disagree on a finding, surface it to Kevin rather than silently overriding it.
+
+Do not deploy on an unreviewed or failing diff. The independent approval is what lets the agent verify its own work instead of Kevin hand-checking every change.
 
 ### 8d. Security review (always run if the feature touches auth, data writes, or money)
 

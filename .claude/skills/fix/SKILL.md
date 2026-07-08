@@ -146,7 +146,18 @@ If Vitest is set up:
 
 If no test framework, skip and note it.
 
-### 4d. Pre-deploy checklist
+### 4d. Independent review gate (blocking for anything beyond a cosmetic change)
+
+Get a fresh perspective on the diff before shipping. Skip only for pure CSS/copy tweaks.
+
+1. Run `/code-review` on the diff, or spawn a fresh reviewer subagent (Agent tool) that has not seen the fix reasoning.
+2. Fix every correctness finding, then re-run the review on the updated diff.
+3. Repeat until the review returns a clean pass. Do not deploy on a failing or unreviewed diff.
+4. If you disagree with a finding, surface it to Kevin rather than overriding it silently.
+
+Keep this proportional: a one-line null-check fix needs a quick review pass, not a ceremony. A multi-file behaviour change needs a real one.
+
+### 4e. Pre-deploy checklist
 
 Quick pass (not the full build-feature checklist):
 1. No `console.log` or `debugger` left in changed code
