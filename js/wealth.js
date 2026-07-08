@@ -675,12 +675,16 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         <!-- Assets, liabilities & net worth (rolling 12 months) -->
         ${assetsHtml}
 
+        <!-- Debts in detail — per-debt rate, balance, monthly cost + AI pay-down guidance -->
+        <div id="wealthDebts" style="margin-bottom:var(--space-5)"></div>
+
     </div>`;
 
     // Cash flow reads the already-loaded transactions (sync). Buckets fetch their table.
     renderWealthCashflow();
     loadWealthBuckets();
     renderWealthPendingVals();
+    renderDebtsDetail();
 
     // Refresh + sync status + health checks — the standard bar every other tab has.
     registerWealthSyncBar(view, monthsBehind, asOf, currentLabel);
@@ -1125,6 +1129,244 @@ async function wealthValuationAction(ids, status) {
         if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
     } catch (e) {
         if (typeof showToast === 'function') showToast('Could not update the valuation — please try again', { type: 'error' });
+    }
+}
+
+// ── Debts in detail (per-debt rate, balance, monthly cost) + AI pay-down guidance ──
+// One place to see what each debt costs. Balances self-calculate: interest-only debts
+// hold at principal, repayment debts amortise (reuses amortisedBalance), credit cards
+// use the live account balance. Rates/terms are set three ways (type, screenshot, or a
+// T&Cs document the AI reads) and saved to Debt Terms, so the figures keep working from
+// then on. Reads the same Debt Terms + accounts as net worth, so no second set of numbers.
+const WEALTH_CARD_NAMES = ['American Express', 'Santander Credit Card', 'Lloyds Credit Card'];
+const _num = v => (v === '' || v == null) ? null : (isFinite(Number(v)) ? Number(v) : null);
+
+function debtRowFromRecord(r) {
+    const name = getField(r, DEBT.name) || '';
+    const cls = getField(r, DEBT.cls) || 'Loans';
+    const type = getField(r, DEBT.type) || '';
+    const rate = _num(getField(r, DEBT.rate));
+    const principal = Number(getField(r, DEBT.principal)) || 0;
+    const term = Number(getField(r, DEBT.term)) || 0;
+    const start = getField(r, DEBT.start) || '';
+    const balance = amortisedBalance(type, principal, rate || 0, term, start).balance;
+    const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
+    return { id: r.id, name, cls, type, rate, balance, monthly, live: false, principal, term, start };
+}
+
+function debtRows() {
+    const debts = (typeof _debtRecords !== 'undefined' && _debtRecords) ? _debtRecords : [];
+    // Credit-card rate rows live in Debt Terms (Class = Credit Cards), matched by name.
+    const cardRec = {};
+    debts.forEach(r => { if (getField(r, DEBT.cls) === 'Credit Cards') cardRec[(getField(r, DEBT.name) || '').trim().toLowerCase()] = r; });
+    const cardRows = WEALTH_CARD_NAMES.map(nm => {
+        const rec = cardRec[nm.toLowerCase()];
+        const live = wealthLiveValue(nm.toLowerCase());
+        const rate = rec ? _num(getField(rec, DEBT.rate)) : null;
+        const balance = live != null ? live : (rec ? Number(getField(rec, DEBT.principal)) || 0 : 0);
+        const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
+        return { id: rec ? rec.id : '', name: nm, cls: 'Credit Cards', type: 'Revolving', rate, balance, monthly, live: live != null, principal: balance, term: 0, start: '' };
+    });
+    const otherRows = debts.filter(r => getField(r, DEBT.cls) !== 'Credit Cards').map(debtRowFromRecord);
+    return cardRows.concat(otherRows);
+}
+
+function renderDebtsDetail() {
+    const el = document.getElementById('wealthDebts');
+    if (!el) return;
+    const rows = debtRows();
+    if (!rows.length) { el.innerHTML = ''; return; }
+    const CLS = ['Credit Cards', 'Loans', 'Mortgages'];
+    const totOwed = rows.reduce((s, r) => s + (r.balance || 0), 0);
+    const totMonthly = rows.reduce((s, r) => s + (r.monthly || 0), 0);
+    const missing = rows.filter(r => r.rate == null).length;
+
+    const rateCell = r => r.rate != null
+        ? `<span style="font-weight:var(--fw-semibold);color:${r.rate >= 8 ? 'var(--danger)' : r.rate >= 6 ? 'var(--warning)' : 'var(--text-primary)'}">${r.rate}%</span>`
+        : `<span style="color:var(--accent);font-size:var(--fs-xs)">set rate</span>`;
+    const editorId = r => 'de-' + (r.id || r.name.replace(/[^a-z0-9]/gi, ''));
+    const rowHtml = r => {
+        const eid = editorId(r);
+        return `<div style="border-bottom:1px solid var(--border-subtle)">
+            <div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:10px;align-items:center;padding:7px 8px;font-size:var(--fs-sm)">
+                <div style="min-width:0"><span style="color:var(--text-primary)">${escHtml(r.name)}</span> <span style="color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(r.type || '')}${r.live ? ' · live' : ''}</span></div>
+                <div style="text-align:right;white-space:nowrap;color:var(--text-primary)">${escHtml(fmt0(r.balance))}</div>
+                <div style="text-align:right;white-space:nowrap;width:64px">${rateCell(r)}</div>
+                <div style="text-align:right;white-space:nowrap;width:96px;color:var(--text-secondary)">${r.monthly != null ? escHtml(fmt0(r.monthly)) + '/mo' : '—'}</div>
+                <button onclick="wealthToggleDebtEditor('${eid}')" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-xs);color:var(--text-secondary);padding:3px 9px">Edit</button>
+            </div>
+            <div id="${eid}" style="display:none;padding:4px 8px 12px">${debtEditorHtml(r)}</div>
+        </div>`;
+    };
+    const sections = CLS.map(cls => {
+        const g = rows.filter(r => r.cls === cls).sort((a, b) => (b.rate == null ? -1 : b.rate) - (a.rate == null ? -1 : a.rate));
+        if (!g.length) return '';
+        const sub = g.reduce((s, r) => s + (r.balance || 0), 0);
+        return `<div style="margin-top:12px">
+            <div style="display:flex;justify-content:space-between;font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;padding:0 8px 4px">
+                <span>${escHtml(cls)}</span><span>${escHtml(fmt0(sub))}</span>
+            </div>${g.map(rowHtml).join('')}</div>`;
+    }).join('');
+
+    el.innerHTML = `<div class="kpi-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+            <div class="kpi-card-label" style="margin:0">Debts in detail</div>
+            <button onclick="getDebtGuidance(this)" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Get pay-down guidance</button>
+        </div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · interest <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} debt${missing === 1 ? '' : 's'} still need a rate</span>` : ''}. Edit a debt to set its rate by typing, dropping a screenshot, or dropping the terms document.</div>
+        ${sections}
+        <div id="wealthDebtGuidance" style="margin-top:12px"></div>
+    </div>`;
+}
+
+function wealthToggleDebtEditor(eid) {
+    const el = document.getElementById(eid);
+    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+// Inline editor for one debt: manual fields + drag/clip a screenshot or terms doc.
+function debtEditorHtml(r) {
+    const inp = (cls, ph, val, extra) => `<input class="${cls}" placeholder="${escHtml(ph)}" value="${val == null ? '' : escHtml(String(val))}" ${extra || ''} style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);width:100%">`;
+    const isRepay = r.type === 'Repayment';
+    return `<div class="debt-editor" data-id="${escHtml(r.id)}" data-name="${escHtml(r.name)}" data-cls="${escHtml(r.cls)}"
+        ondragover="event.preventDefault();this.style.background='var(--bg-surface-2)'" ondragleave="this.style.background=''" ondrop="wealthDebtDrop(event,this)">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:8px">
+            <label style="font-size:var(--fs-xs);color:var(--text-muted)">Rate %${inp('de-rate', 'e.g. 22.9', r.rate, 'type="number" step="0.01"')}</label>
+            <label style="font-size:var(--fs-xs);color:var(--text-muted)">Type<select class="de-type" style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);width:100%"><option${r.type === 'Interest-only' ? ' selected' : ''}>Interest-only</option><option${isRepay ? ' selected' : ''}>Repayment</option><option${r.cls === 'Credit Cards' ? ' selected' : ''}>Revolving</option></select></label>
+            <label style="font-size:var(--fs-xs);color:var(--text-muted)">${r.cls === 'Credit Cards' ? 'Balance £' : 'Original amount £'}${inp('de-principal', '0', r.principal || '', 'type="number" step="0.01"')}</label>
+            <label style="font-size:var(--fs-xs);color:var(--text-muted)">Term (months)${inp('de-term', 'repayment only', r.term || '', 'type="number"')}</label>
+            <label style="font-size:var(--fs-xs);color:var(--text-muted)">Start date${inp('de-start', 'YYYY-MM-DD', r.start || '', 'type="date"')}</label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button onclick="wealthSaveDebt(this)" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Save</button>
+            <button onclick="wealthReadDebtDoc(this)" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:6px 12px;font-size:var(--fs-sm);cursor:pointer;color:var(--text-secondary)">📎 Read screenshot / document</button>
+            <span class="de-status" style="font-size:var(--fs-xs);color:var(--text-muted)">Drop a screenshot or terms PDF here, or type the figures.</span>
+        </div>
+    </div>`;
+}
+
+async function wealthSaveDebt(btn) {
+    const box = btn.closest('.debt-editor');
+    if (!box) return;
+    const status = box.querySelector('.de-status');
+    const val = sel => { const e = box.querySelector(sel); return e ? e.value.trim() : ''; };
+    const fields = {};
+    const rate = _num(val('.de-rate')); if (rate != null) fields[DEBT.rate] = rate;
+    const type = val('.de-type'); if (type) fields[DEBT.type] = type;
+    const principal = _num(val('.de-principal')); if (principal != null) fields[DEBT.principal] = principal;
+    const term = _num(val('.de-term')); if (term != null) fields[DEBT.term] = Math.round(term);
+    const start = val('.de-start'); if (start) fields[DEBT.start] = start;
+    if (!Object.keys(fields).length) { if (status) { status.textContent = 'Nothing to save yet.'; } return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        const id = box.dataset.id;
+        let resp;
+        if (id) {
+            resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.debtTerms}`, {
+                method: 'PATCH', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: [{ id, fields }], typecast: true }),
+            });
+        } else {
+            // New record — needed for a credit card whose rate is set for the first time.
+            fields[DEBT.name] = box.dataset.name;
+            fields[DEBT.cls] = box.dataset.cls;
+            resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.debtTerms}`, {
+                method: 'POST', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: [{ fields }], typecast: true }),
+            });
+        }
+        if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        if (typeof showToast === 'function') showToast('Debt updated', { type: 'success' });
+        _debtPromise = null; _debtRecords = null;
+        try { _debtRecords = await airtableFetch(TABLES.debtTerms); } catch (e) { /* render handles empty */ }
+        const el = document.getElementById('tab-wealth');
+        if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
+    } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+        if (status) { status.textContent = 'Could not save — try again.'; status.style.color = 'var(--danger)'; }
+    }
+}
+
+function wealthDebtDrop(event, box) {
+    event.preventDefault();
+    box.style.background = '';
+    const file = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
+    if (file) wealthExtractDebtTerms(box, file);
+}
+
+function wealthReadDebtDoc(btn) {
+    const box = btn.closest('.debt-editor');
+    if (!box) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp,application/pdf';
+    input.onchange = () => { if (input.files && input.files[0]) wealthExtractDebtTerms(box, input.files[0]); };
+    input.click();
+}
+
+const DEBT_EXTRACT_PROMPT = 'You are reading a loan, mortgage, or credit-card statement or terms document. Extract these fields and respond with ONLY a JSON object, no other text: {"rate": <annual interest rate as a number in percent, or null>, "type": <"Interest-only" or "Repayment" or "Revolving" or null>, "principal": <the original loan amount or current balance in GBP as a number, or null>, "term": <full term in months as a number, or null>, "start": <start date as YYYY-MM-DD, or null>}. Use null for any field not clearly stated. Numbers only, no commas or currency symbols.';
+
+async function wealthExtractDebtTerms(box, file) {
+    const status = box.querySelector('.de-status');
+    const setS = (t, c) => { if (status) { status.textContent = t; status.style.color = c || 'var(--text-muted)'; } };
+    const okTypes = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf'];
+    if (!okTypes.includes(file.type)) { setS('Use a PNG, JPG or PDF.', 'var(--danger)'); return; }
+    if (file.size > 8 * 1024 * 1024) { setS('File too big (8MB max).', 'var(--danger)'); return; }
+    setS('Reading…');
+    try {
+        const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+        const b64 = String(dataUrl).split(',')[1];
+        if (!b64) { setS('Could not read the file — enter manually.', 'var(--danger)'); return; }
+        const block = (file.type === 'application/pdf')
+            ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+            : { type: 'image', source: { type: 'base64', media_type: file.type, data: b64 } };
+        const resp = await fetch(AI_PROXY, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, messages: [{ role: 'user', content: [block, { type: 'text', text: DEBT_EXTRACT_PROMPT }] }] }),
+        });
+        if (!resp.ok) { setS('Could not read — enter manually.', 'var(--danger)'); return; }
+        const data = await resp.json();
+        let text = '';
+        (data.content || []).forEach(b => { if (b && b.type === 'text') text += b.text; });
+        const m = text.match(/\{[\s\S]*\}/);
+        if (!m) { setS('No terms found — enter manually.', 'var(--danger)'); return; }
+        const got = JSON.parse(m[0]);
+        const put = (sel, v) => { if (v == null) return; const e = box.querySelector(sel); if (e) { e.value = v; e.style.borderColor = 'var(--success)'; } };
+        put('.de-rate', got.rate);
+        put('.de-principal', got.principal);
+        put('.de-term', got.term);
+        put('.de-start', got.start);
+        if (got.type) { const t = box.querySelector('.de-type'); if (t) t.value = got.type; }
+        setS('Read it — check the figures, then Save.', 'var(--success)');
+    } catch (e) {
+        setS('Could not read — enter manually.', 'var(--danger)');
+    }
+}
+
+async function getDebtGuidance(btn) {
+    const out = document.getElementById('wealthDebtGuidance');
+    if (!out) return;
+    const rows = debtRows();
+    const known = rows.filter(r => r.rate != null && r.balance > 0);
+    if (!known.length) { out.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">Set a rate on at least one debt first.</div>`; return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+    out.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)"><span class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span>Reading your debts…</div>`;
+    const list = rows.map(r => `- ${r.name} (${r.cls}): balance £${Math.round(r.balance)}, rate ${r.rate == null ? 'UNKNOWN' : r.rate + '%'}, ${r.monthly != null ? '£' + Math.round(r.monthly) + '/mo interest' : 'monthly cost unknown'}`).join('\n');
+    const prompt = `You are a UK wealth adviser. Here are the client's debts:\n${list}\n\nAssume long-run investment returns of about 5-7% a year after tax. In plain, direct English (UK), and in under 180 words:\n1. Name the debts that cost MORE than investing would return (pay these down first) and the order to clear them.\n2. Name the debts cheap enough that investing the money likely beats overpaying them.\n3. Give one clear next action.\nName any debt whose rate is UNKNOWN and say it needs a rate before it can be judged. Be specific with the debt names. No preamble, no disclaimer.`;
+    try {
+        const resp = await fetch(AI_PROXY, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+        });
+        if (!resp.ok) throw new Error('proxy ' + resp.status);
+        const data = await resp.json();
+        let text = '';
+        (data.content || []).forEach(b => { if (b && b.type === 'text') text += b.text; });
+        out.innerHTML = `<div style="background:var(--accent-soft);border-radius:var(--radius-md);padding:12px 14px;font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;white-space:pre-wrap">${escHtml(text.trim())}</div>`;
+    } catch (e) {
+        out.innerHTML = `<div style="color:var(--danger);font-size:var(--fs-sm)">Could not get guidance right now — please try again.</div>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Get pay-down guidance'; }
     }
 }
 
