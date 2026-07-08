@@ -806,6 +806,11 @@ function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
                         if (pf.rows.length) { byClass['Real Estate'] = pf.totalValue; byClass['Mortgages'] = pf.totalMortAll; }
                     } catch (e) { /* compare against the snapshot figures instead */ }
                 }
+                // Mirror the loan sync the view applies (editable Debt Terms balances).
+                try {
+                    const sl = debtRows().filter(r => r.cls === 'Loans');
+                    if (sl.length) byClass['Loans'] = sl.reduce((s, r) => s + (r.balance || 0), 0);
+                } catch (e) { /* compare against the snapshot loans instead */ }
                 const rawAssets = NW_ASSET_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const rawLiabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const assetDiff = rawAssets - view.assets;
