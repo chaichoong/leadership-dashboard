@@ -142,6 +142,84 @@ function wealthLiveValue(name) {
     return isNaN(v) ? null : Math.abs(v);
 }
 
+// Live cash / credit-card items straight from the Accounts table, by the "Net Worth
+// Class" tick (Cash | Credit Card). Balance is live (magnitude — cards store "owed"
+// as a positive). This is the single source for what counts, replacing the old
+// hard-coded name lists. Tick/untick an account and it appears/disappears here.
+function netWorthAccounts(cls) {
+    const accts = (typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [];
+    return accts
+        .filter(a => getField(a, F.accNetWorthClass) === cls)
+        .map(a => ({ name: getField(a, F.accountAlias) || '(account)', amount: Math.abs(Number(getField(a, F.accGBP)) || 0), id: a.id }))
+        .sort((x, y) => y.amount - x.amount);
+}
+
+// Manage which accounts count in net worth, and as what. One row per account with a
+// Cash / Credit card / Not counted selector; the choice writes straight to the
+// Accounts table (Net Worth Class), so cash and cards update the moment you change it.
+function openAccountManager() {
+    const el = document.getElementById('tab-wealth');
+    if (!el) return;
+    const accts = ((typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [])
+        .filter(a => getField(a, F.accountAlias))
+        .slice().sort((a, b) => Math.abs(Number(getField(b, F.accGBP)) || 0) - Math.abs(Number(getField(a, F.accGBP)) || 0));
+    const rowHtml = a => {
+        const name = getField(a, F.accountAlias) || '(account)';
+        const bal = Math.abs(Number(getField(a, F.accGBP)) || 0);
+        const cur = getField(a, F.accNetWorthClass) || '';
+        const opt = v => `<option value="${v}"${cur === v ? ' selected' : ''}>${v || 'Not counted'}</option>`;
+        return `<div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border-subtle);font-size:var(--fs-sm)">
+            <span style="color:var(--text-primary);min-width:0">${escHtml(name)}</span>
+            <span style="text-align:right;color:var(--text-secondary);white-space:nowrap">${escHtml(fmt0(bal))}</span>
+            <select onchange="setAccountClass('${a.id}', this.value)" style="padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">${opt('')}${opt('Cash')}${opt('Credit Card')}</select>
+        </div>`;
+    };
+    el.innerHTML = `<div style="max-width:720px;margin:0 auto">
+        <div style="margin-bottom:8px"><button onclick="renderWealthTab()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);padding:0">&larr; Back to net worth</button></div>
+        <div class="kpi-card">
+            <div class="kpi-card-label" style="margin-bottom:4px">Which accounts count in net worth</div>
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Set each account to Cash, Credit Card, or Not counted. Balances stay live from the account, so you never type a figure. Changes save instantly. Sorted by balance.</div>
+            <div style="max-height:60vh;overflow-y:auto">${accts.map(rowHtml).join('')}</div>
+        </div>
+    </div>`;
+}
+
+async function setAccountClass(id, cls) {
+    const acc = ((typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : []).find(a => a.id === id);
+    try {
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.accounts}`, {
+            method: 'PATCH', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: [{ id, fields: { [F.accNetWorthClass]: cls || null } }], typecast: true }),
+        });
+        if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        if (acc) { acc.fields = acc.fields || {}; acc.fields[F.accNetWorthClass] = cls || null; } // keep the local cache in step
+        if (typeof showToast === 'function') showToast(cls ? `Counted as ${cls}` : 'Not counted', { type: 'success' });
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not save — try again', { type: 'error' });
+    }
+}
+
+// Add a new loan to Debts in detail. Creates a Debt Terms row; set its balance and
+// rate in the row's editor afterwards (interest applies from the balance you give).
+async function wealthAddLoan() {
+    const name = (typeof prompt === 'function') ? prompt('Name of the loan?') : '';
+    if (!name || !name.trim()) return;
+    try {
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.debtTerms}`, {
+            method: 'POST', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: [{ fields: { [DEBT.name]: name.trim(), [DEBT.cls]: 'Loans', [DEBT.type]: 'Repayment' } }], typecast: true }),
+        });
+        if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        if (typeof showToast === 'function') showToast('Loan added — set its balance and rate', { type: 'success' });
+        _debtPromise = null; _debtRecords = null;
+        try { _debtRecords = await airtableFetch(TABLES.debtTerms); } catch (e) { /* render handles empty */ }
+        const el = document.getElementById('tab-wealth');
+        if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not add the loan — try again', { type: 'error' });
+    }
+}
+
 const WEALTH_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const WEALTH_CLASS_ORDER = ['Cash','Real Estate','Investments','Businesses','Credit Cards','Loans','Mortgages'];
 const WEALTH_LIVE_CLASSES = ['Cash','Credit Cards'];
@@ -472,9 +550,17 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const syncedLoanItems = debtRows().filter(r => r.cls === 'Loans').map(r => ({ name: r.name, amount: r.balance }));
     if (syncedLoanItems.length) {
         view.byClass['Loans'] = syncedLoanItems.reduce((s, i) => s + (i.amount || 0), 0);
-        view.liabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (view.byClass[c] || 0), 0);
-        view.net = view.assets - view.liabilities;
     }
+    // Cash + credit cards: live from the Accounts you've ticked (Net Worth Class).
+    // Falls back to the snapshot only if nothing is ticked yet (so it never blanks out).
+    const cashItems = netWorthAccounts('Cash');
+    const cardItems = netWorthAccounts('Credit Card');
+    if (cashItems.length) view.byClass['Cash'] = cashItems.reduce((s, i) => s + i.amount, 0);
+    if (cardItems.length) view.byClass['Credit Cards'] = cardItems.reduce((s, i) => s + i.amount, 0);
+    // Recompute the roll-ups after the loan/cash/card overrides.
+    view.assets = NW_ASSET_CLASSES.reduce((s, c) => s + (view.byClass[c] || 0), 0);
+    view.liabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (view.byClass[c] || 0), 0);
+    view.net = view.assets - view.liabilities;
     // Only show a month-on-month delta when NOT overriding with live data — comparing
     // a live latest against a snapshot prev would be misleading.
     const netChange = (prev && !livePortfolio) ? view.net - prev.net : null;
@@ -588,14 +674,14 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const totalVals = pick => alKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === alLast ? pick(view) : null; });
     const alSections = [
         { header: 'Assets', rows: [
-            alRow('Cash', 'Cash', snapItems('Cash'), true),
+            alRow('Cash', 'Cash', cashItems.length ? cashItems : snapItems('Cash'), true),
             alRow('Real Estate', 'Real Estate', reItems, true),
             alRow('Investments', 'Investments', snapItems('Investments'), true),
             alRow('Businesses', 'Businesses', snapItems('Businesses'), true),
             { label: 'Total assets', goodUp: true, bold: true, border: '1px solid var(--border-default)', values: totalVals(p => p.assets) },
         ] },
         { header: 'Liabilities', rows: [
-            alRow('Credit Cards', 'Credit Cards', snapItems('Credit Cards'), false),
+            alRow('Credit Cards', 'Credit Cards', cardItems.length ? cardItems : snapItems('Credit Cards'), false),
             alRow('Loans', 'Loans', syncedLoanItems.length ? syncedLoanItems : snapItems('Loans'), false),
             alRow('Mortgages', 'Mortgages', mortItems, false),
             { label: 'Total liabilities', goodUp: false, bold: true, border: '1px solid var(--border-default)', values: totalVals(p => p.liabilities) },
@@ -684,8 +770,9 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         <!-- Assets, liabilities & net worth (rolling 12 months) -->
         ${assetsHtml}
 
-        <div style="margin:-8px 0 var(--space-5)">
+        <div style="margin:-8px 0 var(--space-5);display:flex;gap:8px;flex-wrap:wrap">
             <button onclick="openWealthUpdate()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:7px 14px;font-size:var(--fs-sm);color:var(--text-secondary);cursor:pointer">&#9998; Update investments &amp; businesses</button>
+            <button onclick="openAccountManager()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:7px 14px;font-size:var(--fs-sm);color:var(--text-secondary);cursor:pointer">&#9881; Which accounts count</button>
         </div>
 
         <!-- Debts in detail — per-debt rate, balance, monthly cost + AI pay-down guidance -->
@@ -714,8 +801,8 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             });
             // Cash + cards: live per named account, falling back to last snapshot if not mapped.
             const liveClassItems = cls => (latest.items[cls] || []).map(it => { const lv = wealthLiveValue(it.name); return { name: it.name, amount: (lv != null ? lv : it.amount) }; });
-            add('Cash', liveClassItems('Cash'));
-            add('Credit Cards', liveClassItems('Credit Cards'));
+            add('Cash', cashItems.length ? cashItems : liveClassItems('Cash'));
+            add('Credit Cards', cardItems.length ? cardItems : liveClassItems('Credit Cards'));
             add('Real Estate', reItems);                 // latest approved valuations
             add('Mortgages', mortItems);                 // amortised (incl. 17 Newington)
             add('Investments', snapItems('Investments')); // carried forward
@@ -811,6 +898,9 @@ function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
                     const sl = debtRows().filter(r => r.cls === 'Loans');
                     if (sl.length) byClass['Loans'] = sl.reduce((s, r) => s + (r.balance || 0), 0);
                 } catch (e) { /* compare against the snapshot loans instead */ }
+                // Mirror the live cash/card override (Accounts ticked as Cash / Credit Card).
+                const mc = netWorthAccounts('Cash'); if (mc.length) byClass['Cash'] = mc.reduce((s, i) => s + i.amount, 0);
+                const md = netWorthAccounts('Credit Card'); if (md.length) byClass['Credit Cards'] = md.reduce((s, i) => s + i.amount, 0);
                 const rawAssets = NW_ASSET_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const rawLiabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const assetDiff = rawAssets - view.assets;
@@ -1210,15 +1300,15 @@ function debtRows() {
     // Credit-card rate rows live in Debt Terms (Class = Credit Cards), matched by name.
     const cardRec = {};
     debts.forEach(r => { if (getField(r, DEBT.cls) === 'Credit Cards') cardRec[(getField(r, DEBT.name) || '').trim().toLowerCase()] = r; });
-    const cardRows = WEALTH_CARD_NAMES.map(nm => {
-        const rec = cardRec[nm.toLowerCase()];
-        const live = wealthLiveValue(nm.toLowerCase());
+    // Cards = the Accounts you've ticked as "Credit Card" (balance live from the account),
+    // matched to a Debt Terms row by name for the rate.
+    const cardRows = netWorthAccounts('Credit Card').map(acc => {
+        const rec = cardRec[acc.name.trim().toLowerCase()];
         const rate = rec ? _num(getField(rec, DEBT.rate)) : null;
-        // Balance ALWAYS comes from the Accounts table (live) — never the stored figure.
-        const balance = live != null ? live : (rec ? Number(getField(rec, DEBT.principal)) || 0 : 0);
+        const balance = acc.amount; // live from the Accounts table — never the stored figure
         // Monthly interest = balance × annual APR ÷ 12 (the rate is an annual APR).
         const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
-        return { id: rec ? rec.id : '', name: nm, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly, live: live != null, principal: balance, term: 0, start: '', flag: false };
+        return { id: rec ? rec.id : '', name: acc.name, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly, live: true, principal: balance, term: 0, start: '', flag: false };
     });
     const otherRows = debts.filter(r => getField(r, DEBT.cls) !== 'Credit Cards').map(r => {
         const name = getField(r, DEBT.name) || '';
@@ -1299,7 +1389,10 @@ function renderDebtsDetail() {
     el.innerHTML = `<div class="kpi-card">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px">
             <div class="kpi-card-label" style="margin:0">Debts in detail</div>
-            <button onclick="getDebtGuidance(this)" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Get pay-down guidance</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button onclick="wealthAddLoan()" style="background:none;border:1px solid var(--border-default);color:var(--text-secondary);border-radius:var(--radius-md);padding:6px 12px;font-size:var(--fs-sm);cursor:pointer">+ Add loan</button>
+                <button onclick="getDebtGuidance(this)" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Get pay-down guidance</button>
+            </div>
         </div>
         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · payments <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} still need a rate</span>` : ''}. For mortgages, the monthly figure is your real payment (active costs only) and the rate is what that payment implies; &#9888; means it differs from the lender's rate, so that balance is worth checking${flagged ? ` (${flagged} flagged)` : ''}. For credit cards, the balance is live from your accounts (never overwritten) and the monthly figure is the interest at the card's annual APR. Loan balances are editable and carry forward.${noPay ? ` ${noPay} debt${noPay === 1 ? '' : 's'} have no matched payment yet — set the terms by typing, dropping a screenshot, or dropping the terms document.` : ''}</div>
         ${sections}
