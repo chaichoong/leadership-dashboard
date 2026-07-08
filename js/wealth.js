@@ -272,6 +272,7 @@ function openWealthUpdate() {
         'Credit Cards': 'live from accounts',
         'Real Estate': 'managed in Operations → Properties',
         'Mortgages': 'calculated from loan terms',
+        'Loans': 'managed in Debts in detail',
     };
     // Live per-property figures so read-only real estate + mortgages match the matrix
     // and the Operations Properties tab exactly (same Property Valuations source).
@@ -301,8 +302,8 @@ function openWealthUpdate() {
     el.innerHTML = `<div style="max-width:720px;margin:0 auto">
         <div style="margin-bottom:8px"><button onclick="renderWealthTab()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--fs-sm);padding:0">&larr; Back to net worth</button></div>
         <div class="kpi-card">
-            <div class="kpi-card-label" style="margin-bottom:4px">Correct a figure &middot; ${escHtml(curMonth)} ${escHtml(curYear)}</div>
-            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Your figures update automatically each month, so there is nothing you need to do here routinely. Use this only to correct a figure you know is wrong. Cash, cards, real estate and mortgages are managed by their own source and shown read only (edit a property value in Operations, Properties so both pages always agree). You can still correct a loan, business or investment balance below, drag a statement or screenshot onto a row to read it, use "+ Add" for something new, or &times; to drop what you have cleared.</div>
+            <div class="kpi-card-label" style="margin-bottom:4px">Update investments &amp; businesses &middot; ${escHtml(curMonth)} ${escHtml(curYear)}</div>
+            <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Update your investments and businesses here each month — drag a statement or screenshot onto a row to read the figure, type it in, use "+ Add" for something new, or &times; to drop what you have cleared. Anything you do not change rolls forward. Everything else is automatic or managed elsewhere and shown read only: cash and cards are live from accounts, real estate from Operations, Properties, mortgages from loan terms, and loans in Debts in detail.</div>
             ${alreadySaved ? `<div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(curMonth)} ${escHtml(curYear)} already has a saved snapshot. Editing an existing month is coming next; saving now would duplicate it, so it is disabled.</div>` : ''}
             <div id="wealthUpdateError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin:8px 0"></div>
             ${rowsHtml}
@@ -466,6 +467,14 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             }
         } catch (e) { /* fall back to snapshot figures */ }
     }
+    // Sync the Loans class with the editable Debt Terms balances used in "Debts in detail"
+    // (your typed figure wins, else the snapshot), so net worth and the debt table agree.
+    const syncedLoanItems = debtRows().filter(r => r.cls === 'Loans').map(r => ({ name: r.name, amount: r.balance }));
+    if (syncedLoanItems.length) {
+        view.byClass['Loans'] = syncedLoanItems.reduce((s, i) => s + (i.amount || 0), 0);
+        view.liabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (view.byClass[c] || 0), 0);
+        view.net = view.assets - view.liabilities;
+    }
     // Only show a month-on-month delta when NOT overriding with live data — comparing
     // a live latest against a snapshot prev would be misleading.
     const netChange = (prev && !livePortfolio) ? view.net - prev.net : null;
@@ -587,7 +596,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         ] },
         { header: 'Liabilities', rows: [
             alRow('Credit Cards', 'Credit Cards', snapItems('Credit Cards'), false),
-            alRow('Loans', 'Loans', snapItems('Loans'), false),
+            alRow('Loans', 'Loans', syncedLoanItems.length ? syncedLoanItems : snapItems('Loans'), false),
             alRow('Mortgages', 'Mortgages', mortItems, false),
             { label: 'Total liabilities', goodUp: false, bold: true, border: '1px solid var(--border-default)', values: totalVals(p => p.liabilities) },
         ] },
@@ -675,6 +684,10 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         <!-- Assets, liabilities & net worth (rolling 12 months) -->
         ${assetsHtml}
 
+        <div style="margin:-8px 0 var(--space-5)">
+            <button onclick="openWealthUpdate()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:7px 14px;font-size:var(--fs-sm);color:var(--text-secondary);cursor:pointer">&#9998; Update investments &amp; businesses</button>
+        </div>
+
         <!-- Debts in detail — per-debt rate, balance, monthly cost + AI pay-down guidance -->
         <div id="wealthDebts" style="margin-bottom:var(--space-5)"></div>
 
@@ -707,7 +720,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
             add('Mortgages', mortItems);                 // amortised (incl. 17 Newington)
             add('Investments', snapItems('Investments')); // carried forward
             add('Businesses', snapItems('Businesses'));   // carried forward
-            add('Loans', snapItems('Loans'));             // carried forward
+            add('Loans', syncedLoanItems.length ? syncedLoanItems : snapItems('Loans')); // synced editable balances
             return out;
         });
     }
