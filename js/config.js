@@ -324,6 +324,9 @@
         // Accounts
         accGBP:           'fldhDG5jDA8Tu2JyI',
         accLastUpdate:    'fld8HOlbBrXbHesoA',
+        accNetWorthClass: 'fld8MHoybEal88D0Z',  // Net Worth Class (singleSelect): Cash | Credit Card | blank=excluded
+        propInclude:      'flddayDb0932Mk8uA',  // Properties: Include in Net Worth (checkbox)
+        bizInclude:       'fldrAYgb6aYS1zTSr',  // Businesses: Include in Net Worth (checkbox)
         // Costs
         costName:         'fldS6FYfpkhu6tJG0',
         costExpected:     'fld9JibXkMpTeMcxw',
