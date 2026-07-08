@@ -1141,21 +1141,53 @@ async function wealthValuationAction(ids, status) {
 const WEALTH_CARD_NAMES = ['American Express', 'Santander Credit Card', 'Lloyds Credit Card'];
 const _num = v => (v === '' || v == null) ? null : (isFinite(Number(v)) ? Number(v) : null);
 
-function debtRowFromRecord(r) {
-    const name = getField(r, DEBT.name) || '';
-    const cls = getField(r, DEBT.cls) || 'Loans';
-    const type = getField(r, DEBT.type) || '';
-    const rate = _num(getField(r, DEBT.rate));
-    const principal = Number(getField(r, DEBT.principal)) || 0;
-    const term = Number(getField(r, DEBT.term)) || 0;
-    const start = getField(r, DEBT.start) || '';
-    const balance = amortisedBalance(type, principal, rate || 0, term, start).balance;
-    const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
-    return { id: r.id, name, cls, type, rate, balance, monthly, live: false, principal, term, start };
+// Account number = the trailing 6+ alphanumeric token of a debt/cost name, e.g.
+// "Kent Reliance - 55EP - 70016005" → "70016005". This joins a Debt Terms record to
+// its real monthly payment in the Costs table (both carry the same account number).
+function debtAcctKey(name) {
+    const m = String(name || '').match(/([A-Za-z0-9]{6,})\s*$/);
+    return m ? m[1].toLowerCase() : '';
+}
+
+// account number → real monthly payment (Costs table, expected amount). First match wins.
+function debtCostByAcct() {
+    const costs = (typeof allCosts !== 'undefined' && allCosts) ? allCosts : [];
+    const map = {};
+    costs.forEach(c => {
+        const key = debtAcctKey(getField(c, F.costName) || '');
+        const amt = Number(getField(c, F.costExpected)) || 0;
+        if (key && amt > 0 && map[key] == null) map[key] = amt;
+    });
+    return map;
+}
+
+// Loan balances come from the latest net worth snapshot (Loans class) where the
+// pre-entered figures live — Debt Terms holds the loan names but not their balances.
+function debtLoanBalances() {
+    try {
+        const periods = computeNetWorth((typeof _wealthRecords !== 'undefined' && _wealthRecords) ? _wealthRecords : []);
+        const latest = periods[periods.length - 1];
+        const m = {};
+        ((latest && latest.items && latest.items['Loans']) || []).forEach(it => { if (it.name) m[it.name.trim().toLowerCase()] = it.amount; });
+        return m;
+    } catch (e) { return {}; }
+}
+
+// The annual rate a repayment schedule implies, from its real monthly payment, current
+// balance and remaining term: payment = balance·i / (1−(1+i)^−rem). Binary search on i.
+function solveRepayRate(payment, balance, remMonths) {
+    if (!(payment > 0) || !(balance > 0) || !(remMonths > 0)) return null;
+    const pay = i => i === 0 ? balance / remMonths : balance * i / (1 - Math.pow(1 + i, -remMonths));
+    let lo = 0, hi = 0.40 / 12;
+    if (pay(hi) < payment) return null; // implies > 40% a year — implausible, leave unknown
+    for (let k = 0; k < 60; k++) { const mid = (lo + hi) / 2; if (pay(mid) < payment) lo = mid; else hi = mid; }
+    return (lo + hi) / 2 * 12 * 100;
 }
 
 function debtRows() {
     const debts = (typeof _debtRecords !== 'undefined' && _debtRecords) ? _debtRecords : [];
+    const costByAcct = debtCostByAcct();
+    const loanBal = debtLoanBalances();
     // Credit-card rate rows live in Debt Terms (Class = Credit Cards), matched by name.
     const cardRec = {};
     debts.forEach(r => { if (getField(r, DEBT.cls) === 'Credit Cards') cardRec[(getField(r, DEBT.name) || '').trim().toLowerCase()] = r; });
@@ -1164,10 +1196,37 @@ function debtRows() {
         const live = wealthLiveValue(nm.toLowerCase());
         const rate = rec ? _num(getField(rec, DEBT.rate)) : null;
         const balance = live != null ? live : (rec ? Number(getField(rec, DEBT.principal)) || 0 : 0);
-        const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
-        return { id: rec ? rec.id : '', name: nm, cls: 'Credit Cards', type: 'Revolving', rate, balance, monthly, live: live != null, principal: balance, term: 0, start: '' };
+        return { id: rec ? rec.id : '', name: nm, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly: null, live: live != null, principal: balance, term: 0, start: '', flag: false };
     });
-    const otherRows = debts.filter(r => getField(r, DEBT.cls) !== 'Credit Cards').map(debtRowFromRecord);
+    const otherRows = debts.filter(r => getField(r, DEBT.cls) !== 'Credit Cards').map(r => {
+        const name = getField(r, DEBT.name) || '';
+        const cls = getField(r, DEBT.cls) || 'Loans';
+        const type = getField(r, DEBT.type) || '';
+        const storedRate = _num(getField(r, DEBT.rate));
+        const principal = Number(getField(r, DEBT.principal)) || 0;
+        const term = Number(getField(r, DEBT.term)) || 0;
+        const start = getField(r, DEBT.start) || '';
+        // Balance: loans from the snapshot; mortgages amortise (interest-only holds at principal).
+        let balance;
+        if (cls === 'Loans') { const lb = loanBal[name.trim().toLowerCase()]; balance = lb != null ? lb : principal; }
+        else { balance = amortisedBalance(type, principal, storedRate || 0, term, start).balance; }
+        // Real monthly payment, matched by account number.
+        const monthly = costByAcct[debtAcctKey(name)] != null ? costByAcct[debtAcctKey(name)] : null;
+        // Rate DERIVED from the real payment: interest-only = payment×12÷balance; repayment solved.
+        let rate = null;
+        if (monthly != null && balance > 0) {
+            if (type === 'Repayment') {
+                const s = start ? new Date(start) : null;
+                const elapsed = (s && !isNaN(s.getTime())) ? Math.max(0, (new Date().getFullYear() - s.getFullYear()) * 12 + (new Date().getMonth() - s.getMonth())) : 0;
+                rate = solveRepayRate(monthly, balance, term > 0 ? Math.max(1, term - elapsed) : 0);
+            } else {
+                rate = monthly * 12 / balance * 100;
+            }
+        }
+        if (rate == null) rate = storedRate;                 // no payment yet → fall back to the lender rate
+        const flag = (rate != null && storedRate != null && Math.abs(rate - storedRate) > 0.5);
+        return { id: r.id, name, cls, type, rate, storedRate, balance, monthly, live: false, principal, term, start, flag };
+    });
     return cardRows.concat(otherRows);
 }
 
@@ -1180,10 +1239,16 @@ function renderDebtsDetail() {
     const totOwed = rows.reduce((s, r) => s + (r.balance || 0), 0);
     const totMonthly = rows.reduce((s, r) => s + (r.monthly || 0), 0);
     const missing = rows.filter(r => r.rate == null).length;
+    const flagged = rows.filter(r => r.flag).length;
+    const noPay = rows.filter(r => r.cls !== 'Credit Cards' && r.monthly == null).length;
 
-    const rateCell = r => r.rate != null
-        ? `<span style="font-weight:var(--fw-semibold);color:${r.rate >= 8 ? 'var(--danger)' : r.rate >= 6 ? 'var(--warning)' : 'var(--text-primary)'}">${r.rate}%</span>`
-        : `<span style="color:var(--accent);font-size:var(--fs-xs)">set rate</span>`;
+    const rateCell = r => {
+        if (r.rate == null) return `<span style="color:var(--accent);font-size:var(--fs-xs)">set rate</span>`;
+        const shown = Math.round(r.rate * 100) / 100;
+        const col = r.rate >= 8 ? 'var(--danger)' : r.rate >= 6 ? 'var(--warning)' : 'var(--text-primary)';
+        const warn = r.flag ? `<span title="Payment implies ${shown}% but the lender rate is ${r.storedRate}% — check this balance" style="color:var(--warning);font-size:10px;cursor:help"> &#9888;</span>` : '';
+        return `<span style="font-weight:var(--fw-semibold);color:${col}">${shown}%</span>${warn}`;
+    };
     const editorId = r => 'de-' + (r.id || r.name.replace(/[^a-z0-9]/gi, ''));
     const rowHtml = r => {
         const eid = editorId(r);
@@ -1213,7 +1278,7 @@ function renderDebtsDetail() {
             <div class="kpi-card-label" style="margin:0">Debts in detail</div>
             <button onclick="getDebtGuidance(this)" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Get pay-down guidance</button>
         </div>
-        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · interest <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} debt${missing === 1 ? '' : 's'} still need a rate</span>` : ''}. Edit a debt to set its rate by typing, dropping a screenshot, or dropping the terms document.</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · payments <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} still need a rate</span>` : ''}. Monthly figures are your real payments from the Costs table; the rate is what that payment implies. &#9888; means it differs from the lender's rate, so that balance is worth checking${flagged ? ` (${flagged} flagged)` : ''}.${noPay ? ` ${noPay} debt${noPay === 1 ? '' : 's'} have no matched payment yet — set the terms by typing, dropping a screenshot, or dropping the terms document.` : ''}</div>
         ${sections}
         <div id="wealthDebtGuidance" style="margin-top:12px"></div>
     </div>`;
@@ -1351,7 +1416,7 @@ async function getDebtGuidance(btn) {
     if (!known.length) { out.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">Set a rate on at least one debt first.</div>`; return; }
     if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
     out.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)"><span class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span>Reading your debts…</div>`;
-    const list = rows.map(r => `- ${r.name} (${r.cls}): balance £${Math.round(r.balance)}, rate ${r.rate == null ? 'UNKNOWN' : r.rate + '%'}, ${r.monthly != null ? '£' + Math.round(r.monthly) + '/mo interest' : 'monthly cost unknown'}`).join('\n');
+    const list = rows.map(r => `- ${r.name} (${r.cls}): balance £${Math.round(r.balance)}, rate ${r.rate == null ? 'UNKNOWN' : (Math.round(r.rate * 100) / 100) + '%'}, ${r.monthly != null ? '£' + Math.round(r.monthly) + '/mo payment' : 'monthly payment unknown'}`).join('\n');
     const prompt = `You are a UK wealth adviser. Here are the client's debts:\n${list}\n\nAssume long-run investment returns of about 5-7% a year after tax. In plain, direct English (UK), and in under 180 words:\n1. Name the debts that cost MORE than investing would return (pay these down first) and the order to clear them.\n2. Name the debts cheap enough that investing the money likely beats overpaying them.\n3. Give one clear next action.\nName any debt whose rate is UNKNOWN and say it needs a rate before it can be judged. Be specific with the debt names. No preamble, no disclaimer.`;
     try {
         const resp = await fetch(AI_PROXY, {
