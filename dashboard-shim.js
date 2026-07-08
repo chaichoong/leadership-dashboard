@@ -24,7 +24,7 @@
   const ACCOUNTS='tbl1nr0EcX2T62KME', COSTS='tblx5kvhzNEI5TFlS', TENANCIES='tblN51a88qTDB6iMH',
         TX='tbln0gzhCAorFc3zB', UNITS='tblM3mZCR5kiEdWMj', TENANTS='tblX4elTuu01gwBYh',
         CATS='tbleWb8ioptnEwPR8', SUBCATS='tblOTdRcPf8AgRz25', BIZ='tblpqkvWJJo8Uu25q',
-        PROJECTS='tblHrpTMd5LNYn8v1';
+        PROJECTS='tblHrpTMd5LNYn8v1', SOP_QUEUE='tbltuZz5Omrpo7t1x';
 
   const M = {};
   M[ACCOUNTS] = { source:'accounts', write:'accounts', map:{
@@ -74,6 +74,11 @@
   M[CATS]    = { source:'coa_categories', write:'coa_categories', map:{ fldii4oUzSfmplihO:['name','scalar'] }};
   M[SUBCATS] = { source:'coa_sub_categories', write:'coa_sub_categories', map:{ fldO4BTJhFv5EsN6i:['name','scalar'] }};
   M[BIZ]     = { source:'businesses', write:'businesses', map:{ fldbbRqVxLxUdHwIR:['name','scalar'], fldhXBnRrngCVsgSk:['active','bool'] }};
+  M[SOP_QUEUE] = { source:'sop_queue', write:'sop_queue', map:{   // Sitemap "request SOP update" write-only queue
+    fld0ShElHxR10mmBk:['request','scalar'], fldLvshpipHswyudX:['sop_file','scalar'],
+    fldidv94zf8kd0ApG:['page_version','scalar'], fldt4Y6lunSdEF0jX:['status','scalar'],
+    fldsrBokVDBz1ZneD:['page_id','scalar'], fldp8IIF9YmmnplzS:['requested_at','datetime'],
+  }};
   M[PROJECTS] = { source:'v_projects', write:'projects', map:{
     fldiMZICg1KOORpte:['name','scalar'], fldZ0SpReVaDS1VXb:['status','scalar'],
     fldGIlsn0cSEpnj18:['start_date','date'], fldU0cJparnkvOUsV:['end_date','date'],
