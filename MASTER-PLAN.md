@@ -56,7 +56,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] KEVIN — Verify the Google API key in follow-up.html is referrer-restricted in Google Cloud Console (done when: restriction confirmed; due 9 Jul) [AT:recG1rKPOaOWnrGnr]
 - [ ] KEVIN — Set GCAL_PROXY_TOKEN Script Property + redeploy gcal-proxy + set localStorage gcal_proxy_key on Tasks (done when: calendar loads with gate on; due 11 Jul) [AT:rec3G6KvmgrnO47eq]
 - [ ] OPUS — Meetings-script dedupe gate: before creating a task from a meeting summary, check open tasks and link/skip instead of duplicating (done when: test summary naming an existing task creates zero records; due 18 Jul) [gmail-meetings-script.gs — manual paste to redeploy] [AT:reckN5r3NlACstzMU]
-- [ ] OPUS — Nightly plan↔Airtable sync job: tick this plan from completions, push approved plan tasks to Airtable, flag unmapped/duplicates in a short report (done when: first correct nightly report; due 18 Jul) [AT:recJ1QMTpPUsAGh4j]
+- [x] OPUS — Nightly plan↔Airtable sync job: tick this plan from completions, push approved plan tasks to Airtable, flag unmapped/duplicates in a short report (done when: first correct nightly report; due 18 Jul) [AT:recJ1QMTpPUsAGh4j] *(ticked 2026-07-08, synced from Airtable)*
 - [ ] KEVIN — Adopt this plan at the team meeting (done when: team told this is the only plan; due 8 Jul) [AT:rece90eUsYb2TudAV]
 
 ## 4. Product development (finish + de-Kevin + migrate)
@@ -65,7 +65,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] MICA — Commit migrations 0001–0014 to the repo (done when: sequence complete in supabase-migration/; due 11 Jul) [AT:rec3AxVCpdco3MnGu]
 - [ ] MICA — Publish the table-by-table parity list: full / partial / snapshot (done when: list in Slack; due 11 Jul) [AT:recrpCoGoNgKCK8VF]
 - [ ] OPUS — RLS policy audit; write missing policies (done when: audit note + policies applied; due 14 Jul) [AT:recQggeKHzkmdiI4H] [anon-no-login verified blocked 7 Jul]
-- [ ] OPUS — Tenancy spine: tenants, tenant_users, tenant_config, ai_usage_log + Kevin's tenant row (done when: migration applied; due 16 Jul) [AT:reck83Ohljf9Z6And]
+- [x] OPUS — Tenancy spine: tenants, tenant_users, tenant_config, ai_usage_log + Kevin's tenant row (done when: migration applied; due 16 Jul) [AT:reck83Ohljf9Z6And] *(ticked 2026-07-08, synced from Airtable)*
 - [ ] OPUS — Retrofit tenant_id + RLS to every existing table (done when: all tables pass policy audit; due 18 Jul) [AT:reccaeDbqNH68lEE5]
 - [ ] OPUS — entities table per D1 (done when: migration applied; due 18 Jul) [AT:recu5PBEpdGlC07M0]
 - [~] MICA — Finance page set onto the shell (Accounts + P&L landed 7 Jul; transactions + cashflow remain) [AT:recFxlJnVTFLIJV8C] (done when: pages load real data on Vercel; due 15 Jul)
@@ -137,8 +137,8 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [ ] ERICAMAE — First 20 personalised touches sent (done when: 20 logged; due 14 Jul) [AT:recTLE3GO6lSC6fu5]
 - [ ] ERICAMAE — (NEW) Reply-handling templates + SOP (positive / question / not-now / referral) so responses never sit (done when: 4 templates approved + response-time rule; due 15 Jul) [AT:recURXC8NvECVuY9e]
 - [ ] ERICAMAE — Ramp to 60 touches/week from w/c 21 Jul (done when: weekly scorecard shows 60; due 21 Jul) [AT:recHJ5Qn8QdjrI0y4]
-- [ ] ERICAMAE — Lead-Magnet Capture & Nurture workflow live [AT:receDDArEOlLDZaBN] (done when: workflow on; due 15 Jul)
-- [ ] ERICAMAE — Gate the Founder-to-Free magnet (email → link → thank-you CTA to Teardown) (done when: test lead gets it gated; due 16 Jul) [AT:receDDArEOlLDZaBN]
+- [x] ERICAMAE — Lead-Magnet Capture & Nurture workflow live [AT:receDDArEOlLDZaBN] (done when: workflow on; due 15 Jul) *(ticked 2026-07-08, synced from Airtable)*
+- [x] ERICAMAE — Gate the Founder-to-Free magnet (email → link → thank-you CTA to Teardown) (done when: test lead gets it gated; due 16 Jul) [AT:receDDArEOlLDZaBN] *(ticked 2026-07-08, synced from Airtable)*
 - [ ] ERICAMAE — GHL nurture sequences by funnel stage [AT:recKlaXRJXupP36pJ] (done when: test lead receives sequence; due 18 Jul)
 - [ ] ERICAMAE — Content engine LinkedIn-led, problem-first [AT:recgErOu3AiipDQo4] (done when: 3 posts/week running; due 14 Jul)
 - [ ] ERICAMAE — Comparison pages (vs DIY / VA / agency) [AT:reckGG3pb7U5qJYQV] (done when: pages live; due 12 Aug)
@@ -223,3 +223,4 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-07 | Cleanse applied (Claude agent, Kevin-approved) | 53 closed (commented), 52 created, 16 re-dated, 4 parked, 9 orphans linked, 3 RECAT-flagged. Zero duplicates verified. 93 open OD tasks. Finding → task: 92 nameless AP rows. Kevin's base identity = kevin@runpreneur.org.uk. |
 | 2026-07-07 | Kevin, in-session (structural change, approved) | RESTRUCTURED phases → Software-as-a-Science sections (§3-§11): foundations, product, agent fleet, onboarding, lead gen, sales, retention, metrics, launch. Gap-fill pass added 20 (NEW) tasks on the duplicate-beats-a-miss rule. NEW §5: 10 demo agents on Kevin's businesses by end July. Some Day parking reversed → real future due dates. All prior task states preserved. |
 | 2026-07-07 | Nightly sync (scripts/sync-master-plan.py) | ticked 3 from Airtable completions; pushed 1 new plan tasks to Airtable. |
+| 2026-07-08 | Nightly sync (scripts/sync-master-plan.py) | ticked 4 from Airtable completions. |
