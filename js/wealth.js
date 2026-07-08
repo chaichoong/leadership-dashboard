@@ -199,15 +199,27 @@ async function setAccountClass(id, cls) {
     }
 }
 
-// Add a new loan to Debts in detail. Creates a Debt Terms row; set its balance and
-// rate in the row's editor afterwards (interest applies from the balance you give).
-async function wealthAddLoan() {
-    const name = (typeof prompt === 'function') ? prompt('Name of the loan?') : '';
-    if (!name || !name.trim()) return;
+// Add a new loan to Debts in detail. "+ Add loan" reveals an inline name field (not a
+// native prompt, which would trigger the browser's saved-login autofill). Submitting
+// creates a Debt Terms row; set its balance and rate in the row's editor afterwards.
+function wealthAddLoan() {
+    const box = document.getElementById('wealthAddLoanForm');
+    if (!box) return;
+    const show = box.style.display === 'none' || !box.style.display;
+    box.style.display = show ? 'flex' : 'none';
+    if (show) { const inp = document.getElementById('wealthNewLoanName'); if (inp) { inp.value = ''; inp.focus(); } }
+}
+
+async function wealthSubmitLoan() {
+    const inp = document.getElementById('wealthNewLoanName');
+    const name = inp ? inp.value.trim() : '';
+    if (!name) { if (inp) inp.focus(); return; }
+    const btn = document.getElementById('wealthAddLoanBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
     try {
         const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.debtTerms}`, {
             method: 'POST', headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ records: [{ fields: { [DEBT.name]: name.trim(), [DEBT.cls]: 'Loans', [DEBT.type]: 'Repayment' } }], typecast: true }),
+            body: JSON.stringify({ records: [{ fields: { [DEBT.name]: name, [DEBT.cls]: 'Loans', [DEBT.type]: 'Repayment' } }], typecast: true }),
         });
         if (!resp.ok) throw new Error('Airtable ' + resp.status);
         if (typeof showToast === 'function') showToast('Loan added — set its balance and rate', { type: 'success' });
@@ -216,6 +228,7 @@ async function wealthAddLoan() {
         const el = document.getElementById('tab-wealth');
         if (el && _wealthRecords) renderWealthContent(el, _wealthRecords);
     } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
         if (typeof showToast === 'function') showToast('Could not add the loan — try again', { type: 'error' });
     }
 }
@@ -1009,8 +1022,8 @@ function wealthCfLabel(name) {
 //   months   = [{ key, label }]
 //   sections = [{ header, rows }];  row = { label, values:[12|null], items?, bold, goodUp(=true), border }
 let _wealthRowSeq = 0;
-// Period (months) for the matrices' trend/change column. Changed via the selector.
-let _wealthChangeMonths = 12;
+// Period (months) for the matrices' trend/change column. Defaults to 1-month; changed via the selector.
+let _wealthChangeMonths = 1;
 function wealthToggleRows(rid, td) {
     const rows = document.querySelectorAll('tr.wm-child-' + rid);
     let shown = false;
@@ -1395,6 +1408,12 @@ function renderDebtsDetail() {
             </div>
         </div>
         <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:8px;line-height:1.5">Sorted by interest rate, highest first. Total owed <strong style="color:var(--text-primary)">${escHtml(fmt0(totOwed))}</strong> · payments <strong style="color:var(--text-primary)">${escHtml(fmt0(totMonthly))}/mo</strong>${missing ? ` · <span style="color:var(--warning)">${missing} still need a rate</span>` : ''}. For mortgages, the monthly figure is your real payment (active costs only) and the rate is what that payment implies; &#9888; means it differs from the lender's rate, so that balance is worth checking${flagged ? ` (${flagged} flagged)` : ''}. For credit cards, the balance is live from your accounts (never overwritten) and the monthly figure is the interest at the card's annual APR. Loan balances are editable and carry forward.${noPay ? ` ${noPay} debt${noPay === 1 ? '' : 's'} have no matched payment yet — set the terms by typing, dropping a screenshot, or dropping the terms document.` : ''}</div>
+        <div id="wealthAddLoanForm" style="display:none;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+            <input id="wealthNewLoanName" type="text" placeholder="Loan name (e.g. Director's loan)" autocomplete="off" name="wealth-new-loan"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();wealthSubmitLoan()}"
+                style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface)">
+            <button id="wealthAddLoanBtn" onclick="wealthSubmitLoan()" style="background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);padding:6px 14px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);cursor:pointer">Add</button>
+        </div>
         ${sections}
         <div id="wealthDebtGuidance" style="margin-top:12px"></div>
     </div>`;
@@ -1535,6 +1554,7 @@ async function getDebtGuidance(btn) {
     if (!known.length) { out.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">Set a rate on at least one debt first.</div>`; return; }
     if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
     out.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)"><span class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></span>Reading your debts…</div>`;
+    out.scrollIntoView({ behavior: 'smooth', block: 'center' }); // move the screen to the results so it's obvious something happened
     const list = rows.map(r => `- ${r.name} (${r.cls}): balance £${Math.round(r.balance)}, rate ${r.rate == null ? 'UNKNOWN' : (Math.round(r.rate * 100) / 100) + '%'}, ${r.monthly != null ? '£' + Math.round(r.monthly) + '/mo payment' : 'monthly payment unknown'}`).join('\n');
     const prompt = `You are a UK wealth adviser. Here are the client's debts:\n${list}\n\nAssume long-run investment returns of about 5-7% a year after tax. In plain, direct English (UK), and in under 180 words:\n1. Name the debts that cost MORE than investing would return (pay these down first) and the order to clear them.\n2. Name the debts cheap enough that investing the money likely beats overpaying them.\n3. Give one clear next action.\nName any debt whose rate is UNKNOWN and say it needs a rate before it can be judged. Be specific with the debt names. No preamble, no disclaimer.`;
     try {
@@ -1547,6 +1567,7 @@ async function getDebtGuidance(btn) {
         let text = '';
         (data.content || []).forEach(b => { if (b && b.type === 'text') text += b.text; });
         out.innerHTML = `<div style="background:var(--accent-soft);border-radius:var(--radius-md);padding:12px 14px;font-size:var(--fs-sm);color:var(--text-primary);line-height:1.6;white-space:pre-wrap">${escHtml(text.trim())}</div>`;
+        out.scrollIntoView({ behavior: 'smooth', block: 'start' }); // land on the finished guidance
     } catch (e) {
         out.innerHTML = `<div style="color:var(--danger);font-size:var(--fs-sm)">Could not get guidance right now — please try again.</div>`;
     } finally {
