@@ -243,6 +243,11 @@ function renderMoneyContent(el, m) {
     <div data-sync-bar="money"></div>
     <div style="max-width:920px;margin:0 auto">
 
+        <!-- Purpose signpost -->
+        <div style="background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:var(--space-5);font-size:var(--fs-sm);color:var(--text-primary);line-height:1.55">
+            <strong>Use this before you spend today.</strong> It shows the cash safe to touch right now, using only money already in the bank. It ignores rent still to arrive, so it stays your tightest, safest figure. To plan the month ahead, use the <strong>Cash Flow</strong> tab. For whether your net worth is growing, use the <strong>Wealth</strong> tab.
+        </div>
+
         <!-- Hero: the one number -->
         <div style="background:${lightBg};border:1px solid ${lightColour};border-radius:var(--radius-lg);padding:var(--space-6);margin-bottom:var(--space-5)">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -276,6 +281,19 @@ function renderMoneyContent(el, m) {
             ${row('Safe to act today', m.safeToActToday, { strong: true, border: true, colour: lightColour })}
             <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:10px;line-height:1.5">
                 This figure can never exceed what is in the bank. It is your cash, minus a ${fmt(m.wagesFloat)} wages float, a small timing cushion, and the part of this month's fixed costs your reliable rent will not cover. Maintenance is not reserved — you pay it from this surplus in the order below.
+            </div>
+        </div>
+
+        <!-- Why this differs from the Cash Flow tab's withdrawal figure -->
+        <div class="kpi-card" style="margin-bottom:var(--space-5)">
+            <div class="kpi-card-label" style="margin-bottom:8px">Why this is lower than the Cash Flow tab's withdrawal figure</div>
+            <div style="color:var(--text-secondary);font-size:var(--fs-sm);line-height:1.7">
+                Both are correct. They answer different questions.
+                <ul style="margin:8px 0 0;padding-left:20px">
+                    <li><strong style="color:var(--text-primary)">This number</strong> uses only the cash in the bank today and assumes no rent turns up. It holds back a full ${fmt(m.wagesFloat)} wages float, so it stays deliberately tight and safe.</li>
+                    <li><strong style="color:var(--text-primary)">The Withdrawal Advisor</strong> on the Cash Flow tab looks 31 days ahead, counts the rent still to land, and guards only a thin daily safety line. So it can offer more.</li>
+                </ul>
+                <div style="margin-top:8px">Use this number when you want certainty today. Use the Withdrawal Advisor when planning across the whole month.</div>
             </div>
         </div>
 
