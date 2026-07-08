@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Blueprint — Operations Director</title>
+    <link rel="stylesheet" href="css/tokens.css?v=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-family-base); background: var(--bg-app); color: var(--text-primary); }
+
+        .db-header {
+            background: var(--bg-sidebar);
+            color: var(--text-inverse);
+            padding: 20px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .db-header h1 { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+        .db-header p { font-size: var(--fs-sm); opacity: 0.7; }
+        .db-header-links { display: flex; gap: 10px; flex-wrap: wrap; }
+        .db-link {
+            font-size: var(--fs-sm);
+            color: var(--accent-gold);
+            text-decoration: none;
+            padding: 6px 12px;
+            border: 1px solid rgba(198,161,91,0.4);
+            border-radius: var(--radius-md);
+        }
+        .db-link:hover { background: rgba(198,161,91,0.15); }
+
+        .db-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+            padding: 14px 32px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-default);
+            font-size: var(--fs-xs);
+            color: var(--text-secondary);
+        }
+        .db-meta .verified { color: var(--success); font-weight: var(--fw-semibold); }
+        .db-expand-btn {
+            margin-left: auto;
+            font-size: var(--fs-xs);
+            padding: 5px 12px;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .db-expand-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .db-expand-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+        .db-container { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+        .db-section { margin-bottom: 40px; }
+        .db-section-title {
+            font-size: var(--fs-lg);
+            font-weight: var(--fw-semibold);
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--accent);
+        }
+        .db-section-sub { font-size: var(--fs-sm); color: var(--text-secondary); margin-bottom: 16px; }
+
+        .db-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+        .db-grid.wide { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+
+        .db-node {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-lg);
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .db-node:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+        .db-node.expanded { border-color: var(--accent); box-shadow: var(--shadow-md); }
+        .db-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .db-node-header { display: flex; align-items: center; gap: 8px; }
+        .db-node-icon { font-size: 18px; }
+        .db-node-name { font-size: var(--fs-sm); font-weight: var(--fw-semibold); flex: 1; }
+        .db-node-tag {
+            font-size: 10px;
+            font-weight: var(--fw-semibold);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+        .db-node-tag.rule    { background: var(--danger-bg); color: var(--danger); }
+        .db-node-tag.file    { background: var(--accent-soft); color: var(--accent); }
+        .db-node-tag.pipe    { background: var(--warning-bg); color: var(--warning); }
+        .db-node-tag.test    { background: var(--info-bg); color: var(--info); }
+        .db-node-tag.doc     { background: var(--bg-subtle); color: var(--text-secondary); }
+        .db-node-tag.ai      { background: var(--success-bg); color: var(--success); }
+
+        .db-node-detail {
+            display: none;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border-subtle);
+            font-size: var(--fs-xs);
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+        .db-node.expanded .db-node-detail { display: block; }
+        .db-node-detail code {
+            background: var(--bg-subtle);
+            padding: 1px 5px;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+        .db-node-detail ul { margin: 4px 0 4px 18px; }
+        .db-node-detail li { margin-bottom: 3px; }
+        .db-node-detail strong { color: var(--text-primary); }
+
+        .db-table-wrap { overflow-x: auto; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--bg-surface); }
+        table.db-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+        .db-table th {
+            text-align: left;
+            padding: 10px 14px;
+            background: var(--bg-subtle);
+            font-weight: var(--fw-semibold);
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+        .db-table td { padding: 8px 14px; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); vertical-align: top; }
+        .db-table tr:nth-child(even) td { background: var(--bg-surface-2); }
+        .db-table code { background: var(--bg-subtle); padding: 1px 5px; border-radius: var(--radius-sm); font-size: 11px; color: var(--text-primary); }
+
+        .db-callout {
+            background: var(--danger-bg);
+            border: 1px solid var(--danger);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            font-size: var(--fs-xs);
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+        .db-callout strong { color: var(--danger); }
+
+        @media (max-width: 700px) {
+            .db-container { padding: 16px; }
+            .db-grid, .db-grid.wide { grid-template-columns: 1fr; }
+        }
+        @media print {
+            .db-expand-btn, .db-header-links { display: none; }
+            .db-node-detail { display: block; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="db-header">
+    <div>
+        <h1>🧭 Developer Blueprint</h1>
+        <p>How to work on this platform — repo, internals, pipeline, tests, migration, docs, AI layer</p>
+    </div>
+    <nav class="db-header-links" aria-label="Related pages">
+        <a class="db-link" href="architecture.html">🗺️ Architecture Map (what it is)</a>
+        <a class="db-link" href="index.html">← Back to app</a>
+    </nav>
+</header>
+
+<div class="db-meta">
+    <span>Audience: Claude Code sessions and developers. Internal only.</span>
+    <span class="verified">Content verified against the repo: 8 Jul 2026</span>
+    <button class="db-expand-btn" onclick="toggleAllNodes(this)">Expand all</button>
+</div>
+
+<main class="db-container">
+
+    <!-- ============ 1. REPO STRUCTURE & FILE OWNERSHIP ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">1. Repo Structure &amp; File Ownership</h2>
+        <p class="db-section-sub">The monolith was split so parallel Claude sessions can build without overwriting each other. One feature, one file.</p>
+
+        <div class="db-callout">
+            <strong>Golden rule:</strong> two sessions must never edit the same file at the same time. Shared files (<code>js/config.js</code>, <code>js/shared.js</code>, <code>index.html</code>, <code>css/styles.css</code>) are edited by ONE session, in the same session as the feature needing the change. Always <code>git pull</code> before starting, push promptly after committing.
+        </div>
+
+        <div class="db-table-wrap" style="margin-bottom:16px">
+            <table class="db-table">
+                <thead><tr><th>Feature</th><th>Edit this file</th><th>Notes</th></tr></thead>
+                <tbody>
+                    <tr><td>Leadership Dashboard KPIs</td><td><code>js/dashboard.js</code></td><td>Loads the shared global data arrays for everyone</td></tr>
+                    <tr><td>Cash flow / balance calculator</td><td><code>js/cashflow.js</code></td><td>Forecast, UC checks, what-if</td></tr>
+                    <tr><td>Reconciliation engine</td><td><code>js/reconciliation.js</code></td><td>Matching, knowledge base, accuracy tracking; rate-limit pattern lives here</td></tr>
+                    <tr><td>Invoices</td><td><code>js/invoices.js</code></td><td>Fetch, render, match, approve, pay</td></tr>
+                    <tr><td>CFVs / rent statements</td><td><code>js/cfv.js</code></td><td>Overdue rent detection, chase actions</td></tr>
+                    <tr><td>Costs / transactions / income / P&amp;L</td><td><code>js/costs.js</code> · <code>js/transactions.js</code> · <code>js/income.js</code> · <code>js/pnl.js</code></td><td>Finance section tabs</td></tr>
+                    <tr><td>Money Confidence / Wealth</td><td><code>js/money.js</code> · <code>js/wealth.js</code></td><td>Personal finance layer</td></tr>
+                    <tr><td>Arrears</td><td><code>js/arrears.js</code> · <code>js/ar-variable.js</code></td><td>Rent balance per tenancy</td></tr>
+                    <tr><td>Fintable monitor</td><td><code>js/fintable.js</code></td><td>Bank sync health</td></tr>
+                    <tr><td>Site map &amp; links</td><td><code>js/sitemap.js</code></td><td>Also SOP update requests</td></tr>
+                    <tr><td>AI assistant panel</td><td><code>js/ai-assistant.js</code></td><td>Context blocks per tab live here</td></tr>
+                    <tr><td>Skills / KPI sources / quick task</td><td><code>js/skills.js</code> · <code>js/skills-data.js</code> · <code>js/kpi-sources.js</code> · <code>js/quick-task.js</code></td><td></td></tr>
+                    <tr><td>Health bars</td><td><code>js/sync-bar.js</code></td><td>registerSyncBar engine — shared, treat like shared.js</td></tr>
+                    <tr><td>Operating Systems pages</td><td><code>os/*/index.html</code></td><td>tasks, operations, strategy, systemisation, team, business-plan-builder — loaded via iframe</td></tr>
+                    <tr><td>Standalone iframe pages</td><td><code>follow-up.html</code> · <code>compliance.html</code> · <code>ai-brain.html</code></td><td>Each self-contained</td></tr>
+                    <tr><td>Styling</td><td><code>css/styles.css</code> (consumes <code>css/tokens.css</code>)</td><td>Whole-app look changes: tokens.css ONLY</td></tr>
+                    <tr><td>Sidebar / tab shell</td><td><code>index.html</code></td><td>Protected: OS sidebar items, OS iframe tab panels</td></tr>
+                    <tr><td>Constants, table + field IDs</td><td><code>js/config.js</code></td><td>F, TABLES, INV, REC, PS, PAGE_REGISTRY, AI model IDs</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="db-grid">
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">📁</span><span class="db-node-name">Root directory map</span><span class="db-node-tag file">Layout</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>index.html</code> — shell only: sidebar, tab containers, no logic</li>
+                        <li><code>*.html</code> iframe pages — <code>follow-up</code>, <code>compliance</code>, <code>ai-brain</code>, <code>how-it-works</code></li>
+                        <li><code>sop*.html</code> — SOP per page</li>
+                        <li><code>*-supabase.html</code> + <code>supabase-app.html</code> — shadow-build twins (§5)</li>
+                        <li><code>*-shim.js</code> — 5 fetch-override shims for the twins (§5)</li>
+                        <li><code>architecture.html</code> / <code>dev-blueprint.html</code> — the two maps</li>
+                        <li><code>css/</code> <code>js/</code> <code>os/</code> <code>docs/</code> <code>scripts/</code> <code>tests/</code> <code>supabase-migration/</code></li>
+                        <li><code>MASTER-PLAN.md</code> — THE only plan · <code>STRUCTURE.md</code> — file-location source of truth · <code>PRODUCTISATION.md</code> — de-Kevining spec</li>
+                    </ul>
+                    <strong>Rule:</strong> read STRUCTURE.md before creating any file; update it in the same commit if you add a location it does not cover.
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🌿</span><span class="db-node-name">Branch strategy</span><span class="db-node-tag rule">Rule</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><strong>Small fixes, single-file tweaks:</strong> push directly to <code>main</code></li>
+                        <li><strong>New features, multi-file, anything touching shared files:</strong> branch → PR (<code>feature/…</code> or <code>fix/…</code>)</li>
+                        <li>Parallel sessions can sweep uncommitted edits into other commits — commit before context-switching</li>
+                        <li>If a feature vanishes, check git history before reimplementing</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🛡️</span><span class="db-node-name">Protected sections in index.html</span><span class="db-node-tag rule">Rule</span></div>
+                <div class="db-node-detail">
+                    Never remove when restructuring the shell:
+                    <ul>
+                        <li>Sidebar OS menu items and their health dots</li>
+                        <li>OS iframe tab panels: <code>tab-tasks</code>, <code>tab-operations</code>, <code>tab-systemisation</code>, <code>tab-os-strategy</code>, <code>tab-os-team</code>, <code>tab-os-bplan</code></li>
+                        <li>PAGE_REGISTRY OS entries in <code>js/config.js</code></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ 2. JS INTERNALS ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">2. JS Internals — Globals, Helpers, Conventions</h2>
+        <p class="db-section-sub">All JS loads as plain <code>&lt;script&gt;</code> tags in one global scope. No bundler, no modules. Load order: config.js → shared.js → feature files.</p>
+
+        <div class="db-grid">
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🌍</span><span class="db-node-name">Global variables</span><span class="db-node-tag file">js/config.js + dashboard.js</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>PAT</code> — Airtable auth token, set by the auth flow. Never log it, never hardcode it.</li>
+                        <li>Data arrays loaded by <code>dashboard.js</code>: <code>allTransactions</code>, <code>allTenancies</code>, <code>allTenants</code>, <code>allCosts</code>, <code>allCategories</code>, <code>allSubCategories</code>, <code>allBusinesses</code></li>
+                        <li>Constants: <code>F</code> (field IDs), <code>TABLES</code>, <code>INV</code>, <code>REC</code>, <code>PS</code></li>
+                        <li>AI models: <code>AI_MODEL_DEFAULT</code>, <code>AI_MODEL_LIGHT</code> — feature files must use these, never a literal model ID</li>
+                    </ul>
+                    <strong>Rule:</strong> prefer the shared arrays over independent fetches. Only call Airtable separately for tables not already cached.
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🧰</span><span class="db-node-name">shared.js helper catalogue</span><span class="db-node-tag file">js/shared.js</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><strong>Data:</strong> <code>airtableFetch(tableId, params)</code> (handles pagination) · <code>getField</code> · <code>getNumVal</code> · <code>lookupValues</code> · <code>txDisplayAmount</code> · <code>getActiveBusinesses</code></li>
+                        <li><strong>Status logic:</strong> <code>isTenancyActive</code> · <code>isTenancyIncome</code> · <code>isTenantStatusActive/Former</code> · <code>isCostActive</code> · <code>getPaymentStatusName</code></li>
+                        <li><strong>Security:</strong> <code>escHtml(str)</code> for ALL external text into HTML · <code>escJs(str)</code></li>
+                        <li><strong>UI:</strong> <code>expandableCard</code> · <code>toggleCard</code> · <code>switchTab(tabId)</code> · <code>showToast</code> · <code>showConfirm</code> · <code>openQuickTaskModal</code></li>
+                        <li><strong>Health:</strong> <code>updateSidebarHealth(tabId, status)</code> · sync bars via <code>registerSyncBar</code> in <code>js/sync-bar.js</code></li>
+                        <li><strong>Robustness:</strong> <code>limitedApiFetch</code> (rate limit) · <code>nextRenderGen</code>/<code>isCurrentRender</code> (render race guard) · <code>smartRefresh</code> + idle auto-refresh</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">⚠️</span><span class="db-node-name">Known anti-patterns (real production bugs)</span><span class="db-node-tag rule">Check every build</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><strong>Missing Number() on PATCH</strong> — Airtable number fields reject strings: <code>fields: { [F.amount]: Number(value) }</code></li>
+                        <li><strong>Partial re-render stale state</strong> — after inline edit/status/filter change call the full <code>renderAll()</code>, not the single-item updater</li>
+                        <li><strong>returnFieldsByFieldId</strong> — this project uses field NAMES via <code>F</code> constants; field-ID keys silently read undefined</li>
+                        <li><strong>CSS overflow truncation</strong> — long names need ellipsis or <code>word-break: break-word</code></li>
+                        <li><strong>localStorage quota</strong> — Safari caps at 5MB; large caches go to IndexedDB (dashboard.js pattern), localStorage is small UI state only, keys namespaced per feature (<code>cfv_</code>, <code>recon_</code>…)</li>
+                        <li><strong>Linked-record filters</strong> — filter by record ID, never ARRAYJOIN display names</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🚫</span><span class="db-node-name">Forbidden patterns</span><span class="db-node-tag rule">Never introduce</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>console.log</code> / <code>debugger</code> in production paths</li>
+                        <li>Silent <code>catch</code> blocks (must log or toast)</li>
+                        <li>Secrets or PAT tokens hardcoded anywhere</li>
+                        <li>Hardcoded AI model IDs in feature files (a retired ID is an app-wide AI outage)</li>
+                        <li><code>eval()</code>, <code>document.write()</code>, <code>Function()</code> constructor</li>
+                        <li><code>innerHTML</code> with unescaped external data — use <code>escHtml()</code></li>
+                        <li>Hardcoded colours or fonts — design tokens only (§1 of CLAUDE.md design system)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ 3. DEPLOY PIPELINE ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">3. Deploy Pipeline</h2>
+        <p class="db-section-sub">The repo is the source of truth. Push to <code>main</code> → GitHub Pages auto-deploys in 2-3 minutes → confirm live before declaring done.</p>
+
+        <div class="db-grid">
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🚀</span><span class="db-node-name">Deploy flow</span><span class="db-node-tag pipe">Pipeline</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li>Live URL: <code>https://chaichoong.github.io/leadership-dashboard/</code></li>
+                        <li><code>git push origin main</code> → Pages build → poll the deploy monitor script in the background until live</li>
+                        <li>Never say "done" after pushing — the task completes when the deploy is confirmed live (watch stale browser cache; hard reload)</li>
+                        <li>Rollback = identify the revert commit BEFORE deploying anything risky</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🔢</span><span class="db-node-name">Version tracking (PAGE_REGISTRY)</span><span class="db-node-tag pipe">Automation</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>PAGE_REGISTRY</code> in <code>js/config.js</code> tracks <code>pageVer</code> / <code>sopVer</code> per page</li>
+                        <li><code>.github/workflows/auto-bump-pagever.yml</code> bumps <code>pageVer</code> automatically when a page's source file hits main</li>
+                        <li>File→page mapping lives in <code>scripts/pre-commit-action.py</code> — update it when adding pages</li>
+                        <li>Local hooks: <code>scripts/pre-commit</code> (version bump) and <code>scripts/pre-push</code> (test gate) — symlink into <code>.git/hooks/</code></li>
+                        <li><code>sopVer</code> is bumped manually when the SOP catches up with the page</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">⏰</span><span class="db-node-name">Scheduled jobs</span><span class="db-node-tag pipe">GitHub Actions + local</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>monthly-valuations.yml</code> — property valuations run, 1st of the month (needs <code>PROXY_SERVICE_TOKEN</code> secret)</li>
+                        <li><code>sync-ai-brain.yml</code> — publishes the AI Brain feed</li>
+                        <li><code>sync-transactions.yml</code> — transaction sync</li>
+                        <li><code>scripts/sync-master-plan.py</code> — nightly plan↔Airtable sync: ticks MASTER-PLAN from Airtable completions, pushes approved plan tasks to Airtable</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ 4. TESTING ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">4. Testing &amp; Quality Gates</h2>
+        <p class="db-section-sub">Nothing ships unverified. Kevin never debugs — the session that builds it proves it works.</p>
+
+        <div class="db-grid">
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🔒</span><span class="db-node-name">Sync-invariant suite</span><span class="db-node-tag test">Playwright</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>tests/sync-invariants/</code> — 11 spec files (33 tests): active-business filter, auth token handling, badge count sync, cascade sync, CFV detection, no-crash-on-load, and more</li>
+                        <li>Run: <code>npm run test:sync</code></li>
+                        <li>A local pre-push gate (not committed to the repo) blocks failing pushes to main</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🧪</span><span class="db-node-name">Unit tests</span><span class="db-node-tag test">Vitest</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>tests/shared.test.js</code> — shared helper coverage</li>
+                        <li>The <code>/test-gaps</code> skill generates Vitest tests for untested paths in changed files: data writes and business logic first, trivial getters skipped</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">✅</span><span class="db-node-name">Quality pipeline (every build/fix)</span><span class="db-node-tag test">Skills</span></div>
+                <div class="db-node-detail">
+                    Order, run by <code>/build-feature</code> and <code>/fix</code> automatically:
+                    <ul>
+                        <li>Self-audit → <code>/verify</code> (browser proof) → simplify pass → <code>/test-gaps</code> → independent review gate (blocking) → security review when auth/data/money → <code>/pre-deploy</code> checklist → deploy → confirm live → <code>/test</code> against production</li>
+                    </ul>
+                    <strong>Rule:</strong> no "done" without browser-verified proof. Screenshot evidence for UI changes.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ 5. SUPABASE MIGRATION ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">5. Supabase Migration — the Shadow Build</h2>
+        <p class="db-section-sub">Airtable stays the system of record until per-module cutover. A parallel Supabase/Vercel build runs alongside via twins and shims. Spec: <code>docs/supabase-schema-spec.md</code>.</p>
+
+        <div class="db-grid">
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">👯</span><span class="db-node-name">Twin pages + fetch shims</span><span class="db-node-tag file">Pattern</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>supabase-app.html</code> — the shell for the migrated app (deploys to Vercel)</li>
+                        <li><code>*-supabase.html</code> twins mirror live pages: index, accounts, pnl, money, wealth, ai-brain, follow-up, skills</li>
+                        <li><code>*-shim.js</code> (5: <code>dashboard</code>, <code>wealth</code>, <code>ai-brain</code>, <code>comms</code>, <code>skills</code>) override <code>window.fetch</code> and translate Airtable REST calls into Supabase queries — so the original feature JS runs unmodified</li>
+                        <li>Shims load NON-deferred, before feature code, and can chain (a page can load several)</li>
+                        <li>Shims await the Supabase session before the first query (fixes blank-data-on-load)</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🗄️</span><span class="db-node-name">Migrations state</span><span class="db-node-tag pipe">supabase-migration/</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li>In repo: <code>0015_systemisation</code> · <code>0016_app_settings</code> · <code>0017_objectives_strategy</code> · <code>0018_ai_brain</code> · <code>0019_wealth</code></li>
+                        <li>0001–0014 applied to the project but pending commit to the repo (MASTER-PLAN §4 task, Mica)</li>
+                        <li>Tenancy spine applied: <code>tenants</code>, <code>tenant_users</code>, <code>tenant_config</code>, <code>ai_usage_log</code></li>
+                        <li>Open: RLS policy audit, tenant_id retrofit on every table, entities table (D1)</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🧭</span><span class="db-node-name">Cutover rules</span><span class="db-node-tag rule">Rule</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li>Per-module cutover, not big-bang. A module cuts over when its twin loads real data on Vercel and passes the parity check</li>
+                        <li>Until then every write goes to Airtable; the shadow build is read-mirrored</li>
+                        <li>Replace any Airtable automation a migrating page depends on before its cutover</li>
+                        <li>Target: launch on Vercel + Supabase by early August 2026</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ 6. DOCS & SPECS REGISTRY ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">6. Docs &amp; Specs Registry</h2>
+        <p class="db-section-sub">Which document governs what. If it is not listed here, check STRUCTURE.md before creating a new one.</p>
+
+        <div class="db-table-wrap">
+            <table class="db-table">
+                <thead><tr><th>Document</th><th>Governs</th><th>Rule</th></tr></thead>
+                <tbody>
+                    <tr><td><code>MASTER-PLAN.md</code></td><td>THE plan: every OD roadmap, launch task, priority</td><td>Never create another plan doc. Amendments via §13 holding pen, dated + sourced in the Changelog</td></tr>
+                    <tr><td><code>STRUCTURE.md</code></td><td>Where every file lives: repo, AI context layer, Drive</td><td>Read before creating any file; update in the same commit if you add a new location</td></tr>
+                    <tr><td><code>CLAUDE.md</code></td><td>Session rules: stack, workflow, quality gate, design system, concurrency</td><td>The contract every session works under</td></tr>
+                    <tr><td><code>PRODUCTISATION.md</code></td><td>De-Kevining: D1-D9 decisions, tenant model</td><td>§5 holds the decided outcomes</td></tr>
+                    <tr><td><code>docs/supabase-schema-spec.md</code></td><td>Target Postgres schema, RLS approach</td><td>Migration source of truth</td></tr>
+                    <tr><td><code>docs/agent-runtime-spec.md</code></td><td>How agents execute (engine live since 3 Jul 2026)</td><td></td></tr>
+                    <tr><td><code>docs/agentic-extraction-spec.md</code></td><td>Loom → SOP → agent pipeline (the core product engine)</td><td></td></tr>
+                    <tr><td><code>docs/business-blueprint-spec.md</code></td><td>Client-facing Blueprint tab ("% of work run by AI")</td><td>v1 = view over existing data</td></tr>
+                    <tr><td><code>docs/client-profile-questionnaire.md</code></td><td>Onboarding interview that writes tenant_config</td><td></td></tr>
+                    <tr><td><code>docs/airtable-cleanse-2026-07-07.md</code></td><td>Record of the 7 Jul task cleanse</td><td>Historical</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ============ 7. AI LAYER ============ -->
+    <section class="db-section">
+        <h2 class="db-section-title">7. AI Layer</h2>
+        <p class="db-section-sub">Everything AI-facing: model routing, prompts, skills, memory. The north star: AI agents execute up to 90% of repeatable operational work.</p>
+
+        <div class="db-grid">
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🎛️</span><span class="db-node-name">Model routing</span><span class="db-node-tag ai">js/config.js</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>AI_MODEL_DEFAULT</code> — main model for in-app AI features</li>
+                        <li><code>AI_MODEL_LIGHT</code> — cheap model for light tasks</li>
+                        <li>Feature files import these constants. A hardcoded model ID that later retires takes down every AI feature at once — this happened; do not repeat it</li>
+                        <li>Requests route through the claude-proxy worker; per-tenant AI keys (D9) are in build</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🎙️</span><span class="db-node-name">Prompts</span><span class="db-node-tag ai">js/prompts/</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li><code>js/prompts/boardroom-mentor.js</code> — the single source of truth for every AI wizard's voice. All wizards import it; never fork the tone per feature</li>
+                        <li><code>js/ai-assistant.js</code> — the chat panel; per-tab context blocks (e.g. <code>ctx.compliancePage</code>) tell the AI what the user is looking at. New features that hold data Kevin might ask about add a context block here</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">⚡</span><span class="db-node-name">Claude Code skills</span><span class="db-node-tag ai">.claude/skills/</span></div>
+                <div class="db-node-detail">
+                    In-repo skills that drive the workflow:
+                    <ul>
+                        <li><code>build-feature</code> — end-to-end build pipeline (BILD → plan → build → audit → review → deploy)</li>
+                        <li><code>fix</code> — same pipeline for bugs and amendments</li>
+                        <li><code>audit</code> · <code>verify</code> · <code>test</code> · <code>test-gaps</code> · <code>pre-deploy</code> · <code>health-bar</code></li>
+                    </ul>
+                    Kevin's global skills (transcript-to-brain, task creators, etc.) live outside the repo in <code>~/.claude/skills/</code>.
+                </div>
+            </div>
+            <div class="db-node" onclick="toggleNode(this)" tabindex="0" role="button" aria-expanded="false">
+                <div class="db-node-header"><span class="db-node-icon">🧠</span><span class="db-node-name">Memory + AI Brain</span><span class="db-node-tag ai">Outside the repo</span></div>
+                <div class="db-node-detail">
+                    <ul>
+                        <li>Claude Code project memory — persistent facts across sessions (MEMORY.md index + one file per fact)</li>
+                        <li>AI Brain vault — Google Drive <code>00 AI Context</code>: founder profile, priorities, meetings, transcripts. Nightly compound engine links and reviews it</li>
+                        <li>The AI Brain page (<code>ai-brain.html</code>) reads a published Airtable feed — sensitive items are link-only pointers, never copied</li>
+                        <li>Agent engine: live testing since 3 Jul 2026; agents come from the Systemisation pipeline (Loom → SOP → readiness → shadow → live)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<script>
+    function toggleNode(el) {
+        el.classList.toggle('expanded');
+        el.setAttribute('aria-expanded', el.classList.contains('expanded') ? 'true' : 'false');
+    }
+    function toggleAllNodes(btn) {
+        const nodes = document.querySelectorAll('.db-node');
+        const anyCollapsed = Array.from(nodes).some(n => !n.classList.contains('expanded'));
+        nodes.forEach(n => {
+            n.classList.toggle('expanded', anyCollapsed);
+            n.setAttribute('aria-expanded', anyCollapsed ? 'true' : 'false');
+        });
+        btn.textContent = anyCollapsed ? 'Collapse all' : 'Expand all';
+    }
+    document.addEventListener('keydown', e => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('db-node')) {
+            e.preventDefault();
+            toggleNode(e.target);
+        }
+    });
+</script>
+
+</body>
+</html>

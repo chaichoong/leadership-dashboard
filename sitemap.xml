@@ -73,6 +73,12 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://chaichoong.github.io/leadership-dashboard/dev-blueprint.html</loc>
+    <lastmod>2026-07-08</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+  <url>
     <loc>https://chaichoong.github.io/leadership-dashboard/index.html#skills</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
