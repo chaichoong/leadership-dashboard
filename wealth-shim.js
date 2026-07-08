@@ -28,7 +28,15 @@
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } });
   const rec = row => ({ id: row.id, fields: row.fields || {}, cellValuesByFieldId: row.fields || {} });
 
+  // The Wealth tab's first fetch fires on the #wealth hash render, which can beat the
+  // async session restore → RLS returns empty → wealth.js CACHES that empty result and
+  // shows "No net worth data". Force the session to load before any query so the first
+  // read already has auth.
+  let _sessReady = null;
+  function ensureSession() { if (!_sessReady) _sessReady = sbc().auth.getSession().catch(() => {}); return _sessReady; }
+
   async function readAll(table) {
+    await ensureSession();
     const rows = []; const page = 1000; let from = 0;
     for (;;) {
       const { data, error } = await sbc().from(table).select('*').range(from, from + page - 1);
@@ -40,6 +48,7 @@
     return { records: rows.map(rec) };
   }
   async function readOne(table, id) {
+    await ensureSession();
     const { data, error } = await sbc().from(table).select('*').eq('id', id).single();
     if (error) throw new Error(error.message);
     return rec(data);
