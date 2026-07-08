@@ -1154,7 +1154,7 @@ function renderWealthCashflow() {
             { label: 'Net cash flow', values: series(m => m.net), goodUp: true, bold: true, border: '2px solid var(--border-default)' },
         ] },
     ];
-    el.innerHTML = wealthMatrixCard(
+    el.innerHTML = `<div style="background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:var(--space-4);font-size:var(--fs-sm);color:var(--text-primary);line-height:1.55"><strong>Use this at your monthly review.</strong> It shows whether more came in than went out across your whole life, property plus personal, month by month, and whether your net worth is climbing. This is the long game, not a spend-today figure. For what is safe to spend today, use the <strong>Money Confidence</strong> tab. For the month ahead, use the <strong>Cash Flow</strong> tab.</div>` + wealthMatrixCard(
         'Monthly cash flow — rolling 12 months',
         'Money in (real estate / portfolio revenue + personal income, internal drawings excluded) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Click Business or Personal expenditure to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month. Business expenditure is operating costs (matching the P&L); capital repayments not yet included.',
         months, sections, { anchor: 'completed' });
