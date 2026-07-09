@@ -83,6 +83,27 @@ function buildWealthTxAgg(monthKeys) {
     return monthKeys.map(k => byMonth[k]);
 }
 
+// A small inline-SVG sparkline for a metric's 12-month history. `vals` is an array
+// (nulls allowed for gaps); the line is scaled to its own min/max so movement is
+// visible even on small ranges. The last point is marked. Returns '' if there is
+// not enough history to draw a line.
+function wealthSparkline(vals) {
+    const pts = (vals || []).map((v, i) => ({ i, v })).filter(p => p.v != null && isFinite(p.v));
+    if (pts.length < 2) return '';
+    const xs = Math.max(1, (vals.length - 1));
+    const lo = Math.min(...pts.map(p => p.v)), hi = Math.max(...pts.map(p => p.v));
+    const range = (hi - lo) || 1;
+    const W = 132, H = 30, pad = 3;
+    const x = i => pad + (i / xs) * (W - 2 * pad);
+    const y = v => pad + (1 - (v - lo) / range) * (H - 2 * pad);
+    const d = pts.map((p, k) => `${k === 0 ? 'M' : 'L'}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const last = pts[pts.length - 1];
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;margin-top:8px" aria-hidden="true">
+        <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${x(last.i).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="2.4" fill="var(--accent)"/>
+    </svg>`;
+}
+
 // Render the collapsible Analysis section into #wealthRatios. `view` is the live
 // reconciled net-worth object from renderWealthContent (read-only).
 function renderWealthRatios(view) {
@@ -158,6 +179,47 @@ function renderWealthRatios(view) {
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const C = { good: 'var(--success)', mid: 'var(--accent-gold)', low: 'var(--text-secondary)', bad: 'var(--danger)' };
 
+    // ── 12-month trend: recompute every metric for each of the last 12 months so the
+    // direction of travel is visible under each figure. Each point uses the same
+    // trailing 3-month window as the headline, ending on that month, so the last
+    // point matches the figure above it. Precomputed once (two transaction passes),
+    // then window-summed — no per-month re-looping. ──
+    const TN = WEALTH_RATIO_MONTHS + 12;                       // enough history for 12 windows
+    const tKeys = wealthMonthKeys(TN, 1);
+    const tCf = buildMonthlyCashflow(tKeys);
+    const tAgg = buildWealthTxAgg(tKeys);
+    const skOf = k => { const [y, mo] = k.split('-').map(Number); return y * 12 + (mo - 1); };
+    const snapAt = sk => { let best = null; (periods || []).forEach(p => { if (p.sortKey <= sk && (!best || p.sortKey > best.sortKey)) best = p; }); return best; };
+    const tInv = tKeys.map(k => { const s = snapAt(skOf(k)); return s ? (s.byClass['Investments'] || 0) : 0; });
+    const metricAt = i => {
+        const w = []; for (let k = i - months + 1; k <= i; k++) if (k >= 0) w.push(k);
+        const S = f => w.reduce((s, j) => s + f(tCf[j] || {}), 0);
+        const Sa = f => w.reduce((s, j) => s + f(tAgg[j] || {}), 0);
+        const gRent = Sa(m => m.grossRental || 0);
+        const totInc = S(m => m.totalIncome || 0);
+        const earnedW = totInc - gRent, passiveW = gRent;
+        const outW = S(m => (m.bizTotal || 0) + (m.perTotal || 0));
+        const netW = S(m => m.net || 0);
+        const contribW = Sa(m => m.contributions || 0);
+        const invEnd = tInv[i], invStart = (i - months >= 0) ? tInv[i - months] : tInv[0];
+        const portW = Math.max(0, invEnd - invStart - contribW);
+        const moneyInW = earnedW + passiveW + portW;
+        const snap = snapAt(skOf(tKeys[i]));
+        const reW = snap ? (snap.byClass['Real Estate'] || 0) : 0;
+        return {
+            p2e: outW > 0 ? passiveW / outW * 100 : null,
+            work: moneyInW > 0 ? (passiveW + portW) / moneyInW * 100 : null,
+            keep: totInc > 0 ? netW / totInc * 100 : null,
+            roa: (reW + invEnd) > 0 ? (passiveW + portW) / months * 12 / (reW + invEnd) * 100 : null,
+            runway: (outW > 0 && snap && snap.net != null) ? snap.net / (outW / months) : null,
+            debt: (snap && snap.assets > 0) ? snap.liabilities / snap.assets * 100 : null,
+        };
+    };
+    const trend = { p2e: [], work: [], keep: [], roa: [], runway: [], debt: [] };
+    for (let i = Math.max(months - 1, TN - 12); i < TN; i++) { const mm = metricAt(i); Object.keys(trend).forEach(k => trend[k].push(mm[k])); }
+    const trendCaption = '<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:2px">12-month trend</div>';
+    const sparkBlock = vals => { const svg = wealthSparkline(vals); return svg ? svg + trendCaption : ''; };
+
     // Top banner — states the portfolio treatment once, plainly.
     const banner = `<div style="background:var(--info-bg,var(--accent-soft));border:1px solid var(--info,var(--accent));border-radius:var(--radius-md);padding:10px 14px;margin-bottom:var(--space-4);font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.55">
         <strong style="color:var(--text-primary)">How portfolio income is treated:</strong> it is your investments' monthly growth, minus anything you paid in. You have not withdrawn it, so it counts as income and net worth but not as cash. It is excluded from net cash flow and the savings rate, and included in "money working" and return on assets.
@@ -182,14 +244,16 @@ function renderWealthRatios(view) {
         </div>
         <div style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5">${escHtml(p2eMsg)}</div>
         <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Rental income ${fmt0(passive / months)}/mo ÷ total money out ${fmt0(avgOut)}/mo (business + personal). Rental only; portfolio growth is excluded here as it is volatile and reinvested.</div>
+        ${sparkBlock(trend.p2e)}
     </div>`;
 
-    // ── compact metric card ──
-    const card = (label, value, colour, method, meaning) => `<div class="kpi-card" style="margin-bottom:0">
+    // ── compact metric card (with optional 12-month trend sparkline) ──
+    const card = (label, value, colour, method, meaning, spark) => `<div class="kpi-card" style="margin-bottom:0">
         <div class="kpi-card-label" style="margin-bottom:4px">${escHtml(label)}</div>
         <div style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:${colour};line-height:1.1">${value}</div>
         <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">${escHtml(method)}</div>
         <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px;line-height:1.5">${escHtml(meaning)}</div>
+        ${spark || ''}
     </div>`;
 
     // 2. Does your money work for you? — (passive + portfolio) share of money in
@@ -198,7 +262,8 @@ function renderWealthRatios(view) {
     const workColour = workRaw == null ? C.low : (workRaw >= 0.5 ? C.good : (workRaw >= 0.25 ? C.mid : C.low));
     const c2 = card('Does your money work for you?', pctStr(workPct == null ? null : workPct), workColour,
         'passive + portfolio ÷ all money in · includes portfolio',
-        workRaw == null ? 'Needs income in the window to read.' : `${workPct}% of your income is passive and portfolio income, not earned income.`);
+        workRaw == null ? 'Needs income in the window to read.' : `${workPct}% of your income is passive and portfolio income, not earned income.`,
+        sparkBlock(trend.work));
 
     // 3. How much do you keep? — savings rate (cash only)
     const keepRaw = cashIncome > 0 ? (netCashFlow / cashIncome) : null;
@@ -206,7 +271,8 @@ function renderWealthRatios(view) {
     const keepColour = keepRaw == null ? C.low : (keepRaw >= 0.2 ? C.good : (keepRaw >= 0.1 ? C.mid : (keepRaw >= 0 ? C.low : C.bad)));
     const c3 = card('How much do you keep?', pctStr(keepPct), keepColour,
         'net cash flow ÷ money in (earned + passive) · portfolio excluded',
-        keepRaw == null ? 'Needs income in the window to read.' : `You keep ${keepPct}p of every £1 of cash that comes in after all costs.`);
+        keepRaw == null ? 'Needs income in the window to read.' : `You keep ${keepPct}p of every £1 of cash that comes in after all costs.`,
+        sparkBlock(trend.keep));
 
     // 4. Return on assets — property yield, investment return, blended
     const reValue = (view && view.byClass && view.byClass['Real Estate']) || 0;
@@ -223,6 +289,7 @@ function renderWealthRatios(view) {
         ${roaLine('Investment return (portfolio)', invY)}
         <div style="border-top:1px solid var(--border-subtle);margin-top:4px;padding-top:4px">${roaLine('Blended (all assets)', blendY)}</div>
         <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px">yearly income each asset makes ÷ its value. Blended combines both. Property yield = gross rent × 12 ÷ property value. Investment return is annualised from your investment history${portfolioFromLabel ? ` (since ${escHtml(portfolioFromLabel)})` : ''} and swings with the market.</div>
+        ${sparkBlock(trend.roa)}
     </div>`;
 
     // 5. Financial runway — net worth ÷ monthly outgoings
@@ -231,7 +298,8 @@ function renderWealthRatios(view) {
     const runwayColour = runwayMonths == null ? C.low : (runwayMonths >= 120 ? C.good : (runwayMonths >= 36 ? C.mid : C.low));
     const c5 = card('Financial runway', runwayStr, runwayColour,
         'net worth ÷ monthly money out (business + personal)',
-        runwayMonths == null ? 'Needs money-out data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of money out if all income stopped.`);
+        runwayMonths == null ? 'Needs money-out data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of money out if all income stopped.`,
+        sparkBlock(trend.runway));
 
     // 6. Debt ratio — liabilities ÷ assets, safe band
     const debtRaw = (view.assets > 0) ? (view.liabilities / view.assets) : null;
@@ -242,7 +310,8 @@ function renderWealthRatios(view) {
     const debtBand = debtRaw == null ? '' : (debtRaw <= 0.5 ? 'strong' : (debtRaw <= 0.75 ? 'moderate' : 'stretched'));
     const c6 = card('Debt ratio', pctStr(debtPct), debtColour,
         'liabilities ÷ total assets · safe band under 75%',
-        debtRaw == null ? 'Needs asset data to read.' : `${debtPct}% of your assets are financed (${debtBand})${propLtv != null ? `. Property LTV ${propLtv}%` : ''}. Leverage is a tool, so watch the band, not just the direction.`);
+        debtRaw == null ? 'Needs asset data to read.' : `${debtPct}% of your assets are financed (${debtBand})${propLtv != null ? `. Property LTV ${propLtv}%` : ''}. Leverage is a tool, so watch the band, not just the direction.`,
+        sparkBlock(trend.debt));
 
     const grid = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-4);margin-bottom:var(--space-4)">
         ${c2}${c3}${c4}${c5}${c6}
