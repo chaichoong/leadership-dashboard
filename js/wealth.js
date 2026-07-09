@@ -1167,7 +1167,7 @@ function renderWealthCashflow() {
         { header: 'Money in', rows: [
             { label: 'Real estate income (passive)', values: series(m => m.reRevenue), goodUp: true },
             { label: 'Personal income (earned)', values: series(m => m.personalIncome), goodUp: true },
-            { label: 'Portfolio income (investments)', values: portfolioSeries, goodUp: true },
+            { label: 'Investment income (portfolio)', values: portfolioSeries, goodUp: true },
             { label: 'Total income', values: cf.map((m, i) => m.totalIncome + portfolioSeries[i]), goodUp: true, bold: true, border: '1px solid var(--border-default)' },
         ] },
         { header: 'Expenditure', rows: [
