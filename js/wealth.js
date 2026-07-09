@@ -734,17 +734,20 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const alLast = alKeys.length - 1;
     // A month's snapshot wins; the latest column falls back to the reconciled live
     // figure when that month has no saved snapshot yet. Other gaps stay blank.
+    // The current (in-progress) month always shows the live reconciled figure, even if
+    // an early snapshot for it exists — so it matches the top KPI strip and the live
+    // item rows. Completed months show their frozen snapshot.
     const classVals = cls => alKeys.map((k, i) => {
+        if (i === alLast) { const v = view.byClass[cls]; return v == null ? null : v; }
         const p = periodByKey[k];
         if (p) { const v = p.byClass[cls]; return v == null ? null : v; }
-        if (i === alLast) { const v = view.byClass[cls]; return v == null ? null : v; }
         return null;
     });
     const itemRows = (items, goodUp) => (items && items.length)
         ? items.slice().sort((a, b) => b.amount - a.amount).map(it => ({ label: it.name, goodUp, values: alKeys.map((k, i) => i === alLast ? it.amount : null) }))
         : undefined;
     const alRow = (label, cls, items, goodUp) => ({ label, goodUp, values: classVals(cls), items: itemRows(items, goodUp) });
-    const totalVals = pick => alKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === alLast ? pick(view) : null; });
+    const totalVals = pick => alKeys.map((k, i) => { if (i === alLast) return pick(view); const p = periodByKey[k]; return p ? pick(p) : null; });
     const alSections = [
         { header: 'Assets', rows: [
             alRow('Cash', 'Cash', cashItems.length ? cashItems : snapItems('Cash'), true),
@@ -773,7 +776,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     const kpiKeys = wealthMonthKeys(13, 0); // current month + 12 prior
     const kpiRef = wealthCompletedIdx(kpiKeys); // last completed month (flow anchor)
     const kpiLast = kpiKeys.length - 1; // current month (stock/balance anchor)
-    const kpiSnap = pick => kpiKeys.map((k, i) => { const p = periodByKey[k]; if (p) return pick(p); return i === kpiLast ? pick(view) : null; });
+    const kpiSnap = pick => kpiKeys.map((k, i) => { if (i === kpiLast) return pick(view); const p = periodByKey[k]; return p ? pick(p) : null; });
     const kpiCfSeries = buildMonthlyCashflow(kpiKeys).map(m => m.net);
     const KPI_PERIODS = [1, 3, 6, 9, 12];
     const periodChanges = (series, goodUp, anchorIdx) => {
