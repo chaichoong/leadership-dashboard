@@ -43,6 +43,7 @@ FILE_TO_PAGE = {
     # Previously-unmapped registered pages (their versions never bumped)
     'js/money.js':          'money',
     'js/wealth.js':         'wealth',
+    'js/wealth-ratios.js':  'wealth',
     'js/transactions.js':   'transactions',
     'ai-brain.html':        'ai-brain',
     # Supporting files that ship page behaviour but had no mapping
