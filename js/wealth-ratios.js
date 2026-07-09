@@ -197,6 +197,7 @@ function renderWealthRatios(view) {
         const totInc = cfm.totalIncome || 0;
         const earnedM = totInc - gRent, passiveM = gRent;
         const outM = (cfm.bizTotal || 0) + (cfm.perTotal || 0);
+        const perM = cfm.perTotal || 0;
         const netM = cfm.net || 0;
         const contribM = aggm.contributions || 0;
         const sk = skOf(tKeys[i]);
@@ -211,7 +212,7 @@ function renderWealthRatios(view) {
             work: moneyInM > 0 ? (passiveM + portM) / moneyInM * 100 : null,
             keep: totInc > 0 ? netM / totInc * 100 : null,
             roa: (reM + invM) > 0 ? (passiveM + portM) * 12 / (reM + invM) * 100 : null,
-            runway: (outM > 0 && snap && snap.net != null) ? snap.net / outM : null,
+            runway: (perM > 0 && snap && snap.net != null) ? snap.net / perM : null,
             debt: (snap && snap.assets > 0) ? snap.liabilities / snap.assets * 100 : null,
         };
     };
@@ -260,7 +261,7 @@ function renderWealthRatios(view) {
             <div style="height:100%;width:${p2eBar}%;background:${p2eColour};border-radius:var(--radius-full)"></div>
         </div>
         <div style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5">${escHtml(p2eMsg)}</div>
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Rental income ${fmt0(passive / months)}/mo ÷ total money out ${fmt0(avgOut)}/mo (business + personal). Rental only; portfolio growth is excluded here as it is volatile and reinvested.</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Rental income ${fmt0(passive / months)}/mo ÷ total money out ${fmt0(avgOut)}/mo (business + personal), each averaged over the last ${months} completed months. Rental only; portfolio growth is excluded here as it is volatile and reinvested.</div>
         ${sparkBlock(trend.p2e)}
     </div>`;
 
@@ -309,13 +310,16 @@ function renderWealthRatios(view) {
         ${sparkBlock(trend.roa)}
     </div>`;
 
-    // 5. Financial runway — net worth ÷ monthly outgoings
-    const runwayMonths = avgOut > 0 ? (view.net / avgOut) : null;
+    // 5. Financial runway — net worth ÷ PERSONAL monthly money out. If you sold up,
+    // business outgoings would stop but personal costs would continue, so runway is
+    // measured against personal expenditure only.
+    const avgPersonalOut = personalExp / months;
+    const runwayMonths = avgPersonalOut > 0 ? (view.net / avgPersonalOut) : null;
     const runwayStr = runwayMonths == null ? '—' : (runwayMonths >= 24 ? `${(runwayMonths / 12).toFixed(1)} yrs` : `${Math.round(runwayMonths)} mo`);
     const runwayColour = runwayMonths == null ? C.low : (runwayMonths >= 120 ? C.good : (runwayMonths >= 36 ? C.mid : C.low));
     const c5 = card('Financial runway', runwayStr, runwayColour,
-        'net worth ÷ monthly money out (business + personal)',
-        runwayMonths == null ? 'Needs money-out data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of money out if all income stopped.`,
+        'net worth ÷ monthly personal money out',
+        runwayMonths == null ? 'Needs personal-spend data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of personal spending if all income stopped (business costs would stop too, so they are excluded).`,
         sparkBlock(trend.runway));
 
     // 6. Debt ratio — liabilities ÷ assets, safe band
