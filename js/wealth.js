@@ -768,8 +768,8 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     ];
     const assetsHtml = wealthMatrixCard(
         'Assets, liabilities & net worth — rolling 12 months',
-        'Class totals over 12 months (blank where there is no monthly snapshot yet). Click a class to expand its current breakdown. Real estate and mortgages use your live per-property figures; other classes come from the latest monthly snapshot. Arrows = change vs the previous month; 12-mo = change across the period.',
-        alMonths, alSections);
+        'Class totals over 12 months. The current month (●) shows today\'s live figures (matching the strip at the top); completed months show their saved month-end snapshot. Click a class to expand its breakdown. Arrows = change vs the previous month; the Δ column and highlight follow the last completed month, like the other tables.',
+        alMonths, alSections, { anchor: 'completed' });
 
     // ── KPI summary strip (headline figures + 1/3/6/9/12-month changes) ──
     // 13-month series (current + 12 prior) so every period change is computable.
