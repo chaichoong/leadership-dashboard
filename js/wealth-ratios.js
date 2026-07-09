@@ -83,19 +83,6 @@ function buildWealthTxAgg(monthKeys) {
     return monthKeys.map(k => byMonth[k]);
 }
 
-// Investment value at the end of a given month key, from the net-worth snapshots.
-// Carries the last known value forward for months with no snapshot, so a gap does
-// not read as a crash to zero. Returns null if there is no snapshot on/before it.
-function wealthInvestmentAt(periods, key) {
-    const [y, m] = key.split('-').map(Number);
-    const sortKey = y * 12 + (m - 1);
-    let val = null;
-    (periods || []).forEach(p => {
-        if (p.sortKey <= sortKey) { if (val === null || p.sortKey > val.sortKey) val = { sortKey: p.sortKey, v: (p.byClass['Investments'] || 0) }; }
-    });
-    return val ? val.v : null;
-}
-
 // Render the collapsible Analysis section into #wealthRatios. `view` is the live
 // reconciled net-worth object from renderWealthContent (read-only).
 function renderWealthRatios(view) {
@@ -134,16 +121,32 @@ function renderWealthRatios(view) {
     const totalOut = personalExp + businessExp;
     const netCashFlow = sum(cf.map(m => m.net));                          // cash only
 
-    // ── Portfolio income (non-cash): rise in investment value less contributions ──
+    // ── Portfolio income (non-cash): growth of the investment value less contributions ──
+    // Investments are updated manually and often carry forward, so a fixed 3-month
+    // window usually shows no change. Instead measure across every investment snapshot
+    // we have (earliest with a value → latest), subtract contributions over that span,
+    // and express it per month. As monthly updates become regular this tightens.
     const periods = (typeof computeNetWorth === 'function' && typeof _wealthRecords !== 'undefined' && _wealthRecords)
         ? computeNetWorth(_wealthRecords) : [];
-    const priorKey = wealthMonthKeys(months + 1, 1)[0];                   // month before the window
-    const invStart = wealthInvestmentAt(periods, priorKey);
-    const invEnd = wealthInvestmentAt(periods, keys[keys.length - 1]);
-    const contributions = sum(agg.map(m => m.contributions));
-    const invValueNow = (view && view.byClass && view.byClass['Investments']) || (invEnd || 0);
-    const portfolioKnown = (invStart != null && invEnd != null);
-    const portfolio = portfolioKnown ? Math.max(0, invEnd - invStart - contributions) : 0;
+    const invPeriods = periods.filter(p => p.byClass && p.byClass['Investments'] > 0).sort((a, b) => a.sortKey - b.sortKey);
+    let portfolioPerMonth = 0, portfolioKnown = false, portfolioSpanMonths = 0, portfolioFromLabel = '';
+    let invValueNow = (view && view.byClass && view.byClass['Investments']) || 0;
+    if (invPeriods.length >= 2) {
+        const first = invPeriods[0], last = invPeriods[invPeriods.length - 1];
+        portfolioSpanMonths = last.sortKey - first.sortKey;
+        if (!invValueNow) invValueNow = last.byClass['Investments'];
+        if (portfolioSpanMonths > 0) {
+            const spanKeys = [];
+            for (let sk = first.sortKey; sk <= last.sortKey; sk++) spanKeys.push(`${Math.floor(sk / 12)}-${String((sk % 12) + 1).padStart(2, '0')}`);
+            const spanContrib = sum(buildWealthTxAgg(spanKeys).map(m => m.contributions));
+            const growth = last.byClass['Investments'] - first.byClass['Investments'] - spanContrib;
+            portfolioPerMonth = Math.max(0, growth / portfolioSpanMonths);
+            portfolioKnown = true;
+            portfolioFromLabel = wealthMonthLabel(spanKeys[0]);
+        }
+    }
+    // Express portfolio on the same monthly basis as the cash flows so money-in adds up.
+    const portfolio = portfolioPerMonth * months;
 
     const moneyIn = earned + passive + portfolio;
 
@@ -194,15 +197,15 @@ function renderWealthRatios(view) {
     const workPct = workRaw == null ? null : Math.round(workRaw * 100);
     const workColour = workRaw == null ? C.low : (workRaw >= 0.5 ? C.good : (workRaw >= 0.25 ? C.mid : C.low));
     const c2 = card('Does your money work for you?', pctStr(workPct == null ? null : workPct), workColour,
-        'rent + investment growth ÷ all money in · includes portfolio',
-        workRaw == null ? 'Needs income in the window to read.' : `${workPct}% of your income comes from rent and investments, not active work.`);
+        'passive + portfolio ÷ all money in · includes portfolio',
+        workRaw == null ? 'Needs income in the window to read.' : `${workPct}% of your income is passive and portfolio income, not earned income.`);
 
     // 3. How much do you keep? — savings rate (cash only)
     const keepRaw = cashIncome > 0 ? (netCashFlow / cashIncome) : null;
     const keepPct = keepRaw == null ? null : Math.round(keepRaw * 100);
     const keepColour = keepRaw == null ? C.low : (keepRaw >= 0.2 ? C.good : (keepRaw >= 0.1 ? C.mid : (keepRaw >= 0 ? C.low : C.bad)));
     const c3 = card('How much do you keep?', pctStr(keepPct), keepColour,
-        'net cash flow ÷ cash money in · portfolio excluded',
+        'net cash flow ÷ money in (earned + passive) · portfolio excluded',
         keepRaw == null ? 'Needs income in the window to read.' : `You keep ${keepPct}p of every £1 of cash that comes in after all costs.`);
 
     // 4. Return on assets — property yield, investment return, blended
@@ -219,7 +222,7 @@ function renderWealthRatios(view) {
         ${roaLine('Property yield (gross rent)', propY)}
         ${roaLine('Investment return (portfolio)', invY)}
         <div style="border-top:1px solid var(--border-subtle);margin-top:4px;padding-top:4px">${roaLine('Blended (all assets)', blendY)}</div>
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px">yearly income each asset makes ÷ its value. Blended combines both. Investment return swings month to month (last ${months} mo).</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px">yearly income each asset makes ÷ its value. Blended combines both. Property yield = gross rent × 12 ÷ property value. Investment return is annualised from your investment history${portfolioFromLabel ? ` (since ${escHtml(portfolioFromLabel)})` : ''} and swings with the market.</div>
     </div>`;
 
     // 5. Financial runway — net worth ÷ monthly outgoings
@@ -260,7 +263,7 @@ function renderWealthRatios(view) {
         ${srcRow('Earned (worked income)', earned, 'var(--tone-olive)')}
         ${srcRow('Passive (gross rental)', passive, 'var(--tone-sage)')}
         ${srcRow('Portfolio (investment growth)', portfolio, 'var(--tone-blue)', 'reinvested, non-cash')}
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Earned = your worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = investment growth less your contributions; you have not withdrawn it, so it is income and net worth but not cash.${!portfolioKnown ? ' Portfolio reads £0 until there are two months of investment values to compare.' : ''}</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Earned = your worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = average monthly investment growth${portfolioFromLabel ? ` since ${escHtml(portfolioFromLabel)}` : ''}, less your contributions; you have not withdrawn it, so it is income and net worth but not cash.${!portfolioKnown ? ' Portfolio reads £0 until there are at least two investment-value entries to compare.' : ''}</div>
     </div>`;
 
     const note = `<div style="font-size:var(--fs-xs);color:var(--text-muted);line-height:1.6;margin-top:6px">Flows are the last ${months} completed months (${escHtml(monthLabel)}). Balances (net worth, assets, debt) are today's live figures. Read-only — nothing here changes the numbers above.</div>`;
