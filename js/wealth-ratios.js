@@ -1,40 +1,48 @@
 // ══════════════════════════════════════════
 // WEALTH — Analysis ratios (Rich Dad personal financial statement)
 // ══════════════════════════════════════════
-// A READ-ONLY interpretation layer that sits at the bottom of the Wealth tab as a
-// collapsible "Analysis" section. It reads figures the page has already computed —
-// the live `view` (net worth, assets, liabilities, class totals) plus the same
-// transaction-based monthly cash flow (`buildMonthlyCashflow`) — and never writes
-// anything back. A bug here can only make a ratio look wrong; it cannot move net
-// worth, cash flow, or any figure above it.
+// A READ-ONLY interpretation layer at the bottom of the Wealth tab, collapsible
+// and collapsed by default. It reads figures the page already computes (the live
+// `view`, the transaction-based monthly cash flow, and the net-worth snapshots)
+// and never writes back. A bug here can only make a ratio look wrong; it cannot
+// move net worth, cash flow, or any figure above it.
 //
-// The six ratios brought across from Kevin's Kiyosaki personal financial statement:
-//   1. Passive income to expenses (the rat-race-escape gauge, target >= 1.00)
-//   2. Does your money work for you? (passive + portfolio share of net income)
-//   3. How much do you keep? (savings rate = net cash flow / total income)
-//   4. Return on assets (net rental income / real estate value — portfolio yield)
-//   5. Financial runway (net worth / monthly expenses, in months)
-//   6. Debt ratio (liabilities / assets, read against a safe band, not "always down")
+// INCOME MODEL (locked with Kevin 2026-07-09). His Wealth statement entwines
+// business and personal because the portfolio sits in his personal name:
+//   money in  = Earned + Passive + Portfolio
+//   money out = business expenditure + personal expenditure
+//   net cash flow = cash money in − money out   (Portfolio is NOT in this — it is
+//                                                never withdrawn, so no cash moves)
 //
-// CORRECTNESS: passive income is NET (rental income less property costs), never
-// gross rent, so the gauges do not read healthier than reality. The earned/passive
-// split is derived so it reconciles exactly to the cash flow above:
-//   netEarned = (net cash flow + personal expenses) - netPassive
-// Portfolio income is not in the transaction feed yet, so it is shown as £0.
+//   Earned    = active/worked income: Personal Income Other (wife's salary + child
+//               benefit) + any business revenue (Fixed/Variable Income). OD income
+//               is earned in the early stage; it moves to Passive once it runs
+//               without Kevin working for it.
+//   Passive   = GROSS rental income (the full rent). Property costs and mortgages
+//               are already captured in money out, so rent is counted gross here.
+//   Portfolio = the month-on-month RISE in investment value, minus Kevin's own
+//               contributions (sub-category "Personal Investment"), so only what
+//               the investments themselves earned is counted. It is income he has
+//               earned but chosen to reinvest, so it is non-cash: it lands in net
+//               worth via the rising Investments asset line, never in cash.
+//
+// PORTFOLIO TREATMENT PER METRIC (all labelled on the page):
+//   Net cash flow / Savings rate  → EXCLUDED (cash measures; it is never withdrawn)
+//   Income by source              → INCLUDED as its own non-cash line
+//   Does your money work          → INCLUDED (it is money your money made)
+//   Passive vs expenses (rat-race)→ EXCLUDED (rental only — reliable, not volatile)
+//   Return on assets              → INCLUDED as its own line + a blended line
+//   Financial runway / Debt ratio → reflected via net worth / assets (Investments)
 
-// Property-related costs deducted from rental income to reach NET passive income.
-// Every entry is a sub-category name already present in CASHFLOW_COST_SUBCATS.
-const WEALTH_PROPERTY_COST_SUBCATS = [
-    'COGS Property Council Tax', 'COGS Property Utilities',
-    'COGS Property Reactive Maintenance', 'COGS Property Compliance',
-    'Mortgage Interest',
-];
+// Sub-category that records investment contributions (money Kevin pays IN to the
+// portfolio). Subtracted from the investment-value rise so top-ups are not counted
+// as earnings. None exist today; the logic is correct for when they start.
+const WEALTH_CONTRIBUTION_SUBCAT = 'Personal Investment';
+const WEALTH_RENTAL_SUBCAT = 'Rental Income';
 
-// How many completed months to average over. A trailing window smooths lumpy
-// months (a one-off tax or maintenance hit) so the gauges do not swing wildly.
+// Trailing completed months to average over — smooths lumpy months.
 const WEALTH_RATIO_MONTHS = 3;
 
-// Collapsed by default — the section adds nothing to the view on load until opened.
 function wealthRatiosOpen() {
     try { return localStorage.getItem('wealthRatios_open') === '1'; } catch (e) { return false; }
 }
@@ -47,21 +55,20 @@ function toggleWealthRatios() {
     if (caret) caret.textContent = open ? '▾' : '▸';
 }
 
-// Net passive income per month = gross rental income − property costs. This is the
-// only figure computed independently here; everything else reuses the page's cash
-// flow so the split always ties out. Reads allTransactions + allSubCategories (no
-// fetch), classifying by sub-category name exactly like buildMonthlyCashflow.
-function buildWealthPassiveSplit(monthKeys) {
+// Per-month transaction aggregates the cash flow does not expose: gross rental
+// (to split it out of business revenue) and investment contributions. Reads
+// allTransactions + allSubCategories (no fetch), classifying by sub-category name
+// exactly like buildMonthlyCashflow so the figures reconcile.
+function buildWealthTxAgg(monthKeys) {
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
         const n = getField(r, 'fldO4BTJhFv5EsN6i'); if (n) subNames[r.id] = String(n);
     });
-    const propSet = new Set(WEALTH_PROPERTY_COST_SUBCATS);
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
     const set = new Set(monthKeys);
     const byMonth = {};
-    monthKeys.forEach(k => byMonth[k] = { grossRental: 0, propertyCosts: 0 });
+    monthKeys.forEach(k => byMonth[k] = { grossRental: 0, contributions: 0 });
     txns.forEach(tx => {
         const dateStr = getField(tx, F.txDate); if (!dateStr) return;
         const d = new Date(dateStr); if (isNaN(d)) return;
@@ -70,10 +77,23 @@ function buildWealthPassiveSplit(monthKeys) {
         const sub = subNames[linkId(getField(tx, F.txSubCategory))] || '';
         const amt = Number(getField(tx, F.txReportAmount)) || 0; // inflow +, outflow −
         const m = byMonth[key];
-        if (sub === 'Rental Income') m.grossRental += amt;
-        else if (propSet.has(sub)) m.propertyCosts += (-amt); // positive magnitude
+        if (sub === WEALTH_RENTAL_SUBCAT) m.grossRental += amt;
+        else if (sub === WEALTH_CONTRIBUTION_SUBCAT) m.contributions += Math.abs(amt); // money paid in
     });
     return monthKeys.map(k => byMonth[k]);
+}
+
+// Investment value at the end of a given month key, from the net-worth snapshots.
+// Carries the last known value forward for months with no snapshot, so a gap does
+// not read as a crash to zero. Returns null if there is no snapshot on/before it.
+function wealthInvestmentAt(periods, key) {
+    const [y, m] = key.split('-').map(Number);
+    const sortKey = y * 12 + (m - 1);
+    let val = null;
+    (periods || []).forEach(p => {
+        if (p.sortKey <= sortKey) { if (val === null || p.sortKey > val.sortKey) val = { sortKey: p.sortKey, v: (p.byClass['Investments'] || 0) }; }
+    });
+    return val ? val.v : null;
 }
 
 // Render the collapsible Analysis section into #wealthRatios. `view` is the live
@@ -87,8 +107,6 @@ function renderWealthRatios(view) {
             <span style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);color:var(--text-primary)">Analysis — is your money working?</span>
         </button>`;
 
-    // No transactions cached yet → the split cannot be computed. Show a calm empty
-    // state rather than a wall of zeroed ratios.
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
     if (!txns.length) {
         host.innerHTML = `<div class="kpi-card" style="margin-bottom:0">
@@ -99,43 +117,57 @@ function renderWealthRatios(view) {
         return;
     }
 
-    // Trailing completed months (skip the partial current month).
-    const keys = wealthMonthKeys(WEALTH_RATIO_MONTHS, 1);
+    const months = WEALTH_RATIO_MONTHS;
+    const keys = wealthMonthKeys(months, 1);          // trailing completed months
     const cf = buildMonthlyCashflow(keys);
-    const passive = buildWealthPassiveSplit(keys);
+    const agg = buildWealthTxAgg(keys);
     const sum = arr => arr.reduce((s, v) => s + v, 0);
 
-    // Sums over the window (ratio of sums == ratio of averages, but steadier).
-    const totalIncome = sum(cf.map(m => m.totalIncome));   // gross money in
-    const netCashFlow = sum(cf.map(m => m.net));           // after business + personal costs
-    const personalExp = sum(cf.map(m => m.perTotal));      // personal expenditure
-    const grossRental = sum(passive.map(m => m.grossRental));
-    const propertyCosts = sum(passive.map(m => m.propertyCosts));
-    const netPassive = grossRental - propertyCosts;
-    const portfolio = 0;                                    // investment income not fed in yet
-    // Reconciles to the cash flow: netEarned = (net + personal expenses) − netPassive.
-    const netEarned = (netCashFlow + personalExp) - netPassive - portfolio;
-    const netIncome = netEarned + netPassive + portfolio;  // == netCashFlow + personalExp
+    // ── money in (cash) ──
+    const grossRental = sum(agg.map(m => m.grossRental));                 // Passive
+    const cashIncome = sum(cf.map(m => m.totalIncome));                   // Earned + Passive
+    const earned = cashIncome - grossRental;                             // Earned (worked income)
+    const passive = grossRental;
+    // ── money out ──
+    const personalExp = sum(cf.map(m => m.perTotal));
+    const businessExp = sum(cf.map(m => (m.bizTotal || 0)));
+    const totalOut = personalExp + businessExp;
+    const netCashFlow = sum(cf.map(m => m.net));                          // cash only
 
-    const months = WEALTH_RATIO_MONTHS;
-    const avgExp = personalExp / months;
+    // ── Portfolio income (non-cash): rise in investment value less contributions ──
+    const periods = (typeof computeNetWorth === 'function' && typeof _wealthRecords !== 'undefined' && _wealthRecords)
+        ? computeNetWorth(_wealthRecords) : [];
+    const priorKey = wealthMonthKeys(months + 1, 1)[0];                   // month before the window
+    const invStart = wealthInvestmentAt(periods, priorKey);
+    const invEnd = wealthInvestmentAt(periods, keys[keys.length - 1]);
+    const contributions = sum(agg.map(m => m.contributions));
+    const invValueNow = (view && view.byClass && view.byClass['Investments']) || (invEnd || 0);
+    const portfolioKnown = (invStart != null && invEnd != null);
+    const portfolio = portfolioKnown ? Math.max(0, invEnd - invStart - contributions) : 0;
+
+    const moneyIn = earned + passive + portfolio;
+
     const monthLabel = `${wealthMonthLabel(keys[0]).replace(/ \d{4}$/, '')}–${wealthMonthLabel(keys[keys.length - 1])}`;
+    const avgOut = totalOut / months;
 
-    // ── formatting + colour helpers ──
-    const pct = (n, d) => (d && d > 0) ? Math.round((n / d) * 100) : null;
-    const pctStr = v => v == null ? '—' : `${v}%`;
+    // ── helpers ──
+    const pctStr = v => v == null ? '—' : `${Math.round(v)}%`;
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const C = { good: 'var(--success)', mid: 'var(--accent-gold)', low: 'var(--text-secondary)', bad: 'var(--danger)' };
 
-    // ── 1. Passive income to expenses (the hero) ──
-    // Both sides are the 3-month window total, so the ratio is the true monthly cover.
-    const p2eRaw = personalExp > 0 ? (netPassive / personalExp) : null; // 1.0 == passive covers all expenses
+    // Top banner — states the portfolio treatment once, plainly.
+    const banner = `<div style="background:var(--info-bg,var(--accent-soft));border:1px solid var(--info,var(--accent));border-radius:var(--radius-md);padding:10px 14px;margin-bottom:var(--space-4);font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.55">
+        <strong style="color:var(--text-primary)">How portfolio income is treated:</strong> it is your investments' monthly growth, minus anything you paid in. You have not withdrawn it, so it counts as income and net worth but not as cash. It is excluded from net cash flow and the savings rate, and included in "money working" and return on assets.
+    </div>`;
+
+    // ── 1. Passive vs expenses (hero) — rental only ÷ total money out ──
+    const p2eRaw = totalOut > 0 ? (passive / totalOut) : null;
     const p2ePct = p2eRaw == null ? null : Math.round(p2eRaw * 100);
     const p2eColour = p2eRaw == null ? C.low : (p2eRaw >= 1 ? C.good : (p2eRaw >= 0.5 ? C.mid : C.low));
     const p2eBar = p2eRaw == null ? 0 : clamp(Math.round(p2eRaw * 100), 0, 100);
-    const p2eMsg = p2eRaw == null ? 'Add personal expense data to see this.'
-        : p2eRaw >= 1 ? 'Your net rental income covers your personal expenses. Work is optional on this measure.'
-        : `Net rental income covers ${p2ePct}% of your personal expenses. At 100% work becomes optional.`;
+    const p2eMsg = p2eRaw == null ? 'Add income and expense data to see this.'
+        : p2eRaw >= 1 ? 'Your rental income covers your total outgoings. Work is optional on this measure.'
+        : `Your rental income covers ${p2ePct}% of your total outgoings. At 100% work becomes optional.`;
     const heroHtml = `<div style="border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-4);background:var(--bg-surface-2);margin-bottom:var(--space-4)">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
             <div style="font-weight:var(--fw-semibold);color:var(--text-primary)">Passive income vs expenses</div>
@@ -146,84 +178,97 @@ function renderWealthRatios(view) {
             <div style="height:100%;width:${p2eBar}%;background:${p2eColour};border-radius:var(--radius-full)"></div>
         </div>
         <div style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5">${escHtml(p2eMsg)}</div>
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Net passive ${fmt0(netPassive / months)}/mo · expenses ${fmt0(avgExp)}/mo · avg of ${months} months</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px">Rental income ${fmt0(passive / months)}/mo ÷ total money out ${fmt0(avgOut)}/mo (business + personal). Rental only; portfolio growth is excluded here as it is volatile and reinvested.</div>
     </div>`;
 
-    // ── the other five as compact ratio cards ──
-    const card = (label, value, colour, target, meaning) => `<div class="kpi-card" style="margin-bottom:0">
+    // ── compact metric card ──
+    const card = (label, value, colour, method, meaning) => `<div class="kpi-card" style="margin-bottom:0">
         <div class="kpi-card-label" style="margin-bottom:4px">${escHtml(label)}</div>
         <div style="font-size:var(--fs-2xl);font-weight:var(--fw-bold);color:${colour};line-height:1.1">${value}</div>
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">${escHtml(target)}</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px">${escHtml(method)}</div>
         <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:8px;line-height:1.5">${escHtml(meaning)}</div>
     </div>`;
 
-    // 2. Does your money work for you? — passive+portfolio share of net income
-    const workRaw = netIncome > 0 ? ((netPassive + portfolio) / netIncome) : null;
+    // 2. Does your money work for you? — (passive + portfolio) share of money in
+    const workRaw = moneyIn > 0 ? ((passive + portfolio) / moneyIn) : null;
     const workPct = workRaw == null ? null : Math.round(workRaw * 100);
     const workColour = workRaw == null ? C.low : (workRaw >= 0.5 ? C.good : (workRaw >= 0.25 ? C.mid : C.low));
-    const c2 = card('Does your money work for you?', pctStr(workPct), workColour, 'share of income that is passive · higher is better',
-        workRaw == null ? 'Needs a positive net income month to read.' : `${workPct}% of your net income arrives without active work. The rest is earned.`);
+    const c2 = card('Does your money work for you?', pctStr(workPct == null ? null : workPct), workColour,
+        'passive + portfolio ÷ total money in · includes portfolio',
+        workRaw == null ? 'Needs income in the window to read.' : `${workPct}% of your income comes from rent and investments, not active work.`);
 
-    // 3. How much do you keep? — savings rate
-    const keepRaw = totalIncome > 0 ? (netCashFlow / totalIncome) : null;
+    // 3. How much do you keep? — savings rate (cash only)
+    const keepRaw = cashIncome > 0 ? (netCashFlow / cashIncome) : null;
     const keepPct = keepRaw == null ? null : Math.round(keepRaw * 100);
     const keepColour = keepRaw == null ? C.low : (keepRaw >= 0.2 ? C.good : (keepRaw >= 0.1 ? C.mid : (keepRaw >= 0 ? C.low : C.bad)));
-    const c3 = card('How much do you keep?', pctStr(keepPct), keepColour, 'net cash flow ÷ total income · higher is better',
-        keepRaw == null ? 'Needs income in the window to read.' : `You keep ${keepPct}p of every £1 that comes in after all costs.`);
+    const c3 = card('How much do you keep?', pctStr(keepPct), keepColour,
+        'net cash flow ÷ cash income · portfolio excluded',
+        keepRaw == null ? 'Needs income in the window to read.' : `You keep ${keepPct}p of every £1 of cash that comes in after all costs.`);
 
-    // 4. Return on assets — net rental yield on the property value
+    // 4. Return on assets — property yield, investment return, blended
     const reValue = (view && view.byClass && view.byClass['Real Estate']) || 0;
-    const roaRaw = reValue > 0 ? ((netPassive / months) * 12 / reValue) : null;
-    const roaPct = roaRaw == null ? null : (roaRaw * 100);
-    const roaStr = roaPct == null ? '—' : `${roaPct.toFixed(1)}%`;
-    const roaColour = roaRaw == null ? C.low : (roaRaw >= 0.05 ? C.good : (roaRaw >= 0.03 ? C.mid : C.low));
-    const c4 = card('Return on assets', roaStr, roaColour, 'net rental ÷ property value · yearly',
-        roaRaw == null ? 'Needs a property value to read.' : `Your ${fmt0(reValue)} of property returns ${roaStr} a year net. Low yield flags lazy equity to refinance or sell.`);
+    const yieldPct = (income, asset) => (asset > 0) ? ((income / months) * 12 / asset * 100) : null;
+    const propY = yieldPct(passive, reValue);
+    const invY = yieldPct(portfolio, invValueNow);
+    const blendY = yieldPct(passive + portfolio, reValue + invValueNow);
+    const yStr = v => v == null ? '—' : `${v.toFixed(1)}%`;
+    const roaColour = blendY == null ? C.low : (blendY >= 0.05 * 100 ? C.good : (blendY >= 0.03 * 100 ? C.mid : C.low));
+    const roaLine = (lbl, v) => `<div style="display:flex;justify-content:space-between;font-size:var(--fs-sm);padding:2px 0"><span style="color:var(--text-secondary)">${escHtml(lbl)}</span><span style="font-weight:var(--fw-semibold);color:var(--text-primary)">${yStr(v)}</span></div>`;
+    const c4 = `<div class="kpi-card" style="margin-bottom:0">
+        <div class="kpi-card-label" style="margin-bottom:6px">Return on assets</div>
+        ${roaLine('Property yield (rental)', propY)}
+        ${roaLine('Investment return (portfolio)', invY)}
+        <div style="border-top:1px solid var(--border-subtle);margin-top:4px;padding-top:4px">${roaLine('Blended', blendY)}</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px">income ÷ asset value, yearly · investment return is volatile (last ${months} mo)</div>
+    </div>`;
 
-    // 5. Financial runway — months of expenses covered by net worth
-    const runwayMonths = avgExp > 0 ? (view.net / avgExp) : null;
+    // 5. Financial runway — net worth ÷ monthly outgoings
+    const runwayMonths = avgOut > 0 ? (view.net / avgOut) : null;
     const runwayStr = runwayMonths == null ? '—' : (runwayMonths >= 24 ? `${(runwayMonths / 12).toFixed(1)} yrs` : `${Math.round(runwayMonths)} mo`);
     const runwayColour = runwayMonths == null ? C.low : (runwayMonths >= 120 ? C.good : (runwayMonths >= 36 ? C.mid : C.low));
-    const c5 = card('Financial runway', runwayStr, runwayColour, 'net worth ÷ monthly expenses',
-        runwayMonths == null ? 'Needs expense data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of expenses if all income stopped.`);
+    const c5 = card('Financial runway', runwayStr, runwayColour,
+        'net worth ÷ monthly outgoings (business + personal)',
+        runwayMonths == null ? 'Needs expense data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of total outgoings if all income stopped.`);
 
-    // 6. Debt ratio — liabilities against assets, read against a safe band
+    // 6. Debt ratio — liabilities ÷ assets, safe band
     const debtRaw = (view.assets > 0) ? (view.liabilities / view.assets) : null;
     const debtPct = debtRaw == null ? null : Math.round(debtRaw * 100);
     const debtColour = debtRaw == null ? C.low : (debtRaw <= 0.5 ? C.good : (debtRaw <= 0.75 ? C.mid : C.bad));
     const mortgages = (view.byClass && view.byClass['Mortgages']) || 0;
     const propLtv = reValue > 0 ? Math.round((mortgages / reValue) * 100) : null;
     const debtBand = debtRaw == null ? '' : (debtRaw <= 0.5 ? 'strong' : (debtRaw <= 0.75 ? 'moderate' : 'stretched'));
-    const c6 = card('Debt ratio', pctStr(debtPct), debtColour, 'liabilities ÷ assets · safe band under 75%',
+    const c6 = card('Debt ratio', pctStr(debtPct), debtColour,
+        'liabilities ÷ total assets · safe band under 75%',
         debtRaw == null ? 'Needs asset data to read.' : `${debtPct}% of your assets are financed (${debtBand})${propLtv != null ? `. Property LTV ${propLtv}%` : ''}. Leverage is a tool, so watch the band, not just the direction.`);
 
     const grid = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-4);margin-bottom:var(--space-4)">
         ${c2}${c3}${c4}${c5}${c6}
     </div>`;
 
-    // ── Income by source (net) — a stacked bar + figures ──
-    const srcTotal = Math.max(netEarned, 0) + Math.max(netPassive, 0) + Math.max(portfolio, 0);
+    // ── Income by source (per month) ──
+    const srcTotal = Math.max(earned, 0) + Math.max(passive, 0) + Math.max(portfolio, 0);
     const seg = (val, colour) => srcTotal > 0 ? `<div style="width:${clamp(Math.round((Math.max(val, 0) / srcTotal) * 100), 0, 100)}%;background:${colour};height:100%"></div>` : '';
-    const srcRow = (label, val, colour) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-sm);padding:3px 0">
-            <span style="color:var(--text-secondary)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colour};margin-right:8px"></span>${escHtml(label)}</span>
+    const srcRow = (label, val, colour, tag) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-sm);padding:3px 0">
+            <span style="color:var(--text-secondary)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colour};margin-right:8px"></span>${escHtml(label)}${tag ? ` <span style="color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(tag)}</span>` : ''}</span>
             <span style="font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(val / months)}/mo</span>
         </div>`;
     const splitHtml = `<div style="border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-3)">
-        <div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:10px">Income by source (net, per month)</div>
+        <div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:10px">Income by source (per month)</div>
         <div style="display:flex;height:12px;border-radius:var(--radius-full);overflow:hidden;background:var(--bg-subtle);margin-bottom:12px">
-            ${seg(netEarned, 'var(--tone-olive)')}${seg(netPassive, 'var(--tone-sage)')}${seg(portfolio, 'var(--tone-blue)')}
+            ${seg(earned, 'var(--tone-olive)')}${seg(passive, 'var(--tone-sage)')}${seg(portfolio, 'var(--tone-blue)')}
         </div>
-        ${srcRow('Earned (active work)', netEarned, 'var(--tone-olive)')}
-        ${srcRow('Passive (net rental)', netPassive, 'var(--tone-sage)')}
-        ${srcRow('Portfolio (investments)', portfolio, 'var(--tone-blue)')}
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Net of the costs each source carries, so it differs from the gross Total income line above. Portfolio income is not in your transaction feed yet, so it reads £0 until investment income is fed in.</div>
+        ${srcRow('Earned (worked income)', earned, 'var(--tone-olive)')}
+        ${srcRow('Passive (gross rental)', passive, 'var(--tone-sage)')}
+        ${srcRow('Portfolio (investment growth)', portfolio, 'var(--tone-blue)', 'reinvested, non-cash')}
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Earned = your worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = investment growth less your contributions; you have not withdrawn it, so it is income and net worth but not cash.${!portfolioKnown ? ' Portfolio reads £0 until there are two months of investment values to compare.' : ''}</div>
     </div>`;
 
-    const note = `<div style="font-size:var(--fs-xs);color:var(--text-muted);line-height:1.6;margin-top:6px">Based on the last ${months} completed months (${escHtml(monthLabel)}). Passive income is net rental (rent less council tax, utilities, maintenance, compliance and mortgage interest). Balances (net worth, assets, debt) are today's live figures. Read-only — nothing here changes the numbers above.</div>`;
+    const note = `<div style="font-size:var(--fs-xs);color:var(--text-muted);line-height:1.6;margin-top:6px">Flows are the last ${months} completed months (${escHtml(monthLabel)}). Balances (net worth, assets, debt) are today's live figures. Read-only — nothing here changes the numbers above.</div>`;
 
     host.innerHTML = `<div class="kpi-card" style="margin-bottom:0">
         ${header(wealthRatiosOpen())}
         <div id="wealthRatiosBody" style="display:${wealthRatiosOpen() ? 'block' : 'none'};margin-top:16px">
+            ${banner}
             ${heroHtml}
             ${grid}
             ${splitHtml}
