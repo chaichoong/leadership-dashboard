@@ -368,7 +368,10 @@
     "fldnJJBgt3lLlSfGB": "UNNAMED_IN_CONFIG",
     "fldd6IJwHKPIb0CIl": "UNNAMED_IN_CONFIG",
     "fldb6A3vOQv2Js5Nw": "UNNAMED_IN_CONFIG",
-    "fld6yClkQoMlOkiU4": "spendSubs"
+    "fld6yClkQoMlOkiU4": "spendSubs",
+    "fld8MHoybEal88D0Z": "F.accNetWorthClass",
+    "flddayDb0932Mk8uA": "F.propInclude",
+    "fldrAYgb6aYS1zTSr": "F.bizInclude"
   },
   "tables": {
     "tbl1nr0EcX2T62KME": "accounts",
