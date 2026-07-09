@@ -165,12 +165,12 @@ function renderWealthRatios(view) {
     const p2ePct = p2eRaw == null ? null : Math.round(p2eRaw * 100);
     const p2eColour = p2eRaw == null ? C.low : (p2eRaw >= 1 ? C.good : (p2eRaw >= 0.5 ? C.mid : C.low));
     const p2eBar = p2eRaw == null ? 0 : clamp(Math.round(p2eRaw * 100), 0, 100);
-    const p2eMsg = p2eRaw == null ? 'Add income and expense data to see this.'
-        : p2eRaw >= 1 ? 'Your rental income covers your total outgoings. Work is optional on this measure.'
-        : `Your rental income covers ${p2ePct}% of your total outgoings. At 100% work becomes optional.`;
+    const p2eMsg = p2eRaw == null ? 'Not enough data yet to show this.'
+        : p2eRaw >= 1 ? 'Your rental income covers all your money out. Work is optional on this measure.'
+        : `Your rental income covers ${p2ePct}% of your total money out. At 100% work becomes optional.`;
     const heroHtml = `<div style="border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:var(--space-4);background:var(--bg-surface-2);margin-bottom:var(--space-4)">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
-            <div style="font-weight:var(--fw-semibold);color:var(--text-primary)">Passive income vs expenses</div>
+            <div style="font-weight:var(--fw-semibold);color:var(--text-primary)">Passive income vs money out</div>
             <div style="font-size:var(--fs-xs);color:var(--text-muted)">target 100% · rat-race escape</div>
         </div>
         <div style="font-size:var(--fs-3xl);font-weight:var(--fw-bold);color:${p2eColour};line-height:1.1;margin:6px 0">${pctStr(p2ePct)}</div>
@@ -194,7 +194,7 @@ function renderWealthRatios(view) {
     const workPct = workRaw == null ? null : Math.round(workRaw * 100);
     const workColour = workRaw == null ? C.low : (workRaw >= 0.5 ? C.good : (workRaw >= 0.25 ? C.mid : C.low));
     const c2 = card('Does your money work for you?', pctStr(workPct == null ? null : workPct), workColour,
-        'passive + portfolio ÷ total money in · includes portfolio',
+        'rent + investment growth ÷ all money in · includes portfolio',
         workRaw == null ? 'Needs income in the window to read.' : `${workPct}% of your income comes from rent and investments, not active work.`);
 
     // 3. How much do you keep? — savings rate (cash only)
@@ -202,7 +202,7 @@ function renderWealthRatios(view) {
     const keepPct = keepRaw == null ? null : Math.round(keepRaw * 100);
     const keepColour = keepRaw == null ? C.low : (keepRaw >= 0.2 ? C.good : (keepRaw >= 0.1 ? C.mid : (keepRaw >= 0 ? C.low : C.bad)));
     const c3 = card('How much do you keep?', pctStr(keepPct), keepColour,
-        'net cash flow ÷ cash income · portfolio excluded',
+        'net cash flow ÷ cash money in · portfolio excluded',
         keepRaw == null ? 'Needs income in the window to read.' : `You keep ${keepPct}p of every £1 of cash that comes in after all costs.`);
 
     // 4. Return on assets — property yield, investment return, blended
@@ -216,10 +216,10 @@ function renderWealthRatios(view) {
     const roaLine = (lbl, v) => `<div style="display:flex;justify-content:space-between;font-size:var(--fs-sm);padding:2px 0"><span style="color:var(--text-secondary)">${escHtml(lbl)}</span><span style="font-weight:var(--fw-semibold);color:var(--text-primary)">${yStr(v)}</span></div>`;
     const c4 = `<div class="kpi-card" style="margin-bottom:0">
         <div class="kpi-card-label" style="margin-bottom:6px">Return on assets</div>
-        ${roaLine('Property yield (rental)', propY)}
+        ${roaLine('Property yield (gross rent)', propY)}
         ${roaLine('Investment return (portfolio)', invY)}
-        <div style="border-top:1px solid var(--border-subtle);margin-top:4px;padding-top:4px">${roaLine('Blended', blendY)}</div>
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px">income ÷ asset value, yearly · investment return is volatile (last ${months} mo)</div>
+        <div style="border-top:1px solid var(--border-subtle);margin-top:4px;padding-top:4px">${roaLine('Blended (all assets)', blendY)}</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:6px">yearly income each asset makes ÷ its value. Blended combines both. Investment return swings month to month (last ${months} mo).</div>
     </div>`;
 
     // 5. Financial runway — net worth ÷ monthly outgoings
@@ -227,8 +227,8 @@ function renderWealthRatios(view) {
     const runwayStr = runwayMonths == null ? '—' : (runwayMonths >= 24 ? `${(runwayMonths / 12).toFixed(1)} yrs` : `${Math.round(runwayMonths)} mo`);
     const runwayColour = runwayMonths == null ? C.low : (runwayMonths >= 120 ? C.good : (runwayMonths >= 36 ? C.mid : C.low));
     const c5 = card('Financial runway', runwayStr, runwayColour,
-        'net worth ÷ monthly outgoings (business + personal)',
-        runwayMonths == null ? 'Needs expense data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of total outgoings if all income stopped.`);
+        'net worth ÷ monthly money out (business + personal)',
+        runwayMonths == null ? 'Needs money-out data to read.' : `Your net worth would cover ${Math.round(runwayMonths)} months of money out if all income stopped.`);
 
     // 6. Debt ratio — liabilities ÷ assets, safe band
     const debtRaw = (view.assets > 0) ? (view.liabilities / view.assets) : null;
