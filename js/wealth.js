@@ -354,6 +354,9 @@ function openWealthUpdate() {
     const curMonth = WEALTH_MONTHS[now.getMonth()];
     const curYear = String(now.getFullYear());
     const alreadySaved = periods.some(p => p.month === curMonth && String(p.year) === curYear);
+    // Prefill the editable classes from THIS month's snapshot (not just the newest one),
+    // so editing an existing month shows that month's investment/business figures.
+    const curPeriod = periods.find(p => p.month === curMonth && String(p.year) === curYear) || latest;
 
     // Classes managed by their single source are read-only here, so a figure can only
     // ever be changed in one place and Wealth + Operations can never disagree. Only the
@@ -372,7 +375,7 @@ function openWealthUpdate() {
     const itemsFor = cls => {
         if (cls === 'Real Estate' && livePf) return livePf.rows.map(p => ({ name: p.name, amount: p.value }));
         if (cls === 'Mortgages' && livePf) return livePf.rows.filter(p => p.mort > 0).map(p => ({ name: p.name, amount: p.mort }));
-        return (latest.items[cls] || []).map(it => ({ name: it.name, amount: it.amount }));
+        return (curPeriod.items[cls] || []).map(it => ({ name: it.name, amount: it.amount }));
     };
 
     let rowsHtml = '';
@@ -395,11 +398,11 @@ function openWealthUpdate() {
         <div class="kpi-card">
             <div class="kpi-card-label" style="margin-bottom:4px">Update investments &amp; businesses &middot; ${escHtml(curMonth)} ${escHtml(curYear)}</div>
             <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:10px;line-height:1.5">Update your investments and businesses here each month — drag a statement or screenshot onto a row to read the figure, type it in, use "+ Add" for something new, or &times; to drop what you have cleared. Anything you do not change rolls forward. Everything else is automatic or managed elsewhere and shown read only: cash and cards are live from accounts, real estate from Operations, Properties, mortgages from loan terms, and loans in Debts in detail.</div>
-            ${alreadySaved ? `<div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-primary)">${escHtml(curMonth)} ${escHtml(curYear)} already has a saved snapshot. Editing an existing month is coming next; saving now would duplicate it, so it is disabled.</div>` : ''}
+            ${alreadySaved ? `<div style="background:var(--info-bg,var(--accent-soft));border:1px solid var(--info,var(--accent));border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:10px;font-size:var(--fs-sm);color:var(--text-primary)">You are editing ${escHtml(curMonth)} ${escHtml(curYear)}. Change your investments and businesses below, then Save. Automatic figures (cash, cards, property, mortgages, loans) stay as recorded for that month.</div>` : ''}
             <div id="wealthUpdateError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin:8px 0"></div>
             ${rowsHtml}
             <div style="display:flex;gap:10px;margin-top:22px">
-                <button id="wealthSaveBtn" ${alreadySaved ? 'disabled style="opacity:0.5;cursor:not-allowed;' : 'style="cursor:pointer;'}background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:10px 20px;font-weight:var(--fw-semibold)" onclick="saveWealthUpdate('${curMonth}','${curYear}')">Save ${escHtml(curMonth)} ${escHtml(curYear)}</button>
+                <button id="wealthSaveBtn" style="cursor:pointer;background:var(--accent);color:var(--accent-on);border:none;border-radius:var(--radius-md);padding:10px 20px;font-weight:var(--fw-semibold)" onclick="saveWealthUpdate('${curMonth}','${curYear}')">${alreadySaved ? 'Update' : 'Save'} ${escHtml(curMonth)} ${escHtml(curYear)}</button>
                 <button onclick="renderWealthTab()" style="background:none;border:1px solid var(--border-default);border-radius:var(--radius-md);padding:10px 20px;cursor:pointer;color:var(--text-secondary)">Cancel</button>
             </div>
         </div>
@@ -413,9 +416,11 @@ async function saveWealthUpdate(curMonth, curYear) {
     const errEl = document.getElementById('wealthUpdateError');
     const showErr = m => { if (errEl) { errEl.style.display = 'block'; errEl.textContent = m; } if (btn) { btn.disabled = false; btn.textContent = `Save ${curMonth} ${curYear}`; } };
 
-    // Duplicate guard — never create a second snapshot for the same month.
     const existing = computeNetWorth(_wealthRecords || []).some(p => p.month === curMonth && String(p.year) === curYear);
-    if (existing) { showErr(`${curMonth} ${curYear} is already saved. Editing an existing month is coming next.`); return; }
+    // EDIT MODE — the month already has a snapshot. Reconcile only the editable classes
+    // (investments, businesses) against its existing records; automatic classes stay as
+    // recorded. This never duplicates the month.
+    if (existing) { return saveWealthMonthEdit(curMonth, curYear, btn, showErr); }
 
     const rows = [...document.querySelectorAll('.wealth-row')];
     const records = [];
@@ -447,6 +452,61 @@ async function saveWealthUpdate(curMonth, curYear) {
         _wealthRecords = null;
         _wealthPromise = null;
         await renderWealthTab();
+    } catch (e) {
+        showErr('Could not save: ' + (e.message || 'error'));
+    }
+}
+
+// Edit an existing month: reconcile the editable classes (investments, businesses)
+// against that month's saved records — PATCH changed amounts, POST new items, DELETE
+// removed ones. Automatic classes (cash, cards, real estate, mortgages, loans) are
+// untouched, so net worth for the month stays consistent and no month is duplicated.
+async function saveWealthMonthEdit(curMonth, curYear, btn, showErr) {
+    const EDITABLE = ['Investments', 'Businesses'];
+    const formItems = [];
+    [...document.querySelectorAll('.wealth-row')].forEach(row => {
+        const type = row.dataset.wealthType;
+        if (!EDITABLE.includes(type) || row.dataset.readonly) return;
+        const nameInput = row.querySelector('.wn');
+        const name = (row.dataset.name != null ? row.dataset.name : (nameInput ? nameInput.value : '')).trim();
+        if (!name) return;
+        const amtInput = row.querySelector('.wa');
+        formItems.push({ type, name, amount: (amtInput ? Number(amtInput.value) : 0) || 0 });
+    });
+    const raw = (_wealthRecords || []).filter(r =>
+        getField(r, NW.month) === curMonth && String(getField(r, NW.year)) === curYear && EDITABLE.includes(getField(r, NW.type)));
+    const keyOf = (t, n) => t + '|' + n;
+    const byKey = {}; raw.forEach(r => { byKey[keyOf(getField(r, NW.type), getField(r, NW.name))] = r; });
+    const toCreate = [], toUpdate = [], toDelete = [], seen = new Set();
+    formItems.forEach(it => {
+        const k = keyOf(it.type, it.name); seen.add(k);
+        const ex = byKey[k];
+        if (ex) { if (Number(getField(ex, NW.amount)) !== it.amount) toUpdate.push({ id: ex.id, fields: { [NW.amount]: it.amount } }); }
+        else toCreate.push({ fields: { [NW.name]: it.name, [NW.amount]: it.amount, [NW.type]: it.type, [NW.month]: curMonth, [NW.year]: curYear } });
+    });
+    raw.forEach(r => { if (!seen.has(keyOf(getField(r, NW.type), getField(r, NW.name)))) toDelete.push(r.id); });
+
+    if (!toCreate.length && !toUpdate.length && !toDelete.length) { showErr('No changes to save.'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.netWorthByMonth}`;
+    const hdr = { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' };
+    try {
+        for (let i = 0; i < toUpdate.length; i += 10) {
+            const resp = await fetch(url, { method: 'PATCH', headers: hdr, body: JSON.stringify({ records: toUpdate.slice(i, i + 10), typecast: true }) });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+        }
+        for (let i = 0; i < toCreate.length; i += 10) {
+            const resp = await fetch(url, { method: 'POST', headers: hdr, body: JSON.stringify({ records: toCreate.slice(i, i + 10), typecast: true }) });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+        }
+        for (let i = 0; i < toDelete.length; i += 10) {
+            const q = toDelete.slice(i, i + 10).map(id => `records[]=${encodeURIComponent(id)}`).join('&');
+            const resp = await fetch(`${url}?${q}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${PAT}` } });
+            if (!resp.ok) throw new Error('Airtable returned ' + resp.status);
+        }
+        _wealthRecords = null; _wealthPromise = null;
+        await renderWealthTab();
+        if (typeof showToast === 'function') showToast(`${curMonth} ${curYear} investments & businesses updated`, { type: 'success' });
     } catch (e) {
         showErr('Could not save: ' + (e.message || 'error'));
     }
