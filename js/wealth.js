@@ -1058,7 +1058,7 @@ function wealthMatrixCard(title, note, months, sections, opts) {
     }).join('');
     const leadHead = leadHeader ? `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap;background:var(--accent-soft)">${escHtml(leadHeader)}</th>` : '';
 
-    const valCell = (v, prev, goodUp, i) => {
+    const valCell = (v, prev, goodUp, i, fmtV) => {
         const bg = colStyle(i);
         if (v == null) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);${bg}">–</td>`;
         let arrow = '';
@@ -1069,7 +1069,7 @@ function wealthMatrixCard(title, note, months, sections, opts) {
                 arrow = ` <span style="font-size:9px;color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'}</span>`;
             }
         }
-        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${bg}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(v)}${arrow}</td>`;
+        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${bg}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${(fmtV || fmt0)(v)}${arrow}</td>`;
     };
     const changeCell = (values, goodUp) => {
         let cur = values[anchorIdx];
@@ -1090,8 +1090,9 @@ function wealthMatrixCard(title, note, months, sections, opts) {
     const renderRow = (row, isChild, parentRid) => {
         const goodUp = row.goodUp !== false;
         const vals = row.values;
+        const fmtV = row.fmt || opts.fmtVal || fmt0;
         const rowBg = isChild ? 'var(--bg-surface-2)' : (row.bold ? 'var(--bg-subtle)' : 'var(--bg-surface)');
-        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i)).join('');
+        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i, fmtV)).join('');
         const hasItems = row.items && row.items.length;
         const rid = hasItems ? ('r' + (++_wealthRowSeq)) : '';
         const caret = hasItems ? '<span class="wm-caret" style="display:inline-block;width:12px;color:var(--text-muted)">▸</span>' : (isChild ? '' : '<span style="display:inline-block;width:12px"></span>');
@@ -1164,8 +1165,8 @@ function renderWealthCashflow() {
 
     const sections = [
         { header: 'Money in', rows: [
-            { label: 'Real estate / portfolio revenue', values: series(m => m.reRevenue), goodUp: true },
-            { label: 'Personal income', values: series(m => m.personalIncome), goodUp: true },
+            { label: 'Real estate income (passive)', values: series(m => m.reRevenue), goodUp: true },
+            { label: 'Personal income (earned)', values: series(m => m.personalIncome), goodUp: true },
             { label: 'Portfolio income (investments)', values: portfolioSeries, goodUp: true },
             { label: 'Total income', values: cf.map((m, i) => m.totalIncome + portfolioSeries[i]), goodUp: true, bold: true, border: '1px solid var(--border-default)' },
         ] },
