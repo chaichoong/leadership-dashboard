@@ -243,7 +243,11 @@
         'Opex Labour', 'Marketing', 'Premises / Overheads', 'Insurance',
         'Software & Subscriptions', 'Professional Fees', 'Travel & Training',
         'Operational Supplies', 'Subsistence', 'Director Discretionary Expenses',
-        'Charity', 'Mortgage Interest', 'Loan Interest', 'Bank Transaction Fees', 'Tax',
+        'Charity', 'Mortgage Interest', 'Loan Interest',
+        // Capital repayments are real cash out for the Wealth money-out view (unlike the
+        // P&L, which treats them as balance-sheet). Only used here, never in the P&L.
+        'Mortgage Capital Repayment', 'Loan Capital Repayment',
+        'Bank Transaction Fees', 'Tax',
     ];
     // Personal expenditure sub-categories (full Airtable names) — itemised and
     // deducted on the Wealth cash-flow as your personal costs.
