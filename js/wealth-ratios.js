@@ -335,8 +335,9 @@ function renderWealthRatios(view) {
     </div>`;
 
     // ── Income by source — averaged per month over the period set by the top selector ──
-    // Earned + passive average over the selected window (1/3/6/9/12 months); portfolio
-    // stays its own per-month growth (investment history is sparse, not windowed).
+    // All three lines use the SAME selected window (1/3/6/9/12 months) so they are
+    // consistent: earned + passive from that window's cash flow, portfolio from the
+    // investment-value change across the same window. A month with no growth reads £0.
     const srcMonths = (typeof _wealthChangeMonths === 'number' && _wealthChangeMonths > 0) ? _wealthChangeMonths : months;
     const sKeys = wealthMonthKeys(srcMonths, 1);
     const sCf = buildMonthlyCashflow(sKeys);
@@ -345,7 +346,14 @@ function renderWealthRatios(view) {
     const sCashIncome = sum(sCf.map(m => m.totalIncome));
     const srcEarned = (sCashIncome - sGrossRental) / srcMonths;   // per month
     const srcPassive = sGrossRental / srcMonths;                  // per month
-    const srcPortfolio = portfolioPerMonth;                       // per month (span-based)
+    // Portfolio over the SAME window: investment value at the end minus at the start
+    // (the month before the window), less contributions, per month. Falls back to the
+    // earliest snapshot if the window starts before any investment data.
+    const sInvEnd = invAt(skOf(sKeys[sKeys.length - 1]));
+    let sInvStart = invAt(skOf(sKeys[0]) - 1);
+    if (sInvStart == null && invPeriods.length) sInvStart = invPeriods[0].byClass['Investments'];
+    const sContrib = sum(sAgg.map(m => m.contributions));
+    const srcPortfolio = (sInvEnd != null && sInvStart != null) ? Math.max(0, sInvEnd - sInvStart - sContrib) / srcMonths : 0;
     const srcTotal = Math.max(srcEarned, 0) + Math.max(srcPassive, 0) + Math.max(srcPortfolio, 0);
     const seg = (val, colour) => srcTotal > 0 ? `<div style="width:${clamp(Math.round((Math.max(val, 0) / srcTotal) * 100), 0, 100)}%;background:${colour};height:100%"></div>` : '';
     const srcRow = (label, val, colour, tag) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-sm);padding:3px 0">
@@ -363,10 +371,10 @@ function renderWealthRatios(view) {
         ${srcRow('Earned (worked income)', srcEarned, 'var(--tone-olive)')}
         ${srcRow('Passive (gross rental)', srcPassive, 'var(--tone-sage)')}
         ${srcRow('Portfolio (investment growth)', srcPortfolio, 'var(--tone-blue)', 'reinvested, non-cash')}
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Earned + passive are averaged over the last ${srcMonths} month${srcMonths === 1 ? '' : 's'} (change the period with the selector at the top of the tab). Earned = worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = average monthly investment growth${portfolioFromLabel ? ` since ${escHtml(portfolioFromLabel)}` : ''}, less your contributions; reinvested, so it is income and net worth but not cash.${!portfolioKnown ? ' Portfolio reads £0 until there are at least two investment-value entries to compare.' : ''}</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">All three are averaged over the last ${srcMonths} month${srcMonths === 1 ? '' : 's'} (change the period with the selector at the top of the tab). Earned = worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = your investment growth across that period, less contributions; reinvested, so it is income and net worth but not cash. A period with no investment update shows £0.</div>
     </div>`;
 
-    const note = `<div style="font-size:var(--fs-xs);color:var(--text-muted);line-height:1.6;margin-top:6px">Flows are the last ${months} completed months (${escHtml(monthLabel)}). Balances (net worth, assets, debt) are today's live figures. Read-only — nothing here changes the numbers above.</div>`;
+    const note = `<div style="font-size:var(--fs-xs);color:var(--text-muted);line-height:1.6;margin-top:6px">The headline figures above use the last ${months} completed months (${escHtml(monthLabel)}) for income and costs, and today's figures for net worth, assets and debt. The month-by-month table and the income split use the period you set with the selector at the top. Read-only — nothing here changes the numbers above.</div>`;
 
     host.innerHTML = `<div class="kpi-card" style="margin-bottom:0">
         ${header(wealthRatiosOpen())}
