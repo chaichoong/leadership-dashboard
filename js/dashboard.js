@@ -1366,11 +1366,11 @@
         // Defined at module level — see below
 
         // Variable cost reserve (sum of budgets)
-        const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £6,000
+        const variableCostReserve = MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP; // £4,000
         // Required operating cushion = clear profit target + variable cost budgets.
         // The operating cushion must be big enough to absorb variable costs AND still leave the
         // clear profit target behind — anything less means we're eating into the profit target.
-        const requiredOperatingCushion = CLEAR_PROFIT_TARGET + variableCostReserve; // £16,000
+        const requiredOperatingCushion = CLEAR_PROFIT_TARGET + variableCostReserve; // £14,000
 
         // Traffic light uses £ targets now (actual vs budget)
         const maintNum = maintSpend;
