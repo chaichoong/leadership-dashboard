@@ -131,6 +131,9 @@
     }
 
     function isActiveTenancy(r) {
+        // Ended tenancies (end date in the past) are never active, even if the
+        // shared tenant-status rollup still reads Active. isTenancyEnded lives in shared.js.
+        if (typeof isTenancyEnded === 'function' && isTenancyEnded(r)) return false;
         const status = getField(r, F.tenStatus);
         if (Array.isArray(status) && status.length > 0) {
             const val = typeof status[0] === 'object' ? status[0].name : String(status[0]);

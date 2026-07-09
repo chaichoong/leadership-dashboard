@@ -255,9 +255,27 @@
         return ['in payment', 'cfv actioned'].includes(name);
     }
 
+    // A tenancy is "ended" once its Tenancy End Date is before today. Mirrors the
+    // Airtable "Tenancy Status" formula: IF(end AND end < TODAY(), "Ended", "Live").
+    // Needed because the tenant-status rollup below reflects the linked tenant, which
+    // may stay Active across other live tenancies even after this one has ended.
+    function isTenancyEnded(rec) {
+        const raw = getField(rec, F.tenEndDate);
+        if (!raw) return false;
+        const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
+        const end = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(raw);
+        if (isNaN(end.getTime())) return false;
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        return end < startOfToday;
+    }
+    window.isTenancyEnded = isTenancyEnded;
+
     // Check the tenant's actual status (rollup from Tenants table) — excludes "Former" tenants
+    // and any tenancy whose end date has passed (rollup can lag when the tenant is shared).
     // Field returns an array like ["Active"] or ["Former"]
     function isTenantStatusActive(rec) {
+        if (isTenancyEnded(rec)) return false;
         const status = getField(rec, F.tenStatus);
         if (!status) return false;
         if (Array.isArray(status)) {
@@ -269,7 +287,9 @@
 
     // Positive check for "Former" — returns false when the field is empty/null,
     // so new tenancies with an unpopulated rollup are NOT treated as former.
+    // An ended tenancy counts as former even if the shared tenant rollup still reads Active.
     function isTenantStatusFormer(rec) {
+        if (isTenancyEnded(rec)) return true;
         const status = getField(rec, F.tenStatus);
         if (!status) return false;
         if (Array.isArray(status)) {
