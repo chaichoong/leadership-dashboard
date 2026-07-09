@@ -798,7 +798,10 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
 
     // Cash flow reads the already-loaded transactions (sync). Buckets fetch their table.
     renderWealthCashflow();
-    loadWealthBuckets();
+    // Buckets fetch async; the two bucket health checks run before that resolves and
+    // would read as amber ("no buckets") until a manual Re-run. Re-run the passive
+    // checks once buckets have loaded so the pill settles on its true state on its own.
+    loadWealthBuckets().then(() => { if (typeof markTabSynced === 'function') markTabSynced('wealth'); });
     renderWealthPendingVals();
     renderDebtsDetail();
     // Analysis ratios — read-only interpretation of the figures above (own file).
