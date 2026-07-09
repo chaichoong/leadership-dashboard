@@ -256,14 +256,17 @@
 
     // Bucket spend mapping: which personal sub-categories draw down each bucket.
     // A transaction coded to one of these (an outflow) decrements that bucket's
-    // running balance. Investment (transfers to Interactive Investor) and the
-    // credit-card part of Debt Clearance are transfer-based, not sub-category coded,
-    // so they're handled separately/added later — flagged in the UI.
+    // running balance. This is the code-level fallback; the live driver is each
+    // bucket's Spend Sub-Categories link in the Income Buckets table, which this
+    // only backstops if a link is ever cleared. Investment draws down on the
+    // "Personal Investment" sub-category (money actually moved into the portfolio);
+    // the credit-card part of Debt Clearance is transfer-based, added later.
     const BUCKET_SPEND_SUBCATS = {
         'Maintenance': ['Personal Maintenance'],
         'Travel': ['Personal Travel'],
         'Fun': ['Personal Discretionary Lifestyle', 'Personal Discretionary Food & Drink'],
         'Tax': ['Personal Tax'],
+        'Investment': ['Personal Investment'],
         'Debt Clearance': ['Personal Loan Capital Repayment', 'Personal Loan Interest'],
     };
 
