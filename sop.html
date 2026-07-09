@@ -348,12 +348,12 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <table class="label-table">
       <thead><tr><th>Constant</th><th>Value</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>MAINT_TARGET_GBP</code></td><td><strong>&pound;3,000/month</strong></td><td>Maintenance spend budget</td></tr>
+        <tr><td><code>MAINT_TARGET_GBP</code></td><td><strong>&pound;1,000/month</strong></td><td>Maintenance spend budget</td></tr>
         <tr><td><code>WAGES_TARGET_GBP</code></td><td><strong>&pound;1,500/month</strong></td><td>Wages spend budget</td></tr>
         <tr><td><code>CFV_TARGET_GBP</code></td><td><strong>&pound;1,500/month</strong></td><td>CFV exposure allowance</td></tr>
         <tr><td><code>CLEAR_PROFIT_TARGET</code></td><td><strong>&pound;10,000/month</strong></td><td>Target clear profit after all variable costs</td></tr>
-        <tr><td><code>variableCostReserve</code></td><td><strong>&pound;6,000/month</strong></td><td>Sum of maintenance + wages + CFV budgets (calculated)</td></tr>
-        <tr><td><code>requiredOperatingCushion</code></td><td><strong>&pound;16,000/month</strong></td><td>Clear profit target + variable cost reserve (calculated)</td></tr>
+        <tr><td><code>variableCostReserve</code></td><td><strong>&pound;4,000/month</strong></td><td>Sum of maintenance + wages + CFV budgets (calculated)</td></tr>
+        <tr><td><code>requiredOperatingCushion</code></td><td><strong>&pound;14,000/month</strong></td><td>Clear profit target + variable cost reserve (calculated)</td></tr>
       </tbody>
     </table>
   </div>
@@ -438,7 +438,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         <tr>
           <td><strong>Maintenance Spend (31d)</strong></td>
           <td>Transactions with sub-category = <code>REC.subMaint</code> (<code>recWomXYQ3XTgMdrr</code>). Absolute value of <code>txReportAmount</code>.</td>
-          <td><strong>&pound;3,000</strong> (<code>MAINT_TARGET_GBP</code>)</td>
+          <td><strong>&pound;1,000</strong> (<code>MAINT_TARGET_GBP</code>)</td>
           <td>Green &lt; budget, amber &le; budget &times; 1.1, red &gt; budget &times; 1.1</td>
         </tr>
         <tr>
@@ -455,8 +455,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
         </tr>
         <tr>
           <td><strong>Target Operating Cushion</strong></td>
-          <td>Best-case operating cushion (In Payment + CFV Actioned income minus fixed costs) vs required &pound;16,000</td>
-          <td><strong>&pound;16,000</strong> (<code>requiredOperatingCushion</code>)</td>
+          <td>Best-case operating cushion (In Payment + CFV Actioned income minus fixed costs) vs required &pound;14,000</td>
+          <td><strong>&pound;14,000</strong> (<code>requiredOperatingCushion</code>)</td>
           <td>Green if actual &ge; target, amber if below</td>
         </tr>
       </tbody>
@@ -467,7 +467,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     </div>
     <div class="info-box tip">
       <span class="ib-icon">&#x1F4A1;</span>
-      <div><strong>Target Operating Cushion breakdown:</strong> Expanding the Target Operating Cushion card shows: maintenance budget (&pound;3,000), wages budget (&pound;1,500), CFV allowance (&pound;1,500), variable cost reserve (&pound;6,000), clear profit target (&pound;10,000), and required operating cushion (&pound;16,000). The operating cushion must be large enough to absorb all variable costs and still leave the clear profit target behind &mdash; this becomes the <em>operating profit</em>.</div>
+      <div><strong>Target Operating Cushion breakdown:</strong> Expanding the Target Operating Cushion card shows: maintenance budget (&pound;1,000), wages budget (&pound;1,500), CFV allowance (&pound;1,500), variable cost reserve (&pound;4,000), clear profit target (&pound;10,000), and required operating cushion (&pound;14,000). The operating cushion must be large enough to absorb all variable costs and still leave the clear profit target behind &mdash; this becomes the <em>operating profit</em>.</div>
     </div>
   </div>
 </div>
@@ -537,8 +537,8 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
     <p>The AI commentary section (<code>id="aiCommentary"</code>) is generated in <code>renderDashboard()</code> using live KPI data. It covers six titled sections:</p>
     <ul>
       <li><strong>Financial Health:</strong> Confirmed monthly income (In Payment), best-case total (+ CFV Actioned), fixed costs, gross margin range, and whether the upper range is healthy (&ge;40%).</li>
-      <li><strong>Profit Targets:</strong> Current best-case gross profit vs the &pound;16,000 required target. If on track, shows surplus; if off track, shows shortfall and % achieved.</li>
-      <li><strong>Operational Performance (31-Day):</strong> Actual rental income, maintenance status (vs &pound;3,000 budget), wages status (vs &pound;1,500 budget).</li>
+      <li><strong>Profit Targets:</strong> Current best-case gross profit vs the &pound;14,000 required target. If on track, shows surplus; if off track, shows shortfall and % achieved.</li>
+      <li><strong>Operational Performance (31-Day):</strong> Actual rental income, maintenance status (vs &pound;1,000 budget), wages status (vs &pound;1,500 budget).</li>
       <li><strong>Occupancy &amp; Voids:</strong> Occupancy rate, void count, estimated cost per void per month (monthly income &divide; occupied units), and ROI of filling voids.</li>
       <li><strong>CFV Risk:</strong> CFV exposure vs &pound;1,500 allowance, count of unactioned CFVs and value at risk.</li>
       <li><strong>Quick Wins:</strong> Prioritised action list: fill voids (1), action CFVs (2), reduce maintenance if over budget (3), plus a note about mortgage clusters on days 1&ndash;6.</li>
@@ -699,7 +699,7 @@ li { margin-bottom:0.2rem; font-size:0.9rem; } hr { border:none; border-top:1px 
 
     <div class="ts-item">
       <div class="ts-problem">Required gross profit target appears as wrong value</div>
-      <div class="ts-solution">The target is computed as <code>CLEAR_PROFIT_TARGET + MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP</code> = &pound;10,000 + &pound;3,000 + &pound;1,500 + &pound;1,500 = <strong>&pound;16,000</strong>. If the displayed value differs, check <code>js/config.js</code> for the budget constants.</div>
+      <div class="ts-solution">The target is computed as <code>CLEAR_PROFIT_TARGET + MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP</code> = &pound;10,000 + &pound;1,000 + &pound;1,500 + &pound;1,500 = <strong>&pound;14,000</strong>. If the displayed value differs, check <code>js/config.js</code> for the budget constants.</div>
     </div>
 
     <div class="ts-item">
