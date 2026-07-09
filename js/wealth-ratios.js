@@ -334,22 +334,36 @@ function renderWealthRatios(view) {
         ${c2}${c3}${c4}${c5}${c6}
     </div>`;
 
-    // ── Income by source (per month) ──
-    const srcTotal = Math.max(earned, 0) + Math.max(passive, 0) + Math.max(portfolio, 0);
+    // ── Income by source — averaged per month over the period set by the top selector ──
+    // Earned + passive average over the selected window (1/3/6/9/12 months); portfolio
+    // stays its own per-month growth (investment history is sparse, not windowed).
+    const srcMonths = (typeof _wealthChangeMonths === 'number' && _wealthChangeMonths > 0) ? _wealthChangeMonths : months;
+    const sKeys = wealthMonthKeys(srcMonths, 1);
+    const sCf = buildMonthlyCashflow(sKeys);
+    const sAgg = buildWealthTxAgg(sKeys);
+    const sGrossRental = sum(sAgg.map(m => m.grossRental));
+    const sCashIncome = sum(sCf.map(m => m.totalIncome));
+    const srcEarned = (sCashIncome - sGrossRental) / srcMonths;   // per month
+    const srcPassive = sGrossRental / srcMonths;                  // per month
+    const srcPortfolio = portfolioPerMonth;                       // per month (span-based)
+    const srcTotal = Math.max(srcEarned, 0) + Math.max(srcPassive, 0) + Math.max(srcPortfolio, 0);
     const seg = (val, colour) => srcTotal > 0 ? `<div style="width:${clamp(Math.round((Math.max(val, 0) / srcTotal) * 100), 0, 100)}%;background:${colour};height:100%"></div>` : '';
     const srcRow = (label, val, colour, tag) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-sm);padding:3px 0">
             <span style="color:var(--text-secondary)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colour};margin-right:8px"></span>${escHtml(label)}${tag ? ` <span style="color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(tag)}</span>` : ''}</span>
-            <span style="font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(val / months)}/mo</span>
+            <span style="font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(val)}/mo</span>
         </div>`;
     const splitHtml = `<div style="border:1px solid var(--border-subtle);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-3)">
-        <div style="font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:10px">Income by source (per month)</div>
-        <div style="display:flex;height:12px;border-radius:var(--radius-full);overflow:hidden;background:var(--bg-subtle);margin-bottom:12px">
-            ${seg(earned, 'var(--tone-olive)')}${seg(passive, 'var(--tone-sage)')}${seg(portfolio, 'var(--tone-blue)')}
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <span style="font-weight:var(--fw-semibold);color:var(--text-primary)">Income by source, average per month</span>
+            <span style="font-size:var(--fs-xs);color:var(--text-muted)">over the last ${srcMonths} month${srcMonths === 1 ? '' : 's'} · set by the trend selector</span>
         </div>
-        ${srcRow('Earned (worked income)', earned, 'var(--tone-olive)')}
-        ${srcRow('Passive (gross rental)', passive, 'var(--tone-sage)')}
-        ${srcRow('Portfolio (investment growth)', portfolio, 'var(--tone-blue)', 'reinvested, non-cash')}
-        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Earned = your worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = average monthly investment growth${portfolioFromLabel ? ` since ${escHtml(portfolioFromLabel)}` : ''}, less your contributions; you have not withdrawn it, so it is income and net worth but not cash.${!portfolioKnown ? ' Portfolio reads £0 until there are at least two investment-value entries to compare.' : ''}</div>
+        <div style="display:flex;height:12px;border-radius:var(--radius-full);overflow:hidden;background:var(--bg-subtle);margin-bottom:12px">
+            ${seg(srcEarned, 'var(--tone-olive)')}${seg(srcPassive, 'var(--tone-sage)')}${seg(srcPortfolio, 'var(--tone-blue)')}
+        </div>
+        ${srcRow('Earned (worked income)', srcEarned, 'var(--tone-olive)')}
+        ${srcRow('Passive (gross rental)', srcPassive, 'var(--tone-sage)')}
+        ${srcRow('Portfolio (investment growth)', srcPortfolio, 'var(--tone-blue)', 'reinvested, non-cash')}
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px;line-height:1.5">Earned + passive are averaged over the last ${srcMonths} month${srcMonths === 1 ? '' : 's'} (change the period with the selector at the top of the tab). Earned = worked income (Personal Income Other + any business revenue). Passive = gross rental (property costs sit in money out). Portfolio = average monthly investment growth${portfolioFromLabel ? ` since ${escHtml(portfolioFromLabel)}` : ''}, less your contributions; reinvested, so it is income and net worth but not cash.${!portfolioKnown ? ' Portfolio reads £0 until there are at least two investment-value entries to compare.' : ''}</div>
     </div>`;
 
     const note = `<div style="font-size:var(--fs-xs);color:var(--text-muted);line-height:1.6;margin-top:6px">Flows are the last ${months} completed months (${escHtml(monthLabel)}). Balances (net worth, assets, debt) are today's live figures. Read-only — nothing here changes the numbers above.</div>`;
