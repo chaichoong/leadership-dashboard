@@ -179,46 +179,63 @@ function renderWealthRatios(view) {
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const C = { good: 'var(--success)', mid: 'var(--accent-gold)', low: 'var(--text-secondary)', bad: 'var(--danger)' };
 
-    // ── 12-month trend: recompute every metric for each of the last 12 months so the
-    // direction of travel is visible under each figure. Each point uses the same
-    // trailing 3-month window as the headline, ending on that month, so the last
-    // point matches the figure above it. Precomputed once (two transaction passes),
-    // then window-summed — no per-month re-looping. ──
-    const TN = WEALTH_RATIO_MONTHS + 12;                       // enough history for 12 windows
-    const tKeys = wealthMonthKeys(TN, 1);
+    // ── Month-by-month: recompute every metric for each of the rolling 12 months, each
+    // as a SINGLE-MONTH figure calculated at that month's end (June's column is June's
+    // figures), matching how money-in / money-out and the other matrices work. Feeds
+    // both the sparkline on each card and the "Ratios — month by month" table below,
+    // whose Δ column uses the trend selector at the top of the tab. Precomputed once. ──
+    const tMonths = (typeof wealthMonths12 === 'function') ? wealthMonths12() : keys.map(k => ({ key: k, label: k }));
+    const tKeys = tMonths.map(m => m.key);
     const tCf = buildMonthlyCashflow(tKeys);
     const tAgg = buildWealthTxAgg(tKeys);
     const skOf = k => { const [y, mo] = k.split('-').map(Number); return y * 12 + (mo - 1); };
     const snapAt = sk => { let best = null; (periods || []).forEach(p => { if (p.sortKey <= sk && (!best || p.sortKey > best.sortKey)) best = p; }); return best; };
-    const tInv = tKeys.map(k => { const s = snapAt(skOf(k)); return s ? (s.byClass['Investments'] || 0) : 0; });
+    const invAt = sk => { const s = snapAt(sk); return s ? (s.byClass['Investments'] || 0) : null; };
     const metricAt = i => {
-        const w = []; for (let k = i - months + 1; k <= i; k++) if (k >= 0) w.push(k);
-        const S = f => w.reduce((s, j) => s + f(tCf[j] || {}), 0);
-        const Sa = f => w.reduce((s, j) => s + f(tAgg[j] || {}), 0);
-        const gRent = Sa(m => m.grossRental || 0);
-        const totInc = S(m => m.totalIncome || 0);
-        const earnedW = totInc - gRent, passiveW = gRent;
-        const outW = S(m => (m.bizTotal || 0) + (m.perTotal || 0));
-        const netW = S(m => m.net || 0);
-        const contribW = Sa(m => m.contributions || 0);
-        const invEnd = tInv[i], invStart = (i - months >= 0) ? tInv[i - months] : tInv[0];
-        const portW = Math.max(0, invEnd - invStart - contribW);
-        const moneyInW = earnedW + passiveW + portW;
-        const snap = snapAt(skOf(tKeys[i]));
-        const reW = snap ? (snap.byClass['Real Estate'] || 0) : 0;
+        const cfm = tCf[i] || {}, aggm = tAgg[i] || {};
+        const gRent = aggm.grossRental || 0;
+        const totInc = cfm.totalIncome || 0;
+        const earnedM = totInc - gRent, passiveM = gRent;
+        const outM = (cfm.bizTotal || 0) + (cfm.perTotal || 0);
+        const netM = cfm.net || 0;
+        const contribM = aggm.contributions || 0;
+        const sk = skOf(tKeys[i]);
+        const invEnd = invAt(sk), invPrev = invAt(sk - 1);
+        const portM = (invEnd != null && invPrev != null) ? Math.max(0, invEnd - invPrev - contribM) : 0;
+        const moneyInM = earnedM + passiveM + portM;
+        const snap = snapAt(sk);
+        const reM = snap ? (snap.byClass['Real Estate'] || 0) : 0;
+        const invM = invEnd || 0;
         return {
-            p2e: outW > 0 ? passiveW / outW * 100 : null,
-            work: moneyInW > 0 ? (passiveW + portW) / moneyInW * 100 : null,
-            keep: totInc > 0 ? netW / totInc * 100 : null,
-            roa: (reW + invEnd) > 0 ? (passiveW + portW) / months * 12 / (reW + invEnd) * 100 : null,
-            runway: (outW > 0 && snap && snap.net != null) ? snap.net / (outW / months) : null,
+            p2e: outM > 0 ? passiveM / outM * 100 : null,
+            work: moneyInM > 0 ? (passiveM + portM) / moneyInM * 100 : null,
+            keep: totInc > 0 ? netM / totInc * 100 : null,
+            roa: (reM + invM) > 0 ? (passiveM + portM) * 12 / (reM + invM) * 100 : null,
+            runway: (outM > 0 && snap && snap.net != null) ? snap.net / outM : null,
             debt: (snap && snap.assets > 0) ? snap.liabilities / snap.assets * 100 : null,
         };
     };
     const trend = { p2e: [], work: [], keep: [], roa: [], runway: [], debt: [] };
-    for (let i = Math.max(months - 1, TN - 12); i < TN; i++) { const mm = metricAt(i); Object.keys(trend).forEach(k => trend[k].push(mm[k])); }
+    for (let i = 0; i < tKeys.length; i++) { const mm = metricAt(i); Object.keys(trend).forEach(k => trend[k].push(mm[k])); }
     const trendCaption = '<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:2px">12-month trend</div>';
     const sparkBlock = vals => { const svg = wealthSparkline(vals); return svg ? svg + trendCaption : ''; };
+
+    // Month-by-month ratios table (same component + trend selector as the rest of the page).
+    const pf = v => `${Math.round(v)}%`;
+    const runFmt = v => v >= 24 ? `${(v / 12).toFixed(1)}y` : `${Math.round(v)}m`;
+    const ratiosMatrix = (typeof wealthMatrixCard === 'function') ? wealthMatrixCard(
+        'Ratios — month by month',
+        'Each ratio at the end of each month. Use the trend selector at the top of the tab to set the Δ column period. The current month (●) is still in progress. Single-month figures are naturally more jerky than the smoothed headline above.',
+        tMonths,
+        [{ header: '', rows: [
+            { label: 'Passive vs money out', values: trend.p2e, goodUp: true, fmt: pf },
+            { label: 'Money working', values: trend.work, goodUp: true, fmt: pf },
+            { label: 'How much you keep', values: trend.keep, goodUp: true, fmt: pf },
+            { label: 'Return on assets (blended)', values: trend.roa, goodUp: true, fmt: pf },
+            { label: 'Financial runway', values: trend.runway, goodUp: true, fmt: runFmt },
+            { label: 'Debt ratio', values: trend.debt, goodUp: false, fmt: pf },
+        ] }],
+        { anchor: 'completed' }) : '';
 
     // Top banner — states the portfolio treatment once, plainly.
     const banner = `<div style="background:var(--info-bg,var(--accent-soft));border:1px solid var(--info,var(--accent));border-radius:var(--radius-md);padding:10px 14px;margin-bottom:var(--space-4);font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.55">
@@ -343,6 +360,7 @@ function renderWealthRatios(view) {
             ${banner}
             ${heroHtml}
             ${grid}
+            ${ratiosMatrix}
             ${splitHtml}
             ${note}
         </div>
