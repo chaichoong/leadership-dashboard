@@ -326,7 +326,7 @@
         let lowestDay = '';
         const rows = [];
 
-        // Daily variable cost reserve: £3k maint + £1.5k wages + £1.5k CFV = £6,000 / 31
+        // Daily variable cost reserve: £1k maint + £1.5k wages + £1.5k CFV = £4,000 / 31
         const dailyVarCostReserve = (MAINT_TARGET_GBP + WAGES_TARGET_GBP + CFV_TARGET_GBP) / 31;
 
         days.forEach((key, idx) => {

@@ -630,7 +630,7 @@
     };
 
     // Budget targets
-    const MAINT_TARGET_GBP = 3000;     // £3,000/month maintenance budget
+    const MAINT_TARGET_GBP = 1000;     // £1,000/month maintenance budget
     const WAGES_TARGET_GBP = 1500;     // £1,500/month wages budget
     const CFV_TARGET_GBP = 1500;       // £1,500/month CFV allowance
     const CLEAR_PROFIT_TARGET = 10000; // £10,000/month clear profit after all variable costs

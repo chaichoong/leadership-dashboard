@@ -51,7 +51,7 @@
     const PNL_GROSS_MARGIN_TARGET = 80;      // 80% gross profit margin target
     const PNL_NET_MARGIN_TARGET = 15;        // 15% net profit margin target
     const PNL_CLEAR_PROFIT_TARGET = 5000;    // £5,000/month net profit target
-    const PNL_MAINT_TARGET = typeof MAINT_TARGET_GBP !== 'undefined' ? MAINT_TARGET_GBP : 3000;
+    const PNL_MAINT_TARGET = typeof MAINT_TARGET_GBP !== 'undefined' ? MAINT_TARGET_GBP : 1000;
     const PNL_WAGES_TARGET = typeof WAGES_TARGET_GBP !== 'undefined' ? WAGES_TARGET_GBP : 1500;
 
     // ── Helpers ──
