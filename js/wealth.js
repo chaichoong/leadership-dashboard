@@ -1143,11 +1143,28 @@ function renderWealthCashflow() {
     const bizNames = CASHFLOW_COST_SUBCATS.filter(n => cf.some(m => m.bizItems[n]));
     const perNames = CASHFLOW_PERSONAL_EXPENSE_SUBCATS.filter(n => cf.some(m => m.perItems[n]));
 
+    // Per-month portfolio income (non-cash): the rise in investment value that month,
+    // less any contributions you paid in (sub-category "Personal Investment"). It only
+    // appears in the month you update the investment value, so most months read £0 and
+    // the update month shows the jump. Added to Total income; excluded from Net cash
+    // flow because it is reinvested, not withdrawn.
+    const mkeys = months.map(m => m.key);
+    const periods = (typeof computeNetWorth === 'function' && _wealthRecords) ? computeNetWorth(_wealthRecords) : [];
+    const skOf = k => { const [y, mo] = k.split('-').map(Number); return y * 12 + (mo - 1); };
+    const invAt = sk => { let best = null; periods.forEach(p => { if (p.sortKey <= sk && (!best || p.sortKey > best.sortKey)) best = p; }); return best ? (best.byClass['Investments'] || 0) : null; };
+    const contribAgg = (typeof buildWealthTxAgg === 'function') ? buildWealthTxAgg(mkeys) : mkeys.map(() => ({ contributions: 0 }));
+    const portfolioSeries = mkeys.map((k, i) => {
+        const cur = invAt(skOf(k)), prev = invAt(skOf(k) - 1);
+        if (cur == null || prev == null) return 0;
+        return Math.max(0, cur - prev - ((contribAgg[i] && contribAgg[i].contributions) || 0));
+    });
+
     const sections = [
         { header: 'Money in', rows: [
             { label: 'Real estate / portfolio revenue', values: series(m => m.reRevenue), goodUp: true },
             { label: 'Personal income', values: series(m => m.personalIncome), goodUp: true },
-            { label: 'Total income', values: series(m => m.totalIncome), goodUp: true, bold: true, border: '1px solid var(--border-default)' },
+            { label: 'Portfolio income (investments)', values: portfolioSeries, goodUp: true },
+            { label: 'Total income', values: cf.map((m, i) => m.totalIncome + portfolioSeries[i]), goodUp: true, bold: true, border: '1px solid var(--border-default)' },
         ] },
         { header: 'Expenditure', rows: [
             { label: 'Business expenditure', values: series(m => m.bizTotal), goodUp: false, bold: true,
@@ -1161,7 +1178,7 @@ function renderWealthCashflow() {
     ];
     el.innerHTML = `<div style="background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:var(--space-4);font-size:var(--fs-sm);color:var(--text-primary);line-height:1.55"><strong>Use this at your monthly review.</strong> It shows whether more came in than went out across your whole life, property plus personal, month by month, and whether your net worth is climbing. This is the long game, not a spend-today figure. For what is safe to spend today, use the <strong>Money Confidence</strong> tab. For the month ahead, use the <strong>Cash Flow</strong> tab.</div>` + wealthMatrixCard(
         'Monthly cash flow — rolling 12 months',
-        'Money in (real estate / portfolio revenue + personal income, internal drawings excluded) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Click Business or Personal expenditure to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month. Business expenditure is operating costs (matching the P&L); capital repayments not yet included.',
+        'Money in (real estate / portfolio revenue + personal income + portfolio income) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Portfolio income is your investments’ growth: it is added to Total income but EXCLUDED from Net cash flow because it is reinvested, not withdrawn, so it only shows in the month you update the investment value. Click Business or Personal expenditure to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month. Business expenditure is operating costs (matching the P&L); capital repayments not yet included.',
         months, sections, { anchor: 'completed' });
 }
 
