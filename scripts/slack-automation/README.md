@@ -311,9 +311,46 @@ attacks.
 | Bot replies in channel instead of thread       | `event.thread_ts` was empty — the reply is now in a new thread under  |
 |                                                | the original message (correct behaviour)                              |
 
+## money-confidence-daily — daily "Safe to act today" DM
+
+A separate, self-contained cron worker that DMs Kevin the Money Confidence
+figure every working day at 09:30 Europe/London, so he has it on his phone
+before opening the laptop.
+
+- Source: `money-daily-worker.js` · config: `wrangler.money-daily.toml`
+- URL: `money-confidence-daily.kevinbrittain.workers.dev`
+- Cron: `30 8 * * 1-5` and `30 9 * * 1-5` (two UTC crons cover BST + GMT;
+  the worker's `isLondonSendTime()` gate lets exactly one through per day).
+- Recomputes the figure LIVE from Airtable at send time — never a cached value.
+  It is a faithful port of `js/money.js` `computeSafeToAct()` +
+  `js/cashflow.js` `analysePaymentLag()`. **If the app formula changes, update
+  the worker too or the Slack figure drifts from the Money tab.**
+
+Secrets (via `wrangler secret put -c wrangler.money-daily.toml`):
+
+| Secret            | Purpose                                                          |
+| ----------------- | ---------------------------------------------------------------- |
+| `SLACK_BOT_TOKEN` | `xoxb-…` same app as slack-notify (chat:write, users:read.email) |
+| `AIRTABLE_PAT`    | read on Accounts, Tenancies, Costs, Transactions                 |
+| `RECIPIENT_EMAIL` | optional; defaults to `kevin@runpreneur.org.uk` in code          |
+| `TRIGGER_KEY`     | guards the manual test endpoint                                  |
+
+Deploy: `npx wrangler deploy -c wrangler.money-daily.toml`
+
+Manual test (guarded by `TRIGGER_KEY`):
+
+```
+# compute only, returns JSON, no Slack:
+curl "https://money-confidence-daily.kevinbrittain.workers.dev/?mode=compute&key=KEY"
+# compute AND send the DM now (bypasses the DST gate):
+curl "https://money-confidence-daily.kevinbrittain.workers.dev/?mode=send&key=KEY"
+```
+
 ## Related files
 
 - `scripts/slack-automation/contractor-bot.js` — the worker source
+- `scripts/slack-automation/money-daily-worker.js` — daily Money Confidence
+  DM worker (self-contained cron; see section above)
 - `scripts/slack-automation/notify-slack-worker.js` — slack-notify worker
   source (used by the dashboard, NOT by contractor-bot)
 - `~/.claude/.../contractor-job-creator/SKILL.md` — Kevin's personal Claude
