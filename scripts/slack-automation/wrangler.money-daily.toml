@@ -1,0 +1,17 @@
+name = "money-confidence-daily"
+main = "money-daily-worker.js"
+compatibility_date = "2024-12-01"
+
+# Two UTC crons cover 09:30 Europe/London year-round:
+#   "30 8 * * 1-5" hits 09:30 London during BST (summer)
+#   "30 9 * * 1-5" hits 09:30 London during GMT (winter)
+# The worker's isLondonSendTime() gate lets exactly one through per weekday.
+[triggers]
+crons = ["30 8 * * 1-5", "30 9 * * 1-5"]
+
+# Secrets are managed via `wrangler secret put` and persist across deploys —
+# not listed here so a deploy never drops them:
+#   SLACK_BOT_TOKEN   xoxb-… (chat:write, users:read, users:read.email)
+#   AIRTABLE_PAT      pat_…  (read: Accounts, Tenancies, Costs, Transactions)
+#   RECIPIENT_EMAIL   (optional) defaults to kevin@runpreneur.org.uk in code
+#   TRIGGER_KEY       (optional) guards the manual /?mode=… test endpoint
