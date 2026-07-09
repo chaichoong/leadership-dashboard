@@ -791,6 +791,9 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
         <!-- Debts in detail — per-debt rate, balance, monthly cost + AI pay-down guidance -->
         <div id="wealthDebts" style="margin-bottom:var(--space-5)"></div>
 
+        <!-- Analysis — Rich Dad ratios (read-only; rendered by wealth-ratios.js) -->
+        <div id="wealthRatios" style="margin-bottom:var(--space-5)"></div>
+
     </div>`;
 
     // Cash flow reads the already-loaded transactions (sync). Buckets fetch their table.
@@ -798,6 +801,8 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     loadWealthBuckets();
     renderWealthPendingVals();
     renderDebtsDetail();
+    // Analysis ratios — read-only interpretation of the figures above (own file).
+    if (typeof renderWealthRatios === 'function') renderWealthRatios(view);
 
     // Refresh + sync status + health checks — the standard bar every other tab has.
     registerWealthSyncBar(view, monthsBehind, asOf, currentLabel);
