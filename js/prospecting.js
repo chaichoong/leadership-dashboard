@@ -134,9 +134,9 @@
     function prosRouteProcess(route, isLtd) {
         switch (route) {
             case 'Email reply (they asked)':
-                return `Approve → Gmail draft of this reply created for you to send → Claude drafts every response → 7 days silent → ${isLtd ? 'nurture sequence' : 'one follow-up then stop (never sequenced)'}`;
+                return `Approve → this reply is SENT via GoHighLevel (replace [BOOKING-LINK] first) → replies land in GHL, Claude drafts responses → 7 days silent → ${isLtd ? 'nurture sequence' : 'one follow-up then stop (never sequenced)'}`;
             case 'Email sequence (Ltd)':
-                return 'Approve → Gmail draft of this intro created for you to send → 7 days silent → 3-email nurture sequence';
+                return 'Approve → this intro is SENT via GoHighLevel (replace [BOOKING-LINK] first) → 7 days silent → 3-email nurture sequence';
             case 'LinkedIn connect':
                 return 'Approve → Copy the message above → send the connect from your LinkedIn → message on accept → Claude drafts replies';
             case 'Website contact form':
@@ -300,10 +300,52 @@
             rec.fields['GHL Contact ID'] = contactId;
             rec.fields['Status'] = 'Synced to GHL';
             renderProspectingTab();
-            if (typeof showToast === 'function') showToast('Synced to GoHighLevel as a contact — sequence tag only applies after 7 silent days (Ltd only)', { type: 'success', duration: 6000 });
+            if (typeof showToast === 'function') showToast('Synced to GoHighLevel as a contact', { type: 'success' });
+            // Gold standard: approve = message sent, all from this page.
+            await sendProspectEmailViaGHL(rec, contactId, ghlKey, ghlLoc);
         } catch (e) {
             console.warn('Direct GHL sync failed (daily agent will retry):', e);
             if (typeof showToast === 'function') showToast('Approved. Direct GHL sync failed — the daily agent will sync it instead', { type: 'warning', duration: 6000 });
+        }
+    }
+
+    // Send the approved opening message as an email through GoHighLevel so the
+    // whole conversation lives in GHL (kept out of the team-managed Gmail inbox).
+    // Only fires for email routes with a real draft; refuses to send while the
+    // [BOOKING-LINK] placeholder is still in the text.
+    async function sendProspectEmailViaGHL(rec, contactId, ghlKey, ghlLoc) {
+        const route = prosField(rec, 'Contact Route');
+        if (!['Email reply (they asked)', 'Email sequence (Ltd)'].includes(route)) return;
+        const draft = prosField(rec, 'Draft Message');
+        if (!draft) return;
+        if (draft.includes('[BOOKING-LINK]')) {
+            if (typeof showToast === 'function') showToast('Not sent yet: replace [BOOKING-LINK] in the message with your booking URL, then approve again', { type: 'warning', duration: 8000 });
+            return;
+        }
+        const subject = route === 'Email reply (they asked)'
+            ? 'Your post about finding some help'
+            : `A thought for ${prosField(rec, 'Company') || 'your business'}`;
+        try {
+            const resp = await fetch('https://services.leadconnectorhq.com/conversations/messages', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-04-15', 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'Email',
+                    contactId,
+                    subject,
+                    html: escHtml(draft).replace(/\n/g, '<br>'),
+                }),
+            });
+            if (!resp.ok) throw new Error('GHL send HTTP ' + resp.status);
+            const followUp = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+            await patchProspectingRecord(TABLES.prospects, rec.id, { [PROSPECT.status]: 'Contacted (1:1)', [PROSPECT.nextFollowUp]: followUp });
+            rec.fields['Status'] = 'Contacted (1:1)';
+            rec.fields['Next Follow-up'] = followUp;
+            renderProspectingTab();
+            if (typeof showToast === 'function') showToast('Email sent via GoHighLevel — follow-up check in 7 days', { type: 'success', duration: 6000 });
+        } catch (e) {
+            console.warn('GHL email send failed (contact is synced; agent will handle the send):', e);
+            if (typeof showToast === 'function') showToast('Contact synced, but the GHL email send failed — the daily agent will send it instead', { type: 'warning', duration: 7000 });
         }
     }
 
