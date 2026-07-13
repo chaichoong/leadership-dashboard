@@ -6745,8 +6745,9 @@ async function logActivity(task,opts){
     });
     if(!res.ok){console.warn('[logActivity] failed',res.status,await res.text().catch(()=>''));return null}
     const data=await res.json();
-    // If the drawer is open on this task, refresh the feed so the entry shows live.
-    if(typeof drawerTaskId!=='undefined'&&drawerTaskId===task.id){_activityCache[task.id]=null;loadActivityIntoDrawer(task.id)}
+    // If this task's drawer is on screen, refresh the feed so the entry shows
+    // live. Gate on the element (drawerTaskId is nulled by closeDrawer).
+    if(document.getElementById('drwActivityWrap-'+task.id)){_activityCache[task.id]=null;loadActivityIntoDrawer(task.id)}
     return data;
   }catch(e){console.warn('[logActivity] error',e);return null}
 }
@@ -6786,15 +6787,19 @@ async function fetchActivity(taskId){
   })).sort((a,b)=>new Date(b.at)-new Date(a.at));
 }
 async function loadActivityIntoDrawer(taskId){
-  const wrap=document.getElementById('drwActivityWrap-'+taskId);
-  if(!wrap)return;
+  // Gate on the drawer's per-task element, not the drawerTaskId global —
+  // closeDrawer() (called inside openTaskDrawer) nulls drawerTaskId, so it is
+  // not a reliable "is this drawer open" signal. The wrap element only exists
+  // while this task's drawer is on screen, so its presence is the truth.
+  if(!document.getElementById('drwActivityWrap-'+taskId))return;
   try{
     const list=await fetchActivity(taskId);
     _activityCache[taskId]=list;
-    if(drawerTaskId===taskId)renderActivityInDrawer(taskId);
+    renderActivityInDrawer(taskId); // self-checks the wrap element still exists
   }catch(e){
     console.warn('load activity failed',e);
-    if(wrap&&drawerTaskId===taskId)wrap.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm);padding:8px 0">Could not load activity. It will refresh next time you open this task.</div>';
+    const w=document.getElementById('drwActivityWrap-'+taskId);
+    if(w)w.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm);padding:8px 0">Could not load activity. It will refresh next time you open this task.</div>';
   }
 }
 function renderActivityInDrawer(taskId){
