@@ -112,6 +112,10 @@ For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
 - **No reply + Limited Company** → add tag `od-prospect-nurture` to their GHL contact (PUT the contact's tags), Status = "In Sequence". The 3-email sequence takes over.
 - **No reply + manual track** → send ONE polite follow-up via GHL the first time (note it in the record), and after a second silent week set Status = "No Response" and stop. NEVER add manual-track contacts to any email workflow.
 
+**Sequence timeout (Status = "In Sequence"):** 14 days after enrolment (the 3 emails span ~10 days), check for any reply. Reply → "Replied". Nothing → Status = "No Response". No prospect ever sits in a stage forever.
+
+**"No route yet" prospects:** these wait for Kevin's one personal action (e.g. a Facebook message from his account). When he confirms he has made contact, set Status = "Contacted (1:1)" + Next Follow-up +7 days so the conversation is tracked like any other.
+
 **LinkedIn lane lifecycle (Status = "Connect Sent"):** each run, check Kevin's sent invitations (linkedin.com/mynetwork — read-only look). Accepted → send the already-approved Draft Message as the first LinkedIn message (this is the send Kevin pre-approved on the card), Status = "Contacted (1:1)", Next Follow-up = +7 days. Not accepted after 14 days → Status = "No Response" (do not withdraw, do not retry). Any inbound LinkedIn reply → Status = "Replied", draft a response for Kevin's approval in the report.
 
 **Draft freshness:** Kevin may approve cards days after they were found. At send time, if Date Found is older than ~10 days, soften the post reference ("saw your post a little while back") before sending — never send wording that pretends the post was yesterday.
