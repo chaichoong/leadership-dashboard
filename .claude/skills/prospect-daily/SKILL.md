@@ -66,7 +66,8 @@ For each chosen keyword on LinkedIn:
 
 For each qualified candidate, using WebSearch/WebFetch (not the browser):
 - Find the company website: from their LinkedIn profile/company page if visible, else search `"<company>" <name> UK`.
-- Find a contact email on the site (contact page, footer, about). Confidence: High = a named/direct address; Medium = generic (info@/hello@/contact@); Low = found off-site or uncertain. No email found is acceptable — still queue the prospect (Kevin may connect on LinkedIn instead).
+- Find a contact email on the site. **Check ALL of these before concluding "no email" (learned 13 Jul: an address sat in a privacy policy after the contact page showed only a form):** the contact page, the homepage INCLUDING footer, the about page, and `/privacy-policy` (privacy policies nearly always contain a contact address). WebFetch truncates long pages — ask it specifically for email addresses, and try the privacy page even when other pages look empty.
+- Confidence: High = a named/direct address; Medium = generic (info@/hello@/contact@); Low = found off-site or uncertain. No email found is acceptable — still queue the prospect (Kevin may connect on LinkedIn instead).
 
 ### 4. Companies House entity gate
 
@@ -91,17 +92,24 @@ Write a **Draft Message** tailored to the person and route. Voice = Kevin's: dir
   - Status = "Ready for Review", Date Found = today (ISO), Contact Route, Draft Message, plus every captured field.
 - Update each keyword used: Last Used = today, Prospects Found += number of new prospects it produced.
 
-### 6. GHL sync (Approved → GoHighLevel)
+### 6. First-contact pass (conversation-first — Kevin's design, 13 Jul)
 
-- Fetch Prospects with Status = "Approved".
-- If the GHL token file is missing: leave them untouched and report "GHL sync skipped — create a Private Integration token (Settings → Private Integrations, scope contacts.write) and save it to ~/.config/od/ghl_api_key, plus the Location ID to ~/.config/od/ghl_location_id".
-- Otherwise for each approved prospect:
-  - POST `https://services.leadconnectorhq.com/contacts/` (headers: `Authorization: Bearer <token>`, `Version: 2021-07-28`) with name, email, companyName, source "od-prospecting", locationId, and tags:
-    - Limited Company → `od-prospect-nurture` (Ericamae's sequence triggers on this tag when live)
-    - anything else → `od-prospect-manual` (never enters an email workflow)
-  - On success: PATCH the prospect — GHL Contact ID, Status = "Synced to GHL".
-  - On duplicate-contact response: reuse the returned contact id, same PATCH.
-  - 500ms between calls; on 429 back off exponentially.
+The principle: every emailed prospect gets a PERSONAL first message and a led conversation. The nurture sequence is the FALLBACK for silence, Ltd companies only. Manual-track prospects are never sequenced, ever.
+
+For each prospect with Status = "Approved" (Kevin approved the card AND its draft message):
+- **Email routes** (reply / intro / Ltd): create a Gmail DRAFT (Gmail connector `create_draft`) to their address with the approved Draft Message. Subject: replies to a public ask → `Your post in <group/platform>`; intros → `<their company> — a thought`. Kevin presses Send — never send directly.
+- **Website contact form route**: submit their site's contact form with the approved message text via the browser (the message was individually approved, which is the send authorisation).
+- **All emailed/form prospects**: sync to GHL as a CRM contact — POST `https://services.leadconnectorhq.com/contacts/` (headers `Authorization: Bearer <token>`, `Version: 2021-07-28`; token from ~/.config/od/ghl_api_key or report it missing) with name, email, companyName, source "od-prospecting", locationId, tags `od-prospect` (+ `od-prospect-manual` if not a Limited Company). Do NOT apply `od-prospect-nurture` here. On duplicate response reuse meta.contactId. 500ms between calls, back off on 429.
+- Set Status = "Contacted (1:1)" (typecast) and Next Follow-up = today + 7 days. Record GHL Contact ID.
+- **LinkedIn connect routes**: leave for Kevin; count them in the report as "awaiting your LinkedIn sends".
+
+### 6b. Follow-up pass (every run)
+
+For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
+- Search Kevin's Gmail (Gmail connector) for messages from the prospect's address.
+- **Reply found** → Status = "Replied", flag it prominently in the report, and draft a suggested response as a Gmail draft for Kevin. Track what wording gets replies vs silence and feed it back into future drafts.
+- **No reply + Limited Company** → add tag `od-prospect-nurture` to their GHL contact (PUT the contact's tags), Status = "In Sequence". The 3-email sequence takes over.
+- **No reply + manual track** → create ONE polite follow-up Gmail draft the first time this happens (note it in the record), and after a second silent week mark Notes "no response — LinkedIn or drop" and stop. NEVER add manual-track contacts to any email workflow.
 
 ### 7. Report
 

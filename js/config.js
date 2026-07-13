@@ -38,7 +38,7 @@
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
-        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.1', sopFile: 'sop-prospecting.html',        sopVer: '1.1', standalone: 'index.html#prospecting' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.2', sopFile: 'sop-prospecting.html',        sopVer: '1.2', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.17', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'ai-brain.html' },
@@ -105,6 +105,7 @@
         notes:           'fld4yWgjxOoZT9NIV',  // Notes (multilineText)
         contactRoute:    'fld18VDzR2Iu1m2qt',  // Contact Route (singleSelect: Email reply / Email sequence / LinkedIn connect / Contact form / No route yet)
         draftMessage:    'fldafL2q6G5g1TpT7',  // Draft Message (multilineText) — agent-drafted opener, Kevin edits before send
+        nextFollowUp:    'fldYGbMRJmvSZqJu1',  // Next Follow-up (date) — agent checks for replies on this date; silence → Ltd to sequence, manual-track stops
     };
 
     // ── Prospect Keywords field IDs (Airtable table: Prospect Keywords / tblB5tZrXNaKFe02j) ──

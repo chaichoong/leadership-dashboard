@@ -45,7 +45,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
     <a class="header-back" href="index.html#prospecting">&larr; Back to the platform</a>
     <h1>&#x1F9F2; Prospecting</h1>
     <div class="subtitle">Cold outbound pipeline &mdash; LinkedIn pain signals to booked calls</div>
-    <div class="version">SOP v1.1 &middot; Page v1.1 &middot; Owner: Kevin (review), AI agent (execution)</div>
+    <div class="version">SOP v1.2 &middot; Page v1.2 &middot; Owner: Kevin (review), AI agent (execution)</div>
   </div>
 </div>
 <div class="container">
@@ -70,7 +70,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
     <h2 class="section-title">2. Daily agent run</h2>
     <div class="card">
       <ol>
-        <li>Scheduled task fires each weekday (Claude Code scheduled task <code>prospect-daily-run</code>; the Mac must be awake with Chrome open).</li>
+        <li>Scheduled task fires <strong>every day at 09:00, seven days a week</strong> (Claude Code scheduled task <code>prospect-daily-run</code>; the Mac must be awake with Chrome open). Target: 5 qualified prospects a day.</li>
         <li>The agent reads the <strong>active keywords</strong> from the Prospect Keywords table and searches LinkedIn posts through Kevin&rsquo;s logged-in Chrome at human pace &mdash; capped at 20 profile views a run.</li>
         <li>Qualified authors (founder-led, UK, micro/small business, genuine pain post) are researched on the open web for a website and a <em>published</em> contact email. No guessed addresses.</li>
         <li>Companies House search classifies each prospect: Limited Company (with company number), Sole Trader / Partnership, or Unknown.</li>
@@ -88,8 +88,9 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
       <ul>
         <li>Open <strong>Marketing &rarr; Prospecting</strong>. The sidebar badge shows how many are waiting.</li>
         <li>Each card shows the pain quote, entity chip, email and confidence. Click the name for their LinkedIn, or the website link.</li>
-        <li>Each card carries a <strong>Contact Route</strong> chip (email reply, sequence, LinkedIn connect, contact form) and an editable <strong>opening message</strong> drafted by the agent. Tweak the wording, then approve; the edited text is what gets used. The Copy button is for LinkedIn connects you send personally.</li>
-        <li><strong>Approve</strong> = right person, right pain. Limited Companies with an email sync to GoHighLevel instantly (using the same GHL keys as Inbound Comms, stored in this browser); anything else waits for the next agent run or your personal send. <strong>Reject</strong> = bad fit; the agent learns nothing from rejects yet, so also deactivate a keyword if it keeps producing them.</li>
+        <li>Each card carries a <strong>Contact Route</strong> chip, an editable <strong>opening message</strong> drafted by the agent, and a <strong>Process line</strong> spelling out exactly what happens after you approve. Tweak the wording, then approve; the edited text is what gets used. The Copy button is for LinkedIn connects you send personally.</li>
+        <li><strong>Conversation first (the rule for everyone with an email):</strong> the first touch is always a personal message &mdash; the agent creates a Gmail draft, you press Send. Claude then leads the conversation: it watches for replies and drafts every response. Only after <strong>7 silent days</strong> does a Limited Company drop into the 3-email nurture sequence. Manual-track prospects get at most one follow-up and are <strong>never</strong> sequenced.</li>
+        <li><strong>Approve</strong> = right person, right pain. Emailed prospects sync to GoHighLevel instantly as CRM contacts (tag <code>od-prospect</code>; the sequence tag is only ever applied at the 7-day fallback, Ltd only). <strong>Reject</strong> = bad fit; also deactivate a keyword if it keeps producing rejects.</li>
         <li>Both actions have an 8-second Undo.</li>
         <li>Cards marked <strong>manual track (PECR)</strong> still sync to GHL when approved but are tagged <code>od-prospect-manual</code> and never enter the email sequence &mdash; contact them personally on LinkedIn instead.</li>
       </ul>
@@ -136,7 +137,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
       <table>
         <tr><th>Item</th><th>Detail</th></tr>
         <tr><td>Auth</td><td>Private Integration token (scope <code>contacts.write</code>) saved at <code>~/.config/od/ghl_api_key</code>, Location ID at <code>~/.config/od/ghl_location_id</code>. Until these exist the agent skips the sync and says so.</td></tr>
-        <tr><td>Tags</td><td><code>od-prospect-nurture</code> (Ltd &rarr; email sequence) &middot; <code>od-prospect-manual</code> (everyone else &rarr; no email)</td></tr>
+        <tr><td>Tags</td><td><code>od-prospect</code> (every synced contact, CRM only) &middot; <code>od-prospect-manual</code> (non-Ltd &mdash; blocks all email workflows) &middot; <code>od-prospect-nurture</code> (applied ONLY by the follow-up pass after 7 silent days, Ltd only &mdash; this is the tag Ericamae's sequence fires on)</td></tr>
         <tr><td>Sequence</td><td>Ericamae&rsquo;s nurture workflow triggers on the <code>od-prospect-nurture</code> tag. Until she switches it on, tagged contacts simply sit in GHL &mdash; nothing sends.</td></tr>
         <tr><td>Status flow</td><td>Approved &rarr; Synced to GHL &rarr; In Sequence &rarr; Replied / Call Booked. GHL-side stage changes are written back by the agent.</td></tr>
       </table>
