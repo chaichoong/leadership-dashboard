@@ -651,6 +651,35 @@ const CF = { // Completions field IDs
   cadence:      'fld35384OFUdorE0U',
 };
 
+// Task Activity — audit trail of changes made to tasks via the web app.
+// Forward-only log (captures changes from ship date onward). Airtable's own
+// cell-revision history is NOT exposed by the public API, so we log our own.
+const ACTIVITY_TABLE = 'tbl2ZTHBDBPo681UL';
+const AF = { // Activity field IDs
+  activityId: 'fld8L7jkAl0fZTj2v',
+  task:       'fldt6HxujV1G7qciw',
+  taskId:     'fldSnPrhxVjOlrKRO',
+  taskName:   'fldS82AEmQQmp8HX9',
+  actor:      'fldhhv2FNSLxUFK21',
+  actorEmail: 'fld6Sdd4wAuCbGlWB',
+  field:      'fld1ywgv5GDZG7Ke0',
+  summary:    'fldLU5oE32TIZPwEB',
+  from:       'fldWMf3c4Cc7paqHu',
+  to:         'fldVTCAZD87I897Fl',
+  source:     'fldCnAcIDuoNtYLui',
+  at:         'fldUj4SUqAdW4Tl1D',
+};
+// Which task fields are worth an audit entry, and their human label.
+// Freeform text (description, notes) is deliberately excluded to keep the
+// trail signal-heavy — those change often and carry little audit value.
+const ACTIVITY_LABELS = {
+  assignee:'Assignee', dueDate:'Due date', origDueDate:'Original due date',
+  status:'Status', priority:'Priority', priorityLevel:'Priority level',
+  timeEst:'Time estimate', recurring:'Recurring', business:'Business',
+  hardDeadline:'Hard deadline', onHold:'On hold', contractor:'Contractor',
+  maintenance:'Maintenance ticket', name:'Title', someDay:'Someday',
+};
+
 const F = {
   name:        'fldgFjGBw6bTKJFCD',
   dueDate:     'fld7XP8w8kbxfETV4',
@@ -2055,6 +2084,7 @@ async function updateTaskField(taskId,fieldKey,rawValue){
         else if(rawValue===today)newStatus='Today';
         else newStatus='Upcoming';
         if(newStatus&&newStatus!==task.status){
+          const _preAutoStatus=task.status;
           // Optimistic local update so the grid re-renders with the new
           // status on the next paint — don't wait for the PATCH round-trip.
           task.status=newStatus;
@@ -2063,6 +2093,10 @@ async function updateTaskField(taskId,fieldKey,rawValue){
             if(!r.ok){
               console.warn('auto-status patch non-ok',r.status);
               recordSaveFailure(taskId,'status','auto-status patch '+r.status);
+            } else if(!_undoInProgress){
+              // AUDIT LOG — the due-date rule (automation) moved the status.
+              // Suppressed during an undo so reverting a change doesn't add noise.
+              logActivity(task,{field:'Status',summary:`Status auto-set to ${newStatus} after due-date change`,from:_preAutoStatus,to:newStatus,source:'automation'});
             }
           }catch(e){console.warn('auto-status patch failed',e);recordSaveFailure(taskId,'status',(e&&e.message)||'auto-status patch failed')}
           // Re-render so the new status is visible immediately in the grid / drawer
@@ -2089,6 +2123,10 @@ async function updateTaskField(taskId,fieldKey,rawValue){
       const label=`Changed ${fieldKey} from ${fmtRaw(fieldKey,oldRaw)} to ${fmtRaw(fieldKey,rawValue)}`;
       pushUndo({type:'patch',taskId,fieldKey,oldRaw,newRaw:rawValue,label});
     }
+    // AUDIT LOG — record this change to the Task Activity trail. Fire-and-forget
+    // so it never blocks or fails the save. Skipped for undos (an undo re-applies
+    // an old value; logging it as a fresh change would be misleading).
+    if(!_undoInProgress){logFieldActivity(task,fieldKey,oldRaw,rawValue)}
     if(!_bulkOperation)toast('Saved');
     _saveState.ok++;saveEntry.status='ok';
   }catch(e){
@@ -2514,6 +2552,7 @@ function openTaskDrawer(taskId){
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Collaborators</label><div class="field-val" id="drwCollabWrap">${renderCollaboratorsDrawer(t)}</div></div>
       <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Attachments</label><div class="field-val" id="drwAttachWrap">${renderAttachmentsMarkup(t)}</div></div>
       <div class="field-row"><label>Comments <span id="drwCommentCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span></label><div class="field-val"><button class="btn" onclick="openCommentsModal('${t.id}')" style="padding:4px 12px;font-size:var(--fs-sm);background:var(--accent);color:#fff;border-color:var(--accent)">Add &amp; view comments</button></div></div>
+      <div class="field-row" style="flex-direction:column;align-items:stretch"><label>Activity <span id="drwActivityCount-${t.id}" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:var(--bg-subtle);color:var(--text-secondary);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">…</span> <span style="font-weight:400;color:var(--text-muted);font-size:11px;text-transform:none;letter-spacing:0">audit trail</span></label><div class="field-val" id="drwActivityWrap-${t.id}"><div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">Loading activity…</div></div></div>
     </div>
     <div class="drawer-footer">
       <button class="btn" onclick="cancelDrawerEdit('${t.id}')" title="${(typeof window!=='undefined'&&window._draftTaskId===t.id)?'Discard this draft task and close the drawer':'Close the drawer without making changes'}">Cancel</button>
@@ -2524,6 +2563,8 @@ function openTaskDrawer(taskId){
   document.body.appendChild(overlay);
   // Load the live comment count for the badge next to "Comments"
   loadCommentCountForDrawer(t.id);
+  // Load the audit-trail activity feed for this task
+  loadActivityIntoDrawer(t.id);
 }
 // Fetch comment count and write it into the drawer's badge. Called on
 // drawer open and after every post / delete so the number stays in
@@ -2860,6 +2901,8 @@ async function patchCollaborators(taskId,newList,label){
     }
     const wrap=document.getElementById('drwCollabWrap');
     if(wrap&&drawerTaskId===taskId)wrap.innerHTML=renderCollaboratorsDrawer(task);
+    // AUDIT LOG — collaborator add/remove (skip when this is an undo).
+    if(!_undoInProgress)logActivity(task,{field:'Collaborators',summary:label||'Changed collaborators',source:'app'});
     toast('Saved');
   }catch(e){
     console.warn('collab patch failed',e);
@@ -3128,6 +3171,8 @@ async function submitDrawerComment(taskId){
     // Fan-out Slack DM to every collaborator + assignee, skipping the commenter.
     const task=allTasks.find(x=>x.id===taskId);
     if(task)notifyCollabsOnComment(task,text);
+    // AUDIT LOG — a comment was added (body not stored here; it lives in Comments).
+    if(task)logActivity(task,{field:'Comment',summary:'Added a comment',source:'app'});
     toast('Comment posted');
   }catch(e){
     console.warn(e);toast('Failed to post comment',true);
@@ -3316,6 +3361,8 @@ async function submitModalComment(taskId){
     // Fan-out Slack DM (modal path uses the same task store as the drawer).
     const task=allTasks.find(x=>x.id===taskId);
     if(task)notifyCollabsOnComment(task,text);
+    // AUDIT LOG — a comment was added (body not stored here; it lives in Comments).
+    if(task)logActivity(task,{field:'Comment',summary:'Added a comment',source:'app'});
     toast('Comment posted');
   }catch(e){
     console.error('[Comments] post failed',e);toast('Failed to post comment',true);
@@ -6590,6 +6637,8 @@ async function createSimpleTask(opts){
     const data=await res.json();
     const parsed=parseTask(data);
     allTasks.push(parsed);
+    // AUDIT LOG — task created.
+    logActivity(parsed,{field:'Created',summary:parsed.assignee?`Task created, assigned to ${parsed.assignee}`:'Task created',source:'app'});
     // Fire Slack DM to the assignee (skipped silently if the actor IS the
     // assignee, or if the assignee email isn't known yet). Prefer the
     // user-typed name (opts.name) over the parsed echo because the POST
@@ -6650,6 +6699,131 @@ function nextRecurringDate(fromDate,cadence){
 // OPTION A — write one row to the Task Completions log table.
 // Safe to call for both recurring and non-recurring completions; it's fire
 // and forget — if the POST fails we warn but don't block the UI.
+// ======================================================
+// TASK ACTIVITY (audit log)
+// Every change made through the app writes a row to the Task Activity table.
+// Rendered as the "Activity" section at the bottom of the task drawer.
+// ======================================================
+let _activityCache = {};
+// Human-readable value for a raw field value, per field.
+function _activityValLabel(fieldKey,raw){
+  if(raw===null||raw===undefined||raw===''||raw==='__unassigned')return '(none)';
+  if(fieldKey==='assignee'){const m=TEAM.find(x=>x.key===raw);return m?m.name:String(raw)}
+  if(fieldKey==='dueDate'||fieldKey==='origDueDate'){
+    const d=new Date(raw+'T00:00:00');
+    if(!isNaN(d.getTime()))return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'});
+    return String(raw);
+  }
+  if(typeof raw==='boolean')return raw?'Yes':'No';
+  return String(raw);
+}
+// Write one activity row. Fire-and-forget: never blocks or breaks a save.
+async function logActivity(task,opts){
+  opts=opts||{};
+  if(!task||!task.id||typeof PAT==='undefined'||!PAT)return null;
+  const auto=opts.source==='automation';
+  const who=opts.actorName||(auto?'Automation':((currentUser&&(currentUser.name||currentUser.email))||'web app'));
+  const email=opts.actorEmail||(auto?'':((currentUser&&currentUser.email)||''));
+  const fields={};
+  fields[AF.activityId]=`${task.id}-${Date.now()}`;
+  fields[AF.task]=[task.id];
+  fields[AF.taskId]=task.id;
+  fields[AF.taskName]=task.name||'';
+  fields[AF.actor]=who;
+  fields[AF.actorEmail]=email;
+  fields[AF.field]=opts.field||'';
+  fields[AF.summary]=opts.summary||'';
+  if(opts.from!==undefined&&opts.from!==null)fields[AF.from]=String(opts.from);
+  if(opts.to!==undefined&&opts.to!==null)fields[AF.to]=String(opts.to);
+  fields[AF.source]=opts.source||'app';
+  fields[AF.at]=new Date().toISOString();
+  try{
+    const res=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${ACTIVITY_TABLE}?returnFieldsByFieldId=true`,{
+      method:'POST',
+      headers:{'Authorization':`Bearer ${PAT}`,'Content-Type':'application/json'},
+      body:JSON.stringify({fields,typecast:true})
+    });
+    if(!res.ok){console.warn('[logActivity] failed',res.status,await res.text().catch(()=>''));return null}
+    const data=await res.json();
+    // If the drawer is open on this task, refresh the feed so the entry shows live.
+    if(typeof drawerTaskId!=='undefined'&&drawerTaskId===task.id){_activityCache[task.id]=null;loadActivityIntoDrawer(task.id)}
+    return data;
+  }catch(e){console.warn('[logActivity] error',e);return null}
+}
+// Build + write an activity entry for a single field change. Skips fields
+// not worth auditing and no-op changes (old === new).
+function logFieldActivity(task,fieldKey,oldRaw,newRaw){
+  const label=ACTIVITY_LABELS[fieldKey];
+  if(!label)return;
+  const fromH=_activityValLabel(fieldKey,oldRaw);
+  const toH=_activityValLabel(fieldKey,newRaw);
+  if(fromH===toH)return; // nothing actually changed
+  let summary;
+  if(fieldKey==='assignee'){
+    summary=(fromH==='(none)')?`Assigned to ${toH}`
+      :(toH==='(none)')?`Unassigned (was ${fromH})`
+      :`Reassigned from ${fromH} to ${toH}`;
+  } else {
+    summary=`${label}: ${fromH} → ${toH}`;
+  }
+  return logActivity(task,{field:label,summary,from:fromH,to:toH,source:'app'});
+}
+// Fetch activity rows for one task, newest first.
+async function fetchActivity(taskId){
+  const formula=encodeURIComponent(`{TaskId}='${taskId}'`);
+  const url=`https://api.airtable.com/v0/${BASE_ID}/${ACTIVITY_TABLE}?filterByFormula=${formula}&pageSize=50`;
+  const res=await fetch(url,{headers:{'Authorization':`Bearer ${PAT}`}});
+  if(!res.ok)throw new Error('activity fetch '+res.status);
+  const data=await res.json();
+  return (data.records||[]).map(r=>({
+    id:r.id,
+    actor:r.fields['Actor']||'',
+    actorEmail:r.fields['Actor Email']||'',
+    field:r.fields['Field']||'',
+    summary:r.fields['Summary']||'',
+    source:r.fields['Source']||'app',
+    at:r.fields['At']||r.createdTime,
+  })).sort((a,b)=>new Date(b.at)-new Date(a.at));
+}
+async function loadActivityIntoDrawer(taskId){
+  const wrap=document.getElementById('drwActivityWrap-'+taskId);
+  if(!wrap)return;
+  try{
+    const list=await fetchActivity(taskId);
+    _activityCache[taskId]=list;
+    if(drawerTaskId===taskId)renderActivityInDrawer(taskId);
+  }catch(e){
+    console.warn('load activity failed',e);
+    if(wrap&&drawerTaskId===taskId)wrap.innerHTML='<div style="color:var(--danger);font-size:var(--fs-sm);padding:8px 0">Could not load activity. It will refresh next time you open this task.</div>';
+  }
+}
+function renderActivityInDrawer(taskId){
+  const wrap=document.getElementById('drwActivityWrap-'+taskId);if(!wrap)return;
+  const list=(_activityCache[taskId]||[]).slice().sort((a,b)=>new Date(b.at)-new Date(a.at));
+  const cnt=document.getElementById('drwActivityCount-'+taskId);
+  if(cnt&&typeof _renderCommentCountBadge==='function')_renderCommentCountBadge(cnt,list.length);
+  if(!list.length){
+    wrap.innerHTML='<div style="color:var(--text-secondary);font-size:var(--fs-sm);padding:8px 0">No activity recorded yet. Changes made from now on appear here.</div>';
+    return;
+  }
+  const items=list.map(a=>{
+    const auto=a.source==='automation';
+    const name=a.actor||(auto?'Automation':'Someone');
+    const init=name.split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase();
+    const avatar=auto
+      ? `<span class="avatar" style="width:24px;height:24px;font-size:12px;flex-shrink:0;background:var(--bg-subtle);color:var(--text-secondary)" title="Automation">⚙</span>`
+      : `<span class="avatar avatar-${collabKeyForEmail(a.actorEmail)}" style="width:24px;height:24px;font-size:10px;flex-shrink:0">${escHtml(init)}</span>`;
+    return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+      ${avatar}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;color:var(--text-secondary)"><strong style="color:var(--text-primary)">${escHtml(name)}</strong> &middot; ${escHtml(relTime(a.at))}</div>
+        <div style="font-size:var(--fs-base);color:var(--text-primary);word-wrap:break-word">${escHtml(a.summary)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML=`<div style="max-height:280px;overflow-y:auto">${items}</div>`;
+}
+
 async function logTaskCompletion(task){
   if(!task)return null;
   const who=(currentUser&&(currentUser.name||currentUser.email))||'web app';
@@ -6702,6 +6876,8 @@ async function rollRecurringTask(task){
     task.completion='';
     const label=new Date(newDue+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
     if(!_bulkOperation)toast(`Completed · next cycle scheduled for ${label}`);
+    // AUDIT LOG — recurring roll is an automation acting on the task.
+    logActivity(task,{field:'Recurring',summary:`Completed and rolled forward — next cycle due ${label}, status reset to Upcoming`,from:baseDue,to:newDue,source:'automation'});
     try{renderAll()}catch(e){}
     return task;
   }catch(e){console.warn('[rollRecurring] error',e);return null}
@@ -7311,6 +7487,8 @@ async function submitCreateTask(){
     const data=await res.json();
     const parsed=parseTask(data);
     allTasks.push(parsed);
+    // AUDIT LOG — task created.
+    logActivity(parsed,{field:'Created',summary:parsed.assignee?`Task created, assigned to ${parsed.assignee}`:'Task created',source:'app'});
     pushUndo({type:'create',taskId:parsed.id,label:`Created "${parsed.name}"`});
     // If the user kicked off this creation by double-clicking the timeline,
     // pin the new task to the clicked start time so it lands in that slot.
