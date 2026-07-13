@@ -20,7 +20,9 @@ Footer block for ALL emails:
 >
 > Your call is booked: {{appointment.start_time}}.
 >
-> One thing before we speak: jot down the three tasks that eat most of your week. That is where we will start.
+> Here is what you leave with, whether or not we ever work together: a teardown of how your week actually runs, and a map of the first three processes you could hand to an AI operations department tomorrow.
+>
+> One thing to prepare: jot down the three tasks that ate most of your week. That is where we start.
 >
 > Need to move it? Use the reschedule link in this email rather than cancelling.
 >
@@ -73,16 +75,18 @@ Footer block for ALL emails:
 
 **Trigger:** Tag added = `od-prospect-nurture`. (The prospecting agent applies this tag only after 7 silent days, Limited Companies only.)
 
-**Email 1 — immediately. Subject: `The three-task test`**
+**Email 1 — immediately. Subject: `What is your hour actually worth?`**
 > Hi {{contact.first_name}},
 >
 > I emailed you last week about {{contact.company_name}} — no reply needed, founders are busy. That is rather the point.
 >
-> Quick test: write down the three tasks that ate most of your week. If none of them needed YOU specifically, you are running a job, not a business.
+> Quick sum. Take what the business pays you, divide by your working hours. That is your hourly rate. Now look at yesterday: how many of those hours went on chasing, filing, scheduling and follow-ups — £10-an-hour work?
 >
-> Operations Director is an AI-run operations department for founder-led firms. It does those three tasks, and the thirty behind them, for less than a part-time VA.
+> You do not fix that by working harder. You buy those hours back.
 >
-> Fifteen minutes to see it working: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> Operations Director is an AI-run operations department for founder-led firms. It takes the £10 work, and the thirty tasks behind it, for less than a part-time VA.
+>
+> Thirty minutes to see your map: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
 >
 > Kevin
 
@@ -104,7 +108,9 @@ Footer block for ALL emails:
 >
 > Last one from me. If the timing is wrong, no hard feelings — you know where I am when the admin pile wins.
 >
-> If there is even a 10% chance you want your evenings back, the call costs you 30 minutes and nothing else: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
+> One thing worth knowing before I go: we are onboarding our founding clients this quarter at the founding rate, and those terms retire when the places are filled. Founders who join now shape what the product becomes.
+>
+> The call costs you 30 minutes and nothing else: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
 >
 > Either way, good luck with the business. Genuinely.
 >
