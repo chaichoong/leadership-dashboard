@@ -45,7 +45,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
     <a class="header-back" href="index.html#prospecting">&larr; Back to the platform</a>
     <h1>&#x1F9F2; Prospecting</h1>
     <div class="subtitle">Cold outbound pipeline &mdash; LinkedIn pain signals to booked calls</div>
-    <div class="version">SOP v1.2 &middot; Page v1.2 &middot; Owner: Kevin (review), AI agent (execution)</div>
+    <div class="version">SOP v1.3 &middot; Page v1.3 &middot; Owner: Kevin (review), AI agent (execution)</div>
   </div>
 </div>
 <div class="container">
@@ -89,7 +89,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
         <li>Open <strong>Marketing &rarr; Prospecting</strong>. The sidebar badge shows how many are waiting.</li>
         <li>Each card shows the pain quote, entity chip, email and confidence. Click the name for their LinkedIn, or the website link.</li>
         <li>Each card carries a <strong>Contact Route</strong> chip, an editable <strong>opening message</strong> drafted by the agent, and a <strong>Process line</strong> spelling out exactly what happens after you approve. Tweak the wording, then approve; the edited text is what gets used. The Copy button is for LinkedIn connects you send personally.</li>
-        <li><strong>Conversation first (the rule for everyone with an email):</strong> the first touch is always a personal message &mdash; the agent creates a Gmail draft, you press Send. Claude then leads the conversation: it watches for replies and drafts every response. Only after <strong>7 silent days</strong> does a Limited Company drop into the 3-email nurture sequence. Manual-track prospects get at most one follow-up and are <strong>never</strong> sequenced.</li>
+        <li><strong>Conversation first (the rule for everyone with an email):</strong> the first touch is always a personal message, <strong>sent through GoHighLevel the moment you approve</strong> (replace the [BOOKING-LINK] placeholder in the draft first &mdash; the system refuses to send while it remains). Replies land in GHL, never in the team-managed Gmail inbox; any stray that does reach Gmail gets the "16. OD Prospects" label so Inbound Comms leaves it alone. Claude watches for replies and drafts every response. Only after <strong>7 silent days</strong> does a Limited Company drop into the 3-email nurture sequence. Manual-track prospects get at most one follow-up and are <strong>never</strong> sequenced.</li>
         <li><strong>Approve</strong> = right person, right pain. Emailed prospects sync to GoHighLevel instantly as CRM contacts (tag <code>od-prospect</code>; the sequence tag is only ever applied at the 7-day fallback, Ltd only). <strong>Reject</strong> = bad fit; also deactivate a keyword if it keeps producing rejects.</li>
         <li>Both actions have an 8-second Undo.</li>
         <li>Cards marked <strong>manual track (PECR)</strong> still sync to GHL when approved but are tagged <code>od-prospect-manual</code> and never enter the email sequence &mdash; contact them personally on LinkedIn instead.</li>
