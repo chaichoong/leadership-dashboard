@@ -130,6 +130,24 @@
             </div>`;
     }
 
+    // Plain-English "what happens after Approve" line per contact route.
+    function prosRouteProcess(route, isLtd) {
+        switch (route) {
+            case 'Email reply (they asked)':
+                return `Approve → Gmail draft of this reply created for you to send → Claude drafts every response → 7 days silent → ${isLtd ? 'nurture sequence' : 'one follow-up then stop (never sequenced)'}`;
+            case 'Email sequence (Ltd)':
+                return 'Approve → Gmail draft of this intro created for you to send → 7 days silent → 3-email nurture sequence';
+            case 'LinkedIn connect':
+                return 'Approve → Copy the message above → send the connect from your LinkedIn → message on accept → Claude drafts replies';
+            case 'Website contact form':
+                return `Approve → this message goes via their contact form → replies move to email → 7 days silent → ${isLtd ? 'nurture sequence' : 'stop (never sequenced)'}`;
+            case 'No route yet':
+                return 'Approve → you choose the personal route (e.g. a Facebook message from your account) — nothing automated';
+            default:
+                return '';
+        }
+    }
+
     function renderProspectingQueue(records) {
         const el = document.getElementById('prospectingQueue');
         if (!el) return;
@@ -190,6 +208,7 @@
                     </div>
                     <textarea data-draft-for="${escHtml(id)}" rows="4" aria-label="Draft message for ${escHtml(name)}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);font-family:var(--font-family-base);background:var(--bg-surface-2);color:var(--text-primary);resize:vertical">${escHtml(draft)}</textarea>
                 </div>` : ''}
+                ${route ? `<div style="margin-top:8px;font-size:var(--fs-xs);color:var(--text-secondary);background:var(--bg-subtle);border-radius:var(--radius-sm);padding:6px 10px"><span style="font-weight:var(--fw-semibold);color:var(--text-primary)">Process:</span> ${escHtml(prosRouteProcess(route, isLtd))}</div>` : ''}
             </div>`;
         }).join('');
     }
@@ -246,7 +265,7 @@
         if (!rec) return;
         const email = prosField(rec, 'Contact Email');
         const isLtd = prosField(rec, 'Entity Type') === 'Limited Company';
-        if (!isLtd || !email) return;
+        if (!email) return;
         const ghlKey = localStorage.getItem('ghl_api_key');
         const ghlLoc = localStorage.getItem('ghl_location_id');
         if (!ghlKey || !ghlLoc) {
@@ -254,6 +273,12 @@
             return;
         }
         try {
+            // Conversation-first: contacts land in GHL as CRM records only. The
+            // od-prospect-nurture tag (which fires the email sequence) is applied
+            // later by the agent's follow-up pass, Ltd companies only, after 7
+            // silent days. Manual-track contacts are tagged so they can NEVER
+            // be swept into an email workflow.
+            const tags = isLtd ? ['od-prospect'] : ['od-prospect', 'od-prospect-manual'];
             const resp = await fetch('https://services.leadconnectorhq.com/contacts/', {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
@@ -263,7 +288,7 @@
                     companyName: prosField(rec, 'Company'),
                     locationId: ghlLoc,
                     source: 'od-prospecting',
-                    tags: ['od-prospect-nurture'],
+                    tags,
                 }),
             });
             const data = await resp.json().catch(() => ({}));
@@ -275,7 +300,7 @@
             rec.fields['GHL Contact ID'] = contactId;
             rec.fields['Status'] = 'Synced to GHL';
             renderProspectingTab();
-            if (typeof showToast === 'function') showToast('Synced to GoHighLevel — tagged od-prospect-nurture', { type: 'success' });
+            if (typeof showToast === 'function') showToast('Synced to GoHighLevel as a contact — sequence tag only applies after 7 silent days (Ltd only)', { type: 'success', duration: 6000 });
         } catch (e) {
             console.warn('Direct GHL sync failed (daily agent will retry):', e);
             if (typeof showToast === 'function') showToast('Approved. Direct GHL sync failed — the daily agent will sync it instead', { type: 'warning', duration: 6000 });
@@ -325,7 +350,7 @@
         const filterBar = document.getElementById('prospectingFilterBar');
         if (!tbody || !filterBar) return;
 
-        const statuses = ['All', 'Ready for Review', 'Approved', 'Synced to GHL', 'In Sequence', 'Replied', 'Call Booked', 'Rejected', 'Suppressed'];
+        const statuses = ['All', 'Ready for Review', 'Approved', 'Synced to GHL', 'Contacted (1:1)', 'In Sequence', 'Replied', 'Call Booked', 'Rejected', 'Suppressed'];
         if (!statuses.includes(prospectingFilter)) prospectingFilter = 'All';
         filterBar.innerHTML = statuses.map(s => {
             const active = s === prospectingFilter;
