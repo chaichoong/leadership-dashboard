@@ -45,7 +45,7 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
     <a class="header-back" href="index.html#prospecting">&larr; Back to the platform</a>
     <h1>&#x1F9F2; Prospecting</h1>
     <div class="subtitle">Cold outbound pipeline &mdash; LinkedIn pain signals to booked calls</div>
-    <div class="version">SOP v1.0 &middot; Page v1.0 &middot; Owner: Kevin (review), AI agent (execution)</div>
+    <div class="version">SOP v1.1 &middot; Page v1.1 &middot; Owner: Kevin (review), AI agent (execution)</div>
   </div>
 </div>
 <div class="container">
@@ -88,7 +88,8 @@ code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px;
       <ul>
         <li>Open <strong>Marketing &rarr; Prospecting</strong>. The sidebar badge shows how many are waiting.</li>
         <li>Each card shows the pain quote, entity chip, email and confidence. Click the name for their LinkedIn, or the website link.</li>
-        <li><strong>Approve</strong> = right person, right pain. They sync to GHL on the next agent run. <strong>Reject</strong> = bad fit; the agent learns nothing from rejects yet, so also deactivate a keyword if it keeps producing them.</li>
+        <li>Each card carries a <strong>Contact Route</strong> chip (email reply, sequence, LinkedIn connect, contact form) and an editable <strong>opening message</strong> drafted by the agent. Tweak the wording, then approve; the edited text is what gets used. The Copy button is for LinkedIn connects you send personally.</li>
+        <li><strong>Approve</strong> = right person, right pain. Limited Companies with an email sync to GoHighLevel instantly (using the same GHL keys as Inbound Comms, stored in this browser); anything else waits for the next agent run or your personal send. <strong>Reject</strong> = bad fit; the agent learns nothing from rejects yet, so also deactivate a keyword if it keeps producing them.</li>
         <li>Both actions have an 8-second Undo.</li>
         <li>Cards marked <strong>manual track (PECR)</strong> still sync to GHL when approved but are tagged <code>od-prospect-manual</code> and never enter the email sequence &mdash; contact them personally on LinkedIn instead.</li>
       </ul>
