@@ -1,6 +1,14 @@
 # GHL Sequence Copy Pack — Operations Director prospecting
 
-Paste-ready copy + build steps for every sequence. Written 13 Jul 2026.
+Paste-ready copy + build steps for every sequence. Written 13 Jul 2026, final version.
+Grounded in the **2026-06-17 Sales & Marketing Team Brief** (Software as a Science; 13-year-old test; one channel to green = LinkedIn outreach; capture the lead, never a dead end) and its **five evidence-based hot-buttons** from real sales calls:
+1. You ARE the business ("my business is me")
+2. You're drowning ("not enough hours in my day")
+3. It's all in your head (no systems, can't hand over or sell)
+4. Flying blind on the numbers ("I can't tell you my profit")
+5. Tools are a mess, money wasted on software ("worst thing I've done")
+
+Top objection from real calls = PRICE: lead with £350/month and the 30-day money-back guarantee. Second = "show me": offer the live dashboard on the call.
 Sub-account: **Operations Director** (`dgsHwbYbp6xrhRGZr9ik`).
 Send from: **kevin@operationsdirector.co.uk**. Booking link: `https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0`.
 Every email footer (PECR): sender identity + postal address + unsubscribe link (use GHL's unsubscribe merge tag).
@@ -75,29 +83,33 @@ Footer block for ALL emails:
 
 **Trigger:** Tag added = `od-prospect-nurture`. (The prospecting agent applies this tag only after 7 silent days, Limited Companies only.)
 
-**Email 1 — immediately. Subject: `What is your hour actually worth?`**
+**Email 1 — immediately. Subject: `What is your hour actually worth?`** *(hot-buttons 1 + 2)*
 > Hi {{contact.first_name}},
 >
 > I emailed you last week about {{contact.company_name}} — no reply needed, founders are busy. That is rather the point.
+>
+> A founder said to me recently: "my business is me. It's only myself doing everything." Sound familiar?
 >
 > Quick sum. Take what the business pays you, divide by your working hours. That is your hourly rate. Now look at yesterday: how many of those hours went on chasing, filing, scheduling and follow-ups — £10-an-hour work?
 >
 > You do not fix that by working harder. You buy those hours back.
 >
-> Operations Director is an AI-run operations department for founder-led firms. It takes the £10 work, and the thirty tasks behind it, for less than a part-time VA.
+> Operations Director is an AI-run operations department for founder-led firms. It takes the £10 work, and the thirty tasks behind it, off your plate.
 >
 > Thirty minutes to see your map: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
 >
 > Kevin
 
-**Email 2 — wait 4 days. Subject: `What I run on it`**
+**Email 2 — wait 4 days. Subject: `What I run on it`** *(hot-button 3 + the "show me" objection)*
 > Hi {{contact.first_name}},
+>
+> Most founder-led businesses run out of one place: the founder's head. Which works, right up until you want a holiday, a hire, or a buyer.
 >
 > Fair question to ask any software founder: do you use your own product?
 >
-> I run a 27-property portfolio on Operations Director. Rent reconciliation, compliance deadlines, contractor jobs, tenant comms — the system does the work, I approve decisions from one screen in about 20 minutes a day.
+> I run a 27-property portfolio on Operations Director. Rent reconciliation, compliance deadlines, contractor jobs, tenant comms — the system does the work, I approve decisions from one screen in about 20 minutes a day. Nothing lives in my head.
 >
-> That is the same setup I would build for {{contact.company_name}}.
+> On the call I show you that live dashboard, running my real business, then map yours.
 >
 > Worth a look: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
 >
@@ -108,7 +120,7 @@ Footer block for ALL emails:
 >
 > Last one from me. If the timing is wrong, no hard feelings — you know where I am when the admin pile wins.
 >
-> One thing worth knowing before I go: we are onboarding our founding clients this quarter at the founding rate, and those terms retire when the places are filled. Founders who join now shape what the product becomes.
+> One thing worth knowing before I go: this is £350 a month with a 30-day money-back guarantee, and we are onboarding founding clients this quarter at the founding rate — those terms retire when the places fill. Founders who join now shape what the product becomes.
 >
 > The call costs you 30 minutes and nothing else: https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0
 >

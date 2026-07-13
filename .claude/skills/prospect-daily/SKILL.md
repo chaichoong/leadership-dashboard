@@ -56,11 +56,12 @@ For each chosen keyword on LinkedIn:
 - **Seller test (learned 13 Jul 2026):** most pain-phrase search results are sellers marketing TO the pain. Genuine prospects write first-person, present-tense, incidental pain ("I'm juggling everything", "quiet week panic") — sellers write second-person, listicle, hashtag-heavy posts ending in a CTA. Check the author's headline before counting anyone: if it says coach / mentor / consultant / agency / automation / "I help founders...", skip. Past-tense pain ("the biggest mistake I made was...") from someone now selling the cure = seller.
 - **Comment mining:** when a seller's pain post has real engagement, open the post and read its comments — founders who reply "this is me" or share their own version of the pain ARE prospects. Qualify commenters exactly like authors. This often out-produces the search results themselves.
 - Quoted exact phrases return sparse results; run each keyword both quoted and unquoted when results are thin, and try the default relevance sort as well as date_posted — relevance surfaces high-engagement posts whose comments are mineable.
-- For each candidate (respecting the pacing and the 20-profile cap across the whole run): open their profile, read name, headline, location, current company. Qualify only if ALL of:
-  - Founder-led signal: title contains founder / owner / MD / director of their own small company
+- For each candidate (respecting the pacing and the 20-profile cap across the whole run): open their profile, read name, headline, location, current company. Qualify only if ALL of (targeting per the 2026-06-17 Sales & Marketing Team Brief in Drive — the canon):
+  - Founder-led signal: Founder / Co-founder / CEO / Owner / Managing Director of their own company. Founder-led, not PE-owned, not corporate.
   - UK-based
-  - Micro/small business (solo to ~10 staff, judge from profile/company page)
+  - Roughly £100k-£5m turnover, about 2-50 staff (judge from profile/company page; solo founders count when clearly running a real trading business)
   - Not already in the dedupe or suppression set
+- **The five hot-buttons (from real sales calls — every prospect should map to at least one):** (1) you ARE the business; (2) drowning in hours; (3) it's all in your head, no systems; (4) flying blind on the numbers; (5) tools a mess, money wasted on software. Verbatim customer phrases double as search keywords: "my business is me", "not enough hours in my day", "it's all in my head", "I can't tell you my profit".
 - Capture: full name, LinkedIn profile URL, headline, company name, the pain quote (short, verbatim where possible), signal source (Post/Profile/Comment), keyword matched.
 
 ### 3. Website + contact email (open web, no LinkedIn)
