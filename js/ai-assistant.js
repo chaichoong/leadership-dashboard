@@ -255,6 +255,21 @@
                 const summary = document.getElementById('fintableSummary');
                 ctx.fintableSummary = summary?.innerText || 'Fintable sync monitor page';
             }
+            if (tab === 'prospecting' && typeof prospectsCache !== 'undefined' && prospectsCache) {
+                const byStatus = {};
+                prospectsCache.forEach(r => {
+                    const s = (r.fields && r.fields['Status']) || 'Found';
+                    byStatus[s] = (byStatus[s] || 0) + 1;
+                });
+                ctx.prospectingFunnel = byStatus;
+                ctx.prospectingQueue = prospectsCache
+                    .filter(r => (r.fields && r.fields['Status']) === 'Ready for Review')
+                    .slice(0, 25)
+                    .map(r => ({ name: r.fields['Name'], company: r.fields['Company'], entity: r.fields['Entity Type'], pain: r.fields['Pain Signal'] }));
+                ctx.prospectingKeywords = (typeof prospectKeywordsCache !== 'undefined' && prospectKeywordsCache || [])
+                    .filter(k => k.fields && k.fields['Active'])
+                    .map(k => k.fields['Keyword']);
+            }
         } catch(e) { console.warn('Context gathering error:', e); }
         return ctx;
     }

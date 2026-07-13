@@ -38,6 +38,7 @@
         { id: 'systemisation', name: 'Systemisation',              icon: '⚙️', pageVer: '1.5', sopFile: '',                            sopVer: '1.0', standalone: 'os/systemisation/index.html' },
         { id: 'os-team',    name: 'Team Members',                  icon: '👥', pageVer: '1.2', sopFile: '',                            sopVer: '1.0', standalone: 'os/team/index.html' },
         { id: 'content-machine', name: 'Content Machine',           icon: '🎬', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'https://chaichoong.github.io/content-machine/' },
+        { id: 'prospecting', name: 'Prospecting',                   icon: '🧲', pageVer: '1.0', sopFile: 'sop-prospecting.html',        sopVer: '1.0', standalone: 'index.html#prospecting' },
         { id: 'sitemap',    name: 'Site Map & Guides',             icon: '🔗', pageVer: '1.17', sopFile: 'sop-sitemap.html',            sopVer: '1.2', standalone: 'index.html#sitemap' },
         { id: 'skills',     name: 'Skills Library',                icon: '🧠', pageVer: '1.4', sopFile: '',                             sopVer: '1.0', standalone: 'index.html#skills' },
         { id: 'ai-brain',  name: 'AI Brain',                       icon: '💭', pageVer: '1.0', sopFile: '',                            sopVer: '1.0', standalone: 'ai-brain.html' },
@@ -76,6 +77,42 @@
         arrearsLog:    'tblik5VI5Jy6tO2yc', // Arrears Contact Log — audit trail per contact event
         sysWorkflows:  'tblLPoRHFBl0vqR24', // Systemisation Workflows
         workflowSteps: 'tblTadoyWXFHbmYxm', // Workflow Steps (within Systemisation Workflows)
+        prospects:     'tbljHVGJoKJf8acy3', // Prospects — cold outbound pipeline (Prospecting tab)
+        prospectKeywords: 'tblB5tZrXNaKFe02j', // Prospect Keywords — LinkedIn search strings the daily agent runs
+    };
+
+    // ── Prospects field IDs (Airtable table: Prospects / tbljHVGJoKJf8acy3) ──
+    // Written by the daily prospecting agent (/prospect-daily skill), reviewed
+    // in the Prospecting tab, synced to GoHighLevel on approval by the agent.
+    const PROSPECT = {
+        name:            'fldJConBhbcg55dFE',  // Name (singleLineText, primary)
+        linkedin:        'fldokUrBcggRW91Ms',  // LinkedIn URL (url)
+        headline:        'fldWheU6cyPuuHYUE',  // Headline (singleLineText)
+        company:         'fldvP8ljYvuGI4Jif',  // Company (singleLineText)
+        website:         'fldXVOVAZ4l32O2up',  // Company Website (url)
+        email:           'fldAn2mzI9RoQCVSm',  // Contact Email (email)
+        emailSource:     'fldk9HsMY5pf9D0U8',  // Email Source (singleSelect)
+        emailConfidence: 'fld9h6F4K4jo2cD5d',  // Email Confidence (singleSelect: High/Medium/Low)
+        entityType:      'fld4eYVzxfQU74Mew',  // Entity Type (singleSelect: Limited Company / Sole Trader / Unknown)
+        chNo:            'fldQAvkn0p8KDj70h',  // Companies House No (singleLineText)
+        painSignal:      'fldvDtz1VuE40zyZI',  // Pain Signal (multilineText)
+        signalSource:    'fldRJgaACrUH5t9jC',  // Signal Source (singleSelect)
+        keyword:         'fldnO2nIgnADzlvFN',  // Keyword Matched (singleLineText)
+        status:          'fldNFSZrPsUF1NAd1',  // Status (singleSelect — 9-stage pipeline)
+        dateFound:       'fldSoTbvGYRI2R0bq',  // Date Found (date, ISO)
+        ghlId:           'fld2cltR75W6DYQuB',  // GHL Contact ID (singleLineText)
+        suppressedReason:'fldPlSHFy8iJgCopr',  // Suppressed Reason (singleSelect)
+        notes:           'fld4yWgjxOoZT9NIV',  // Notes (multilineText)
+    };
+
+    // ── Prospect Keywords field IDs (Airtable table: Prospect Keywords / tblB5tZrXNaKFe02j) ──
+    const PKEY = {
+        keyword: 'fldkgKnoJYEU0RDkE',  // Keyword (singleLineText, primary)
+        type:    'fldzIJbDDvNX5HvaN',  // Type (singleSelect: Pain Phrase / Role Keyword / Hashtag)
+        active:  'fld2RNZflCPTEV8Qd',  // Active (checkbox)
+        lastUsed:'fldV7wTV6TJx23k3l',  // Last Used (date, ISO)
+        found:   'fldHQasLEVwvCLJiA',  // Prospects Found (number) — running count written by the agent
+        notes:   'fldj3FXk0zPUINO2U',  // Notes (singleLineText)
     };
 
     // ── Task field IDs (Airtable table: Tasks / tblqB8b22hKBL4PF1) ──

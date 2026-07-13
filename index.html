@@ -108,7 +108,7 @@
                 </div>
             </div>
 
-            <div class="sidebar-section" data-section="marketing" data-tabs="content-machine">
+            <div class="sidebar-section" data-section="marketing" data-tabs="content-machine,prospecting">
                 <div class="sidebar-section-header" role="button" tabindex="0" aria-expanded="true" onclick="toggleSidebarSection('marketing')" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSidebarSection('marketing')">
                     <span class="sidebar-section-chevron">&#x25BE;</span>
                     <span class="sidebar-section-name">Marketing</span>
@@ -116,6 +116,7 @@
                 </div>
                 <div class="sidebar-section-body">
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('content-machine')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('content-machine')}"><span class="sidebar-icon">&#x1F3AC;</span><span class="sidebar-label">Content Machine</span><span class="sidebar-health-dot unknown" data-sidebar-health="content-machine" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('prospecting')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('prospecting')}"><span class="sidebar-icon">&#x1F9F2;</span><span class="sidebar-label">Prospecting</span><span class="sidebar-health-dot unknown" data-sidebar-health="prospecting" title="No checks run yet"></span><span id="prospectingBadge" style="display:none;margin-left:6px;min-width:20px;height:20px;border-radius:10px;font-size:11px;font-weight:700;color:var(--accent-on);text-align:center;line-height:20px;padding:0 6px"></span></div>
                 </div>
             </div>
 
@@ -753,6 +754,66 @@
             </div>
         </div>
 
+        <!-- Tab: Prospecting (cold outbound pipeline) -->
+        <div class="tab-panel" id="tab-prospecting">
+            <div data-sync-bar="prospecting"></div>
+            <div class="section">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:6px">
+                    <h2 class="section-title" style="margin-bottom:0">Prospecting</h2>
+                    <span id="prospectingAgentStamp" style="font-size:var(--fs-xs);color:var(--text-muted)"></span>
+                </div>
+                <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">The daily agent finds founder-led UK businesses posting about overload on LinkedIn, locates a website and contact email, and queues them here. Approve to sync to GoHighLevel; only Limited Companies enter the email sequence (PECR), others route to a manual track.</p>
+
+                <!-- Funnel summary cards -->
+                <div id="prospectingFunnel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:24px" aria-live="polite"></div>
+
+                <!-- Review queue -->
+                <h3 style="font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);margin-bottom:10px">Review queue</h3>
+                <div id="prospectingQueue" aria-live="polite"></div>
+
+                <!-- Pipeline table -->
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:26px 0 10px">
+                    <h3 style="font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);margin:0">Pipeline</h3>
+                    <div id="prospectingFilterBar" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+                </div>
+                <div style="overflow-x:auto">
+                    <table class="invoice-table" id="prospectingTable">
+                        <thead>
+                            <tr>
+                                <th>Prospect</th>
+                                <th>Company</th>
+                                <th>Entity</th>
+                                <th>Email</th>
+                                <th>Signal</th>
+                                <th>Status</th>
+                                <th>Found</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prospectingTableBody">
+                            <tr><td colspan="7" class="od-empty-state">Loading prospects…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Keyword manager -->
+                <h3 style="font-size:var(--fs-md);font-weight:var(--fw-semibold);color:var(--text-primary);margin:26px 0 10px">Search keywords</h3>
+                <p style="color:var(--text-secondary);font-size:12px;margin-bottom:10px">The agent runs the active keywords each day. Toggle off any producing weak prospects; add new pain phrases as you spot them.</p>
+                <div id="prospectingKeywords"></div>
+                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                    <input type="text" id="newKeywordInput" placeholder="Add a keyword or pain phrase…" style="flex:1;min-width:220px;padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);color:var(--text-primary)" aria-label="New keyword">
+                    <select id="newKeywordType" style="padding:8px 12px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);background:var(--bg-surface);color:var(--text-primary)" aria-label="Keyword type">
+                        <option>Pain Phrase</option>
+                        <option>Role Keyword</option>
+                        <option>Hashtag</option>
+                    </select>
+                    <button id="addKeywordBtn" class="od-btn-secondary" onclick="addProspectKeyword()">Add keyword</button>
+                </div>
+
+                <!-- Bottom clearance so the fixed Quick-Task FAB can never overlay the Add-keyword controls -->
+                <p style="color:var(--text-muted);font-size:11px;margin-top:20px;padding-bottom:96px">Approved prospects sync to GoHighLevel on the next agent run. Nothing emails anyone until the nurture sequence is switched on in GHL.</p>
+            </div>
+        </div>
+
         <!-- Tab: Skills Library -->
         <div class="tab-panel" id="tab-skills">
             <div class="section">
@@ -783,9 +844,9 @@
     <!-- JavaScript: split into modules for concurrent development -->
     <!-- v=cb versions bust stale caches when modules change -->
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
-    <script defer src="js/config.js?v=43"></script>
+    <script defer src="js/config.js?v=44"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
-    <script defer src="js/shared.js?v=31"></script>
+    <script defer src="js/shared.js?v=32"></script>
     <script defer src="js/sync-bar.js?v=5"></script>
     <script defer src="js/dashboard.js?v=21"></script>
     <script defer src="js/cashflow.js?v=21"></script>
@@ -803,9 +864,10 @@
     <script defer src="js/cfv.js?v=26"></script>
     <script defer src="js/arrears.js?v=31"></script>
     <script defer src="js/fintable.js?v=14"></script>
+    <script defer src="js/prospecting.js?v=1"></script>
     <script defer src="js/skills-data.js?v=3"></script>
     <script defer src="js/skills.js?v=9"></script>
-    <script defer src="js/ai-assistant.js?v=17"></script>
+    <script defer src="js/ai-assistant.js?v=18"></script>
     <script defer src="js/quick-task.js?v=4"></script>
     <script defer src="js/admin-repair-splits.js?v=5"></script>
 </body>
