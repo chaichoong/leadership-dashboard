@@ -7,6 +7,20 @@
       "runtimeArgs": ["-m", "http.server", "8951"],
       "port": 8951,
       "cwd": "."
+    },
+    {
+      "name": "ops-director-agents",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8955"],
+      "port": 8955,
+      "cwd": "."
+    },
+    {
+      "name": "ops-director-brain",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8957"],
+      "port": 8957,
+      "cwd": "."
     }
   ]
 }
