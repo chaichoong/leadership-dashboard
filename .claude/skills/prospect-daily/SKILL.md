@@ -32,9 +32,20 @@ One run = find up to 20 qualified prospects, queue them for Kevin's review in th
 - Fetch all Prospect Keywords where Active is true. Sort by Last Used ascending (never-used first). Pick the top 2-3 for this run.
 - Fetch all existing Prospects (paginate). Build a dedupe set of LinkedIn URLs (lowercased, path only) and emails, and a suppression set from Status = Suppressed records.
 
-### 2. LinkedIn search (assisted browsing, Kevin's Chrome)
+### 2. Pain-signal search (assisted browsing, Kevin's Chrome)
 
-For each chosen keyword:
+Platforms, in priority order (rotate 2-3 per run so no single platform gets heavy daily automation):
+1. **LinkedIn** (procedure below)
+2. **X (Twitter)** — `https://x.com/search?q=<encoded keyword>&f=live`. First-person pain is common and sellers are rarer than LinkedIn. Same qualification rules. Resolve handle → real name → business → website before counting anyone.
+3. **Threads** — `https://www.threads.net/search?q=<encoded keyword>`. Same rules.
+4. **Facebook** — public UK small-business owner groups, read-only research. NEVER DM group members or post from Kevin's account; qualified members are contacted via their business website or LinkedIn instead.
+5. Instagram/TikTok — PARKED (poor search precision, slow identity resolution). Do not use unless Kevin re-opens them.
+
+The same hard rules apply on every platform: Kevin's logged-in Chrome only, human pacing, stop for the day on any captcha/restriction warning per platform, and the combined 20-profile-view cap across all platforms.
+
+When writing Prospects records with a Signal Source not yet in the select options (e.g. "X Post", "Threads Post", "Facebook Group Post"), add `"typecast": true` to the curl POST body so Airtable auto-creates the option.
+
+For each chosen keyword on LinkedIn:
 - Load the claude-in-chrome tools via ToolSearch if not loaded. Confirm Chrome is connected; if not, stop and report "Chrome not available — run skipped".
 - Go to `https://www.linkedin.com/search/results/content/?keywords=<encoded keyword>&sortBy=%22date_posted%22` for pain phrases/hashtags. Read the visible results with get_page_text / read_page rather than heavy interaction. Scroll at most 3-4 times per keyword.
 - Candidate = the post author of a post genuinely expressing the pain (overloaded founder, no time, doing everything themselves, can't switch off). Ignore coaches/consultants SELLING a solution to the pain — they are competitors, not prospects. Ignore job seekers and employees.
