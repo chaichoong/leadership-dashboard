@@ -85,7 +85,7 @@ Set **Contact Route** by this decision tree:
 4. Website form only → "Website contact form".
 5. Otherwise → "No route yet".
 
-Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a 20-minute call with the booking link placeholder [BOOKING-LINK]. Under 90 words for email replies, under 40 for LinkedIn connect notes. Never fake familiarity; say where we saw their post.
+Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a call with the booking link `https://api.leadconnectorhq.com/widget/booking/gT2Vw4oxHujytzWVRvS9` (the Strategy Call with Operations Director calendar, 30 min — say "a quick call", not "20-minute"). Under 90 words for email replies, under 40 for LinkedIn connect notes (no link in connect notes; the link goes in the post-accept message). Never fake familiarity; say where we saw their post.
 
 ### 5. Write to Airtable
 
