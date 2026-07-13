@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prospecting &mdash; Standard Operating Procedure</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { line-height: 1.6; color: var(--text-primary); background: var(--bg-app); }
+.header { background: var(--accent); color: white; padding: 2.5rem 2rem 2rem; }
+.header-inner { max-width: 1100px; margin: 0 auto; }
+.header-back { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; opacity: 0.7; text-decoration: none; color: white; margin-bottom: 1rem; }
+.header-back:hover { opacity: 1; }
+.header h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.3rem; }
+.header .subtitle { font-size: 1.05rem; opacity: 0.85; }
+.header .version { font-size: 0.85rem; opacity: 0.6; margin-top: 0.5rem; }
+.container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+.section { margin-top: 2.5rem; }
+.section-title { font-size: 1.5rem; font-weight: 700; color: var(--accent); padding-bottom: 0.5rem; border-bottom: 3px solid var(--accent-soft); margin-bottom: 1.25rem; }
+.card { background: var(--bg-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); padding: 1.5rem; margin-bottom: 1.25rem; border: 1px solid var(--border-default); }
+.card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem; }
+.card p, .card li { font-size: 0.92rem; color: var(--text-secondary); }
+.card ul, .card ol { padding-left: 1.4rem; margin: 0.5rem 0; }
+.card li { margin-bottom: 0.4rem; }
+.flow { display: flex; align-items: center; flex-wrap: wrap; gap: 0; padding: 1rem 0; }
+.flow-step { background: var(--bg-surface); border: 2px solid var(--accent-soft); border-radius: var(--radius-lg); padding: 0.75rem 1rem; text-align: center; font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); }
+.flow-step.primary { background: var(--accent); color: white; border-color: var(--accent); }
+.flow-arrow { font-size: 1.3rem; color: var(--text-muted); padding: 0 0.35rem; }
+.callout { border-left: 4px solid var(--accent-gold); background: var(--warning-bg); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin: 1rem 0; font-size: 0.9rem; }
+.callout.danger { border-left-color: var(--danger); background: var(--danger-bg); }
+.callout strong { color: var(--text-primary); }
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 0.75rem 0; }
+th { background: var(--accent); color: white; padding: 0.6rem 0.9rem; text-align: left; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.5px; }
+td { padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border-default); vertical-align: top; color: var(--text-secondary); }
+tr:nth-child(even) td { background: var(--bg-surface-2); }
+code { background: var(--bg-subtle); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.84em; }
+@media print { .header-back { display: none; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-inner">
+    <a class="header-back" href="index.html#prospecting">&larr; Back to the platform</a>
+    <h1>&#x1F9F2; Prospecting</h1>
+    <div class="subtitle">Cold outbound pipeline &mdash; LinkedIn pain signals to booked calls</div>
+    <div class="version">SOP v1.0 &middot; Page v1.0 &middot; Owner: Kevin (review), AI agent (execution)</div>
+  </div>
+</div>
+<div class="container">
+
+  <div class="section">
+    <h2 class="section-title">1. What this system does</h2>
+    <div class="card">
+      <p>A daily AI agent finds founder-led UK micro and small business owners who post about being overloaded &mdash; wearing every hat, no time, drowning in admin. It locates their company website and a published contact email, checks Companies House to classify the legal entity, and queues each prospect in the Prospecting tab. Kevin approves or rejects. Approved prospects sync to GoHighLevel, where the nurture sequence takes over. The goal metric is calls booked.</p>
+      <div class="flow">
+        <div class="flow-step">LinkedIn pain signal</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">Website + email</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">Companies House gate</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step primary">Kevin reviews</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">GHL + nurture</div><div class="flow-arrow">&rarr;</div>
+        <div class="flow-step">Call booked</div>
+      </div>
+      <p>When a call is booked, a separate pre-call research agent compiles the full dossier &mdash; research spend lands only on people worth calendar time.</p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">2. Daily agent run</h2>
+    <div class="card">
+      <ol>
+        <li>Scheduled task fires each weekday (Claude Code scheduled task <code>prospect-daily-run</code>; the Mac must be awake with Chrome open).</li>
+        <li>The agent reads the <strong>active keywords</strong> from the Prospect Keywords table and searches LinkedIn posts through Kevin&rsquo;s logged-in Chrome at human pace &mdash; capped at 20 profile views a run.</li>
+        <li>Qualified authors (founder-led, UK, micro/small business, genuine pain post) are researched on the open web for a website and a <em>published</em> contact email. No guessed addresses.</li>
+        <li>Companies House search classifies each prospect: Limited Company (with company number), Sole Trader / Partnership, or Unknown.</li>
+        <li>Each prospect lands in the Prospects table as <strong>Ready for Review</strong> with the pain quote, links, email, confidence, and entity type.</li>
+        <li>Previously <strong>Approved</strong> prospects are pushed to GoHighLevel and move to <strong>Synced to GHL</strong>.</li>
+        <li>Kevin gets a Slack summary: found, synced, keywords used, any warnings.</li>
+      </ol>
+      <div class="callout"><strong>LinkedIn safety:</strong> the agent browses only through Kevin&rsquo;s real Chrome session, never with scrapers, and stops for the day at the first captcha or unusual-activity warning. Automated activity on LinkedIn sits outside their User Agreement &mdash; low volume and human pacing keep the risk small, but the kill-switch rule is absolute.</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">3. Reviewing the queue (Kevin, ~5 min/day)</h2>
+    <div class="card">
+      <ul>
+        <li>Open <strong>Marketing &rarr; Prospecting</strong>. The sidebar badge shows how many are waiting.</li>
+        <li>Each card shows the pain quote, entity chip, email and confidence. Click the name for their LinkedIn, or the website link.</li>
+        <li><strong>Approve</strong> = right person, right pain. They sync to GHL on the next agent run. <strong>Reject</strong> = bad fit; the agent learns nothing from rejects yet, so also deactivate a keyword if it keeps producing them.</li>
+        <li>Both actions have an 8-second Undo.</li>
+        <li>Cards marked <strong>manual track (PECR)</strong> still sync to GHL when approved but are tagged <code>od-prospect-manual</code> and never enter the email sequence &mdash; contact them personally on LinkedIn instead.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">4. Compliance &mdash; legitimate interest assessment (UK GDPR + PECR)</h2>
+    <div class="card">
+      <h3>Lawful basis</h3>
+      <p>Processing basis: <strong>legitimate interest</strong> (Article 6(1)(f) UK GDPR) &mdash; B2B direct marketing of a business operations service to businesses showing an active, self-declared need. This section is the documented assessment.</p>
+      <table>
+        <tr><th>Test</th><th>Assessment</th></tr>
+        <tr><td>Purpose</td><td>Introduce Operations Director to founder-led UK small businesses whose owners publicly describe the exact problem the service solves. Clear commercial interest; benefit to the recipient is a relevant, non-generic offer.</td></tr>
+        <tr><td>Necessity</td><td>Data collected is minimal and business-focused: name, role, company, public LinkedIn content, published business contact email. No special category data, no private-life data, no purchased lists.</td></tr>
+        <tr><td>Balancing</td><td>Recipients are business owners contacted at business addresses they publish for business contact. Contact volume is low (one sequence, easy opt-out). Reasonable expectation: a business publishing a contact email expects business approaches.</td></tr>
+      </table>
+      <h3>PECR rules (enforced in the pipeline)</h3>
+      <ul>
+        <li><strong>Corporate subscribers only for email.</strong> Only Entity Type = Limited Company enters the email sequence. Sole traders and partnerships count as individual subscribers under PECR Reg. 22 and are NEVER cold-emailed &mdash; they route to the manual track. Unknown is treated as sole trader. The health bar has a hard-fail check for this.</li>
+        <li><strong>Every email identifies the sender</strong> (Operations Director + postal address) and carries a working unsubscribe. This lives in the GHL sequence templates &mdash; Ericamae owns it, Kevin signs it off before the sequence goes live.</li>
+        <li><strong>Suppression is forever.</strong> Unsubscribes and removal requests are marked Suppressed in the Prospects table and in GHL; the agent checks the list before every add and never re-adds them.</li>
+        <li><strong>Right to object / erasure:</strong> on any request, mark Suppressed, delete the GHL contact, and clear personal fields from the Airtable record within 30 days.</li>
+        <li>Data source is the person&rsquo;s own public LinkedIn activity plus their company website; the first email states where we found them (transparency, Art. 14).</li>
+      </ul>
+      <div class="callout danger"><strong>Hard rule:</strong> if entity type is uncertain, the prospect does not get emailed. The gate errs on the side of not sending.</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">5. Keywords</h2>
+    <div class="card">
+      <ul>
+        <li>The agent rotates through <strong>active</strong> keywords, oldest-used first, 2-3 per run.</li>
+        <li>Add pain phrases you hear on calls or see in posts. Phrase them the way founders actually write, not marketing speak.</li>
+        <li>Each keyword tracks how many prospects it has produced &mdash; deactivate the duds, keep the producers.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">6. GoHighLevel wiring</h2>
+    <div class="card">
+      <table>
+        <tr><th>Item</th><th>Detail</th></tr>
+        <tr><td>Auth</td><td>Private Integration token (scope <code>contacts.write</code>) saved at <code>~/.config/od/ghl_api_key</code>, Location ID at <code>~/.config/od/ghl_location_id</code>. Until these exist the agent skips the sync and says so.</td></tr>
+        <tr><td>Tags</td><td><code>od-prospect-nurture</code> (Ltd &rarr; email sequence) &middot; <code>od-prospect-manual</code> (everyone else &rarr; no email)</td></tr>
+        <tr><td>Sequence</td><td>Ericamae&rsquo;s nurture workflow triggers on the <code>od-prospect-nurture</code> tag. Until she switches it on, tagged contacts simply sit in GHL &mdash; nothing sends.</td></tr>
+        <tr><td>Status flow</td><td>Approved &rarr; Synced to GHL &rarr; In Sequence &rarr; Replied / Call Booked. GHL-side stage changes are written back by the agent.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">7. Health checks &amp; troubleshooting</h2>
+    <div class="card">
+      <table>
+        <tr><th>Check</th><th>If it fails</th></tr>
+        <tr><td>Prospects table reachable</td><td>Airtable auth or network issue &mdash; hit Refresh; check the PAT.</td></tr>
+        <tr><td>Active search keywords defined</td><td>All keywords toggled off &mdash; activate at least one.</td></tr>
+        <tr><td>Daily agent ran recently</td><td>No new prospects for 3+ days: Mac asleep at run time, Chrome closed, or LinkedIn friction stopped the run. Check the scheduled task log.</td></tr>
+        <tr><td>Approved synced to GHL</td><td>Big Approved backlog means GHL token missing/expired &mdash; see &sect;6.</td></tr>
+        <tr><td>Synced records carry GHL ID</td><td>Partial sync failure &mdash; re-run the agent; it retries by email match.</td></tr>
+        <tr><td>PECR gate</td><td><strong>Red alert:</strong> a non-Ltd prospect is in the email sequence. Remove them from the GHL workflow immediately and mark the record.</td></tr>
+      </table>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

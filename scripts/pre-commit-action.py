@@ -26,6 +26,7 @@ FILE_TO_PAGE = {
     'js/invoices.js':       'invoices',
     'js/pnl.js':            'pnl',
     'js/fintable.js':       'fintable',
+    'js/prospecting.js':    'prospecting',
     'js/sitemap.js':        'sitemap',
     'follow-up.html':       'comms',
     'compliance.html':      'compliance',

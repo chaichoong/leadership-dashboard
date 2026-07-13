@@ -1,0 +1,83 @@
+---
+name: prospect-daily
+description: Daily cold-outbound prospecting agent. Finds founder-led UK micro/small business owners posting pain signals on LinkedIn (assisted browsing via Kevin's Chrome), locates their website and contact email, runs the Companies House entity gate, writes them to the Airtable Prospects table for review, and syncs Approved prospects to GoHighLevel. Use when Kevin says "run the prospecting agent", "find prospects", "/prospect-daily", or when the scheduled daily prospecting task fires.
+---
+
+# Prospect Daily — autonomous prospecting run
+
+One run = find up to 20 qualified prospects, queue them for Kevin's review in the Prospecting tab, and sync previously-approved prospects to GoHighLevel. Everything is logged to Airtable. Kevin approves before anyone is contacted.
+
+## Hard rules (never break these)
+
+1. **No scraping tools.** LinkedIn is browsed only through Kevin's logged-in Chrome via the claude-in-chrome tools, at human pace. Never use HTTP requests, scripts, or third-party scrapers against LinkedIn.
+2. **Stop on friction.** If LinkedIn shows a captcha, verification prompt, "unusual activity" notice, or any restriction warning: stop all LinkedIn browsing immediately for the day, note it in the report, and continue the rest of the pipeline with what was already collected.
+3. **Volume caps.** Max 20 prospect profiles viewed per run. Max 1 run per day. Pause 5-15 seconds between LinkedIn page loads (vary it).
+4. **PECR gate.** Only prospects with Entity Type = "Limited Company" may ever be tagged for the email sequence. Sole Trader / Partnership / Unknown get the manual-track tag and are never cold-emailed.
+5. **Suppression is forever.** Before creating any prospect or GHL contact, check the existing Prospects table: if the person's email or LinkedIn URL matches a record with Status = Suppressed, skip them permanently.
+6. **Emails only from published sources.** Use only addresses published on the company's own website or public profile. Never pattern-guess addresses (no firstname@domain guessing). Record the source and an honest confidence.
+7. **Never print secrets.** Read token files silently; never echo their contents into output, logs, or Airtable.
+
+## Config
+
+- Airtable PAT: `~/.config/od/airtable_pat` (curl, base `appnqjDpqDniH3IRl`)
+- Prospects table: `tbljHVGJoKJf8acy3` — field IDs in `js/config.js` (`PROSPECT` map)
+- Prospect Keywords table: `tblB5tZrXNaKFe02j` (`PKEY` map)
+- GHL Private Integration token: `~/.config/od/ghl_api_key` (optional — if missing, skip step 6 and tell Kevin what to create)
+- GHL Location ID: `~/.config/od/ghl_location_id`
+
+## Procedure
+
+### 1. Load state from Airtable
+
+- Fetch all Prospect Keywords where Active is true. Sort by Last Used ascending (never-used first). Pick the top 2-3 for this run.
+- Fetch all existing Prospects (paginate). Build a dedupe set of LinkedIn URLs (lowercased, path only) and emails, and a suppression set from Status = Suppressed records.
+
+### 2. LinkedIn search (assisted browsing, Kevin's Chrome)
+
+For each chosen keyword:
+- Load the claude-in-chrome tools via ToolSearch if not loaded. Confirm Chrome is connected; if not, stop and report "Chrome not available — run skipped".
+- Go to `https://www.linkedin.com/search/results/content/?keywords=<encoded keyword>&sortBy=%22date_posted%22` for pain phrases/hashtags. Read the visible results with get_page_text / read_page rather than heavy interaction. Scroll at most 3-4 times per keyword.
+- Candidate = the post author of a post genuinely expressing the pain (overloaded founder, no time, doing everything themselves, can't switch off). Ignore coaches/consultants SELLING a solution to the pain — they are competitors, not prospects. Ignore job seekers and employees.
+- For each candidate (respecting the pacing and the 20-profile cap across the whole run): open their profile, read name, headline, location, current company. Qualify only if ALL of:
+  - Founder-led signal: title contains founder / owner / MD / director of their own small company
+  - UK-based
+  - Micro/small business (solo to ~10 staff, judge from profile/company page)
+  - Not already in the dedupe or suppression set
+- Capture: full name, LinkedIn profile URL, headline, company name, the pain quote (short, verbatim where possible), signal source (Post/Profile/Comment), keyword matched.
+
+### 3. Website + contact email (open web, no LinkedIn)
+
+For each qualified candidate, using WebSearch/WebFetch (not the browser):
+- Find the company website: from their LinkedIn profile/company page if visible, else search `"<company>" <name> UK`.
+- Find a contact email on the site (contact page, footer, about). Confidence: High = a named/direct address; Medium = generic (info@/hello@/contact@); Low = found off-site or uncertain. No email found is acceptable — still queue the prospect (Kevin may connect on LinkedIn instead).
+
+### 4. Companies House entity gate
+
+- Search the public register: `https://find-and-update.company-information.service.gov.uk/search?q=<company name>`.
+- Confident active match → Entity Type = "Limited Company" + record the company number.
+- No plausible match → "Sole Trader / Partnership" if the site/profile suggests a trading individual, else "Unknown". When unsure, choose "Unknown" — the gate errs on the side of NOT emailing.
+
+### 5. Write to Airtable
+
+- Create one Prospects record per candidate via curl (Number()-cast any numerics, 500ms between writes):
+  - Status = "Ready for Review", Date Found = today (ISO), plus every captured field.
+- Update each keyword used: Last Used = today, Prospects Found += number of new prospects it produced.
+
+### 6. GHL sync (Approved → GoHighLevel)
+
+- Fetch Prospects with Status = "Approved".
+- If the GHL token file is missing: leave them untouched and report "GHL sync skipped — create a Private Integration token (Settings → Private Integrations, scope contacts.write) and save it to ~/.config/od/ghl_api_key, plus the Location ID to ~/.config/od/ghl_location_id".
+- Otherwise for each approved prospect:
+  - POST `https://services.leadconnectorhq.com/contacts/` (headers: `Authorization: Bearer <token>`, `Version: 2021-07-28`) with name, email, companyName, source "od-prospecting", locationId, and tags:
+    - Limited Company → `od-prospect-nurture` (Ericamae's sequence triggers on this tag when live)
+    - anything else → `od-prospect-manual` (never enters an email workflow)
+  - On success: PATCH the prospect — GHL Contact ID, Status = "Synced to GHL".
+  - On duplicate-contact response: reuse the returned contact id, same PATCH.
+  - 500ms between calls; on 429 back off exponentially.
+
+### 7. Report
+
+Send Kevin a short Slack DM (slack connector) and end with the same summary:
+`Prospecting run <date>: <n> found → review queue | <m> synced to GHL | keywords used: <list> | <any warnings: LinkedIn friction, GHL skipped, 0 results>`
+
+Keep it honest — a zero-result run says so plainly, with the likely reason.
