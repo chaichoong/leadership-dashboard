@@ -277,7 +277,9 @@
         const email = prosField(rec, 'Contact Email');
         const isLtd = prosField(rec, 'Entity Type') === 'Limited Company';
         if (!email) return;
-        const ghlKey = localStorage.getItem('ghl_api_key');
+        // Prefer the dedicated OD Prospecting Agent token (write scopes); fall
+        // back to the shared Inbound Comms key for reads-only environments.
+        const ghlKey = localStorage.getItem('od_prospecting_ghl_key') || localStorage.getItem('ghl_api_key');
         const ghlLoc = localStorage.getItem('ghl_location_id');
         if (!ghlKey || !ghlLoc) {
             if (typeof showToast === 'function') showToast('Approved. GHL keys not set in this browser (Inbound Comms → Settings) — the daily agent will sync it instead', { type: 'info', duration: 6000 });
