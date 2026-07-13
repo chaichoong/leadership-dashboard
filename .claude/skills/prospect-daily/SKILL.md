@@ -85,7 +85,7 @@ Set **Contact Route** by this decision tree:
 4. Website form only → "Website contact form".
 5. Otherwise → "No route yet".
 
-Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a call with the booking link `https://api.leadconnectorhq.com/widget/booking/gT2Vw4oxHujytzWVRvS9` (the Strategy Call with Operations Director calendar, 30 min — say "a quick call", not "20-minute"). Under 90 words for email replies, under 40 for LinkedIn connect notes (no link in connect notes; the link goes in the post-accept message). Never fake familiarity; say where we saw their post.
+Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a call with the booking link `https://api.leadconnectorhq.com/widget/booking/BcVVhAg1zLaPVEXj5ih0` (Kevin-confirmed calendar, 13 Jul — say "a quick call"). Under 90 words for email replies, under 40 for LinkedIn connect notes (no link in connect notes; the link goes in the post-accept message). Never fake familiarity; say where we saw their post.
 
 ### 5. Write to Airtable
 
@@ -107,7 +107,11 @@ For each prospect with Status = "Approved" (Kevin approved the card AND its draf
 ### 6b. Follow-up pass (every run)
 
 For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
-- Check the prospect's GHL conversation for inbound replies (GET conversations search by contactId — same API the sms-email-bridge worker uses). Also search Kevin's Gmail for their address as a belt-and-braces check; if a prospect reply IS found in Gmail, apply the Gmail label "16. OD Prospects" (create it once via the Gmail connector if missing) so the Inbound Comms team knows to leave the thread alone.
+- Check the prospect's GHL conversation for inbound replies (GET conversations search by contactId — same API the sms-email-bridge worker uses). Also search Kevin's Gmail for their address as a belt-and-braces check; if a prospect reply IS found in Gmail, apply the label **"17: OD Prospects"** (Label_940887198997874147) so the Inbound Comms team knows to leave the thread alone.
+- **Labelling safety rules (Kevin, 13 Jul — tenant SMS also flows through GHL):**
+  1. Label a thread ONLY when the sender address exactly matches a Contact Email in the Prospects table. The prospect's address is the key — never the platform.
+  2. NEVER label based on a message merely coming from or mentioning GoHighLevel/LeadConnector — GHL system notifications, tenant SMS-bridge emails, and workflow alerts must never receive this label.
+  3. When unsure, do not label; note it in the report instead. A missed label is recoverable; a tenant thread pulled out of the team's flow is not.
 - **Reply found** → Status = "Replied", flag it prominently in the report, and draft a suggested response (send via GHL after Kevin approves it, or leave as a pending draft in the record Notes). Track what wording gets replies vs silence and feed it back into future drafts.
 - **No reply + Limited Company** → add tag `od-prospect-nurture` to their GHL contact (PUT the contact's tags), Status = "In Sequence". The 3-email sequence takes over.
 - **No reply + manual track** → send ONE polite follow-up via GHL the first time (note it in the record), and after a second silent week set Status = "No Response" and stop. NEVER add manual-track contacts to any email workflow.
