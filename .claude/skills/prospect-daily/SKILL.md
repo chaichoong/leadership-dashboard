@@ -110,7 +110,13 @@ For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
 - Check the prospect's GHL conversation for inbound replies (GET conversations search by contactId — same API the sms-email-bridge worker uses). Also search Kevin's Gmail for their address as a belt-and-braces check; if a prospect reply IS found in Gmail, apply the Gmail label "16. OD Prospects" (create it once via the Gmail connector if missing) so the Inbound Comms team knows to leave the thread alone.
 - **Reply found** → Status = "Replied", flag it prominently in the report, and draft a suggested response (send via GHL after Kevin approves it, or leave as a pending draft in the record Notes). Track what wording gets replies vs silence and feed it back into future drafts.
 - **No reply + Limited Company** → add tag `od-prospect-nurture` to their GHL contact (PUT the contact's tags), Status = "In Sequence". The 3-email sequence takes over.
-- **No reply + manual track** → create ONE polite follow-up Gmail draft the first time this happens (note it in the record), and after a second silent week mark Notes "no response — LinkedIn or drop" and stop. NEVER add manual-track contacts to any email workflow.
+- **No reply + manual track** → send ONE polite follow-up via GHL the first time (note it in the record), and after a second silent week set Status = "No Response" and stop. NEVER add manual-track contacts to any email workflow.
+
+**LinkedIn lane lifecycle (Status = "Connect Sent"):** each run, check Kevin's sent invitations (linkedin.com/mynetwork — read-only look). Accepted → send the already-approved Draft Message as the first LinkedIn message (this is the send Kevin pre-approved on the card), Status = "Contacted (1:1)", Next Follow-up = +7 days. Not accepted after 14 days → Status = "No Response" (do not withdraw, do not retry). Any inbound LinkedIn reply → Status = "Replied", draft a response for Kevin's approval in the report.
+
+**Draft freshness:** Kevin may approve cards days after they were found. At send time, if Date Found is older than ~10 days, soften the post reference ("saw your post a little while back") before sending — never send wording that pretends the post was yesterday.
+
+**Accuracy tracking (the autonomy gate metric):** every run, compute and report: prospects reviewed to date, approved vs rejected, current approval rate, and the rate over the trailing 14 days. The Prospecting tab shows the same number on its Agent accuracy card. When the trailing-14-day rate exceeds 90% with meaningful volume, remind Kevin the auto-approve proposal is available (see 6c).
 
 ### 6c. Autonomy roadmap (NOT yet active)
 
