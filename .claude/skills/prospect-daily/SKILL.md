@@ -23,7 +23,8 @@ One run = find qualified prospects (TARGET: 5 per day, Kevin-set 13 Jul; hard ca
 - Prospects table: `tbljHVGJoKJf8acy3` — field IDs in `js/config.js` (`PROSPECT` map)
 - Prospect Keywords table: `tblB5tZrXNaKFe02j` (`PKEY` map)
 - GHL Private Integration token: `~/.config/od/ghl_api_key` (optional — if missing, skip step 6 and tell Kevin what to create)
-- GHL Location ID: `~/.config/od/ghl_location_id`
+- GHL Location ID: `~/.config/od/ghl_location_id` — MUST be `dgsHwbYbp6xrhRGZr9ik` (the "Operations Director" sub-account, Kevin-confirmed 13 Jul). The Runpreneur sub-account (4ags…UT0) is the property business — tenant SMS lives there; prospects must NEVER be created in it.
+- Email sends via GHL conversations REQUIRE `"emailFrom": "kevin@operationsdirector.co.uk"` (the location 500s without it). Dedicated sending domain mail.operationsdirector.co.uk is configured.
 
 ## Procedure
 

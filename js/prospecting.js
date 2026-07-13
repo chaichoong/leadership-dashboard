@@ -277,10 +277,12 @@
         const email = prosField(rec, 'Contact Email');
         const isLtd = prosField(rec, 'Entity Type') === 'Limited Company';
         if (!email) return;
-        // Prefer the dedicated OD Prospecting Agent token (write scopes); fall
-        // back to the shared Inbound Comms key for reads-only environments.
+        // Dedicated OD Prospecting credentials. IMPORTANT: prospects live in the
+        // "Operations Director" GHL sub-account (dgsH…9ik), NOT the Runpreneur one
+        // that Inbound Comms' shared ghl_location_id points at — never fall back
+        // to the shared location or contacts land in the wrong business.
         const ghlKey = localStorage.getItem('od_prospecting_ghl_key') || localStorage.getItem('ghl_api_key');
-        const ghlLoc = localStorage.getItem('ghl_location_id');
+        const ghlLoc = localStorage.getItem('od_prospecting_ghl_location');
         if (!ghlKey || !ghlLoc) {
             if (typeof showToast === 'function') showToast('Approved. GHL keys not set in this browser (Inbound Comms → Settings) — the daily agent will sync it instead', { type: 'info', duration: 6000 });
             return;
@@ -347,6 +349,8 @@
                     contactId,
                     subject,
                     html: escHtml(draft).replace(/\n/g, '<br>'),
+                    // Required: without an explicit from, the OD location returns a 500
+                    emailFrom: 'kevin@operationsdirector.co.uk',
                 }),
             });
             if (!resp.ok) throw new Error('GHL send HTTP ' + resp.status);
