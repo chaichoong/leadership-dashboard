@@ -151,9 +151,11 @@
             const entity = prosField(r, 'Entity Type') || 'Unknown';
             const pain = prosField(r, 'Pain Signal');
             const keyword = prosField(r, 'Keyword Matched');
+            const route = prosField(r, 'Contact Route');
+            const draft = prosField(r, 'Draft Message');
             const isLtd = entity === 'Limited Company';
             const entityChip = isLtd
-                ? `<span style="background:var(--success-bg);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-medium)">Limited Company · email OK</span>`
+                ? `<span style="background:var(--success-bg);color:var(--success);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-medium)">Limited Company${email ? ' · email OK' : ''}</span>`
                 : `<span style="background:var(--warning-bg);color:var(--warning);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-medium)">${escHtml(entity)} · manual track (PECR)</span>`;
             const confColor = emailConf === 'High' ? 'var(--success)' : emailConf === 'Medium' ? 'var(--accent-gold)' : 'var(--danger)';
             return `
@@ -176,9 +178,18 @@
                 ${pain ? `<div style="margin-top:10px;padding:10px 12px;background:var(--bg-surface-2);border-left:3px solid var(--accent-gold);border-radius:var(--radius-sm);font-size:var(--fs-sm);color:var(--text-primary);word-break:break-word">“${escHtml(pain)}”</div>` : ''}
                 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:center">
                     ${entityChip}
+                    ${route ? `<span style="background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:var(--radius-full);font-size:var(--fs-xs);font-weight:var(--fw-medium)">${escHtml(route)}</span>` : ''}
                     ${email ? `<span style="font-size:var(--fs-xs);color:var(--text-secondary)">${escHtml(email)} <span style="color:${confColor};font-weight:var(--fw-medium)">(${escHtml(emailConf || '?')} confidence)</span></span>` : '<span style="font-size:var(--fs-xs);color:var(--danger)">No email found</span>'}
                     ${keyword ? `<span style="font-size:var(--fs-xs);color:var(--text-muted)">matched: ${escHtml(keyword)}</span>` : ''}
                 </div>
+                ${draft || route ? `
+                <div style="margin-top:10px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+                        <span style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-secondary)">Opening message (edit before approving)</span>
+                        <button class="od-btn-secondary" style="padding:2px 10px;font-size:var(--fs-xs)" onclick="copyProspectDraft('${escHtml(id)}', this)">Copy</button>
+                    </div>
+                    <textarea data-draft-for="${escHtml(id)}" rows="4" aria-label="Draft message for ${escHtml(name)}" style="width:100%;padding:8px 10px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);font-family:var(--font-family-base);background:var(--bg-surface-2);color:var(--text-primary);resize:vertical">${escHtml(draft)}</textarea>
+                </div>` : ''}
             </div>`;
         }).join('');
     }
@@ -211,8 +222,73 @@
         }
     }
 
-    function approveProspect(recordId) { _prosChangeStatus(recordId, 'Approved', 'approved — syncs to GHL on the next agent run'); }
+    async function approveProspect(recordId) {
+        // Persist any edited draft first so what sends is exactly what Kevin saw
+        const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
+        const rec = (prospectsCache || []).find(r => r.id === recordId);
+        if (ta && rec && ta.value !== (rec.fields['Draft Message'] || '')) {
+            try {
+                await patchProspectingRecord(TABLES.prospects, recordId, { [PROSPECT.draftMessage]: ta.value });
+                rec.fields['Draft Message'] = ta.value;
+            } catch (e) { console.warn('Draft save failed (continuing with approval):', e); }
+        }
+        await _prosChangeStatus(recordId, 'Approved', 'approved');
+        attemptGHLSync(recordId);
+    }
     function rejectProspect(recordId) { _prosChangeStatus(recordId, 'Rejected', 'rejected'); }
+
+    // Direct GHL sync on approval, using the same Private Integration token the
+    // Inbound Comms module stores in this browser (localStorage ghl_api_key /
+    // ghl_location_id). Ltd + email prospects only — manual-track prospects are
+    // never auto-synced. Any failure falls back to the daily agent's sync pass.
+    async function attemptGHLSync(recordId) {
+        const rec = (prospectsCache || []).find(r => r.id === recordId);
+        if (!rec) return;
+        const email = prosField(rec, 'Contact Email');
+        const isLtd = prosField(rec, 'Entity Type') === 'Limited Company';
+        if (!isLtd || !email) return;
+        const ghlKey = localStorage.getItem('ghl_api_key');
+        const ghlLoc = localStorage.getItem('ghl_location_id');
+        if (!ghlKey || !ghlLoc) {
+            if (typeof showToast === 'function') showToast('Approved. GHL keys not set in this browser (Inbound Comms → Settings) — the daily agent will sync it instead', { type: 'info', duration: 6000 });
+            return;
+        }
+        try {
+            const resp = await fetch('https://services.leadconnectorhq.com/contacts/', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${ghlKey}`, 'Version': '2021-07-28', 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: prosField(rec, 'Name'),
+                    email,
+                    companyName: prosField(rec, 'Company'),
+                    locationId: ghlLoc,
+                    source: 'od-prospecting',
+                    tags: ['od-prospect-nurture'],
+                }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            let contactId = data && data.contact && data.contact.id;
+            // GHL answers 400 with meta.contactId when the contact already exists — reuse it
+            if (!contactId && data && data.meta && data.meta.contactId) contactId = data.meta.contactId;
+            if (!contactId) throw new Error('GHL HTTP ' + resp.status);
+            await patchProspectingRecord(TABLES.prospects, recordId, { [PROSPECT.ghlId]: contactId, [PROSPECT.status]: 'Synced to GHL' });
+            rec.fields['GHL Contact ID'] = contactId;
+            rec.fields['Status'] = 'Synced to GHL';
+            renderProspectingTab();
+            if (typeof showToast === 'function') showToast('Synced to GoHighLevel — tagged od-prospect-nurture', { type: 'success' });
+        } catch (e) {
+            console.warn('Direct GHL sync failed (daily agent will retry):', e);
+            if (typeof showToast === 'function') showToast('Approved. Direct GHL sync failed — the daily agent will sync it instead', { type: 'warning', duration: 6000 });
+        }
+    }
+
+    function copyProspectDraft(recordId, btn) {
+        const ta = document.querySelector(`textarea[data-draft-for="${recordId}"]`);
+        if (!ta || !ta.value) { if (typeof showToast === 'function') showToast('No draft to copy yet', { type: 'warning' }); return; }
+        navigator.clipboard.writeText(ta.value).then(() => {
+            if (btn) { const t = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = t; }, 2000); }
+        }).catch(() => { ta.select(); document.execCommand('copy'); });
+    }
 
     function _prosShowUndoToast(message, recordId, prevStatus) {
         let host = document.getElementById('prosUndoToast');

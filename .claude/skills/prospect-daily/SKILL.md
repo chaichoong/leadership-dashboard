@@ -74,10 +74,21 @@ For each qualified candidate, using WebSearch/WebFetch (not the browser):
 - Confident active match → Entity Type = "Limited Company" + record the company number.
 - No plausible match → "Sole Trader / Partnership" if the site/profile suggests a trading individual, else "Unknown". When unsure, choose "Unknown" — the gate errs on the side of NOT emailing.
 
+### 4.5 Contact route + draft message (per candidate)
+
+Set **Contact Route** by this decision tree:
+1. They publicly ASKED for help (buying signal) and an email/form exists → "Email reply (they asked)" — solicited, any entity type, reply same day.
+2. Limited Company + published email (pain signal, unsolicited) → "Email sequence (Ltd)".
+3. No email but LinkedIn profile found → "LinkedIn connect" (Kevin sends personally, 2-3/day max).
+4. Website form only → "Website contact form".
+5. Otherwise → "No route yet".
+
+Write a **Draft Message** tailored to the person and route. Voice = Kevin's: direct, spartan, UK English, no hype words, no em dashes. Shape: (1) reference exactly what they posted, (2) one sentence on what Operations Director does for someone in their position (an AI-run operations department, not another VA), (3) soft CTA to a 20-minute call with the booking link placeholder [BOOKING-LINK]. Under 90 words for email replies, under 40 for LinkedIn connect notes. Never fake familiarity; say where we saw their post.
+
 ### 5. Write to Airtable
 
-- Create one Prospects record per candidate via curl (Number()-cast any numerics, 500ms between writes):
-  - Status = "Ready for Review", Date Found = today (ISO), plus every captured field.
+- Create one Prospects record per candidate via curl (Number()-cast any numerics, 500ms between writes, `"typecast": true`):
+  - Status = "Ready for Review", Date Found = today (ISO), Contact Route, Draft Message, plus every captured field.
 - Update each keyword used: Last Used = today, Prospects Found += number of new prospects it produced.
 
 ### 6. GHL sync (Approved → GoHighLevel)
