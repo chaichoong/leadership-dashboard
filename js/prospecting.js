@@ -119,6 +119,13 @@
             { label: 'Replied', value: count('Replied'), color: 'var(--tone-plum)' },
             { label: 'Calls booked', value: calls, color: 'var(--accent-gold)' },
         ];
+        // Agent accuracy = share of Kevin-reviewed prospects he approved (rejected =
+        // a miss). This is the gate metric: >90% over 2 consecutive weeks unlocks
+        // auto-approve for high-confidence prospects.
+        const reviewed = records.filter(r => !['Found', PROS_QUEUE_STATUS].includes(prosStatus(r)));
+        const rejected = reviewed.filter(r => prosStatus(r) === 'Rejected').length;
+        const accuracy = reviewed.length ? (((reviewed.length - rejected) / reviewed.length) * 100) : null;
+        const accColor = accuracy === null ? 'var(--text-muted)' : accuracy >= 90 ? 'var(--success)' : accuracy >= 70 ? 'var(--accent-gold)' : 'var(--danger)';
         el.innerHTML = stages.map(s => `
             <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:14px;text-align:center">
                 <div style="font-size:24px;font-weight:var(--fw-bold);color:${s.color}">${s.value}</div>
@@ -127,6 +134,10 @@
             + `<div style="background:var(--accent-soft);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:14px;text-align:center">
                 <div style="font-size:24px;font-weight:var(--fw-bold);color:var(--accent)">${total ? ((calls / total) * 100).toFixed(1) : '0.0'}%</div>
                 <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px">Found → call rate</div>
+            </div>
+            <div style="background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-lg);padding:14px;text-align:center" title="Approved ÷ reviewed. Above 90% for 2 weeks unlocks auto-approve.">
+                <div style="font-size:24px;font-weight:var(--fw-bold);color:${accColor}">${accuracy === null ? '—' : accuracy.toFixed(0) + '%'}</div>
+                <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-top:2px">Agent accuracy (${reviewed.length} reviewed)</div>
             </div>`;
     }
 
@@ -392,7 +403,7 @@
         const filterBar = document.getElementById('prospectingFilterBar');
         if (!tbody || !filterBar) return;
 
-        const statuses = ['All', 'Ready for Review', 'Approved', 'Synced to GHL', 'Contacted (1:1)', 'In Sequence', 'Replied', 'Call Booked', 'Rejected', 'Suppressed'];
+        const statuses = ['All', 'Ready for Review', 'Approved', 'Synced to GHL', 'Contacted (1:1)', 'Connect Sent', 'In Sequence', 'Replied', 'Call Booked', 'No Response', 'Rejected', 'Suppressed'];
         if (!statuses.includes(prospectingFilter)) prospectingFilter = 'All';
         filterBar.innerHTML = statuses.map(s => {
             const active = s === prospectingFilter;
@@ -413,7 +424,7 @@
             const dateFound = prosField(r, 'Date Found');
             const status = prosStatus(r);
             const statusColor = status === 'Call Booked' ? 'var(--accent-gold)'
-                : status === 'Rejected' || status === 'Suppressed' ? 'var(--text-muted)'
+                : ['Rejected', 'Suppressed', 'No Response'].includes(status) ? 'var(--text-muted)'
                 : status === PROS_QUEUE_STATUS ? 'var(--info)'
                 : 'var(--accent)';
             return `<tr>

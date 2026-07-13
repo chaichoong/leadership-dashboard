@@ -7819,12 +7819,22 @@ Close short: "You're set. Start a new task from the sidebar anytime, or type \`/
         source: 'custom',
         tags: ['master-prompt', 'context', 'ai-brain', 'quarterly', 'maintenance', 'accuracy']
     },
+    {
+        id: 'prospect-daily',
+        name: 'Prospect Daily (Cold Outbound Agent)',
+        command: 'prospect-daily',
+        description: 'Daily autonomous prospecting agent: finds founder-led UK micro/small business owners posting pain and buying signals on Facebook and LinkedIn (assisted browsing, human pace, stop-on-friction), researches website + published email + Companies House entity (PECR gate), drafts a personal opener per prospect, and queues 5/day in the Prospecting tab. On Kevin\'s approval: sends the email through GoHighLevel, submits contact forms, or sends LinkedIn connects (max 3/day). Manages the conversation: checks GHL for replies, drafts responses, applies the 7-silent-days fallback (Ltd to the nurture sequence; manual-track never sequenced). Runs every day at 09:00; paired with the Cold Outbound Prospecting workflow in Systemisation.',
+        category: 'Marketing',
+        source: 'custom',
+        tags: ['prospecting', 'cold-outreach', 'linkedin', 'facebook', 'gohighlevel', 'pecr', 'agent', 'daily']
+    },
 ];
 
 const SKILLS_CATEGORIES = [
     'Property Management',
     'Finance',
     'Operations',
+    'Marketing',
     'Legal',
     'Data & Analytics',
     'Customer Support',
