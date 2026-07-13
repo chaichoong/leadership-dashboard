@@ -58,6 +58,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] OPUS — Meetings-script dedupe gate: before creating a task from a meeting summary, check open tasks and link/skip instead of duplicating (done when: test summary naming an existing task creates zero records; due 18 Jul) [gmail-meetings-script.gs — manual paste to redeploy] [AT:reckN5r3NlACstzMU]
 - [x] OPUS — Nightly plan↔Airtable sync job: tick this plan from completions, push approved plan tasks to Airtable, flag unmapped/duplicates in a short report (done when: first correct nightly report; due 18 Jul) [AT:recJ1QMTpPUsAGh4j] *(ticked 2026-07-08, synced from Airtable)*
 - [ ] KEVIN — Adopt this plan at the team meeting (done when: team told this is the only plan; due 8 Jul) [AT:rece90eUsYb2TudAV]
+- [ ] KEVIN+OPUS — GDPR pack: ICO registration check, privacy policy on the sales site, client-facing DPA, sub-processor list (Supabase, Anthropic, Vercel, GHL, Stripe), data-retention line. Claude drafts, Kevin reviews and registers (done when: all five exist + DPA ready to send a design partner; due 18 Jul) [AT:recxhhfUWIGiumUtU]
 
 ## 4. Product development (finish + de-Kevin + migrate)
 
@@ -97,7 +98,7 @@ Live, taking money, generating leads, and delivering what we sell:
 
 ## 5. AI agent fleet — 10 demo agents on Kevin's businesses (NEW section, Kevin 7 Jul)
 
-The sales evidence: prospects see real agents running real businesses. Route: Systemisation pipeline (Loom → SOP → readiness → disposition → shadow → live). Existing: CFV agent (testing), rent-chase queue (built), reconciliation auto-approve (built). Target: **10 by end of July.**
+The sales evidence: prospects see real agents running real businesses. Route: Systemisation pipeline (Loom → SOP → readiness → disposition → shadow → live). Existing: CFV agent (testing), rent-chase queue (built), reconciliation auto-approve (built). Target: **10 shortlisted; launch gate = minimum 3 LIVE with demo recordings by 31 Jul** (amended 8 Jul, was "10 live").
 
 - [ ] KEVIN — Clear the CFV agent's pending approval queue with feedback (done when: 0 pending; due 9 Jul) [AT:recIRpGlkXo8Al1rq]
 - [ ] KEVIN — Daily approvals until ≥90% over 3 consecutive runs (done when: stats bar shows it; due 16 Jul) [AT:recIRpGlkXo8Al1rq]
@@ -153,12 +154,13 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [ ] ERICAMAE — Website clarity pass [AT:recSlGxdgHaecSGG1] (done when: Kevin sign-off; due 11 Jul)
 - [ ] ERICAMAE — Pricing page from the SIMPLE locked card [AT:recnggtrSkRcjT9fU] (done when: live at 29 Jun pricing; due 11 Jul)
 - [ ] KEVIN — Answer Ericamae on the trust video (waiting since 29 Jun) [AT:recG4RxL6ewQoEvPX] (done when: yes/no sent; due 8 Jul)
-- [ ] KEVIN — (NEW) Contract + T&Cs reflect the simple pricing (sendlink contract still at old terms?) + refund/cancellation lines (done when: contract reissued at £350/£1,500 + trial terms; due 11 Jul) [AT:rec87RsSw8UdBbxqc]
+- [ ] KEVIN — (NEW) Contract + T&Cs reflect the simple pricing (sendlink contract still at old terms?) + refund/cancellation lines + AI limitation-of-liability clause + human-approval-defaults-on wording (amended 8 Jul) (done when: contract reissued at £350/£1,500 + trial terms + AI clauses; due 11 Jul) [AT:rec87RsSw8UdBbxqc]
 - [ ] KEVIN — Founder Dependency Score live-on-call sheet [AT:recFNqmzmeSmOfgJw] (done when: usable on a call; due 10 Jul)
 - [ ] KEVIN — Rocket Demo flow one-pager (done when: doc exists; due 12 Jul) [AT:rece60QJYytAQxsiL]
 - [ ] KEVIN — (NEW) Objection crib sheet from the real historic calls (price #1, want-a-demo, credibility, burned-before, consult-partner) with your answer to each (done when: one page, used in the dry-run; due 12 Jul) [AT:recgbVSeU22pHeOwV]
 - [ ] KEVIN — (NEW) Demo tenant with anonymised sample data for Rocket Demos (pairs with §5 evidence pack) (done when: demo login shows a populated believable business; due 22 Jul) [AT:recIUH5bvRdFZWeqa]
 - [ ] KEVIN — One dry-run Teardown with Mica or Ericamae as prospect (done when: dry-run held; due 14 Jul) [AT:recjhBwlCkKqpnk8I]
+- [ ] KEVIN — (NEW 8 Jul) Feedback walkthrough with the letting-agent founder: sit-down session, capture what lands / what confuses / what he'd pay for / his first-agent pick, route fixes into the launch plan (done when: session held + feedback list logged; due 16 Jul) [AT:recr2SE4YjIizu3gQ]
 - [ ] KEVIN — Design-partner offer terms (founding rate + case study + testimonial) (done when: one-pager; due 11 Jul) [AT:recGG8hME8rFgTUqG]
 - [ ] KEVIN — Seed clauses in the live contract BEFORE partner #1 signs [AT:rec3HGmM6uHgKK1v8] (done when: clauses in; due 11 Jul)
 - [ ] KEVIN — (NEW) Case-study template ready before partner #1 (what we capture, when, in what format) (done when: template exists; due 18 Jul) [AT:recyMjpz4Q7PdAD1f]
@@ -212,7 +214,11 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 
 | Date | Source | Proposal | Kevin's call |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-07-08 | Fable 5 launch pressure-test (investor/competitor/regulator seats, in-session) | Add KEVIN warm-network lane to §7: 10 direct asks to known founders/contacts by 11 Jul. Cold outreach alone cannot produce 2 signed partners by 31 Jul (first touches 14 Jul → close in 11 days is not credible). | RESOLVED (modified) 8 Jul — Kevin: feedback-first. Letting-agent walkthrough task added to §8 (due 16 Jul); conversion optional, not the goal. The 10-direct-asks element not adopted; paid-partner pipeline stays cold-outreach-only. |
+| 2026-07-08 | Fable 5 launch pressure-test | Re-sequence: pull the Ch11 services-economics pass (§10, due 17 Jul) forward to 10 Jul so unit economics are known BEFORE design-partner terms lock on 11 Jul. | REJECTED 8 Jul — Kevin: measure real delivery cost from the first onboarded clients and drive efficiencies from live data; §10 founder-minutes instrumentation already covers the measurement |
+| 2026-07-08 | Fable 5 launch pressure-test | New §3 task: GDPR pack by 18 Jul — ICO registration check, privacy policy on the sales site, client-facing DPA, sub-processor list (Supabase, Anthropic, Vercel, GHL, Stripe), retention line. Currently absent from the plan; design partners' accountants will ask. | APPROVED 8 Jul — live in §3 |
+| 2026-07-08 | Fable 5 launch pressure-test | Extend the contract task (§8, rec87RsSw8UdBbxqc) to add AI-specific limitation-of-liability + human-approval-defaults-on language, not just pricing/refund terms. | APPROVED 8 Jul — scope added to the §8 task |
+| 2026-07-08 | Fable 5 launch pressure-test | Reframe §5 target: 10 processes shortlisted, but launch gate = minimum 3 agents LIVE with demo recordings by 31 Jul. Protects approval-rep quality; sales story needs 3 good agents, not 10 rushed ones. | APPROVED 8 Jul — §5 target updated |
 
 ## 14. Changelog
 
@@ -224,3 +230,6 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-07 | Kevin, in-session (structural change, approved) | RESTRUCTURED phases → Software-as-a-Science sections (§3-§11): foundations, product, agent fleet, onboarding, lead gen, sales, retention, metrics, launch. Gap-fill pass added 20 (NEW) tasks on the duplicate-beats-a-miss rule. NEW §5: 10 demo agents on Kevin's businesses by end July. Some Day parking reversed → real future due dates. All prior task states preserved. |
 | 2026-07-07 | Nightly sync (scripts/sync-master-plan.py) | ticked 3 from Airtable completions; pushed 1 new plan tasks to Airtable. |
 | 2026-07-08 | Nightly sync (scripts/sync-master-plan.py) | ticked 4 from Airtable completions. |
+| 2026-07-08 | Kevin, in-session | Approved pressure-test amendment 3: GDPR pack task added to §3 (Kevin+Opus, due 18 Jul, Airtable recxhhfUWIGiumUtU). Amendments 1, 2, 4, 5 remain in §13 pending Kevin's call. |
+| 2026-07-08 | Kevin, in-session (second pass) | Amendment decisions: AI-liability contract scope APPROVED (§8 task extended); §5 target reframe APPROVED (launch gate = min 3 live agents with recordings); economics re-sequence REJECTED (measure from live clients, §10 instrumentation covers it); warm-network lane PENDING (Kevin has a free letting-agent pilot; paid design-partner question in discussion). |
+| 2026-07-08 | Kevin, in-session (third pass) | Amendment 1 RESOLVED (modified): feedback-first. Letting-agent founder walkthrough task added to §8 (due 16 Jul, Airtable recr2SE4YjIizu3gQ). Conversion optional. All 5 pressure-test amendments now decided. |
