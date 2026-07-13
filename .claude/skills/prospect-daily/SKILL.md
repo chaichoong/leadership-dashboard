@@ -5,7 +5,7 @@ description: Daily cold-outbound prospecting agent. Finds founder-led UK micro/s
 
 # Prospect Daily — autonomous prospecting run
 
-One run = find up to 20 qualified prospects, queue them for Kevin's review in the Prospecting tab, and sync previously-approved prospects to GoHighLevel. Everything is logged to Airtable. Kevin approves before anyone is contacted.
+One run = find qualified prospects (TARGET: 5 per day, Kevin-set 13 Jul; hard cap 20), queue them for Kevin's review in the Prospecting tab, and sync previously-approved prospects to GoHighLevel. Everything is logged to Airtable. Kevin approves before anyone is contacted. Runs 7 days a week. Quality beats the target: never pad the queue with weak prospects to hit 5 — the funnel maths (prospect→client ≈ 2%) only holds at the quality bar.
 
 ## Hard rules (never break these)
 
@@ -35,10 +35,13 @@ One run = find up to 20 qualified prospects, queue them for Kevin's review in th
 ### 2. Pain-signal search (assisted browsing, Kevin's Chrome)
 
 Platforms, in priority order (rotate 2-3 per run so no single platform gets heavy daily automation):
-1. **LinkedIn** (procedure below)
-2. **X (Twitter)** — `https://x.com/search?q=<encoded keyword>&f=live`. First-person pain is common and sellers are rarer than LinkedIn. Same qualification rules. Resolve handle → real name → business → website before counting anyone.
-3. **Threads** — `https://www.threads.net/search?q=<encoded keyword>`. Same rules.
-4. **Facebook** — public UK small-business owner groups, read-only research. NEVER DM group members or post from Kevin's account; qualified members are contacted via their business website or LinkedIn instead.
+1. **Facebook — BEST PRODUCER (proven 13 Jul: 3 of 5 day-one prospects).** Post search `https://www.facebook.com/search/posts/?q=<encoded phrase>`, read-only research. Two search modes:
+   - **Buying signals (highest yield):** "recommend a virtual assistant", "recommend a VA", "need help with my admin", "looking for someone to help with" — people asking for delegation help are active buyers. The group "I need a UK Virtual Assistant" is a standing watering hole; check it every run.
+   - Pain phrases (same keywords as LinkedIn).
+   NEVER DM group members, comment, or post from Kevin's account; qualified members are contacted via their business website or LinkedIn instead.
+2. **LinkedIn** (procedure below)
+3. **X (Twitter)** — `https://x.com/search?q=<encoded keyword>&f=live`. BLOCKED until Kevin logs into X in Chrome (checked 13 Jul: logged out). Resolve handle → real name → business → website before counting anyone.
+4. **Threads** — `https://www.threads.com/search?q=<encoded keyword>`. BLOCKED until Kevin logs in (checked 13 Jul: search is login-gated).
 5. Instagram/TikTok — PARKED (poor search precision, slow identity resolution). Do not use unless Kevin re-opens them.
 
 The same hard rules apply on every platform: Kevin's logged-in Chrome only, human pacing, stop for the day on any captcha/restriction warning per platform, and the combined 20-profile-view cap across all platforms.
