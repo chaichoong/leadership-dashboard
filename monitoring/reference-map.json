@@ -371,7 +371,34 @@
     "fld6yClkQoMlOkiU4": "spendSubs",
     "fld8MHoybEal88D0Z": "F.accNetWorthClass",
     "flddayDb0932Mk8uA": "F.propInclude",
-    "fldrAYgb6aYS1zTSr": "F.bizInclude"
+    "fldrAYgb6aYS1zTSr": "F.bizInclude",
+    "fld18VDzR2Iu1m2qt": "contactRoute",
+    "fld2RNZflCPTEV8Qd": "active",
+    "fld2cltR75W6DYQuB": "ghlId",
+    "fld4eYVzxfQU74Mew": "entityType",
+    "fld4yWgjxOoZT9NIV": "notes",
+    "fld9h6F4K4jo2cD5d": "emailConfidence",
+    "fldAn2mzI9RoQCVSm": "email",
+    "fldHQasLEVwvCLJiA": "found",
+    "fldJConBhbcg55dFE": "name",
+    "fldNFSZrPsUF1NAd1": "status",
+    "fldPlSHFy8iJgCopr": "suppressedReason",
+    "fldQAvkn0p8KDj70h": "chNo",
+    "fldRJgaACrUH5t9jC": "signalSource",
+    "fldSoTbvGYRI2R0bq": "dateFound",
+    "fldV7wTV6TJx23k3l": "lastUsed",
+    "fldWheU6cyPuuHYUE": "headline",
+    "fldXVOVAZ4l32O2up": "website",
+    "fldYGbMRJmvSZqJu1": "nextFollowUp",
+    "fldafL2q6G5g1TpT7": "draftMessage",
+    "fldj3FXk0zPUINO2U": "notes",
+    "fldk9HsMY5pf9D0U8": "emailSource",
+    "fldkgKnoJYEU0RDkE": "keyword",
+    "fldnO2nIgnADzlvFN": "keyword",
+    "fldokUrBcggRW91Ms": "linkedin",
+    "fldvDtz1VuE40zyZI": "painSignal",
+    "fldvP8ljYvuGI4Jif": "company",
+    "fldzIJbDDvNX5HvaN": "type"
   },
   "tables": {
     "tbl1nr0EcX2T62KME": "accounts",
@@ -404,7 +431,9 @@
     "tblF3tSfEajPQJHoI": "UNNAMED_IN_CONFIG",
     "tblco0p2OnlLQVAX7": "UNNAMED_IN_CONFIG",
     "tblHiFrzekohQk2lt": "UNNAMED_IN_CONFIG",
-    "tbloIBoYzlF3URiYK": "UNNAMED_IN_CONFIG"
+    "tbloIBoYzlF3URiYK": "UNNAMED_IN_CONFIG",
+    "tblB5tZrXNaKFe02j": "prospectKeywords",
+    "tbljHVGJoKJf8acy3": "prospects"
   },
   "records": {
     "recF1C2ZXBfNeYlGT": "id",
@@ -442,11 +471,12 @@
     "sel43EzvHZXeLZbwC": "costNewInactive"
   },
   "summary": {
-    "fields": 369,
-    "tables": 31,
+    "fields": 399,
+    "tables": 33,
     "records": 20,
     "selectChoices": 11,
-    "generated": "2026-07-01",
-    "source": "js/config.js"
+    "generated": "2026-07-14",
+    "source": "js/config.js",
+    "note": "Added Prospects + Prospect Keywords field/table IDs (drift monitor 2026-07-14)"
   }
 }
