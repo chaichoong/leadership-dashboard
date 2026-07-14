@@ -5,7 +5,21 @@ description: Daily cold-outbound prospecting agent. Finds founder-led UK micro/s
 
 # Prospect Daily — autonomous prospecting run
 
-One run = find qualified prospects (TARGET: 5 per day, Kevin-set 13 Jul; hard cap 20), queue them for Kevin's review in the Prospecting tab, and sync previously-approved prospects to GoHighLevel. Everything is logged to Airtable. Kevin approves before anyone is contacted. Runs 7 days a week. Quality beats the target: never pad the queue with weak prospects to hit 5 — the funnel maths (prospect→client ≈ 2%) only holds at the quality bar.
+One run = find qualified prospects (TARGET: 5 per day, Kevin-set 13 Jul; hard cap 20), queue them for Kevin's review in the Prospecting tab, and sync previously-approved prospects to GoHighLevel. Everything is logged to Airtable. Kevin approves before anyone is contacted. Runs 7 days a week.
+
+**Hit 5 every day. Widen the net, do not dilute it (Kevin, 14 Jul).** Work the full persistence ladder in §2a before concluding a run is short — never stop after one or two searches. The bar deliberately favours VOLUME, because these are PUBLIC buying signals (much higher intent than cold scraping) and Kevin would rather review a few imperfect-looking leads than miss a buyer who does not look like the textbook fit.
+
+**A prospect = a founder-led UK micro/small business owner (solo up to ~50 staff) who is publicly showing a buying signal or genuine operational pain.** That is the whole gate. It is industry-agnostic on purpose — the wedge is the SITUATION (founder-led, running everything themselves), not the sector. INCLUDE, do not pre-judge on "fit" or budget (Kevin decides that at review):
+- Any owner/founder/director asking for or hiring delegation help: VA, PA, admin, bookkeeper, office manager, OBM, "someone to help with…". Bookkeeper/admin/finance requests COUNT — do not skip them.
+- Coaches, consultants, therapists, creatives, trades, retail, hospitality, services — any founder-led small business. A coach BUYING a VA for her own business is a buyer.
+- Solo founders running a real trading business count.
+
+EXCLUDE only these (they are not buyers):
+- **Supply-side sellers** — VAs, agencies, automation/ops consultants, or anyone marketing THEIR OWN services (a VA advertising availability is supply, not demand). This is the main thing to filter.
+- **Direct OD competitors** selling the operations/systemisation cure itself.
+- Job-seekers and employees; pre-launch / not-yet-trading ("launch and set up a new brand"); non-UK; already deduped/suppressed.
+
+When genuinely unsure whether someone is a founder-buyer or a seller, lean towards INCLUDING and flag the doubt in the record notes — Kevin's review is the filter, not the agent's caution. If the full ladder is genuinely exhausted and 5 are still not there, report the true number and the channel gap; but with the net this wide plus §2a, a normal day should reach 5.
 
 ## Hard rules (never break these)
 
@@ -40,6 +54,7 @@ Platforms, in priority order (rotate 2-3 per run so no single platform gets heav
    - **Buying signals (highest yield):** "recommend a virtual assistant", "recommend a VA", "need help with my admin", "looking for someone to help with" — people asking for delegation help are active buyers. The group "I need a UK Virtual Assistant" is a standing watering hole; check it every run.
    - Pain phrases (same keywords as LinkedIn).
    NEVER DM group members, comment, or post from Kevin's account; qualified members are contacted via their business website or LinkedIn instead.
+   **Joining groups is authorised (Kevin, 14 Jul):** when driving Kevin's Chrome you MAY click "Join" on public UK buyer-dense Facebook/LinkedIn groups to widen sourcing (join only — the no-DM/comment/post rule still stands). Prefer public groups (posts are visible immediately); if a group needs admin approval, request to join and note it, then move on. Log every group joined in the report.
 2. **LinkedIn** (procedure below)
 3. **X (Twitter)** — `https://x.com/search?q=<encoded keyword>&f=live`. BLOCKED until Kevin logs into X in Chrome (checked 13 Jul: logged out). Resolve handle → real name → business → website before counting anyone.
 4. **Threads** — `https://www.threads.com/search?q=<encoded keyword>`. BLOCKED until Kevin logs in (checked 13 Jul: search is login-gated).
@@ -47,20 +62,35 @@ Platforms, in priority order (rotate 2-3 per run so no single platform gets heav
 
 The same hard rules apply on every platform: Kevin's logged-in Chrome only, human pacing, stop for the day on any captcha/restriction warning per platform, and the combined 20-profile-view cap across all platforms.
 
+### 2a. Persistence ladder — work these rungs in order until 5 qualified are queued (added 14 Jul)
+
+Global Facebook post search alone will NOT reliably hit 5: buying-signal phrases get recycled day-to-day (yesterday's buyers are already in the dedupe set), pain phrases return sellers, and global results are polluted by Kevin's Cambridge location bias. Climb the ladder each run and stop only when 5 qualified are queued or every rung is exhausted:
+
+1. **Search INSIDE the watering-hole groups, not just global FB.** This is the highest-yield rung (proven 14 Jul: produced Stefan Gordon + Jordan Curtis). Use the group's own search: `https://www.facebook.com/groups/<id>/search/?q=<term>`. The "I need a UK Virtual Assistant" group id is `1067913934417558`. Cycle buyer-phrasing terms — `looking for a virtual assistant`, `wanted`, `my business`, `our team`, `hiring`, `PA required` — and toggle "Recent posts" on. Company-signal wording ("I'm the owner of…", "we're looking for…", "our busy company", "join our team") flags a real SME; a named business is resolvable to a website/email/Companies House.
+2. **Rotate additional watering-hole groups, and JOIN more when supply is thin** (Kevin authorised join-on-his-behalf, 14 Jul). One group over-mined = the same recycled posts, so widen. Known UK buyer-dense groups: "I need a UK Virtual Assistant" (1067913934417558), "UK Association of Virtual Assistants" (groups/UKVirtualAssistants), "Virtual Assistant Uk" (1312350108818227). Actively search out and JOIN more UK "find a VA / PA / OBM", "small business owners UK", trades/industry owner groups, and local-business networking groups — a wider group set is the single biggest lever on hitting 5/day. (Groups that are VA-to-VA networking are supply-side and thin on buyers — deprioritise.) Also mine LinkedIn the same way: content search + relevant UK founder/owner groups.
+3. **Comment-mine** high-engagement seller pain posts (LinkedIn relevance sort, or a busy FB pain post) for founders replying "this is me".
+4. **X / Threads** once Kevin is logged in (still blocked 14 Jul — a real bottleneck; flag it every short day).
+
+**Resolution rung (so strong signals still count):** when a candidate clearly IS an ICP founder-buyer but the business is unnamed/unresolvable to a website+email (common — most group buyer posts do not name the company), still queue them with Entity Type = Unknown and Contact Route = "No route yet"; Kevin makes first contact himself via the group/Messenger. A strong, honestly-graded "No route yet" lead counts toward 5; a poor-fit coach with a tidy email does not.
+
+**When still short after the full ladder:** say so plainly in the report, name the missing channel (e.g. "X/Threads logged out; only one VA group mined"), and — if Kevin wants volume — list the best sub-ICP candidates seen (graded, with why they fell short) so he can choose to include any, rather than the agent deciding to pad.
+
 When writing Prospects records with a Signal Source not yet in the select options (e.g. "X Post", "Threads Post", "Facebook Group Post"), add `"typecast": true` to the curl POST body so Airtable auto-creates the option.
 
 For each chosen keyword on LinkedIn:
 - Load the claude-in-chrome tools via ToolSearch if not loaded. Confirm Chrome is connected; if not, stop and report "Chrome not available — run skipped".
 - Go to `https://www.linkedin.com/search/results/content/?keywords=<encoded keyword>&sortBy=%22date_posted%22` for pain phrases/hashtags. Read the visible results with get_page_text / read_page rather than heavy interaction. Scroll at most 3-4 times per keyword.
-- Candidate = the post author of a post genuinely expressing the pain (overloaded founder, no time, doing everything themselves, can't switch off). Ignore coaches/consultants SELLING a solution to the pain — they are competitors, not prospects. Ignore job seekers and employees.
+- Candidate = the post author showing a buying signal (asking for/hiring a VA, PA, admin, bookkeeper, OBM, "someone to help with…") OR genuinely expressing operational pain (overloaded founder, no time, doing everything themselves, can't switch off). Ignore only the SUPPLY side — VAs/agencies/consultants marketing their own services — plus job-seekers and employees. A coach or consultant who is BUYING help for their own business is a prospect, not a competitor; only exclude those SELLING the operations/systemisation cure itself.
 - **Seller test (learned 13 Jul 2026):** most pain-phrase search results are sellers marketing TO the pain. Genuine prospects write first-person, present-tense, incidental pain ("I'm juggling everything", "quiet week panic") — sellers write second-person, listicle, hashtag-heavy posts ending in a CTA. Check the author's headline before counting anyone: if it says coach / mentor / consultant / agency / automation / "I help founders...", skip. Past-tense pain ("the biggest mistake I made was...") from someone now selling the cure = seller.
 - **Comment mining:** when a seller's pain post has real engagement, open the post and read its comments — founders who reply "this is me" or share their own version of the pain ARE prospects. Qualify commenters exactly like authors. This often out-produces the search results themselves.
 - Quoted exact phrases return sparse results; run each keyword both quoted and unquoted when results are thin, and try the default relevance sort as well as date_posted — relevance surfaces high-engagement posts whose comments are mineable.
-- For each candidate (respecting the pacing and the 20-profile cap across the whole run): open their profile, read name, headline, location, current company. Qualify only if ALL of (targeting per the 2026-06-17 Sales & Marketing Team Brief in Drive — the canon):
-  - Founder-led signal: Founder / Co-founder / CEO / Owner / Managing Director of their own company. Founder-led, not PE-owned, not corporate.
+- For each candidate (respecting the pacing and the 20-profile cap across the whole run): open their profile, read name, headline, location, current company. Qualify if ALL of (targeting per the 2026-06-17 Sales & Marketing Team Brief in Drive — the canon, widened by Kevin 14 Jul to favour volume):
+  - Founder-led signal: Founder / Co-founder / CEO / Owner / Director of their own business. Founder-led, not PE-owned, not corporate.
   - UK-based
-  - Roughly £100k-£5m turnover, about 2-50 staff (judge from profile/company page; solo founders count when clearly running a real trading business)
+  - Micro/small business: solo up to about 50 staff. Do NOT screen on turnover, budget, or industry — a small operation with a buying signal is in; Kevin judges fit and budget at review.
+  - Publicly showing a buying signal or operational pain (see candidate rule above)
   - Not already in the dedupe or suppression set
+  - Not supply-side (see exclusions in the intro)
 - **The five hot-buttons (from real sales calls — every prospect should map to at least one):** (1) you ARE the business; (2) drowning in hours; (3) it's all in your head, no systems; (4) flying blind on the numbers; (5) tools a mess, money wasted on software. Verbatim customer phrases double as search keywords: "my business is me", "not enough hours in my day", "it's all in my head", "I can't tell you my profit".
 - Capture: full name, LinkedIn profile URL, headline, company name, the pain quote (short, verbatim where possible), signal source (Post/Profile/Comment), keyword matched.
 
@@ -132,9 +162,30 @@ For each prospect with Status = "Contacted (1:1)" and Next Follow-up ≤ today:
 
 Kevin's end state: he first sees a prospect when the call lands in his diary. The review gate stays until quality is proven: once Kevin's approval rate exceeds 90% across 2 consecutive weeks, propose switching high-confidence prospects (buying signal + Ltd + High email confidence + no [BOOKING-LINK] placeholder) to auto-approve-and-send, with a daily digest instead of per-card review. Do not enable this without Kevin's explicit yes — track the approval stats in the report from day one.
 
+### 8. Learning loop (self-evolution — run at the END of every run)
+
+**North star: calls ATTENDED.** The full chain is found → contacted → replied → booked → attended. Each run, compute the funnel numbers and identify the current bottleneck stage; bias the next run's effort toward it (more finding, sharper drafts, faster follow-ups, or reminder tuning).
+
+1. **Keyword evolution:** using each prospect's Keyword Matched field, score keywords by what they produced DOWNSTREAM (approvals, replies, calls — not just finds). After a keyword has been used 4+ times with zero approved prospects, deactivate it (never delete; note why in its Notes). When producing posts reveal new first-person pain language, add at most 2 new keyword variants per week, marked "agent-proposed" in Notes.
+2. **Playbook write-back:** any repeatable discovery (where an email was hiding, which group produced, which platform pattern worked or failed, which draft wording got a reply) gets appended as ONE dated bullet to the "Learned playbook" section at the bottom of this file. Keep it curated: merge duplicates, prune bullets disproven later. This is how the agent gets permanently smarter.
+3. **Draft evolution:** track which opener styles get replies (the Pain Signal + Draft Message of Replied prospects vs silent ones). Fold winning patterns into the drafting rules in §4.5 by editing them — with a dated note of what changed and the evidence.
+4. **Attendance loop:** read appointment outcomes from GHL for booked calls. If no-shows exceed 1 in 3, say so in the report and propose reminder-sequence changes to Kevin.
+5. **Evidence bar:** at 5 prospects/day the numbers are small — never change anything on fewer than 4 data points, and log EVERY self-change in the daily report so Kevin sees each mutation.
+
+**IMMUTABLE — the agent must NEVER self-modify these, regardless of what it learns:** the Hard rules section (scraping ban, stop-on-friction, volume caps, PECR gate, suppression, published-emails-only, secrets), the approval gate while it is active, targeting canon, and spend. Changes there are proposed to Kevin, never applied. Better conversion never justifies breaking compliance.
+
 ### 7. Report
 
 Send Kevin a short Slack DM (slack connector) and end with the same summary:
 `Prospecting run <date>: <n> found → review queue | <m> synced to GHL | keywords used: <list> | <any warnings: LinkedIn friction, GHL skipped, 0 results>`
 
-Keep it honest — a zero-result run says so plainly, with the likely reason.
+Keep it honest — a zero-result run says so plainly, with the likely reason. Include the full funnel (found → contacted → replied → booked → ATTENDED), the current bottleneck, and any self-changes made by the learning loop.
+
+---
+
+## Learned playbook (agent-maintained — append dated bullets via §8 only)
+
+- 2026-07-13: Privacy policies nearly always publish an email when the contact page shows only a form (Lucy Williams case).
+- 2026-07-13: Booking-platform pages (Treatwell/Fresha) count as the prospect's website; check their contact section when the main domain is dead (Dr Raghda case). Retry dead domains through Kevin's Chrome before giving up.
+- 2026-07-13: Pain-phrase searches surface ~90% sellers; buying-signal searches ("recommend a virtual assistant") out-produce them — 3 of 5 day-one prospects. The FB group "I need a UK Virtual Assistant" is a standing source.
+- 2026-07-13: Sellers write second-person listicles with CTAs; genuine prospects write first-person, present-tense, incidental pain. Past-tense pain from someone selling the cure = seller.
