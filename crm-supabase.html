@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRM — Operations Director</title>
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg-app);color:var(--text-primary);
+         font-family:var(--font-family-base,'DM Sans',system-ui,sans-serif);}
+    .topbar{display:flex;align-items:center;gap:16px;padding:14px 22px;background:var(--bg-surface);
+            border-bottom:1px solid var(--border-default);position:sticky;top:0;z-index:20;}
+    .topbar h1{font-size:18px;margin:0;font-weight:700;display:flex;align-items:center;gap:8px;}
+    .topbar .sub{font-size:12px;color:var(--text-muted);}
+    .tabs{display:flex;gap:4px;margin-left:12px;}
+    .tab{padding:7px 16px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;
+         color:var(--text-secondary);border:1px solid transparent;}
+    .tab.active{background:var(--accent-soft);color:var(--accent-hover);}
+    .tab:hover:not(.active){background:var(--bg-surface-2);}
+    .spacer{flex:1;}
+    .btn{background:var(--accent);color:#fff;border:0;padding:9px 15px;border-radius:8px;
+         font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;}
+    .btn:hover{background:var(--accent-hover);}
+    .btn.ghost{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-default);}
+    .btn.ghost:hover{background:var(--bg-surface-2);}
+    .btn.danger{background:var(--danger,#B42318);}
+    .wrap{padding:22px;}
+    .search{padding:9px 12px;border:1px solid var(--border-default);border-radius:8px;font-size:14px;
+            width:260px;font-family:inherit;background:var(--bg-surface);}
+    /* Contacts table */
+    table{width:100%;border-collapse:collapse;background:var(--bg-surface);border:1px solid var(--border-default);
+          border-radius:12px;overflow:hidden;}
+    th{ text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);
+        padding:11px 14px;background:var(--bg-subtle);font-weight:700;}
+    td{padding:12px 14px;border-top:1px solid var(--border-subtle);font-size:14px;}
+    tr.row:hover td{background:var(--bg-surface-2);cursor:pointer;}
+    .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;
+          background:var(--bg-subtle);color:var(--text-secondary);}
+    .pill.person{background:var(--accent-soft);color:var(--accent-hover);}
+    .pill.company{background:#E7EDF6;color:#3560A8;}
+    .muted{color:var(--text-muted);}
+    .empty{padding:48px;text-align:center;color:var(--text-muted);background:var(--bg-surface);
+           border:1px dashed var(--border-default);border-radius:12px;}
+    /* Kanban */
+    .board{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;}
+    .col{flex:0 0 268px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);
+         border-radius:12px;display:flex;flex-direction:column;min-height:120px;}
+    .col.dragover{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--accent-soft);}
+    .col-head{padding:11px 14px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;
+              align-items:center;border-bottom:1px solid var(--border-subtle);}
+    .col-head .meta{font-size:11px;color:var(--text-muted);font-weight:600;font-variant-numeric:tabular-nums;}
+    .col-body{padding:10px;display:flex;flex-direction:column;gap:9px;flex:1;}
+    .card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:9px;padding:11px 12px;
+          cursor:grab;box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.04));}
+    .card:active{cursor:grabbing;}
+    .card .t{font-weight:600;font-size:13.5px;margin-bottom:4px;}
+    .card .c{font-size:12px;color:var(--text-secondary);}
+    .card .v{font-size:12px;color:var(--accent-hover);font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums;}
+    .card.won{border-left:3px solid var(--success,#2C6E49);}
+    .card.lost{border-left:3px solid var(--danger,#B42318);opacity:.7;}
+    /* Modal */
+    .overlay{position:fixed;inset:0;background:rgba(20,25,21,.45);display:none;align-items:center;
+             justify-content:center;z-index:50;}
+    .overlay.open{display:flex;}
+    .modal{background:var(--bg-surface);border-radius:14px;padding:24px;width:440px;max-width:94vw;
+           box-shadow:var(--shadow-lg,0 20px 50px rgba(0,0,0,.2));max-height:90vh;overflow:auto;}
+    .modal h2{margin:0 0 16px;font-size:18px;}
+    .modal label{display:block;font-size:12px;font-weight:600;margin:12px 0 4px;color:var(--text-secondary);}
+    .modal input,.modal select,.modal textarea{width:100%;padding:9px 11px;border:1px solid var(--border-default);
+          border-radius:8px;font-size:14px;font-family:inherit;background:var(--bg-app);}
+    .modal textarea{resize:vertical;min-height:64px;}
+    .modal .row2{display:flex;gap:10px;}
+    .modal .row2>div{flex:1;}
+    .modal-actions{display:flex;gap:8px;margin-top:20px;align-items:center;}
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text-primary);
+           color:#fff;padding:11px 18px;border-radius:9px;font-size:14px;z-index:80;opacity:0;
+           transition:opacity .2s;pointer-events:none;}
+    .toast.show{opacity:1;}
+    #loginNote{padding:48px;text-align:center;color:var(--text-muted);}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>👥 CRM</h1>
+    <span class="sub" id="pipeName"></span>
+    <div class="tabs">
+      <div class="tab active" data-tab="contacts">Contacts</div>
+      <div class="tab" data-tab="pipeline">Pipeline</div>
+    </div>
+    <div class="spacer"></div>
+    <input class="search" id="search" placeholder="Search contacts…" style="display:none">
+    <button class="btn" id="addBtn">+ Add</button>
+  </div>
+
+  <div class="wrap">
+    <div id="loginNote" style="display:none">Sign in from the main app to load your CRM.</div>
+    <div id="contactsView"></div>
+    <div id="pipelineView" style="display:none"></div>
+  </div>
+
+  <!-- Contact modal -->
+  <div class="overlay" id="contactOverlay">
+    <div class="modal">
+      <h2 id="cTitle">New contact</h2>
+      <input type="hidden" id="cId">
+      <label>Name *</label><input id="cName" placeholder="Full name or company">
+      <div class="row2">
+        <div><label>Type</label><select id="cKind"><option value="person">Person</option><option value="company">Company</option></select></div>
+        <div><label>Status</label><select id="cStatus"><option value="active">Active</option><option value="lead">Lead</option><option value="archived">Archived</option></select></div>
+      </div>
+      <label>Company</label><input id="cCompany">
+      <div class="row2">
+        <div><label>Email</label><input id="cEmail" type="email"></div>
+        <div><label>Phone</label><input id="cPhone"></div>
+      </div>
+      <label>Notes</label><textarea id="cNotes"></textarea>
+      <div class="modal-actions">
+        <button class="btn" id="cSave">Save</button>
+        <button class="btn ghost" onclick="closeModal('contactOverlay')">Cancel</button>
+        <span class="spacer"></span>
+        <button class="btn danger" id="cDelete" style="display:none">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deal modal -->
+  <div class="overlay" id="dealOverlay">
+    <div class="modal">
+      <h2 id="dTitle">New deal</h2>
+      <input type="hidden" id="dId">
+      <label>Title *</label><input id="dDealTitle" placeholder="e.g. Website project">
+      <div class="row2">
+        <div><label>Value (£)</label><input id="dValue" type="number" step="0.01"></div>
+        <div><label>Stage</label><select id="dStage"></select></div>
+      </div>
+      <label>Contact</label><select id="dContact"></select>
+      <label>Status</label><select id="dStatus"><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select>
+      <label>Notes</label><textarea id="dNotes"></textarea>
+      <div class="modal-actions">
+        <button class="btn" id="dSave">Save</button>
+        <button class="btn ghost" onclick="closeModal('dealOverlay')">Cancel</button>
+        <span class="spacer"></span>
+        <button class="btn danger" id="dDelete" style="display:none">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const SB_URL = 'https://ptkyhzlsvijcwyovgrgv.supabase.co';
+    const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB0a3loemxzdmlqY3d5b3Zncmd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzIxNzgsImV4cCI6MjA5MTkwODE3OH0.U5ZdIjw--_UgJlYi75JTjpb2doBTjO4W8LUZPnZzkFU';
+    const sb = supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, storageKey: '_dlr_sb_app' } });
+
+    const esc = s => (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const gbp = n => (n==null||n==='')?'':'£'+Number(n).toLocaleString('en-GB',{minimumFractionDigits:0,maximumFractionDigits:2});
+    let _sess=null;
+    function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+    async function ensureSession(){ if(_sess===null){ const {data}=await sb.auth.getSession(); _sess=data.session||false; } return _sess; }
+
+    const state = { pipeline:null, stages:[], deals:[], contacts:[] };
+
+    async function loadAll(){
+      const sess = await ensureSession();
+      if(!sess){ document.getElementById('loginNote').style.display='block'; return; }
+      // pipeline (first), stages, deals, contacts — RLS scopes to the caller's workspace
+      const [{data:pipes}, {data:contacts}] = await Promise.all([
+        sb.from('crm_pipelines').select('*').order('sort_order').limit(1),
+        sb.from('crm_contacts').select('*').order('name')
+      ]);
+      state.pipeline = (pipes&&pipes[0])||null;
+      state.contacts = contacts||[];
+      if(state.pipeline){
+        const [{data:stages},{data:deals}] = await Promise.all([
+          sb.from('crm_stages').select('*').eq('pipeline_id',state.pipeline.id).order('sort_order'),
+          sb.from('crm_deals').select('*').eq('pipeline_id',state.pipeline.id).order('sort_order')
+        ]);
+        state.stages = stages||[]; state.deals = deals||[];
+        document.getElementById('pipeName').textContent = state.pipeline.name;
+      }
+      renderContacts(); renderPipeline();
+    }
+
+    // ── Contacts ──────────────────────────────────────────────────────────────
+    function renderContacts(){
+      const q = (document.getElementById('search').value||'').toLowerCase();
+      const rows = state.contacts.filter(c => !q || (c.name+' '+(c.company||'')+' '+(c.email||'')).toLowerCase().includes(q));
+      const el = document.getElementById('contactsView');
+      if(!rows.length){ el.innerHTML = '<div class="empty">No contacts yet. Click <b>+ Add</b> to create your first one.</div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>Name</th><th>Type</th><th>Company</th><th>Email</th><th>Phone</th><th>Status</th></tr></thead><tbody>'
+        + rows.map(c => `<tr class="row" data-id="${c.id}">
+            <td><b>${esc(c.name)}</b></td>
+            <td><span class="pill ${c.kind}">${esc(c.kind)}</span></td>
+            <td>${esc(c.company)||'<span class="muted">—</span>'}</td>
+            <td>${esc(c.email)||'<span class="muted">—</span>'}</td>
+            <td>${esc(c.phone)||'<span class="muted">—</span>'}</td>
+            <td><span class="pill">${esc(c.status||'active')}</span></td></tr>`).join('')
+        + '</tbody></table>';
+      el.querySelectorAll('tr.row').forEach(r => r.onclick = () => openContact(state.contacts.find(c=>c.id===r.dataset.id)));
+    }
+    function openContact(c){
+      document.getElementById('cTitle').textContent = c?'Edit contact':'New contact';
+      document.getElementById('cId').value = c?c.id:'';
+      document.getElementById('cName').value = c?c.name:'';
+      document.getElementById('cKind').value = c?c.kind:'person';
+      document.getElementById('cStatus').value = c?(c.status||'active'):'active';
+      document.getElementById('cCompany').value = c?(c.company||''):'';
+      document.getElementById('cEmail').value = c?(c.email||''):'';
+      document.getElementById('cPhone').value = c?(c.phone||''):'';
+      document.getElementById('cNotes').value = c?(c.notes||''):'';
+      document.getElementById('cDelete').style.display = c?'inline-block':'none';
+      openModal('contactOverlay');
+    }
+    document.getElementById('cSave').onclick = async () => {
+      const name = document.getElementById('cName').value.trim();
+      if(!name){ toast('Name is required'); return; }
+      const rec = { name, kind:document.getElementById('cKind').value, status:document.getElementById('cStatus').value,
+        company:document.getElementById('cCompany').value.trim()||null, email:document.getElementById('cEmail').value.trim()||null,
+        phone:document.getElementById('cPhone').value.trim()||null, notes:document.getElementById('cNotes').value.trim()||null };
+      const id = document.getElementById('cId').value;
+      const { error } = id ? await sb.from('crm_contacts').update(rec).eq('id',id)
+                           : await sb.from('crm_contacts').insert(rec);
+      if(error){ toast('Error: '+error.message); return; }
+      closeModal('contactOverlay'); toast(id?'Contact updated':'Contact added'); await loadAll();
+    };
+    document.getElementById('cDelete').onclick = async () => {
+      const id = document.getElementById('cId').value; if(!id) return;
+      if(!confirm('Delete this contact?')) return;
+      const { error } = await sb.from('crm_contacts').delete().eq('id',id);
+      if(error){ toast('Error: '+error.message); return; }
+      closeModal('contactOverlay'); toast('Contact deleted'); await loadAll();
+    };
+
+    // ── Pipeline (kanban) ──────────────────────────────────────────────────────
+    function renderPipeline(){
+      const el = document.getElementById('pipelineView');
+      if(!state.pipeline){ el.innerHTML = '<div class="empty">No pipeline yet.</div>'; return; }
+      el.innerHTML = '<div class="board">' + state.stages.map(st => {
+        const deals = state.deals.filter(d => d.stage_id===st.id);
+        const total = deals.reduce((s,d)=>s+(Number(d.value)||0),0);
+        return `<div class="col" data-stage="${st.id}">
+          <div class="col-head">${esc(st.name)}<span class="meta">${deals.length} · ${gbp(total)||'£0'}</span></div>
+          <div class="col-body" data-stage="${st.id}">
+          ${deals.map(d => {
+            const c = state.contacts.find(x=>x.id===d.contact_id);
+            return `<div class="card ${d.status==='won'?'won':d.status==='lost'?'lost':''}" draggable="true" data-id="${d.id}">
+              <div class="t">${esc(d.title)}</div>
+              ${c?`<div class="c">${esc(c.name)}</div>`:''}
+              ${d.value?`<div class="v">${gbp(d.value)}</div>`:''}
+            </div>`; }).join('')}
+          </div></div>`; }).join('') + '</div>';
+      // card click → edit; drag handlers
+      el.querySelectorAll('.card').forEach(card => {
+        card.onclick = () => openDeal(state.deals.find(d=>d.id===card.dataset.id));
+        card.addEventListener('dragstart', e => { e.dataTransfer.setData('id', card.dataset.id); });
+      });
+      el.querySelectorAll('.col').forEach(col => {
+        col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('dragover'); });
+        col.addEventListener('dragleave', () => col.classList.remove('dragover'));
+        col.addEventListener('drop', async e => {
+          e.preventDefault(); col.classList.remove('dragover');
+          const id = e.dataTransfer.getData('id'); const stageId = col.dataset.stage;
+          const deal = state.deals.find(d=>d.id===id);
+          if(!deal || deal.stage_id===stageId) return;
+          deal.stage_id = stageId; renderPipeline();  // optimistic
+          const { error } = await sb.from('crm_deals').update({ stage_id: stageId }).eq('id', id);
+          if(error){ toast('Error: '+error.message); await loadAll(); } else { toast('Deal moved'); }
+        });
+      });
+    }
+    function openDeal(d){
+      document.getElementById('dTitle').textContent = d?'Edit deal':'New deal';
+      document.getElementById('dId').value = d?d.id:'';
+      document.getElementById('dDealTitle').value = d?d.title:'';
+      document.getElementById('dValue').value = d?(d.value??''):'';
+      document.getElementById('dStatus').value = d?(d.status||'open'):'open';
+      document.getElementById('dNotes').value = d?(d.notes||''):'';
+      const stageSel = document.getElementById('dStage');
+      stageSel.innerHTML = state.stages.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+      stageSel.value = d?d.stage_id:(state.stages[0]&&state.stages[0].id);
+      const cSel = document.getElementById('dContact');
+      cSel.innerHTML = '<option value="">— none —</option>' + state.contacts.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      cSel.value = d?(d.contact_id||''):'';
+      document.getElementById('dDelete').style.display = d?'inline-block':'none';
+      openModal('dealOverlay');
+    }
+    document.getElementById('dSave').onclick = async () => {
+      const title = document.getElementById('dDealTitle').value.trim();
+      if(!title){ toast('Title is required'); return; }
+      const rec = { title, pipeline_id:state.pipeline.id, stage_id:document.getElementById('dStage').value,
+        value:document.getElementById('dValue').value?Number(document.getElementById('dValue').value):null,
+        contact_id:document.getElementById('dContact').value||null, status:document.getElementById('dStatus').value,
+        notes:document.getElementById('dNotes').value.trim()||null };
+      const id = document.getElementById('dId').value;
+      const { error } = id ? await sb.from('crm_deals').update(rec).eq('id',id)
+                           : await sb.from('crm_deals').insert(rec);
+      if(error){ toast('Error: '+error.message); return; }
+      closeModal('dealOverlay'); toast(id?'Deal updated':'Deal added'); await loadAll();
+    };
+    document.getElementById('dDelete').onclick = async () => {
+      const id = document.getElementById('dId').value; if(!id) return;
+      if(!confirm('Delete this deal?')) return;
+      const { error } = await sb.from('crm_deals').delete().eq('id',id);
+      if(error){ toast('Error: '+error.message); return; }
+      closeModal('dealOverlay'); toast('Deal deleted'); await loadAll();
+    };
+
+    // ── Tabs / modal plumbing ──────────────────────────────────────────────────
+    let currentTab = 'contacts';
+    document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+      currentTab = t.dataset.tab;
+      document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));
+      document.getElementById('contactsView').style.display = currentTab==='contacts'?'':'none';
+      document.getElementById('pipelineView').style.display = currentTab==='pipeline'?'':'none';
+      document.getElementById('search').style.display = currentTab==='contacts'?'':'none';
+    });
+    document.getElementById('addBtn').onclick = () => currentTab==='contacts' ? openContact(null) : openDeal(null);
+    document.getElementById('search').oninput = renderContacts;
+    function openModal(id){ document.getElementById(id).classList.add('open'); }
+    function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+    document.querySelectorAll('.overlay').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('open'); }));
+
+    loadAll();
+  </script>
+</body>
+</html>
