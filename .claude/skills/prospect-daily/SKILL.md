@@ -56,9 +56,7 @@ Platforms, in priority order (rotate 2-3 per run so no single platform gets heav
    NEVER DM group members, comment, or post from Kevin's account; qualified members are contacted via their business website or LinkedIn instead.
    **Joining groups is authorised (Kevin, 14 Jul):** when driving Kevin's Chrome you MAY click "Join" on public UK buyer-dense Facebook/LinkedIn groups to widen sourcing (join only — the no-DM/comment/post rule still stands). Prefer public groups (posts are visible immediately); if a group needs admin approval, request to join and note it, then move on. Log every group joined in the report.
 2. **LinkedIn** (procedure below)
-3. **X (Twitter)** — `https://x.com/search?q=<encoded keyword>&f=live`. BLOCKED until Kevin logs into X in Chrome (checked 13 Jul: logged out). Resolve handle → real name → business → website before counting anyone.
-4. **Threads** — `https://www.threads.com/search?q=<encoded keyword>`. BLOCKED until Kevin logs in (checked 13 Jul: search is login-gated).
-5. Instagram/TikTok — PARKED (poor search precision, slow identity resolution). Do not use unless Kevin re-opens them.
+3. Instagram/TikTok — PARKED (poor search precision, slow identity resolution). Do not use unless Kevin re-opens them. (X and Threads dropped by Kevin 14 Jul — do not use.)
 
 The same hard rules apply on every platform: Kevin's logged-in Chrome only, human pacing, stop for the day on any captcha/restriction warning per platform, and the combined 20-profile-view cap across all platforms.
 
@@ -69,13 +67,12 @@ Global Facebook post search alone will NOT reliably hit 5: buying-signal phrases
 1. **Search INSIDE the watering-hole groups, not just global FB.** This is the highest-yield rung (proven 14 Jul: produced Stefan Gordon + Jordan Curtis). Use the group's own search: `https://www.facebook.com/groups/<id>/search/?q=<term>`. The "I need a UK Virtual Assistant" group id is `1067913934417558`. Cycle buyer-phrasing terms — `looking for a virtual assistant`, `wanted`, `my business`, `our team`, `hiring`, `PA required` — and toggle "Recent posts" on. Company-signal wording ("I'm the owner of…", "we're looking for…", "our busy company", "join our team") flags a real SME; a named business is resolvable to a website/email/Companies House.
 2. **Rotate additional watering-hole groups, and JOIN more when supply is thin** (Kevin authorised join-on-his-behalf, 14 Jul). One group over-mined = the same recycled posts, so widen. Known UK buyer-dense groups: "I need a UK Virtual Assistant" (1067913934417558), "UK Association of Virtual Assistants" (groups/UKVirtualAssistants), "Virtual Assistant Uk" (1312350108818227). Actively search out and JOIN more UK "find a VA / PA / OBM", "small business owners UK", trades/industry owner groups, and local-business networking groups — a wider group set is the single biggest lever on hitting 5/day. (Groups that are VA-to-VA networking are supply-side and thin on buyers — deprioritise.) Also mine LinkedIn the same way: content search + relevant UK founder/owner groups.
 3. **Comment-mine** high-engagement seller pain posts (LinkedIn relevance sort, or a busy FB pain post) for founders replying "this is me".
-4. **X / Threads** once Kevin is logged in (still blocked 14 Jul — a real bottleneck; flag it every short day).
 
 **Resolution rung (so strong signals still count):** when a candidate clearly IS an ICP founder-buyer but the business is unnamed/unresolvable to a website+email (common — most group buyer posts do not name the company), still queue them with Entity Type = Unknown and Contact Route = "No route yet"; Kevin makes first contact himself via the group/Messenger. A strong, honestly-graded "No route yet" lead counts toward 5; a poor-fit coach with a tidy email does not.
 
-**When still short after the full ladder:** say so plainly in the report, name the missing channel (e.g. "X/Threads logged out; only one VA group mined"), and — if Kevin wants volume — list the best sub-ICP candidates seen (graded, with why they fell short) so he can choose to include any, rather than the agent deciding to pad.
+**When still short after the full ladder:** say so plainly in the report, name what limited supply (e.g. "only one VA group mined; buying phrases recycled"), and join more groups next run to widen the net.
 
-When writing Prospects records with a Signal Source not yet in the select options (e.g. "X Post", "Threads Post", "Facebook Group Post"), add `"typecast": true` to the curl POST body so Airtable auto-creates the option.
+When writing Prospects records with a Signal Source not yet in the select options (e.g. "Facebook Group Post"), add `"typecast": true` to the curl POST body so Airtable auto-creates the option.
 
 For each chosen keyword on LinkedIn:
 - Load the claude-in-chrome tools via ToolSearch if not loaded. Confirm Chrome is connected; if not, stop and report "Chrome not available — run skipped".
