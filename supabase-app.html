@@ -67,32 +67,32 @@
         </div>
 
         <div class="section">Leadership</div>
-        <div class="navitem" data-page="dashboard"><span class="ico">📊</span> Leadership Dashboard <span class="dot"></span></div>
-        <div class="navitem" data-page="os-strategy"><span class="ico">🎯</span> Objective &amp; Strategy <span class="dot"></span></div>
-        <div class="navitem" data-page="os-bplan"><span class="ico">📋</span> Plan Builder <span class="dot"></span></div>
+        <div class="navitem" data-page="dashboard" data-module="command_centre"><span class="ico">📊</span> Leadership Dashboard <span class="dot"></span></div>
+        <div class="navitem" data-page="os-strategy" data-module="strategy"><span class="ico">🎯</span> Objective &amp; Strategy <span class="dot"></span></div>
+        <div class="navitem" data-page="os-bplan" data-module="strategy"><span class="ico">📋</span> Plan Builder <span class="dot"></span></div>
 
         <div class="section">Operations</div>
-        <div class="navitem" data-page="tasks"><span class="ico">✅</span> Tasks &amp; Projects <span class="dot"></span></div>
-        <div class="navitem" data-page="operations"><span class="ico">🏢</span> Operations <span class="dot"></span></div>
-        <div class="navitem" data-page="comms"><span class="ico">📨</span> Inbound Comms <span class="dot"></span></div>
-        <div class="navitem" data-page="systemisation"><span class="ico">⚙️</span> Systemisation <span class="dot"></span></div>
-        <div class="navitem" data-page="skills"><span class="ico">🧠</span> Skills Library <span class="dot"></span></div>
-        <div class="navitem" data-page="ai-brain"><span class="ico">💭</span> AI Brain <span class="dot"></span></div>
+        <div class="navitem" data-page="tasks" data-module="tasks"><span class="ico">✅</span> Tasks &amp; Projects <span class="dot"></span></div>
+        <div class="navitem" data-page="operations" data-module="property"><span class="ico">🏢</span> Operations <span class="dot"></span></div>
+        <div class="navitem" data-page="comms" data-module="inbound_comms"><span class="ico">📨</span> Inbound Comms <span class="dot"></span></div>
+        <div class="navitem" data-page="systemisation" data-module="systemisation"><span class="ico">⚙️</span> Systemisation <span class="dot"></span></div>
+        <div class="navitem" data-page="skills" data-module="systemisation"><span class="ico">🧠</span> Skills Library <span class="dot"></span></div>
+        <div class="navitem" data-page="ai-brain" data-module="ai_assistant"><span class="ico">💭</span> AI Brain <span class="dot"></span></div>
 
         <div class="section">Finance</div>
-        <div class="navitem" data-page="money"><span class="ico">🧭</span> Money Confidence <span class="dot"></span></div>
-        <div class="navitem" data-page="accounts"><span class="ico">🏦</span> Accounts <span class="dot"></span></div>
-        <div class="navitem" data-page="pnl"><span class="ico">💰</span> Profit &amp; Loss <span class="dot"></span></div>
-        <div class="navitem" data-page="wealth"><span class="ico">📈</span> Wealth <span class="dot"></span></div>
+        <div class="navitem" data-page="money" data-module="finance"><span class="ico">🧭</span> Money Confidence <span class="dot"></span></div>
+        <div class="navitem" data-page="accounts" data-module="finance"><span class="ico">🏦</span> Accounts <span class="dot"></span></div>
+        <div class="navitem" data-page="pnl" data-module="finance"><span class="ico">💰</span> Profit &amp; Loss <span class="dot"></span></div>
+        <div class="navitem" data-page="wealth" data-module="personal_wealth"><span class="ico">📈</span> Wealth <span class="dot"></span></div>
 
         <div class="section">Team</div>
-        <div class="navitem" data-page="os-team"><span class="ico">👥</span> Team Members <span class="dot"></span></div>
+        <div class="navitem" data-page="os-team" data-module="team"><span class="ico">👥</span> Team Members <span class="dot"></span></div>
 
         <div class="section">Marketing</div>
-        <div class="navitem" data-page="content-machine"><span class="ico">⚙️</span> Content Machine <span class="dot"></span></div>
+        <div class="navitem" data-page="content-machine" data-module="content_machine"><span class="ico">⚙️</span> Content Machine <span class="dot"></span></div>
 
         <div class="section">System</div>
-        <div class="navitem" data-page="sitemap"><span class="ico">🔗</span> Site Map &amp; Guides <span class="dot"></span></div>
+        <div class="navitem" data-page="sitemap" data-module="dod_queue"><span class="ico">🔗</span> Site Map &amp; Guides <span class="dot"></span></div>
       </aside>
       <main class="main">
         <iframe id="frame" title="page"></iframe>
@@ -132,11 +132,42 @@
     }
     document.querySelectorAll('.navitem[data-page]').forEach(n => n.addEventListener('click', () => navTo(n.dataset.page)));
 
-    function showApp() {
+    // Base modules always show (they're included in every plan); add-ons only if
+    // the workspace's org_modules row is enabled. Fails safe: if the fetch fails,
+    // base stays visible and add-ons stay hidden.
+    const BASE_MODULES = ['command_centre','strategy','tasks','team','systemisation','ai_assistant','dod_queue','crm'];
+    async function applyEntitlements() {
+      const enabled = new Set(BASE_MODULES);
+      try {
+        const { data, error } = await sb.from('org_modules').select('module_key').eq('enabled', true);
+        if (!error && data) data.forEach(r => enabled.add(r.module_key));
+      } catch (e) { /* fail safe — base only */ }
+      document.querySelectorAll('.navitem[data-module]').forEach(n => {
+        n.style.display = enabled.has(n.dataset.module) ? '' : 'none';
+      });
+      // Hide a section header when all its items are hidden.
+      document.querySelectorAll('.sidebar .section').forEach(sec => {
+        let visible = false;
+        for (let el = sec.nextElementSibling; el && !el.classList.contains('section'); el = el.nextElementSibling) {
+          if (el.classList.contains('navitem') && el.style.display !== 'none') { visible = true; break; }
+        }
+        sec.style.display = visible ? '' : 'none';
+      });
+      return enabled;
+    }
+
+    async function showApp() {
       document.getElementById('login').style.display = 'none';
       document.getElementById('app').style.display = 'block';
-      const page = (location.hash || '#tasks').slice(1);
-      navTo(PAGES[page] ? page : 'tasks');
+      await applyEntitlements();
+      let page = (location.hash || '#tasks').slice(1);
+      const navEl = document.querySelector(`.navitem[data-page="${page}"]`);
+      // Fall back to the first visible module if the requested page is unknown or gated off.
+      if (!PAGES[page] || (navEl && navEl.style.display === 'none')) {
+        const firstVisible = [...document.querySelectorAll('.navitem[data-page]')].find(n => n.style.display !== 'none');
+        page = firstVisible ? firstVisible.dataset.page : 'dashboard';
+      }
+      navTo(page);
     }
 
     document.getElementById('go').addEventListener('click', signIn);
