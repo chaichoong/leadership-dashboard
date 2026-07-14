@@ -18,7 +18,7 @@
     const PAGE_REGISTRY = [
         { id: 'overview',    name: 'Leadership Dashboard',           icon: '📊', pageVer: '2.41', sopFile: 'sop.html',                   sopVer: '2.9', standalone: 'index.html#overview' },
         { id: 'os-strategy', name: 'Objective & Strategy',           icon: '🎯', pageVer: '1.15', sopFile: 'os/strategy/sop.html',       sopVer: '1.0', standalone: 'os/strategy/index.html' },
-        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.110', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
+        { id: 'tasks',       name: 'Tasks & Projects',   icon: '✅', pageVer: '1.111', sopFile: 'os/tasks/sop.html',             sopVer: '1.1', standalone: 'os/tasks/index.html' },
         { id: 'cfv',        name: 'CFVs',                          icon: '🚨', pageVer: '1.29', sopFile: 'sop-cfvs.html',               sopVer: '1.6', standalone: 'index.html#cfv' },
         { id: 'money',      name: 'Money Confidence',              icon: '🧭', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#money' },
         { id: 'wealth',     name: 'Wealth',                        icon: '📈', pageVer: '1.1', sopFile: '',                            sopVer: '1.0', standalone: 'index.html#wealth' },
