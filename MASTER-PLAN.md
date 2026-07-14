@@ -46,7 +46,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [x] KEVIN — Confirm the 6 flagged unlinked tasks + 3 RECAT candidates from the cleanse report (done when: each closed or recategorised; due 8 Jul) [AT:recVczPN4KgdRudUA] *(ticked 2026-07-07, synced from Airtable)*
 - [ ] OPUS — Fix the 92 nameless invoice/AP artefact rows polluting Tasks status views (done when: zero nameless open rows + ingestion stops creating them; due 11 Jul) [AT:recZhtp6ZNnYlQRJi]
 - [ ] OPUS — Inventory every consumer of the current Airtable PAT (repo, workers, GitHub secrets, HR app chaichoong.github.io/HR, scripts, ~/.config/od) (done when: written list; due 9 Jul) [AT:recO3x3yw9KAcrLjH]
-- [ ] KEVIN — Generate a new Airtable PAT + revoke the exposed one (done when: old token dead; due 10 Jul) [AT:recDz1ljafVN1CB45]
+- [x] KEVIN — Generate a new Airtable PAT + revoke the exposed one (done when: old token dead; due 10 Jul) [AT:recDz1ljafVN1CB45] *(ticked 2026-07-14, synced from Airtable)*
 - [ ] OPUS — Update every PAT consumer + verify each works (done when: all green; due 10 Jul) [AT:rec8BVrJIDAjp6QY7]
 - [ ] ERICAMAE — Change the affiliate admin password + store it outside Slack (done when: new password works; due 9 Jul) [AT:rec0JrMvCKgmsi3lP]
 - [x] KEVIN — Agree the no-secrets-in-Slack rule + alternative channel at the team meeting (done when: agreed; due 8 Jul) [AT:rec0j7ZPQl91sGRQx] *(ticked 2026-07-07, synced from Airtable)*
@@ -57,7 +57,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] KEVIN — Set GCAL_PROXY_TOKEN Script Property + redeploy gcal-proxy + set localStorage gcal_proxy_key on Tasks (done when: calendar loads with gate on; due 11 Jul) [AT:rec3G6KvmgrnO47eq]
 - [ ] OPUS — Meetings-script dedupe gate: before creating a task from a meeting summary, check open tasks and link/skip instead of duplicating (done when: test summary naming an existing task creates zero records; due 18 Jul) [gmail-meetings-script.gs — manual paste to redeploy] [AT:reckN5r3NlACstzMU]
 - [x] OPUS — Nightly plan↔Airtable sync job: tick this plan from completions, push approved plan tasks to Airtable, flag unmapped/duplicates in a short report (done when: first correct nightly report; due 18 Jul) [AT:recJ1QMTpPUsAGh4j] *(ticked 2026-07-08, synced from Airtable)*
-- [ ] KEVIN — Adopt this plan at the team meeting (done when: team told this is the only plan; due 8 Jul) [AT:rece90eUsYb2TudAV]
+- [x] KEVIN — Adopt this plan at the team meeting (done when: team told this is the only plan; due 8 Jul) [AT:rece90eUsYb2TudAV] *(ticked 2026-07-14, synced from Airtable)*
 - [ ] KEVIN+OPUS — GDPR pack: ICO registration check, privacy policy on the sales site, client-facing DPA, sub-processor list (Supabase, Anthropic, Vercel, GHL, Stripe), data-retention line. Claude drafts, Kevin reviews and registers (done when: all five exist + DPA ready to send a design partner; due 18 Jul) [AT:recxhhfUWIGiumUtU]
 
 ## 4. Product development (finish + de-Kevin + migrate)
@@ -86,8 +86,8 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] OPUS — Empty-state sweep: every page helpful with zero records [AT:recKYTvkpyVZERmnN] (done when: clean new-tenant walkthrough; due 24 Jul)
 
 ### Finish + fixes
-- [ ] KEVIN+OPUS — Wealth module: personal cash flow + net worth statements [AT:recNxHUwt9DQnmjWg, recnbOvfUCXLKRFhJ, receMj0K0O6Ym8qgg] — or re-date post-launch at the team meeting (done when: built or re-dated; due 8 Jul decision)
-- [ ] OPUS — Fix P&L gross profit % + net profit sign [AT:recBCnFH2tRrUs5BD] (done when: /fix verified in browser; due 11 Jul)
+- [x] KEVIN+OPUS — Wealth module: personal cash flow + net worth statements [AT:recNxHUwt9DQnmjWg, recnbOvfUCXLKRFhJ, receMj0K0O6Ym8qgg] — or re-date post-launch at the team meeting (done when: built or re-dated; due 8 Jul decision) *(ticked 2026-07-14, synced from Airtable)*
+- [x] OPUS — Fix P&L gross profit % + net profit sign [AT:recBCnFH2tRrUs5BD] (done when: /fix verified in browser; due 11 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] OPUS — Update sop-cfvs.html for the 3 Jul CFV detection change [AT:rec9ihFqDDSY8DMLZ] (done when: drift monitor clear; due 14 Jul)
 - [ ] OPUS — 13-year-old workflow visual aids per page [AT:recinNtKPawy2g3vI] (done when: every page has one; due 25 Jul)
 - [ ] OPUS — Manual KPI entry STANDARD + "Connect your numbers — Finance module" upsell state (D3 companion) (done when: both verified on a test tenant; due 24 Jul) [AT:recBACpQPF8x8VORc]
@@ -144,7 +144,7 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [ ] ERICAMAE — (NEW 13 Jul; amended same day ×2) Nurture sequence triggers on GHL tag `od-prospect-nurture` (the prospecting agent applies this tag only after 7 silent days, Ltd contacts only); **3 emails maximum** (Kevin's call: non-aggressive, value-led, each with a call CTA); templates carry sender identity, postal address and unsubscribe (PECR) with Kevin sign-off before switch-on. Also: build a Smart List filtered on tag `od-prospect`, verify GHL email sending (LC Email) works from the location, and ensure NO workflow ever triggers on `od-prospect` or `od-prospect-manual` (done when: test Ltd contact tagged nurture receives the 3-email sequence + a test send from conversations succeeds; due 18 Jul) [AT:-]
 - [x] ERICAMAE — Lead-Magnet Capture & Nurture workflow live [AT:receDDArEOlLDZaBN] (done when: workflow on; due 15 Jul) *(ticked 2026-07-08, synced from Airtable)*
 - [x] ERICAMAE — Gate the Founder-to-Free magnet (email → link → thank-you CTA to Teardown) (done when: test lead gets it gated; due 16 Jul) [AT:receDDArEOlLDZaBN] *(ticked 2026-07-08, synced from Airtable)*
-- [ ] ERICAMAE — GHL nurture sequences by funnel stage [AT:recKlaXRJXupP36pJ] (done when: test lead receives sequence; due 18 Jul)
+- [x] ERICAMAE — GHL nurture sequences by funnel stage [AT:recKlaXRJXupP36pJ] (done when: test lead receives sequence; due 18 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] ERICAMAE — Content engine LinkedIn-led, problem-first [AT:recgErOu3AiipDQo4] (done when: 3 posts/week running; due 14 Jul)
 - [ ] ERICAMAE — Comparison pages (vs DIY / VA / agency) [AT:reckGG3pb7U5qJYQV] (done when: pages live; due 12 Aug)
 - [ ] ERICAMAE — Retargeting across the funnel [AT:recQnZxHECFiumZwn] (done when: pixels + audiences live; due 12 Aug)
@@ -153,10 +153,10 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 
 - [ ] ERICAMAE — Verify sales + thank-you pages show £350/£1,500 + trial everywhere (done when: screenshots in Slack; due 9 Jul) [AT:rect3tMNA5vAUUf0t]
 - [ ] ERICAMAE — Resolve the 2 sales-page placeholders (calendar link, worker URL) (done when: both live; due 9 Jul) [AT:rectDqrReN31yzJcr]
-- [ ] MICA — Fix the Stripe webhook delivery failures on od-billing-bridge [AT:recjybZNepSBpDLeP] (done when: deliveries succeeding; due 9 Jul)
+- [x] MICA — Fix the Stripe webhook delivery failures on od-billing-bridge [AT:recjybZNepSBpDLeP] (done when: deliveries succeeding; due 9 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] ERICAMAE — Full dry-run: book Teardown → calendar; checkout → contract + welcome email (done when: evidence in Slack; due 10 Jul) [AT:recrgbZ4SKtCladgr]
-- [ ] ERICAMAE — Website clarity pass [AT:recSlGxdgHaecSGG1] (done when: Kevin sign-off; due 11 Jul)
-- [ ] ERICAMAE — Pricing page from the SIMPLE locked card [AT:recnggtrSkRcjT9fU] (done when: live at 29 Jun pricing; due 11 Jul)
+- [x] ERICAMAE — Website clarity pass [AT:recSlGxdgHaecSGG1] (done when: Kevin sign-off; due 11 Jul) *(ticked 2026-07-14, synced from Airtable)*
+- [x] ERICAMAE — Pricing page from the SIMPLE locked card [AT:recnggtrSkRcjT9fU] (done when: live at 29 Jun pricing; due 11 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] KEVIN — Answer Ericamae on the trust video (waiting since 29 Jun) [AT:recG4RxL6ewQoEvPX] (done when: yes/no sent; due 8 Jul)
 - [ ] KEVIN — (NEW) Contract + T&Cs reflect the simple pricing (sendlink contract still at old terms?) + refund/cancellation lines + AI limitation-of-liability clause + human-approval-defaults-on wording (amended 8 Jul) (done when: contract reissued at £350/£1,500 + trial terms + AI clauses; due 11 Jul) [AT:rec87RsSw8UdBbxqc]
 - [ ] KEVIN — Founder Dependency Score live-on-call sheet [AT:recFNqmzmeSmOfgJw] (done when: usable on a call; due 10 Jul)
@@ -196,11 +196,11 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 
 - [ ] OPUS — Full pre-deploy pass (skill: pre-deploy) (done when: clean report; due 29 Jul) [AT:recRONNTnugjcty0Q]
 - [ ] OPUS — Regression: every tab, zero console errors, live + Vercel (done when: evidence saved; due 29 Jul) [AT:reciLx4y5AZJ8VvAC]
-- [ ] KEVIN — Build + sign off launch-scope modules [AT:rec5bUChevzCQfdyV] (done when: sign-off logged; due 30 Jul)
+- [x] KEVIN — Build + sign off launch-scope modules [AT:rec5bUChevzCQfdyV] (done when: sign-off logged; due 30 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] KEVIN — (NEW) Go/no-go criteria list agreed BEFORE the review (checkout works, zero criticals, support route live, agents demo-able) (done when: list written; due 25 Jul) [AT:rec5jJKKAJne3ncIc]
 - [ ] KEVIN — (NEW) Backup/rollback: Supabase backup confirmed + Airtable snapshot taken + how-to-revert note (done when: both verified; due 30 Jul) [AT:recMzgGvDFCldnLyN]
 - [ ] KEVIN — (NEW) Support route live: support@ address routed + who answers + response target (done when: test email answered; due 30 Jul) [AT:recT8wabpzF7MnzW3]
-- [ ] KEVIN — Make the product publicly live and purchasable [AT:rec1oFlkDNI6MRAnU] (done when: a stranger can buy; due 1 Aug)
+- [x] KEVIN — Make the product publicly live and purchasable [AT:rec1oFlkDNI6MRAnU] (done when: a stranger can buy; due 1 Aug) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] KEVIN — Confirm the 1 Aug monthly-valuations run succeeded (done when: Action green; due 1 Aug) [AT:recUMjzYVDsXU0EY3]
 - [ ] KEVIN — Go/no-go review against this plan (done when: decision in Changelog; due 31 Jul) [AT:reckHAHBcDOH0JxU1]
 - [ ] ERICAMAE — Launch announcement: website banner + LinkedIn post + email to list (done when: all three live; due 1 Aug) [AT:rec5DeFwALGaHQMH2]
@@ -239,3 +239,4 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-08 | Kevin, in-session (third pass) | Amendment 1 RESOLVED (modified): feedback-first. Letting-agent founder walkthrough task added to §8 (due 16 Jul, Airtable recr2SE4YjIizu3gQ). Conversion optional. All 5 pressure-test amendments now decided. |
 | 2026-07-13 | Kevin, in-session (/build-feature, approved) | §7: Prospecting engine v1 added and built — AI agent finds founder-led UK prospects from LinkedIn pain signals (assisted browsing, Kevin's Chrome, kill-switch on LinkedIn friction), Companies House PECR gate (Ltd-only email; sole traders manual track), review queue in new Prospecting tab, GHL sync on approval. 3 follow-on tasks added (GHL token — Kevin; supervised first run — Kevin; nurture tag wiring — Ericamae). Complements Ericamae's manual outbound lane, does not replace it. |
 | 2026-07-13 | Kevin, in-session (same day, iterations v1.1–v1.3) | Prospecting engine evolved on Kevin's direction: 5/day target, 7-day schedule, multi-platform (FB buying-signal search = top producer; X/Threads parked), conversation-first contact flow (personal GHL-sent email first, Claude leads replies, 7 silent days → Ltd to nurture, manual-track never sequenced), agent-drafted openers with per-card process lines, agent-sent LinkedIn connects (max 3/day, Kevin accepted account risk), Ericamae's §7 sequence task extended (tag trigger + Smart List + LC email check). End-state agreed: full autonomy after 2 weeks >90% approval rate — Kevin's first touch becomes the booked call. |
+| 2026-07-14 | Nightly sync (scripts/sync-master-plan.py) | ticked 10 from Airtable completions. |
