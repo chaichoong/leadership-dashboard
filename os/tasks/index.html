@@ -830,6 +830,18 @@ let completedRangeFrom = '';
 let completedRangeTo = '';
 let completedRangeLoading = false;
 const COMPLETED_RANGE_CAP = 1000; // safety bound on a single range query
+// Resolve a task by id across the active set AND the completed-history caches.
+// The Completed view renders tasks that live outside allTasks (the recent-300
+// cache or a date-range query), so any drawer / edit / comment action opened
+// from that view must search those arrays too — otherwise the click resolves to
+// nothing and the drawer never opens. For active tasks this is identical to the
+// old allTasks.find (allTasks is searched first).
+function findTaskAnywhere(id){
+  return (allTasks||[]).find(t=>t.id===id)
+    || (completedTasks||[]).find(t=>t.id===id)
+    || (completedRangeTasks||[]).find(t=>t.id===id)
+    || null;
+}
 let allProjects = [];
 let BUSINESS_MAP = {}; // name -> id
 let activeTeam = 'all';
@@ -1884,7 +1896,7 @@ function fmtRaw(fieldKey,rawValue){
 
 // Update one task field; updates local state; toasts.
 async function updateTaskField(taskId,fieldKey,rawValue){
-  const task=allTasks.find(t=>t.id===taskId);if(!task)return;
+  const task=findTaskAnywhere(taskId);if(!task)return;
   const prev={...task};
   const oldRaw=captureOldRaw(task,fieldKey);
   let payload={};
@@ -2517,7 +2529,7 @@ function renderKPIs(){
 // ======================================================
 function openTaskDrawer(taskId){
   drawerTaskId=taskId;
-  const t=allTasks.find(x=>x.id===taskId);if(!t)return;
+  const t=findTaskAnywhere(taskId);if(!t)return;
   closeDrawer();
   const overlay=document.createElement('div');
   overlay.className='drawer-overlay';
@@ -2670,7 +2682,7 @@ window.updateDescLinks=updateDescLinks;
 // back to the current user — guarantees the recipient sees who's
 // chasing them even if the task was created by an unknown actor.
 async function resendAssigneeNotification(taskId){
-  const task=allTasks.find(x=>x.id===taskId);if(!task)return;
+  const task=findTaskAnywhere(taskId);if(!task)return;
   if(!task.assigneeEmail){toast('No assignee on this task',true);return}
   // Don't ping yourself.
   const actorEmail=(currentUser&&currentUser.email)||'';
@@ -3034,14 +3046,20 @@ async function removeAttachment(taskId,attachmentId){
 const _drawerComments={}; // taskId -> array
 const _commentCounts={}; // taskId -> number (cached counts for row badges)
 let _commentCountsLoaded=false;
-async function loadAllCommentCounts(){
-  if(!allTasks.length)return;
-  const active=allTasks.filter(t=>t.status!=='Completed');
+// Fetch comment counts for an explicit list of tasks and populate the shared
+// _commentCounts cache + refresh the row badges. Used both for the active set
+// (loadAllCommentCounts) and for the Completed history view, whose tasks live
+// outside allTasks and so were never getting counts (comment badges were
+// therefore missing on completed rows).
+async function loadCommentCountsFor(tasks,{refresh=false}={}){
+  if(!tasks||!tasks.length)return;
   const CONCURRENCY=5;
   let i=0;
   async function next(){
-    while(i<active.length){
-      const t=active[i++];
+    while(i<tasks.length){
+      const t=tasks[i++];
+      // Skip ids we already have a count for unless a refresh is requested.
+      if(!refresh&&_commentCounts[t.id]!==undefined)continue;
       try{
         const r=await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TASKS_TABLE}/${t.id}/comments?pageSize=100`,{headers:{Authorization:`Bearer ${PAT}`}});
         if(r.ok){const d=await r.json();const n=(d.comments||[]).length;if(_commentCounts[t.id]!==n){_commentCounts[t.id]=n;updateAllCommentBadges();}}
@@ -3050,8 +3068,14 @@ async function loadAllCommentCounts(){
     }
   }
   await Promise.all(Array.from({length:CONCURRENCY},()=>next()));
-  _commentCountsLoaded=true;
   updateAllCommentBadges();
+}
+window.loadCommentCountsFor=loadCommentCountsFor;
+async function loadAllCommentCounts(){
+  if(!allTasks.length)return;
+  const active=allTasks.filter(t=>t.status!=='Completed');
+  await loadCommentCountsFor(active,{refresh:true});
+  _commentCountsLoaded=true;
 }
 function commentBadgeHtml(taskId){
   const n=_commentCounts[taskId]||0;
@@ -3289,7 +3313,7 @@ function adjustProjectTaskCounts(oldProjectIds,newProjectIds){
 let _commentsModalTaskId=null;
 function openCommentsModal(taskId){
   _commentsModalTaskId=taskId;
-  const task=allTasks.find(t=>t.id===taskId);
+  const task=findTaskAnywhere(taskId);
   // Remove other overlays but keep the drawer (comments opens from drawer)
   ['autoModal','drillModal','commentsModal','createTaskModal','createProjModal','deleteConfirmModal'].forEach(id=>{const el=document.getElementById(id);if(el)el.remove()});
   const overlay=document.createElement('div');
@@ -3400,7 +3424,7 @@ async function completeTaskInline(taskId,ev){
 
 function deleteTask(taskId,ev){
   if(ev){ev.stopPropagation();ev.preventDefault()}
-  const task=allTasks.find(t=>t.id===taskId);
+  const task=findTaskAnywhere(taskId);
   if(!task)return;
   // Always close the drawer first, then force-remove the overlay as a
   // defensive fallback (the overlay can survive closeDrawer if a pending
@@ -3436,7 +3460,7 @@ function openDeleteConfirm(task){
 }
 
 async function performDeleteTask(taskId){
-  const task=allTasks.find(t=>t.id===taskId);
+  const task=findTaskAnywhere(taskId);
   if(!task)return;
   // Snapshot full field payload for undo (so we can re-create a new record)
   const snapshot=buildFieldsFromTask(task);
@@ -3452,6 +3476,10 @@ async function performDeleteTask(taskId){
     // Decrement task counts on any linked projects before we lose the reference
     adjustProjectTaskCounts(task.projectIds||[],[]);
     allTasks=allTasks.filter(t=>t.id!==taskId);
+    // Also drop from the completed-history caches so a deleted historic task
+    // doesn't linger in the Completed view until the next full refresh.
+    completedTasks=completedTasks.filter(t=>t.id!==taskId);
+    completedRangeTasks=completedRangeTasks.filter(t=>t.id!==taskId);
     if(drawerTaskId===taskId)closeDrawer();
     pushUndo({type:'delete',snapshot,label:`Deleted "${task.name}"`});
     showDeleteUndoToast(task.name);
@@ -5062,6 +5090,12 @@ function renderTasks(){
   if(!page.length)html=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-secondary)">No tasks found.</td></tr>`;
 
   document.getElementById('taskBody').innerHTML=html;
+  // Completed-history rows live outside allTasks, so their comment counts were
+  // never fetched by loadAllCommentCounts — lazy-load counts for the visible
+  // completed page so the 💬 badge shows on completed tasks too.
+  if((document.getElementById('filterStatus')||{}).value==='Completed'&&page.length){
+    loadCommentCountsFor(page);
+  }
   document.getElementById('showingCount').textContent=`Showing ${page.length} of ${tasks.length}`;
   document.getElementById('pageInfo').textContent=`Page ${currentPage} of ${totalPages}`;
   document.getElementById('prevPage').disabled=currentPage<=1;
