@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>How to use the CRM — Operations Director</title>
+  <link rel="stylesheet" href="css/tokens.css?v=1">
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg-app);color:var(--text-primary);
+         font-family:var(--font-family-base,'DM Sans',system-ui,sans-serif);line-height:1.55;}
+    .page{max-width:820px;margin:0 auto;padding:40px 24px 72px;}
+    .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);
+             font-weight:700;margin:0 0 8px;}
+    h1{font-size:clamp(26px,4vw,36px);line-height:1.08;margin:0 0 10px;font-weight:700;letter-spacing:-.01em;}
+    .lede{font-size:17px;color:var(--text-secondary);margin:0 0 8px;max-width:60ch;}
+    h2{font-size:22px;margin:44px 0 4px;font-weight:700;display:flex;align-items:center;gap:10px;}
+    h2 .em{font-size:22px;}
+    .sublede{color:var(--text-secondary);margin:0 0 20px;}
+    .card{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:14px;
+          padding:22px;margin:18px 0;box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.04));}
+    ol.steps{list-style:none;counter-reset:s;margin:0;padding:0;}
+    ol.steps li{counter-increment:s;position:relative;padding:10px 0 10px 44px;border-top:1px solid var(--border-subtle);}
+    ol.steps li:first-child{border-top:0;}
+    ol.steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:28px;height:28px;
+         background:var(--accent-soft);color:var(--accent-hover);border-radius:50%;display:flex;
+         align-items:center;justify-content:center;font-weight:700;font-size:14px;}
+    ol.steps b{font-weight:600;}
+    .tag{display:inline-block;background:var(--bg-subtle);border-radius:6px;padding:1px 7px;font-size:13px;
+         font-weight:600;color:var(--text-secondary);}
+    /* ── inline mockups ── */
+    .mock{border:1px solid var(--border-default);border-radius:12px;overflow:hidden;margin:6px 0 2px;background:var(--bg-surface);}
+    .mock-bar{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--bg-subtle);
+              border-bottom:1px solid var(--border-subtle);font-size:13px;font-weight:600;color:var(--text-secondary);}
+    .mock-bar .chip{background:var(--accent);color:#fff;border-radius:6px;padding:3px 10px;font-size:12px;margin-left:auto;}
+    table{width:100%;border-collapse:collapse;font-size:13.5px;}
+    th{text-align:left;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);
+       padding:9px 14px;font-weight:700;}
+    td{padding:10px 14px;border-top:1px solid var(--border-subtle);}
+    .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;
+          background:var(--bg-subtle);color:var(--text-secondary);}
+    .pill.person{background:var(--accent-soft);color:var(--accent-hover);}
+    .pill.company{background:#E7EDF6;color:#3560A8;}
+    .board{display:flex;gap:10px;padding:14px;overflow-x:auto;}
+    .col{flex:0 0 150px;background:var(--bg-surface-2);border:1px solid var(--border-subtle);border-radius:10px;}
+    .col-h{padding:8px 11px;font-weight:700;font-size:12px;display:flex;justify-content:space-between;
+           border-bottom:1px solid var(--border-subtle);}
+    .col-h .n{color:var(--text-muted);font-weight:600;}
+    .col-b{padding:9px;min-height:44px;}
+    .deal{background:var(--bg-surface);border:1px solid var(--border-default);border-radius:8px;padding:8px 9px;font-size:12px;}
+    .deal.won{border-left:3px solid var(--accent);}
+    .deal .dn{font-weight:600;}
+    .deal .dv{color:var(--accent-hover);font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums;}
+    .dragnote{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);
+              padding:0 14px 14px;}
+    .dragnote .arrow{color:var(--accent);font-weight:700;}
+    .tips{background:var(--accent-soft);border:1px solid var(--border-default);border-radius:14px;padding:20px 22px;margin-top:28px;}
+    .tips h3{margin:0 0 10px;font-size:16px;}
+    .tips ul{margin:0;padding-left:20px;}
+    .tips li{margin:6px 0;color:var(--text-primary);}
+    .foot{margin-top:36px;padding-top:18px;border-top:1px solid var(--border-subtle);color:var(--text-muted);font-size:13px;}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <p class="eyebrow">Operations Director · Guide</p>
+    <h1>How to use the CRM</h1>
+    <p class="lede">Your CRM keeps track of the people you deal with and the deals you're working on —
+      in one place, private to your business. It has two tabs: <b>Contacts</b> and <b>Pipeline</b>.</p>
+
+    <!-- CONTACTS -->
+    <h2><span class="em">📇</span> Contacts</h2>
+    <p class="sublede">Your address book — every person and company you work with.</p>
+    <div class="mock">
+      <div class="mock-bar">Contacts <span class="chip">+ Add</span></div>
+      <table>
+        <thead><tr><th>Name</th><th>Type</th><th>Company</th><th>Email</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><b>Sarah Jones</b></td><td><span class="pill person">person</span></td><td>Brightwork Ltd</td><td>sarah@brightwork.co</td><td><span class="pill">active</span></td></tr>
+          <tr><td><b>Brightwork Ltd</b></td><td><span class="pill company">company</span></td><td>—</td><td>hello@brightwork.co</td><td><span class="pill">active</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <ol class="steps">
+        <li><b>Add a contact.</b> On the <span class="tag">Contacts</span> tab, click <span class="tag">+ Add</span>. Enter a name (the only required field), choose <b>Person</b> or <b>Company</b>, and add email, phone, company or notes. Click <b>Save</b>.</li>
+        <li><b>Find a contact.</b> Use the <b>Search</b> box — it filters instantly by name, company, or email as you type.</li>
+        <li><b>Edit or remove.</b> Click any row to reopen it, make your changes and <b>Save</b> — or click <b>Delete</b>.</li>
+      </ol>
+    </div>
+
+    <!-- PIPELINE -->
+    <h2><span class="em">📊</span> Pipeline</h2>
+    <p class="sublede">Your deals, moving left to right as they progress. Each column is a stage;
+      its header shows how many deals are in it and their total value.</p>
+    <div class="mock">
+      <div class="board">
+        <div class="col"><div class="col-h">Lead <span class="n">1 · £2k</span></div>
+          <div class="col-b"><div class="deal"><div class="dn">Intro call</div><div class="dv">£2,000</div></div></div></div>
+        <div class="col"><div class="col-h">Contacted <span class="n">0</span></div><div class="col-b"></div></div>
+        <div class="col"><div class="col-h">Proposal <span class="n">1 · £5k</span></div>
+          <div class="col-b"><div class="deal"><div class="dn">Website project</div><div class="dv">£5,000</div></div></div></div>
+        <div class="col"><div class="col-h">Won <span class="n">1 · £8k</span></div>
+          <div class="col-b"><div class="deal won"><div class="dn">Retainer</div><div class="dv">£8,000</div></div></div></div>
+      </div>
+      <div class="dragnote"><span class="arrow">⇢</span> Drag a card from one column to the next as the deal moves forward — it saves automatically.</div>
+    </div>
+    <div class="card">
+      <ol class="steps">
+        <li><b>Add a deal.</b> On the <span class="tag">Pipeline</span> tab, click <span class="tag">+ Add</span>. Give it a title, a value in £, pick the <b>stage</b> it's at, and (optionally) link a <b>contact</b>. Click <b>Save</b> — it appears as a card.</li>
+        <li><b>Move it forward.</b> <b>Drag the card</b> into the next column as things progress. There's nothing to save — it updates on its own.</li>
+        <li><b>Win or lose it.</b> Click the card and set <b>Status</b> to <b>Won</b> or <b>Lost</b>. Won deals get a green edge; lost ones fade — so the board stays honest at a glance.</li>
+        <li><b>Edit or remove.</b> Click any card to reopen, change the details and <b>Save</b>, or <b>Delete</b>.</li>
+      </ol>
+    </div>
+
+    <div class="tips">
+      <h3>Good to know</h3>
+      <ul>
+        <li><b>It's private to your business.</b> Only you and your team see your contacts and deals.</li>
+        <li><b>You start ready to go.</b> The pipeline comes pre-built with the usual stages — Lead, Contacted, Qualified, Proposal, Won, Lost — so you can add your first deal straight away.</li>
+        <li><b>Link deals to contacts.</b> Attaching a contact to a deal shows who it's with, right on the card.</li>
+      </ul>
+    </div>
+
+    <p class="foot">Part of the Operations Director base plan · Operations → CRM</p>
+  </div>
+</body>
+</html>
