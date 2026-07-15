@@ -145,6 +145,42 @@
         <span class="spacer"></span>
         <button class="btn danger" id="dDelete" style="display:none">Delete</button>
       </div>
+      <div id="dWonRow" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-subtle)">
+        <button class="btn" id="dCreateClient" style="background:var(--accent-gold,#B8933A)">🎟 Create client account</button>
+        <div class="muted" style="font-size:12px;margin-top:6px">Won this deal? Set up their login &amp; workspace.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create client account modal -->
+  <div class="overlay" id="acctOverlay">
+    <div class="modal">
+      <h2>Create client account</h2>
+      <p class="muted" style="font-size:13px;margin:-8px 0 10px">Creates their login and their own workspace — base plan, starter SOPs and a pipeline, all ready to go.</p>
+      <div id="acctForm">
+        <label>Client email *</label><input id="aEmail" type="email" placeholder="name@theircompany.com">
+        <label>Company / workspace name</label><input id="aOrg" placeholder="e.g. Brightwork Ltd">
+        <label>Temporary password *</label>
+        <div style="display:flex;gap:8px"><input id="aPass"><button class="btn ghost" id="aGen" title="Generate">↻</button></div>
+        <div class="modal-actions">
+          <button class="btn" id="aCreate">Create account</button>
+          <button class="btn ghost" onclick="closeModal('acctOverlay')">Cancel</button>
+        </div>
+      </div>
+      <div id="acctResult" style="display:none">
+        <div style="background:var(--success-bg,#DDE8DF);border:1px solid var(--accent);border-radius:10px;padding:14px;font-size:14px">
+          <b>✓ Account created.</b> Share these with your client:
+          <div style="margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.9">
+            <div>Login: <span id="rLink"></span></div>
+            <div>Email: <b id="rEmail"></b></div>
+            <div>Password: <b id="rPass"></b></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="aCopy">Copy details</button>
+          <button class="btn" onclick="closeModal('acctOverlay')">Done</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -285,6 +321,7 @@
       cSel.innerHTML = '<option value="">— none —</option>' + state.contacts.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
       cSel.value = d?(d.contact_id||''):'';
       document.getElementById('dDelete').style.display = d?'inline-block':'none';
+      document.getElementById('dWonRow').style.display = d?'block':'none';
       openModal('dealOverlay');
     }
     document.getElementById('dSave').onclick = async () => {
@@ -306,6 +343,52 @@
       const { error } = await sb.from('crm_deals').delete().eq('id',id);
       if(error){ toast('Error: '+error.message); return; }
       closeModal('dealOverlay'); toast('Deal deleted'); await loadAll();
+    };
+
+    // ── Create client account (calls the create-client Edge Function) ───────────
+    const FN_URL = SB_URL + '/functions/v1/create-client';
+    const APP_URL = 'https://chaichoong.github.io/leadership-dashboard/supabase-app.html';
+    function genPassword(){
+      const cs = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+      let p = ''; for (const n of crypto.getRandomValues(new Uint32Array(14))) p += cs[n % cs.length];
+      return p;
+    }
+    document.getElementById('dCreateClient').onclick = () => {
+      const d = state.deals.find(x => x.id === document.getElementById('dId').value) || null;
+      const c = d ? state.contacts.find(x => x.id === d.contact_id) : null;
+      document.getElementById('aEmail').value = c ? (c.email || '') : '';
+      document.getElementById('aOrg').value = c ? (c.company || c.name || '') : '';
+      document.getElementById('aPass').value = genPassword();
+      document.getElementById('acctForm').style.display = 'block';
+      document.getElementById('acctResult').style.display = 'none';
+      closeModal('dealOverlay'); openModal('acctOverlay');
+    };
+    document.getElementById('aGen').onclick = () => { document.getElementById('aPass').value = genPassword(); };
+    document.getElementById('aCreate').onclick = async () => {
+      const email = document.getElementById('aEmail').value.trim();
+      const org = document.getElementById('aOrg').value.trim();
+      const pass = document.getElementById('aPass').value;
+      if (!email || !pass){ toast('Email and password are required'); return; }
+      const btn = document.getElementById('aCreate'); btn.disabled = true; btn.textContent = 'Creating…';
+      try {
+        const { data: { session } } = await sb.auth.getSession();
+        const res = await fetch(FN_URL, { method:'POST',
+          headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+(session?.access_token||''), 'apikey':SB_ANON },
+          body: JSON.stringify({ email, password: pass, org_name: org }) });
+        const out = await res.json().catch(()=>({error:'Unexpected response'}));
+        if (!res.ok || out.error){ toast('Error: '+(out.error||res.status)); btn.disabled=false; btn.textContent='Create account'; return; }
+        document.getElementById('rLink').textContent = APP_URL;
+        document.getElementById('rEmail').textContent = email;
+        document.getElementById('rPass').textContent = pass;
+        document.getElementById('acctForm').style.display = 'none';
+        document.getElementById('acctResult').style.display = 'block';
+        toast('Client account created');
+      } catch(e){ toast('Error: '+e.message); }
+      btn.disabled = false; btn.textContent = 'Create account';
+    };
+    document.getElementById('aCopy').onclick = () => {
+      const t = 'Login: '+APP_URL+'\nEmail: '+document.getElementById('rEmail').textContent+'\nPassword: '+document.getElementById('rPass').textContent;
+      navigator.clipboard.writeText(t).then(()=>toast('Copied')).catch(()=>toast('Copy failed'));
     };
 
     // ── Tabs / modal plumbing ──────────────────────────────────────────────────
