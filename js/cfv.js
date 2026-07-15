@@ -380,8 +380,22 @@
             // before detectCFVs() blocks the main thread. Without this the spinner
             // HTML is set but never rendered — the user sees the previous tab frozen
             // and assumes the page has crashed.
-            await new Promise(requestAnimationFrame);
-            await new Promise(requestAnimationFrame);
+            //
+            // requestAnimationFrame does NOT fire while the document is hidden
+            // (background tab, minimised window, headless/automated render). A bare
+            // `await new Promise(requestAnimationFrame)` then stays pending forever,
+            // leaving the tab stuck on the "Loading Cash Flow Voids…" spinner. Race
+            // each frame against a short timeout so a hidden document still makes
+            // progress — there is nothing to paint when hidden anyway, and when the
+            // tab is visible rAF wins first so the paint guarantee is preserved.
+            const nextFrame = () => new Promise(resolve => {
+                let settled = false;
+                const done = () => { if (!settled) { settled = true; resolve(); } };
+                requestAnimationFrame(done);
+                setTimeout(done, 50);
+            });
+            await nextFrame();
+            await nextFrame();
         }
 
         const cfvList = detectCFVs();
