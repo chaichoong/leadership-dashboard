@@ -18,7 +18,7 @@ Env:
   DRY_RUN=1      compute + log, write nothing
   LIMIT=N        value at most N properties (0 = all)
 """
-import os, sys, json, time, re, datetime, urllib.request, urllib.error
+import os, sys, json, time, re, datetime, urllib.request, urllib.error, urllib.parse
 
 AIRTABLE_PAT = os.environ.get('AIRTABLE_PAT', '').strip()
 DRY_RUN = os.environ.get('DRY_RUN') == '1'
@@ -29,10 +29,23 @@ VAL_TABLE = 'tblZYsa0u1M17N7ZE'      # Property Valuations
 PROP_TABLE = 'tbl6f0OkAmTC2jbuG'     # Properties
 PROXY = 'https://claude-proxy.kevinbrittain.workers.dev'
 # The hardened claude-proxy authenticates scripts with a bearer token (it no
-# longer accepts a spoofed Origin). PROXY_SERVICE_TOKEN must be set in the job
-# environment; the workflow passes it from the GitHub Actions secret of the
-# same name. Deployed on the worker 2026-07-02.
+# longer accepts a spoofed Origin). Resolution order:
+#   1. PROXY_SERVICE_TOKEN env var (GitHub Actions secret, if configured).
+#   2. Fallback: the 'PROXY_SERVICE_TOKEN' record in the Airtable Settings
+#      table (the job already holds AIRTABLE_PAT, so no new secret is needed).
+#      Stored 2026-07-14 because the repo PAT cannot create GitHub secrets.
 PROXY_SERVICE_TOKEN = os.environ.get('PROXY_SERVICE_TOKEN', '').strip()
+SETTINGS_TABLE = 'tblHGNzDmOs59r9QD'  # (Deprecated) Settings — reused as config store
+
+
+def _load_proxy_token_from_airtable():
+    formula = urllib.parse.quote("{Name} = 'PROXY_SERVICE_TOKEN'")
+    url = (f'https://api.airtable.com/v0/{BASE_ID}/{SETTINGS_TABLE}'
+           f'?filterByFormula={formula}&pageSize=1')
+    status, d = _http(url, headers={'Authorization': f'Bearer {AIRTABLE_PAT}'})
+    if status != 200 or not d.get('records'):
+        return ''
+    return (d['records'][0].get('fields', {}).get('Active Skill IDs') or '').strip()
 
 # Property Valuations field IDs
 F_TITLE = 'fldRBIx2kRFAVmH0k'
@@ -132,9 +145,16 @@ def value_property(address, last_value, last_date):
 
 
 def main():
+    global PROXY_SERVICE_TOKEN
     if not AIRTABLE_PAT:
         print('AIRTABLE_PAT not set', file=sys.stderr)
         sys.exit(1)
+    if not PROXY_SERVICE_TOKEN:
+        PROXY_SERVICE_TOKEN = _load_proxy_token_from_airtable()
+        if PROXY_SERVICE_TOKEN:
+            print('Proxy token loaded from Airtable Settings (no env secret set).')
+        else:
+            print('WARNING: no PROXY_SERVICE_TOKEN in env or Airtable — proxy calls will 403.', file=sys.stderr)
     now = datetime.date.today()
     month_label = now.strftime('%b %Y')   # e.g. "Aug 2026"
     month_key = now.strftime('%Y-%m')
