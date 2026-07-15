@@ -299,16 +299,28 @@
         });
 
         // Project costs
+        // "Expected Cost" in Airtable is stored as a MONTHLY-equivalent for every
+        // cost, regardless of its billing Frequency (same convention as tenancy
+        // "Expected Monthly Rent"). The forecast must convert that monthly figure
+        // into the REAL cash that leaves per occurrence, or non-monthly costs are
+        // grossly mis-billed (a Daily cost billed at its full monthly amount every
+        // day injected ~£21k of phantom outflow). Weekly/daily etc. distribute
+        // across the month so they net to the monthly figure; quarterly/annual are
+        // smoothed to their monthly figure (see costPerOccurrence for why).
         activeCostsList.forEach(r => {
-            const amount = Number(getField(r, F.costExpected)) || 0;
-            if (amount <= 0) return;
+            const expectedMonthly = Number(getField(r, F.costExpected)) || 0;
+            if (expectedMonthly <= 0) return;
             const dueDay = getNumVal(r, F.costDueDay, 1);
             const freq = getField(r, F.costFrequency) || 'Monthly';
+            const amount = costPerOccurrence(expectedMonthly, freq);
+            // Quarterly/annual are smoothed: project them monthly at the monthly
+            // figure rather than as a lump on an unreliable annual date.
+            const projFreq = isMonthlySmoothed(freq) ? 'Monthly' : freq;
             const name = String(getField(r, F.costName) || 'Unknown cost');
             const dueDateNext = getField(r, F.costDueDateNext);
             const costSubCatIds = getField(r, F.costSubCategory); // linked sub-category record IDs
 
-            projectDates(today, dueDay, freq, null, dueDateNext).forEach(dk => {
+            projectDates(today, dueDay, projFreq, null, dueDateNext).forEach(dk => {
                 if (dayMap[dk]) {
                     const cleared = isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds, r.id);
                     dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '', cleared });
@@ -907,6 +919,31 @@
         window._waIncomeTenancies = incomeTenancies;
 
         return rows;
+    }
+
+    // "Expected Cost" in Airtable is a MONTHLY-equivalent for every cost, whatever
+    // its billing Frequency. The forecast places one charge per projected date, so
+    // it must convert that monthly figure into the real cash that leaves per
+    // occurrence, or non-monthly costs are grossly mis-billed.
+    //   - sub-monthly (daily/weekly/fortnightly/4-weekly): a slice of the monthly
+    //     figure, so the many occurrences in a month net back to the monthly total.
+    //   - quarterly/annual: SMOOTHED to the monthly figure and projected monthly
+    //     (see isMonthlySmoothed / projFreq below). True lump-on-due-date is
+    //     deferred until the annual due-date data is reliable — today the forecast's
+    //     annual date field is monthly-aligned and several "next payment" dates are
+    //     stale, so lumps would land in the wrong month.
+    //   - monthly / blank / unknown: the monthly figure unchanged.
+    function isMonthlySmoothed(frequency) {
+        const f = (frequency || 'Monthly').toLowerCase();
+        return f === 'quarterly' || f === 'annually' || f === 'annual';
+    }
+    function costPerOccurrence(expectedMonthly, frequency) {
+        const f = (frequency || 'Monthly').toLowerCase();
+        if (f === 'weekly')      return expectedMonthly * 12 / 52;
+        if (f === 'fortnightly') return expectedMonthly * 12 / 26;
+        if (f === '4-weekly')    return expectedMonthly * 12 / 13;
+        if (f === 'daily')       return expectedMonthly * 12 / 365;
+        return expectedMonthly; // monthly, quarterly, annual, blank, unknown
     }
 
     // ── Due Date Projection ──
