@@ -11,7 +11,7 @@
 
 1. Never create a new plan/roadmap/task-list document for OD — in the repo, in Drive, or anywhere else. Amend MASTER-PLAN.md instead.
 2. Every amendment is dated and sourced in its Changelog. Tasks are never silently deleted: done stays ticked, dropped is marked `[D]` with a reason.
-3. Ideas from learning material (transcripts, mentor calls, KOL content — e.g. via /transcript-to-brain) go into its §10 Proposed Amendments table, never straight into the live checklist. Kevin approves before they lock in.
+3. Ideas from learning material (transcripts, mentor calls, KOL content — e.g. via /transcript-to-brain) go into its Proposed Amendments holding pen (the "## Proposed Amendments" section, §13 as of Jul 2026 — find it by heading, not number), never straight into the live checklist. Kevin approves before they lock in.
 4. Structural changes to the plan need Kevin's explicit approval.
 5. Airtable (project "Launch & First Revenue") is the team's working copy; the plan is canonical. New tasks flow plan → Airtable; status flows back at the weekly review.
 
