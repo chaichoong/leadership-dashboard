@@ -477,7 +477,13 @@
             const day = waProjected[i];
             const availNow = day.opening - roundedBuffer;
             if (availNow < 50) continue;
-            let minFuture = availNow;
+            // Cap by the LOWER of this day's opening and its own closing balance
+            // (opening minus today's outflows). On every day but the last, the
+            // closing is caught by the next day's opening in the look-ahead below;
+            // on the final window day there is no next day, so without this the
+            // withdrawal would ignore that day's costs and push the balance
+            // negative. min() keeps day i's own outflows inside the safety buffer.
+            let minFuture = Math.min(day.opening, day.balance) - roundedBuffer;
             for (let j = i + 1; j < waProjected.length; j++) {
                 const lowest = Math.min(waProjected[j].opening, waProjected[j].balance);
                 const futAvail = lowest - roundedBuffer;
@@ -507,12 +513,12 @@
         kpisEl.innerHTML += `
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Final Balance</div>
-                <div class="kpi-card-value ${waFinalBalance >= 0 ? 'text-green' : 'text-red'}">${fmt(waFinalBalance)}</div>
+                <div class="kpi-card-value ${waFinalBalance >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(waFinalBalance)}</div>
                 <div class="kpi-card-sub">Post-withdrawal day 31</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-card-label" style="${cfLabelStyle}">Lowest Balance</div>
-                <div class="kpi-card-value ${waLowestBal >= 0 ? 'text-green' : 'text-red'}">${fmt(waLowestBal)}</div>
+                <div class="kpi-card-value ${waLowestBal >= 0 ? 'text-green' : 'text-red'}">${fmtAccounting(waLowestBal)}</div>
                 <div class="kpi-card-sub">Post-withdrawal lowest</div>
             </div>
         `;
