@@ -546,6 +546,20 @@
     const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable'];
 
     async function switchTab(tabId) {
+        // Standalone-only pages (e.g. Property Compliance, How It Works) live in
+        // PAGE_REGISTRY with a `standalone` file but have NO in-app `tab-<id>`
+        // panel. Calling switchTab for them used to deactivate every panel and
+        // then find nothing to show, blanking the whole content area. Detect that
+        // case up front — open the standalone page in a new tab and leave the
+        // current view untouched — before any panel is deactivated.
+        if (!document.getElementById('tab-' + tabId)) {
+            const regEntry = (typeof PAGE_REGISTRY !== 'undefined')
+                ? PAGE_REGISTRY.find(p => p.id === tabId) : null;
+            if (regEntry && regEntry.standalone) {
+                window.open(regEntry.standalone, '_blank');
+                return;
+            }
+        }
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn, .sidebar-item').forEach(b => b.classList.remove('active'));
         const tabEl = document.getElementById('tab-' + tabId);
