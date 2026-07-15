@@ -88,13 +88,13 @@
   </div>
 
   <div class="tabs">
-    <button class="tab active" data-view="setup">Setup</button>
-    <button class="tab" data-view="today">Today</button>
+    <button class="tab active" data-view="today">Today</button>
+    <button class="tab" data-view="setup">Setup</button>
   </div>
 
   <div class="wrap">
 
-    <div id="setup">
+    <div id="setup" class="hidden">
       <div class="card">
         <h2>Your connections</h2>
         <p class="hint">What your brain is plugged into, checked from last night's runs.</p>
@@ -106,6 +106,7 @@
         <p class="hint">What the brain knows about you and the business. The more complete, the sharper every answer.</p>
         <div class="bar"><span id="profileBar" style="width:0%"></span></div>
         <p class="foot" id="profileText">Loading…</p>
+        <button class="btn primary" id="profileGo" style="display:none;margin-top:10px;">Finish it on the Today tab</button>
       </div>
 
       <div class="card">
@@ -115,7 +116,7 @@
       </div>
     </div>
 
-    <div id="today" class="hidden">
+    <div id="today">
       <div class="synbar">
         <span class="sdot" id="syncDot" aria-hidden="true"></span>
         <span id="syncStatus">Loading…</span>
@@ -299,6 +300,7 @@
     if (prof){
       document.getElementById('profileBar').style.width = (prof.Value || 0) + '%';
       document.getElementById('profileText').textContent = prof.Text || '';
+      document.getElementById('profileGo').style.display = (prof.Value || 0) < 100 ? 'inline-block' : 'none';
     } else {
       document.getElementById('profileText').textContent = 'No profile data yet. It publishes with tonight’s run.';
     }
@@ -329,6 +331,14 @@
   }
 
   document.getElementById('refreshBtn').addEventListener('click', function(){ loadToday(true); });
+
+  // "Finish it on the Today tab" — the pending profile sections sit in the
+  // question queue there; jump straight to it.
+  document.getElementById('profileGo').addEventListener('click', function(){
+    document.querySelector('.tab[data-view="today"]').click();
+    var q = document.getElementById('queries');
+    if (q) q.scrollIntoView({ behavior: 'smooth' });
+  });
 
   // Ask your brain — hand the question to the dashboard's AI assistant, which
   // loads the brain index (published nightly) as context and answers with links.
