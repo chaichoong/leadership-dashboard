@@ -43,23 +43,24 @@ Deno.serve(async (req) => {
       .select('role').eq('user_id', user.id).in('role', ['owner', 'admin']).limit(1)
     if (!mem || !mem.length) return json({ error: 'You are not allowed to create client accounts.' }, 403)
 
-    // 3. Create the client login → the signup trigger provisions their workspace.
+    // 3. Invite the client → this creates their account (firing the signup
+    //    trigger that provisions their workspace) AND emails them a secure link
+    //    to set their own password. No password is set or shared here.
     const body = await req.json().catch(() => ({}))
     const email = String(body.email || '').trim().toLowerCase()
-    const password = String(body.password || '')
     const orgName = String(body.org_name || '').trim()
-    if (!email || !password) return json({ error: 'Email and password are required.' }, 400)
-    if (password.length < 8) return json({ error: 'Password must be at least 8 characters.' }, 400)
+    const redirectTo = String(body.redirect_to || 'https://chaichoong.github.io/leadership-dashboard/set-password.html')
+    if (!email) return json({ error: 'A client email is required.' }, 400)
 
-    const { data: created, error: cErr } = await admin.auth.admin.createUser({
-      email, password, email_confirm: true,
-      user_metadata: orgName ? { org_name: orgName } : {},
+    const { data: invited, error: cErr } = await admin.auth.admin.inviteUserByEmail(email, {
+      data: orgName ? { org_name: orgName } : {},
+      redirectTo,
     })
     if (cErr) {
-      const msg = /already/i.test(cErr.message) ? 'That email already has an account.' : cErr.message
+      const msg = /already|registered/i.test(cErr.message) ? 'That email already has an account.' : cErr.message
       return json({ error: msg }, 400)
     }
-    return json({ ok: true, user_id: created.user?.id, email })
+    return json({ ok: true, user_id: invited.user?.id, email, invited: true })
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) }, 500)
   }
