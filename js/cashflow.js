@@ -304,28 +304,48 @@
         // "Expected Monthly Rent"). The forecast must convert that monthly figure
         // into the REAL cash that leaves per occurrence, or non-monthly costs are
         // grossly mis-billed (a Daily cost billed at its full monthly amount every
-        // day injected ~£21k of phantom outflow). Weekly/daily etc. distribute
-        // across the month so they net to the monthly figure; quarterly/annual are
-        // smoothed to their monthly figure (see costPerOccurrence for why).
+        // day injected ~£21k of phantom outflow).
+        //   - sub-monthly (daily/weekly/fortnightly/4-weekly) + monthly: convert to
+        //     the per-occurrence slice and distribute across the window.
+        //   - quarterly/annual: show the REAL lump (monthly x 3 / x 12) on its true
+        //     due date, derived from the last reconciled payment + the frequency
+        //     interval (a reliable, self-correcting fact — the stored annual date
+        //     fields are monthly-aligned/stale and can't be trusted). The lump only
+        //     appears if that date falls inside the 31-day window. Costs with no
+        //     payment history fall back to a smoothed monthly figure.
         activeCostsList.forEach(r => {
             const expectedMonthly = Number(getField(r, F.costExpected)) || 0;
             if (expectedMonthly <= 0) return;
             const dueDay = getNumVal(r, F.costDueDay, 1);
             const freq = getField(r, F.costFrequency) || 'Monthly';
-            const amount = costPerOccurrence(expectedMonthly, freq);
-            // Quarterly/annual are smoothed: project them monthly at the monthly
-            // figure rather than as a lump on an unreliable annual date.
-            const projFreq = isMonthlySmoothed(freq) ? 'Monthly' : freq;
+            const fLower = String(freq).toLowerCase();
             const name = String(getField(r, F.costName) || 'Unknown cost');
-            const dueDateNext = getField(r, F.costDueDateNext);
             const costSubCatIds = getField(r, F.costSubCategory); // linked sub-category record IDs
 
-            projectDates(today, dueDay, projFreq, null, dueDateNext).forEach(dk => {
-                if (dayMap[dk]) {
-                    const cleared = isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds, r.id);
-                    dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '', cleared });
+            const pushOutflow = (dk, amount) => {
+                if (!dayMap[dk]) return;
+                const cleared = isInReconWindow(dk) && isOutflowAlreadyCleared(amount, name, costSubCatIds, r.id);
+                dayMap[dk].outflows.push({ name, amount, account: costLastAccount[r.id] || '', cleared });
+            };
+
+            const isLump = fLower === 'quarterly' || fLower === 'annually' || fLower === 'annual';
+            if (isLump) {
+                const monthsStep = fLower === 'quarterly' ? 3 : 12;
+                const lumpAmount = expectedMonthly * monthsStep; // monthly-equiv x months in the cycle
+                const nextDue = nextDueFromLastPayment(getField(r, F.costLastReconDate), monthsStep, today);
+                if (nextDue) {
+                    // Lands in dayMap only if within the 31-day window — else £0 this cycle.
+                    pushOutflow(dateKey(nextDue), lumpAmount);
+                } else {
+                    // No payment history to anchor the lump — smooth to the monthly figure.
+                    projectDates(today, dueDay, 'Monthly', null, null).forEach(dk => pushOutflow(dk, expectedMonthly));
                 }
-            });
+                return;
+            }
+
+            const amount = costPerOccurrence(expectedMonthly, freq);
+            const dueDateNext = getField(r, F.costDueDateNext);
+            projectDates(today, dueDay, freq, null, dueDateNext).forEach(dk => pushOutflow(dk, amount));
         });
 
         // Calculate running balance + worst-case line (deducting variable cost reserves daily)
@@ -921,29 +941,54 @@
         return rows;
     }
 
-    // "Expected Cost" in Airtable is a MONTHLY-equivalent for every cost, whatever
-    // its billing Frequency. The forecast places one charge per projected date, so
-    // it must convert that monthly figure into the real cash that leaves per
-    // occurrence, or non-monthly costs are grossly mis-billed.
-    //   - sub-monthly (daily/weekly/fortnightly/4-weekly): a slice of the monthly
-    //     figure, so the many occurrences in a month net back to the monthly total.
-    //   - quarterly/annual: SMOOTHED to the monthly figure and projected monthly
-    //     (see isMonthlySmoothed / projFreq below). True lump-on-due-date is
-    //     deferred until the annual due-date data is reliable — today the forecast's
-    //     annual date field is monthly-aligned and several "next payment" dates are
-    //     stale, so lumps would land in the wrong month.
-    //   - monthly / blank / unknown: the monthly figure unchanged.
-    function isMonthlySmoothed(frequency) {
-        const f = (frequency || 'Monthly').toLowerCase();
-        return f === 'quarterly' || f === 'annually' || f === 'annual';
-    }
+    // Convert a MONTHLY-equivalent "Expected Cost" into the real cash that leaves
+    // per billing occurrence, for sub-monthly costs the forecast distributes across
+    // the window (many occurrences net back to the monthly figure). Monthly and any
+    // unrecognised frequency pass through unchanged. Quarterly/annual do NOT use
+    // this — they are placed as a single lump (see the cost-projection loop).
     function costPerOccurrence(expectedMonthly, frequency) {
         const f = (frequency || 'Monthly').toLowerCase();
         if (f === 'weekly')      return expectedMonthly * 12 / 52;
         if (f === 'fortnightly') return expectedMonthly * 12 / 26;
         if (f === '4-weekly')    return expectedMonthly * 12 / 13;
         if (f === 'daily')       return expectedMonthly * 12 / 365;
-        return expectedMonthly; // monthly, quarterly, annual, blank, unknown
+        return expectedMonthly; // monthly, blank, or anything unrecognised
+    }
+
+    // Add whole months to a date, clamping the day to the target month's length
+    // (e.g. 31 Jan + 1 month → 28/29 Feb) so we never roll into the next month.
+    function addMonthsClamped(date, n) {
+        const m = date.getMonth() + n;
+        const targetY = date.getFullYear() + Math.floor(m / 12);
+        const targetM = ((m % 12) + 12) % 12;
+        const lastDay = new Date(targetY, targetM + 1, 0).getDate();
+        return new Date(targetY, targetM, Math.min(date.getDate(), lastDay));
+    }
+
+    // Next real due date for a lumpy (quarterly/annual) cost: step the frequency
+    // interval forward from the last reconciled payment until the date is today or
+    // later. This derives the true billing date from a hard fact (the last payment)
+    // rather than the unreliable stored date fields, and self-corrects as new
+    // payments reconcile. Returns a Date, or null if there is no usable last date.
+    function nextDueFromLastPayment(lastPaymentDate, monthsStep, today) {
+        if (!lastPaymentDate) return null;
+        // Parse the calendar Y-M-D directly from the ISO string. Using new Date(str)
+        // on a date-only value parses as UTC midnight, which can shift a day in
+        // non-UK timezones; taking the parts verbatim keeps it on the real date.
+        const s = String(lastPaymentDate);
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        let next;
+        if (m) {
+            next = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        } else {
+            const raw = new Date(lastPaymentDate);
+            if (isNaN(raw.getTime())) return null;
+            next = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+        }
+        const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        let guard = 0;
+        while (next < todayMid && guard < 600) { next = addMonthsClamped(next, monthsStep); guard++; }
+        return next;
     }
 
     // ── Due Date Projection ──
