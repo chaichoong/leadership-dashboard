@@ -158,9 +158,50 @@
       return enabled;
     }
 
+    async function doLogout(){ await sb.auth.signOut(); localStorage.removeItem('_dlr_last_uid'); location.reload(); }
+
+    // Show the signed-in workspace/user — never a hard-coded name.
+    function setIdentity(user){
+      const label = (user && user.user_metadata && user.user_metadata.org_name) || (user && user.email) || '';
+      const sub = document.querySelector('.brand .sub');
+      if (!sub) return;
+      sub.textContent = label + ' ';
+      const a = document.createElement('a'); a.id = 'logout'; a.textContent = 'Logout';
+      a.addEventListener('click', doLogout); sub.appendChild(a);
+    }
+
+    // When a DIFFERENT user signs in, wipe cached clone data so one person never
+    // sees another's cached view. Never touches the auth session or the live
+    // Airtable site's tokens (_dlr_pat / airtable_pat / cm_at_key).
+    async function clearStaleCaches(){
+      try {
+        const keep = new Set(['_dlr_sb_app','_dlr_pat','airtable_pat','cm_at_key','_dlr_last_uid']);
+        Object.keys(localStorage).forEach(k => {
+          if (keep.has(k)) return;
+          if (/^_task_?|^sys_task|^sys_vtask|^_slack_notified|^_dlr_cache/.test(k)) localStorage.removeItem(k);
+        });
+        if (indexedDB.databases) {
+          const dbs = await indexedDB.databases();
+          await Promise.all(dbs.map(db => db.name ? new Promise(res => {
+            const r = indexedDB.deleteDatabase(db.name); r.onsuccess = r.onerror = r.onblocked = () => res();
+          }) : Promise.resolve()));
+        }
+      } catch (e) {}
+    }
+
     async function showApp() {
+      const { data: { session } } = await sb.auth.getSession();
+      const uid = session && session.user && session.user.id;
+      // Different user than last time → clear stale caches, then reload clean.
+      if (uid && uid !== localStorage.getItem('_dlr_last_uid')) {
+        localStorage.setItem('_dlr_last_uid', uid);
+        await clearStaleCaches();
+        location.reload();
+        return;
+      }
       document.getElementById('login').style.display = 'none';
       document.getElementById('app').style.display = 'block';
+      if (session) setIdentity(session.user);
       await applyEntitlements();
       let page = (location.hash || '#tasks').slice(1);
       const navEl = document.querySelector(`.navitem[data-page="${page}"]`);
@@ -182,7 +223,7 @@
       if (error) { err.textContent = error.message; err.style.display = 'block'; return; }
       showApp();
     }
-    document.getElementById('logout').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+    document.getElementById('logout').addEventListener('click', doLogout);
 
     // Auto-enter if already signed in.
     sb.auth.getSession().then(({ data }) => { if (data.session) showApp(); });
