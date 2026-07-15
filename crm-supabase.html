@@ -341,9 +341,11 @@
     // ── Invite client (calls the create-client Edge Function) ───────────────────
     const FN_URL = SB_URL + '/functions/v1/create-client';
     const SETPW_URL = 'https://chaichoong.github.io/leadership-dashboard/set-password.html';
+    let _inviteName = '';
     document.getElementById('dCreateClient').onclick = () => {
       const d = state.deals.find(x => x.id === document.getElementById('dId').value) || null;
       const c = d ? state.contacts.find(x => x.id === d.contact_id) : null;
+      _inviteName = c ? (c.name || '') : '';
       document.getElementById('aEmail').value = c ? (c.email || '') : '';
       document.getElementById('aOrg').value = c ? (c.company || c.name || '') : '';
       document.getElementById('acctForm').style.display = 'block';
@@ -359,7 +361,7 @@
         const { data: { session } } = await sb.auth.getSession();
         const res = await fetch(FN_URL, { method:'POST',
           headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+(session?.access_token||''), 'apikey':SB_ANON },
-          body: JSON.stringify({ email, org_name: org, redirect_to: SETPW_URL }) });
+          body: JSON.stringify({ email, org_name: org, name: _inviteName, redirect_to: SETPW_URL }) });
         const out = await res.json().catch(()=>({error:'Unexpected response'}));
         if (!res.ok || out.error){ toast('Error: '+(out.error||res.status)); btn.disabled=false; btn.textContent='Send invitation'; return; }
         document.getElementById('rEmail').textContent = email;
