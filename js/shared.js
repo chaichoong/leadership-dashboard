@@ -87,10 +87,32 @@
             PAT = saved;
             document.getElementById('authScreen').style.display = 'none';
             loadDashboard();
+            updateAiBrainBadge();
+            setInterval(updateAiBrainBadge, REFRESH_INTERVAL);
         }
         document.getElementById('patInput').addEventListener('keydown', e => {
             if (e.key === 'Enter') authenticate();
         });
+    }
+
+    // AI Brain sidebar badge — how many items are waiting for Kevin's call
+    // (open questions + unresolved sensitive flags in the private feed).
+    async function updateAiBrainBadge() {
+        const el = document.getElementById('aiBrainSidebarBadge');
+        if (!el || !PAT) return;
+        try {
+            const r = await fetch('https://api.airtable.com/v0/appnqjDpqDniH3IRl/tblZ75JgE1wzDP0ps?pageSize=100', {
+                headers: { Authorization: 'Bearer ' + PAT }
+            });
+            if (!r.ok) return;
+            const data = await r.json();
+            const waiting = (data.records || []).filter(rec => {
+                const f = rec.fields || {};
+                return (f.Kind === 'query' || f.Kind === 'sensitive') && f.Status === 'open' && !f.Answer;
+            }).length;
+            el.textContent = waiting;
+            el.style.display = waiting > 0 ? 'inline-block' : 'none';
+        } catch (e) { /* badge is cosmetic; stay quiet on network errors */ }
     }
     if (document.readyState === 'complete') {
         _opsDirectorInit();
@@ -546,6 +568,11 @@
     const ACCOUNTS_GROUP = ['income', 'ar-variable', 'costs', 'invoices', 'transactions', 'fintable'];
 
     async function switchTab(tabId) {
+        // Leaving the AI Brain tab: refresh its sidebar badge so answers Kevin
+        // just tapped drop the waiting count straight away.
+        if (window.location.hash === '#ai-brain' && tabId !== 'ai-brain') {
+            setTimeout(updateAiBrainBadge, 400);
+        }
         // Standalone-only pages (e.g. Property Compliance, How It Works) live in
         // PAGE_REGISTRY with a `standalone` file but have NO in-app `tab-<id>`
         // panel. Calling switchTab for them used to deactivate every panel and
