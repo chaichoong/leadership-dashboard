@@ -1495,9 +1495,21 @@ function doAuth(){
 // never sees the owner's team names. Identity comes from the Supabase session
 // stored on this origin (shared storageKey with the shell).
 const OWNER_LOGIN = 'kevin@operationsdirector.co.uk';
-function _sbUser(){ try{ const s=JSON.parse(localStorage.getItem('_dlr_sb_app')||'{}'); return s.user||(s.currentSession&&s.currentSession.user)||null; }catch(e){ return null; } }
-function loggedInEmail(){ const u=_sbUser(); return ((u&&u.email)||'').toLowerCase(); }
-function loggedInName(){ const u=_sbUser()||{}; return (u.user_metadata&&(u.user_metadata.org_name||u.user_metadata.full_name||u.user_metadata.name))||((u.email||'').split('@')[0])||'You'; }
+// Read the signed-in user's email + metadata from the shared Supabase session.
+// Tries the stored user object, then falls back to decoding the JWT payload, so
+// it's robust to storage-shape differences.
+function _sbClaims(){
+  try{
+    const s=JSON.parse(localStorage.getItem('_dlr_sb_app')||'{}');
+    const u=s.user||(s.currentSession&&s.currentSession.user);
+    if(u&&u.email) return { email:u.email, meta:u.user_metadata||{} };
+    const tok=s.access_token||(s.currentSession&&s.currentSession.access_token);
+    if(tok){ const p=JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return { email:p.email||'', meta:p.user_metadata||{} }; }
+  }catch(e){}
+  return { email:'', meta:{} };
+}
+function loggedInEmail(){ return (_sbClaims().email||'').toLowerCase(); }
+function loggedInName(){ const c=_sbClaims(); return c.meta.org_name||c.meta.full_name||c.meta.name||((c.email||'').split('@')[0])||'You'; }
 function initIdentity(){
   if(loggedInEmail()===OWNER_LOGIN){
     const s=localStorage.getItem('_task_user');
@@ -1505,8 +1517,7 @@ function initIdentity(){
     showIdentityOverlay();return false;
   }
   // Not the owner → this is the logged-in user's own workspace; identify them.
-  const u=_sbUser();
-  currentUser={key:'me',name:loggedInName(),email:(u&&u.email)||''};
+  currentUser={key:'me',name:loggedInName(),email:_sbClaims().email||''};
   renderUserBadge();return true;
 }
 function showIdentityOverlay(){
