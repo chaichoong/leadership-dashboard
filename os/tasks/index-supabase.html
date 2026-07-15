@@ -179,7 +179,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .badge-business{background:var(--accent-soft);color:var(--accent);font-size:10px;margin-left:4px}
 
 /* Avatars */
-.avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:#fff;flex-shrink:0}
+.avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:var(--fw-bold);color:#fff;background:#2C6E49;flex-shrink:0}
 .avatar-kevin{background:#6366f1}.avatar-mica{background:#ec4899}
 .avatar-erica{background:#f59e0b}.avatar-may{background:#22c55e}
 .avatar-gary{background:#0ea5e9}.avatar-rob{background:#a855f7}.avatar-roy{background:#14b8a6}
@@ -722,7 +722,26 @@ const TM = {
 };
 let allTeamMembers = [];
 
-const TEAM = [
+// ── Identity helpers: scope the team list to the logged-in workspace ──────────
+const OWNER_LOGIN = 'kevin@operationsdirector.co.uk';
+function _sbClaims(){
+  try{
+    const s=JSON.parse(localStorage.getItem('_dlr_sb_app')||'{}');
+    const u=s.user||(s.currentSession&&s.currentSession.user);
+    if(u&&u.email) return { email:u.email, meta:u.user_metadata||{} };
+    const tok=s.access_token||(s.currentSession&&s.currentSession.access_token);
+    if(tok){ const p=JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return { email:p.email||'', meta:p.user_metadata||{} }; }
+  }catch(e){}
+  return { email:'', meta:{} };
+}
+function loggedInEmail(){ return (_sbClaims().email||'').toLowerCase(); }
+function loggedInName(){ const c=_sbClaims(); return c.meta.org_name||c.meta.full_name||c.meta.name||((c.email||'').split('@')[0])||'You'; }
+const IS_OWNER = loggedInEmail()===OWNER_LOGIN;
+
+// The owner's home workspace uses this hard-coded team (his people). ANY other
+// workspace starts empty and fills only from ITS OWN team members after load,
+// so a client only ever sees people they've added to their own workspace.
+const TEAM_SEED = [
   { key:'kevin', name:'Kevin Brittain',  email:'kevin@runpreneur.org.uk' },
   { key:'mica',  name:'Mica Albovias',   email:'micaa.work@gmail.com' },
   { key:'erica', name:'Ericamae Atenta', email:'atentaerica@gmail.com' },
@@ -734,6 +753,7 @@ const TEAM = [
   { key:'rob',   name:'Rob Jackson',     email:'rjm320@hotmail.com' },
   { key:'roy',   name:'Roy Lavin',       email:'roy.lavin1978@gmail.com' },
 ];
+let TEAM = IS_OWNER ? TEAM_SEED.slice() : [];
 
 const STATUS_OPTIONS = ['Today','Upcoming','Approval','Completed','Overdue'];
 const PRIORITY_OPTIONS = ['Project','Urgent','Not Urgent'];
@@ -1493,23 +1513,8 @@ function doAuth(){
 // The owner's home workspace keeps the team-member picker (switch between team
 // members). Any OTHER logged-in user is identified as themselves, so a client
 // never sees the owner's team names. Identity comes from the Supabase session
-// stored on this origin (shared storageKey with the shell).
-const OWNER_LOGIN = 'kevin@operationsdirector.co.uk';
-// Read the signed-in user's email + metadata from the shared Supabase session.
-// Tries the stored user object, then falls back to decoding the JWT payload, so
-// it's robust to storage-shape differences.
-function _sbClaims(){
-  try{
-    const s=JSON.parse(localStorage.getItem('_dlr_sb_app')||'{}');
-    const u=s.user||(s.currentSession&&s.currentSession.user);
-    if(u&&u.email) return { email:u.email, meta:u.user_metadata||{} };
-    const tok=s.access_token||(s.currentSession&&s.currentSession.access_token);
-    if(tok){ const p=JSON.parse(atob(tok.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); return { email:p.email||'', meta:p.user_metadata||{} }; }
-  }catch(e){}
-  return { email:'', meta:{} };
-}
-function loggedInEmail(){ return (_sbClaims().email||'').toLowerCase(); }
-function loggedInName(){ const c=_sbClaims(); return c.meta.org_name||c.meta.full_name||c.meta.name||((c.email||'').split('@')[0])||'You'; }
+// stored on this origin (shared storageKey with the shell). Helpers + TEAM are
+// defined near the top of the script.
 function initIdentity(){
   if(loggedInEmail()===OWNER_LOGIN){
     const s=localStorage.getItem('_task_user');
@@ -1538,7 +1543,8 @@ function renderUserBadge(){
   if(!currentUser)return;
   const b=document.getElementById('userBadge');
   const i=currentUser.name.split(' ').map(w=>w[0]).join('');
-  b.innerHTML=`<span class="avatar avatar-${currentUser.key}">${i}</span>${escHtml(currentUser.name.split(' ')[0])}<span class="switch-user" onclick="switchUser()">Switch</span>`;
+  const switchLink = (TEAM.length>1) ? `<span class="switch-user" onclick="switchUser()">Switch</span>` : '';
+  b.innerHTML=`<span class="avatar avatar-${currentUser.key}">${i}</span>${escHtml(currentUser.name.split(' ')[0])}${switchLink}`;
   b.style.display='flex';
 }
 function checkIdentityAndLoad(){if(initIdentity()){activeTeam=currentUser.key;loadAllData()}}
@@ -7999,6 +8005,13 @@ async function loadAllData(){
         ||'(Unknown)';
       return{id:r.id,name:displayName,email:m?.email||''};
     }).filter(m=>m.email);
+    // Non-owner workspaces: the people list IS this workspace's own team members
+    // (loaded above via RLS). So a client only ever sees people in their own
+    // workspace — empty until they add any. The owner keeps the hard-coded team.
+    if(!IS_OWNER){
+      TEAM = allTeamMembers.map((m,i)=>({key:'tm'+i,name:m.name,email:m.email}));
+      try{renderUserBadge()}catch(e){}
+    }
     try{populateProjectFilterOptions()}catch(e){}
 
     const pm={};allProjects.forEach(p=>pm[p.id]=p.name);
