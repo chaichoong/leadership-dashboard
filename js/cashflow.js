@@ -623,7 +623,7 @@
                     return `<div class="cashflow-detail-item in" style="${excluded ? 'opacity:0.5' : ''}"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="in" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1;${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value" style="${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">+${fmt(f.amount)}</span></div>`;
                 }).join('')
                 : '<div class="cashflow-detail-item"><em>None</em></div>';
-            const outflowsHtml = r.outflows.length > 0
+            const baseOutflowsHtml = r.outflows.length > 0
                 ? r.outflows.map((f, fi) => {
                     if (f.cleared) {
                         return `<div class="cashflow-detail-item out" style="opacity:0.5"><span class="cashflow-detail-item-name" style="flex:1;color:var(--text-muted)">${escHtml(f.name)}${reconBadge}${acctTag(f.account)}</span><span class="cashflow-detail-item-value" style="text-decoration:line-through;color:var(--text-muted)">-${fmt(f.amount)}</span></div>`;
@@ -633,7 +633,15 @@
                     const excluded = !checked;
                     return `<div class="cashflow-detail-item out" style="${excluded ? 'opacity:0.5' : ''}"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1"><input type="checkbox" data-cf-key="${cbId}" data-row="${i}" data-fi="${fi}" data-dir="out" ${checked} onchange="toggleCFExclusion(this.dataset.cfKey)"><span class="cashflow-detail-item-name" style="flex:1;${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escHtml(f.name)}${acctTag(f.account)}</span></label><span class="cashflow-detail-item-value" style="${excluded ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">-${fmt(f.amount)}</span></div>`;
                 }).join('')
-                : '<div class="cashflow-detail-item"><em>None</em></div>';
+                : '';
+            // Weekly commitments (Wages, Top-up, etc.) are added to this day's Out
+            // total in waProjected, so they must show in the detail too or the
+            // Out column won't reconcile to the listed items.
+            const rowCommitments = commitments.filter(c => r.date.getDay() === c.day && (c.amount || 0) > 0);
+            const commitmentsHtml = rowCommitments.map(c =>
+                `<div class="cashflow-detail-item out"><span class="cashflow-detail-item-name" style="flex:1">${escHtml(c.label || 'Weekly commitment')} <span style="color:var(--text-muted);font-size:var(--fs-xs)">(weekly)</span></span><span class="cashflow-detail-item-value">-${fmt(c.amount)}</span></div>`
+            ).join('');
+            const outflowsHtml = (baseOutflowsHtml + commitmentsHtml) || '<div class="cashflow-detail-item"><em>None</em></div>';
 
             const dayAccounts = new Set();
             r.inflows.forEach(f => { if (f.account) dayAccounts.add(f.account); });
@@ -643,10 +651,16 @@
                 : '';
 
             const withdrawCell = w
-                ? `<span style="color:var(--accent);font-weight:var(--fw-semibold)">${fmt(w.amount)}</span>`
+                ? `<span style="color:var(--accent);font-weight:var(--fw-semibold)">-${fmt(w.amount)}</span>`
                 : '';
 
             const waDay = waProjected[i];
+            // In/Out must come from the SAME series as Opening/Closing (waProjected),
+            // not the raw base rows. waProjected excludes cleared + unticked items and
+            // includes weekly commitments, so Opening + In - Out - Withdraw = Closing
+            // reconciles exactly. Falls back to raw rows only if waProjected is absent.
+            const dayInVal = waDay ? waDay.dayIn : r.dayIn;
+            const dayOutVal = waDay ? waDay.dayOut : r.dayOut;
             const closingBalance = waDay ? waDay.balance : r.closing;
             const closingBalClass = closingBalance < 0 ? 'text-red' : closingBalance < 500 ? 'text-amber' : 'text-green';
 
@@ -654,8 +668,8 @@
                 <tr class="cashflow-row${wknd}" onclick="toggleCashflowRow('cfrow-${i}', this)">
                     <td><span class="expand-chevron" id="cf-chev-${i}">▶</span><strong>${dayName(r.date)}</strong></td>
                     <td>${fmtAccounting(waDay ? waDay.opening : r.opening)}</td>
-                    <td class="text-green">${r.dayIn > 0 ? '+' + fmt(r.dayIn) : ''}</td>
-                    <td class="text-red">${r.dayOut > 0 ? '-' + fmt(r.dayOut) : ''}</td>
+                    <td class="text-green">${dayInVal > 0 ? '+' + fmt(dayInVal) : ''}</td>
+                    <td class="text-red">${dayOutVal > 0 ? '-' + fmt(dayOutVal) : ''}</td>
                     <td class="${closingBalClass}"><strong>${fmtAccounting(closingBalance)}</strong></td>
                     <td>${withdrawCell}</td>
                     <td class="od-text-muted-sm" style="white-space:nowrap">${acctSummary}</td>
@@ -674,7 +688,12 @@
         }).join('');
 
         // Totals row + cross-check diagnostic
-        const totalNet = totalIn - totalOut;
+        // Sum the SAME series shown in the table columns (waProjected + withdrawals)
+        // so the Totals row reconciles to the columns: In - Out - Withdraw = net change.
+        const tblIn = waProjected.reduce((s, d) => s + d.dayIn, 0);
+        const tblOut = waProjected.reduce((s, d) => s + d.dayOut, 0);
+        const tblWithdraw = waTotalAvailable;
+        const totalNet = tblIn - tblOut - tblWithdraw;
         const monthlyCostsCalc = activeCostsList.reduce((s, r) => s + (Number(getField(r, F.costExpected)) || 0), 0);
         const fullOutflows = totalOut + clearedOut;
         const fullInflows = totalIn + clearedIn;
@@ -690,14 +709,15 @@
             <tr style="background:var(--bg-subtle);font-weight:var(--fw-semibold);border-top:2px solid var(--border-default)">
                 <td>Totals</td>
                 <td></td>
-                <td class="text-green">+${fmt(totalIn)}</td>
-                <td class="text-red">-${fmt(totalOut)}</td>
+                <td class="text-green">+${fmt(tblIn)}</td>
+                <td class="text-red">-${fmt(tblOut)}</td>
                 <td class="${totalNet >= 0 ? 'text-green' : 'text-red'}">${totalNet >= 0 ? '+' : '-'}${fmt(totalNet)}</td>
-                <td></td>
+                <td class="text-red">${tblWithdraw > 0 ? '-' + fmt(tblWithdraw) : ''}</td>
                 <td></td>
             </tr>
             <tr style="background:var(--bg-surface-2);font-size:0.8rem;color:var(--text-secondary)">
                 <td colspan="7" style="padding:8px 12px;line-height:1.6">
+                    <strong>How each row reconciles:</strong> Opening + In − Out − Withdraw = Closing, and each day's Closing becomes the next day's Opening. In/Out include weekly commitments and exclude reconciled or unticked items.<br>
                     <strong>Cross-check vs Dashboard metrics:</strong><br>
                     Inflows: ${fmt(fullInflows)} forecast (incl. reconciled) vs ${fmt(monthlyIncome)} monthly income
                     <span style="color:${inMatch ? 'var(--success)' : 'var(--warning)'}">${inMatch ? '✓ Match' : '△ Differs'}</span>
