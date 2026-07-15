@@ -172,6 +172,15 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
+  // Tell the dashboard shell to recount the sidebar badge. Fired after every
+  // answered question, resolved sensitive item, and data refresh, so the badge
+  // drops in real time instead of waiting for a tab switch or the 15-min timer.
+  function notifyParentBadge(){
+    if (window.parent !== window){
+      window.parent.postMessage({ type: 'od-brain-badge' }, window.location.origin);
+    }
+  }
+
   function fmtDate(iso){
     if (!iso) return '';
     var p = iso.split('-'); if (p.length !== 3) return iso;
@@ -207,7 +216,7 @@
     var url = 'https://api.airtable.com/v0/' + BASE + '/' + TABLE + '?pageSize=100&cb=' + Date.now();
     fetch(url, { headers: { Authorization: 'Bearer ' + PAT } })
       .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function(data){ render(data.records || []); loaded = true; })
+      .then(function(data){ render(data.records || []); loaded = true; notifyParentBadge(); })
       .catch(function(err){
         setSync('Could not sync (' + esc(err.message) + ')', true);
         document.getElementById('captured').innerHTML = '<p class="hint">Your brain refreshes each night. Try Refresh in a moment.</p>';
@@ -276,6 +285,7 @@
         }).then(function(r){
           if (r.ok){
             box.innerHTML = '<span class="resolved">Answered: ' + esc(val) + '. Your brain learns and applies it tonight.</span>';
+            notifyParentBadge();
           } else { toast('Could not save just now, try again'); }
         }).catch(function(){ toast('Could not save just now, try again'); });
       });
@@ -325,6 +335,7 @@
           body: JSON.stringify({ fields: { Status: 'resolved' } })
         }).then(function(r){
           box.innerHTML = r.ok ? '<span class="resolved">Acknowledged. Left private, no action taken.</span>' : 'Could not save just now.';
+          if (r.ok) notifyParentBadge();
         }).catch(function(){ box.innerHTML = 'Could not save just now.'; });
       });
     });

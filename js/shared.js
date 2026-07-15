@@ -95,6 +95,13 @@
         });
     }
 
+    // The AI Brain iframe pings this after every answered question, resolved
+    // sensitive item, and data refresh, so the badge drops in real time.
+    window.addEventListener('message', e => {
+        if (e.origin !== window.location.origin) return;
+        if (e.data && e.data.type === 'od-brain-badge') updateAiBrainBadge();
+    });
+
     // AI Brain sidebar badge — how many items are waiting for Kevin's call
     // (open questions + unresolved sensitive flags in the private feed).
     async function updateAiBrainBadge() {
