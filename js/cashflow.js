@@ -524,7 +524,13 @@
             if (minFuture < 50) continue;
             const amt = Math.floor(minFuture / 50) * 50;
             if (amt < 50) continue;
-            waWithdrawals.push({ idx: i, key: rows[i].key, date: rows[i].date, amount: amt, balBefore: day.opening, balAfter: day.opening - amt });
+            // balAfter = the day's real CLOSING balance once this withdrawal is taken
+            // (opening + that day's inflows - outflows - withdrawal), so the green
+            // withdrawal-window bar marries with the Closing column. day.balance here
+            // is the pre-withdrawal closing (the subtraction loop below applies amt),
+            // so closing = day.balance - amt. Using day.opening - amt was wrong: it
+            // ignored the day's own costs.
+            waWithdrawals.push({ idx: i, key: rows[i].key, date: rows[i].date, amount: amt, balBefore: day.opening, balAfter: day.balance - amt });
             for (let j = i; j < waProjected.length; j++) {
                 waProjected[j].balance -= amt;
                 if (j > i) waProjected[j].opening -= amt;
