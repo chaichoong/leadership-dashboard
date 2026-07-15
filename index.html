@@ -79,7 +79,7 @@
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('comms')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('comms')}"><span class="sidebar-icon">&#x1F4E8;</span><span class="sidebar-label">Inbound Comms</span><span class="sidebar-health-dot unknown" data-sidebar-health="comms" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('systemisation')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('systemisation')}"><span class="sidebar-icon">&#x2699;&#xFE0F;</span><span class="sidebar-label">Systemisation</span><span class="sidebar-health-dot unknown" data-sidebar-health="systemisation" title="No checks run yet"></span></div>
                     <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('skills')}"><span class="sidebar-icon">&#x1F9E0;</span><span class="sidebar-label">Skills Library</span><span class="sidebar-health-dot unknown" data-sidebar-health="skills" title="No checks run yet"></span></div>
-                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ai-brain')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ai-brain')}"><span class="sidebar-icon">&#x1F4AD;</span><span class="sidebar-label">AI Brain</span><span class="sidebar-health-dot unknown" data-sidebar-health="ai-brain" title="No checks run yet"></span></div>
+                    <div class="sidebar-item" role="menuitem" tabindex="0" onclick="switchTab('ai-brain')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('ai-brain')}"><span class="sidebar-icon">&#x1F4AD;</span><span class="sidebar-label">AI Brain</span><span class="sidebar-health-dot unknown" data-sidebar-health="ai-brain" title="No checks run yet"></span><span id="aiBrainSidebarBadge" title="Items waiting for your call" style="display:none;margin-left:6px;background:var(--accent);color:var(--accent-on);font-size:var(--fs-xs);font-weight:var(--fw-semibold);border-radius:var(--radius-full);padding:1px 7px;"></span></div>
                 </div>
             </div>
 
@@ -846,7 +846,7 @@
     <!-- defer: non-blocking download, executed in order before DOMContentLoaded — lets HTML paint the loading overlay immediately -->
     <script defer src="js/config.js?v=46"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
-    <script defer src="js/shared.js?v=33"></script>
+    <script defer src="js/shared.js?v=34"></script>
     <script defer src="js/sync-bar.js?v=5"></script>
     <script defer src="js/dashboard.js?v=21"></script>
     <script defer src="js/cashflow.js?v=21"></script>
