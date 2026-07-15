@@ -1,7 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "redirects": [
-    { "source": "/", "destination": "/supabase-app.html", "permanent": false },
-    { "source": "/index.html", "destination": "/supabase-app.html", "permanent": false }
+    { "source": "/", "destination": "/login", "permanent": false },
+    { "source": "/index.html", "destination": "/login", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/login", "destination": "/supabase-app.html" }
   ]
 }
