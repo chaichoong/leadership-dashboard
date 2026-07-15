@@ -183,7 +183,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .avatar-kevin{background:#6366f1}.avatar-mica{background:#ec4899}
 .avatar-erica{background:#f59e0b}.avatar-may{background:#22c55e}
 .avatar-gary{background:#0ea5e9}.avatar-rob{background:#a855f7}.avatar-roy{background:#14b8a6}
-.avatar-other{background:#64748b}
+.avatar-other{background:#64748b}.avatar-me{background:#2C6E49}
 .assignee-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
 
 /* Task detail drawer (modal) */
@@ -1490,10 +1490,24 @@ function doAuth(){
 }
 
 // ===== IDENTITY =====
+// The owner's home workspace keeps the team-member picker (switch between team
+// members). Any OTHER logged-in user is identified as themselves, so a client
+// never sees the owner's team names. Identity comes from the Supabase session
+// stored on this origin (shared storageKey with the shell).
+const OWNER_LOGIN = 'kevin@operationsdirector.co.uk';
+function _sbUser(){ try{ const s=JSON.parse(localStorage.getItem('_dlr_sb_app')||'{}'); return s.user||(s.currentSession&&s.currentSession.user)||null; }catch(e){ return null; } }
+function loggedInEmail(){ const u=_sbUser(); return ((u&&u.email)||'').toLowerCase(); }
+function loggedInName(){ const u=_sbUser()||{}; return (u.user_metadata&&(u.user_metadata.org_name||u.user_metadata.full_name||u.user_metadata.name))||((u.email||'').split('@')[0])||'You'; }
 function initIdentity(){
-  const s=localStorage.getItem('_task_user');
-  if(s){try{currentUser=JSON.parse(s);if(currentUser&&currentUser.key){renderUserBadge();return true}}catch(e){}}
-  showIdentityOverlay();return false;
+  if(loggedInEmail()===OWNER_LOGIN){
+    const s=localStorage.getItem('_task_user');
+    if(s){try{currentUser=JSON.parse(s);if(currentUser&&currentUser.key){renderUserBadge();return true}}catch(e){}}
+    showIdentityOverlay();return false;
+  }
+  // Not the owner → this is the logged-in user's own workspace; identify them.
+  const u=_sbUser();
+  currentUser={key:'me',name:loggedInName(),email:(u&&u.email)||''};
+  renderUserBadge();return true;
 }
 function showIdentityOverlay(){
   const btns=document.getElementById('identityBtns');
