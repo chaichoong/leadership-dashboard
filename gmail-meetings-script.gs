@@ -239,6 +239,9 @@ function syncMeetings() {
   var existingUuids = getExistingMeetingUuids(config);
   var teamMap     = getLinkNameMap(config, T.team, TEAM_PRIMARY);
   var projectMap  = getLinkNameMap(config, T.projects, PROJECT_PRIMARY);
+  // Task-level dedupe: text index of every active (not Completed) task, built
+  // once and shared across all meetings this run so duplicates never get added.
+  var taskDedupe  = buildTaskDedupeIndex(config);
 
   var todayStr = fmtDate(new Date());
   var found = 0, created = 0, skipped = 0, tasksCreated = 0;
@@ -298,7 +301,7 @@ function syncMeetings() {
       existingUuids[msgId] = meetingId;
 
       // ---- Tasks from action points ----
-      var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr);
+      var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr, { dedupe: taskDedupe });
       tasksCreated += taskIds.length;
 
       // Link the new tasks back into the meeting, then close it out.
@@ -321,6 +324,7 @@ function syncMeetings() {
     meetingsCreated: created,
     skippedExisting: skipped,
     tasksCreated: tasksCreated,
+    tasksSkippedDuplicate: taskDedupe.skipped,
   };
   Logger.log('RESULT: ' + JSON.stringify(result));
   return result;
@@ -332,6 +336,7 @@ function syncMeetings() {
 // so both paths build tasks identically.
 function createTasksForMeeting(config, parsed, projectMap, todayStr, opts) {
   var notify = !(opts && opts.notify === false);   // repair back-fills silently
+  var dedupe = opts && opts.dedupe;                 // shared active-task text index
   var taskIds = [];
   var isWeekly = parsed.isWeeklyCheckin;
   // Collaborators = the team members who were present at this meeting.
@@ -343,6 +348,12 @@ function createTasksForMeeting(config, parsed, projectMap, todayStr, opts) {
     var ownerRaw = item.owner;
     if (!ownerRaw && isWeekly) ownerRaw = 'Mica';     // weekly check-in default
     var email = resolveAssigneeEmail(ownerRaw);
+
+    // Duplicate guard — comprehensive text test against every active task and
+    // against tasks already created earlier in this run. A meeting re-stating a
+    // standing commitment (weekly check-ins) or rephrasing an open action point
+    // must NOT spawn a second task. Match on the text a human would read.
+    if (dedupe && dedupe.has(item.text)) { dedupe.skipped++; continue; }
 
     // Phase 1: create with name + assignee only (lets base automation run)
     var tFields = {};
@@ -369,6 +380,7 @@ function createTasksForMeeting(config, parsed, projectMap, todayStr, opts) {
     updateRecord(config, T.tasks, taskId, upd);
 
     taskIds.push(taskId);
+    if (dedupe) dedupe.add(item.text);   // later items dedupe against this one too
 
     // Slack DM the assignee (except Kevin) via the always-on worker.
     if (notify && email !== KEVIN_EMAIL) {
@@ -408,6 +420,9 @@ function repairStuckMeetings() {
   var projectMap = getLinkNameMap(config, T.projects, PROJECT_PRIMARY);
   var todayStr   = fmtDate(new Date());
   var stuck      = getStuckMeetings(config);
+  // Same task-level dedupe the live sync uses, so repair never back-fills a task
+  // that already exists as an active task.
+  var taskDedupe = buildTaskDedupeIndex(config);
 
   var repaired = 0, tasksCreated = 0, closedExisting = 0, skippedNoContent = 0;
 
@@ -431,7 +446,7 @@ function repairStuckMeetings() {
     }
 
     var parsed  = parseMeetingFromRecord(rec);
-    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr, { notify: false });
+    var taskIds = createTasksForMeeting(config, parsed, projectMap, todayStr, { notify: false, dedupe: taskDedupe });
 
     var close = mkStatus('Done');
     if (taskIds.length) close[MF.tasks] = taskIds;
@@ -451,6 +466,7 @@ function repairStuckMeetings() {
     stuckFound: stuck.length,
     meetingsRepaired: repaired,
     tasksCreated: tasksCreated,
+    tasksSkippedDuplicate: taskDedupe.skipped,
     closedAlreadyHadTasks: closedExisting,
     skippedNoContent: skippedNoContent,
   };
@@ -1025,6 +1041,178 @@ function getExistingMeetingUuids(config) {
     offset = data.offset || null;
   } while (offset);
   return map;
+}
+
+// ── Task-level de-duplication ───────────────────────────────────────────────
+// The meeting parser turns action points into tasks. Without a cross-reference
+// the same commitment lands in the Tasks table again every time it's mentioned
+// (weekly check-ins re-state standing tasks; different meetings rephrase the
+// same open action). buildTaskDedupeIndex loads every ACTIVE task once and
+// returns an index that answers "does a task like this already exist?" using a
+// comprehensive text test — not a brittle exact-string compare.
+
+// Pull the names of every active (not Completed) task, paging through the table.
+function getActiveTaskNames(config) {
+  var out = [], offset = null;
+  var formula = encodeURIComponent("NOT({Status}='Completed')");
+  do {
+    var url = 'https://api.airtable.com/v0/' + config.base + '/' + T.tasks +
+      '?fields%5B%5D=' + TF.name + '&returnFieldsByFieldId=true&pageSize=100' +
+      '&filterByFormula=' + formula;
+    if (offset) url += '&offset=' + offset;
+    var resp = UrlFetchApp.fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + config.pat },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) { Logger.log('active tasks: ' + resp.getContentText()); break; }
+    var data = JSON.parse(resp.getContentText());
+    (data.records || []).forEach(function (r) {
+      var nm = r.fields[TF.name];
+      if (nm) out.push(nm);
+    });
+    offset = data.offset || null;
+  } while (offset);
+  return out;
+}
+
+// Known team first names + full names, derived from PEOPLE. Used to strip an
+// owner prefix ONLY when the leading word is genuinely a person — never when it
+// is the sentence's own action verb ("Speak to…", "Write to…"), which would
+// wrongly collapse two different tasks.
+var KNOWN_OWNER_NAMES = (function () {
+  var s = {};
+  for (var i = 0; i < PEOPLE.length; i++) {
+    for (var j = 0; j < PEOPLE[i].names.length; j++) {
+      var full = PEOPLE[i].names[j];
+      s[full] = 1;
+      s[full.split(/\s+/)[0]] = 1;
+    }
+  }
+  return s;
+})();
+
+// Length of a leading "<known owner> <commitment marker> " span to strip, else 0.
+// Only fires for a recognised person, so an action verb is never mistaken for an
+// owner. "Mica will update X" / "Rob: do Y" → strip; "Speak to X" → keep.
+function leadingOwnerSpan(t) {
+  var m = t.match(/^([A-Za-z'’.\-]+(?:\s+[A-Za-z'’.\-]+)?)\s+(?:will|'ll|is going to|going to|agreed to|needs? to|should|to)\s+/i);
+  if (m && isKnownOwner(m[1])) return m[0].length;
+  var m2 = t.match(/^([A-Za-z'’.\-]+(?:\s+[A-Za-z'’.\-]+)?)\s*[:\-–—]\s+/);
+  if (m2 && isKnownOwner(m2[1])) return m2[0].length;
+  return 0;
+}
+function isKnownOwner(phrase) {
+  var low = String(phrase || '').toLowerCase().trim();
+  return !!(KNOWN_OWNER_NAMES[low] || KNOWN_OWNER_NAMES[low.split(/\s+/)[0]]);
+}
+
+// Normalise task text so wording differences don't hide a real duplicate: strip a
+// leading owner tag ("Mica will update X" → "update x"), then lowercase and drop
+// punctuation.
+function normalizeTaskText(s) {
+  var t = String(s || '').trim();
+  var span = leadingOwnerSpan(t);
+  if (span) t = t.slice(span);
+  return t.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Filler words carry no meaning for matching; a light suffix trim ("update"/
+// "updates"/"updating"/"updated" → "updat") makes tense/plural differences match.
+var TASK_STOPWORDS = { 'a':1,'an':1,'the':1,'to':1,'of':1,'for':1,'and':1,'or':1,
+  'in':1,'on':1,'at':1,'by':1,'with':1,'this':1,'that':1,'is':1,'are':1,'be':1,
+  'will':1,'please':1,'need':1,'needs':1,'should':1,'must':1,'it':1,'we':1,
+  'our':1,'up':1,'out':1,'all':1,'any':1,'his':1,'her':1,'their':1,'from':1 };
+
+function taskTokens(s) {
+  var norm = normalizeTaskText(s);
+  var words = norm ? norm.split(' ') : [];
+  var set = {};
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    if (w.length < 2 || TASK_STOPWORDS[w]) continue;
+    w = w.replace(/(ing|ed|es|s)$/, '');                       // light stem
+    if (w.length >= 4 && w.charAt(w.length - 1) === 'e') w = w.slice(0, -1); // update/updating/updated → updat
+    if (w.length < 2) continue;
+    set[w] = 1;
+  }
+  return set;
+}
+
+function objSize(o) { var n = 0; for (var k in o) if (o.hasOwnProperty(k)) n++; return n; }
+
+// The numbers in a task ("batch 2", "partner #1", "due 6 August", "£150"). Two
+// otherwise-identical tasks that carry different numbers are DIFFERENT tasks
+// (sequence/date/amount) and must not be collapsed — dropping a real task is
+// worse than the odd duplicate. Leading zeros are normalised (007 → 7).
+function taskNums(s) {
+  var out = {}, m = String(s || '').match(/\d+/g) || [];
+  for (var i = 0; i < m.length; i++) out[String(parseInt(m[i], 10))] = 1;
+  return out;
+}
+
+// True only on a genuine number conflict: each task carries a number the other
+// lacks (e.g. "due 5 August" vs "due 6 August", "#1" vs "#2"). A subset — "batch
+// 1" vs "batch 1 (agents 4-6)" — is the same task with extra detail, not a
+// conflict. If either has no number, numbers can't disqualify (one may spell it
+// out), so we return false and let the word test decide.
+function numsDiffer(a, b) {
+  var ka = Object.keys(a), kb = Object.keys(b);
+  if (!ka.length || !kb.length) return false;
+  var aExtra = false, bExtra = false;
+  for (var i = 0; i < ka.length; i++) { if (!b[ka[i]]) { aExtra = true; break; } }
+  for (var j = 0; j < kb.length; j++) { if (!a[kb[j]]) { bExtra = true; break; } }
+  return aExtra && bExtra;
+}
+
+// Two token sets are "the same task" when they share nearly all their meaningful
+// words (Jaccard ≥ 0.8) or when one substantial task is fully contained in the
+// other (≥ 4 shared tokens). The high bars keep genuinely different tasks apart.
+function tokensMatch(a, aSize, b, bSize) {
+  if (!aSize || !bSize) return false;
+  var inter = 0, keys = Object.keys(a);
+  for (var i = 0; i < keys.length; i++) { if (b[keys[i]]) inter++; }
+  var jaccard = inter / (aSize + bSize - inter);
+  if (jaccard >= 0.8) return true;
+  var smaller = aSize < bSize ? aSize : bSize;
+  if (smaller >= 4 && inter === smaller) return true;   // full containment
+  return false;
+}
+
+// An empty index; has()/add() run the text test above. Kept network-free so the
+// matching logic can be unit-tested without hitting Airtable.
+function makeTaskDedupeIndex() {
+  var norms = {}, tokenSets = [];
+  return {
+    skipped: 0,
+    has: function (text) {
+      var n = normalizeTaskText(text);
+      if (!n) return false;
+      if (norms[n]) return true;                 // exact normalized match (numbers included)
+      var ts = taskTokens(text), size = objSize(ts);
+      if (!size) return false;
+      var nums = taskNums(text);
+      for (var i = 0; i < tokenSets.length; i++) {
+        if (tokensMatch(ts, size, tokenSets[i].set, tokenSets[i].size) &&
+            !numsDiffer(nums, tokenSets[i].nums)) return true;
+      }
+      return false;
+    },
+    add: function (text) {
+      var n = normalizeTaskText(text);
+      if (!n) return;
+      norms[n] = true;
+      var ts = taskTokens(text);
+      tokenSets.push({ set: ts, size: objSize(ts), nums: taskNums(text) });
+    }
+  };
+}
+
+// makeTaskDedupeIndex() seeded from every active task in the base.
+function buildTaskDedupeIndex(config) {
+  var idx = makeTaskDedupeIndex();
+  var names = getActiveTaskNames(config);
+  for (var i = 0; i < names.length; i++) idx.add(names[i]);
+  return idx;
 }
 
 // Build a {lowercaseName: recordId} map for a linked table's primary field.
