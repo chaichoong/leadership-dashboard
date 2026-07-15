@@ -160,8 +160,13 @@
 
     async function doLogout(){ await sb.auth.signOut(); localStorage.removeItem('_dlr_last_uid'); location.reload(); }
 
-    // Show the signed-in workspace/user — never a hard-coded name.
-    function setIdentity(user){
+    // Show the signed-in workspace/user — never a hard-coded name. Reads the
+    // CURRENT name from the server (getUser) so a rename shows immediately,
+    // falling back to the cached session if offline.
+    async function setIdentity(){
+      let user = null;
+      try { const { data } = await sb.auth.getUser(); user = data.user; } catch (e) {}
+      if (!user) { const { data } = await sb.auth.getSession(); user = data.session && data.session.user; }
       const label = (user && user.user_metadata && user.user_metadata.org_name) || (user && user.email) || '';
       const sub = document.querySelector('.brand .sub');
       if (!sub) return;
@@ -201,7 +206,7 @@
       }
       document.getElementById('login').style.display = 'none';
       document.getElementById('app').style.display = 'block';
-      if (session) setIdentity(session.user);
+      if (session) await setIdentity();
       await applyEntitlements();
       let page = (location.hash || '#tasks').slice(1);
       const navEl = document.querySelector(`.navitem[data-page="${page}"]`);
