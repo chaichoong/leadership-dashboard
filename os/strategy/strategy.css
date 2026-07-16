@@ -439,6 +439,19 @@ details.section[open] .section-chevron { transform: rotate(180deg); }
 }
 .empty-state h3 { color: var(--text-primary); margin-bottom: 8px; font-size: var(--fs-xl); }
 .empty-state p { margin-bottom: 18px; font-size: var(--fs-md); }
+.empty-guide {
+    background: var(--accent-soft); border: 1px solid var(--border-default);
+    border-radius: var(--radius-md); padding: 12px 16px;
+    margin: 0 auto 18px; max-width: 620px;
+    text-align: left; line-height: 1.55;
+    font-size: var(--fs-sm); color: var(--text-secondary);
+}
+.empty-guide strong { color: var(--text-primary); }
+.empty-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.empty-state p.empty-sub {
+    margin: 16px auto 0; max-width: 620px;
+    font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.5;
+}
 
 /* Wizard panel */
 .wizard-panel {

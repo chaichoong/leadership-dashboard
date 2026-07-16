@@ -126,9 +126,7 @@ function populateContextBar() {
     ysel.addEventListener('change', onContextChange);
 
     // Set current quarter default
-    const m = new Date().getMonth();
-    const currentQ = m < 3 ? 'Q1' : m < 6 ? 'Q2' : m < 9 ? 'Q3' : 'Q4';
-    document.getElementById('quarterSel').value = currentQ;
+    document.getElementById('quarterSel').value = currentQuarterYear().quarter;
 }
 
 function getSelection() {
@@ -137,6 +135,28 @@ function getSelection() {
         quarter: document.getElementById('quarterSel').value,
         year: document.getElementById('yearSel').value,
     };
+}
+
+// The calendar quarter we are actually in. Used both to default the picker and
+// to tell "planning the quarter ahead" from "rewriting a finished one".
+function currentQuarterYear() {
+    const now = new Date();
+    const m = now.getMonth();
+    return {
+        quarter: m < 3 ? 'Q1' : m < 6 ? 'Q2' : m < 9 ? 'Q3' : 'Q4',
+        year: String(now.getFullYear()),
+    };
+}
+
+// True when the selected quarter has already finished. Its plan is history the
+// founder cannot recover once overwritten.
+function isPastQuarter(quarter, year) {
+    const cur = currentQuarterYear();
+    const y = parseInt(year, 10);
+    const cy = parseInt(cur.year, 10);
+    if (Number.isNaN(y)) return false;
+    if (y !== cy) return y < cy;
+    return QUARTERS.indexOf(quarter) < QUARTERS.indexOf(cur.quarter);
 }
 
 async function onContextChange() {
@@ -183,7 +203,7 @@ async function loadRecord() {
             setTimeout(() => setStatus('', ''), 2000);
         } else {
             currentRecord = null;
-            renderEmptyState(`No plan yet for ${quarter} ${year}. Start the AI Wizard to build one — it will pull the previous quarter as a starting point.`);
+            renderEmptyState(`No plan saved for ${quarter} ${year} yet. Pick how you want to start.`, { startable: true });
             setStatus('', '');
         }
     } catch (e) {
@@ -249,13 +269,54 @@ async function loadRecord() {
     }
 }
 
-function renderEmptyState(message) {
+// `opts.startable` — true once a business, quarter and year are all chosen but
+// no record exists. Only then do we offer the two routes into a new plan;
+// before that the buttons are dead controls that reject their own click.
+function renderEmptyState(message, opts = {}) {
     const host = document.getElementById('planForm');
+    if (!opts.startable) {
+        host.innerHTML = `<div class="empty-state">
+            <h3>Nothing here yet</h3>
+            <p>${escapeHtml(message)}</p>
+        </div>`;
+        return;
+    }
+    const { quarter, year } = getSelection();
+    const q = escapeHtml(`${quarter} ${year}`);
     host.innerHTML = `<div class="empty-state">
-        <h3>Nothing here yet</h3>
+        <h3>Plan ${q}</h3>
         <p>${escapeHtml(message)}</p>
-        <button class="btn btn-primary" onclick="openWizard()">Start AI Wizard</button>
+        <div class="empty-guide">
+            <strong>You are in the right place.</strong> ${q} is the quarter you are
+            planning, so leave it selected. Do not switch back to last quarter to start:
+            the wizard opens it for you, asks what hit and what missed, and uses it as
+            the starting point.
+        </div>
+        <div class="empty-actions">
+            <button class="btn btn-primary" onclick="openWizard()">Start AI Wizard</button>
+            <button class="btn btn-ghost" onclick="startManualPlan()">Fill in manually</button>
+        </div>
+        <p class="empty-sub">The wizard interviews you section by section and writes the
+        plan from short answers. Filling in manually opens the same form blank, with a
+        hint under every section heading.</p>
     </div>`;
+}
+
+// Manual route into a new quarter. Without this the empty state offered the
+// wizard and nothing else, so a founder who wanted to type their own plan had
+// no form to type into.
+function startManualPlan() {
+    const { businessId, quarter, year } = getSelection();
+    if (!businessId || !quarter || !year) {
+        setStatus('warn', 'Pick a business, quarter and year first.');
+        return;
+    }
+    renderForm({});
+    // Sections fold shut when their fields are empty, which on a blank plan
+    // means every hint is hidden behind a collapsed bar. Open them so the
+    // founder sees the questions they are answering.
+    toggleAllSections(true);
+    setStatus('info', `Blank ${quarter} ${year} plan — every section is open with a hint. Fill in what you can, then Save changes.`);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -277,8 +338,11 @@ function renderForm(fields) {
                 .filter(m => m && m.email)
                 .map(m => ({ name: m.name || m.email, email: m.email }))
                 .sort((a, b) => a.name.localeCompare(b.name));
-            // Re-render to pick up owner options without a hard refresh.
-            if (currentRecord && currentRecord.fields) renderForm(currentRecord.fields);
+            // Fill the Owner dropdowns in place rather than re-rendering the
+            // form. A re-render would blank anything typed while the team
+            // fetch was in flight, and it never ran at all on a brand-new
+            // plan (currentRecord is null there), leaving Owner stuck on "—".
+            populateOwnerSelects();
         }).catch(() => {});
     }
 
@@ -495,6 +559,33 @@ function renderForm(fields) {
                 }, 0);
             }
         });
+    });
+}
+
+// Adds the team-member options to every Owner dropdown already on the page,
+// preserving each one's current selection. Used when the team cache resolves
+// after the form has been rendered.
+function populateOwnerSelects() {
+    const opts = window.__stratOwnerOptions || [];
+    if (!opts.length) return;
+    document.querySelectorAll('.plan-form select[data-type="collaborator"]').forEach(sel => {
+        const keep = sel.value;
+        const byValue = new Map([...sel.options].map(o => [o.value, o]));
+        opts.forEach(m => {
+            const existing = byValue.get(m.email);
+            if (existing) {
+                // Rendered while the cache was cold, so the owner was added by
+                // the unknown-member fallback and is labelled with a raw email.
+                // Now that we know the name, show it.
+                if (existing.textContent === m.email) existing.textContent = m.name;
+                return;
+            }
+            const opt = document.createElement('option');
+            opt.value = m.email;
+            opt.textContent = m.name;
+            sel.appendChild(opt);
+        });
+        sel.value = keep;
     });
 }
 
@@ -930,6 +1021,24 @@ async function saveRecord() {
     Object.keys(fields).forEach(fid => {
         if (typeof fields[fid] === 'string') fields[fid] = fields[fid].trim();
     });
+
+    // Never CREATE an empty plan. saveRecord force-adds Quarter, Year and
+    // Business below, so a form with nothing in it still writes a record —
+    // and that record then counts as "a plan exists", so loadRecord stops
+    // offering the empty state and the founder loses both routes in.
+    // Reachable by walking the wizard end to end without answering: every
+    // step skipped leaves ~50 blank fields, and finishing unlocks Save.
+    //
+    // Only guard the create. Clearing every field of an existing plan and
+    // saving is a deliberate edit, and blocking it would be wrong.
+    // readAllFormFields yields '' for blank text and null for blank number
+    // and collaborator fields, so anything else is real content.
+    const hasContent = Object.values(fields).some(v => v !== null && v !== '');
+    if (!currentRecord && !hasContent) {
+        setStatus('error', 'Nothing to save yet — answer at least one question, or fill in a field, first.');
+        updateSaveButton();
+        return;
+    }
 
     // Quarter/year/business are always required
     fields[OBJSTRAT.quarter] = quarter;
@@ -1882,6 +1991,36 @@ function openWizard(opts = {}) {
     // Spot-edit: { focusStepId } jumps the wizard straight to one step.
     const focusStepId = opts.focusStepId || null;
 
+    // A founder's instinct is to open last quarter and run the wizard from
+    // there. That used to rewrite the finished quarter silently, because the
+    // wizard writes into whatever record is loaded. Warn, and point at the
+    // quarter they almost certainly meant.
+    //
+    // Not for a spot-edit: clicking "✨ Revise" on one field of a historic
+    // record is a deliberate single-field edit, so telling them to go and
+    // select a different quarter would be wrong.
+    if (!focusStepId && currentRecord && isPastQuarter(quarter, year)) {
+        const cur = currentQuarterYear();
+        const ok = confirm(
+            `${quarter} ${year} is a past quarter and already has a saved plan.\n\n` +
+            `Running the wizard here will rewrite it.\n\n` +
+            `To plan the new quarter, close this and select ${cur.quarter} ${cur.year} instead. ` +
+            `The wizard reads ${quarter} ${year} for you automatically and uses it for reflection.\n\n` +
+            `Continue editing ${quarter} ${year} anyway?`
+        );
+        if (!ok) return;
+    }
+
+    // The wizard writes its answers into form fields, so there has to be a form.
+    // Opening from the empty state leaves one only when a prior quarter exists
+    // to pre-fill from. A brand-new business has none, and the prior-quarter
+    // fetch can fail silently, so guarantee a blank form up front rather than
+    // letting the wizard type into nothing.
+    if (!document.querySelector('.plan-form [data-field-id]')) {
+        renderForm({});
+        toggleAllSections(true);
+    }
+
     // Try to resume a saved session for this business/quarter/year.
     let saved = null;
     try {
@@ -1977,13 +2116,29 @@ async function loadPriorQuarter() {
             appendWizMessage('system', `Prior quarter loaded: ${priorQ} ${priorY}. I will reference it where useful.`);
 
             // If no record exists for the current quarter yet, pre-fill the form
-            // with the prior quarter's values so the user can iterate on them rather
-            // than starting blank. Only touch fields that are currently empty.
-            if (!currentRecord) {
+            // with the prior quarter's values so the user can iterate on them
+            // rather than starting blank.
+            //
+            // Skip the pre-fill if the form is already dirty: the founder has
+            // started typing their own plan via "Fill in manually" and then
+            // opened the wizard for help. renderForm() replaces the whole form,
+            // so pre-filling here would wipe their words without warning.
+            if (!currentRecord && isDirty) {
+                appendWizMessage('system', `You've already started typing this plan, so I've left your work alone rather than overwriting it with ${priorQ} ${priorY}. I'll still use ${priorQ} ${priorY} for reflection, and each answer you give me updates its own field.`);
+            } else if (!currentRecord) {
                 const priorFields = wizardState.priorRecord.fields || {};
                 renderForm(priorFields);
-                markDirty();
-                appendWizMessage('system', `Form pre-filled from ${priorQ} ${priorY}. I'll walk through each section so we can iterate.`);
+                // Deliberately NOT markDirty(). A pre-fill is last quarter's
+                // work, not this quarter's, and Save used to go live the
+                // instant the wizard opened — one click from a Q3 that is a
+                // verbatim copy of Q2 and reads back as a finished plan.
+                //
+                // This defers Save until the founder has actually engaged:
+                // answered a step, edited a field, or walked the wizard to the
+                // end (see finaliseWizard). It does NOT prevent a deliberate
+                // clone — skipping every step still carries the prior quarter
+                // over — it only stops an accidental one.
+                appendWizMessage('system', `Form pre-filled from ${priorQ} ${priorY} as a starting point — nothing is saved yet. I'll walk through each section so we can iterate. 'Save changes' unlocks once you've answered or changed something.`);
             }
         } else {
             appendWizMessage('system', `No prior quarter found (${priorQ} ${priorY}). Starting fresh.`);
@@ -2803,6 +2958,12 @@ function extractCurrentPlanFromForm() {
 }
 
 function finaliseWizard() {
+    // Reaching the end IS the engagement the pre-fill guard waits for — the
+    // founder has been walked through every section. Without this, a run where
+    // every step was skipped ("Move on →" never touches a field, so nothing
+    // marks dirty) ends on a greyed-out Save while this message tells them to
+    // press it.
+    markDirty();
     appendWizMessage('assistant', 'All sections captured. I have pre-filled the form. Review, then hit "Save changes" at the top. After saving, I will offer to push the three Quarterly Projects into the Projects table as real project records with linked monthly Tasks.');
     document.getElementById('wizStepLabel').textContent = 'Complete — review form';
     // Wizard finished cleanly — drop the saved session so the next open starts fresh.
