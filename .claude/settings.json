@@ -5,6 +5,9 @@
       "hooks": [{
         "type": "command",
         "command": "bash -c 'for f in $CLAUDE_FILE_PATHS; do case \"$f\" in *.html) npx -y htmlhint@1.1.4 \"$f\" 2>&1 || true ;; esac; done'"
+      }, {
+        "type": "command",
+        "command": "bash -c '\"$CLAUDE_PROJECT_DIR/scripts/check-model-ids.sh\" $CLAUDE_FILE_PATHS'"
       }]
     }]
   }
