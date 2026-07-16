@@ -205,6 +205,9 @@
         //   vendorOnly — vendor alone       → stable fields only (cat, subcat, biz, cost)
         const composite = {};   // key → { ...allFields, count }
         const vendorOnly = {};  // key → { catId, subCatId, bizId, costId, count }
+        // reference token → Set of costIds it has been seen against. A token serving more
+        // than one cost does not discriminate and is ignored at match time.
+        const refIndex = {};
 
         function addComposite(key, data) {
             if (!key || key.length < 4) return;
@@ -253,6 +256,16 @@
 
             if (!data.subCatId && !data.catId && !data.costId && !data.tenancyId) return;
 
+            // Index every reference in this descriptor against the cost it was reconciled
+            // to. A token that ends up with 2+ costs is self-evidently not an identifier
+            // for any of them (see pickCostByReference).
+            if (data.costId) {
+                extractRefTokens(getField(tx, F.txDescription)).forEach(tok => {
+                    if (!refIndex[tok]) refIndex[tok] = new Set();
+                    refIndex[tok].add(data.costId);
+                });
+            }
+
             const vendor = reconNorm(getField(tx, F.txVendor));
             const vWords = vendor.split(/\s+/).filter(w => w.length >= 2);
             const dTokens = reconDescTokens(getField(tx, F.txDescription));
@@ -289,7 +302,7 @@
                 if (dTokens.length >= 2) addComposite('|' + dTokens.join(' '), data);
             }
         });
-        return { composite, vendorOnly };
+        return { composite, vendorOnly, refIndex };
     }
 
     function runReconciliationMatching() {
@@ -298,7 +311,7 @@
         const unrec = allTransactions.filter(r => !getField(r, F.txReconciled));
 
         // 1. Build historical patterns from ALL reconciled transactions
-        const { composite: compositePatterns, vendorOnly: vendorOnlyPatterns } = buildHistoricalPatterns();
+        const { composite: compositePatterns, vendorOnly: vendorOnlyPatterns, refIndex } = buildHistoricalPatterns();
 
         // 2. Build tenancy lookup for enrichment
         const tenantLookup = buildTenantLookup();
@@ -377,7 +390,7 @@
                 for (const key of compositeKeys) {
                     const hit = compositePatterns[key];
                     if (hit && hit.count >= 1) {
-                        applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, true);
+                        applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, true, refIndex);
                         matched = true;
                         break;
                     }
@@ -389,7 +402,7 @@
                 for (const key of vendorKeys) {
                     const hit = vendorOnlyPatterns[key];
                     if (hit && hit.count >= 1) {
-                        applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, false);
+                        applyHistoricalToResult(result, hit, tenancyLookup, tenantLookup, costLookup, hit.count, false, refIndex);
                         matched = true;
                         break;
                     }
@@ -474,6 +487,50 @@
     // How far a payment may sit from a cost's Expected Cost and still auto-match.
     const COST_MATCH_TOLERANCE = 0.10; // 10%
 
+    // Account/policy/mandate references embedded in a bank descriptor. Nearly every cost
+    // in this base carries its reference in the NAME and the bank repeats it in the
+    // descriptor, which makes the reference a far stronger signal than the amount:
+    //     cost  "Kent Reliance - 4AP - MOM0840638BRI1"
+    //     bank  "DIRECT DEBIT PAYMENT TO KENT RELIANCE IP REF MOM0840638BRI1, MANDATE NO 0100"
+    // Verified 27/27 across the three biggest clusters (Kent Reliance 8/8, Birmingham
+    // Midshires 12/12, West Suffolk 7/7) in the Jul 2026 audit.
+    //
+    // >=6 chars with at least one digit: long enough not to collide with ordinary words,
+    // and it deliberately excludes short mandate numbers ("MANDATE NO 553"), which are not
+    // unique across suppliers.
+    function extractRefTokens(text) {
+        const out = [];
+        String(text || '').toUpperCase().split(/[^A-Z0-9]+/).forEach(t => {
+            if (t.length >= 6 && /[0-9]/.test(t) && out.indexOf(t) === -1) out.push(t);
+        });
+        return out;
+    }
+
+    // Pick a cost from the references in a descriptor.
+    //
+    // A reference is only trusted when history shows it serving exactly ONE cost. That
+    // caveat is the whole reason this is safe: Close Brothers finances two Swinton policies
+    // under a single agreement, so "REF 85376969" appears on BOTH policies' payments while
+    // sitting in only ONE policy's cost name. Trusting it blindly would send every £45.30
+    // payment to the £42.01 policy — precisely the bug fixed in 87d6b62. History shows that
+    // token against two costs, so it is discarded here and the amount decides instead.
+    //
+    // Sort codes and account numbers self-neutralise the same way: "090128"/"44385270"
+    // appear on both Paul Brittain loans, so neither token discriminates.
+    function pickCostByReference(desc, refIndex, costLookup) {
+        if (!refIndex) return '';
+        const hits = [];
+        extractRefTokens(desc).forEach(tok => {
+            const ids = refIndex[tok];
+            if (!ids || ids.size !== 1) return; // absent, or serves several costs → tells us nothing
+            const id = ids.values().next().value;
+            if (costLookup && costLookup[id] && hits.indexOf(id) === -1) hits.push(id);
+        });
+        return hits.length === 1 ? hits[0] : ''; // two refs disagreeing is not a match
+    }
+    window.extractRefTokens = extractRefTokens;
+    window.pickCostByReference = pickCostByReference;
+
     // Amount-aware cost picker.
     //
     // "Cost is stable per vendor" was the old assumption, and it is false. Close
@@ -516,7 +573,7 @@
 
     // includeVariableFields: true = composite match (apply tenancy/unit/property)
     //                        false = vendor-only match (stable fields only — leave variable fields blank)
-    function applyHistoricalToResult(result, hist, tenancyLookup, tenantLookup, costLookup, count, includeVariableFields) {
+    function applyHistoricalToResult(result, hist, tenancyLookup, tenantLookup, costLookup, count, includeVariableFields, refIndex) {
         // Stable fields — always applied
         result.subCatId = hist.subCatId || '';
         result.subCatName = getSubCatName(hist.subCatId);
@@ -524,14 +581,27 @@
         result.categoryName = getCatName(hist.catId);
         result.businessId = hist.bizId || '';
 
-        // Cost — chosen by amount across every cost this vendor has billed, NOT by
-        // last-writer-wins. One vendor can bill several costs with identical bank
-        // descriptors (see pickCostForAmount). Only touch the cost when the vendor
-        // actually has history for one, so a no-cost vendor leaves the field alone.
+        // Cost — reference first, amount second, blank third. NOT last-writer-wins.
+        //
+        // 1. The reference in the descriptor, when history proves it identifies exactly one
+        //    cost. Exact and drift-proof: a mortgage can be repriced by £40 and its account
+        //    ref still nails it, where amount alone would drift onto a neighbouring one (13
+        //    Kent Reliance mortgages sit within 10% of each other).
+        // 2. Otherwise the amount, across every cost this vendor has billed. Needed where
+        //    the reference is shared — Close Brothers bills two Swinton policies under one
+        //    agreement ref, so only the amount separates them.
+        // 3. Otherwise blank, for a human.
+        //
+        // Only touch the cost when there is something to say, so a vendor with no cost
+        // history leaves the field alone.
         const candidateCostIds = hist.costIds
             ? Object.keys(hist.costIds)
             : (hist.costId ? [hist.costId] : []);
-        if (candidateCostIds.length) {
+        const byRef = pickCostByReference(result.txDesc, refIndex, costLookup);
+        if (byRef) {
+            result.costId = byRef;
+            result.costLabel = String(getField(costLookup[byRef], F.costName) || '');
+        } else if (candidateCostIds.length) {
             const chosenCostId = pickCostForAmount(candidateCostIds, result.txAmount, costLookup);
             result.costId = chosenCostId;
             result.costLabel = chosenCostId
