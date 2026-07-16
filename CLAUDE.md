@@ -19,6 +19,15 @@
 
 `STRUCTURE.md` is the single source of truth for where every file lives: repo folders, the AI context layer (CLAUDE.md, memory, skills), and Google Drive. Read it before creating any file. If you add a file in a location it does not cover, update STRUCTURE.md in the same commit. Code is ONLY edited in this repo; copies found in Google Drive are stale exports.
 
+## Data Lookups
+
+Never guess an entity attribute — property location, tenancy status, cost status, model ID, record count, table or field name. Query the source of truth first (Airtable via curl, or the constant in `js/config.js`) and cite the record or line you read. If you cannot find it, say so. An inferred value presented as a fact is worse than "I don't know", because it gets acted on.
+
+- **Every number in a report needs a source.** State the field or formula it came from and a sample record proving the derivation. Flag anything inferred rather than read.
+- **Airtable access:** the `airtable` MCP connector is broken (auth error). Use curl with the PAT at `~/.config/od/airtable_pat` — never print the token. Base `appnqjDpqDniH3IRl`.
+- **Match on the right field.** Costs use the LEGACY `Payment Status`, not `Cost Status`. Filtering the wrong status field has produced confidently wrong impact stories before.
+- **A skill's own learning log is evidence, not proof.** Verify its claims against the table before acting on them.
+
 ## Standard Workflow
 
 Two commands cover all work. Kevin talks conversationally after either one. Claude handles the full pipeline.
@@ -50,6 +59,8 @@ These have caused production bugs in this codebase. Check for them during every 
 - **returnFieldsByFieldId returning IDs not names** — when using `returnFieldsByFieldId=true` in Airtable API calls, field keys in the response are field IDs (e.g. `fldXyz123`), not human-readable names. If your code expects `rec.fields['Amount']` but gets `rec.fields['fldXyz123']`, every field read silently returns undefined. Match the approach used by the rest of the codebase (this project uses field names via the `F` constants in config.js, not raw field IDs)
 - **CSS overflow truncation** — long tenant names, property addresses, and note text clip without ellipsis or wrapping. Use `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` on single-line cells, or `word-break: break-word` on multi-line content
 - **localStorage quota issues** — Safari has a 5MB localStorage limit. Large cached datasets (100+ transaction records with all fields) can exceed this. Use IndexedDB for large caches (follow the `dashboard.js` pattern), keep localStorage for small UI state only
+- **Airtable blank fields pass `!= 0` but fail `> 0`** — in an Airtable formula an empty number/currency field is NOT equal to 0, so `{blank} != 0` is TRUE while `{blank} > 0` is FALSE. Swapping `> 0` for `!= 0` to allow negatives makes every blank-field record take the wrong branch. This blanked `Report Amount` on 8,667 of 8,690 transactions in Jul 2026, taking out the P&L, dashboard, wealth and cashflow at once. To test "is this signed value set and non-zero" while keeping the blank fall-through, use **`ABS({field}) > 0`**. Whenever you change a formula condition, check it against a blank record, not just a populated one
+- **Split Override Amount must carry the sign of `**GBP`** — the split modal collects positive magnitudes (`totalRaw` uses `Math.abs`, validation requires every portion `> 0`), but Airtable's `Report Amount` returns the override verbatim. Writing a positive override on an expense flips an outflow into revenue across every report. Always multiply the portion by the sign of `**GBP` before writing (see `performReconSplit` in `js/reconciliation.js`). Inflow splits hid this for years because their sign is already positive — the first expense split would have posted £1,742.60 of costs as income
 
 ## File Architecture (Split for Concurrent Editing)
 
@@ -218,6 +229,12 @@ After every `git push origin main`, you MUST:
 
 Never say "done" after pushing and leave the user waiting. The task is not complete until the deploy is confirmed live. If the deploy takes longer than expected, keep the user informed with a short status update.
 
+**Never claim an outcome you have not observed.** Do not say a nightly sync will pick something up, that a cron will fire, or that a deploy carried a change, unless you watched it happen. Report exactly what you clicked and what you saw. Bump the cache-bust version as part of the change, not after Kevin reports a stale page.
+
+## Communication
+
+Kevin is a non-technical operator. Explain in plain English at roughly a 13-year-old reading level — no jargon, no unexplained acronyms, no internal codenames. Keep it short. Lead with what happened, then the detail. Chunk long output across several messages rather than one wall of text.
+
 ## Design System — Sage Executive (light)
 
 The platform uses a **single design-token stylesheet** so every page — main shell, iframe pages, OS pages, SOPs — looks like part of the same software.
@@ -321,3 +338,12 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 - **Small fixes, bug fixes, single-file tweaks:** push directly to main
 - **New features, multi-file changes, anything touching shared files (config.js, shared.js, index.html, styles.css):** work on a branch, push, create a PR. This protects against concurrent session conflicts
 - Branch naming: `feature/short-description` or `fix/short-description`
+
+### Creating the PR
+
+`gh` CLI is NOT installed. The `github` MCP server IS connected and authenticated (verified 16 Jul 2026 — `list_pull_requests` returns cleanly). Order of attempts:
+
+1. `mcp__github__create_pull_request` (owner `chaichoong`, repo `leadership-dashboard`). Load it via ToolSearch first.
+2. If that fails, `open` the compare URL in Kevin's Chrome: `https://github.com/chaichoong/leadership-dashboard/compare/<branch>`
+
+Do NOT quietly merge to main locally as a fallback — that discards the review step the branch existed for. Kevin cannot click a terminal link: always `open` the PR, the deployed page, and any deliverable in his browser rather than printing the URL.
