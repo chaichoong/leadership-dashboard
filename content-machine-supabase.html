@@ -1528,6 +1528,8 @@ Total distance so far —/40,075km</div>
 
 <div id="toast"></div>
 
+<!-- Model IDs live once in js/ai-models.js. Never hardcode a model ID below. -->
+<script src="js/ai-models.js?v=1"></script>
 <script>
 // ============================================================
 // STATE
@@ -4092,7 +4094,7 @@ async function generateCopywriting(recId) {
         'x-api-key': aiKey.trim(),
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:4000, system:KEVIN_SYSTEM, messages:[{ role:'user', content:userPrompt }] })
+      body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:4000, system:KEVIN_SYSTEM, messages:[{ role:'user', content:userPrompt }] })
     });
     if (!response.ok) { const err = await response.json().catch(()=>({})); throw new Error(err.error?.message || 'HTTP ' + response.status); }
     const data = await response.json();
@@ -4958,7 +4960,7 @@ function populateSummaryFields(recId, text, f) {
     const base64=imgData.split(',')[1];
     const res=await fetchWithTimeout(proxy,{method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':key.trim(),'anthropic-version':'2023-06-01'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:80,messages:[{role:'user',content:[
+      body:JSON.stringify({model:window.AI_MODELS.default,max_tokens:80,messages:[{role:'user',content:[
         {type:'image',source:{type:'base64',media_type:'image/jpeg',data:base64}},
         {type:'text',text:'Find the main person (a runner, likely in an orange top). Return ONLY valid JSON: {"x":0-100,"y":0-100} where x=horizontal % left-to-right, y=vertical % top-to-bottom. 50,50=exact centre. If not visible return {"x":50,"y":50}. No other text.'}
       ]}]})
@@ -8267,7 +8269,7 @@ async function cmAiCall(systemPrompt, userPrompt, maxTokens=800){
   const res = await fetchWithTimeout(proxy, {
     method:'POST',
     headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,
+    body:JSON.stringify({model:window.AI_MODELS.default,max_tokens:maxTokens,
       system:systemPrompt,messages:[{role:'user',content:userPrompt}]})
   });
   const data = await res.json();
@@ -8693,7 +8695,7 @@ async function callClaudeAI(userPrompt, systemPrompt='', maxTokens=600){
   const aiKey   = getAiKey();
   const proxyUrl= localStorage.getItem('cm_proxy_url')||'';
   if(!aiKey||!proxyUrl) throw new Error('Set your Anthropic key and proxy URL in Settings first');
-  const body={model:'claude-sonnet-4-6',max_tokens:maxTokens,messages:[{role:'user',content:userPrompt}]};
+  const body={model:window.AI_MODELS.default,max_tokens:maxTokens,messages:[{role:'user',content:userPrompt}]};
   if(systemPrompt) body.system=systemPrompt;
   const res=await fetchWithTimeout(proxyUrl,{method:'POST',headers:{'Content-Type':'application/json','x-api-key':aiKey.trim(),'anthropic-version':'2023-06-01'},body:JSON.stringify(body)});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||'HTTP '+res.status);}

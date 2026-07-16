@@ -1472,7 +1472,7 @@ RULES:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                model: AI_MODEL_DEFAULT,
                 max_tokens: 800,
                 system,
                 messages: [{ role: 'user', content: `Stone: "${stoneText}"\n\nReturn the JSON task list now.` }],
@@ -2346,7 +2346,7 @@ Rules:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                model: AI_MODEL_DEFAULT,
                 max_tokens: 1500,
                 system,
                 messages: [{ role: 'user', content: answer }],
@@ -2461,7 +2461,7 @@ Return the JSON object ONLY. No commentary. No code fence.`
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                model: AI_MODEL_DEFAULT,
                 max_tokens: 3000,
                 system,
                 messages: [{ role: 'user', content: 'Return the restructured list now.' }],
@@ -2501,7 +2501,7 @@ RULES:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                model: AI_MODEL_DEFAULT,
                 max_tokens: 2000,
                 system,
                 messages: [
@@ -2556,7 +2556,7 @@ RULES:
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                model: AI_MODEL_DEFAULT,
                 max_tokens: 2000,
                 system,
                 messages: [
@@ -2737,7 +2737,7 @@ Do not accept pure platitudes ('be the best', 'crush it'). DO accept rough or te
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                model: AI_MODEL_DEFAULT,
                 max_tokens: 2500,
                 system,
                 // Pass the full per-step conversation so the model sees what it's already asked.
