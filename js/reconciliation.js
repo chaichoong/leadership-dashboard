@@ -213,9 +213,13 @@
             if (data.subCatId)  composite[key].subCatId  = data.subCatId;
             if (data.catId)     composite[key].catId     = data.catId;
             if (data.bizId)     composite[key].bizId     = data.bizId;
-            if (data.costId)    composite[key].costId    = data.costId;
             if (data.tenancyId) composite[key].tenancyId = data.tenancyId;
             if (data.unitId)    composite[key].unitId    = data.unitId;
+            if (data.costId) {
+                composite[key].costId = data.costId; // legacy single slot — fallback only
+                if (!composite[key].costIds) composite[key].costIds = {};
+                composite[key].costIds[data.costId] = (composite[key].costIds[data.costId] || 0) + 1;
+            }
         }
 
         function addVendorOnly(key, data) {
@@ -226,7 +230,13 @@
             if (data.subCatId) vendorOnly[key].subCatId = data.subCatId;
             if (data.catId)    vendorOnly[key].catId    = data.catId;
             if (data.bizId)    vendorOnly[key].bizId    = data.bizId;
-            if (data.costId)   vendorOnly[key].costId   = data.costId;
+            if (data.costId) {
+                vendorOnly[key].costId = data.costId; // legacy single slot — fallback only
+                // A vendor can bill SEVERAL costs, so record every one it has billed
+                // rather than letting the last transaction win. See pickCostForAmount.
+                if (!vendorOnly[key].costIds) vendorOnly[key].costIds = {};
+                vendorOnly[key].costIds[data.costId] = (vendorOnly[key].costIds[data.costId] || 0) + 1;
+            }
         }
 
         allTransactions.forEach(tx => {
@@ -461,6 +471,49 @@
         result.status = 'suggestion';
     }
 
+    // How far a payment may sit from a cost's Expected Cost and still auto-match.
+    const COST_MATCH_TOLERANCE = 0.10; // 10%
+
+    // Amount-aware cost picker.
+    //
+    // "Cost is stable per vendor" was the old assumption, and it is false. Close
+    // Brothers finances several Swinton policies under ONE direct-debit mandate, so
+    // every payment arrives with a byte-identical descriptor:
+    //     DIRECT DEBIT PAYMENT TO CLOSE-SWINTON REF 85376969, MANDATE NO 0207
+    // The ONLY thing separating the policies is the amount and the day: £42.01 on the
+    // 27th (policy RSAP6837602300) vs £45.30 on the 2nd (policy BE26ACTP...). The
+    // history map kept a single costId per vendor key on a last-writer-wins basis, so
+    // all 12 payments were attributed to one policy and the other read overdue for
+    // four months while being paid every month (Jul 2026).
+    //
+    // Given every cost a vendor has historically billed, pick the one whose Expected
+    // Cost is closest to THIS payment. Note the tolerance alone would NOT have caught
+    // Swinton — £45.30 vs £42.01 is only 7.8% out — so the decisive part is choosing
+    // the BEST candidate, not merely rejecting a bad one.
+    //
+    // If even the closest candidate is more than COST_MATCH_TOLERANCE away, return ''
+    // and leave the cost for a human. A genuine price rise and a wrong match look
+    // identical from here, and a blank costs a moment of triage while a wrong one
+    // silently misattributes money.
+    function pickCostForAmount(costIds, txAmount, costLookup) {
+        const ids = (costIds || []).filter(id => costLookup && costLookup[id]);
+        if (!ids.length) return '';
+        const amount = Math.abs(Number(txAmount) || 0);
+        if (!amount) return ids[0]; // nothing to judge on — keep prior behaviour
+
+        let best = '';
+        let bestVariance = Infinity;
+        ids.forEach(id => {
+            const expected = Math.abs(Number(getField(costLookup[id], F.costExpected)) || 0);
+            if (!expected) return; // no Expected Cost — cannot compare on amount
+            const variance = Math.abs(amount - expected) / expected;
+            if (variance < bestVariance) { bestVariance = variance; best = id; }
+        });
+        if (!best) return ids[0]; // no candidate had an Expected Cost to compare
+        return bestVariance <= COST_MATCH_TOLERANCE ? best : '';
+    }
+    window.pickCostForAmount = pickCostForAmount;
+
     // includeVariableFields: true = composite match (apply tenancy/unit/property)
     //                        false = vendor-only match (stable fields only — leave variable fields blank)
     function applyHistoricalToResult(result, hist, tenancyLookup, tenantLookup, costLookup, count, includeVariableFields) {
@@ -471,11 +524,19 @@
         result.categoryName = getCatName(hist.catId);
         result.businessId = hist.bizId || '';
 
-        // Cost — stable per vendor, always applied
-        if (hist.costId && costLookup[hist.costId]) {
-            const cost = costLookup[hist.costId];
-            result.costId = hist.costId;
-            result.costLabel = String(getField(cost, F.costName) || '');
+        // Cost — chosen by amount across every cost this vendor has billed, NOT by
+        // last-writer-wins. One vendor can bill several costs with identical bank
+        // descriptors (see pickCostForAmount). Only touch the cost when the vendor
+        // actually has history for one, so a no-cost vendor leaves the field alone.
+        const candidateCostIds = hist.costIds
+            ? Object.keys(hist.costIds)
+            : (hist.costId ? [hist.costId] : []);
+        if (candidateCostIds.length) {
+            const chosenCostId = pickCostForAmount(candidateCostIds, result.txAmount, costLookup);
+            result.costId = chosenCostId;
+            result.costLabel = chosenCostId
+                ? String(getField(costLookup[chosenCostId], F.costName) || '')
+                : '';
         }
 
         // Variable fields — only applied from composite (vendor+description) matches
