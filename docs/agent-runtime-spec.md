@@ -33,11 +33,18 @@ This is the queue mechanic already in the pricing model. It is what makes autono
 
 Every agent earns its autonomy. It does not start fully loose.
 
-1. **Shadow / suggest-only** — proposes everything, a human approves all. Builds the accuracy record.
-2. **Assisted** — auto-does only the rock-solid tier, queues the rest (the reconciliation model).
-3. **Autonomous** — runs the confident majority alone; the human sees a summary and can undo.
+**The owner moves the ramp. The number advises.** (Amended 16 Jul 2026, Kevin's call — see the note below.) An agent never graduates itself. Accuracy is shown as a recommendation at each gear, and a dip is surfaced as a prompt to pull the agent back, but the human decides. Handing autonomy over without a human yes is the one thing that breaks client trust, and client trust is what the 90%-AI goal runs on.
 
-An agent graduates a tier only when its measured accuracy clears a bar, and drops back a tier if accuracy dips. The number drives the autonomy, not a guess.
+The ramp has four gears, as shown on the autonomy dial in the Systemisation module:
+
+1. **Guardrails set** — the never-dos are written down. Captured by the AGENTIC "I — Inspections & Caveats" stage, before the agent acts at all.
+2. **Approve everything** (built as `agent.state = 'testing'`) — proposes everything, a human approves all. Builds the accuracy record.
+3. **Loosen the leash** (built as `agent.autoFields` / `autoComments`) — auto-does only the actions the owner has ticked, queues the rest (the reconciliation model). This is the "assisted" tier.
+4. **Heartbeat** (built as `agent.state = 'live'`) — runs to a schedule, does the confident majority alone; the human sees a summary and can undo.
+
+The gear is **derived from live state, never stored**, so the dial can never disagree with what the agent is actually doing. See `getAgentGear()` in `os/systemisation/index.html`.
+
+**Why this changed:** this spec previously said "an agent graduates a tier only when its measured accuracy clears a bar... the number drives the autonomy, not a guess." That was written before the runtime existed, and it conflicted with both the shipped code (a human has always flipped the state) and with how the ramp is sold. Two corrections: the owner holds the control, and the accuracy bar cannot drive anything until the runtime actually logs accuracy. Today only the reconciliation agent has real metrics. Until every agent does, the dial's guidance says what we can observe and does not invent a score. When the run/accuracy log lands (step 7 above), the bar drops into `agentGearAdvice()` as the recommendation at each gear — advising, not deciding.
 
 ---
 
@@ -73,4 +80,4 @@ Every run is logged: time, trigger, inputs seen, actions taken, confidence, appr
 1. **First agent, browser-assisted: the conservative reconciliation auto-approve** we scoped earlier. Auto-do the near-certain recurring matches, queue the rest, show a summary with undo. Safe, reversible, zero new infrastructure. It proves the gate, the accuracy logging, and the undo on a real daily job, and brings us full circle to where this started.
 2. **Generalise the loop** into a shared runtime the agent spec plugs into.
 3. **Move triggers server-side** with Supabase for true headless runs.
-4. **Every new agent rides the trust ramp** (shadow → assisted → autonomous).
+4. **Every new agent rides the trust ramp** (guardrails → approve everything → loosen the leash → heartbeat), with the owner moving each gear.
