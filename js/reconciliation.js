@@ -1676,9 +1676,16 @@
             if (cleanName !== currentName) {
                 srcFields[F.txName] = cleanName;
             }
+            // Split Override Amount must carry the SAME SIGN as the raw bank
+            // amount. The modal collects positive magnitudes (totalRaw uses
+            // Math.abs), but Airtable's Report Amount formula returns the
+            // override verbatim whenever it is non-zero. Writing a positive
+            // override on an expense would flip it to income — an outflow
+            // would report as revenue across the P&L.
+            const amountSign = (Number(getField(tx, F.txAmount)) || 0) < 0 ? -1 : 1;
             // Custom mode: also write Override + categorisation for portion[0]
             if (st.mode === 'custom') {
-                srcFields[F.txSplitOverride] = portionAmounts[0];
+                srcFields[F.txSplitOverride] = portionAmounts[0] * amountSign;
                 const c0 = portionCats[0];
                 if (c0.subCatId)   srcFields[F.txSubCategory] = [c0.subCatId];
                 if (c0.businessId) srcFields[F.txBusiness]    = [c0.businessId];
@@ -1712,7 +1719,7 @@
                 const childPatches = children.map((child, k) => {
                     const portionIdx = k + 1; // children are portions 2..N
                     const c = portionCats[portionIdx];
-                    const fields = { [F.txSplitOverride]: portionAmounts[portionIdx] };
+                    const fields = { [F.txSplitOverride]: portionAmounts[portionIdx] * amountSign };
                     if (c.subCatId)   fields[F.txSubCategory] = [c.subCatId];
                     if (c.businessId) fields[F.txBusiness]    = [c.businessId];
                     if (c.tenancyId)  fields[F.txTenancy]     = [c.tenancyId];
@@ -1743,7 +1750,7 @@
                 };
                 if (F.txTenant) clearFields[F.txTenant] = [];
                 const childIds = children.map(c => c.id);
-                const parentFields = { ...clearFields, [F.txSplitOverride]: perPortion };
+                const parentFields = { ...clearFields, [F.txSplitOverride]: perPortion * amountSign };
                 await Promise.all([
                     patchTx(tx.id, parentFields),
                     ...childIds.map(id => patchTx(id, clearFields)),
@@ -1756,7 +1763,7 @@
             // Mirror the automation's name change (parent gets " (Split 1 of N)")
             tx.fields[F.txName] = `${cleanName} (Split 1 of ${N})`;
             if (st.mode === 'custom') {
-                tx.fields[F.txSplitOverride] = portionAmounts[0];
+                tx.fields[F.txSplitOverride] = portionAmounts[0] * amountSign;
                 const c0 = portionCats[0];
                 if (c0.subCatId)   tx.fields[F.txSubCategory] = [{ id: c0.subCatId }];
                 if (c0.businessId) tx.fields[F.txBusiness]    = [{ id: c0.businessId }];
@@ -1768,7 +1775,7 @@
                 tx.fields[F.txReconciled] = false;
                 tx.fields[F.txTenancy] = [];
                 tx.fields[F.txUnit] = [];
-                tx.fields[F.txSplitOverride] = st.totalRaw / N;
+                tx.fields[F.txSplitOverride] = st.totalRaw / N * amountSign;
                 if (F.txTenant) tx.fields[F.txTenant] = [];
             }
             children.forEach(child => {
