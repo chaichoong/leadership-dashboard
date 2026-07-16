@@ -43,6 +43,12 @@ const FIELDS = {
   costExpected: 'fld9JibXkMpTeMcxw',
   costDueDay: 'fld7IsfiGvKpxEwSs',
   costStatusNew: 'fldWl7mp9zTC2aaaQ',
+  // Costs filter on the LEGACY Payment Status, not Cost Status (New) — see the
+  // Data Lookups rule in CLAUDE.md. A fixture that only sets costStatusNew will
+  // not appear in the active list.
+  costPayStatus: 'fldXZNI96v8HgjuSh',
+  costFrequency: 'fldvozTHvs5VH3lNi',
+  costLastReconDate: 'fldeMdOxYemcJwVRD',
   accGBP: 'fldhDG5jDA8Tu2JyI',
   accountAlias: 'fld21HAxSawQCxICj',
   unitName: 'fldr8sliyu8h2jw9t',
