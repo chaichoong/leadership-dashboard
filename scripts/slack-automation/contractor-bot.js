@@ -68,12 +68,15 @@ const PROPERTY_CHANNEL_ID = 'C09EMKREPJL';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
-const MODEL_FAST        = 'claude-haiku-4-5-20251001';
-// Used for the intent classifier specifically — Sonnet handles the
-// fault-vs-progress distinction (e.g. "blocked drain" = new fault, not
-// a contractor status report) reliably where Haiku trips up. Single
-// short call per inbound message.
-const MODEL_ACCURATE    = 'claude-sonnet-4-5-20250929';
+// Model IDs live in wrangler.toml [vars] (AI_MODEL_DEFAULT / AI_MODEL_LIGHT)
+// and are read off `env` at the call site — a module-scope const cannot see
+// `env`, which is how the old literals got stranded on a stale model. The
+// light/default split is preserved:
+//   env.AI_MODEL_LIGHT   — the cheap default for most calls (was MODEL_FAST)
+//   env.AI_MODEL_DEFAULT — the intent classifier (was MODEL_ACCURATE). Sonnet
+//     handles the fault-vs-progress distinction (e.g. "blocked drain" = new
+//     fault, not a contractor status report) reliably where Haiku trips up.
+//     Single short call per inbound message, so the cost is pennies.
 
 const SLACK_POST_URL    = 'https://slack.com/api/chat.postMessage';
 const SLACK_LOOKUP_URL  = 'https://slack.com/api/users.lookupByEmail';
@@ -831,7 +834,7 @@ async function classifyIntent(text, env) {
     // Sonnet handles the fault-vs-progress distinction reliably. 50-token
     // call, runs once per inbound message — pennies.
     const raw = await callClaude(env, {
-        model: MODEL_ACCURATE,
+        model: env.AI_MODEL_DEFAULT,
         system,
         messages: [{ role: 'user', content: text }],
         maxTokens: 100,
@@ -2014,7 +2017,7 @@ async function callClaude(env, { system, messages, maxTokens, model }) {
             'anthropic-version': ANTHROPIC_VERSION,
         },
         body: JSON.stringify({
-            model: model || MODEL_FAST,
+            model: model || env.AI_MODEL_LIGHT,
             max_tokens: maxTokens,
             system,
             messages,
