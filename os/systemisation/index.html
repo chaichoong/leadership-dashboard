@@ -347,6 +347,30 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .agent-pill{display:inline-block;font-size:11px;font-weight:var(--fw-bold);letter-spacing:.5px;padding:3px 10px;border-radius:var(--radius-full)}
 .agent-sub{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
 .agent-feed{margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:6px;max-height:420px;overflow-y:auto}
+/* Agent identity card — who this agent is, in the client's language */
+.agent-idcard{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface-2);padding:12px 14px;margin-top:12px}
+.agent-idcard-empty{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.agent-idcard-title{font-weight:var(--fw-semibold);font-size:var(--fs-sm)}
+.agent-idcard-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.agent-idcard-name{font-weight:var(--fw-bold);font-size:var(--fs-base)}
+.agent-idcard-role{font-size:var(--fs-xs);color:var(--text-secondary);margin-left:8px}
+.agent-idcard-body{display:grid;grid-template-columns:132px 1fr;gap:5px 12px;margin:0;font-size:var(--fs-xs)}
+.agent-idcard-body dt{color:var(--text-muted);font-weight:var(--fw-medium)}
+.agent-idcard-body dd{margin:0;color:var(--text-primary);line-height:1.5;word-break:break-word}
+.agent-idcard-never{margin:0;padding-left:16px}
+.agent-idcard-never li{margin-bottom:2px}
+.agent-idcard-foot{margin-top:10px;padding-top:8px;border-top:1px solid var(--border-subtle);font-size:11px;color:var(--text-muted)}
+/* Autonomy ladder — names the ramp the module already runs */
+.agent-ladder{margin-top:12px;border-top:1px solid var(--border-subtle);padding-top:10px}
+.ag-gear-row{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+.ag-gear{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.ag-gear-rail{flex:1;min-width:12px;height:2px;background:var(--border-default);margin:0 8px}
+.ag-gear-dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:var(--fw-bold);flex-shrink:0}
+.ag-gear-name{font-size:var(--fs-xs);white-space:nowrap}
+.ag-gear-here .ag-gear-name{font-weight:var(--fw-semibold)}
+.ag-gear-advice{margin-top:9px;font-size:var(--fs-xs);color:var(--text-secondary);line-height:1.5}
+.ag-gear-advice strong{color:var(--text-primary);font-weight:var(--fw-semibold)}
+@media(max-width:720px){.ag-gear-rail{display:none}.ag-gear-row{gap:10px}.agent-idcard-body{grid-template-columns:1fr;gap:2px}.agent-idcard-body dt{margin-top:6px}}
 .agent-row{padding:9px 0;border-bottom:1px solid var(--border-subtle)}
 .agent-row:last-child{border-bottom:none}
 .agent-row-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -3500,6 +3524,154 @@ function agentLinkBarHtml(wfId){
     </div>`;
 }
 
+// ── The autonomy ladder ────────────────────────────────────────────────
+// These four gears are NOT a new model. They name, in plain English, the ramp
+// this module already runs: draft -> testing (proposes only) -> testing with
+// autoFields (some actions automatic) -> live (runs on a schedule). Gear 1's
+// guardrails come from the AGENTIC "I — Inspections & Caveats" stage, which is
+// where the never-dos are already captured. The owner moves the gears; we only
+// recommend. See docs/agent-runtime-spec.md.
+const AGENT_GEARS = [
+    { n:1, name:'Guardrails set',    blurb:'Its limits are written down: what it checks, and what it must never do on its own.' },
+    { n:2, name:'Approve everything', blurb:'It proposes every action and waits. Nothing happens without your tick.' },
+    { n:3, name:'Loosen the leash',   blurb:'The actions you trust happen automatically. Everything else still asks.' },
+    { n:4, name:'Heartbeat',          blurb:'It runs to a schedule on its own, and only escalates what needs you.' },
+];
+
+// Derive the CURRENT gear from real state, never from a stored guess, so the
+// dial can never disagree with what the agent is actually doing.
+function getAgentGear(wfId){
+    const agent = getWfAgent(wfId);
+    const readiness = (getWfSopData(wfId)||{}).readiness;
+    const guardrailsSet = !!(readiness && readiness.state === 'Ready');
+    if(!agent || !agent.state || agent.state==='draft') return { gear: guardrailsSet ? 1 : 0, paused:false, guardrailsSet };
+    if(agent.state==='off') return { gear: 0, paused:true, guardrailsSet };
+    const loosened = !!((agent.autoFields||[]).length || agent.autoComments);
+    if(agent.state==='live') return { gear:4, paused:false, guardrailsSet };
+    return { gear: loosened ? 3 : 2, paused:false, guardrailsSet };
+}
+
+// What OD recommends at the owner's current gear. Honest by design: until the
+// runtime logs a real accuracy number, we say what we can actually see rather
+// than invent a score. agent-runtime-spec.md's accuracy bar lands here later.
+function agentGearAdvice(wfId){
+    const { gear, paused, guardrailsSet } = getAgentGear(wfId);
+    if(paused) return 'Paused. Resume testing when you want it watching again.';
+    if(!guardrailsSet) return 'Finish the readiness check first. An agent should not act until its never-dos are written down.';
+    if(gear===1) return 'Guardrails are set. Start testing so you can watch it propose before it touches anything.';
+    if(gear===2) return 'Watch its proposals until you would have ticked every one. Then tick the safest action below to let it do that one on its own.';
+    if(gear===3) return 'It is doing the safe actions for you. When a run goes by without you changing anything, it is ready to go live.';
+    return 'Running on its own. Review the activity below now and then, and pull it back a gear if anything looks off.';
+}
+
+function renderAutonomyLadder(wfId){
+    const { gear, paused } = getAgentGear(wfId);
+    const cells = AGENT_GEARS.map(g=>{
+        const done = !paused && gear > g.n;
+        const here = !paused && gear === g.n;
+        const bg = here ? 'var(--accent)' : done ? 'var(--accent-soft)' : 'var(--bg-subtle)';
+        const fg = here ? '#fff' : done ? 'var(--accent)' : 'var(--text-muted)';
+        return `<div class="ag-gear${here?' ag-gear-here':''}" title="${esc(g.blurb)}">
+            <span class="ag-gear-dot" style="background:${bg};color:${fg}">${g.n}</span>
+            <span class="ag-gear-name" style="color:${here?'var(--text-primary)':'var(--text-muted)'}">${esc(g.name)}</span>
+        </div>`;
+    }).join('<span class="ag-gear-rail" aria-hidden="true"></span>');
+    return `<div class="agent-ladder" role="group" aria-label="Autonomy level">
+        <div class="ag-gear-row">${cells}</div>
+        <div class="ag-gear-advice"><strong>OD suggests:</strong> ${esc(agentGearAdvice(wfId))}</div>
+    </div>`;
+}
+
+// ── The agent card (who this agent is) ─────────────────────────────────
+// Stored at sop.agent.identity, so it rides inside the `agent` key that SOP
+// regeneration already preserves. Generated by AI from the SOP, then owned and
+// edited by the client — never hand-written from a blank page.
+function renderAgentIdentity(wfId){
+    const agent = getWfAgent(wfId) || {};
+    const id = agent.identity;
+    if(!id){
+        return `<div class="agent-idcard agent-idcard-empty">
+            <div>
+                <div class="agent-idcard-title">This agent has no card yet</div>
+                <div class="agent-sub">A card names it, states what done looks like, and pins down what it must never do. Built from the SOP you already have.</div>
+            </div>
+            <button class="btn btn-sm btn-ai" onclick="generateAgentCard('${wfId}')" id="agcardBtn-${wfId}">Build the card</button>
+        </div>`;
+    }
+    const never = (id.neverDo||[]).map(n=>`<li>${esc(n)}</li>`).join('');
+    return `<div class="agent-idcard">
+        <div class="agent-idcard-head">
+            <div>
+                <span class="agent-idcard-name">${esc(id.name||'Unnamed')}</span>
+                <span class="agent-idcard-role">${esc(id.role||'')}</span>
+            </div>
+            <button class="btn btn-sm" onclick="generateAgentCard('${wfId}')" title="Rebuild this card from the current SOP">Rebuild</button>
+        </div>
+        <dl class="agent-idcard-body">
+            <dt>What done looks like</dt><dd>${esc(id.definitionOfDone||'Not set')}</dd>
+            <dt>Who it works for</dt><dd>${esc(id.servesWho||'Not set')}</dd>
+            <dt>How it behaves</dt><dd>${esc(id.voice||'Not set')}</dd>
+            <dt>Its lane</dt><dd>${esc(id.lane||'Not set')}</dd>
+            ${never?`<dt>It will never</dt><dd><ul class="agent-idcard-never">${never}</ul></dd>`:''}
+        </dl>
+        <div class="agent-idcard-foot">Runs on ${esc(window.AI_MODELS.default)}</div>
+    </div>`;
+}
+
+// Reverse-prompted from the SOP: the AI reads the captured process and writes
+// the card, exactly as it writes the SOP and the readiness score.
+async function generateAgentCard(wfId){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    if(!getWfSopData(wfId)){ toast('Generate the SOP first'); return; }
+    const btn = document.getElementById('agcardBtn-'+wfId);
+    if(btn){ btn.disabled = true; btn.textContent = 'Building…'; }
+    const wName = gf(w,WF.name)||'Untitled';
+    const bizName = (allBusinesses.find(b=>(gf(w,WF.business)||[])[0]===b.id)||{});
+    const prompt = `You are writing the identity card for an AI agent that runs this business process.
+
+PROCESS NAME: ${wName}
+BUSINESS: ${gf(bizName,BIZ_NAME)||'the business'}
+
+${agenticSopText(wfId)}
+
+Write the agent's card. Return ONLY JSON, no prose, in this exact shape:
+{
+  "name": "a short human first name that suits the job, e.g. Amelia for an inbox agent",
+  "role": "its job title in 2-4 words",
+  "definitionOfDone": "ONE sentence describing the concrete finished state of a successful run, drawn from the SOP's conclusion",
+  "servesWho": "who it works for and what they care about, one short sentence",
+  "voice": "how it behaves and writes, one short sentence, plain and specific",
+  "lane": "the boundary of what it touches, one short sentence starting with what it may work on",
+  "neverDo": ["the hard never-dos and must-ask items, taken from the SOP cautions and checks, 2-5 short items"]
+}
+
+Rules: UK English. Plain language a non-technical owner understands. No jargon. No em dashes. Be specific to THIS process, never generic.`;
+    try {
+        const res = await fetch(CLAUDE_PROXY, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ model:window.AI_MODELS.default, max_tokens:900, messages:[{role:'user',content:prompt}] })
+        });
+        if(!res.ok) throw new Error('AI request failed ('+res.status+')');
+        const data = await res.json();
+        const raw = (data.content && data.content[0] && data.content[0].text) || '';
+        const match = raw.match(/\{[\s\S]*\}/);
+        if(!match) throw new Error('Could not read the card back');
+        const id = JSON.parse(match[0]);
+        if(!id.name || !id.definitionOfDone) throw new Error('The card came back incomplete');
+        if(!Array.isArray(id.neverDo)) id.neverDo = [];
+        const agent = getWfAgent(wfId) || { state:'draft' };
+        agent.identity = id;
+        await setWfAgent(wfId, agent);
+        renderAgentPanel(wfId);
+        toast('Agent card ready — read it and change anything that is not right');
+    } catch(e){
+        toast('Could not build the card: '+e.message);
+        if(btn){ btn.disabled = false; btn.textContent = 'Build the card'; }
+    }
+}
+window.generateAgentCard = generateAgentCard;
+
 async function renderAgentPanel(wfId){
     const el = document.getElementById('agentpanel-'+wfId);
     if(!el) return;
@@ -3514,6 +3686,8 @@ async function renderAgentPanel(wfId){
                 <span class="agent-sub">This process is marked to run as an AI agent, but the agent hasn't started yet.</span></div>
                 <button class="btn btn-sm btn-ai" onclick="startAgentTesting('${wfId}')">Start testing</button>
             </div>
+            ${renderAgentIdentity(wfId)}
+            ${renderAutonomyLadder(wfId)}
         </div>`;
         return;
     }
@@ -3539,6 +3713,8 @@ async function renderAgentPanel(wfId){
             <span class="agent-sub" id="agstats-${wfId}" style="color:var(--text-muted)"></span></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap">${controls}</div>
         </div>
+        ${renderAgentIdentity(wfId)}
+        ${renderAutonomyLadder(wfId)}
         <div class="agent-perms" id="agentperms-${wfId}"></div>
         <div class="agent-feed" id="agentfeed-${wfId}"><div class="od-text-muted-sm" style="padding:8px 0;font-size:var(--fs-xs);color:var(--text-muted)">Loading activity…</div></div>
     </div>`;
