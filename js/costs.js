@@ -325,9 +325,26 @@
         const expectedThisPeriod = computeExpectedNextPayment(lastReconDate, dueDay, frequency);
         const today = new Date(); today.setHours(0,0,0,0);
 
-        // "Paid this period" — is the last reconciled date on/after the expected date?
+        // "Paid this period" — did a payment land for the current period?
+        //
+        // Direct debits routinely clear a few days BEFORE the due day (Sky paid
+        // on the 29th for a due day of 30, Oldham on the 17th for a due day of
+        // 22). The old test was `lastRecon >= expected`, which scored those as
+        // UNPAID and then counted days from the due date — so paying a bill
+        // EARLY made it read as overdue. That was 5 of 21 overdue costs.
+        //
+        // The tolerance only applies to the Due-Day-anchored path (Monthly, or
+        // frequency unset). Every other frequency derives `expected` FROM
+        // lastReconDate (lastRecon + interval), so lastRecon can never reach it
+        // and the tolerance is either inert (Fortnightly/4-Weekly/Quarterly/
+        // Annually) or actively harmful — on Daily and Weekly, expected minus 7
+        // days lands on or before lastRecon itself, which would mark those costs
+        // permanently paid and silence real overdues.
+        const EARLY_PAY_TOLERANCE_DAYS = 7;
+        const dueDayAnchored = (frequency === 'Monthly' || !frequency);
         const paidThisPeriod = expectedThisPeriod && lastReconDate
             ? new Date(lastReconDate).getTime() >= expectedThisPeriod.getTime()
+                - (dueDayAnchored ? EARLY_PAY_TOLERANCE_DAYS * 86400000 : 0)
             : false;
 
         // Days overdue:
