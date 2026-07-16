@@ -3,3 +3,18 @@
 node_modules/
 test-results/
 playwright-report/
+
+# Secrets — NEVER commit. This repo is PUBLIC (GitHub Pages at
+# chaichoong.github.io/leadership-dashboard). A leaked Airtable PAT is
+# read/write on the whole business base.
+# .e2e_tok appeared untracked and unignored on 16 Jul 2026 containing a
+# byte-identical copy of ~/.config/od/airtable_pat. One `git add -A` from
+# publication. The source of truth is ~/.config/od/airtable_pat — nothing
+# should ever copy a live token into the working tree.
+.e2e_tok
+*.tok
+*_tok
+.env
+.env.*
+*.pat
+airtable_pat
