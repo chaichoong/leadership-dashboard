@@ -5,10 +5,13 @@
     const BASE_ID = 'appnqjDpqDniH3IRl';
     const REFRESH_INTERVAL = 15 * 60 * 1000; // 15 minutes
 
-    // ── AI models (single source of truth — never hardcode model IDs in
-    // feature files; a retired ID is an app-wide AI outage) ──
-    const AI_MODEL_DEFAULT = 'claude-sonnet-4-6';
-    const AI_MODEL_LIGHT = 'claude-haiku-4-5-20251001';
+    // ── AI models (never hardcode model IDs in feature files; a retired ID
+    // is an app-wide AI outage). The literals live in js/ai-models.js, which
+    // MUST be loaded before this file. Pages that cannot load config.js (they
+    // declare their own BASE_ID/PAT/TEAM) load js/ai-models.js directly and
+    // read window.AI_MODELS.* instead of these constants. ──
+    const AI_MODEL_DEFAULT = (window.AI_MODELS || {}).default;
+    const AI_MODEL_LIGHT = (window.AI_MODELS || {}).light;
 
     // ── Slack notify worker (outbound DM dispatch). SaaS migration: swap
     // for the Supabase Edge Function URL; request shape stays identical. ──

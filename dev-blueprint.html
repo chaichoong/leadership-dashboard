@@ -273,7 +273,7 @@
                         <li><code>PAT</code> — Airtable auth token, set by the auth flow. Never log it, never hardcode it.</li>
                         <li>Data arrays loaded by <code>dashboard.js</code>: <code>allTransactions</code>, <code>allTenancies</code>, <code>allTenants</code>, <code>allCosts</code>, <code>allCategories</code>, <code>allSubCategories</code>, <code>allBusinesses</code></li>
                         <li>Constants: <code>F</code> (field IDs), <code>TABLES</code>, <code>INV</code>, <code>REC</code>, <code>PS</code></li>
-                        <li>AI models: <code>AI_MODEL_DEFAULT</code>, <code>AI_MODEL_LIGHT</code> — feature files must use these, never a literal model ID</li>
+                        <li>AI models: <code>AI_MODEL_DEFAULT</code>, <code>AI_MODEL_LIGHT</code> — feature files must use these, never a literal model ID. The literals live once in <code>js/ai-models.js</code> (loaded before <code>config.js</code>); pages that cannot load <code>config.js</code> read <code>window.AI_MODELS.default</code> / <code>.light</code> directly</li>
                     </ul>
                     <strong>Rule:</strong> prefer the shared arrays over independent fetches. Only call Airtable separately for tables not already cached.
                 </div>

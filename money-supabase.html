@@ -808,6 +808,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="dashboard-shim.js?v=8"></script>
     <script src="dashboard-boot.js?v=5"></script>
+    <!-- ai-models.js MUST load before config.js — config reads window.AI_MODELS -->
+    <script defer src="js/ai-models.js?v=1"></script>
     <script defer src="js/config.js?v=37"></script>
     <script defer src="js/prompts/boardroom-mentor.js?v=2"></script>
     <script defer src="js/shared.js?v=27"></script>
