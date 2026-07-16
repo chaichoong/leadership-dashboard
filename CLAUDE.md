@@ -130,6 +130,43 @@ Each session should only edit the file(s) for its feature. Before starting work:
 2. Edit ONLY the file(s) for your feature
 3. Commit and push promptly when done
 
+### The Golden Rule is necessary but NOT sufficient — use separate worktrees
+
+File-level ownership does not protect what git actually shares: **HEAD, the index, the stash,
+and the working tree**. On 2026-07-16 two sessions in one checkout produced all of the
+following, and not one of them is a file collision:
+
+- Session B ran `git stash` and swept Session A's uncommitted fix into a stash it labelled
+  "not-mine", then checked out another branch. A's edits vanished from the tree mid-task.
+- Session B pushed `main` while A's unpushed commit sat on it — A's commit shipped inside B's
+  push, untested by A.
+- Session B switched the checkout onto a feature branch, so A's next commit landed on the
+  wrong branch. `git push origin main` then reported "Everything up-to-date" while A was
+  three commits ahead somewhere else. A only noticed because the push was suspiciously quiet.
+- B's dev server held the Playwright port, so A's pre-push test gate failed for a reason that
+  had nothing to do with A's code — a false red that invites a `SKIP_SYNC_TESTS=1` bypass.
+
+**Run concurrent sessions in separate git worktrees.** A single checkout cannot be shared:
+
+```bash
+git worktree add ../od-<feature> -b feature/<name>
+```
+
+Each worktree has its own HEAD, index and stash; only the remote is shared. Give each session
+its own dev-server port in `.claude/launch.json` too, or the test gate collides.
+
+If a checkout genuinely must be shared: commit before EVERY context switch, never `git stash`
+work you did not write (leave it and say so), and run `git status -sb` before assuming which
+branch you are on — especially before reading a quiet "Everything up-to-date" as success.
+
+### Never pass secrets as command-line arguments
+
+MCP servers and CLI tools configured with `--api-key <token>` put that token in the process
+table, where any process running as the same user can read it with `ps`. It also lands in
+session transcripts on disk. Use a file (`~/.config/od/airtable_pat`) or an env var. Found on
+2026-07-16: the Airtable PAT was visible 7 times in `ps` output, passed to an MCP connector
+that was broken and unused anyway.
+
 ### Which file to edit for each feature
 
 | Feature | Edit this file | DO NOT touch |
