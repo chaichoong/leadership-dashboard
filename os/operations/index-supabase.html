@@ -394,6 +394,8 @@ tr.expand-row:hover td{background:var(--bg-surface-2)!important}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="supabase-shim.js?v=3"></script>
 <script src="supabase-boot.js?v=2"></script>
+<!-- Model IDs live once in js/ai-models.js. Never hardcode a model ID below. -->
+<script src="../../js/ai-models.js?v=1"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 // CONFIG — Airtable IDs (mirrors js/config.js — hardcoded since iframe can't
@@ -2334,7 +2336,7 @@ Confidence guide:
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
+        model: window.AI_MODELS.default,
         max_tokens: 12288,
         // Higher budget — finding 3 sold + 3 listed across multiple sources
         // typically needs more searches than a single-type pass.
@@ -2739,7 +2741,7 @@ async function testAnthropicKey(propertyId){
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5',
+        model: window.AI_MODELS.light,
         max_tokens: 32,
         messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
       }),

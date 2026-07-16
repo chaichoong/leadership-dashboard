@@ -1614,7 +1614,7 @@ async function wealthExtractDebtTerms(box, file) {
             : { type: 'image', source: { type: 'base64', media_type: file.type, data: b64 } };
         const resp = await fetch(AI_PROXY, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 300, messages: [{ role: 'user', content: [block, { type: 'text', text: DEBT_EXTRACT_PROMPT }] }] }),
+            body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 300, messages: [{ role: 'user', content: [block, { type: 'text', text: DEBT_EXTRACT_PROMPT }] }] }),
         });
         if (!resp.ok) { setS('Could not read — enter manually.', 'var(--danger)'); return; }
         const data = await resp.json();
@@ -1649,7 +1649,7 @@ async function getDebtGuidance(btn) {
     try {
         const resp = await fetch(AI_PROXY, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
+            body: JSON.stringify({ model: AI_MODEL_DEFAULT, max_tokens: 700, messages: [{ role: 'user', content: prompt }] }),
         });
         if (!resp.ok) throw new Error('proxy ' + resp.status);
         const data = await resp.json();

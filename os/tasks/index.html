@@ -631,6 +631,8 @@ body.app-busy,body.app-busy *{cursor:progress!important}
 <script src="../../js/kpi-sources.js?v=1"></script>
 <script src="../../js/sync-bar.js?v=4"></script>
 
+<!-- Model IDs live once in js/ai-models.js. Never hardcode a model ID below. -->
+<script src="../../js/ai-models.js?v=1"></script>
 <script>
 // CONFIG
 const BASE_ID = 'appnqjDpqDniH3IRl';
@@ -6183,7 +6185,7 @@ async function kpiWizardSendToClaude(){
   if(chat)chat.appendChild(thinking);
   try{
     const body={
-      model:'claude-sonnet-4-6',
+      model:window.AI_MODELS.default,
       max_tokens:1500,
       system:KPI_WIZARD_SYSTEM_PROMPT,
       messages:_kpiWizardState.messages.map(m=>({role:m.role,content:m.content})),
