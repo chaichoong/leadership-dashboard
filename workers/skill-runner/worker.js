@@ -151,7 +151,8 @@ async function handleRun(request, env, allowOrigin) {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
+                // Model ID lives in wrangler.toml [vars] — never hardcode it here.
+                model: env.AI_MODEL_DEFAULT,
                 max_tokens: 4096,
                 system: systemPrompt,
                 messages: [{ role: 'user', content: userMessage }],

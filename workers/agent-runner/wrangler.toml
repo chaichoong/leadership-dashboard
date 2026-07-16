@@ -23,3 +23,12 @@ crons = ["0 7 * * *"]
 [[services]]
 binding = "PROXY"
 service = "claude-proxy"
+
+# ── AI models — the ONE place this deployable names a model ──
+# Mirrors js/ai-models.js (the browser single source). Workers cannot read that
+# file, so each deployable carries its own [vars]. These are plain vars, NOT
+# secrets: they ship with `wrangler deploy`, no `wrangler secret put` needed.
+# A retired model ID is an outage — change it here, then redeploy.
+[vars]
+AI_MODEL_DEFAULT = "claude-sonnet-4-6"
+AI_MODEL_LIGHT = "claude-haiku-4-5-20251001"

@@ -18,7 +18,9 @@ const BASE_ID = 'appnqjDpqDniH3IRl';
 const WORKFLOWS_TBL = 'tblLPoRHFBl0vqR24';
 const ACTIVITY_TBL = 'tblJ3GFnAAoXf99e9';
 const CLAUDE_PROXY = 'https://claude-proxy.kevinbrittain.workers.dev';
-const MODEL = 'claude-sonnet-4-6';
+// Model IDs live in wrangler.toml [vars] (AI_MODEL_DEFAULT / AI_MODEL_LIGHT),
+// read off `env` at the call site. Never hardcode one here: a module-scope const
+// cannot see `env`, which is exactly how the old literal got stranded.
 const MAX_TOOL_TURNS = 16;
 const ALLOWED_ORIGINS = ['https://chaichoong.github.io'];
 
@@ -98,7 +100,7 @@ async function callClaude(env, system, messages, tools) {
             'Authorization': `Bearer ${env.PROXY_TOKEN}`,
             'User-Agent': 'agent-runner/1.0',
         },
-        body: JSON.stringify({ model: MODEL, max_tokens: 3000, system, messages, tools }),
+        body: JSON.stringify({ model: env.AI_MODEL_DEFAULT, max_tokens: 3000, system, messages, tools }),
     });
     if (!res.ok) throw new Error(`proxy ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return res.json();
