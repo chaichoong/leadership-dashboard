@@ -397,6 +397,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .disp-opt:hover{border-color:var(--accent);color:var(--accent)}
 .disp-opt.sel{background:var(--accent);border-color:var(--accent);color:var(--bg-surface);font-weight:var(--fw-semibold)}
 .disp-hint{font-size:var(--fs-xs);color:var(--text-muted);margin-top:8px}
+.disp-opt.rec{border-color:var(--accent);color:var(--accent)}
+.disp-rec{font-size:10px;font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:.4px;opacity:.75;margin-left:5px}
+/* Rule of R — the gate before the disposition choice */
+.ror-bar{border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface);margin:14px 0 0;padding:12px 16px}
+.ror-rows{display:flex;gap:18px;flex-wrap:wrap}
+.ror-row{display:flex;align-items:center;gap:8px}
+.ror-q{font-size:var(--fs-sm);color:var(--text-secondary);cursor:help}
+.ror-btns{display:inline-flex;border:1px solid var(--border-default);border-radius:var(--radius-full);overflow:hidden}
+.ror-btn{padding:3px 11px;border:none;background:var(--bg-surface);color:var(--text-muted);font-size:var(--fs-xs);font-family:inherit;cursor:pointer;transition:background .15s,color .15s}
+.ror-btn:hover{background:var(--bg-surface-2)}
+.ror-btn.sel{background:var(--accent);color:var(--bg-surface);font-weight:var(--fw-semibold)}
+.ror-verdict{font-size:var(--fs-xs);color:var(--text-secondary);margin-top:10px;padding-top:8px;border-top:1px solid var(--border-subtle);line-height:1.5}
+.ror-verdict strong{color:var(--text-primary)}
+.ror-verdict-empty{color:var(--text-muted)}
+@media(max-width:720px){.ror-rows{gap:8px;flex-direction:column;align-items:stretch}.ror-row{justify-content:space-between}}
 .disp-tag{flex-shrink:0;font-size:10px;font-weight:var(--fw-semibold);padding:1px 6px;border-radius:var(--radius-full)}
 .disp-tag-agent{background:var(--accent-soft);color:var(--accent)}
 .disp-tag-recurring{background:var(--warning-bg);color:var(--warning)}
@@ -2388,13 +2403,16 @@ No other text outside the JSON object.`;
         const tips = sopData.tips || [];
 
         renderSOPDocument(wfId, wName, wDesc, dept, fulfill, loomUrl, steps, sopSteps, container, sopTitle, cautions, tips, videoTitle);
-        // Regenerating must NOT wipe how the workflow runs: keep the disposition and
-        // the agent config. Readiness is deliberately reset — new content, new score.
+        // Regenerating must NOT wipe how the workflow runs: keep the disposition, the
+        // agent config, and the owner's Rule of R answers (they describe the WORK, which
+        // a re-record does not change). Readiness is deliberately reset — new content,
+        // new score. Anything not listed here is silently dropped on regenerate.
         const prevSop = getWfSopData(wfId) || {};
         const sopJson = JSON.stringify(Object.assign(
             { sopTitle, sopSteps, cautions, tips, videoTitle, generatedDate: new Date().toISOString() },
             prevSop.disposition ? { disposition: prevSop.disposition } : {},
-            prevSop.agent ? { agent: prevSop.agent } : {}
+            prevSop.agent ? { agent: prevSop.agent } : {},
+            prevSop.ruleOfR ? { ruleOfR: prevSop.ruleOfR } : {}
         ));
         try {
             await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: sopJson });
@@ -3427,15 +3445,82 @@ function getWfDisposition(wfId){
     return (sop && sop.disposition) ? sop.disposition : null;
 }
 
+// ── Rule of R: is this worth an agent at all? ──────────────────────────
+// Three questions, asked BEFORE "how will this run?", because the cheapest
+// agent is the one you never build. The answers describe the work itself, so
+// they survive a re-record (see the regenerate preservation list above).
+const RULE_OF_R = [
+    { key:'repetitive',  q:'Repetitive?',   hint:'Would you do this every week, or close to it?' },
+    { key:'rulesBased',  q:'Rules-based?',  hint:'Same kind of input, same kind of outcome each time?' },
+    { key:'returnsTime', q:'Returns time?', hint:'Would automating it save more time than building it costs?' },
+];
+
+function getWfRuleOfR(wfId){
+    const sop = getWfSopData(wfId);
+    return (sop && sop.ruleOfR) ? sop.ruleOfR : null;
+}
+
+// Map the answers onto the three dispositions that already exist. This only ever
+// RECOMMENDS — the owner still picks. Unanswered means no recommendation.
+function ruleOfRVerdict(r){
+    if(!r || RULE_OF_R.some(c=>typeof r[c.key] !== 'boolean')) return null;
+    if(r.repetitive && r.rulesBased && r.returnsTime)
+        return { rec:'agent', label:'Good agent candidate', why:'Repetitive, rules-based, and it pays back the build.' };
+    if(r.repetitive && r.rulesBased && !r.returnsTime)
+        return { rec:'recurring', label:'Systemise, do not automate', why:'It is repeatable, but building an agent costs more time than it saves.' };
+    if(r.repetitive && !r.rulesBased)
+        return { rec:'recurring', label:'Needs a human call', why:'It happens often, but the judgement changes each time.' };
+    return { rec:'adhoc', label:'Leave it ad-hoc', why:'It is not regular enough to be worth systemising.' };
+}
+
+async function setWfRuleOfR(wfId, key, value){
+    const w = allWorkflows.find(x=>x.id===wfId);
+    if(!w) return;
+    const sop = getWfSopData(wfId);
+    if(!sop){ toast('Generate the SOP first'); return; }
+    sop.ruleOfR = Object.assign({}, sop.ruleOfR, { [key]: value });
+    const json = JSON.stringify(sop);
+    w.fields[WF.sopDocument] = json;
+    try { await atUpdate(TBL.workflows, wfId, { [WF.sopDocument]: json }); }
+    catch(e){ toast('Could not save that answer: '+e.message); return; }
+    const host = document.getElementById('disposition-'+wfId);
+    if(host) host.innerHTML = dispositionBarHtml(wfId);
+}
+window.setWfRuleOfR = setWfRuleOfR;
+
+function ruleOfRHtml(wfId){
+    const r = getWfRuleOfR(wfId) || {};
+    const rows = RULE_OF_R.map(c=>{
+        const v = r[c.key];
+        const btn = (val,label)=>`<button class="ror-btn${v===val?' sel':''}" onclick="setWfRuleOfR('${wfId}','${c.key}',${val})">${label}</button>`;
+        return `<div class="ror-row">
+            <span class="ror-q" title="${esc(c.hint)}">${esc(c.q)}</span>
+            <span class="ror-btns">${btn(true,'Yes')}${btn(false,'No')}</span>
+        </div>`;
+    }).join('');
+    const v = ruleOfRVerdict(r);
+    const verdict = v
+        ? `<div class="ror-verdict"><strong>${esc(v.label)}.</strong> ${esc(v.why)}</div>`
+        : `<div class="ror-verdict ror-verdict-empty">Answer these three and we will suggest how it should run.</div>`;
+    return `<div class="ror-bar">
+        <div class="disp-q">Is this worth an agent?</div>
+        <div class="ror-rows">${rows}</div>
+        ${verdict}
+    </div>`;
+}
+
 function dispositionBarHtml(wfId){
     const cur = getWfDisposition(wfId);
+    const v = ruleOfRVerdict(getWfRuleOfR(wfId));
     const opts = DISPOSITIONS.map(d=>{
         const sel = cur && cur.type===d.key;
-        return `<button class="disp-opt${sel?' sel':''}" onclick="setWfDisposition('${wfId}','${d.key}')">${esc(d.label)}</button>`;
+        const rec = v && v.rec===d.key && !sel;
+        return `<button class="disp-opt${sel?' sel':''}${rec?' rec':''}" onclick="setWfDisposition('${wfId}','${d.key}')">${esc(d.label)}${rec?' <span class="disp-rec">suggested</span>':''}</button>`;
     }).join('');
     const cd = cur ? DISPOSITIONS.find(d=>d.key===cur.type) : null;
     const hint = cd ? cd.hint : 'Once the SOP is ready, choose how this process runs.';
-    return `<div class="disp-bar">
+    return `${ruleOfRHtml(wfId)}
+    <div class="disp-bar">
         <div class="disp-q">How will this run?</div>
         <div class="disp-opts">${opts}</div>
         <div class="disp-hint">${esc(hint)}</div>
