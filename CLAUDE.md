@@ -62,6 +62,33 @@ These have caused production bugs in this codebase. Check for them during every 
 - **Airtable blank fields pass `!= 0` but fail `> 0`** — in an Airtable formula an empty number/currency field is NOT equal to 0, so `{blank} != 0` is TRUE while `{blank} > 0` is FALSE. Swapping `> 0` for `!= 0` to allow negatives makes every blank-field record take the wrong branch. This blanked `Report Amount` on 8,667 of 8,690 transactions in Jul 2026, taking out the P&L, dashboard, wealth and cashflow at once. To test "is this signed value set and non-zero" while keeping the blank fall-through, use **`ABS({field}) > 0`**. Whenever you change a formula condition, check it against a blank record, not just a populated one
 - **Split Override Amount must carry the sign of `**GBP`** — the split modal collects positive magnitudes (`totalRaw` uses `Math.abs`, validation requires every portion `> 0`), but Airtable's `Report Amount` returns the override verbatim. Writing a positive override on an expense flips an outflow into revenue across every report. Always multiply the portion by the sign of `**GBP` before writing (see `performReconSplit` in `js/reconciliation.js`). Inflow splits hid this for years because their sign is already positive — the first expense split would have posted £1,742.60 of costs as income
 
+## Regression Tests (no bug is fixed until it is caught)
+
+A bug is not fixed when the symptom goes away. It is fixed when a test reproduces it and
+passes. Every entry in "Known Anti-Patterns" above is something that shipped, broke
+production, got fixed, and came back or nearly did. Add the test in the same commit as the fix.
+
+**Pick the right layer — this is the part that gets it wrong:**
+
+| The bug lives in | Test goes in | Runs |
+|---|---|---|
+| JS: render, state, filters, PATCH payloads, auth | `tests/sync-invariants/*.spec.js` (Playwright, fixtures) | `npm run test:sync`, pre-push gate |
+| Pure functions/helpers | `tests/*.test.js` (vitest) | `npm test` |
+| **Airtable: formulas, computed fields, real data shape** | `scripts/check-data-invariants.py` | daily `prod-e2e-sweep` STEP 4.5 |
+
+`tests/sync-invariants/` mocks the Airtable API (`page.route` on `/v0/**`). That keeps the
+pre-push gate deterministic, and it means those tests **cannot see an Airtable-side bug** —
+they stub out the layer that broke. Both of this platform's worst incidents (the 8,667-txn
+`Report Amount` blanking and the split sign-flip) would ship green through the whole fixture
+suite. If your bug is in a formula or in the shape of real data, a fixture test is theatre.
+Add a live invariant instead.
+
+**Every live invariant needs a control.** A `filterByFormula` with a typo'd field name
+returns zero rows and reads as a pass forever. Each invariant declares a `control` formula
+matching the population the bug would corrupt; if the control matches nothing, the run FAILS
+rather than passing. Back-test a new invariant by evaluating the *broken* formula inline in a
+read-only query and confirming it fires — never by writing bad data.
+
 ## File Architecture (Split for Concurrent Editing)
 
 The platform has been split from a single monolith into separate files so that **multiple Claude sessions can work on different features at the same time** without overwriting each other.
