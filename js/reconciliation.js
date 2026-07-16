@@ -317,8 +317,18 @@
         const tenantLookup = buildTenantLookup();
         const tenancyLookup = {};
         allTenancies.forEach(r => { tenancyLookup[r.id] = r; });
+        // ACTIVE costs only — the same isCostActive rule buildCostDropdown uses (and the
+        // Leadership Dashboard, and AP Fixed). Two reasons this must match:
+        //   1. A Paused or Inactive cost is one Kevin has deliberately stopped paying.
+        //      Proposing it invites a payment onto a dead line. In Jul 2026 all 12 live
+        //      suggestions pointed at a cost paused an hour earlier.
+        //   2. The cost dropdown only contains ACTIVE costs, so suggesting an inactive one
+        //      renders a label the dropdown cannot hold — resolveDropdownId then returns ''
+        //      on Approve and the suggestion silently drops. Same silent-drop trap as the
+        //      tenancy/unit lookups documented in reconTenancyChanged.
+        // Both pickers gate on costLookup, so filtering here covers reference AND amount.
         const costLookup = {};
-        allCosts.forEach(r => { costLookup[r.id] = r; });
+        allCosts.filter(r => isCostActive(r)).forEach(r => { costLookup[r.id] = r; });
 
         unrec.forEach(tx => {
             const amt = Number(getField(tx, F.txReportAmount)) || 0;

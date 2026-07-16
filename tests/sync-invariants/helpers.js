@@ -35,6 +35,8 @@ const FIELDS = {
   txUnit: 'fldJGIhSbgXNIEW4a',
   txProperty: 'fldvp44VfF8uTTthp',
   txSubCategory: 'fldMRjSVzZVYeHb0A',
+  txCost: 'fldGkpkVqSeiGvUGL',
+  txVendor: 'fld0Xr8sboQ0ekJQJ',
   invDesc: 'fldT0onwVg9JDJ1sv',
   invAmount: 'fldauZCUSWeIfGryG',
   invBusiness: 'fldzGhwp6rxwEFoxu',
