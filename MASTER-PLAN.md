@@ -132,9 +132,9 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 
 ## 7. Lead generation — attention (Ch3/Ch4)
 
-- [ ] ERICAMAE — Deliver the LinkedIn outbound proposal [AT:recR5cIwV8A8Q8NDt] (done when: written proposal with Kevin; due 8 Jul)
+- [x] ERICAMAE — Deliver the LinkedIn outbound proposal [AT:recR5cIwV8A8Q8NDt] (done when: written proposal with Kevin; due 8 Jul) *(ticked 2026-07-16, synced from Airtable)*
 - [ ] KEVIN — Approve/adjust it same day (done when: reply sent; due 8 Jul) [AT:-]
-- [ ] ERICAMAE — Target list v1: 60 founder-led UK SMEs matching the 5 hot-buttons (done when: 60 rows with signal noted; due 10 Jul) [AT:recwTeqcJwSAaSo9R]
+- [x] ERICAMAE — Target list v1: 60 founder-led UK SMEs matching the 5 hot-buttons (done when: 60 rows with signal noted; due 10 Jul) [AT:recwTeqcJwSAaSo9R] *(ticked 2026-07-16, synced from Airtable)*
 - [ ] ERICAMAE — 3 outreach message templates from the hot-buttons (done when: Kevin approved all 3; due 11 Jul) [AT:rec7CmRC1QiL6cMLZ]
 - [ ] KEVIN — (NEW) LinkedIn profile revamp: Kevin's profile is the outreach landing page — headline, about, featured to the core message (done when: profile matches the 13-yo message; due 11 Jul) [AT:recZV6j6rPyPvlRb6]
 - [ ] ERICAMAE — First 20 personalised touches sent (done when: 20 logged; due 14 Jul) [AT:recTLE3GO6lSC6fu5]
@@ -147,13 +147,13 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [x] ERICAMAE — Lead-Magnet Capture & Nurture workflow live [AT:receDDArEOlLDZaBN] (done when: workflow on; due 15 Jul) *(ticked 2026-07-08, synced from Airtable)*
 - [x] ERICAMAE — Gate the Founder-to-Free magnet (email → link → thank-you CTA to Teardown) (done when: test lead gets it gated; due 16 Jul) [AT:receDDArEOlLDZaBN] *(ticked 2026-07-08, synced from Airtable)*
 - [x] ERICAMAE — GHL nurture sequences by funnel stage [AT:recKlaXRJXupP36pJ] (done when: test lead receives sequence; due 18 Jul) *(ticked 2026-07-14, synced from Airtable)*
-- [ ] ERICAMAE — Content engine LinkedIn-led, problem-first [AT:recgErOu3AiipDQo4] (done when: 3 posts/week running; due 14 Jul)
+- [x] ERICAMAE — Content engine LinkedIn-led, problem-first [AT:recgErOu3AiipDQo4] (done when: 3 posts/week running; due 14 Jul) *(ticked 2026-07-16, synced from Airtable)*
 - [ ] ERICAMAE — Comparison pages (vs DIY / VA / agency) [AT:reckGG3pb7U5qJYQV] (done when: pages live; due 12 Aug)
 - [ ] ERICAMAE — Retargeting across the funnel [AT:recQnZxHECFiumZwn] (done when: pixels + audiences live; due 12 Aug)
 
 ## 8. Sales & conversion (Ch5 Rocket Demo)
 
-- [ ] ERICAMAE — Verify sales + thank-you pages show £350/£1,500 + trial everywhere (done when: screenshots in Slack; due 9 Jul) [AT:rect3tMNA5vAUUf0t]
+- [x] ERICAMAE — Verify sales + thank-you pages show £350/£1,500 + trial everywhere (done when: screenshots in Slack; due 9 Jul) [AT:rect3tMNA5vAUUf0t] *(ticked 2026-07-16, synced from Airtable)*
 - [ ] ERICAMAE — Resolve the 2 sales-page placeholders (calendar link, worker URL) (done when: both live; due 9 Jul) [AT:rectDqrReN31yzJcr]
 - [x] MICA — Fix the Stripe webhook delivery failures on od-billing-bridge [AT:recjybZNepSBpDLeP] (done when: deliveries succeeding; due 9 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] ERICAMAE — Full dry-run: book Teardown → calendar; checkout → contract + welcome email (done when: evidence in Slack; due 10 Jul) [AT:recrgbZ4SKtCladgr]
@@ -246,3 +246,4 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-14 | Nightly sync (scripts/sync-master-plan.py) | ticked 10 from Airtable completions. |
 | 2026-07-15 | Kevin, in-session (transcript-to-brain) | Added §13 holding-pen proposal: productise Dave Jenyns' task-to-agent method as OD's standard delivery method (Process-to-Agent runbook + process-clarity gate + team-adoption playbook + connector on-ramp copy). PENDING Kevin's call — nothing live yet. |
 | 2026-07-15 | Kevin, in-session (approved) | §13 Jenyns-Loom amendment APPROVED. 4 tasks now live: §6 Process-to-Agent delivery runbook + process-clarity gate (due 22 Jul); §6 team-adoption playbook (due 22 Jul); §8 connector on-ramp copy (due 22 Jul). Framed as a client-facing WRAPPER over the existing §5 Systemisation pipeline + Systemisation module, NOT a rebuild. Nightly sync to push new [AT:-] tasks to Airtable. |
+| 2026-07-16 | Nightly sync (scripts/sync-master-plan.py) | ticked 4 from Airtable completions. |
