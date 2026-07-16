@@ -368,9 +368,21 @@ PAGE_REGISTRY in `js/config.js` tracks page and SOP versions.
 
 ### Creating the PR
 
-`gh` CLI is NOT installed. The `github` MCP server IS connected and authenticated (verified 16 Jul 2026 — `list_pull_requests` returns cleanly). Order of attempts:
+`gh` CLI is NOT installed. The `github` MCP server is connected but **read-only** — `create_pull_request` returns "Authentication Failed: Requires authentication" (tested 16 Jul 2026).
 
-1. `mcp__github__create_pull_request` (owner `chaichoong`, repo `leadership-dashboard`). Load it via ToolSearch first.
-2. If that fails, `open` the compare URL in Kevin's Chrome: `https://github.com/chaichoong/leadership-dashboard/compare/<branch>`
+**Do not re-test this with a read.** This repo is public, so `list_pull_requests`, `get_file_contents` and friends succeed with no credentials at all. A passing read proves nothing about writes; it is exactly what fooled a previous session into recording the MCP as authenticated. Only a write proves a write.
+
+So, to ship a branch:
+
+1. `git push -u origin <branch>`
+2. `open` the compare URL in Kevin's Chrome — he is logged in there and creates the PR in two clicks:
+   `https://github.com/chaichoong/leadership-dashboard/compare/<branch>?expand=1`
+3. Paste the PR body into the message for him, or leave it in the commit body so GitHub prefills it.
 
 Do NOT quietly merge to main locally as a fallback — that discards the review step the branch existed for. Kevin cannot click a terminal link: always `open` the PR, the deployed page, and any deliverable in his browser rather than printing the URL.
+
+To remove this friction permanently, someone with the token needs to run **one** of:
+- `brew install gh && gh auth login`, or
+- give the `github` MCP server a PAT with `repo` scope.
+
+Until then, step 2 is the path — it works and takes Kevin ten seconds.
