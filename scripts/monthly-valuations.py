@@ -14,11 +14,12 @@ existing Claude proxy, which supports server-side web search when called with th
 app Origin.
 
 Env:
-  AIRTABLE_PAT   Airtable personal access token (required)
-  DRY_RUN=1      compute + log, write nothing
-  LIMIT=N        value at most N properties (0 = all)
+  AIRTABLE_PAT          Airtable personal access token (required)
+  PROXY_SERVICE_TOKEN   bearer token for the Claude proxy (required)
+  DRY_RUN=1             compute + log, write nothing
+  LIMIT=N               value at most N properties (0 = all)
 """
-import os, sys, json, time, re, datetime, urllib.request, urllib.error, urllib.parse
+import os, sys, json, time, re, datetime, urllib.request, urllib.error
 
 AIRTABLE_PAT = os.environ.get('AIRTABLE_PAT', '').strip()
 DRY_RUN = os.environ.get('DRY_RUN') == '1'
@@ -28,24 +29,15 @@ BASE_ID = 'appnqjDpqDniH3IRl'
 VAL_TABLE = 'tblZYsa0u1M17N7ZE'      # Property Valuations
 PROP_TABLE = 'tbl6f0OkAmTC2jbuG'     # Properties
 PROXY = 'https://claude-proxy.kevinbrittain.workers.dev'
-# The hardened claude-proxy authenticates scripts with a bearer token (it no
-# longer accepts a spoofed Origin). Resolution order:
-#   1. PROXY_SERVICE_TOKEN env var (GitHub Actions secret, if configured).
-#   2. Fallback: the 'PROXY_SERVICE_TOKEN' record in the Airtable Settings
-#      table (the job already holds AIRTABLE_PAT, so no new secret is needed).
-#      Stored 2026-07-14 because the repo PAT cannot create GitHub secrets.
+# The hardened claude-proxy authenticates scripts with a bearer token (it no longer
+# accepts a spoofed Origin). The token comes from the GitHub Actions secret ONLY.
+#
+# It used to fall back to reading the token out of an Airtable Settings record when
+# no env secret was set. That was a stop-gap from 2026-07-14 (the repo PAT cannot
+# create GitHub secrets) and it put a live credential in a field that every Airtable
+# PAT can read. Removed 2026-07-17 and the token rotated. Do not reintroduce a
+# fallback that reads a secret out of Airtable.
 PROXY_SERVICE_TOKEN = os.environ.get('PROXY_SERVICE_TOKEN', '').strip()
-SETTINGS_TABLE = 'tblHGNzDmOs59r9QD'  # (Deprecated) Settings — reused as config store
-
-
-def _load_proxy_token_from_airtable():
-    formula = urllib.parse.quote("{Name} = 'PROXY_SERVICE_TOKEN'")
-    url = (f'https://api.airtable.com/v0/{BASE_ID}/{SETTINGS_TABLE}'
-           f'?filterByFormula={formula}&pageSize=1')
-    status, d = _http(url, headers={'Authorization': f'Bearer {AIRTABLE_PAT}'})
-    if status != 200 or not d.get('records'):
-        return ''
-    return (d['records'][0].get('fields', {}).get('Active Skill IDs') or '').strip()
 
 # Property Valuations field IDs
 F_TITLE = 'fldRBIx2kRFAVmH0k'
@@ -145,16 +137,17 @@ def value_property(address, last_value, last_date):
 
 
 def main():
-    global PROXY_SERVICE_TOKEN
     if not AIRTABLE_PAT:
         print('AIRTABLE_PAT not set', file=sys.stderr)
         sys.exit(1)
+    # Fail loudly, not silently. Without the token every proxy call 403s, each
+    # property yields no value and gets SKIPped, and the job would exit 0 having
+    # quietly valued nothing — a green run that did no work.
     if not PROXY_SERVICE_TOKEN:
-        PROXY_SERVICE_TOKEN = _load_proxy_token_from_airtable()
-        if PROXY_SERVICE_TOKEN:
-            print('Proxy token loaded from Airtable Settings (no env secret set).')
-        else:
-            print('WARNING: no PROXY_SERVICE_TOKEN in env or Airtable — proxy calls will 403.', file=sys.stderr)
+        print('PROXY_SERVICE_TOKEN not set — add it as a GitHub Actions secret '
+              '(Settings > Secrets and variables > Actions). Every proxy call '
+              'would 403 and no property would be valued.', file=sys.stderr)
+        sys.exit(1)
     now = datetime.date.today()
     month_label = now.strftime('%b %Y')   # e.g. "Aug 2026"
     month_key = now.strftime('%Y-%m')
