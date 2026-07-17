@@ -25,14 +25,24 @@
     const SETTINGS_RECORD = 'recqbcIz2R2griDn3';
     const ACTIVE_SKILLS_FIELD = 'Active Skill IDs';
 
+    // No `fields[]` on this URL, and no switching to the list endpoint. Two reasons:
+    //   1. Airtable's single-record GET rejects fields[] with a 422 (only the list
+    //      endpoint accepts it). That 422 silently broke this fetch until 17 Jul 2026.
+    //   2. SETTINGS_TABLE keys rows by Name, and another row ('PROXY_SERVICE_TOKEN',
+    //      read by scripts/monthly-valuations.py) holds a live service token in this
+    //      same field. The list endpoint would pull that secret into the browser.
+    // A single-record GET returns only SETTINGS_RECORD, so the token can never reach here.
     async function fetchActivePresets() {
         if (_activePresetsFetched || typeof PAT === 'undefined' || !PAT) return;
         try {
-            const url = `https://api.airtable.com/v0/${BASE_ID}/${SETTINGS_TABLE}/${SETTINGS_RECORD}?fields[]=${encodeURIComponent(ACTIVE_SKILLS_FIELD)}`;
+            const url = `https://api.airtable.com/v0/${BASE_ID}/${SETTINGS_TABLE}/${SETTINGS_RECORD}`;
             const res = await fetch(url, { headers: { Authorization: 'Bearer ' + PAT } });
-            if (!res.ok) return;
+            if (!res.ok) {
+                console.warn('Skills: active presets fetch failed —', res.status, res.statusText);
+                return;
+            }
             const data = await res.json();
-            const raw = data.fields[ACTIVE_SKILLS_FIELD];
+            const raw = (data.fields || {})[ACTIVE_SKILLS_FIELD];
             if (raw) {
                 try { _activePresetIds = JSON.parse(raw); } catch (e) { _activePresetIds = []; }
             }
