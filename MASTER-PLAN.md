@@ -52,8 +52,8 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] OPUS — Update every PAT consumer + verify each works (done when: all green; due 10 Jul) [AT:rec8BVrJIDAjp6QY7]
 - [ ] ERICAMAE — Change the affiliate admin password + store it outside Slack (done when: new password works; due 9 Jul) [AT:rec0JrMvCKgmsi3lP]
 - [x] KEVIN — Agree the no-secrets-in-Slack rule + alternative channel at the team meeting (done when: agreed; due 8 Jul) [AT:rec0j7ZPQl91sGRQx] *(ticked 2026-07-07, synced from Airtable)*
-- [ ] KEVIN — Rotate PROXY_SERVICE_TOKEN and add it as a GitHub Actions secret (done when: secret exists AND the Worker holds the same new value; due 9 Jul) [NOW BLOCKING: the Airtable fallback was removed 17 Jul, so the 1 Aug valuations run exits 1 without this] [AT:recNhmqjkkrJQYGRM]
-- [ ] KEVIN — Add the env line to .github/workflows/monthly-valuations.yml via GitHub web UI (done when: line merged; due 9 Jul) [pairs with the secret above — neither works alone; PAT lacks workflow scope] [AT:recd4w48QR3HLhJp6]
+- [x] KEVIN — Rotate PROXY_SERVICE_TOKEN and add it as a GitHub Actions secret (done when: secret exists AND the Worker holds the same new value; due 9 Jul) [AT:recNhmqjkkrJQYGRM] *(done 2026-07-17: rotated to a fresh value, set on the Worker + as a GitHub secret; proven by a dry run — 25 valued, 0 skipped)*
+- [x] KEVIN — Add the env line to .github/workflows/monthly-valuations.yml via GitHub web UI (done when: line merged; due 9 Jul) [AT:recd4w48QR3HLhJp6] *(done 2026-07-17, commit 54fdc44)*
 - [ ] KEVIN — Apply the saved auto-bump-pagever.yml diff via GitHub web UI, or grant the PAT workflow scope (done when: workflow updated; due 9 Jul) [AT:recNBCvgAQyQQnSNY]
 - [ ] KEVIN — Verify the Google API key in follow-up.html is referrer-restricted in Google Cloud Console (done when: restriction confirmed; due 9 Jul) [AT:recG1rKPOaOWnrGnr]
 - [ ] KEVIN — Set GCAL_PROXY_TOKEN Script Property + redeploy gcal-proxy + set localStorage gcal_proxy_key on Tasks (done when: calendar loads with gate on; due 11 Jul) [AT:rec3G6KvmgrnO47eq]
