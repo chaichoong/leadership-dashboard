@@ -96,7 +96,7 @@ Live, taking money, generating leads, and delivering what we sell:
 - [ ] KEVIN — (NEW) Content Machine: merge the hardened branch into the main app marketing section, or explicitly defer (done when: merged or defer logged; due 15 Jul) [AT:recLZd4a7hxK9HfH6]
 - [ ] OPUS — (NEW) Trial-end + payment-failure + cancellation flows: what happens in Stripe/GHL/app when a trial converts, a card fails, or a client cancels — map and close gaps (done when: all three flows tested end-to-end in test mode; due 23 Jul) [AT:recYAjccWhOGqbFIt]
 - [ ] OPUS — (NEW) Error monitoring on the client-facing app (Sentry free tier per the migration plan) (done when: a forced error appears in Sentry; due 25 Jul) [AT:recsN5m4gCi3SaLmD]
-- [ ] ERICAMAE — (NEW) Mobile responsiveness pass on all client-facing pages (sales, booking, app shell) (done when: screenshots at 375px width, no broken layouts; due 18 Jul) [AT:rec1pullKuO84OX3u]
+- [x] ERICAMAE — (NEW) Mobile responsiveness pass on all client-facing pages (sales, booking, app shell) (done when: screenshots at 375px width, no broken layouts; due 18 Jul) [AT:rec1pullKuO84OX3u] *(ticked 2026-07-18, synced from Airtable)*
 
 ## 5. AI agent fleet — 10 demo agents on Kevin's businesses (NEW section, Kevin 7 Jul)
 
@@ -143,7 +143,7 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [ ] KEVIN — (NEW) LinkedIn profile revamp: Kevin's profile is the outreach landing page — headline, about, featured to the core message (done when: profile matches the 13-yo message; due 11 Jul) [AT:recZV6j6rPyPvlRb6]
 - [ ] ERICAMAE — First 20 personalised touches sent (done when: 20 logged; due 14 Jul) [AT:recTLE3GO6lSC6fu5]
 - [ ] ERICAMAE — (NEW) Reply-handling templates + SOP (positive / question / not-now / referral) so responses never sit (done when: 4 templates approved + response-time rule; due 15 Jul) [AT:recURXC8NvECVuY9e]
-- [ ] ERICAMAE — Ramp to 60 touches/week from w/c 21 Jul (done when: weekly scorecard shows 60; due 21 Jul) [AT:recHJ5Qn8QdjrI0y4]
+- [x] ERICAMAE — Ramp to 60 touches/week from w/c 21 Jul (done when: weekly scorecard shows 60; due 21 Jul) [AT:recHJ5Qn8QdjrI0y4] *(ticked 2026-07-18, synced from Airtable)*
 - [x] FABLE — (NEW 13 Jul) Prospecting engine v1: Prospecting tab (review queue + funnel + keyword manager), Prospects + Prospect Keywords Airtable tables, /prospect-daily agent skill (LinkedIn assisted browsing via Kevin's Chrome, Companies House PECR gate, GHL sync), weekday scheduled run *(built + verified 13 Jul)* [AT:-]
 - [ ] KEVIN — (NEW 13 Jul) GHL Private Integration token (scope contacts.write) + Location ID saved to `~/.config/od/ghl_api_key` and `~/.config/od/ghl_location_id` — until then the agent queues prospects but cannot sync approved ones (done when: agent reports a successful GHL sync; due 15 Jul) [AT:-]
 - [ ] KEVIN — (NEW 13 Jul) First supervised /prospect-daily run: watch quality of the first batch, tune keywords, then let the daily schedule own it (done when: first batch reviewed in the Prospecting tab; due 15 Jul) [AT:-]
@@ -210,7 +210,7 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 - [x] KEVIN — Make the product publicly live and purchasable [AT:rec1oFlkDNI6MRAnU] (done when: a stranger can buy; due 1 Aug) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] KEVIN — Confirm the 1 Aug monthly-valuations run succeeded (done when: Action green; due 1 Aug) [AT:recUMjzYVDsXU0EY3]
 - [ ] KEVIN — Go/no-go review against this plan (done when: decision in Changelog; due 31 Jul) [AT:reckHAHBcDOH0JxU1]
-- [ ] ERICAMAE — Launch announcement: website banner + LinkedIn post + email to list (done when: all three live; due 1 Aug) [AT:rec5DeFwALGaHQMH2]
+- [x] ERICAMAE — Launch announcement: website banner + LinkedIn post + email to list (done when: all three live; due 1 Aug) [AT:rec5DeFwALGaHQMH2] *(ticked 2026-07-18, synced from Airtable)*
 - [x] KEVIN — Resolve all critical launch-week bugs via /fix [AT:recRhajAjdshE4NqN] (done when: zero criticals; due 3 Aug) *(ticked 2026-07-07, synced from Airtable)*
 - [ ] KEVIN — Acquire + onboard the first paid subscriber [AT:recsqZey1t0o4BE0l] (done when: paid, provisioned, activated; due 15 Aug)
 - [ ] KEVIN+TEAM — Client #1 activation ladder complete ≤1 month (done when: Key Event logged; due 15 Sep) [AT:recMjHDeP8SwBouSr]
@@ -256,3 +256,4 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-15 | Kevin, in-session (transcript-to-brain) | Added §13 holding-pen proposal: productise Dave Jenyns' task-to-agent method as OD's standard delivery method (Process-to-Agent runbook + process-clarity gate + team-adoption playbook + connector on-ramp copy). PENDING Kevin's call — nothing live yet. |
 | 2026-07-15 | Kevin, in-session (approved) | §13 Jenyns-Loom amendment APPROVED. 4 tasks now live: §6 Process-to-Agent delivery runbook + process-clarity gate (due 22 Jul); §6 team-adoption playbook (due 22 Jul); §8 connector on-ramp copy (due 22 Jul). Framed as a client-facing WRAPPER over the existing §5 Systemisation pipeline + Systemisation module, NOT a rebuild. Nightly sync to push new [AT:-] tasks to Airtable. |
 | 2026-07-16 | Nightly sync (scripts/sync-master-plan.py) | ticked 4 from Airtable completions. |
+| 2026-07-18 | Nightly sync (scripts/sync-master-plan.py) | ticked 3 from Airtable completions. |
