@@ -252,22 +252,26 @@
     const NW_ASSET_CLASSES = ['Cash', 'Real Estate', 'Investments', 'Businesses'];
     const NW_LIABILITY_CLASSES = ['Credit Cards', 'Loans', 'Mortgages'];
 
-    // ── Personal expenditure sub-categories (Chart of Accounts - Sub Categories) ──
-    // The 11 personal-expense sub-categories Kevin tracks. Transactions are coded to
-    // these by the reconciliation engine, so the Wealth tab sums spend per category
-    // per month. (Director Discretionary, Charity, Subsistence excluded = business.)
+    // ── Budgeted personal sub-categories (Chart of Accounts - Sub Categories) ────
+    // The personal-expense sub-categories that carry a MONTHLY BUDGET: Needs and
+    // Wants only. Transactions are coded to these by the reconciliation engine, so
+    // the Wealth tab sums spend per category per month and compares it to budget.
+    //
+    // Travel, Tax, Maintenance and Investment are deliberately ABSENT: they are
+    // bucket-funded, so they are not budgeted and not counted as expenditure. See
+    // PERSONAL_MONEY_GROUPS below. (Director Discretionary, Charity, Subsistence
+    // excluded = business.)
     const PERSONAL_EXPENSE_SUBCATS = [
-        { id: 'recF1C2ZXBfNeYlGT', name: 'Household Essentials' },       // groceries, utilities, council tax, mobile/internet, essential clothing, insurance
-        { id: 'rec7uCvNlKGlieZMS', name: 'Discretionary Food & Drink' }, // optional extra food/drink
-        { id: 'recism4LGdEx0Nh9Q', name: 'Discretionary Lifestyle' },    // non-essential, fun, choice purchases, optional clothing
-        { id: 'rec6b96i917M64Nof', name: 'Transport' },                  // incl. parking
-        { id: 'recEvGF5Sr8R9p6tC', name: 'Travel' },                     // holidays, trips
-        { id: 'rec4fuKSWoK8ftkLJ', name: 'Health' },
-        { id: 'recS1AiGq8oDEzmZD', name: 'Tax' },
-        { id: 'recPA5FxzccOfWvQd', name: 'Banking Fees' },
-        { id: 'rec2yAlBoqSZrXtHW', name: 'Professional Fees' },
-        { id: 'rec1KfO2hixb1DA2e', name: 'Loan Capital Repayment' },
-        { id: 'recICmYNPZBQbeWWE', name: 'Loan Interest' },
+        { id: 'recF1C2ZXBfNeYlGT', name: 'Household Essentials', group: 'Needs' },       // groceries, utilities, council tax, mobile/internet, mortgage, essential clothing
+        { id: 'rec6b96i917M64Nof', name: 'Transport', group: 'Needs' },                  // incl. parking
+        { id: 'recICmYNPZBQbeWWE', name: 'Loan Interest', group: 'Needs' },              // incl. credit-card interest — the cost of holding the debt
+        { id: 'rec4fuKSWoK8ftkLJ', name: 'Health', group: 'Needs' },
+        { id: 'recl1UbR0LhffjWbg', name: 'Insurance', group: 'Needs' },
+        { id: 'recPA5FxzccOfWvQd', name: 'Banking Fees', group: 'Needs' },
+        { id: 'rec2yAlBoqSZrXtHW', name: 'Professional Fees', group: 'Needs' },
+        { id: 'rec1KfO2hixb1DA2e', name: 'Loan Capital Repayment', group: 'Needs' },     // contractual — money you must find each month
+        { id: 'recism4LGdEx0Nh9Q', name: 'Discretionary Lifestyle', group: 'Wants' },    // non-essential, fun, choice purchases, optional clothing
+        { id: 'rec7uCvNlKGlieZMS', name: 'Discretionary Food & Drink', group: 'Wants' }, // optional extra food/drink
     ];
 
     // ── Wealth monthly cash-flow classification (by sub-category NAME) ──
@@ -292,29 +296,64 @@
         'Mortgage Capital Repayment', 'Loan Capital Repayment',
         'Bank Transaction Fees', 'Tax',
     ];
+    // ── Money Groups: budgets vs buckets (the two halves of personal money) ──────
+    // Every personal sub-category is EITHER budgeted OR bucket-funded, never both.
+    //
+    //   Budgeted (Needs / Wants) — money that leaves as you spend it. It REDUCES net
+    //   cash flow and is monitored monthly against a budget set from history.
+    //
+    //   Bucket-funded (Debt / Dreams / Fix / Future / Tax) — money you set aside first
+    //   and release later. Spending it draws its pot down but must NOT reduce net cash
+    //   flow, because the pot was already funded out of an earlier month's surplus.
+    //
+    // Why that second rule matters: tax saved for 12 months then paid in one lump used
+    // to register as a £5k expense in the payment month, pushing net cash flow negative
+    // and starving EVERY bucket in the exact month the pot existed to absorb. Counting
+    // it once, in the pot, is the whole point of having the pot.
+    //
+    // The live driver is the "Money Group" single-select on Chart of Accounts - Sub
+    // Categories; this map only backstops it if the field is ever cleared.
+    const PERSONAL_MONEY_GROUPS = {
+        'Personal Household Essentials':      'Needs',
+        'Personal Transport':                 'Needs',
+        'Personal Health':                    'Needs',
+        'Personal Insurance':                 'Needs',
+        'Personal Banking Fees':              'Needs',
+        'Personal Professional Fees':         'Needs',
+        'Personal Loan Interest':             'Needs',  // the cost of holding debt — mandatory, buys nothing
+        'Personal Loan Capital Repayment':    'Needs',  // contractual: money you must find each month
+        'Personal Discretionary Food & Drink':'Wants',
+        'Personal Discretionary Lifestyle':   'Wants',
+    };
+
     // Personal expenditure sub-categories (full Airtable names) — itemised and
-    // deducted on the Wealth cash-flow as your personal costs.
-    const CASHFLOW_PERSONAL_EXPENSE_SUBCATS = [
-        'Personal Household Essentials', 'Personal Maintenance', 'Personal Discretionary Food & Drink',
-        'Personal Discretionary Lifestyle', 'Personal Transport', 'Personal Travel',
-        'Personal Health', 'Personal Tax', 'Personal Banking Fees',
-        'Personal Professional Fees', 'Personal Loan Capital Repayment', 'Personal Loan Interest',
-    ];
+    // deducted on the Wealth cash-flow as your personal costs. Needs + Wants ONLY:
+    // bucket-funded categories are excluded on purpose (see PERSONAL_MONEY_GROUPS).
+    const CASHFLOW_PERSONAL_EXPENSE_SUBCATS = Object.keys(PERSONAL_MONEY_GROUPS);
 
     // Bucket spend mapping: which personal sub-categories draw down each bucket.
-    // A transaction coded to one of these (an outflow) decrements that bucket's
-    // running balance. This is the code-level fallback; the live driver is each
-    // bucket's Spend Sub-Categories link in the Income Buckets table, which this
-    // only backstops if a link is ever cleared. Investment draws down on the
-    // "Personal Investment" sub-category (money actually moved into the portfolio);
-    // the credit-card part of Debt Clearance is transfer-based, added later.
+    // A transaction coded to one of these decrements that bucket's running balance
+    // WITHOUT counting as expenditure. This is the code-level fallback; the live
+    // driver is each bucket's Spend Sub-Categories link in the Income Buckets table.
+    //
+    // Debt draws on "Personal Credit Card Transfer" — the cash-account leg of a card
+    // payment. Deliberately the cash leg, not the card leg: it is the only one that
+    // covers cards with no open-banking feed (Barclaycard, NatWest), and because the
+    // amounts are SIGNED, a bounced direct debit coming back in nets itself off with
+    // no date-matching guesswork. Card spending itself is never counted here — it is
+    // already captured, categorised, when the card is tapped.
     const BUCKET_SPEND_SUBCATS = {
-        'Maintenance': ['Personal Maintenance'],
-        'Travel': ['Personal Travel'],
-        'Fun': ['Personal Discretionary Lifestyle', 'Personal Discretionary Food & Drink'],
-        'Tax': ['Personal Tax'],
-        'Investment': ['Personal Investment'],
-        'Debt Clearance': ['Personal Loan Capital Repayment', 'Personal Loan Interest'],
+        'Debt':   ['Personal Credit Card Transfer'],
+        'Dreams': ['Personal Travel'],
+        'Fix':    ['Personal Maintenance'],
+        'Future': ['Personal Investment'],
+        'Tax':    ['Personal Tax'],
+    };
+
+    // ── Chart of Accounts - Sub Categories field IDs (tblOTdRcPf8AgRz25) ──────────
+    const SUBCAT = {
+        name:       'fldO4BTJhFv5EsN6i',  // Sub Category Name (singleLineText, primary)
+        moneyGroup: 'fld4sJbnOMJ4A1Uey',  // Money Group (singleSelect): Needs | Wants | blank
     };
 
     // ── Personal Budgets field IDs (Airtable: Personal Budgets / tblm5ZxyoiLfaBAS4) ──
