@@ -1034,19 +1034,41 @@ function wealthCompletedIdx(keys) {
     return Math.max(0, keys.length - 1);
 }
 
+// Which Money Group each personal sub-category belongs to, and which are bucket-funded.
+// Live driver is the "Money Group" single-select on the sub-category record; the
+// PERSONAL_MONEY_GROUPS map in config.js only backstops a cleared field.
+//
+// Bucket membership is read from the CODE constant, not the Income Buckets links,
+// on purpose: net cash flow must not change value depending on whether an async
+// fetch has landed yet. The links decide which pot a category draws from; this
+// decides whether it counts as expenditure at all.
+function personalMoneyGroups() {
+    const byName = {};
+    ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
+        const n = getField(r, SUBCAT.name); if (!n) return;
+        const g = getField(r, SUBCAT.moneyGroup);
+        if (g === 'Needs' || g === 'Wants') byName[String(n)] = g;
+    });
+    // Fall back to the code map for anything the field does not answer.
+    Object.keys(PERSONAL_MONEY_GROUPS).forEach(n => { if (!byName[n]) byName[n] = PERSONAL_MONEY_GROUPS[n]; });
+    const bucketSubs = new Set();
+    Object.keys(BUCKET_SPEND_SUBCATS).forEach(b => BUCKET_SPEND_SUBCATS[b].forEach(s => bucketSubs.add(s)));
+    return { byName, bucketSubs };
+}
+
 function buildMonthlyCashflow(monthKeys) {
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
-        const n = getField(r, 'fldO4BTJhFv5EsN6i'); if (n) subNames[r.id] = String(n);
+        const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n);
     });
+    const { byName: moneyGroup, bucketSubs } = personalMoneyGroups();
     const reSet = new Set(CASHFLOW_INCOME_SUBCATS);            // real estate / portfolio revenue
     const piSet = new Set(CASHFLOW_PERSONAL_INCOME_SUBCATS);   // personal income
     const bizSet = new Set(CASHFLOW_COST_SUBCATS);             // business expenditure (itemised)
-    const perSet = new Set(CASHFLOW_PERSONAL_EXPENSE_SUBCATS); // personal expenditure (itemised)
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
     const set = new Set(monthKeys);
-    const blank = () => ({ reRevenue: 0, personalIncome: 0, bizItems: {}, perItems: {} });
+    const blank = () => ({ reRevenue: 0, personalIncome: 0, bizItems: {}, perItems: {}, bucketItems: {} });
     const byMonth = {};
     monthKeys.forEach(k => byMonth[k] = blank());
     txns.forEach(tx => {
@@ -1060,16 +1082,28 @@ function buildMonthlyCashflow(monthKeys) {
         if (reSet.has(sub)) m.reRevenue += amt;
         else if (piSet.has(sub)) m.personalIncome += amt;
         else if (bizSet.has(sub)) m.bizItems[sub] = (m.bizItems[sub] || 0) + (-amt); // positive magnitude
-        else if (perSet.has(sub)) m.perItems[sub] = (m.perItems[sub] || 0) + (-amt);
+        // Bucket membership is tested FIRST. If a category is somehow both bucket-linked
+        // and carrying a Money Group, treating it as budgeted would deduct it from net
+        // cash flow AND drain its pot — the exact double-count this design exists to
+        // stop. Bucket wins, so the worst case is a missing budget line, not a figure
+        // that is wrong twice.
+        else if (bucketSubs.has(sub)) m.bucketItems[sub] = (m.bucketItems[sub] || 0) + (-amt);
+        else if (moneyGroup[sub]) m.perItems[sub] = (m.perItems[sub] || 0) + (-amt);
     });
     return monthKeys.map(k => {
         const m = byMonth[k];
         const bizTotal = Object.values(m.bizItems).reduce((s, v) => s + v, 0);
         const perTotal = Object.values(m.perItems).reduce((s, v) => s + v, 0);
+        const bucketTotal = Object.values(m.bucketItems).reduce((s, v) => s + v, 0);
+        const groupTotal = g => Object.keys(m.perItems)
+            .filter(n => moneyGroup[n] === g)
+            .reduce((s, n) => s + m.perItems[n], 0);
         const totalIncome = m.reRevenue + m.personalIncome;
         return {
             key: k, reRevenue: m.reRevenue, personalIncome: m.personalIncome, totalIncome,
             bizItems: m.bizItems, bizTotal, perItems: m.perItems, perTotal,
+            bucketItems: m.bucketItems, bucketTotal,
+            needsTotal: groupTotal('Needs'), wantsTotal: groupTotal('Wants'),
             net: totalIncome - bizTotal - perTotal,
         };
     });
@@ -1208,7 +1242,19 @@ function renderWealthCashflow() {
     const cf = buildMonthlyCashflow(months.map(m => m.key));
     const series = pick => cf.map(pick);
     const bizNames = CASHFLOW_COST_SUBCATS.filter(n => cf.some(m => m.bizItems[n]));
-    const perNames = CASHFLOW_PERSONAL_EXPENSE_SUBCATS.filter(n => cf.some(m => m.perItems[n]));
+    const mg = personalMoneyGroups();
+    // Drive the itemised rows from the LIVE group map, not the static constant, so a
+    // sub-category classified in Airtable but absent from config still gets its own
+    // line. Otherwise its spend would land in the Needs/Wants subtotal with no row
+    // behind it and the children would stop summing to the parent.
+    const groupNames = g => Object.keys(mg.byName)
+        .filter(n => mg.byName[n] === g && cf.some(m => m.perItems[n]))
+        .sort((a, b) => cf.reduce((s, m) => s + (m.perItems[b] || 0), 0) - cf.reduce((s, m) => s + (m.perItems[a] || 0), 0));
+    const needsNames = groupNames('Needs');
+    const wantsNames = groupNames('Wants');
+    const bucketNames = Object.keys(BUCKET_SPEND_SUBCATS)
+        .reduce((a, b) => a.concat(BUCKET_SPEND_SUBCATS[b]), [])
+        .filter(n => cf.some(m => m.bucketItems[n]));
 
     // Per-month portfolio income (non-cash): the rise in investment value that month,
     // less any contributions you paid in (sub-category "Personal Investment"). It only
@@ -1237,15 +1283,24 @@ function renderWealthCashflow() {
             { label: 'Business expenditure', values: series(m => m.bizTotal), goodUp: false, bold: true,
               items: bizNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.bizItems[n] || 0), goodUp: false })) },
             { label: 'Personal expenditure', values: series(m => m.perTotal), goodUp: false, bold: true,
-              items: perNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false })) },
+              items: [
+                  { label: 'Needs', values: series(m => m.needsTotal), goodUp: false },
+                  ...needsNames.map(n => ({ label: '· ' + wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false })),
+                  { label: 'Wants', values: series(m => m.wantsTotal), goodUp: false },
+                  ...wantsNames.map(n => ({ label: '· ' + wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false })),
+              ] },
         ] },
         { header: '', rows: [
             { label: 'Net cash flow', values: series(m => m.net), goodUp: true, bold: true, border: '2px solid var(--border-default)' },
         ] },
+        ...(bucketNames.length ? [{ header: 'Funded from your buckets (not expenditure)', rows: [
+            { label: 'Bucket spending', values: series(m => m.bucketTotal), goodUp: false, bold: true,
+              items: bucketNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.bucketItems[n] || 0), goodUp: false })) },
+        ] }] : []),
     ];
     el.innerHTML = `<div style="background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:var(--space-4);font-size:var(--fs-sm);color:var(--text-primary);line-height:1.55"><strong>Use this at your monthly review.</strong> It shows whether more came in than went out across your whole life, property plus personal, month by month, and whether your net worth is climbing. This is the long game, not a spend-today figure. For what is safe to spend today, use the <strong>Money Confidence</strong> tab. For the month ahead, use the <strong>Cash Flow</strong> tab.</div>` + wealthMatrixCard(
         'Monthly cash flow — rolling 12 months',
-        'Money in (real estate / portfolio revenue + personal income + portfolio income) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Portfolio income is your investments’ growth: it is added to Total income but EXCLUDED from Net cash flow because it is reinvested, not withdrawn, so it only shows in the month you update the investment value. Click Business or Personal expenditure to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month. Business expenditure is operating costs (matching the P&L); capital repayments not yet included.',
+        'Money in (real estate / portfolio revenue + personal income + portfolio income) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Personal expenditure is your BUDGETED money only — Needs and Wants. Money you spend from a bucket (debt payments, travel, maintenance, investment, tax) is shown at the bottom and is deliberately NOT deducted here: its pot was already funded out of an earlier month’s surplus, so counting it again would starve every bucket in the month you finally spend what you saved. Portfolio income is your investments’ growth: added to Total income but excluded from Net cash flow because it is reinvested, not withdrawn. Click a row to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month.',
         months, sections, { anchor: 'completed' });
 }
 
@@ -2027,6 +2082,7 @@ async function renderPersonalExpenditure() {
     });
 
     const catIds = new Set(PERSONAL_EXPENSE_SUBCATS.map(c => c.id));
+    const liveGroups = personalMoneyGroups().byName;
 
     // Last 6 calendar months (oldest → newest)
     const now = new Date();
@@ -2070,7 +2126,11 @@ async function renderPersonalExpenditure() {
     const rows = PERSONAL_EXPENSE_SUBCATS.map(c => {
         const byMonth = months.map(m => data[c.id][m.key] || 0);
         const total = byMonth.reduce((s, v) => s + v, 0);
-        return { id: c.id, name: c.name, byMonth, total, avg: total / months.length, budget: budgetByName[c.name] || 0, budgetId: budgetIdByName[c.name] || '', txns: txnsByCat[c.id] };
+        // Group from the LIVE Money Group field, same source the cash-flow matrix uses,
+        // so the two tables on this page can never split the same category differently.
+        // Falls back to the static group when the field is blank.
+        const live = liveGroups['Personal ' + c.name];
+        return { id: c.id, name: c.name, group: live || c.group || 'Needs', byMonth, total, avg: total / months.length, budget: budgetByName[c.name] || 0, budgetId: budgetIdByName[c.name] || '', txns: txnsByCat[c.id] };
     }).sort((a, b) => b.total - a.total);
 
     const grandAvg = rows.reduce((s, r) => s + r.total, 0) / months.length;
@@ -2080,7 +2140,22 @@ async function renderPersonalExpenditure() {
     const headCells = months.map(m => `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">${escHtml(m.label)}</th>`).join('');
     const colspan = months.length + 3; // Category + months + Avg + Budget
     const fmt2 = n => '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const bodyRows = rows.map(r => {
+    // Needs and Wants are budgeted separately, so the table is grouped with a
+    // subtotal per group rather than one flat biggest-first list.
+    const groupHeader = (g, label) => {
+        const gr = rows.filter(r => r.group === g);
+        if (!gr.length) return '';
+        const avg = gr.reduce((s, r) => s + r.avg, 0);
+        const bud = gr.reduce((s, r) => s + r.budget, 0);
+        const cells = months.map((m, i) => `<td style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-secondary)">${fmt0(gr.reduce((s, r) => s + (r.byMonth[i] || 0), 0))}</td>`).join('');
+        return `<tr style="background:var(--bg-subtle)">
+            <td style="padding:7px 8px;font-weight:var(--fw-semibold);color:var(--text-primary)">${escHtml(label)}</td>
+            ${cells}
+            <td style="text-align:right;padding:7px 8px;font-weight:var(--fw-semibold);color:${bud > 0 && avg > bud ? 'var(--danger)' : 'var(--text-primary)'}">${fmt0(avg)}</td>
+            <td style="text-align:right;padding:7px 8px;font-weight:var(--fw-semibold);color:var(--text-secondary)">${bud > 0 ? fmt0(bud) : '–'}</td>
+        </tr>`;
+    };
+    const rowHtml = r => {
         const cells = r.byMonth.map(v => `<td style="text-align:right;padding:6px 8px;color:${Math.abs(v) >= 0.005 ? (v < 0 ? 'var(--success)' : 'var(--text-primary)') : 'var(--text-muted)'}">${Math.abs(v) >= 0.005 ? fmt0(v) : '–'}</td>`).join('');
         // Colour the average vs budget: over = danger, within = success, no budget = neutral.
         const avgColour = r.budget > 0 ? (r.avg > r.budget ? 'var(--danger)' : 'var(--success)') : 'var(--text-primary)';
@@ -2106,7 +2181,13 @@ async function renderPersonalExpenditure() {
             <td style="text-align:right;padding:6px 8px"><span style="color:var(--text-muted)">£</span><input type="number" step="1" min="0" class="pbud" data-budget-id="${escHtml(r.budgetId)}" data-avg="${Math.round(r.avg)}" value="${r.budget || ''}" placeholder="0" style="width:84px;padding:5px 8px;border:1px solid var(--border-default);border-radius:var(--radius-md);font-size:var(--fs-sm);text-align:right;background:var(--bg-surface)"></td>
         </tr>
         <tr id="exp-detail-${r.id}" style="display:none"><td colspan="${colspan}" style="padding:4px 8px 12px 28px">${detail}</td></tr>`;
-    }).join('');
+    };
+    const bodyRows = [
+        groupHeader('Needs', 'Needs — what you must pay'),
+        rows.filter(r => r.group === 'Needs').map(rowHtml).join(''),
+        groupHeader('Wants', 'Wants — what you choose to pay'),
+        rows.filter(r => r.group === 'Wants').map(rowHtml).join(''),
+    ].join('');
     const totalCells = months.map((m, idx) => {
         const t = rows.reduce((s, r) => s + (r.byMonth[idx] || 0), 0);
         return `<td style="text-align:right;padding:8px;font-weight:var(--fw-semibold);color:var(--text-primary)">${fmt0(t)}</td>`;
@@ -2117,7 +2198,7 @@ async function renderPersonalExpenditure() {
             <span class="kpi-card-label">Personal expenditure vs budget</span>
             <span style="margin-left:auto;color:var(--text-secondary);font-size:var(--fs-sm)">Avg/month: <strong style="color:var(--text-primary)">${fmt0(grandAvg)}</strong>${grandBudget > 0 ? ` vs budget <strong style="color:${grandAvg > grandBudget ? 'var(--danger)' : 'var(--success)'}">${fmt0(grandBudget)}</strong>` : ''}</span>
         </div>
-        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Actual spend per category, last 6 months, from your reconciled transactions (biggest first). Set a monthly budget per category; the Avg turns red when you are over it, green when under. Save to persist.</div>
+        <div style="color:var(--text-muted);font-size:var(--fs-xs);margin-bottom:12px;line-height:1.5">Actual spend per category, last 6 months, from your reconciled transactions. <strong>Needs</strong> are what you must pay; <strong>Wants</strong> are what you choose to pay. Set a monthly budget per category; the Avg turns red when you are over it, green when under. Save to persist. Travel, tax, maintenance, investment and debt payments are not here on purpose — they come out of your buckets, not your budget.</div>
         <div id="budgetSaveError" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-bottom:8px"></div>
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
@@ -2378,7 +2459,7 @@ function renderBuckets(el, override) {
     const totPot = bal.reduce((s, b) => s + (b.balance[last] || 0), 0);
     rows.push({ label: 'Total allocated', goodUp: true, bold: true, border: '1px solid var(--border-default)', lead: totPot, values: totApr });
 
-    const note = `Each row is a bucket and its share (%) of net cash flow. The highlighted "In the pot" column is what's in each bucket right now — apportioned in, less spent, never below £0. The monthly columns show what went in that month (£0 in any month with no surplus). The current month (●) is still in progress; the Δ trend uses the last completed month. Click a bucket to see what's been spent and its running balance.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
+    const note = `Each row is a bucket and its share (%) of net cash flow. The highlighted "In the pot" column is what's in each bucket right now — apportioned in, less spent, never below £0. The monthly columns show what went in that month (£0 in any month with no surplus). Click a bucket to see what's been spent and its running balance. A <em>negative</em> figure on the Spent row is money coming back — a refund, or a direct debit that bounced and was returned — and it cancels the payment it reverses. If you spend more than a pot holds, the overspend carries forward, so the pot stays at £0 until later months have made it back. The current month (●) is still in progress; the Δ trend uses the last completed month.${totalPct !== 100 ? ` Percentages total ${totalPct}% (aim for 100%).` : ''}`;
     el.innerHTML = wealthMatrixCard('Income buckets — rolling 12 months', note, months, [{ header: '', rows }], { leadHeader: 'In the pot', anchor: 'completed' });
 }
 
@@ -2387,10 +2468,23 @@ function renderBuckets(el, override) {
 // sub-categories (BUCKET_SPEND_SUBCATS). Cumulative over the months shown.
 function buildBucketBalances(buckets, months) {
     const subNames = {};
-    ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => { const n = getField(r, 'fldO4BTJhFv5EsN6i'); if (n) subNames[r.id] = String(n); });
+    ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => { const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n); });
     // Map sub-category name → bucket. The live editor passes explicit `subs` ids per
     // bucket (so unticking a category updates instantly); otherwise read the saved
     // Spend Sub-Categories links, falling back to the built-in defaults.
+    // A budgeted category (Money Group = Needs/Wants) can never also drain a pot: it
+    // already reduces net cash flow, so draining a bucket too would count it twice.
+    // The bucket editor lets any sub-category be ticked, so guard it here rather than
+    // trusting the tick.
+    //
+    // BUCKET_SPEND_SUBCATS wins over the Money Group field, exactly as it does in
+    // buildMonthlyCashflow. Both functions must agree on membership or money goes
+    // missing: if this file treated a code-listed bucket category as budgeted while
+    // buildMonthlyCashflow still excluded it from expenditure, the spend would leave
+    // net cash flow untouched AND drain no pot — invisible in both views.
+    const mgroups = personalMoneyGroups();
+    const budgeted = {};
+    Object.keys(mgroups.byName).forEach(n => { if (!mgroups.bucketSubs.has(n)) budgeted[n] = mgroups.byName[n]; });
     const subToBucket = {};
     if (buckets.some(b => b.subs)) {
         buckets.forEach(b => (b.subs || []).forEach(id => { const nm = subNames[id]; if (nm && b.name) subToBucket[nm] = b.name; }));
@@ -2402,14 +2496,20 @@ function buildBucketBalances(buckets, months) {
         });
         Object.keys(BUCKET_SPEND_SUBCATS).forEach(b => BUCKET_SPEND_SUBCATS[b].forEach(s => { if (!subToBucket[s]) subToBucket[s] = b; }));
     }
+    Object.keys(subToBucket).forEach(n => { if (budgeted[n]) delete subToBucket[n]; });
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
     const keys = months.map(m => m.key);
     const keyIdx = {}; keys.forEach((k, i) => keyIdx[k] = i);
     const spent = {}; buckets.forEach(b => spent[b.name] = keys.map(() => 0));
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
+    // SIGNED, not outflows-only. A bounced direct debit to a credit card comes back
+    // into the cash account as an inflow on the same sub-category, so summing signed
+    // amounts cancels the failed payment automatically — no date-window matching, no
+    // guessing at bank wording. Refunds on any other bucket cancel the same way.
+    // Monthly totals are floored at £0 so a refund-only month cannot ADD to a pot.
     txns.forEach(tx => {
         const amt = Number(getField(tx, F.txReportAmount)) || 0;
-        if (amt >= 0) return; // outflows only
+        if (!amt) return;
         const dateStr = getField(tx, F.txDate); if (!dateStr) return;
         const d = new Date(dateStr); if (isNaN(d)) return;
         const idx = keyIdx[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`];
@@ -2424,10 +2524,27 @@ function buildBucketBalances(buckets, months) {
         // in (it never draws a bucket down), so the figure shows £0, never a negative.
         const appor = net.map(n => Math.max(0, Math.round(n * pct / 100)));
         const sp = (spent[b.name] || keys.map(() => 0)).map(v => Math.round(v));
-        // Cumulative balance is floored at 0: a bucket can't go negative — overspend
-        // just empties it (the shortfall is picked up in the expenditure budgets).
-        let run = 0;
-        const balance = appor.map((a, i) => { run = Math.max(0, run + a - sp[i]); return run; });
+        // Monthly spend stays SIGNED so a reversal cancels its payment even when the
+        // two land in different calendar months — a direct debit taken on the 30th and
+        // returned on the 2nd is the common bounce, and flooring per month would keep
+        // the payment and silently discard the refund.
+        //
+        // Both cumulative runs are floored at 0 instead:
+        //   · cumulative spend can't go negative, so a refund with no matching spend
+        //     cannot conjure money into a pot;
+        //   · the pot itself can't display negative.
+        //
+        // Overspend CARRIES FORWARD: spend £3,000 from a pot holding £400 and the pot
+        // reads £0 until later allocations have made the £2,600 back. That is the
+        // honest reading — the money really was spent — but it does mean a pot can sit
+        // at £0 for months while allocations flow in. The alternative (forgiving the
+        // overspend at each month boundary) would show money you have already spent.
+        let runIn = 0, runSpent = 0;
+        const balance = appor.map((a, i) => {
+            runIn += a;
+            runSpent = Math.max(0, runSpent + sp[i]);
+            return Math.max(0, runIn - runSpent);
+        });
         return { name: b.name, appor, spent: sp, balance };
     });
 }

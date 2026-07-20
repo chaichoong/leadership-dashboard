@@ -137,7 +137,12 @@ function renderWealthRatios(view) {
     const earned = cashIncome - grossRental;                             // Earned (worked income)
     const passive = grossRental;
     // ── money out ──
-    const personalExp = sum(cf.map(m => m.perTotal));
+    // Personal money out = budgeted (Needs/Wants) PLUS bucket-funded spend. Bucket
+    // spend is excluded from NET CASH FLOW (its pot was funded from an earlier
+    // month's surplus) but it is still money that left the household, so every
+    // "can I live on this?" ratio below must count it. Dropping it would tell Kevin
+    // his rental income covers his life on the strength of a tax bill he did pay.
+    const personalExp = sum(cf.map(m => m.perTotal + (m.bucketTotal || 0)));
     const businessExp = sum(cf.map(m => (m.bizTotal || 0)));
     const totalOut = personalExp + businessExp;
     const netCashFlow = sum(cf.map(m => m.net));                          // cash only
@@ -196,8 +201,9 @@ function renderWealthRatios(view) {
         const gRent = aggm.grossRental || 0;
         const totInc = cfm.totalIncome || 0;
         const earnedM = totInc - gRent, passiveM = gRent;
-        const outM = (cfm.bizTotal || 0) + (cfm.perTotal || 0);
-        const perM = cfm.perTotal || 0;
+        // Same rule as personalExp above: bucket-funded spend still left the household.
+        const perM = (cfm.perTotal || 0) + (cfm.bucketTotal || 0);
+        const outM = (cfm.bizTotal || 0) + perM;
         const netM = cfm.net || 0;
         const contribM = aggm.contributions || 0;
         const sk = skOf(tKeys[i]);
@@ -210,7 +216,7 @@ function renderWealthRatios(view) {
         return {
             p2e: outM > 0 ? passiveM / outM * 100 : null,
             work: moneyInM > 0 ? (passiveM + portM) / moneyInM * 100 : null,
-            keep: totInc > 0 ? netM / totInc * 100 : null,
+            keep: totInc > 0 ? (totInc - outM) / totInc * 100 : null,   // all money out, see keepRaw
             roa: (reM + invM) > 0 ? (passiveM + portM) * 12 / (reM + invM) * 100 : null,
             runway: (perM > 0 && snap && snap.net != null) ? snap.net / perM : null,
             debt: (snap && snap.assets > 0) ? snap.liabilities / snap.assets * 100 : null,
@@ -284,7 +290,12 @@ function renderWealthRatios(view) {
         sparkBlock(trend.work));
 
     // 3. How much do you keep? — savings rate (cash only)
-    const keepRaw = cashIncome > 0 ? (netCashFlow / cashIncome) : null;
+    // Deliberately income − ALL money out, not net cash flow. Net cash flow excludes
+    // bucket-funded spend by design (its pot was filled from an earlier month), but
+    // this card claims "after all costs", and a tax bill or a holiday is a real cost
+    // in the window it was paid. Using m.net here would count the saving months and
+    // never the spending month, permanently overstating the rate.
+    const keepRaw = cashIncome > 0 ? ((cashIncome - totalOut) / cashIncome) : null;
     const keepPct = keepRaw == null ? null : Math.round(keepRaw * 100);
     const keepColour = keepRaw == null ? C.low : (keepRaw >= 0.2 ? C.good : (keepRaw >= 0.1 ? C.mid : (keepRaw >= 0 ? C.low : C.bad)));
     const c3 = card('How much do you keep?', pctStr(keepPct), keepColour,
