@@ -1056,8 +1056,14 @@ function personalMoneyGroups() {
     return { byName, bucketSubs };
 }
 
+// Transactions behind the last buildMonthlyCashflow run, indexed sub-category → month
+// key → [tx]. Populated as a side-effect so the drill-down shows exactly the rows that
+// produced the figure on screen, never a re-query that could filter differently.
+let _cfTxIndex = {};
+
 function buildMonthlyCashflow(monthKeys) {
     const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
+    _cfTxIndex = {};
     const subNames = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
         const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n);
@@ -1089,6 +1095,9 @@ function buildMonthlyCashflow(monthKeys) {
         // that is wrong twice.
         else if (bucketSubs.has(sub)) m.bucketItems[sub] = (m.bucketItems[sub] || 0) + (-amt);
         else if (moneyGroup[sub]) m.perItems[sub] = (m.perItems[sub] || 0) + (-amt);
+        else return; // not counted anywhere — don't index it either
+        if (!_cfTxIndex[sub]) _cfTxIndex[sub] = {};
+        (_cfTxIndex[sub][key] = _cfTxIndex[sub][key] || []).push(tx);
     });
     return monthKeys.map(k => {
         const m = byMonth[k];
@@ -1108,6 +1117,84 @@ function buildMonthlyCashflow(monthKeys) {
         };
     });
 }
+
+// ── Cash-flow drill-down ─────────────────────────────────────────────────────
+// Click any figure in the Monthly cash flow matrix to see the transactions behind
+// it, in the same shape as the P&L drill-down. Rows opt in by carrying a `drill`
+// array of sub-category names; wealthMatrixCard is shared with the net-worth,
+// buckets and ratios tables, and a row without `drill` renders exactly as before.
+//
+// Reads _cfTxIndex, populated by the same pass that produced the totals, so the
+// list can never disagree with the number that was clicked.
+function wealthDrill(subs, monthKey, label) {
+    if (!Array.isArray(subs) || !subs.length) return;
+
+    const txs = [];
+    subs.forEach(sub => {
+        const byMonth = _cfTxIndex[sub] || {};
+        (monthKey ? [monthKey] : Object.keys(byMonth)).forEach(k => (byMonth[k] || []).forEach(t => txs.push(t)));
+    });
+    txs.sort((a, b) => new Date(getField(b, F.txDate)) - new Date(getField(a, F.txDate)));
+
+    const subNames = {};
+    ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
+        .forEach(r => { const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n); });
+    const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
+
+    let total = 0;
+    const money = v => `${v < 0 ? '−' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const rowsHtml = txs.map(t => {
+        const amt = Number(getField(t, F.txReportAmount)) || 0;
+        total += amt;
+        const d = getField(t, F.txDate) || '';
+        const desc = String(getField(t, F.txDescription) || getField(t, F.txVendor) || '(no description)');
+        const acct = String(getField(t, F.txAccountAlias) || '');
+        const sub = subNames[linkId(getField(t, F.txSubCategory))] || '';
+        return `<tr style="border-top:1px solid var(--border-subtle)">
+            <td style="padding:7px 10px;white-space:nowrap;color:var(--text-secondary);vertical-align:top">${escHtml(d)}</td>
+            <td style="padding:7px 10px;vertical-align:top;min-width:200px;word-break:break-word">${escHtml(desc)}</td>
+            <td style="padding:7px 10px;vertical-align:top;color:var(--text-muted);white-space:nowrap">${escHtml(acct)}</td>
+            <td style="padding:7px 10px;vertical-align:top;color:var(--text-muted);white-space:nowrap">${escHtml(sub)}</td>
+            <td style="padding:7px 10px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:var(--fw-semibold);color:${amt < 0 ? 'var(--danger)' : 'var(--success)'};vertical-align:top">${money(amt)}</td>
+        </tr>`;
+    }).join('');
+
+    wealthCloseDrill();
+    const overlay = document.createElement('div');
+    overlay.id = 'wealthDrillOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.onclick = e => { if (e.target === overlay) wealthCloseDrill(); };
+    overlay.innerHTML = `<div style="background:var(--bg-surface);border-radius:var(--radius-lg);max-width:1000px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border-default)">
+            <div style="min-width:0">
+                <div style="font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:1px">${escHtml(monthKey ? wealthMonthLabel(monthKey) : 'Rolling 12 months')}</div>
+                <div style="font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${escHtml(label || '')}</div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:3px">${txs.length} transaction${txs.length === 1 ? '' : 's'} · Total <strong style="color:var(--text-primary)">${money(total)}</strong> <span style="color:var(--text-muted)">· money out shows as a minus. Something in the wrong place? Recategorise it on the Reconciliation tab and it moves here.</span></div>
+            </div>
+            <button onclick="wealthCloseDrill()" aria-label="Close" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:var(--text-muted);padding:0 4px">&times;</button>
+        </div>
+        <div style="overflow:auto;flex:1">
+            <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
+                <thead><tr style="position:sticky;top:0;background:var(--bg-subtle)">
+                    <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Date</th>
+                    <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Description</th>
+                    <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Account</th>
+                    <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Category</th>
+                    <th style="text-align:right;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Amount</th>
+                </tr></thead>
+                <tbody>${rowsHtml || `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted)">No transactions behind this figure.</td></tr>`}</tbody>
+            </table>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', wealthDrillEsc);
+}
+function wealthCloseDrill() {
+    const o = document.getElementById('wealthDrillOverlay');
+    if (o) o.remove();
+    document.removeEventListener('keydown', wealthDrillEsc);
+}
+function wealthDrillEsc(e) { if (e.key === 'Escape') wealthCloseDrill(); }
 
 function wealthMonthLabel(key) {
     const [y, m] = key.split('-').map(Number);
@@ -1155,7 +1242,23 @@ function wealthMatrixCard(title, note, months, sections, opts) {
     }).join('');
     const leadHead = leadHeader ? `<th style="text-align:right;padding:6px 8px;font-weight:var(--fw-semibold);color:var(--text-primary);white-space:nowrap;background:var(--accent-soft)">${escHtml(leadHeader)}</th>` : '';
 
-    const valCell = (v, prev, goodUp, i, fmtV) => {
+    // A row opts into the drill-down by carrying `drill` (an array of sub-category
+    // names). Rows without it — net worth, buckets, ratios — render exactly as before.
+    // Arguments are emitted as JSON literals, not as quoted strings built by hand.
+    // escHtml is NOT safe here: it turns ' into &#39;, and the HTML parser decodes
+    // entities BEFORE the JS is parsed, so an apostrophe in a category name would
+    // close the string literal and break (or inject into) the handler. JSON.stringify
+    // escapes for the JS context; the entity pass then escapes for the attribute.
+    const jsArg = v => JSON.stringify(v == null ? null : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const drillAttr = (row, monthKey) => {
+        if (!row || !row.drill || !row.drill.length) return { attr: '', style: '' };
+        return {
+            attr: ` onclick="wealthDrill(${jsArg(row.drill)},${jsArg(monthKey || null)},${jsArg(String(row.label || ''))})" title="Show the transactions behind this"`,
+            style: 'cursor:pointer;',
+        };
+    };
+    const valCell = (v, prev, goodUp, i, fmtV, row) => {
         const bg = colStyle(i);
         if (v == null) return `<td style="text-align:right;padding:5px 8px;color:var(--text-muted);${bg}">–</td>`;
         let arrow = '';
@@ -1166,7 +1269,8 @@ function wealthMatrixCard(title, note, months, sections, opts) {
                 arrow = ` <span style="font-size:9px;color:${good ? 'var(--success)' : 'var(--danger)'}">${up ? '▲' : '▼'}</span>`;
             }
         }
-        return `<td style="text-align:right;padding:5px 8px;white-space:nowrap;${bg}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${(fmtV || fmt0)(v)}${arrow}</td>`;
+        const d = drillAttr(row, months[i] && months[i].key);
+        return `<td${d.attr} style="text-align:right;padding:5px 8px;white-space:nowrap;${d.style}${bg}color:${v < 0 ? 'var(--danger)' : 'var(--text-primary)'}">${(fmtV || fmt0)(v)}${arrow}</td>`;
     };
     const changeCell = (values, goodUp) => {
         let cur = values[anchorIdx];
@@ -1189,7 +1293,7 @@ function wealthMatrixCard(title, note, months, sections, opts) {
         const vals = row.values;
         const fmtV = row.fmt || opts.fmtVal || fmt0;
         const rowBg = isChild ? 'var(--bg-surface-2)' : (row.bold ? 'var(--bg-subtle)' : 'var(--bg-surface)');
-        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i, fmtV)).join('');
+        const cells = vals.map((v, i) => valCell(v, i > 0 ? vals[i - 1] : null, goodUp, i, fmtV, row)).join('');
         const hasItems = row.items && row.items.length;
         const rid = hasItems ? ('r' + (++_wealthRowSeq)) : '';
         const caret = hasItems ? '<span class="wm-caret" style="display:inline-block;width:12px;color:var(--text-muted)">▸</span>' : (isChild ? '' : '<span style="display:inline-block;width:12px"></span>');
@@ -1272,35 +1376,41 @@ function renderWealthCashflow() {
         return Math.max(0, cur - prev - ((contribAgg[i] && contribAgg[i].contributions) || 0));
     });
 
+    // Drill keys. Every figure below is the sum of transactions in these sub-categories,
+    // so the drill-down is the same set the total was built from. Investment income is
+    // the one row with no drill: it is a valuation movement, not transactions.
+    const allIncome = CASHFLOW_INCOME_SUBCATS.concat(CASHFLOW_PERSONAL_INCOME_SUBCATS);
+    const netSubs = allIncome.concat(bizNames, needsNames, wantsNames);
+
     const sections = [
         { header: 'Money in', rows: [
-            { label: 'Real estate income (passive)', values: series(m => m.reRevenue), goodUp: true },
-            { label: 'Personal income (earned)', values: series(m => m.personalIncome), goodUp: true },
+            { label: 'Real estate income (passive)', values: series(m => m.reRevenue), goodUp: true, drill: CASHFLOW_INCOME_SUBCATS },
+            { label: 'Personal income (earned)', values: series(m => m.personalIncome), goodUp: true, drill: CASHFLOW_PERSONAL_INCOME_SUBCATS },
             { label: 'Investment income (portfolio)', values: portfolioSeries, goodUp: true },
-            { label: 'Total income', values: cf.map((m, i) => m.totalIncome + portfolioSeries[i]), goodUp: true, bold: true, border: '1px solid var(--border-default)' },
+            { label: 'Total income', values: cf.map((m, i) => m.totalIncome + portfolioSeries[i]), goodUp: true, bold: true, border: '1px solid var(--border-default)', drill: allIncome },
         ] },
         { header: 'Expenditure', rows: [
-            { label: 'Business expenditure', values: series(m => m.bizTotal), goodUp: false, bold: true,
-              items: bizNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.bizItems[n] || 0), goodUp: false })) },
-            { label: 'Personal expenditure', values: series(m => m.perTotal), goodUp: false, bold: true,
+            { label: 'Business expenditure', values: series(m => m.bizTotal), goodUp: false, bold: true, drill: bizNames,
+              items: bizNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.bizItems[n] || 0), goodUp: false, drill: [n] })) },
+            { label: 'Personal expenditure', values: series(m => m.perTotal), goodUp: false, bold: true, drill: needsNames.concat(wantsNames),
               items: [
-                  { label: 'Needs', values: series(m => m.needsTotal), goodUp: false },
-                  ...needsNames.map(n => ({ label: '· ' + wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false })),
-                  { label: 'Wants', values: series(m => m.wantsTotal), goodUp: false },
-                  ...wantsNames.map(n => ({ label: '· ' + wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false })),
+                  { label: 'Needs', values: series(m => m.needsTotal), goodUp: false, drill: needsNames },
+                  ...needsNames.map(n => ({ label: '· ' + wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false, drill: [n] })),
+                  { label: 'Wants', values: series(m => m.wantsTotal), goodUp: false, drill: wantsNames },
+                  ...wantsNames.map(n => ({ label: '· ' + wealthCfLabel(n), values: series(m => m.perItems[n] || 0), goodUp: false, drill: [n] })),
               ] },
         ] },
         { header: '', rows: [
-            { label: 'Net cash flow', values: series(m => m.net), goodUp: true, bold: true, border: '2px solid var(--border-default)' },
+            { label: 'Net cash flow', values: series(m => m.net), goodUp: true, bold: true, border: '2px solid var(--border-default)', drill: netSubs },
         ] },
         ...(bucketNames.length ? [{ header: 'Funded from your buckets (not expenditure)', rows: [
-            { label: 'Bucket spending', values: series(m => m.bucketTotal), goodUp: false, bold: true,
-              items: bucketNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.bucketItems[n] || 0), goodUp: false })) },
+            { label: 'Bucket spending', values: series(m => m.bucketTotal), goodUp: false, bold: true, drill: bucketNames,
+              items: bucketNames.map(n => ({ label: wealthCfLabel(n), values: series(m => m.bucketItems[n] || 0), goodUp: false, drill: [n] })) },
         ] }] : []),
     ];
     el.innerHTML = `<div style="background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:var(--space-4);font-size:var(--fs-sm);color:var(--text-primary);line-height:1.55"><strong>Use this at your monthly review.</strong> It shows whether more came in than went out across your whole life, property plus personal, month by month, and whether your net worth is climbing. This is the long game, not a spend-today figure. For what is safe to spend today, use the <strong>Money Confidence</strong> tab. For the month ahead, use the <strong>Cash Flow</strong> tab.</div>` + wealthMatrixCard(
         'Monthly cash flow — rolling 12 months',
-        'Money in (real estate / portfolio revenue + personal income + portfolio income) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Personal expenditure is your BUDGETED money only — Needs and Wants. Money you spend from a bucket (debt payments, travel, maintenance, investment, tax) is shown at the bottom and is deliberately NOT deducted here: its pot was already funded out of an earlier month’s surplus, so counting it again would starve every bucket in the month you finally spend what you saved. Portfolio income is your investments’ growth: added to Total income but excluded from Net cash flow because it is reinvested, not withdrawn. Click a row to expand the detail. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month.',
+        'Money in (real estate / portfolio revenue + personal income + portfolio income) less itemised business and personal expenditure = net cash flow, which feeds your buckets. Personal expenditure is your BUDGETED money only — Needs and Wants. Money you spend from a bucket (debt payments, travel, maintenance, investment, tax) is shown at the bottom and is deliberately NOT deducted here: its pot was already funded out of an earlier month’s surplus, so counting it again would starve every bucket in the month you finally spend what you saved. Portfolio income is your investments’ growth: added to Total income but excluded from Net cash flow because it is reinvested, not withdrawn. Click a row <em>name</em> to expand the detail, or click any <em>figure</em> to see the transactions behind it. The current month (●) is still in progress; the highlighted column and the Δ trend use the last completed month.',
         months, sections, { anchor: 'completed' });
 }
 
