@@ -44,8 +44,10 @@ function loadEngine() {
   vm.runInContext(`Object.assign(globalThis, {
     F, SUBCAT, PERSONAL_MONEY_GROUPS, BUCKET_SPEND_SUBCATS,
     CASHFLOW_PERSONAL_EXPENSE_SUBCATS, PERSONAL_EXPENSE_SUBCATS,
-    buildMonthlyCashflow, buildBucketBalances, personalMoneyGroups,
+    buildMonthlyCashflow, buildBucketBalances, personalMoneyGroups, wealthMatrixCard,
   })`, sandbox);
+  // _cfTxIndex is a module-level `let`; expose a reader from inside the same scope.
+  vm.runInContext(`globalThis.getCfTxIndex = () => _cfTxIndex;`, sandbox);
   // Same reason: `allTransactions` / `allSubCategories` are lexical `let`s in
   // config.js, so assigning sandbox.allTransactions would NOT be seen by the engine.
   // Write through a setter that runs inside the same lexical scope.
@@ -174,6 +176,65 @@ describe('Money Groups — net cash flow behaviour', () => {
     ], subsFor(s));
     const [m] = s.buildMonthlyCashflow(['2026-06']);
     expect(m.perTotal).toBe(0);
+  });
+});
+
+describe('Cash-flow drill-down', () => {
+  it('indexes the transactions behind every figure', () => {
+    const s = loadEngine();
+    const N = s.SUBCAT.name, G = s.SUBCAT.moneyGroup;
+    s.__setData([
+      tx(s, { date: '2026-06-10', amount: -2020.20, subId: 'recEss' }),
+      tx(s, { date: '2026-06-12', amount: -180, subId: 'recEss' }),
+      tx(s, { date: '2026-06-14', amount: -1000, subId: 'recCardXfer' }),
+    ], [
+      { id: 'recEss', fields: { [N]: 'Personal Household Essentials', [G]: 'Needs' } },
+      { id: 'recCardXfer', fields: { [N]: 'Personal Credit Card Transfer' } },
+    ]);
+    const [m] = s.buildMonthlyCashflow(['2026-06']);
+    const idx = s.getCfTxIndex();
+    // The index must reproduce the figure on screen, or the drill-down disagrees
+    // with the number that was clicked.
+    const sum = list => list.reduce((t, r) => t + Math.abs(r.fields[s.F.txReportAmount]), 0);
+    expect(sum(idx['Personal Household Essentials']['2026-06'])).toBeCloseTo(m.perItems['Personal Household Essentials'], 2);
+    expect(sum(idx['Personal Credit Card Transfer']['2026-06'])).toBeCloseTo(m.bucketItems['Personal Credit Card Transfer'], 2);
+  });
+
+  it('an uncounted transaction is not indexed either', () => {
+    // Anything that falls through every classification branch must stay out of the
+    // index, or a drill-down would list rows that are in no total on the page.
+    const s = loadEngine();
+    const N = s.SUBCAT.name;
+    s.__setData([tx(s, { date: '2026-06-10', amount: -500, subId: 'recMystery' })],
+      [{ id: 'recMystery', fields: { [N]: 'Some Unclassified Thing' } }]);
+    s.buildMonthlyCashflow(['2026-06']);
+    expect(s.getCfTxIndex()['Some Unclassified Thing']).toBeUndefined();
+  });
+
+  it('onclick arguments survive quotes and ampersands in a category name', () => {
+    // escHtml is NOT safe in an event-handler attribute: it turns ' into &#39;, and
+    // the HTML parser decodes entities BEFORE the JS is parsed, so an apostrophe in
+    // a category name closed the string literal and threw a SyntaxError on click.
+    // Verified against the old implementation before this test was written.
+    const s = loadEngine();
+    const rows = [{ label: "Marketing O'Brien \"Ltd\" & Co", values: [100], drill: ["Marketing O'Brien \"Ltd\" & Co"] }];
+    const html = s.wealthMatrixCard('t', '', [{ key: '2026-06', label: 'Jun' }], [{ header: '', rows }], {});
+    const onclick = /onclick="(wealthDrill\(.*?\))"/.exec(html);
+    expect(onclick).not.toBeNull();
+    // Decode the attribute the way a browser would, then check it parses as JS.
+    const decoded = onclick[1]
+      .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    expect(() => new Function('wealthDrill', decoded)).not.toThrow();
+    // And the raw apostrophe must never sit inside a single-quoted JS string.
+    expect(onclick[1]).not.toMatch(/'\[/);
+  });
+
+  it('a row without a drill key stays non-clickable', () => {
+    // wealthMatrixCard is shared with the net-worth, buckets and ratios tables.
+    const s = loadEngine();
+    const rows = [{ label: 'Net worth', values: [1000] }];
+    const html = s.wealthMatrixCard('t', '', [{ key: '2026-06', label: 'Jun' }], [{ header: '', rows }], {});
+    expect(html).not.toContain('wealthDrill(');
   });
 });
 
