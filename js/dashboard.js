@@ -151,6 +151,13 @@
     function markMainDataReady() {
         if (_mainDataReadyResolve) { _mainDataReadyResolve(); _mainDataReadyResolve = null; }
     }
+    // Exposed so the deep-link handler in shared.js can re-render a cold-loaded tab
+    // once the 9-table fetch has populated the globals. On a cold deep-link to a
+    // non-overview tab (e.g. #costs), switchTab renders the tab on window 'load' —
+    // before this data has arrived — so the tab sticks on its loading state until the
+    // user navigates away and back. Resolves once (first load), which is exactly the
+    // deep-link case; later manual refreshes re-render through their own paths.
+    window.whenMainDataReady = _mainDataReadyPromise;
 
     function _stratSelName(v){if(!v)return '';if(typeof v==='string')return v;if(typeof v==='object'&&v.name)return v.name;return ''}
     function _stratDaysAgo(iso){if(!iso)return null;const ms=Date.now()-new Date(iso).getTime();return Math.floor(ms/86400000)}

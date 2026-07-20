@@ -197,12 +197,38 @@ const TABLE_MAP = {
   'tblbfuxYxu4uMMWwT': 'reconAudit',
 };
 
+// The app pulls two things off the public internet on every page load: Chart.js from
+// cdnjs (a PARSER-BLOCKING <script> in <head>, index.html:7) and DM Sans from Google
+// Fonts (@import in css/tokens.css:12). Left un-mocked, every test in this suite
+// depended on Google and Cloudflare being healthy, and the pre-push gate failed at
+// random when they were not — proven 2026-07-17 by delaying fonts past the 20s wait
+// below, which reproduced the exact "row should render" null failure. Stub them so the
+// suite is hermetic. hermetic-no-external-requests.spec.js fails if a new one appears.
+async function stubExternalHosts(page) {
+  // Chart.js: the app only ever does `new Chart(ctx, cfg)` and `.destroy()`, and pnl.js
+  // guards on `typeof Chart === 'undefined'` — so a no-op class keeps every caller happy.
+  await page.route('**cdnjs.cloudflare.com/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: 'window.Chart=class Chart{constructor(){}destroy(){}update(){}resize(){}};window.Chart.register=function(){};',
+    });
+  });
+  // Empty CSS means no @font-face rules, so the gstatic font fetch never fires either.
+  await page.route('**fonts.googleapis.com/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/css', body: '' });
+  });
+  await page.route('**fonts.gstatic.com/**', async (route) => route.abort());
+}
+
 /**
  * Set up route interception so Airtable API calls return fixture data.
  * Optionally pass custom fixtures to override defaults.
  */
 async function setupMockAirtable(page, customFixtures = null) {
   const fixtures = customFixtures || makeFixtures();
+
+  await stubExternalHosts(page);
 
   // Block Gmail script calls
   await page.route('**/script.google.com/**', async (route) => {
@@ -294,4 +320,4 @@ async function loadDashboardWithFixtures(page, fixtureOverrides, hash = '') {
   await page.waitForTimeout(1500);
 }
 
-module.exports = { MOCK_PAT, FIELDS, TABLE_MAP, makeFixtures, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };
+module.exports = { MOCK_PAT, FIELDS, TABLE_MAP, makeFixtures, stubExternalHosts, setupMockAirtable, loadDashboard, loadDashboardWithFixtures };

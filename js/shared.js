@@ -824,6 +824,18 @@ if (tabId === 'comms') {
         const hash = window.location.hash.replace('#', '');
         if (hash && document.getElementById('tab-' + hash)) {
             switchTab(hash);
+            // A cold deep-link renders the tab here, before loadDashboard has fetched
+            // the data it needs, so a non-overview tab shows only its loading state.
+            // Re-render once the main data is in. (overview re-renders itself in
+            // loadDashboard; iframe/standalone tabs don't depend on this data.)
+            if (hash !== 'overview' && window.whenMainDataReady && typeof window.whenMainDataReady.then === 'function') {
+                window.whenMainDataReady.then(() => {
+                    // Only if the user hasn't since navigated elsewhere.
+                    if (window.location.hash.replace('#', '') === hash) {
+                        try { switchTab(hash); } catch (e) { console.warn('[deep-link] re-render after data load failed:', e); }
+                    }
+                });
+            }
         }
     });
 
