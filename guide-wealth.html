@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page guide — Wealth</title>
+<link rel="stylesheet" href="css/tokens.css?v=1">
+<style>
+    body { background: var(--bg-app); color: var(--text-primary); margin: 0; padding: 28px 22px 60px; line-height: 1.6; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    h1 { font-size: var(--fs-2xl); margin: 0 0 6px; }
+    h2 { font-size: var(--fs-lg); margin: 34px 0 10px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
+    h3 { font-size: var(--fs-md); margin: 22px 0 8px; }
+    p, li { font-size: var(--fs-sm); color: var(--text-secondary); }
+    strong { color: var(--text-primary); }
+    .lede { font-size: var(--fs-md); color: var(--text-secondary); margin-bottom: 22px; }
+    .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 18px 20px; margin: 14px 0; }
+    .rule { background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: var(--radius-md); padding: 14px 18px; margin: 18px 0; }
+    .rule strong { display: block; margin-bottom: 4px; }
+    .warn { background: var(--warning-bg); border-left: 3px solid var(--warning); border-radius: var(--radius-md); padding: 12px 16px; margin: 14px 0; font-size: var(--fs-sm); }
+    table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin: 10px 0; }
+    th { text-align: left; padding: 7px 9px; color: var(--text-muted); font-weight: var(--fw-medium); font-size: var(--fs-xs); border-bottom: 1px solid var(--border-default); }
+    td { padding: 7px 9px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+    code { background: var(--bg-subtle); padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+    .scroll { overflow-x: auto; }
+    figure { margin: 16px 0; }
+    figcaption { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 6px; }
+    .step { display: flex; gap: 12px; margin: 10px 0; align-items: flex-start; }
+    .num { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-size: var(--fs-xs); font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; }
+    .who { display: inline-block; font-size: 10px; font-weight: var(--fw-semibold); padding: 1px 7px; border-radius: var(--radius-full); margin-left: 6px; vertical-align: middle; }
+    .auto { background: var(--info-bg); color: var(--info); }
+    .you { background: var(--accent-soft); color: var(--accent); }
+    .ai { background: var(--warning-bg); color: var(--warning); }
+    svg { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Wealth — page guide</h1>
+<p class="lede">What this page is, where every number comes from, and which bits happen on their own.
+Read the first section and you will understand the page. Keep reading if you want to know exactly how a figure was worked out.</p>
+
+<p><span class="who auto">AUTOMATIC</span> happens without you &nbsp; <span class="who you">YOU</span> needs a person &nbsp; <span class="who ai">AI</span> a computer makes a suggestion you approve</p>
+
+<h2>1. The big picture</h2>
+
+<p>Money comes in from your properties and your work. Some goes out on living costs. What is left over is split into pots for the future.</p>
+
+<figure>
+<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Money flows from bank accounts into the app, is sorted into money in and money out, and the surplus fills five pots">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="var(--text-muted)"/></marker>
+  </defs>
+  <rect x="8" y="110" width="132" height="66" rx="9" fill="var(--bg-surface)" stroke="var(--border-default)"/>
+  <text x="74" y="138" text-anchor="middle" font-size="13" font-weight="600" fill="var(--text-primary)">Your banks</text>
+  <text x="74" y="156" text-anchor="middle" font-size="11" fill="var(--text-muted)">48 accounts</text>
+
+  <line x1="142" y1="143" x2="196" y2="143" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <rect x="200" y="110" width="132" height="66" rx="9" fill="var(--info-bg)" stroke="var(--info)"/>
+  <text x="266" y="132" text-anchor="middle" font-size="13" font-weight="600" fill="var(--text-primary)">Sorted into</text>
+  <text x="266" y="149" text-anchor="middle" font-size="13" font-weight="600" fill="var(--text-primary)">categories</text>
+  <text x="266" y="166" text-anchor="middle" font-size="10" fill="var(--info)">automatic + your checks</text>
+
+  <line x1="334" y1="143" x2="388" y2="143" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <rect x="392" y="46" width="150" height="56" rx="9" fill="var(--success-bg)" stroke="var(--success)"/>
+  <text x="467" y="70" text-anchor="middle" font-size="13" font-weight="600" fill="var(--text-primary)">Money in</text>
+  <text x="467" y="88" text-anchor="middle" font-size="10" fill="var(--text-secondary)">rent + your income</text>
+
+  <rect x="392" y="182" width="150" height="56" rx="9" fill="var(--danger-bg)" stroke="var(--danger)"/>
+  <text x="467" y="206" text-anchor="middle" font-size="13" font-weight="600" fill="var(--text-primary)">Money out</text>
+  <text x="467" y="224" text-anchor="middle" font-size="10" fill="var(--text-secondary)">business + Needs/Wants</text>
+
+  <path d="M467,102 L467,132" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+  <path d="M467,182 L467,154" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <rect x="556" y="112" width="140" height="62" rx="9" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="626" y="136" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text-primary)">What's left</text>
+  <text x="626" y="155" text-anchor="middle" font-size="10" fill="var(--accent)">net cash flow</text>
+
+  <line x1="542" y1="143" x2="552" y2="143" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="698" y1="143" x2="726" y2="143" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <rect x="730" y="30" width="120" height="228" rx="9" fill="var(--bg-surface)" stroke="var(--border-default)"/>
+  <text x="790" y="52" text-anchor="middle" font-size="12" font-weight="700" fill="var(--text-primary)">5 pots</text>
+  <text x="790" y="80" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Debt 70%</text>
+  <text x="790" y="104" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Dreams 20%</text>
+  <text x="790" y="128" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Fix 10%</text>
+  <text x="790" y="152" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Future 0%</text>
+  <text x="790" y="176" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Tax 0%</text>
+  <text x="790" y="212" text-anchor="middle" font-size="10" fill="var(--text-muted)">percentages</text>
+  <text x="790" y="228" text-anchor="middle" font-size="10" fill="var(--text-muted)">are yours to</text>
+  <text x="790" y="244" text-anchor="middle" font-size="10" fill="var(--text-muted)">change</text>
+</svg>
+<figcaption>Left to right: real money → sorted → in and out → what's left → shared between five pots.</figcaption>
+</figure>
+
+<h2>2. The one rule that explains everything</h2>
+
+<div class="rule">
+<strong>Every personal spending category is EITHER a budget OR a pot. Never both.</strong>
+A <strong>budget</strong> is money that leaves as you spend it, so it reduces what's left over.
+A <strong>pot</strong> is money you set aside first and spend later, so spending it empties the pot but does <em>not</em> reduce what's left over.
+</div>
+
+<h3>Why that second half matters</h3>
+<p>Imagine you save £1,000 a month for tax. After five months the pot holds £5,000, the tax bill arrives, and you pay it.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>If the tax bill counted as spending</th><th>What actually happens now</th></tr></thead>
+<tbody>
+<tr><td>That month shows a £5,000 loss</td><td>The tax pot goes from £5,000 to £0</td></tr>
+<tr><td>What's left over goes negative</td><td>What's left over is unaffected</td></tr>
+<tr><td><strong>Every other pot gets nothing that month</strong></td><td>Every other pot fills as normal</td></tr>
+</tbody>
+</table>
+</div>
+<p>The pot existed to absorb that bill. Counting it twice would punish you for using it properly. So bucket spending is shown on the page, but never deducted.</p>
+
+<h2>3. Where each number comes from</h2>
+
+<h3>Monthly cash flow</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Row</th><th>How it is worked out</th></tr></thead>
+<tbody>
+<tr><td><strong>Real estate income</strong></td><td>Adds up rent and property income for the month</td></tr>
+<tr><td><strong>Personal income</strong></td><td>Money you earned. Transfers from your own businesses are excluded so rent isn't counted twice</td></tr>
+<tr><td><strong>Investment income</strong></td><td>How much your investments grew, minus what you paid in. Added to total income but <em>not</em> to what's left over, because it hasn't been withdrawn</td></tr>
+<tr><td><strong>Business expenditure</strong></td><td>Running costs of the properties and companies</td></tr>
+<tr><td><strong>Personal expenditure</strong></td><td>Needs + Wants only. Split out so you can see each</td></tr>
+<tr><td><strong>Net cash flow</strong></td><td>Total income − business costs − Needs − Wants</td></tr>
+<tr><td><strong>Bucket spending</strong></td><td>Shown at the bottom, deliberately not deducted (see the rule above)</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Click any number</strong> to see the exact transactions behind it. You can change a transaction's category there and the page recalculates when you close.</p>
+
+<h3>The five pots</h3>
+<p>Each month every pot receives its percentage of what's left over. If nothing is left over, nothing goes in — pots never go backwards.</p>
+<p>A pot empties when you spend on its category:</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Pot</th><th>Emptied by</th></tr></thead>
+<tbody>
+<tr><td>Debt</td><td>Payments into your credit cards</td></tr>
+<tr><td>Dreams</td><td>Travel</td></tr>
+<tr><td>Fix</td><td>Personal maintenance</td></tr>
+<tr><td>Future</td><td>Money moved into investments</td></tr>
+<tr><td>Tax</td><td>Personal tax payments</td></tr>
+</tbody>
+</table>
+</div>
+<div class="warn"><strong>If a pot shows £0 with lots of spending against it</strong>, that is not a fault. It means you have spent more through that pot than what's left over has put in. Overspend carries forward, so the pot stays at £0 until later months make it up.</div>
+
+<h3>Credit card payments — the tricky one</h3>
+<p>Paying a card creates <strong>two</strong> records: money out of your current account, and money into the card. Counting both would double it. Counting the wrong one can miss it entirely.</p>
+<div class="step"><span class="num">1</span><div><strong>Money arriving into a credit card is a payment.</strong> No labelling needed — this is read automatically. <span class="who auto">AUTOMATIC</span></div></div>
+<div class="step"><span class="num">2</span><div>For cards with <strong>no bank feed</strong> (Barclaycard, NatWest) there is nothing to read, so the current-account side is used instead. <span class="who you">YOU</span></div></div>
+<div class="step"><span class="num">3</span><div>If both exist, the duplicate is removed. Each card record cancels at most one current-account record, so two same-value payments in one week are both still counted. <span class="who auto">AUTOMATIC</span></div></div>
+<div class="step"><span class="num">4</span><div>A bounced direct debit that comes back cancels itself out. <span class="who auto">AUTOMATIC</span></div></div>
+
+<h2>4. What happens on its own, and what needs you</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Step</th><th>Who</th><th>When</th></tr></thead>
+<tbody>
+<tr><td>Bank transactions imported</td><td><span class="who auto">AUTOMATIC</span></td><td>Through the day</td></tr>
+<tr><td>Category suggested for each transaction</td><td><span class="who ai">AI</span></td><td>On import</td></tr>
+<tr><td>Category confirmed or corrected</td><td><span class="who you">YOU</span></td><td>Reconciliation tab, or by clicking a number here</td></tr>
+<tr><td>Every figure on this page recalculated</td><td><span class="who auto">AUTOMATIC</span></td><td>Each time the page loads</td></tr>
+<tr><td>Property values estimated</td><td><span class="who ai">AI</span></td><td>Monthly — you approve before net worth moves</td></tr>
+<tr><td>Cash and credit card balances</td><td><span class="who auto">AUTOMATIC</span></td><td>Live from the bank</td></tr>
+<tr><td>Property, business, loan and investment values</td><td><span class="who you">YOU</span></td><td>Monthly, by hand</td></tr>
+<tr><td>Overnight data checks (duplicate imports, broken figures)</td><td><span class="who auto">AUTOMATIC</span></td><td>Nightly</td></tr>
+<tr><td>Budgets and pot percentages set</td><td><span class="who you">YOU</span></td><td>Whenever you choose</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>5. Using it each month</h2>
+<div class="step"><span class="num">1</span><div>Press <strong>↻ Refresh</strong>, then check the health pill is green.</div></div>
+<div class="step"><span class="num">2</span><div>Look at <strong>net cash flow</strong>. Positive means you built something this month.</div></div>
+<div class="step"><span class="num">3</span><div>Check <strong>Needs and Wants against budget</strong>. Red means over.</div></div>
+<div class="step"><span class="num">4</span><div>Anything surprising? <strong>Click the number</strong> and read the transactions. Fix a wrong category on the spot.</div></div>
+<div class="step"><span class="num">5</span><div>Update the manual figures once a month so net worth stays honest.</div></div>
+
+<div class="rule" style="margin-top:26px">
+<strong>If you remember one thing</strong>
+Budgets are money leaving now. Pots are money set aside for later. Keeping them apart is what makes every other number on this page true.
+</div>
+
+<p style="color:var(--text-muted);font-size:var(--fs-xs);margin-top:30px">
+Page guide for the Wealth tab · written to be understood without any finance or computing knowledge.
+If a number here ever disagrees with what you see on the page, the page is right and this guide needs updating.
+</p>
+
+</div>
+</body>
+</html>
