@@ -158,9 +158,25 @@ A <strong>pot</strong> is money you set aside first and spend later, so spending
 <h3>Credit card payments — the tricky one</h3>
 <p>Paying a card creates <strong>two</strong> records: money out of your current account, and money into the card. Counting both would double it. Counting the wrong one can miss it entirely.</p>
 <div class="step"><span class="num">1</span><div><strong>Money arriving into a credit card is a payment.</strong> No labelling needed — this is read automatically. <span class="who auto">AUTOMATIC</span></div></div>
-<div class="step"><span class="num">2</span><div>For cards with <strong>no bank feed</strong> (Barclaycard, NatWest) there is nothing to read, so the current-account side is used instead. <span class="who you">YOU</span></div></div>
+<div class="step"><span class="num">2</span><div>For a <strong>closed card with no feed</strong> (Barclaycard, NatWest) there is no card record to read, so the current-account side is used instead. You label those <em>Personal Credit Card Transfer</em> when you reconcile. <span class="who you">YOU</span></div></div>
 <div class="step"><span class="num">3</span><div>If both exist, the duplicate is removed. Each card record cancels at most one current-account record, so two same-value payments in one week are both still counted. <span class="who auto">AUTOMATIC</span></div></div>
 <div class="step"><span class="num">4</span><div>A bounced direct debit that comes back cancels itself out. <span class="who auto">AUTOMATIC</span></div></div>
+<p style="margin-top:10px">The same figure is used by the cash flow row and the Debt pot, from one shared calculation, so the two can never disagree.</p>
+
+<h3>Debts you cannot see</h3>
+<p>A closed card still owes money, and with no feed there is nothing to read. Rather than a number that goes stale, these are <strong>worked out</strong>: a known starting balance and date, its interest rate, and every payment found in your bank feed since.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Debt</th><th>Starting point</th><th>How payments are found</th></tr></thead>
+<tbody>
+<tr><td>Barclaycard</td><td>Last synced balance, Aug 2025</td><td>Any transaction naming Barclaycard <em>or</em> the card number</td></tr>
+<tr><td>NatWest card</td><td>Statement, June 2026</td><td>Any transaction naming NatWest</td></tr>
+<tr><td>Charging order</td><td>The order itself, May 2026</td><td>No payments — it only accrues</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each one moves on its own every month. Nothing to type in. <span class="who auto">AUTOMATIC</span></p>
+<div class="warn">The charging order's interest rate is an <strong>assumption</strong>, not something taken from the paperwork. It is flagged in the record for confirmation. Treat that balance as an estimate.</div>
 
 <h2>4. What happens on its own, and what needs you</h2>
 <div class="scroll">
@@ -173,19 +189,25 @@ A <strong>pot</strong> is money you set aside first and spend later, so spending
 <tr><td>Every figure on this page recalculated</td><td><span class="who auto">AUTOMATIC</span></td><td>Each time the page loads</td></tr>
 <tr><td>Property values estimated</td><td><span class="who ai">AI</span></td><td>Monthly — you approve before net worth moves</td></tr>
 <tr><td>Cash and credit card balances</td><td><span class="who auto">AUTOMATIC</span></td><td>Live from the bank</td></tr>
-<tr><td>Property, business, loan and investment values</td><td><span class="who you">YOU</span></td><td>Monthly, by hand</td></tr>
+<tr><td>Mortgage balances</td><td><span class="who auto">AUTOMATIC</span></td><td>Worked out from each mortgage's own terms</td></tr>
+<tr><td>Closed cards and the charging order</td><td><span class="who auto">AUTOMATIC</span></td><td>Calculated forward monthly (see above)</td></tr>
+<tr><td>Monthly snapshot of the whole picture</td><td><span class="who auto">AUTOMATIC</span></td><td>Stamped on the 1st, so the history builds itself</td></tr>
+<tr><td>Business values and fixed loans</td><td><span class="who auto">AUTOMATIC</span></td><td>Carried forward unchanged until you override one; the new figure then carries forward</td></tr>
+<tr><td><strong>Investment values</strong></td><td><span class="who you">YOU</span></td><td><strong>Monthly, by hand — the one thing that cannot be linked</strong></td></tr>
 <tr><td>Overnight data checks (duplicate imports, broken figures)</td><td><span class="who auto">AUTOMATIC</span></td><td>Nightly</td></tr>
 <tr><td>Budgets and pot percentages set</td><td><span class="who you">YOU</span></td><td>Whenever you choose</td></tr>
 </tbody>
 </table>
 </div>
+<div class="rule"><strong>The short version</strong>
+Everything on this page keeps itself up to date except two things: you type in your <strong>investment values</strong>, and you <strong>approve the property valuations</strong> the AI suggests. Nothing else needs touching.</div>
 
 <h2>5. Using it each month</h2>
 <div class="step"><span class="num">1</span><div>Press <strong>↻ Refresh</strong>, then check the health pill is green.</div></div>
 <div class="step"><span class="num">2</span><div>Look at <strong>net cash flow</strong>. Positive means you built something this month.</div></div>
 <div class="step"><span class="num">3</span><div>Check <strong>Needs and Wants against budget</strong>. Red means over.</div></div>
 <div class="step"><span class="num">4</span><div>Anything surprising? <strong>Click the number</strong> and read the transactions. Fix a wrong category on the spot.</div></div>
-<div class="step"><span class="num">5</span><div>Update the manual figures once a month so net worth stays honest.</div></div>
+<div class="step"><span class="num">5</span><div>Update your <strong>investment values</strong> and approve any property valuations waiting. That is the only typing this page asks of you.</div></div>
 
 <div class="rule" style="margin-top:26px">
 <strong>If you remember one thing</strong>

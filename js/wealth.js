@@ -982,7 +982,7 @@ function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
     const num = a => (a && a.length) || 0;
     registerSyncBar('wealth', {
         // Plain-English explainer, opened from the "Page guide" button in the sync bar.
-        guideUrl: 'guide-wealth.html?v=1',
+        guideUrl: 'guide-wealth.html?v=2',
         refreshFn: async () => {
             // Refresh the shared dashboard data (transactions, accounts) then the
             // Wealth-specific tables, then re-render from scratch.
