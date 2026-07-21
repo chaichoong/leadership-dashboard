@@ -241,6 +241,7 @@
                 <span class="sync-bar-time">${_escHtml(timeText)}</span>
                 <button class="sync-bar-refresh" onclick="triggerSyncBarRefresh('${tabId}')" ${refreshDisabled ? 'disabled' : ''} title="Re-fetch this tab's data">↻ Refresh</button>
                 <button class="sync-bar-health ${pillClass}" onclick="toggleHealthDrawer('${tabId}')" title="Click to expand checks">${pillText}</button>
+                ${s.guideUrl ? `<button class="sync-bar-guide" onclick="openPageGuide('${_escHtml(s.guideUrl)}')" title="How this page works, in plain English">📖 Page guide</button>` : ''}
             </div>
             ${drawerHtml}
         `;
@@ -312,6 +313,35 @@
                 }, 30000);
             });
     }
+
+    // Open a tab's page guide in an overlay. Kept in-app rather than a new browser
+    // tab so the guide sits beside the thing it explains — you read a step, close it,
+    // and the page is still where you left it.
+    function openPageGuide(url) {
+        closePageGuide();
+        const o = document.createElement('div');
+        o.id = 'pageGuideOverlay';
+        o.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:10001;display:flex;align-items:center;justify-content:center;padding:20px';
+        o.onclick = e => { if (e.target === o) closePageGuide(); };
+        o.innerHTML = `<div style="background:var(--bg-surface);border-radius:var(--radius-lg);width:100%;max-width:1100px;height:90vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg);overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border-default);flex:0 0 auto">
+                <strong style="font-size:var(--fs-md);color:var(--text-primary)">📖 Page guide</strong>
+                <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                    <a href="${_escHtml(url)}" target="_blank" rel="noopener" style="font-size:var(--fs-sm);color:var(--accent);text-decoration:none">Open in a new tab ↗</a>
+                    <button onclick="closePageGuide()" aria-label="Close" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:var(--text-muted);padding:0 4px">&times;</button>
+                </span>
+            </div>
+            <iframe src="${_escHtml(url)}" title="Page guide" style="border:0;flex:1 1 auto;width:100%"></iframe>
+        </div>`;
+        document.body.appendChild(o);
+        document.addEventListener('keydown', _pageGuideEsc);
+    }
+    function closePageGuide() {
+        const o = document.getElementById('pageGuideOverlay');
+        if (o) o.remove();
+        document.removeEventListener('keydown', _pageGuideEsc);
+    }
+    function _pageGuideEsc(e) { if (e.key === 'Escape') closePageGuide(); }
 
     function toggleHealthDrawer(tabId) {
         const s = _syncBars[tabId];

@@ -36,6 +36,7 @@
     font-variant-numeric: tabular-nums;
 }
 .sync-bar-refresh,
+.sync-bar-guide,
 .sync-bar-health {
     flex: 0 0 auto;
     font: inherit;
@@ -57,6 +58,19 @@
     color: var(--accent);
 }
 .sync-bar-refresh:disabled { opacity: 0.55; cursor: wait; }
+
+/* Page guide — opens the plain-English explainer for this tab. Opt-in: a tab only
+   gets the button if it registers a guideUrl, so tabs without a guide look unchanged. */
+.sync-bar-guide {
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+}
+.sync-bar-guide:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+}
 
 .sync-bar-health {
     border: 1px solid transparent;
