@@ -403,6 +403,33 @@ describe('Money Groups — bucket drawdown', () => {
     expect(debt.spent[0]).toBe(200); // £100 Amex + £100 Barclaycard, neither lost nor doubled
   });
 
+  it('the cash-flow row and the Debt bucket always agree', () => {
+    // These are two views of one fact, on the same screen. They used to compute it
+    // separately: the cash-flow row read only the cash-side tag while the bucket read
+    // the card leg, so July showed £25 in one place and £1,225 in the other. Both now
+    // call cardPaymentsByMonth(). This test fails if anyone re-forks that logic.
+    const s = loadEngine();
+    const N = s.SUBCAT.name;
+    s.__setData([
+      // tagged cash leg + card leg (must not double)
+      tx(s, { date: '2026-07-06', amount: -1000, subId: 'recCardXfer', alias: 'Santander' }),
+      tx(s, { date: '2026-07-06', amount: 1000, subId: 'recTransfer', alias: 'American Express' }),
+      // untagged card leg only (must still count)
+      tx(s, { date: '2026-07-07', amount: 100, subId: 'recTransfer', alias: 'American Express' }),
+      // feedless card, cash leg only (must still count)
+      tx(s, { date: '2026-07-07', amount: -25, subId: 'recCardXfer', alias: 'Santander' }),
+    ], [
+      { id: 'recCardXfer', fields: { [N]: 'Personal Credit Card Transfer' } },
+      { id: 'recTransfer', fields: { [N]: 'Transfer' } },
+    ], [{ id: 'recAmex', fields: { [s.F.accountAlias]: 'American Express', [s.F.accNetWorthClass]: 'Credit Card' } }]);
+    const months = [{ key: '2026-07', label: 'Jul' }];
+    const [m] = s.buildMonthlyCashflow(['2026-07']);
+    const [debt] = s.buildBucketBalances([{ name: 'Debt', pct: 70 }], months);
+    const cashflowRow = m.bucketItems['Personal Credit Card Transfer'] || 0;
+    expect(Math.round(cashflowRow)).toBe(Math.round(debt.spent[0]));
+    expect(Math.round(cashflowRow)).toBe(1125); // 1000 + 100 + 25, nothing doubled or lost
+  });
+
   it('a refund-only month cannot ADD to a pot', () => {
     // Floor at £0: without it a net-positive month would inflate the bucket as if
     // the refund were fresh allocation.
