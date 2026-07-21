@@ -154,6 +154,29 @@ function netWorthAccounts(cls) {
         .sort((x, y) => y.amount - x.amount);
 }
 
+// Every credit card that counts as a liability: the accounts ticked "Credit Card"
+// (live balance from the bank) PLUS any Debt Terms row classed "Credit Cards" that has
+// no matching account.
+//
+// That second half exists because a closed card still owes money. Barclaycard's feed
+// died on 3 Aug 2025 and NatWest was never connected, so there is no account to read —
+// their balance is the figure held in Debt Terms and maintained by hand. Without this
+// they were simply absent from net worth, understating the debt.
+//
+// Matching is by name, so a card must not be BOTH a ticked account and a Debt Terms
+// balance row, or it would count twice. The account wins where it exists.
+function creditCardItems() {
+    const live = netWorthAccounts('Credit Card');
+    const have = new Set(live.map(a => String(a.name || '').trim().toLowerCase()));
+    const debts = (typeof _debtRecords !== 'undefined' && _debtRecords) ? _debtRecords : [];
+    const manual = debts
+        .filter(r => getField(r, DEBT.cls) === 'Credit Cards')
+        .filter(r => !have.has(String(getField(r, DEBT.name) || '').trim().toLowerCase()))
+        .map(r => ({ name: getField(r, DEBT.name) || '(card)', amount: Math.abs(Number(getField(r, DEBT.principal)) || 0), id: r.id, manual: true }))
+        .filter(x => x.amount > 0);
+    return live.concat(manual).sort((a, b) => b.amount - a.amount);
+}
+
 // Manage which accounts count in net worth, and as what. One row per account with a
 // Cash / Credit card / Not counted selector; the choice writes straight to the
 // Accounts table (Net Worth Class), so cash and cards update the moment you change it.
@@ -627,7 +650,7 @@ function renderWealthContent(el, records, valRecs, debtRecs) {
     // Cash + credit cards: live from the Accounts you've ticked (Net Worth Class).
     // Falls back to the snapshot only if nothing is ticked yet (so it never blanks out).
     const cashItems = netWorthAccounts('Cash');
-    const cardItems = netWorthAccounts('Credit Card');
+    const cardItems = creditCardItems();
     if (cashItems.length) view.byClass['Cash'] = cashItems.reduce((s, i) => s + i.amount, 0);
     if (cardItems.length) view.byClass['Credit Cards'] = cardItems.reduce((s, i) => s + i.amount, 0);
     // Recompute the roll-ups after the loan/cash/card overrides.
@@ -986,7 +1009,7 @@ function registerWealthSyncBar(view, monthsBehind, asOf, currentLabel) {
                 } catch (e) { /* compare against the snapshot loans instead */ }
                 // Mirror the live cash/card override (Accounts ticked as Cash / Credit Card).
                 const mc = netWorthAccounts('Cash'); if (mc.length) byClass['Cash'] = mc.reduce((s, i) => s + i.amount, 0);
-                const md = netWorthAccounts('Credit Card'); if (md.length) byClass['Credit Cards'] = md.reduce((s, i) => s + i.amount, 0);
+                const md = creditCardItems(); if (md.length) byClass['Credit Cards'] = md.reduce((s, i) => s + i.amount, 0);
                 const rawAssets = NW_ASSET_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const rawLiabilities = NW_LIABILITY_CLASSES.reduce((s, c) => s + (byClass[c] || 0), 0);
                 const assetDiff = rawAssets - view.assets;
@@ -1700,13 +1723,15 @@ function debtRows() {
     debts.forEach(r => { if (getField(r, DEBT.cls) === 'Credit Cards') cardRec[(getField(r, DEBT.name) || '').trim().toLowerCase()] = r; });
     // Cards = the Accounts you've ticked as "Credit Card" (balance live from the account),
     // matched to a Debt Terms row by name for the rate.
-    const cardRows = netWorthAccounts('Credit Card').map(acc => {
+    const cardRows = creditCardItems().map(acc => {
         const rec = cardRec[acc.name.trim().toLowerCase()];
         const rate = rec ? _num(getField(rec, DEBT.rate)) : null;
-        const balance = acc.amount; // live from the Accounts table — never the stored figure
+        // Live from the Accounts table where the card has a feed; for a closed card it is
+        // the hand-maintained Debt Terms figure, which must NOT be labelled live.
+        const balance = acc.amount;
         // Monthly interest = balance × annual APR ÷ 12 (the rate is an annual APR).
         const monthly = (rate != null && rate > 0 && balance > 0) ? balance * rate / 100 / 12 : null;
-        return { id: rec ? rec.id : '', name: acc.name, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly, live: true, principal: balance, term: 0, start: '', flag: false };
+        return { id: rec ? rec.id : '', name: acc.name, cls: 'Credit Cards', type: 'Revolving', rate, storedRate: rate, balance, monthly, live: !acc.manual, principal: balance, term: 0, start: '', flag: false };
     });
     const otherRows = debts.filter(r => getField(r, DEBT.cls) !== 'Credit Cards').map(r => {
         const name = getField(r, DEBT.name) || '';
