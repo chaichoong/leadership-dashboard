@@ -165,6 +165,58 @@ function netWorthAccounts(cls) {
 //
 // Matching is by name, so a card must not be BOTH a ticked account and a Debt Terms
 // balance row, or it would count twice. The account wins where it exists.
+// Current balance of a debt with no bank feed, CALCULATED rather than typed in.
+//
+// Opening balance (Original Amount) as at its Start Date, compounded monthly at the
+// stored rate, less every payment found since. Payments are matched by name using the
+// debt's Payment Match terms, so they are picked up from the ordinary bank feed with
+// nothing to maintain by hand — which is the point: a closed card is exactly the debt
+// most likely to be forgotten and quietly grow.
+//
+// Interest is applied to the balance AFTER that month's payments, month by month, so
+// paying earlier genuinely costs less. A rate of 0 means interest is frozen (common on
+// a closed account under an arrangement) and the balance simply reduces by payments.
+function manualDebtBalance(rec) {
+    const opening = Math.abs(Number(getField(rec, DEBT.principal)) || 0);
+    if (!opening) return 0;
+    const startStr = getField(rec, DEBT.start);
+    const start = startStr ? new Date(startStr) : null;
+    if (!start || isNaN(start)) return opening;
+    const rate = Number(getField(rec, DEBT.rate)) || 0;
+    const monthlyRate = rate / 100 / 12;
+
+    // Payments since the opening date, bucketed by month.
+    const terms = String(getField(rec, DEBT.payMatch) || '')
+        .split('|').map(t => t.trim().toUpperCase()).filter(Boolean);
+    const paidByMonth = {};
+    if (terms.length) {
+        const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
+        txns.forEach(t => {
+            const amt = Number(getField(t, F.txReportAmount)) || 0;
+            if (amt >= 0) return;                       // outflows only — a payment reduces the debt
+            const name = String(getField(t, F.txDescription) || '').toUpperCase();
+            if (!terms.some(term => name.includes(term))) return;
+            const ds = getField(t, F.txDate); if (!ds) return;
+            const d = new Date(ds); if (isNaN(d) || d < start) return;
+            const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            paidByMonth[k] = (paidByMonth[k] || 0) + Math.abs(amt);
+        });
+    }
+
+    let bal = opening;
+    const now = new Date();
+    const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 1);
+    let guard = 0;
+    while (cur <= end && guard++ < 600) {
+        const k = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
+        bal = Math.max(0, bal - (paidByMonth[k] || 0));
+        bal = bal * (1 + monthlyRate);
+        cur.setMonth(cur.getMonth() + 1);
+    }
+    return Math.max(0, bal);
+}
+
 function creditCardItems() {
     const live = netWorthAccounts('Credit Card');
     const have = new Set(live.map(a => String(a.name || '').trim().toLowerCase()));
@@ -172,7 +224,7 @@ function creditCardItems() {
     const manual = debts
         .filter(r => getField(r, DEBT.cls) === 'Credit Cards')
         .filter(r => !have.has(String(getField(r, DEBT.name) || '').trim().toLowerCase()))
-        .map(r => ({ name: getField(r, DEBT.name) || '(card)', amount: Math.abs(Number(getField(r, DEBT.principal)) || 0), id: r.id, manual: true }))
+        .map(r => ({ name: getField(r, DEBT.name) || '(card)', amount: manualDebtBalance(r), id: r.id, manual: true }))
         .filter(x => x.amount > 0);
     return live.concat(manual).sort((a, b) => b.amount - a.amount);
 }
@@ -1744,7 +1796,14 @@ function debtRows() {
         // Balance: loans use your edited figure (Debt Terms) first, falling back to the
         // snapshot; mortgages amortise (interest-only holds at principal).
         let balance;
-        if (cls === 'Loans') { const lb = loanBal[name.trim().toLowerCase()]; balance = principal > 0 ? principal : (lb != null ? lb : 0); }
+        if (cls === 'Loans') {
+            // A loan carrying a start date AND a rate is rolled forward automatically
+            // (the charging order accrues and is never paid down). Everything else keeps
+            // the existing behaviour: your edited figure, else the snapshot.
+            const rollForward = getField(r, DEBT.start) && _num(getField(r, DEBT.rate)) != null && principal > 0;
+            if (rollForward) balance = manualDebtBalance(r);
+            else { const lb = loanBal[name.trim().toLowerCase()]; balance = principal > 0 ? principal : (lb != null ? lb : 0); }
+        }
         else { balance = amortisedBalance(type, principal, storedRate || 0, term, start).balance; }
         // Real monthly payment, matched by account number.
         const monthly = costByAcct[debtAcctKey(name)] != null ? costByAcct[debtAcctKey(name)] : null;
