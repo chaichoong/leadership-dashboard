@@ -1141,6 +1141,22 @@ function wealthDrill(subs, monthKey, label) {
         .forEach(r => { const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n); });
     const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
 
+    // Editable pickers. Category, sub-category and business are all shown so a
+    // miscoded transaction can be corrected here rather than hunting for it on the
+    // Reconciliation tab. Saves straight to Airtable; the matrix re-renders on close.
+    const optionList = (recs, fieldId) => (recs || [])
+        .map(r => ({ id: r.id, name: String(getField(r, fieldId) || '') }))
+        .filter(o => o.name).sort((a, b) => a.name.localeCompare(b.name));
+    const catOpts = optionList(typeof allCategories !== 'undefined' ? allCategories : [], CAT_NAME_FIELD);
+    const subOpts = optionList(typeof allSubCategories !== 'undefined' ? allSubCategories : [], SUBCAT.name);
+    const bizOpts = optionList((typeof getActiveBusinesses === 'function') ? getActiveBusinesses()
+        : (typeof allBusinesses !== 'undefined' ? allBusinesses : []), BIZ_NAME_FIELD);
+    const picker = (txId, kind, opts, currentId) => {
+        if (!opts.length) return '<span style="color:var(--text-muted)">–</span>';
+        const o = opts.map(x => `<option value="${escHtml(x.id)}"${x.id === currentId ? ' selected' : ''}>${escHtml(x.name)}</option>`).join('');
+        return `<select onchange="wealthEditTx('${escHtml(txId)}','${kind}',this.value,this)" style="max-width:180px;padding:4px 6px;border:1px solid var(--border-default);border-radius:var(--radius-sm);font-size:var(--fs-xs);background:var(--bg-surface);color:var(--text-primary)"><option value="">— none —</option>${o}</select>`;
+    };
+
     let total = 0;
     const money = v => `${v < 0 ? '−' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     const rowsHtml = txs.map(t => {
@@ -1149,13 +1165,14 @@ function wealthDrill(subs, monthKey, label) {
         const d = getField(t, F.txDate) || '';
         const desc = String(getField(t, F.txDescription) || getField(t, F.txVendor) || '(no description)');
         const acct = String(getField(t, F.txAccountAlias) || '');
-        const sub = subNames[linkId(getField(t, F.txSubCategory))] || '';
-        return `<tr style="border-top:1px solid var(--border-subtle)">
+        return `<tr style="border-top:1px solid var(--border-subtle)" data-tx="${escHtml(t.id)}">
             <td style="padding:7px 10px;white-space:nowrap;color:var(--text-secondary);vertical-align:top">${escHtml(d)}</td>
-            <td style="padding:7px 10px;vertical-align:top;min-width:200px;word-break:break-word">${escHtml(desc)}</td>
+            <td style="padding:7px 10px;vertical-align:top;min-width:180px;word-break:break-word">${escHtml(desc)}</td>
             <td style="padding:7px 10px;vertical-align:top;color:var(--text-muted);white-space:nowrap">${escHtml(acct)}</td>
-            <td style="padding:7px 10px;vertical-align:top;color:var(--text-muted);white-space:nowrap">${escHtml(sub)}</td>
-            <td style="padding:7px 10px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:var(--fw-semibold);color:${amt < 0 ? 'var(--danger)' : 'var(--success)'};vertical-align:top">${money(amt)}</td>
+            <td style="padding:5px 6px;vertical-align:top">${picker(t.id, 'category', catOpts, linkId(getField(t, F.txCategory)))}</td>
+            <td style="padding:5px 6px;vertical-align:top">${picker(t.id, 'subCategory', subOpts, linkId(getField(t, F.txSubCategory)))}</td>
+            <td style="padding:5px 6px;vertical-align:top">${picker(t.id, 'business', bizOpts, linkId(getField(t, F.txBusiness)))}</td>
+            <td style="padding:7px 10px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:var(--fw-semibold);color:${amt < 0 ? 'var(--danger)' : 'var(--success)'};vertical-align:top">${money(amt)}<span class="wd-status" style="display:block;font-size:9px;font-weight:var(--fw-regular);min-height:11px"></span></td>
         </tr>`;
     }).join('');
 
@@ -1169,7 +1186,7 @@ function wealthDrill(subs, monthKey, label) {
             <div style="min-width:0">
                 <div style="font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:1px">${escHtml(monthKey ? wealthMonthLabel(monthKey) : 'Rolling 12 months')}</div>
                 <div style="font-size:var(--fs-lg);font-weight:var(--fw-bold);color:var(--text-primary)">${escHtml(label || '')}</div>
-                <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:3px">${txs.length} transaction${txs.length === 1 ? '' : 's'} · Total <strong style="color:var(--text-primary)">${money(total)}</strong> <span style="color:var(--text-muted)">· money out shows as a minus. Something in the wrong place? Recategorise it on the Reconciliation tab and it moves here.</span></div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:3px">${txs.length} transaction${txs.length === 1 ? '' : 's'} · Total <strong style="color:var(--text-primary)">${money(total)}</strong> <span style="color:var(--text-muted)">· money out shows as a minus. Something in the wrong place? Change its category, sub-category or business right here — it saves as you pick, and the figures update when you close.</span></div>
             </div>
             <button onclick="wealthCloseDrill()" aria-label="Close" style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:var(--text-muted);padding:0 4px">&times;</button>
         </div>
@@ -1180,19 +1197,58 @@ function wealthDrill(subs, monthKey, label) {
                     <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Description</th>
                     <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Account</th>
                     <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Category</th>
+                    <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Sub-category</th>
+                    <th style="text-align:left;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Business</th>
                     <th style="text-align:right;padding:7px 10px;font-weight:var(--fw-medium);color:var(--text-muted);font-size:var(--fs-xs)">Amount</th>
                 </tr></thead>
-                <tbody>${rowsHtml || `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted)">No transactions behind this figure.</td></tr>`}</tbody>
+                <tbody>${rowsHtml || `<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted)">No transactions behind this figure.</td></tr>`}</tbody>
             </table>
         </div>
     </div>`;
     document.body.appendChild(overlay);
     document.addEventListener('keydown', wealthDrillEsc);
 }
+// Save a recategorisation from the drill-down. Writes to Airtable, updates the local
+// transaction cache so the page agrees without a refetch, and flags the matrix to
+// re-render on close (re-rendering mid-edit would rip the open modal out).
+let _wealthDrillEdited = false;
+async function wealthEditTx(txId, kind, valueId, el) {
+    const fieldId = { category: F.txCategory, subCategory: F.txSubCategory, business: F.txBusiness }[kind];
+    if (!fieldId) return;
+    const status = el && el.closest('tr') ? el.closest('tr').querySelector('.wd-status') : null;
+    const setStatus = (txt, colour) => { if (status) { status.textContent = txt; status.style.color = colour; } };
+    setStatus('saving…', 'var(--text-muted)');
+    if (el) el.disabled = true;
+    try {
+        const resp = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.transactions}`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${PAT}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: [{ id: txId, fields: { [fieldId]: valueId ? [valueId] : [] } }] }),
+        });
+        if (!resp.ok) throw new Error('Airtable ' + resp.status);
+        const rec = ((typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : []).find(t => t.id === txId);
+        if (rec) { rec.fields = rec.fields || {}; rec.fields[fieldId] = valueId ? [valueId] : []; }
+        _wealthDrillEdited = true;
+        setStatus('saved', 'var(--success)');
+    } catch (e) {
+        setStatus('not saved', 'var(--danger)');
+        if (typeof showToast === 'function') showToast('Could not save that change — try again', { type: 'error' });
+    } finally {
+        if (el) el.disabled = false;
+    }
+}
 function wealthCloseDrill() {
     const o = document.getElementById('wealthDrillOverlay');
     if (o) o.remove();
     document.removeEventListener('keydown', wealthDrillEsc);
+    // Recategorising moves money between rows, so the figures behind the modal are
+    // stale the moment an edit lands. Re-render once, on close.
+    if (_wealthDrillEdited) {
+        _wealthDrillEdited = false;
+        if (typeof renderWealthCashflow === 'function') renderWealthCashflow();
+        if (typeof renderPersonalExpenditure === 'function') renderPersonalExpenditure();
+        if (typeof loadWealthBuckets === 'function') loadWealthBuckets();
+    }
 }
 function wealthDrillEsc(e) { if (e.key === 'Escape') wealthCloseDrill(); }
 

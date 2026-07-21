@@ -87,3 +87,31 @@ describe('money-daily-worker does not drift from js/config.js', () => {
     }
   });
 });
+
+// ── Duplicate global declarations ────────────────────────────────────────────
+// Every js/ file is a plain <script> sharing ONE global scope. Two files declaring
+// the same top-level `const` throws "Identifier X has already been declared" and
+// takes out EVERY tab, not just the two involved. It happened on 2026-07-20:
+// CAT_NAME_FIELD was added to config.js while costs.js already had its own copy,
+// and 14 sync tests went red across tabs that had nothing to do with the change.
+//
+// Rather than guess at top-level scope with a regex, this concatenates the files in
+// the exact order index.html loads them and parses the result — which is precisely
+// what the browser does, so a collision fails here for the same reason it fails live.
+describe('no duplicate global declarations across js/ files', () => {
+  it('parses every js/ file concatenated in index.html load order', () => {
+    const html = read('index.html');
+    const order = [...html.matchAll(/<script[^>]+src="(js\/[^"?]+)/g)].map((m) => m[1]);
+    expect(order.length).toBeGreaterThan(5); // guard: a broken regex must not silently pass
+
+    const combined = order
+      .map((f) => {
+        try { return read(f); } catch (e) { return ''; }
+      })
+      .join('\n;\n');
+
+    let error = null;
+    try { new Function(combined); } catch (e) { error = e.message; }
+    expect(error).toBeNull();
+  });
+});
