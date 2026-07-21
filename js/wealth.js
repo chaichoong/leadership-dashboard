@@ -1044,6 +1044,62 @@ function wealthCompletedIdx(keys) {
 // on purpose: net cash flow must not change value depending on whether an async
 // fetch has landed yet. The links decide which pot a category draws from; this
 // decides whether it counts as expenditure at all.
+// Credit-card payments per month — the ONE place this is worked out.
+//
+// A card payment leaves two records: money out of a current account, and money into
+// the card. Both the Monthly cash flow row and the Debt bucket need the same answer,
+// and when they each computed it their own way they disagreed (the cash-flow row read
+// only the cash-side tag and showed £25 for July against the bucket's £1,225). One
+// function, both callers.
+//
+// Money arriving into a credit-card account IS a payment, by definition, so the card
+// leg needs no tagging and is the source of truth. The cash leg is the fallback for
+// cards with no open-banking feed (Barclaycard, NatWest) — there, it is the only
+// record. Where both exist the duplicate is dropped, one-for-one so two same-value
+// payments in a week are not collapsed into one.
+//
+// Amounts are SIGNED, so a bounced direct debit returning cancels the payment it
+// reverses. Returns { byMonth: {monthKey: amount}, txns: {monthKey: [tx]} }.
+const CARD_PAYMENT_SUBCAT = 'Personal Credit Card Transfer';
+
+function cardPaymentsByMonth(monthKeys) {
+    const keySet = new Set(monthKeys);
+    const byMonth = {}; const txnsBy = {};
+    monthKeys.forEach(k => { byMonth[k] = 0; txnsBy[k] = []; });
+    const txns = (typeof allTransactions !== 'undefined' && allTransactions) ? allTransactions : [];
+    const subNames = {};
+    ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : [])
+        .forEach(r => { const n = getField(r, SUBCAT.name); if (n) subNames[r.id] = String(n); });
+    const linkId = f => { if (!f) return null; if (Array.isArray(f)) { const x = f[0]; return x && typeof x === 'object' ? x.id : x; } return typeof f === 'object' ? f.id : f; };
+    const cardAliases = new Set(
+        ((typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [])
+            .filter(a => getField(a, F.accNetWorthClass) === 'Credit Card')
+            .map(a => String(getField(a, F.accountAlias) || '')).filter(Boolean));
+    const aliasOf = t => { const v = getField(t, F.txAccountAlias); const x = Array.isArray(v) ? v[0] : v; return String((x && typeof x === 'object') ? x.id : (x || '')); };
+    const subOf = t => subNames[linkId(getField(t, F.txSubCategory))] || '';
+    const dateOf = t => { const s = getField(t, F.txDate); const d = s ? new Date(s) : null; return (d && !isNaN(d)) ? d : null; };
+    const keyOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const add = (t, d, amt) => { const k = keyOf(d); if (!keySet.has(k)) return; byMonth[k] += amt; txnsBy[k].push(t); };
+
+    const cardLeg = txns.filter(t => cardAliases.has(aliasOf(t)) && subOf(t) === 'Transfer');
+    cardLeg.forEach(t => { const d = dateOf(t); if (d) add(t, d, Number(getField(t, F.txReportAmount)) || 0); });
+
+    const inflows = cardLeg
+        .map(t => ({ amt: Math.round(Math.abs(Number(getField(t, F.txReportAmount)) || 0) * 100), d: dateOf(t), used: false }))
+        .filter(x => x.d);
+    txns.filter(t => subOf(t) === CARD_PAYMENT_SUBCAT)
+        .sort((a, b) => String(getField(a, F.txDate)).localeCompare(String(getField(b, F.txDate))))
+        .forEach(t => {
+            const d = dateOf(t); if (!d) return;
+            const amt = Number(getField(t, F.txReportAmount)) || 0;
+            const cents = Math.round(Math.abs(amt) * 100);
+            const match = inflows.find(x => !x.used && x.amt === cents && Math.abs(x.d - d) <= 7 * 864e5);
+            if (match) { match.used = true; return; } // the card leg already counted it
+            add(t, d, -amt); // outflow → positive paydown
+        });
+    return { byMonth, txns: txnsBy };
+}
+
 function personalMoneyGroups() {
     const byName = {};
     ((typeof allSubCategories !== 'undefined' && allSubCategories) ? allSubCategories : []).forEach(r => {
@@ -1095,12 +1151,29 @@ function buildMonthlyCashflow(monthKeys) {
         // cash flow AND drain its pot — the exact double-count this design exists to
         // stop. Bucket wins, so the worst case is a missing budget line, not a figure
         // that is wrong twice.
+        // Card payments are handled below by cardPaymentsByMonth, which reads the card
+        // leg as well as the tag. Skip them here or the tagged ones count twice.
+        else if (sub === CARD_PAYMENT_SUBCAT) return;
         else if (bucketSubs.has(sub)) m.bucketItems[sub] = (m.bucketItems[sub] || 0) + (-amt);
         else if (moneyGroup[sub]) m.perItems[sub] = (m.perItems[sub] || 0) + (-amt);
         else return; // not counted anywhere — don't index it either
         if (!_cfTxIndex[sub]) _cfTxIndex[sub] = {};
         (_cfTxIndex[sub][key] = _cfTxIndex[sub][key] || []).push(tx);
     });
+
+    // Card payments, from the single shared source, so this row can never disagree
+    // with the Debt bucket further down the page.
+    if (bucketSubs.has(CARD_PAYMENT_SUBCAT)) {
+        const cp = cardPaymentsByMonth(monthKeys);
+        monthKeys.forEach(k => {
+            const v = cp.byMonth[k] || 0;
+            if (v) byMonth[k].bucketItems[CARD_PAYMENT_SUBCAT] = v;
+            if (cp.txns[k] && cp.txns[k].length) {
+                if (!_cfTxIndex[CARD_PAYMENT_SUBCAT]) _cfTxIndex[CARD_PAYMENT_SUBCAT] = {};
+                _cfTxIndex[CARD_PAYMENT_SUBCAT][k] = cp.txns[k];
+            }
+        });
+    }
     return monthKeys.map(k => {
         const m = byMonth[k];
         const bizTotal = Object.values(m.bizItems).reduce((s, v) => s + v, 0);
@@ -2682,64 +2755,21 @@ function buildBucketBalances(buckets, months) {
         const d = new Date(dateStr); if (isNaN(d)) return;
         const idx = keyIdx[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`];
         if (idx === undefined) return;
-        const bucket = subToBucket[subNames[linkId(getField(tx, F.txSubCategory))] || ''];
+        const sub = subNames[linkId(getField(tx, F.txSubCategory))] || '';
+        if (sub === CARD_PAYMENT_SUBCAT) return; // handled by cardPaymentsByMonth below
+        const bucket = subToBucket[sub];
         if (bucket && spent[bucket]) spent[bucket][idx] += -amt;
     });
 
-    // ── Credit-card payments: read the CARD side, not just the cash side ─────────
-    // A card payment has two legs. The cash-side leg only counts here if someone
-    // coded it "Personal Credit Card Transfer", and reconciliation mostly does not:
-    // of 84 card payments only 43 carried that tag, so £74,971 of real debt paydown
-    // was invisible to the Debt bucket (found 21 Jul 2026 when Kevin noticed his
-    // July payments missing).
-    //
-    // An inflow to a credit-card account IS a payment, by definition — no tagging
-    // required. So take the card leg as the source of truth and fall back to the
-    // cash leg only where there is no card leg to read, which is exactly the case
-    // for cards with no open-banking feed (Barclaycard, NatWest).
-    const cardBucket = Object.keys(subToBucket).find(n => n === 'Personal Credit Card Transfer');
-    if (cardBucket && spent[subToBucket[cardBucket]]) {
-        const bname = subToBucket[cardBucket];
-        const cardAliases = new Set(
-            ((typeof allAccounts !== 'undefined' && allAccounts) ? allAccounts : [])
-                .filter(a => getField(a, F.accNetWorthClass) === 'Credit Card')
-                .map(a => String(getField(a, F.accountAlias) || '')).filter(Boolean));
-        const aliasOf = tx => { const v = getField(tx, F.txAccountAlias); const x = Array.isArray(v) ? v[0] : v; return String((x && typeof x === 'object') ? x.id : (x || '')); };
-        const subOf = tx => subNames[linkId(getField(tx, F.txSubCategory))] || '';
-        const dateOf = tx => { const s = getField(tx, F.txDate); const d = s ? new Date(s) : null; return (d && !isNaN(d)) ? d : null; };
-        const monthIdx = d => keyIdx[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`];
-
-        // Card leg: signed, so a bounced direct debit returning on the card cancels
-        // the payment it reverses (the Lloyds £1,978.70 bounce in May 2026).
-        const cardLeg = txns.filter(t => cardAliases.has(aliasOf(t)) && subOf(t) === 'Transfer');
-        cardLeg.forEach(t => {
-            const d = dateOf(t); if (!d) return;
-            const idx = monthIdx(d); if (idx === undefined) return;
-            spent[bname][idx] += Number(getField(t, F.txReportAmount)) || 0; // inflow = paydown
-        });
-
-        // Remove the cash-side rows already counted above that duplicate a card leg,
-        // matched on amount within a week. What survives is payments to cards we
-        // cannot see — the only place the cash leg is the sole record.
-        // Each card leg can cancel AT MOST ONE cash-side row. Without consuming the
-        // match, two same-value payments in the same week to different cards — one fed,
-        // one not — would both match the single card leg and both be removed, losing a
-        // real payment. Kevin pays several cards on the same day (7 Jul 2026: £100 to
-        // Lloyds and £100 to Santander CC), so this is the normal case, not a corner.
-        const inflows = cardLeg
-            .map(t => ({ amt: Math.round(Math.abs(Number(getField(t, F.txReportAmount)) || 0) * 100), d: dateOf(t), used: false }))
-            .filter(x => x.d);
-        txns.filter(t => subOf(t) === 'Personal Credit Card Transfer')
-            .sort((a, b) => String(getField(a, F.txDate)).localeCompare(String(getField(b, F.txDate))))
-            .forEach(t => {
-                const d = dateOf(t); if (!d) return;
-                const idx = monthIdx(d); if (idx === undefined) return;
-                const amt = Number(getField(t, F.txReportAmount)) || 0;
-                const cents = Math.round(Math.abs(amt) * 100);
-                const match = inflows.find(x => !x.used && x.amt === cents && Math.abs(x.d - d) <= 7 * 864e5);
-                if (match) { match.used = true; spent[bname][idx] -= -amt; } // card leg already has it
-            });
+    // Credit-card payments come from the shared cardPaymentsByMonth(), the same source
+    // the Monthly cash flow row uses, so the two can never disagree. It reads the card
+    // leg (no tagging needed) and falls back to the cash leg for cards with no feed.
+    const cardBucket = subToBucket[CARD_PAYMENT_SUBCAT];
+    if (cardBucket && spent[cardBucket]) {
+        const cp = cardPaymentsByMonth(keys);
+        keys.forEach((k, i) => { spent[cardBucket][i] += cp.byMonth[k] || 0; });
     }
+
     const net = buildMonthlyCashflow(keys).map(m => m.net);
     return buckets.map(b => {
         const pct = Number(b.pct) || 0;
