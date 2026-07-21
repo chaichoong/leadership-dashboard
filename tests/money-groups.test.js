@@ -381,6 +381,28 @@ describe('Money Groups — bucket drawdown', () => {
     expect(debt.spent[0]).toBe(25);
   });
 
+  it('two same-value payments in a week: one fed card, one not, both counted', () => {
+    // Kevin tags the cash leg AND the card leg exists — belt and braces. Each card
+    // leg may cancel at most ONE cash-side row, or a payment to a feedless card
+    // (Barclaycard) would be wrongly cancelled by an unrelated card leg of the same
+    // value. He pays several cards on the same day, so this is the normal case.
+    const s = loadEngine();
+    const N = s.SUBCAT.name;
+    s.__setData([
+      // £100 to Amex — cash leg tagged AND card leg present
+      tx(s, { date: '2026-07-07', amount: -100, subId: 'recCardXfer', alias: 'Santander' }),
+      tx(s, { date: '2026-07-07', amount: 100, subId: 'recTransfer', alias: 'American Express' }),
+      // £100 to Barclaycard — no feed, so the cash leg is the ONLY record
+      tx(s, { date: '2026-07-07', amount: -100, subId: 'recCardXfer', alias: 'Santander' }),
+    ], [
+      { id: 'recCardXfer', fields: { [N]: 'Personal Credit Card Transfer' } },
+      { id: 'recTransfer', fields: { [N]: 'Transfer' } },
+    ], [{ id: 'recAmex', fields: { [s.F.accountAlias]: 'American Express', [s.F.accNetWorthClass]: 'Credit Card' } }]);
+    const months = [{ key: '2026-07', label: 'Jul' }];
+    const [debt] = s.buildBucketBalances([{ name: 'Debt', pct: 70 }], months);
+    expect(debt.spent[0]).toBe(200); // £100 Amex + £100 Barclaycard, neither lost nor doubled
+  });
+
   it('a refund-only month cannot ADD to a pot', () => {
     // Floor at £0: without it a net-positive month would inflate the bucket as if
     // the refund were fresh allocation.
