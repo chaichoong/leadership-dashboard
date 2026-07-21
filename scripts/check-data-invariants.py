@@ -82,6 +82,90 @@ INVARIANTS = [
 ]
 
 
+def scan_all(pat, table, fields):
+    """Every record in a table, paginated. For invariants that compare records to each
+    other — filterByFormula can only test one record at a time."""
+    records = []
+    offset = None
+    while True:
+        qs = urllib.parse.urlencode({"pageSize": "100"})
+        for f in fields:
+            qs += "&" + urllib.parse.urlencode({"fields[]": f})
+        if offset:
+            qs += "&" + urllib.parse.urlencode({"offset": offset})
+        url = f"https://api.airtable.com/v0/{BASE_ID}/{table}?{qs}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {pat}"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                body = json.load(resp)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:200]
+            raise RuntimeError(f"HTTP {e.code}: {detail}") from None
+        except Exception as e:
+            raise RuntimeError(f"request failed: {e}") from None
+        if "error" in body:
+            raise RuntimeError(f"Airtable error: {body['error']}")
+        records += body.get("records", [])
+        offset = body.get("offset")
+        if not offset:
+            return records
+
+
+def check_reimport_duplicates(pat):
+    """Same bank transaction imported twice under two different Plaid account ids.
+
+    Found 2026-07-21: three Santander accounts were re-linked, so the feed re-imported
+    their history under a NEW Plaid account id. 64 duplicate transactions, £2,316 of
+    double-counted money, sitting in the Wealth and P&L figures unnoticed for months.
+
+    The Plaid transaction id is "<plaidAccountId>--<transactionHash>". The hash is
+    stable for a given bank transaction, so the SAME hash appearing under two different
+    account ids means one real payment was imported twice. Matching on date+amount
+    instead would flag genuine same-day same-value pairs (two £56.99 Amazon charges on
+    20 Mar 2026 were real, not duplicates) — the hash does not have that problem.
+
+    Returns (violations, control_population).
+    """
+    records = scan_all(pat, TX, ["**Plaid TX ID", "Account Alias (from **Account)", "**GBP", "**Date"])
+    by_hash = {}
+    control = 0
+    for r in records:
+        pid = str(r["fields"].get("**Plaid TX ID") or "")
+        if "--" not in pid:
+            continue
+        control += 1
+        account_id, tx_hash = pid.split("--", 1)
+        by_hash.setdefault(tx_hash, {}).setdefault(account_id, []).append(r)
+
+    violations = []
+    for tx_hash, by_account in by_hash.items():
+        if len(by_account) < 2:
+            continue
+        copies = [r for group in by_account.values() for r in group]
+        alias = copies[0]["fields"].get("Account Alias (from **Account)")
+        alias = (alias[0] if isinstance(alias, list) and alias else alias) or "(unknown account)"
+        violations.append({
+            "account": alias,
+            "date": copies[0]["fields"].get("**Date"),
+            "amount": copies[0]["fields"].get("**GBP"),
+            "copies": len(copies),
+            "plaid_account_ids": sorted(by_account.keys()),
+            "ids": [r["id"] for r in copies],
+        })
+    return violations, control
+
+
+SCANS = [
+    {
+        "name": "no-reimport-duplicates",
+        "asserts": "one bank transaction => one record (not re-imported under a second Plaid account id)",
+        "incident": "Jul 2026 — Santander accounts re-linked; 64 duplicates, £2,316 double-counted across Wealth and P&L",
+        "control_means": "transactions carrying a Plaid id (the population a re-import duplicates)",
+        "run": check_reimport_duplicates,
+    },
+]
+
+
 def load_pat():
     path = os.path.expanduser("~/.config/od/airtable_pat")
     try:
@@ -150,6 +234,33 @@ def main():
                 failed = True
             else:
                 entry.update(status="PASS", control_population=len(control))
+        except RuntimeError as e:
+            entry.update(status="ERROR", detail=str(e))
+            failed = True
+        results.append(entry)
+
+    # Cross-record invariants. Same control discipline as the formula ones: if the
+    # scan sees no eligible population, that is a BROKEN check, not a pass.
+    for scan in SCANS:
+        entry = {"name": scan["name"], "asserts": scan["asserts"]}
+        try:
+            violations, control = scan["run"](pat)
+            if not control:
+                entry.update(
+                    status="CONTROL_FAILED",
+                    detail=f"control matched 0 records ({scan['control_means']}) — this check is asserting nothing",
+                )
+                failed = True
+            elif violations:
+                entry.update(
+                    status="FAIL",
+                    count=len(violations),
+                    incident=scan["incident"],
+                    samples=violations[:5],
+                )
+                failed = True
+            else:
+                entry.update(status="PASS", control_population=control)
         except RuntimeError as e:
             entry.update(status="ERROR", detail=str(e))
             failed = True
