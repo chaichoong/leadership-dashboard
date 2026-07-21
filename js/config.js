@@ -375,6 +375,9 @@
         term:      'fldf4d9blAMhn3LAi',  // Term Months (number)
         start:     'fldO7nbTpn0RvGY04',  // Start Date (date)
         notes:     'fldRgR0iM5KqkBHuT',  // Notes (multilineText)
+        // Pipe-separated terms matched against a transaction name to find payments
+        // against a debt that has no bank feed (a closed card). Blank = no payments.
+        payMatch:  'fldgcwyxNgr8n4128',  // Payment Match (singleLineText)
     };
 
     // ── Property Valuations field IDs (Airtable: Property Valuations / tblZYsa0u1M17N7ZE) ──
