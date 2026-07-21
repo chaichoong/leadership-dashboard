@@ -51,15 +51,16 @@ function loadEngine() {
   // Same reason: `allTransactions` / `allSubCategories` are lexical `let`s in
   // config.js, so assigning sandbox.allTransactions would NOT be seen by the engine.
   // Write through a setter that runs inside the same lexical scope.
-  vm.runInContext(`globalThis.__setData = (t, sc) => { allTransactions = t; allSubCategories = sc; }`, sandbox);
+  vm.runInContext(`globalThis.__setData = (t, sc, ac) => { allTransactions = t; allSubCategories = sc; allAccounts = ac || []; }`, sandbox);
   return sandbox;
 }
 
 // Build a transaction using the real field IDs from config.js.
-function tx(sandbox, { date, amount, subId }) {
+function tx(sandbox, { date, amount, subId, alias }) {
   const F = sandbox.F;
   return { id: 'rec' + Math.random().toString(36).slice(2), fields: {
     [F.txDate]: date, [F.txReportAmount]: amount, [F.txSubCategory]: [subId],
+    ...(alias ? { [F.txAccountAlias]: [alias] } : {}),
   } };
 }
 
@@ -330,6 +331,54 @@ describe('Money Groups — bucket drawdown', () => {
     // July as if the overspend had been written off at the month boundary.
     expect(dreams.balance[0]).toBe(0);
     expect(dreams.balance[1]).toBe(0);
+  });
+
+  it('reads the CARD leg, so an untagged card payment is still counted', () => {
+    // Kevin spotted this on 21 Jul 2026: his early-July card payments were missing
+    // from the Debt bucket. They were in the base, but reconciliation had coded them
+    // plain "Transfer" rather than "Personal Credit Card Transfer", and the bucket
+    // only read the cash leg. 41 payments worth £74,971 were invisible.
+    // An inflow to a credit-card account IS a payment — no tagging required.
+    const s = loadEngine();
+    const N = s.SUBCAT.name;
+    s.__setData([
+      tx(s, { date: '2026-07-06', amount: 1000, subId: 'recTransfer', alias: 'American Express' }),
+    ], [{ id: 'recTransfer', fields: { [N]: 'Transfer' } }],
+       [{ id: 'recAmex', fields: { [s.F.accountAlias]: 'American Express', [s.F.accNetWorthClass]: 'Credit Card' } }]);
+    const months = [{ key: '2026-07', label: 'Jul' }];
+    const [debt] = s.buildBucketBalances([{ name: 'Debt', pct: 50 }], months);
+    expect(debt.spent[0]).toBe(1000);
+  });
+
+  it('does not double-count when BOTH legs are present', () => {
+    // The cash leg tagged Personal Credit Card Transfer AND the card-side inflow.
+    // Counting both would double the paydown.
+    const s = loadEngine();
+    const N = s.SUBCAT.name;
+    s.__setData([
+      tx(s, { date: '2026-06-28', amount: -1024.31, subId: 'recCardXfer', alias: 'Santander' }),
+      tx(s, { date: '2026-06-28', amount: 1024.31, subId: 'recTransfer', alias: 'American Express' }),
+    ], [
+      { id: 'recCardXfer', fields: { [N]: 'Personal Credit Card Transfer' } },
+      { id: 'recTransfer', fields: { [N]: 'Transfer' } },
+    ], [{ id: 'recAmex', fields: { [s.F.accountAlias]: 'American Express', [s.F.accNetWorthClass]: 'Credit Card' } }]);
+    const months = [{ key: '2026-06', label: 'Jun' }];
+    const [debt] = s.buildBucketBalances([{ name: 'Debt', pct: 50 }], months);
+    expect(debt.spent[0]).toBe(1024); // spend is rounded to whole pounds for display
+  });
+
+  it('still counts a card with no feed, from the cash leg alone', () => {
+    // Barclaycard has no open-banking feed, so there is no card leg to read. The
+    // cash-side tag is the only record and must survive the de-duplication.
+    const s = loadEngine();
+    const N = s.SUBCAT.name;
+    s.__setData([
+      tx(s, { date: '2026-07-07', amount: -25, subId: 'recCardXfer', alias: 'Santander' }),
+    ], [{ id: 'recCardXfer', fields: { [N]: 'Personal Credit Card Transfer' } }],
+       [{ id: 'recAmex', fields: { [s.F.accountAlias]: 'American Express', [s.F.accNetWorthClass]: 'Credit Card' } }]);
+    const months = [{ key: '2026-07', label: 'Jul' }];
+    const [debt] = s.buildBucketBalances([{ name: 'Debt', pct: 50 }], months);
+    expect(debt.spent[0]).toBe(25);
   });
 
   it('a refund-only month cannot ADD to a pot', () => {
