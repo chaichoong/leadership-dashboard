@@ -66,6 +66,10 @@
         subCategories: 'tblOTdRcPf8AgRz25',
         businesses:    'tblpqkvWJJo8Uu25q',
         invoices:      'tblkOTKIG2Tyiy9aM',
+        // Net worth lives HERE — one row per item per month, auto-stamped monthly.
+        // Airtable also holds "ZZ LEGACY — Net Worth Statement" (tblWtiyQikO2hOzeW):
+        // orphaned, last written Jan 2026, read by nothing. On 2026-07-21 it caused a
+        // false report of a six-month gap in Kevin's net-worth history. Never read it.
         netWorthByMonth: 'tblvtDXCBJCHu9hnK', // Specific Net Worth Statement by Month (Wealth tab)
         incomeBuckets:   'tbldMPjXTu7ho5f0T', // Income Buckets (Wealth tab — virtual overlay)
         personalBudgets: 'tblm5ZxyoiLfaBAS4', // Personal Budgets (Wealth tab — monthly budget per personal category)
