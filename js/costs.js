@@ -95,7 +95,9 @@
 
 
     const SUBCAT_NAME_FIELD = 'fldO4BTJhFv5EsN6i';
-    const CAT_NAME_FIELD = 'fldii4oUzSfmplihO';
+    // CAT_NAME_FIELD now lives in config.js (loaded first). Every file shares one
+    // global scope, so re-declaring it here throws "already been declared" and takes
+    // out every tab, not just this one.
 
     // Match thresholds for variance check (Last Reconciled Amount vs Expected Cost)
     const VAR_TOL_ABS = 1;     // £1 absolute

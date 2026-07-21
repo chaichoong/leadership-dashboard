@@ -402,6 +402,10 @@
         spendSubs: 'fld6yClkQoMlOkiU4', // Spend Sub-Categories (multipleRecordLinks → subCategories): drives bucket draw-down
     };
 
+    // Chart of Accounts - Categories: name field (primary). Used by the cash-flow
+    // drill-down so a miscoded transaction can be recategorised in place.
+    const CAT_NAME_FIELD = 'fldii4oUzSfmplihO';
+
     // Business name field on the Businesses table — used by the Invoices tab dropdown
     const BIZ_NAME_FIELD = 'fldbbRqVxLxUdHwIR';
     // Active checkbox on the Businesses table — every business picker/filter in the app
