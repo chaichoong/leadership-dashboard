@@ -158,9 +158,9 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 ## 8. Sales & conversion (Ch5 Rocket Demo)
 
 - [x] ERICAMAE — Verify sales + thank-you pages show £350/£1,500 + trial everywhere (done when: screenshots in Slack; due 9 Jul) [AT:rect3tMNA5vAUUf0t] *(ticked 2026-07-16, synced from Airtable)*
-- [ ] ERICAMAE — Resolve the 2 sales-page placeholders (calendar link, worker URL) (done when: both live; due 9 Jul) [AT:rectDqrReN31yzJcr]
+- [x] ERICAMAE — Resolve the 2 sales-page placeholders (calendar link, worker URL) (done when: both live; due 9 Jul) [AT:rectDqrReN31yzJcr] *(ticked 2026-07-21, synced from Airtable)*
 - [x] MICA — Fix the Stripe webhook delivery failures on od-billing-bridge [AT:recjybZNepSBpDLeP] (done when: deliveries succeeding; due 9 Jul) *(ticked 2026-07-14, synced from Airtable)*
-- [ ] ERICAMAE — Full dry-run: book Teardown → calendar; checkout → contract + welcome email (done when: evidence in Slack; due 10 Jul) [AT:recrgbZ4SKtCladgr]
+- [x] ERICAMAE — Full dry-run: book Teardown → calendar; checkout → contract + welcome email (done when: evidence in Slack; due 10 Jul) [AT:recrgbZ4SKtCladgr] *(ticked 2026-07-21, synced from Airtable)*
 - [x] ERICAMAE — Website clarity pass [AT:recSlGxdgHaecSGG1] (done when: Kevin sign-off; due 11 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [x] ERICAMAE — Pricing page from the SIMPLE locked card [AT:recnggtrSkRcjT9fU] (done when: live at 29 Jun pricing; due 11 Jul) *(ticked 2026-07-14, synced from Airtable)*
 - [ ] KEVIN — Answer Ericamae on the trust video (waiting since 29 Jun) [AT:recG4RxL6ewQoEvPX] (done when: yes/no sent; due 8 Jul)
@@ -257,3 +257,4 @@ The sales evidence: prospects see real agents running real businesses. Route: Sy
 | 2026-07-15 | Kevin, in-session (approved) | §13 Jenyns-Loom amendment APPROVED. 4 tasks now live: §6 Process-to-Agent delivery runbook + process-clarity gate (due 22 Jul); §6 team-adoption playbook (due 22 Jul); §8 connector on-ramp copy (due 22 Jul). Framed as a client-facing WRAPPER over the existing §5 Systemisation pipeline + Systemisation module, NOT a rebuild. Nightly sync to push new [AT:-] tasks to Airtable. |
 | 2026-07-16 | Nightly sync (scripts/sync-master-plan.py) | ticked 4 from Airtable completions. |
 | 2026-07-18 | Nightly sync (scripts/sync-master-plan.py) | ticked 3 from Airtable completions. |
+| 2026-07-21 | Nightly sync (scripts/sync-master-plan.py) | ticked 2 from Airtable completions. |
