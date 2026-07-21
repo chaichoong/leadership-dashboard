@@ -22,7 +22,8 @@
   //   kinds: scalar | num | bool | date | link | collabOne | json
   const TASKS = 'tblqB8b22hKBL4PF1', PROJECTS = 'tblHrpTMd5LNYn8v1',
         BUSINESSES = 'tblpqkvWJJo8Uu25q', PROPS = 'tbl6f0OkAmTC2jbuG',
-        TEAM = 'tblco0p2OnlLQVAX7', COMPL = 'tblxnBxgD9pzLlvgl';
+        TEAM = 'tblco0p2OnlLQVAX7', COMPL = 'tblxnBxgD9pzLlvgl',
+        MEETINGS = 'tblNodbh9B3WLzCIK';
 
   const M = {};
   M[TASKS] = { source: 'tasks', write: 'tasks', map: {
@@ -73,6 +74,13 @@
     fld03eN4H0rB3nZH7:['time_est','scalar'], fldBdmHiRMfLvQ4ZE:['minutes','num'],
     fldthW4i7551wOXa1:['business','scalar'], fld889If2Y3EvrLiL:['project','scalar'],
     fld35384OFUdorE0U:['cadence','scalar'],
+  }};
+  M[MEETINGS] = { source: 'meetings', write: 'meetings', map: {
+    fldWSPqwJMMAA1mxm:['name','scalar'],       fldTMJFKGqr9VCTns:['date','scalar'],
+    fldUKM6X8PFxbF1HU:['status','scalar'],      fldZLnxcXALQj2C97:['attendees','json'],
+    fldxLuW7F8e4acS4x:['ext_attendees','scalar'], fld7hO6M1Pcsxp1BC:['summary','scalar'],
+    fldwkgiZ6JdPBgEeU:['action_points','scalar'], fld3NpfT3Sbmy3obd:['tasks','json'],
+    fldrHJGXyIVyPlqCA:['recording','scalar'],   fldAmaevMBxmpezx2:['source','scalar'],
   }};
 
   // Normalise a Postgres timestamptz ("...+00:00") to Airtable's "...Z" ISO so
