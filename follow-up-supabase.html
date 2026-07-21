@@ -1045,6 +1045,26 @@
     let tokenExpiresAt = 0; // timestamp when token expires
     let tokenRefreshTimer = null;
 
+    // Wait until Google's Gmail client (gapi.client.gmail) has finished loading.
+    // Guards against the race where a view (e.g. the inbox) tries to read Gmail
+    // before gapi.client.init() has resolved — which throws "Cannot read
+    // properties of undefined (reading 'users')". Returns true when ready,
+    // false if it never became ready within the timeout.
+    async function ensureGmailReady(timeoutMs = 6000) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (typeof gapi !== 'undefined' && gapi.client && gapi.client.gmail) return true;
+            await new Promise(r => setTimeout(r, 200));
+        }
+        return !!(typeof gapi !== 'undefined' && gapi.client && gapi.client.gmail);
+    }
+
+    function gmailNotReadyMessage() {
+        return accessToken
+            ? 'Gmail is still connecting — click Refresh in a few seconds.'
+            : 'Not connected to Gmail yet — click "Connect Gmail" to sign in.';
+    }
+
     function gisLoaded() {
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: CLIENT_ID,
@@ -1586,6 +1606,13 @@
         document.getElementById('emailListBody').innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading emails...</div></div>';
         document.getElementById('paginationBar').style.display = 'none';
         clearError();
+        if (!(await ensureGmailReady())) {
+            btn.disabled = false;
+            btn.textContent = 'Refresh';
+            document.getElementById('emailListBody').innerHTML = '';
+            showError(gmailNotReadyMessage());
+            return;
+        }
         try { await ensureValidToken(); } catch (e) { console.warn('Token refresh failed, continuing with existing token'); }
 
         // Reset search and pagination
@@ -1956,6 +1983,11 @@
         globalSearchResults = null;
 
         try {
+            if (!(await ensureGmailReady())) {
+                document.getElementById('emailListBody').innerHTML = '';
+                showError(gmailNotReadyMessage());
+                return;
+            }
             if (allLabelsRaw.length === 0) {
                 const labelsResp = await gapi.client.gmail.users.labels.list({ userId: 'me' });
                 allLabelsRaw = labelsResp.result.labels || [];
