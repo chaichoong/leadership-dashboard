@@ -2719,16 +2719,24 @@ function buildBucketBalances(buckets, months) {
         // Remove the cash-side rows already counted above that duplicate a card leg,
         // matched on amount within a week. What survives is payments to cards we
         // cannot see — the only place the cash leg is the sole record.
-        const inflows = cardLeg.map(t => ({ amt: Math.round(Math.abs(Number(getField(t, F.txReportAmount)) || 0) * 100), d: dateOf(t) })).filter(x => x.d);
-        txns.forEach(t => {
-            if (subOf(t) !== 'Personal Credit Card Transfer') return;
-            const d = dateOf(t); if (!d) return;
-            const idx = monthIdx(d); if (idx === undefined) return;
-            const amt = Number(getField(t, F.txReportAmount)) || 0;
-            const cents = Math.round(Math.abs(amt) * 100);
-            const dup = inflows.some(x => x.amt === cents && Math.abs(x.d - d) <= 7 * 864e5);
-            if (dup) spent[bname][idx] -= -amt; // undo the cash-side count; the card leg has it
-        });
+        // Each card leg can cancel AT MOST ONE cash-side row. Without consuming the
+        // match, two same-value payments in the same week to different cards — one fed,
+        // one not — would both match the single card leg and both be removed, losing a
+        // real payment. Kevin pays several cards on the same day (7 Jul 2026: £100 to
+        // Lloyds and £100 to Santander CC), so this is the normal case, not a corner.
+        const inflows = cardLeg
+            .map(t => ({ amt: Math.round(Math.abs(Number(getField(t, F.txReportAmount)) || 0) * 100), d: dateOf(t), used: false }))
+            .filter(x => x.d);
+        txns.filter(t => subOf(t) === 'Personal Credit Card Transfer')
+            .sort((a, b) => String(getField(a, F.txDate)).localeCompare(String(getField(b, F.txDate))))
+            .forEach(t => {
+                const d = dateOf(t); if (!d) return;
+                const idx = monthIdx(d); if (idx === undefined) return;
+                const amt = Number(getField(t, F.txReportAmount)) || 0;
+                const cents = Math.round(Math.abs(amt) * 100);
+                const match = inflows.find(x => !x.used && x.amt === cents && Math.abs(x.d - d) <= 7 * 864e5);
+                if (match) { match.used = true; spent[bname][idx] -= -amt; } // card leg already has it
+            });
     }
     const net = buildMonthlyCashflow(keys).map(m => m.net);
     return buckets.map(b => {
