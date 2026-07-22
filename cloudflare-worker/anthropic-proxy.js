@@ -34,6 +34,7 @@
 const ALLOWED_ORIGINS = [
   'https://chaichoong.github.io',
   'https://leadership-dashboard-gamma.vercel.app', // Supabase build on Vercel
+  'https://app.operationsdirector.co.uk',          // branded production domain
 ];
 const ALLOWED_ORIGIN = ALLOWED_ORIGINS[0]; // fallback for CORS reflection
 
